@@ -115,6 +115,20 @@ describe("WizardResultsStep navigation buttons", () => {
     setSinglePdfResult()
   })
 
+  it("delegates Start over to durable session replacement when provided", () => {
+    const onStartOver = vi.fn()
+    render(
+      <WizardResultsStep onClose={vi.fn()} onStartOver={onStartOver} />
+    )
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Start a new ingest" })
+    )
+
+    expect(onStartOver).toHaveBeenCalledTimes(1)
+    expect(wizardHarness.reset).not.toHaveBeenCalled()
+  })
+
   it("renders Search in Knowledge button when onSearchKnowledge is provided", () => {
     const onSearchKnowledge = vi.fn()
     render(

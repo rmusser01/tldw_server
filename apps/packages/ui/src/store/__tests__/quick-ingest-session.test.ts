@@ -1,20 +1,152 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
+import type { StateStorage } from "zustand/middleware"
 
 import {
   createEmptyQuickIngestSession,
   createQuickIngestSessionStore,
 } from "../quick-ingest-session"
 
-const STORAGE_KEY = "tldw-quick-ingest-session"
+type TestPersistenceStatus =
+  | "ready"
+  | "migrating"
+  | "unavailable"
+  | "quota_error"
+
+const createControlledPersistence = () => {
+  let value: string | null = null
+  let status: TestPersistenceStatus = "migrating"
+  let nextWriteFailure: unknown = null
+  let nextWriteGate: Promise<void> | null = null
+  let delayNextRead = false
+  let acquireResult = true
+  const writeAttempts: string[] = []
+  const listeners = new Set<(next: TestPersistenceStatus) => void>()
+
+  const publishStatus = (next: TestPersistenceStatus) => {
+    status = next
+    for (const listener of listeners) listener(next)
+  }
+
+  const awaitNextWrite = async () => {
+    const gate = nextWriteGate
+    const failure = nextWriteFailure
+    nextWriteGate = null
+    nextWriteFailure = null
+    if (gate) await gate
+    if (failure) {
+      publishStatus(
+        failure instanceof DOMException && failure.name === "QuotaExceededError"
+          ? "quota_error"
+          : "unavailable"
+      )
+      throw failure
+    }
+  }
+
+  const storage: StateStorage = {
+    getItem: async () => {
+      if (delayNextRead) {
+        delayNextRead = false
+        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      }
+      return value
+    },
+    setItem: async (_key, next) => {
+      writeAttempts.push(next)
+      await awaitNextWrite()
+      value = next
+    },
+    removeItem: async () => {
+      value = null
+    },
+  }
+
+  return {
+    storage,
+    initialize: vi.fn(async () => {
+      await Promise.resolve()
+      publishStatus("ready")
+    }),
+    cleanupExpired: vi.fn(async () => {}),
+    commitReviewHandoff: vi.fn(async (expected: string, next: string) => {
+      writeAttempts.push(next)
+      await awaitNextWrite()
+      if (value !== expected) return false
+      value = next
+      return true
+    }),
+    commitProcessingHandoff: vi.fn(async (expected: string, next: string) => {
+      writeAttempts.push(next)
+      await awaitNextWrite()
+      if (value !== expected) return false
+      value = next
+      return true
+    }),
+    clearAuthoritativeSession: vi.fn(
+      async (expected: { id: string; lifecycle: string; updatedAt: number }) => {
+        const session = value ? JSON.parse(value)?.state?.session : null
+        if (
+          session?.id !== expected.id ||
+          session?.lifecycle !== expected.lifecycle ||
+          session?.updatedAt !== expected.updatedAt
+        ) {
+          return false
+        }
+        value = null
+        return true
+      }
+    ),
+    getStatus: () => status,
+    subscribeStatus: (listener: (next: TestPersistenceStatus) => void) => {
+      listeners.add(listener)
+      listener(status)
+      return () => listeners.delete(listener)
+    },
+    acquireSubmissionLease: vi.fn(async () => acquireResult),
+    renewSubmissionLease: vi.fn(async () => true),
+    releaseSubmissionLease: vi.fn(async () => {}),
+    publishStatus,
+    failNextWrite: (failure: unknown) => {
+      nextWriteFailure = failure
+    },
+    blockNextWrite: (gate: Promise<void>) => {
+      nextWriteGate = gate
+    },
+    delayNextRead: () => {
+      delayNextRead = true
+    },
+    seedValue: (next: string | null) => {
+      value = next
+    },
+    setAcquireResult: (next: boolean) => {
+      acquireResult = next
+    },
+    get value() {
+      return value
+    },
+    get writeAttempts() {
+      return [...writeAttempts]
+    },
+  }
+}
+
+const createStoreWithPersistence = (
+  persistence: ReturnType<typeof createControlledPersistence>
+) =>
+  (createQuickIngestSessionStore as unknown as (options: {
+    persistence: ReturnType<typeof createControlledPersistence>
+  }) => ReturnType<typeof createQuickIngestSessionStore>)({ persistence })
+
+const flushPersistence = async () => {
+  await Promise.resolve()
+  await new Promise<void>((resolve) => setTimeout(resolve, 0))
+}
 
 describe("quick ingest session store", () => {
-  beforeEach(() => {
-    sessionStorage.clear()
-  })
-
-  it("persists a hidden completed session and rehydrates it in the same tab", () => {
-    const store = createQuickIngestSessionStore()
+  it("persists a hidden completed session and rehydrates it in the same origin", async () => {
+    const persistence = createControlledPersistence()
+    const store = createStoreWithPersistence(persistence)
 
     store.getState().upsertSession({
       ...createEmptyQuickIngestSession(),
@@ -37,11 +169,13 @@ describe("quick ingest session store", () => {
       completedAt: 1700000005000,
     })
 
-    const persistedRaw = sessionStorage.getItem(STORAGE_KEY)
+    await flushPersistence()
+    const persistedRaw = persistence.value
     expect(persistedRaw).toContain('"lifecycle":"completed"')
     expect(persistedRaw).toContain('"visibility":"hidden"')
 
-    const rehydratedStore = createQuickIngestSessionStore()
+    const rehydratedStore = createStoreWithPersistence(persistence)
+    await rehydratedStore.persist.rehydrate()
     const rehydrated = rehydratedStore.getState().session
 
     expect(rehydrated?.lifecycle).toBe("completed")
@@ -50,8 +184,55 @@ describe("quick ingest session store", () => {
     expect(rehydratedStore.getState().triggerSummary.label).toMatch(/completed/i)
   })
 
-  it("removes completed sessions only when clearSession is called", () => {
-    const store = createQuickIngestSessionStore()
+  it("keeps durable non-draft authority when an early draft intent is newer than hydration", async () => {
+    const persistence = createControlledPersistence()
+    const durable = {
+      ...createEmptyQuickIngestSession(),
+      id: "durable-before-open",
+      lifecycle: "completed" as const,
+      visibility: "hidden" as const,
+      currentStep: 5 as const,
+      createdAt: 1,
+      updatedAt: 2,
+      completedAt: 2,
+    }
+    persistence.seedValue(
+      JSON.stringify({ state: { session: durable }, version: 0 })
+    )
+    persistence.delayNextRead()
+    let releaseDraftWrite!: () => void
+    persistence.blockNextWrite(
+      new Promise<void>((resolve) => {
+        releaseDraftWrite = resolve
+      })
+    )
+    const store = createStoreWithPersistence(persistence)
+    const hydrationFinished = new Promise<void>((resolve) => {
+      const unsubscribe = store.persist.onFinishHydration(() => {
+        unsubscribe()
+        resolve()
+      })
+    })
+
+    const earlyDraft = store.getState().createDraftSession({
+      id: "early-open-draft",
+      visibility: "visible",
+      updatedAt: Date.now(),
+    })
+    expect(earlyDraft.updatedAt).toBeGreaterThan(durable.updatedAt)
+    await hydrationFinished
+
+    expect(store.getState().session).toMatchObject({
+      id: "durable-before-open",
+      lifecycle: "completed",
+      currentStep: 5,
+    })
+    releaseDraftWrite()
+  })
+
+  it("removes completed sessions only when clearSession is called", async () => {
+    const persistence = createControlledPersistence()
+    const store = createStoreWithPersistence(persistence)
 
     store.getState().upsertSession({
       ...createEmptyQuickIngestSession(),
@@ -61,17 +242,20 @@ describe("quick ingest session store", () => {
       completedAt: 1700000005000,
     })
 
+    await flushPersistence()
     expect(store.getState().session).not.toBeNull()
-    expect(sessionStorage.getItem(STORAGE_KEY)).toContain('"visibility":"hidden"')
+    expect(persistence.value).toContain('"visibility":"hidden"')
 
     store.getState().clearSession()
 
+    await flushPersistence()
     expect(store.getState().session).toBeNull()
-    expect(sessionStorage.getItem(STORAGE_KEY)).toBeNull()
+    expect(persistence.value).toBeNull()
   })
 
-  it("keeps the prior replay identity when a Review handoff cannot be confirmed", () => {
-    const store = createQuickIngestSessionStore()
+  it("keeps the prior replay identity when a Review handoff cannot be confirmed", async () => {
+    const persistence = createControlledPersistence()
+    const store = createStoreWithPersistence(persistence)
     store.getState().upsertSession({
       ...createEmptyQuickIngestSession(),
       lifecycle: "processing",
@@ -83,45 +267,79 @@ describe("quick ingest session store", () => {
         startedAt: Date.now(),
       },
     })
+    await flushPersistence()
     const before = store.getState().session
-    const durableBefore = sessionStorage.getItem(STORAGE_KEY)
-    const realSessionStorage = window.sessionStorage
-    Object.defineProperty(window, "sessionStorage", {
-      configurable: true,
-      value: {
-        getItem: realSessionStorage.getItem.bind(realSessionStorage),
-        setItem: () => {
-          throw new DOMException("Review persistence unavailable", "QuotaExceededError")
-        },
-        removeItem: realSessionStorage.removeItem.bind(realSessionStorage),
-      },
-    })
+    const durableBefore = persistence.value
+    persistence.failNextWrite(new Error("Review persistence unavailable"))
 
-    try {
-      expect(
-        store.getState().commitReviewHandoff({
-          lifecycle: "draft",
-          currentStep: 3,
-          processingState: {
-            status: "idle",
-            perItemProgress: [],
-            elapsed: 0,
-            estimatedRemaining: 0,
-          },
-        })
-      ).toBe(false)
-      expect(store.getState().session).toEqual(before)
-      expect(realSessionStorage.getItem(STORAGE_KEY)).toBe(durableBefore)
-    } finally {
-      Object.defineProperty(window, "sessionStorage", {
-        configurable: true,
-        value: realSessionStorage,
+    expect(
+      await store.getState().commitReviewHandoff({
+        lifecycle: "draft",
+        currentStep: 3,
+        processingState: {
+          status: "idle",
+          perItemProgress: [],
+          elapsed: 0,
+          estimatedRemaining: 0,
+        },
       })
-    }
+    ).toBe(false)
+    expect(store.getState().session).toEqual(before)
+    expect(persistence.value).toBe(durableBefore)
+    expect(store.getState().persistenceStatus).toBe("unavailable")
   })
 
-  it("writes a Review handoff in the envelope used by normal store rehydration", () => {
-    const store = createQuickIngestSessionStore()
+  it("retries an identical background value after its first write fails", async () => {
+    const persistence = createControlledPersistence()
+    const store = createStoreWithPersistence(persistence)
+    store.getState().createDraftSession()
+    await flushPersistence()
+    const durableBefore = persistence.value
+
+    persistence.failNextWrite(new Error("background persistence unavailable"))
+    store.getState().hideSession()
+    await flushPersistence()
+
+    expect(persistence.value).toBe(durableBefore)
+    expect(store.getState().persistenceStatus).toBe("unavailable")
+
+    persistence.publishStatus("ready")
+    await flushPersistence()
+
+    expect(JSON.parse(persistence.value || "null")?.state?.session).toMatchObject({
+      visibility: "hidden",
+    })
+  })
+
+  it("does not let an older failed write clear a newer successful dedupe marker", async () => {
+    const persistence = createControlledPersistence()
+    const store = createStoreWithPersistence(persistence)
+    store.getState().createDraftSession()
+    await flushPersistence()
+    let releaseOlderWrite!: () => void
+    persistence.failNextWrite(new Error("older background write failed"))
+    persistence.blockNextWrite(
+      new Promise<void>((resolve) => {
+        releaseOlderWrite = resolve
+      })
+    )
+
+    store.getState().hideSession()
+    store.getState().showSession()
+    await flushPersistence()
+    releaseOlderWrite()
+    await flushPersistence()
+    const attemptsAfterOlderFailure = persistence.writeAttempts.length
+
+    persistence.publishStatus("ready")
+    await flushPersistence()
+
+    expect(persistence.writeAttempts).toHaveLength(attemptsAfterOlderFailure)
+  })
+
+  it("writes a Review handoff in the envelope used by normal store rehydration", async () => {
+    const persistence = createControlledPersistence()
+    const store = createStoreWithPersistence(persistence)
     store.getState().upsertSession({
       ...createEmptyQuickIngestSession(),
       lifecycle: "processing",
@@ -135,7 +353,7 @@ describe("quick ingest session store", () => {
     })
 
     expect(
-      store.getState().commitReviewHandoff({
+      await store.getState().commitReviewHandoff({
         lifecycle: "draft",
         currentStep: 3,
         processingState: {
@@ -147,22 +365,25 @@ describe("quick ingest session store", () => {
       })
     ).toBe(true)
 
-    const persisted = JSON.parse(sessionStorage.getItem(STORAGE_KEY) || "null")
+    const persisted = JSON.parse(persistence.value || "null")
     expect(persisted?.version).toBe(0)
     expect(persisted?.state?.session?.currentStep).toBe(3)
     expect(persisted?.state?.session?.tracking).toBeUndefined()
 
-    const rehydrated = createQuickIngestSessionStore().getState().session
+    const rehydratedStore = createStoreWithPersistence(persistence)
+    await rehydratedStore.persist.rehydrate()
+    const rehydrated = rehydratedStore.getState().session
     expect(rehydrated?.currentStep).toBe(3)
     expect(rehydrated?.tracking).toBeUndefined()
   })
 
-  it("stores queue file stubs without raw File instances", () => {
+  it("stores queue file stubs without raw File instances", async () => {
     const file = new File(["sample"], "sample.txt", {
       type: "text/plain",
       lastModified: 1700000000000,
     })
-    const store = createQuickIngestSessionStore()
+    const persistence = createControlledPersistence()
+    const store = createStoreWithPersistence(persistence)
 
     store.getState().upsertSession({
       queueItems: [
@@ -180,7 +401,8 @@ describe("quick ingest session store", () => {
       ] as any,
     })
 
-    const persistedRaw = sessionStorage.getItem(STORAGE_KEY)
+    await flushPersistence()
+    const persistedRaw = persistence.value
     const persisted = persistedRaw ? JSON.parse(persistedRaw) : null
     const persistedItem = persisted?.state?.session?.queueItems?.[0]
 
@@ -188,6 +410,679 @@ describe("quick ingest session store", () => {
     expect(persistedItem?.name).toBe("sample.txt")
     expect(persistedItem?.file).toBeUndefined()
     expect(persistedItem?.transientPayload).toBeUndefined()
+  })
+
+  it("persists a compact sanitized 500-item record without file or raw display bytes", async () => {
+    const persistence = createControlledPersistence()
+    const store = createStoreWithPersistence(persistence)
+    const thumbnail = `data:image/png;base64,${"x".repeat(10_000)}`
+    const queueItems = Array.from({ length: 500 }, (_, index) => ({
+      id: `bounded-${index + 1}`,
+      sourceRef: {
+        kind: "direct_url",
+        occurrenceId: `bounded-${index + 1}`,
+        url: `https://example.com/watch/${index + 1}`,
+      },
+      kind: "url",
+      url: `https://example.com/watch/${index + 1}`,
+      detectedType: "video",
+      icon: "Film",
+      fileSize: 0,
+      validation: { valid: true },
+      file: new File(["not durable"], `source-${index + 1}.mp4`, {
+        type: "video/mp4",
+      }),
+      thumbnail,
+      rawBytes: new Uint8Array(10_000),
+      base64: thumbnail,
+      transientPayload: { thumbnail },
+    }))
+
+    store.getState().upsertSession({ queueItems } as never)
+    await flushPersistence()
+
+    expect(persistence.value).not.toBeNull()
+    expect(persistence.value?.length).toBeLessThan(500_000)
+    const persisted = JSON.parse(persistence.value || "null")
+    expect(persisted?.state?.session?.queueItems).toHaveLength(500)
+    expect(persistence.value).not.toContain("data:image/png;base64")
+    expect(persistence.value).not.toContain("transientPayload")
+    expect(persisted?.state?.session?.queueItems?.[0]?.file).toBeUndefined()
+    expect(persisted?.state?.session?.queueItems?.[0]?.rawBytes).toBeUndefined()
+  })
+
+  it("sanitizes and bounds every persisted full-envelope payload surface", async () => {
+    const persistence = createControlledPersistence()
+    const store = createStoreWithPersistence(persistence)
+    const marker = `data:image/png;base64,${"unsafe".repeat(700)}`
+    const rows = Array.from({ length: 500 }, (_, index) => {
+      const id = `full-envelope-${index + 1}`
+      return {
+        queueItem: {
+          id,
+          sourceRef: {
+            kind: "direct_url",
+            occurrenceId: id,
+            url: `https://example.com/watch/${index + 1}`,
+          },
+          kind: "url",
+          url: `https://example.com/watch/${index + 1}`,
+          detectedType: "video",
+          icon: "Film",
+          fileSize: 0,
+          validation: { valid: true },
+          thumbnail: marker,
+          transientPayload: { marker },
+        },
+        result: {
+          id,
+          status: "ok",
+          outcome: "ingested",
+          type: "video",
+          title: `Restored title ${index + 1}`,
+          message: "Restored result",
+          mediaId: index + 1,
+          retryAttempt: 2,
+          data: {
+            file: new File(["unsafe"], `${id}.mp4`, { type: "video/mp4" }),
+            blob: new Blob(["unsafe"], { type: "application/octet-stream" }),
+            base64: marker,
+            thumbnail: marker,
+            transient: marker,
+            bytes: new Uint8Array(256),
+          },
+        },
+        progress: {
+          id,
+          status: "processing",
+          progressPercent: 50,
+          currentStage: "Restored processing",
+          estimatedRemaining: 10,
+          lifecycleState: "processing",
+          retryable: true,
+          attempt: 2,
+          thumbnail: marker,
+          transient: { marker },
+          bytes: new Uint8Array(256),
+        },
+      }
+    })
+
+    store.getState().upsertSession({
+      queueItems: rows.map(({ queueItem }) => queueItem),
+      results: rows.map(({ result }) => result),
+      processingState: {
+        status: "running",
+        perItemProgress: rows.map(({ progress }) => progress),
+        elapsed: 12,
+        estimatedRemaining: 10,
+        thumbnail: marker,
+      },
+      openDetail: {
+        source: "extension_active_tab",
+        action: "playlist_preflight",
+        url: "https://example.com/playlist",
+        thumbnail: marker,
+        transient: { marker },
+      },
+      conferenceBatchMetadata: {
+        collectionName: "Restored conference",
+        sharedTags: ["conference"],
+        thumbnail: marker,
+        transient: { marker },
+      },
+      presetConfig: {
+        ...createEmptyQuickIngestSession().presetConfig,
+        thumbnail: marker,
+        transient: { marker },
+      },
+      customOptions: {
+        thumbnail: marker,
+        transient: { marker },
+      },
+    } as never)
+    await flushPersistence()
+
+    const raw = persistence.value || ""
+    const session = JSON.parse(raw || "null")?.state?.session
+    expect(raw.length).toBeLessThan(1_000_000)
+    expect(raw).not.toContain("data:image/png;base64")
+    expect(session.results).toHaveLength(500)
+    expect(session.processingState.perItemProgress).toHaveLength(500)
+    expect(session.results[0]).toMatchObject({
+      id: "full-envelope-1",
+      status: "ok",
+      outcome: "ingested",
+      type: "video",
+      title: "Restored title 1",
+      message: "Restored result",
+      mediaId: 1,
+      retryAttempt: 2,
+    })
+    expect(session.results[0].data).toBeUndefined()
+    expect(session.processingState.perItemProgress[0]).toMatchObject({
+      id: "full-envelope-1",
+      status: "processing",
+      progressPercent: 50,
+      currentStage: "Restored processing",
+      lifecycleState: "processing",
+      retryable: true,
+      attempt: 2,
+    })
+    expect(session.processingState.perItemProgress[0].transient).toBeUndefined()
+    expect(session.openDetail).toEqual({
+      source: "extension_active_tab",
+      action: "playlist_preflight",
+      url: "https://example.com/playlist",
+    })
+    expect(session.conferenceBatchMetadata).toEqual({
+      collectionName: "Restored conference",
+      sharedTags: ["conference"],
+    })
+    expect(session.presetConfig.transient).toBeUndefined()
+    expect(session.customOptions.transient).toBeUndefined()
+  })
+
+  it("bounds every tracking collection and mapping while retaining recovery identity", async () => {
+    const persistence = createControlledPersistence()
+    const store = createStoreWithPersistence(persistence)
+    const ids = Array.from({ length: 650 }, (_, index) => `occurrence-${index + 1}`)
+    const jobIdToItemId = Object.fromEntries(
+      ids.map((id, index) => [String(index + 1), id])
+    )
+    const jobIdToCollectionItemId = Object.fromEntries(
+      ids.map((_id, index) => [String(index + 1), `collection-item-${index + 1}`])
+    )
+    jobIdToItemId["x".repeat(300)] = "y".repeat(300)
+
+    store.getState().upsertSession({
+      tracking: {
+        mode: "webui-direct",
+        sessionId: "session-bounded",
+        runId: "run-bounded",
+        submissionOccurrenceIds: ids,
+        plannedItemIds: ids,
+        submittedItemIds: ids,
+        itemIds: ids,
+        batchIds: ids.map((_, index) => `batch-${index + 1}`),
+        jobIds: ids.map((_, index) => index + 1),
+        jobIdToItemId,
+        jobIdToCollectionItemId,
+      },
+    } as never)
+    await flushPersistence()
+
+    const raw = persistence.value || ""
+    const tracking = JSON.parse(raw || "null")?.state?.session?.tracking
+    expect(raw.length).toBeLessThan(500_000)
+    expect(tracking).toMatchObject({
+      mode: "webui-direct",
+      sessionId: "session-bounded",
+      runId: "run-bounded",
+    })
+    for (const key of [
+      "submissionOccurrenceIds",
+      "plannedItemIds",
+      "submittedItemIds",
+      "itemIds",
+      "batchIds",
+      "jobIds",
+    ]) {
+      expect(tracking[key].length).toBeLessThanOrEqual(500)
+    }
+    for (const key of ["jobIdToItemId", "jobIdToCollectionItemId"]) {
+      const entries = Object.entries(tracking[key])
+      expect(entries.length).toBeLessThanOrEqual(500)
+      expect(
+        entries.every(
+          ([entryKey, entryValue]) =>
+            entryKey.length <= 255 && String(entryValue).length <= 255
+        )
+      ).toBe(true)
+    }
+    expect(tracking.plannedItemIds).toContain("occurrence-1")
+    expect(tracking.jobIdToItemId["1"]).toBe("occurrence-1")
+    expect(tracking.jobIdToCollectionItemId["1"]).toBe("collection-item-1")
+  })
+
+  it("awaits durable Review persistence before changing in-memory replay authority", async () => {
+    const persistence = createControlledPersistence()
+    const store = createStoreWithPersistence(persistence)
+    store.getState().upsertSession({
+      ...createEmptyQuickIngestSession(),
+      lifecycle: "processing",
+      currentStep: 4,
+      tracking: {
+        mode: "extension-runtime",
+        sessionId: "qi-awaited-review",
+        itemIds: ["occ-awaited-review"],
+      },
+    })
+    await flushPersistence()
+    let releaseWrite!: () => void
+    persistence.blockNextWrite(
+      new Promise<void>((resolve) => {
+        releaseWrite = resolve
+      })
+    )
+
+    const handoff = store.getState().commitReviewHandoff({
+      lifecycle: "draft",
+      currentStep: 3,
+      processingState: {
+        status: "idle",
+        perItemProgress: [],
+        elapsed: 0,
+        estimatedRemaining: 0,
+      },
+    })
+
+    expect(handoff).toBeInstanceOf(Promise)
+    expect(store.getState().session).toMatchObject({
+      lifecycle: "processing",
+      currentStep: 4,
+      tracking: { sessionId: "qi-awaited-review" },
+    })
+    releaseWrite()
+    await expect(handoff).resolves.toBe(true)
+    expect(store.getState().session).toMatchObject({
+      lifecycle: "draft",
+      currentStep: 3,
+      tracking: undefined,
+    })
+  })
+
+  it("reports a failed durable Review handoff without replacing prior replay state", async () => {
+    const persistence = createControlledPersistence()
+    const store = createStoreWithPersistence(persistence)
+    store.getState().upsertSession({
+      ...createEmptyQuickIngestSession(),
+      lifecycle: "processing",
+      currentStep: 4,
+      tracking: {
+        mode: "extension-runtime",
+        sessionId: "qi-failed-review",
+        itemIds: ["occ-failed-review"],
+      },
+    })
+    await flushPersistence()
+    const before = store.getState().session
+    const durableBefore = persistence.value
+    persistence.failNextWrite(
+      new DOMException("Review persistence full", "QuotaExceededError")
+    )
+
+    await expect(
+      store.getState().commitReviewHandoff({
+        lifecycle: "draft",
+        currentStep: 3,
+      })
+    ).resolves.toBe(false)
+    expect(store.getState().session).toEqual(before)
+    expect(persistence.value).toBe(durableBefore)
+    expect(store.getState().persistenceStatus).toBe("quota_error")
+  })
+
+  it("rejects a captured Review handoff when the exact durable authority changed", async () => {
+    const persistence = createControlledPersistence()
+    const store = createStoreWithPersistence(persistence)
+    const processing = {
+      ...createEmptyQuickIngestSession(),
+      lifecycle: "processing" as const,
+      currentStep: 4 as const,
+      tracking: {
+        mode: "extension-runtime" as const,
+        sessionId: "qi-captured-review",
+        generation: "generation-old",
+      },
+    }
+    store.setState({ session: processing, persistenceStatus: "ready" })
+    await flushPersistence()
+    let releaseWrite!: () => void
+    persistence.blockNextWrite(
+      new Promise<void>((resolve) => {
+        releaseWrite = resolve
+      })
+    )
+
+    const handoff = store.getState().commitReviewHandoff({
+      lifecycle: "draft",
+      currentStep: 3,
+    })
+    await Promise.resolve()
+    const newerAuthority = {
+      ...processing,
+      updatedAt: processing.updatedAt + 100,
+      tracking: {
+        ...processing.tracking,
+        generation: "generation-new",
+      },
+    }
+    persistence.seedValue(
+      JSON.stringify({ state: { session: newerAuthority }, version: 0 })
+    )
+    releaseWrite()
+
+    await expect(handoff).resolves.toBe(false)
+    expect(store.getState().session).toEqual(processing)
+    expect(JSON.parse(persistence.value || "null")?.state?.session).toMatchObject({
+      lifecycle: "processing",
+      tracking: { generation: "generation-new" },
+    })
+  })
+
+  it("awaits durable processing authority before changing in-memory replay state", async () => {
+    const persistence = createControlledPersistence()
+    const store = createStoreWithPersistence(persistence)
+    const draft = createEmptyQuickIngestSession()
+    store.getState().upsertSession({
+      ...draft,
+      queueItems: [
+        {
+          id: "occ-awaited-processing",
+          kind: "url",
+          url: "https://example.com/awaited-processing",
+          status: "pending",
+        },
+      ],
+    })
+    await flushPersistence()
+    store.setState({ isSubmissionOwner: true, persistenceStatus: "ready" })
+    let releaseWrite!: () => void
+    persistence.blockNextWrite(
+      new Promise<void>((resolve) => {
+        releaseWrite = resolve
+      })
+    )
+
+    const handoff = store.getState().commitProcessingHandoff(
+      {
+        currentStep: 4,
+        queueItems: store.getState().session?.queueItems || [],
+      },
+      {
+        mode: "unknown",
+        submissionState: "creating_run",
+        submissionOccurrenceIds: ["occ-awaited-processing"],
+        startedAt: 1700000000000,
+      }
+    )
+
+    expect(handoff).toBeInstanceOf(Promise)
+    expect(store.getState().session).toMatchObject({
+      lifecycle: "draft",
+      currentStep: 1,
+      tracking: undefined,
+    })
+    releaseWrite()
+    await expect(handoff).resolves.toBe(true)
+    expect(store.getState().session).toMatchObject({
+      lifecycle: "processing",
+      currentStep: 4,
+      tracking: {
+        mode: "unknown",
+        submissionState: "creating_run",
+        submissionOccurrenceIds: ["occ-awaited-processing"],
+        startedAt: 1700000000000,
+      },
+    })
+    expect(JSON.parse(persistence.value || "null")?.state?.session).toMatchObject({
+      lifecycle: "processing",
+      currentStep: 4,
+      tracking: { submissionState: "creating_run" },
+    })
+  })
+
+  it("keeps prior authority when the durable processing handoff fails", async () => {
+    const persistence = createControlledPersistence()
+    const store = createStoreWithPersistence(persistence)
+    store.getState().createDraftSession()
+    await flushPersistence()
+    store.setState({ isSubmissionOwner: true, persistenceStatus: "ready" })
+    const before = store.getState().session
+    const durableBefore = persistence.value
+    persistence.failNextWrite(
+      new DOMException("Processing persistence full", "QuotaExceededError")
+    )
+
+    await expect(
+      store.getState().commitProcessingHandoff(
+        { currentStep: 4 },
+        {
+          mode: "unknown",
+          submissionState: "creating_run",
+          submissionOccurrenceIds: ["occ-failed-processing"],
+        }
+      )
+    ).resolves.toBe(false)
+    expect(store.getState().session).toEqual(before)
+    expect(persistence.value).toBe(durableBefore)
+    expect(store.getState().persistenceStatus).toBe("quota_error")
+  })
+
+  it("surfaces persistence status and submission ownership in store state", async () => {
+    const persistence = createControlledPersistence()
+    const store = createStoreWithPersistence(persistence)
+    store.getState().createDraftSession()
+
+    expect(store.getState().persistenceStatus).toBe("migrating")
+    persistence.publishStatus("unavailable")
+    expect(store.getState().persistenceStatus).toBe("unavailable")
+    persistence.publishStatus("ready")
+
+    await expect(store.getState().acquireSubmissionLease()).resolves.toBe(true)
+    expect(store.getState().isSubmissionOwner).toBe(true)
+    await expect(store.getState().renewSubmissionLease()).resolves.toBe(true)
+    await store.getState().releaseSubmissionLease()
+    expect(store.getState().isSubmissionOwner).toBe(false)
+  })
+
+  it("merges newer durable processing authority when lease acquisition is rejected", async () => {
+    const persistence = createControlledPersistence()
+    const store = createStoreWithPersistence(persistence)
+    const draft = createEmptyQuickIngestSession()
+    store.getState().upsertSession({
+      ...draft,
+      lifecycle: "draft",
+      currentStep: 3,
+      updatedAt: 100,
+    })
+    await flushPersistence()
+    persistence.seedValue(
+      JSON.stringify({
+        state: {
+          session: {
+            ...draft,
+            lifecycle: "processing",
+            currentStep: 4,
+            updatedAt: 200,
+            tracking: {
+              mode: "webui-direct",
+              sessionId: "authoritative-processing-session",
+              runId: "authoritative-processing-run",
+            },
+          },
+        },
+        version: 0,
+      })
+    )
+    persistence.setAcquireResult(false)
+
+    await expect(store.getState().acquireSubmissionLease()).resolves.toBe(false)
+
+    expect(store.getState().isSubmissionOwner).toBe(false)
+    expect(store.getState().session).toMatchObject({
+      id: draft.id,
+      lifecycle: "processing",
+      currentStep: 4,
+      tracking: {
+        sessionId: "authoritative-processing-session",
+        runId: "authoritative-processing-run",
+      },
+    })
+  })
+
+  it("reconciles a newer full durable draft after successful acquisition without rolling back to an older draft", async () => {
+    const persistence = createControlledPersistence()
+    const store = createStoreWithPersistence(persistence)
+    const draft = {
+      ...createEmptyQuickIngestSession(),
+      updatedAt: 100,
+      queueItems: [
+        {
+          id: "local-stale-row",
+          kind: "url" as const,
+          url: "https://example.com/local-stale-row",
+          sourceRef: {
+            kind: "direct_url" as const,
+            occurrenceId: "local-stale-row",
+            url: "https://example.com/local-stale-row",
+          },
+          detectedType: "web" as const,
+          icon: "Globe",
+          fileSize: 0,
+          validation: { valid: true },
+        },
+      ],
+    }
+    store.setState({ session: draft, persistenceStatus: "ready" })
+    await flushPersistence()
+    const durable = {
+      ...draft,
+      updatedAt: 200,
+      queueItems: [
+        {
+          ...draft.queueItems[0],
+          id: "durable-full-row",
+          url: "https://example.com/durable-full-row",
+          sourceRef: {
+            kind: "direct_url" as const,
+            occurrenceId: "durable-full-row",
+            url: "https://example.com/durable-full-row",
+          },
+        },
+      ],
+      selectedPreset: "custom" as const,
+      customBasePreset: "deep" as const,
+      presetConfig: {
+        ...draft.presetConfig,
+        common: { ...draft.presetConfig.common, perform_analysis: false },
+      },
+      customOptions: { common: { perform_analysis: false } },
+      conferenceBatchMetadata: {
+        collectionName: "Durable conference",
+        sharedTags: ["durable"],
+      },
+      openDetail: {
+        source: "extension_active_tab" as const,
+        action: "playlist_preflight" as const,
+        url: "https://youtube.com/playlist?list=durable",
+        sourceKind: "youtube_playlist" as const,
+      },
+    }
+    persistence.seedValue(
+      JSON.stringify({ state: { session: durable }, version: 0 })
+    )
+
+    await expect(store.getState().acquireSubmissionLease()).resolves.toBe(true)
+    expect(store.getState()).toMatchObject({
+      isSubmissionOwner: true,
+      externalAuthorityRevision: 1,
+      session: {
+        queueItems: [{ id: "durable-full-row" }],
+        selectedPreset: "custom",
+        customOptions: { common: { perform_analysis: false } },
+        conferenceBatchMetadata: { collectionName: "Durable conference" },
+        openDetail: {
+          action: "playlist_preflight",
+          url: "https://youtube.com/playlist?list=durable",
+        },
+      },
+    })
+
+    await flushPersistence()
+    persistence.seedValue(
+      JSON.stringify({
+        state: {
+          session: {
+            ...durable,
+            updatedAt: 150,
+            queueItems: [{ ...durable.queueItems[0], id: "older-durable-row" }],
+          },
+        },
+        version: 0,
+      })
+    )
+    await expect(store.getState().acquireSubmissionLease()).resolves.toBe(true)
+    expect(store.getState().session?.queueItems[0]?.id).toBe("durable-full-row")
+    expect((store.getState() as any).externalAuthorityRevision).toBe(1)
+  })
+
+  it("reads durable authority before publishing a rejected lease result after fresh hydration", async () => {
+    const persistence = createControlledPersistence()
+    const draft = {
+      ...createEmptyQuickIngestSession(),
+      lifecycle: "draft" as const,
+      currentStep: 3 as const,
+    }
+    persistence.seedValue(
+      JSON.stringify({ state: { session: draft }, version: 0 })
+    )
+    const store = createStoreWithPersistence(persistence)
+    await store.persist.rehydrate()
+    expect(store.getState().persistenceStatus).toBe("ready")
+    expect(store.getState().session).toMatchObject({
+      id: draft.id,
+      lifecycle: "draft",
+      currentStep: 3,
+    })
+    const attemptsBeforeAcquire = persistence.writeAttempts.length
+    const authoritativeEnvelope = JSON.stringify({
+      state: {
+        session: {
+          ...draft,
+          lifecycle: "processing",
+          currentStep: 4,
+          updatedAt: draft.updatedAt + 100,
+          tracking: {
+            mode: "webui-direct",
+            sessionId: "fresh-hydration-authority",
+            runId: "fresh-hydration-run",
+          },
+        },
+      },
+      version: 0,
+    })
+    persistence.seedValue(authoritativeEnvelope)
+    persistence.setAcquireResult(false)
+    persistence.delayNextRead()
+
+    await expect(store.getState().acquireSubmissionLease()).resolves.toBe(false)
+    await flushPersistence()
+
+    const leaseAttempts = persistence.writeAttempts.slice(attemptsBeforeAcquire)
+    expect(
+      leaseAttempts.every((value) =>
+        value.includes('"lifecycle":"processing"')
+      )
+    ).toBe(true)
+    expect(JSON.parse(persistence.value || "null")?.state?.session).toMatchObject({
+      id: draft.id,
+      lifecycle: "processing",
+      currentStep: 4,
+      tracking: {
+        sessionId: "fresh-hydration-authority",
+        runId: "fresh-hydration-run",
+      },
+    })
+    expect(store.getState().session).toMatchObject({
+      id: draft.id,
+      lifecycle: "processing",
+      currentStep: 4,
+    })
+    await expect(store.getState().acquireSubmissionLease()).resolves.toBe(false)
+    expect(store.getState().isSubmissionOwner).toBe(false)
+    expect(persistence.acquireSubmissionLease).toHaveBeenCalledTimes(2)
   })
 
   it("merges persisted tracking metadata across direct-session updates", () => {
@@ -245,8 +1140,28 @@ describe("quick ingest session store", () => {
     expect(store.getState().session?.tracking).toBeUndefined()
   })
 
-  it("bounds persisted run identity to the backend identifier limit", () => {
+  it("deduplicates cumulative job IDs before applying the 500-ID persistence bound", () => {
     const store = createQuickIngestSessionStore()
+
+    store.getState().markProcessingTracking({
+      mode: "webui-direct",
+      sessionId: "qi-cumulative-jobs",
+      jobIds: Array.from({ length: 250 }, (_, index) => index + 1),
+    })
+    store.getState().markProcessingTracking({
+      mode: "webui-direct",
+      sessionId: "qi-cumulative-jobs",
+      jobIds: Array.from({ length: 500 }, (_, index) => index + 1),
+    })
+
+    expect(store.getState().session?.tracking?.jobIds).toEqual(
+      Array.from({ length: 500 }, (_, index) => index + 1)
+    )
+  })
+
+  it("bounds persisted run identity to the backend identifier limit", async () => {
+    const persistence = createControlledPersistence()
+    const store = createStoreWithPersistence(persistence)
     const oversizedRunId = "r".repeat(256)
 
     store.getState().markProcessingTracking({
@@ -256,7 +1171,8 @@ describe("quick ingest session store", () => {
     })
 
     expect(store.getState().session?.tracking?.runId).toBeUndefined()
-    expect(sessionStorage.getItem(STORAGE_KEY)).not.toContain(oversizedRunId)
+    await flushPersistence()
+    expect(persistence.value).not.toContain(oversizedRunId)
 
     const maximumRunId = ` ${"r".repeat(255)} `
     store.getState().markProcessingTracking({
@@ -268,8 +1184,9 @@ describe("quick ingest session store", () => {
     expect(store.getState().session?.tracking?.runId).toBe("r".repeat(255))
   })
 
-  it("persists version-2 submission state before a run id exists", () => {
-    const store = createQuickIngestSessionStore()
+  it("persists version-2 submission state before a run id exists", async () => {
+    const persistence = createControlledPersistence()
+    const store = createStoreWithPersistence(persistence)
 
     store.getState().markProcessingTracking({
       mode: "webui-direct",
@@ -284,19 +1201,23 @@ describe("quick ingest session store", () => {
       submissionState: "creating_run",
       submissionOccurrenceIds: ["occ-submission-intent"],
     })
-    expect(sessionStorage.getItem(STORAGE_KEY)).toContain(
+    await flushPersistence()
+    expect(persistence.value).toContain(
       '"submissionState":"creating_run"'
     )
 
-    const rehydrated = createQuickIngestSessionStore().getState().session
+    const rehydratedStore = createStoreWithPersistence(persistence)
+    await rehydratedStore.persist.rehydrate()
+    const rehydrated = rehydratedStore.getState().session
     expect(rehydrated?.tracking).toMatchObject({
       submissionState: "creating_run",
       runId: undefined,
     })
   })
 
-  it("bounds dedicated submission occurrence recovery identities", () => {
-    const store = createQuickIngestSessionStore()
+  it("bounds dedicated submission occurrence recovery identities", async () => {
+    const persistence = createControlledPersistence()
+    const store = createStoreWithPersistence(persistence)
 
     store.getState().markProcessingTracking({
       mode: "webui-direct",
@@ -312,7 +1233,8 @@ describe("quick ingest session store", () => {
       ?.submissionOccurrenceIds
     expect(occurrenceIds).toHaveLength(500)
     expect(occurrenceIds?.at(-1)).toBe("occ-500")
-    expect(sessionStorage.getItem(STORAGE_KEY)).not.toContain("x".repeat(256))
+    await flushPersistence()
+    expect(persistence.value).not.toContain("x".repeat(256))
   })
 
   it("reconstructs bounded playlist records and fails closed on mismatched authority", () => {
@@ -573,7 +1495,7 @@ describe("quick ingest session store", () => {
     expect(materialized?.fileName).toBeUndefined()
   })
 
-  it("rehydrates corrupt materialized drafts without throwing or URL fallback authority", () => {
+  it("rehydrates corrupt materialized drafts without throwing or URL fallback authority", async () => {
     const session = {
       ...createEmptyQuickIngestSession(),
       queueItems: [
@@ -595,15 +1517,14 @@ describe("quick ingest session store", () => {
         },
       ],
     }
-    sessionStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({ state: { session }, version: 0 })
-    )
+    const persistence = createControlledPersistence()
+    persistence.seedValue(JSON.stringify({ state: { session }, version: 0 }))
 
     let restored: ReturnType<typeof createQuickIngestSessionStore> | undefined
     expect(() => {
-      restored = createQuickIngestSessionStore()
+      restored = createStoreWithPersistence(persistence)
     }).not.toThrow()
+    await restored?.persist.rehydrate()
     const row = restored?.getState().session?.queueItems[0]
     expect(row?.sourceRef).toBeUndefined()
     expect(row?.url).toBe("https://cached.example.invalid/display-only")

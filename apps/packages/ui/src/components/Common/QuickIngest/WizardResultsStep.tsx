@@ -39,7 +39,7 @@ import {
 
 type WizardResultsStepProps = {
   onClose: () => void
-  onIngestMore?: () => void
+  onStartOver?: () => void
   onRetryItems?: (
     itemIds: string[],
     retryItems?: ConferenceRetryRequestItem[]
@@ -361,7 +361,7 @@ ErrorRow.displayName = "ErrorRow"
 
 export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
   onClose,
-  onIngestMore,
+  onStartOver,
   onRetryItems,
   onOpenMedia,
   onDiscussInChat,
@@ -664,12 +664,12 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
   )
 
   const handleIngestMore = useCallback(() => {
-    if (onIngestMore) {
-      onIngestMore()
+    if (onStartOver) {
+      onStartOver()
       return
     }
     reset()
-  }, [onIngestMore, reset])
+  }, [onStartOver, reset])
 
   const handleResultRowKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLElement>, index: number) => {

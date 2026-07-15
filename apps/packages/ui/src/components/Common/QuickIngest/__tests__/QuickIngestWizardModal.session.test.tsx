@@ -27,6 +27,14 @@ const mocks = vi.hoisted(() => ({
     offlineBypass: false,
   },
   delayedPayloadFile: null as File | null,
+  staggeredPayloadFiles: null as { first: File; second: File } | null,
+  latestQuickProcess: null as (() => void) | null,
+  latestPreparingCancelItem: null as ((id: string) => void) | null,
+  latestPreparingCancelAll: null as (() => void) | null,
+  processingRenderSnapshots: [] as Array<{
+    queueIds: string
+    runId: string
+  }>,
 }))
 
 vi.mock("react-i18next", () => ({
@@ -206,6 +214,7 @@ vi.mock("@/components/Common/QuickIngest/AddContentStep", async () => {
       onQuickProcess?: () => void
       quickProcessWarning?: string | null
     }) => {
+      mocks.latestQuickProcess = onQuickProcess ?? null
       const context = actual.useIngestWizard() as any
       const { state, setQueueItems } = context
       return (
@@ -267,6 +276,49 @@ vi.mock("@/components/Common/QuickIngest/AddContentStep", async () => {
             }}
           >
             Queue Delayed File With Sibling And Process
+          </button>
+          <button
+            onClick={() => {
+              const files = mocks.staggeredPayloadFiles
+              if (!files) return
+              setQueueItems([
+                {
+                  id: "occ-finished-file-a",
+                  kind: "file",
+                  file: files.first,
+                  fileName: files.first.name,
+                  sourceRef: {
+                    kind: "file_stub",
+                    occurrenceId: "occ-finished-file-a",
+                  },
+                  detectedType: "video",
+                  icon: "Film",
+                  fileSize: files.first.size,
+                  mimeType: files.first.type,
+                  validation: { valid: true },
+                  conferenceOverride: { selected: true, title: "Finished A" },
+                },
+                {
+                  id: "occ-blocked-file-b",
+                  kind: "file",
+                  file: files.second,
+                  fileName: files.second.name,
+                  sourceRef: {
+                    kind: "file_stub",
+                    occurrenceId: "occ-blocked-file-b",
+                  },
+                  detectedType: "video",
+                  icon: "Film",
+                  fileSize: files.second.size,
+                  mimeType: files.second.type,
+                  validation: { valid: true },
+                  conferenceOverride: { selected: true, title: "Blocked B" },
+                },
+              ])
+              onQuickProcess?.()
+            }}
+          >
+            Queue Two Staggered Files And Process
           </button>
           <button
             onClick={() => {
@@ -499,13 +551,28 @@ vi.mock("@/components/Common/QuickIngest/ReviewStep", async () => {
     typeof import("@/components/Common/QuickIngest/IngestWizardContext")
   >("@/components/Common/QuickIngest/IngestWizardContext")
   return {
-    ReviewStep: () => {
+    ReviewStep: ({
+      persistenceStatus,
+      isSubmissionOwner,
+      onCheckSubmissionOwnership,
+      onBeginProcessing,
+      submissionStartError,
+    }: any) => {
       const { state, startProcessing, updateQueueItems } = actual.useIngestWizard()
       return (
         <div
           data-testid="wizard-review"
           data-processing-block={state.processingBlock?.code ?? ""}
+          data-persistence-status={persistenceStatus ?? "missing"}
+          data-submission-owner={String(isSubmissionOwner)}
+          data-queue-ids={state.queueItems.map((item) => item.id).join(",")}
+          data-selected-preset={state.selectedPreset}
+          data-config-analysis={String(state.presetConfig.common.perform_analysis)}
+          data-custom-options={JSON.stringify(state.customOptions)}
+          data-conference={JSON.stringify(state.conferenceBatchMetadata)}
+          data-open-detail={JSON.stringify(state.playlistPreflightSeed)}
         >
+          {submissionStartError && <div role="alert">{submissionStartError}</div>}
           <button
             onClick={() =>
               updateQueueItems((current) =>
@@ -522,7 +589,29 @@ vi.mock("@/components/Common/QuickIngest/ReviewStep", async () => {
           >
             Resolve duplicate
           </button>
-          <button onClick={startProcessing}>Start reviewed processing</button>
+          <button
+            onClick={() =>
+              onBeginProcessing
+                ? void onBeginProcessing(state)
+                : startProcessing()
+            }
+          >
+            Start reviewed processing
+          </button>
+          <button
+            onClick={() =>
+              void (async () => {
+                if (
+                  !onCheckSubmissionOwnership ||
+                  (await onCheckSubmissionOwnership())
+                ) {
+                  startProcessing()
+                }
+              })()
+            }
+          >
+            Start ownership-checked processing
+          </button>
           {state.queueItems.map((item) => (
             <div
               key={item.id}
@@ -593,16 +682,47 @@ vi.mock("@/components/Common/QuickIngest/ProcessingStep", async () => {
   const actual = await vi.importActual<
     typeof import("@/components/Common/QuickIngest/IngestWizardContext")
   >("@/components/Common/QuickIngest/IngestWizardContext")
+  const sessionStore = await vi.importActual<
+    typeof import("@/store/quick-ingest-session")
+  >("@/store/quick-ingest-session")
   return {
-    ProcessingStep: ({ onCancelAll }: { onCancelAll?: () => void }) => {
+    ProcessingStep: ({
+      preparingSubmission = false,
+      onPreparingCancelItem,
+      onPreparingCancelAll,
+    }: any) => {
       const { state, cancelProcessing, cancelItem, checkStatus } = actual.useIngestWizard()
+      mocks.processingRenderSnapshots.push({
+        queueIds: state.queueItems.map((item: any) => item.id).join(","),
+        runId: String(
+          sessionStore.useQuickIngestSessionStore.getState().session?.tracking
+            ?.runId || ""
+        ),
+      })
+      if (preparingSubmission) {
+        if (onPreparingCancelItem) {
+          mocks.latestPreparingCancelItem = onPreparingCancelItem
+        }
+        if (onPreparingCancelAll) {
+          mocks.latestPreparingCancelAll = onPreparingCancelAll
+        }
+      }
       return (
-        <div data-testid="wizard-processing">
+        <div
+          data-testid="wizard-processing"
+          data-queue-ids={state.queueItems.map((item: any) => item.id).join(",")}
+          data-progress-ids={state.processingState.perItemProgress
+            .map((item: any) => item.id)
+            .join(",")}
+          data-pending-run-ids={(state.pendingRunRequest?.inputs || [])
+            .map((item: any) => item.occurrenceId)
+            .join(",")}
+        >
           {state.processingState.status}:{state.processingState.perItemProgress.length}
           <button
             onClick={() => {
-              if (onCancelAll) {
-                onCancelAll()
+              if (preparingSubmission) {
+                onPreparingCancelAll?.()
               } else {
                 cancelProcessing()
               }
@@ -611,7 +731,15 @@ vi.mock("@/components/Common/QuickIngest/ProcessingStep", async () => {
           >
             Cancel Processing
           </button>
-          <button onClick={() => cancelItem(state.queueItems[0]?.id || "")}>Cancel first item</button>
+          <button
+            onClick={() =>
+              preparingSubmission
+                ? onPreparingCancelItem?.(state.queueItems[0]?.id || "")
+                : cancelItem(state.queueItems[0]?.id || "")
+            }
+          >
+            Cancel first item
+          </button>
           <button onClick={() => checkStatus(state.queueItems[0]?.id || "")}>Check first item</button>
         </div>
       )
@@ -626,12 +754,12 @@ vi.mock("@/components/Common/QuickIngest/WizardResultsStep", async () => {
   return {
     WizardResultsStep: ({
       onOpenCollection,
-      onIngestMore,
       onRetryItems,
+      onStartOver,
     }: {
       onOpenCollection?: (collectionId: string) => void
-      onIngestMore?: () => void
       onRetryItems?: (itemIds: string[]) => void
+      onStartOver?: () => void
     }) => {
       const { state, reset } = actual.useIngestWizard()
       return (
@@ -656,7 +784,7 @@ vi.mock("@/components/Common/QuickIngest/WizardResultsStep", async () => {
               Retry first result
             </button>
           ) : null}
-          <button type="button" onClick={onIngestMore || reset}>
+          <button type="button" onClick={onStartOver || reset}>
             Start over
           </button>
         </div>
@@ -673,9 +801,66 @@ import { QuickIngestWizardModal } from "@/components/Common/QuickIngestWizardMod
 import { createQuickIngestSessionRuntime } from "@/entries/shared/quick-ingest-session-runtime"
 import {
   createEmptyQuickIngestSession,
+  type PersistedQuickIngestTracking,
+  type QuickIngestSessionRecord,
   useQuickIngestSessionStore,
 } from "@/store/quick-ingest-session"
 import { resolvePresetMap } from "@/components/Common/QuickIngest/presets"
+
+const commitModalReviewHandoff = async (
+  next: Partial<QuickIngestSessionRecord>
+): Promise<boolean> => {
+  if (!useQuickIngestSessionStore.getState().session) return false
+  useQuickIngestSessionStore.getState().upsertSession(next)
+  useQuickIngestSessionStore.getState().clearProcessingTracking()
+  return true
+}
+
+const acquireModalSubmissionLease = async (): Promise<boolean> => {
+  useQuickIngestSessionStore.setState({ isSubmissionOwner: true })
+  return true
+}
+
+const renewModalSubmissionLease = async (): Promise<boolean> => {
+  useQuickIngestSessionStore.setState({ isSubmissionOwner: true })
+  return true
+}
+
+const commitModalProcessingHandoff = async (
+  next: Partial<QuickIngestSessionRecord>,
+  tracking: PersistedQuickIngestTracking
+): Promise<boolean> => {
+  const current = useQuickIngestSessionStore.getState()
+  if (
+    !current.session ||
+    current.persistenceStatus !== "ready" ||
+    !current.isSubmissionOwner
+  ) {
+    return false
+  }
+  current.upsertSession({
+    ...next,
+    lifecycle: "processing",
+    currentStep: 4,
+    tracking,
+  })
+  return true
+}
+
+const validDirectQueueItem = (id: string) => ({
+  id,
+  kind: "url" as const,
+  url: `https://example.com/${id}`,
+  sourceRef: {
+    kind: "direct_url" as const,
+    occurrenceId: id,
+    url: `https://example.com/${id}`,
+  },
+  detectedType: "web" as const,
+  icon: "Globe",
+  fileSize: 0,
+  validation: { valid: true },
+})
 
 const emitRuntimeMessage = (message: any) => {
   for (const listener of [...mocks.runtimeListeners]) {
@@ -732,6 +917,11 @@ describe("QuickIngestWizardModal session runtime", () => {
       offlineBypass: false,
     })
     mocks.delayedPayloadFile = null
+    mocks.staggeredPayloadFiles = null
+    mocks.latestQuickProcess = null
+    mocks.latestPreparingCancelItem = null
+    mocks.latestPreparingCancelAll = null
+    mocks.processingRenderSnapshots.splice(0, mocks.processingRenderSnapshots.length)
     mocks.cancelQuickIngestSession.mockResolvedValue({ ok: true })
     mocks.retryQuickIngestSession.mockResolvedValue({ ok: true })
     mocks.queryQuickIngestSession.mockResolvedValue({ ok: true, active: true, event: null })
@@ -739,12 +929,969 @@ describe("QuickIngestWizardModal session runtime", () => {
     useQuickIngestSessionStore.setState({
       session: null,
       triggerSummary: { count: 0, label: null, hadFailure: false },
+      persistenceStatus: "ready",
+      isSubmissionOwner: true,
+      externalAuthorityRevision: 0,
+      commitReviewHandoff: commitModalReviewHandoff,
+      commitProcessingHandoff: commitModalProcessingHandoff,
+      acquireSubmissionLease: acquireModalSubmissionLease,
+      renewSubmissionLease: renewModalSubmissionLease,
     })
   })
 
   afterEach(() => {
     vi.useRealTimers()
     vi.restoreAllMocks()
+  })
+
+  it("waits for hydration before creating a modal fallback draft", async () => {
+    const persistApi = useQuickIngestSessionStore.persist
+    let hydrated = false
+    let finishHydration: (() => void) | null = null
+    const hasHydrated = vi
+      .spyOn(persistApi, "hasHydrated")
+      .mockImplementation(() => hydrated)
+    const onFinishHydration = vi
+      .spyOn(persistApi, "onFinishHydration")
+      .mockImplementation((listener: any) => {
+        finishHydration = () => listener(useQuickIngestSessionStore.getState())
+        return () => {}
+      })
+    const onHydrate = vi
+      .spyOn(persistApi, "onHydrate")
+      .mockImplementation(() => () => {})
+    const realCreateDraft = useQuickIngestSessionStore.getState().createDraftSession
+    const createDraftSession = vi.fn(realCreateDraft)
+    useQuickIngestSessionStore.setState({
+      session: null,
+      createDraftSession,
+    } as never)
+
+    try {
+      render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+      expect(createDraftSession).not.toHaveBeenCalled()
+
+      const durable = {
+        ...createEmptyQuickIngestSession(),
+        id: "durable-hydrated-terminal",
+        lifecycle: "completed" as const,
+        currentStep: 5 as const,
+        results: [
+          {
+            id: "durable-result",
+            status: "ok" as const,
+            type: "html" as const,
+            title: "durable hydrated result",
+          },
+        ],
+      }
+      act(() => {
+        useQuickIngestSessionStore.setState({ session: durable } as never)
+        hydrated = true
+        finishHydration?.()
+      })
+
+      expect(createDraftSession).not.toHaveBeenCalled()
+      expect(await screen.findByTestId("wizard-results")).toHaveTextContent(
+        "durable hydrated result"
+      )
+    } finally {
+      useQuickIngestSessionStore.setState({ createDraftSession: realCreateDraft })
+      hasHydrated.mockRestore()
+      onFinishHydration.mockRestore()
+      onHydrate.mockRestore()
+    }
+  })
+
+  it("forwards persistence recovery and submission ownership state to Review", async () => {
+    useQuickIngestSessionStore.setState({
+      session: {
+        ...createEmptyQuickIngestSession(),
+        currentStep: 3,
+      },
+      persistenceStatus: "unavailable",
+      isSubmissionOwner: false,
+    } as never)
+
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+
+    const review = await screen.findByTestId("wizard-review")
+    expect(review).toHaveAttribute("data-persistence-status", "unavailable")
+    expect(review).toHaveAttribute("data-submission-owner", "false")
+  })
+
+  it.each([
+    ["unavailable storage", "unavailable", false],
+    ["quota-exhausted storage", "quota_error", false],
+    ["a rejected ownership check", "ready", false],
+  ] as const)(
+    "blocks autoProcessQueued before submission when authority has %s",
+    async (_label, persistenceStatus, isSubmissionOwner) => {
+      const acquireSubmissionLease = vi.fn().mockResolvedValue(false)
+      useQuickIngestSessionStore.setState({
+        session: {
+          ...createEmptyQuickIngestSession(),
+          queueItems: [validDirectQueueItem("blocked-auto-authority")],
+        },
+        persistenceStatus,
+        isSubmissionOwner,
+        acquireSubmissionLease,
+      } as never)
+      mocks.startQuickIngestSession.mockResolvedValue({
+        ok: true,
+        sessionId: "must-not-start-auto",
+      })
+
+      render(<QuickIngestWizardModal open autoProcessQueued onClose={vi.fn()} />)
+      await screen.findByRole("dialog")
+      await act(async () => {
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+
+      expect(mocks.startQuickIngestSession).not.toHaveBeenCalled()
+    }
+  )
+
+  it.each([
+    ["unavailable storage", "unavailable", false],
+    ["quota-exhausted storage", "quota_error", false],
+    ["a rejected ownership check", "ready", false],
+  ] as const)(
+    "blocks Step-1 Use defaults & process before submission when authority has %s",
+    async (_label, persistenceStatus, isSubmissionOwner) => {
+      const user = userEvent.setup()
+      const acquireSubmissionLease = vi.fn().mockResolvedValue(false)
+      useQuickIngestSessionStore.setState({
+        session: createEmptyQuickIngestSession(),
+        persistenceStatus,
+        isSubmissionOwner,
+        acquireSubmissionLease,
+      } as never)
+      mocks.startQuickIngestSession.mockResolvedValue({
+        ok: true,
+        sessionId: "must-not-start-quick",
+      })
+
+      render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+      await user.click(screen.getByRole("button", { name: "Queue And Process" }))
+
+      expect(await screen.findByTestId("wizard-review")).toBeInTheDocument()
+      expect(mocks.startQuickIngestSession).not.toHaveBeenCalled()
+      expect(mocks.submitQuickIngestBatch).not.toHaveBeenCalled()
+    }
+  )
+
+  it("fails closed at the start boundary when a stale step-4 state lacks durable authority", async () => {
+    useQuickIngestSessionStore.setState({
+      session: {
+        ...createEmptyQuickIngestSession(),
+        currentStep: 4,
+        queueItems: [validDirectQueueItem("stale-step-four")],
+        processingState: {
+          status: "running",
+          perItemProgress: [],
+          elapsed: 0,
+          estimatedRemaining: 0,
+        },
+      },
+      persistenceStatus: "unavailable",
+      isSubmissionOwner: false,
+    } as never)
+    mocks.startQuickIngestSession.mockResolvedValue({
+      ok: true,
+      sessionId: "must-not-start-boundary",
+    })
+
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+    await screen.findByTestId("wizard-processing")
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(mocks.startQuickIngestSession).not.toHaveBeenCalled()
+  })
+
+  it("awaits durable creating-run authority before the backend start mutation", async () => {
+    const user = userEvent.setup()
+    let releaseCommit!: (committed: boolean) => void
+    const commitProcessingHandoff = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          releaseCommit = resolve
+        })
+    )
+    useQuickIngestSessionStore.setState({
+      session: createEmptyQuickIngestSession(),
+      persistenceStatus: "ready",
+      isSubmissionOwner: true,
+      acquireSubmissionLease: vi.fn().mockResolvedValue(true),
+      commitProcessingHandoff,
+    } as never)
+    mocks.startQuickIngestSession.mockResolvedValue({
+      ok: true,
+      sessionId: "durably-started",
+    })
+    mocks.submitQuickIngestBatch.mockReturnValue(new Promise(() => {}))
+
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+    await user.click(screen.getByRole("button", { name: "Queue And Process" }))
+
+    await waitFor(() => expect(commitProcessingHandoff).toHaveBeenCalledTimes(1))
+    expect(mocks.startQuickIngestSession).not.toHaveBeenCalled()
+
+    releaseCommit(true)
+    await waitFor(() => expect(mocks.startQuickIngestSession).toHaveBeenCalledTimes(1))
+    expect(commitProcessingHandoff.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.startQuickIngestSession.mock.invocationCallOrder[0]
+    )
+    expect(mocks.startQuickIngestSession).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([
+    ["lease renewal", false, "success"],
+    ["durable handoff rejection", true, "false"],
+    ["durable handoff exception", true, "throw"],
+  ] as const)(
+    "returns to Review when the pre-submit %s boundary fails",
+    async (_label, renews, commitBehavior) => {
+      const user = userEvent.setup()
+      const renewSubmissionLease = vi.fn().mockResolvedValue(renews)
+      const commitProcessingHandoff = vi.fn(() => {
+        if (commitBehavior === "throw") {
+          throw new Error("durable handoff exploded")
+        }
+        return Promise.resolve(commitBehavior === "success")
+      })
+      useQuickIngestSessionStore.setState({
+        session: createEmptyQuickIngestSession(),
+        persistenceStatus: "ready",
+        isSubmissionOwner: true,
+        acquireSubmissionLease: vi.fn().mockResolvedValue(true),
+        renewSubmissionLease,
+        commitProcessingHandoff,
+      } as never)
+
+      render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+      await user.click(screen.getByRole("button", { name: "Queue And Process" }))
+
+      await waitFor(() => expect(renewSubmissionLease).toHaveBeenCalledTimes(1))
+      if (renews) {
+        await waitFor(() =>
+          expect(commitProcessingHandoff).toHaveBeenCalledTimes(1)
+        )
+      } else {
+        expect(commitProcessingHandoff).not.toHaveBeenCalled()
+      }
+      expect(await screen.findByTestId("wizard-review")).toBeInTheDocument()
+      expect(renewSubmissionLease).toHaveBeenCalledTimes(1)
+      expect(commitProcessingHandoff).toHaveBeenCalledTimes(renews ? 1 : 0)
+      expect(mocks.startQuickIngestSession).not.toHaveBeenCalled()
+      expect(mocks.submitQuickIngestBatch).not.toHaveBeenCalled()
+    }
+  )
+
+  it("claims one attempt before awaiting acquisition when two commands race", async () => {
+    let releaseAcquire!: (acquired: boolean) => void
+    const acquireSubmissionLease = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          releaseAcquire = resolve
+        })
+    )
+    useQuickIngestSessionStore.setState({
+      session: createEmptyQuickIngestSession(),
+      acquireSubmissionLease,
+    } as never)
+    mocks.startQuickIngestSession.mockResolvedValue({
+      ok: true,
+      sessionId: "qi-extension-command-race",
+    })
+
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole("button", { name: "Queue And Process" }))
+    expect(mocks.latestQuickProcess).toBeTypeOf("function")
+    await waitFor(() => expect(acquireSubmissionLease).toHaveBeenCalledTimes(1))
+    act(() => mocks.latestQuickProcess?.())
+
+    expect(acquireSubmissionLease).toHaveBeenCalledTimes(1)
+    expect(screen.queryByTestId("wizard-review")).not.toBeInTheDocument()
+
+    releaseAcquire(true)
+    await waitFor(() => {
+      expect(mocks.startQuickIngestSession).toHaveBeenCalledTimes(1)
+    })
+    expect(screen.queryByTestId("wizard-review")).not.toBeInTheDocument()
+  })
+
+  it.each(["draft", "processing"] as const)(
+    "treats restored and rerendered Step-4 running %s state as display-only",
+    async (lifecycle) => {
+      const restored = {
+        ...createEmptyQuickIngestSession(),
+        lifecycle,
+        currentStep: 4 as const,
+        queueItems: [validDirectQueueItem(`restored-${lifecycle}`)],
+        processingState: {
+          status: "running" as const,
+          perItemProgress: [],
+          elapsed: 0,
+          estimatedRemaining: 0,
+        },
+      }
+      useQuickIngestSessionStore.setState({ session: restored } as never)
+      mocks.startQuickIngestSession.mockResolvedValue({
+        ok: true,
+        sessionId: `must-not-start-${lifecycle}`,
+      })
+
+      const view = render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+      await screen.findByTestId("wizard-processing")
+      view.rerender(<QuickIngestWizardModal open onClose={vi.fn()} />)
+      await act(async () => {
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+
+      expect(mocks.startQuickIngestSession).not.toHaveBeenCalled()
+      expect(mocks.submitQuickIngestBatch).not.toHaveBeenCalled()
+    }
+  )
+
+  it("keeps autoProcessQueued restored non-draft Step 4 display-only", async () => {
+    const acquireSubmissionLease = vi.fn().mockResolvedValue(true)
+    const renewSubmissionLease = vi.fn().mockResolvedValue(true)
+    useQuickIngestSessionStore.setState({
+      session: {
+        ...createEmptyQuickIngestSession(),
+        lifecycle: "processing",
+        currentStep: 4,
+        queueItems: [validDirectQueueItem("restored-auto-step-4")],
+        processingState: {
+          status: "running",
+          perItemProgress: [],
+          elapsed: 0,
+          estimatedRemaining: 0,
+        },
+      },
+      acquireSubmissionLease,
+      renewSubmissionLease,
+    } as never)
+
+    const view = render(
+      <QuickIngestWizardModal open autoProcessQueued onClose={vi.fn()} />
+    )
+    expect(await screen.findByTestId("wizard-processing")).toBeInTheDocument()
+    view.rerender(
+      <QuickIngestWizardModal open autoProcessQueued onClose={vi.fn()} />
+    )
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(acquireSubmissionLease).not.toHaveBeenCalled()
+    expect(renewSubmissionLease).not.toHaveBeenCalled()
+    expect(mocks.startQuickIngestSession).not.toHaveBeenCalled()
+    expect(mocks.submitQuickIngestBatch).not.toHaveBeenCalled()
+    expect(screen.queryByTestId("wizard-review")).not.toBeInTheDocument()
+    expect(screen.getByTestId("wizard-processing")).toBeInTheDocument()
+  })
+
+  it("returns a payload-build failure to Review without exposing a raw thrown value", async () => {
+    const rawFailure = "raw payload bytes failure that must stay private"
+    const failedFile = {
+      name: "failed-payload.mp4",
+      type: "video/mp4",
+      size: 3,
+      lastModified: 1,
+      arrayBuffer: vi.fn(() => Promise.reject(new Error(rawFailure))),
+    } as unknown as File
+    mocks.delayedPayloadFile = failedFile
+    useQuickIngestSessionStore.setState({
+      session: createEmptyQuickIngestSession(),
+    } as never)
+
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+    await userEvent.click(
+      screen.getByRole("button", { name: "Queue Delayed File And Process" })
+    )
+
+    expect(await screen.findByTestId("wizard-review")).toBeInTheDocument()
+    const safeError =
+      "Quick ingest paused before submission. Check local recovery and submission ownership, then try again."
+    expect(screen.getByRole("alert")).toHaveTextContent(safeError)
+    expect(document.body).not.toHaveTextContent(rawFailure)
+    expect(mocks.startQuickIngestSession).not.toHaveBeenCalled()
+    expect(mocks.submitQuickIngestBatch).not.toHaveBeenCalled()
+    expect(useQuickIngestSessionStore.getState().session?.errorMessage).toBe(
+      safeError
+    )
+  })
+
+  it("does not continue after unmount while acquisition is pending", async () => {
+    let releaseAcquire!: (acquired: boolean) => void
+    const acquireSubmissionLease = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          releaseAcquire = resolve
+        })
+    )
+    const renewSubmissionLease = vi.fn().mockResolvedValue(true)
+    const commitProcessingHandoff = vi.fn().mockResolvedValue(true)
+    useQuickIngestSessionStore.setState({
+      session: createEmptyQuickIngestSession(),
+      acquireSubmissionLease,
+      renewSubmissionLease,
+      commitProcessingHandoff,
+    } as never)
+
+    const view = render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole("button", { name: "Queue And Process" }))
+    await waitFor(() => expect(acquireSubmissionLease).toHaveBeenCalledTimes(1))
+    view.unmount()
+
+    await act(async () => {
+      releaseAcquire(true)
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(renewSubmissionLease).not.toHaveBeenCalled()
+    expect(commitProcessingHandoff).not.toHaveBeenCalled()
+    expect(mocks.startQuickIngestSession).not.toHaveBeenCalled()
+  })
+
+  it("does not continue after unmount while payload bytes are pending", async () => {
+    let releaseBytes!: () => void
+    const byteGate = new Promise<ArrayBuffer>((resolve) => {
+      releaseBytes = () => resolve(Uint8Array.from([1, 2, 3]).buffer)
+    })
+    const delayedFile = {
+      name: "unmount-payload.mp4",
+      type: "video/mp4",
+      size: 3,
+      lastModified: 1,
+      arrayBuffer: vi.fn(() => byteGate),
+    } as unknown as File
+    const renewSubmissionLease = vi.fn().mockResolvedValue(true)
+    const commitProcessingHandoff = vi.fn().mockResolvedValue(true)
+    mocks.delayedPayloadFile = delayedFile
+    useQuickIngestSessionStore.setState({
+      session: createEmptyQuickIngestSession(),
+      renewSubmissionLease,
+      commitProcessingHandoff,
+    } as never)
+
+    const view = render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+    fireEvent.click(
+      screen.getByRole("button", { name: "Queue Delayed File And Process" })
+    )
+    await waitFor(() => expect(delayedFile.arrayBuffer).toHaveBeenCalledTimes(1))
+    view.unmount()
+
+    await act(async () => {
+      releaseBytes()
+      await byteGate
+      await Promise.resolve()
+    })
+
+    expect(renewSubmissionLease).not.toHaveBeenCalled()
+    expect(commitProcessingHandoff).not.toHaveBeenCalled()
+    expect(mocks.startQuickIngestSession).not.toHaveBeenCalled()
+  })
+
+  it("does not submit or track after unmount while the start acknowledgement is pending", async () => {
+    let releaseStart!: (ack: { ok: boolean; sessionId: string }) => void
+    mocks.startQuickIngestSession.mockReturnValue(
+      new Promise((resolve) => {
+        releaseStart = resolve
+      })
+    )
+    mocks.submitQuickIngestBatch.mockResolvedValue({ ok: true, results: [] })
+    useQuickIngestSessionStore.setState({
+      session: createEmptyQuickIngestSession(),
+    } as never)
+
+    const view = render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole("button", { name: "Queue And Process" }))
+    await waitFor(() => {
+      expect(mocks.startQuickIngestSession).toHaveBeenCalledTimes(1)
+    })
+    view.unmount()
+
+    await act(async () => {
+      releaseStart({ ok: true, sessionId: "qi-direct-unmounted-start" })
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(mocks.submitQuickIngestBatch).not.toHaveBeenCalled()
+    expect(useQuickIngestSessionStore.getState().session?.tracking).toMatchObject({
+      mode: "unknown",
+      submissionState: "creating_run",
+    })
+  })
+
+  it("clears a terminal attempt so a later explicit run can start", async () => {
+    mocks.startQuickIngestSession
+      .mockResolvedValueOnce({ ok: true, sessionId: "qi-direct-terminal-first" })
+      .mockResolvedValueOnce({ ok: true, sessionId: "qi-extension-terminal-second" })
+    mocks.submitQuickIngestBatch.mockResolvedValueOnce({
+      ok: true,
+      results: [
+        {
+          id: "queued-url-1",
+          status: "ok",
+          type: "html",
+          title: "first terminal attempt",
+        },
+      ],
+    })
+    useQuickIngestSessionStore.setState({
+      session: createEmptyQuickIngestSession(),
+    } as never)
+
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole("button", { name: "Queue And Process" }))
+    expect(await screen.findByTestId("wizard-results")).toHaveTextContent(
+      "first terminal attempt"
+    )
+    const terminalSessionId = useQuickIngestSessionStore.getState().session?.id
+
+    fireEvent.click(screen.getByRole("button", { name: "Start over" }))
+    await waitFor(() => {
+      expect(useQuickIngestSessionStore.getState().session).toMatchObject({
+        lifecycle: "draft",
+        currentStep: 1,
+      })
+      expect(useQuickIngestSessionStore.getState().session?.id).not.toBe(
+        terminalSessionId
+      )
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Queue And Process" }))
+
+    await waitFor(() => {
+      expect(mocks.startQuickIngestSession).toHaveBeenCalledTimes(2)
+    })
+  })
+
+  it("fences stale tracking, warning, result, and token cleanup after cancellation replacement", async () => {
+    let rejectOldSubmission!: (error: Error) => void
+    let oldPayload: any
+    let releaseNewStart!: (ack: { ok: boolean; sessionId: string }) => void
+    const acquireSubmissionLease = vi.fn(async () => {
+      useQuickIngestSessionStore.setState({ isSubmissionOwner: true })
+      return true
+    })
+    const renewSubmissionLease = vi.fn(renewModalSubmissionLease)
+    const commitProcessingHandoff = vi.fn(commitModalProcessingHandoff)
+    mocks.startQuickIngestSession
+      .mockResolvedValueOnce({ ok: true, sessionId: "qi-direct-stale-old" })
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          releaseNewStart = resolve
+        })
+      )
+    mocks.submitQuickIngestBatch.mockImplementationOnce((payload: any) => {
+      oldPayload = payload
+      return new Promise((_resolve, reject) => {
+        rejectOldSubmission = reject
+      })
+    })
+    useQuickIngestSessionStore.setState({
+      session: createEmptyQuickIngestSession(),
+      acquireSubmissionLease,
+      renewSubmissionLease,
+      commitProcessingHandoff,
+    } as never)
+
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole("button", { name: "Queue And Process" }))
+    await waitFor(() => {
+      expect(mocks.submitQuickIngestBatch).toHaveBeenCalledTimes(1)
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel Processing" }))
+    await waitFor(() => {
+      expect(mocks.cancelQuickIngestSession).toHaveBeenCalled()
+    })
+    emitRuntimeMessage({
+      type: "tldw:quick-ingest/completed",
+      payload: {
+        sessionId: "qi-direct-stale-old",
+        results: [
+          {
+            id: "queued-url-1",
+            status: "error",
+            type: "html",
+            error: "Cancelled by user.",
+            data: { outcome: "cancelled" },
+          },
+        ],
+      },
+    })
+    await screen.findByTestId("wizard-results")
+
+    fireEvent.click(screen.getByRole("button", { name: "Start over" }))
+    fireEvent.click(screen.getByRole("button", { name: "Queue And Process" }))
+    await waitFor(() => {
+      expect(acquireSubmissionLease).toHaveBeenCalledTimes(2)
+    })
+    await waitFor(() => {
+      expect(renewSubmissionLease).toHaveBeenCalledTimes(2)
+      expect(commitProcessingHandoff).toHaveBeenCalledTimes(2)
+    })
+    await waitFor(() => {
+      expect(mocks.startQuickIngestSession).toHaveBeenCalledTimes(2)
+    })
+
+    oldPayload.onTrackingMetadata({
+      mode: "webui-direct",
+      runId: "run-from-stale-attempt",
+      submittedItemIds: ["queued-url-1"],
+      startedAt: Date.now(),
+    })
+    await act(async () => {
+      rejectOldSubmission(new Error("warning from stale attempt"))
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    act(() => mocks.latestQuickProcess?.())
+    expect(acquireSubmissionLease).toHaveBeenCalledTimes(2)
+    expect(screen.getByTestId("wizard-processing")).toHaveTextContent("running")
+    expect(
+      useQuickIngestSessionStore.getState().session?.tracking?.runId || ""
+    ).not.toBe("run-from-stale-attempt")
+    expect(
+      useQuickIngestSessionStore.getState().session?.errorMessage || ""
+    ).not.toContain("warning from stale attempt")
+
+    await act(async () => {
+      releaseNewStart({ ok: true, sessionId: "qi-extension-stale-new" })
+      await Promise.resolve()
+    })
+    await waitFor(() => {
+      expect(useQuickIngestSessionStore.getState().session?.tracking).toMatchObject({
+        mode: "extension-runtime",
+        sessionId: "qi-extension-stale-new",
+      })
+    })
+  })
+
+  it("does not submit after a delayed start is replaced by a newer authority revision", async () => {
+    let releaseStart!: (ack: { ok: boolean; sessionId: string }) => void
+    mocks.startQuickIngestSession.mockReturnValue(
+      new Promise((resolve) => {
+        releaseStart = resolve
+      })
+    )
+    useQuickIngestSessionStore.setState({
+      session: createEmptyQuickIngestSession(),
+    } as never)
+
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole("button", { name: "Queue And Process" }))
+    await waitFor(() => {
+      expect(mocks.startQuickIngestSession).toHaveBeenCalledTimes(1)
+    })
+    const active = useQuickIngestSessionStore.getState().session!
+    act(() => {
+      useQuickIngestSessionStore.setState({
+        session: {
+          ...active,
+          lifecycle: "processing",
+          currentStep: 4,
+          updatedAt: active.updatedAt + 100,
+          queueItems: [validDirectQueueItem("replacement-after-start")],
+          tracking: {
+            mode: "webui-direct",
+            sessionId: "qi-direct-replacement",
+            runId: "run-replacement",
+          },
+        },
+        externalAuthorityRevision: 1,
+      } as never)
+    })
+
+    await act(async () => {
+      releaseStart({ ok: true, sessionId: "qi-direct-obsolete" })
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(mocks.submitQuickIngestBatch).not.toHaveBeenCalled()
+    expect(useQuickIngestSessionStore.getState().session?.tracking).toMatchObject({
+      sessionId: "qi-direct-replacement",
+      runId: "run-replacement",
+    })
+  })
+
+  it("ignores delayed submission callbacks after same-session authority advances", async () => {
+    let submissionPayload: any
+    let releaseSubmission!: (result: any) => void
+    mocks.startQuickIngestSession.mockResolvedValue({
+      ok: true,
+      sessionId: "qi-direct-delayed-revision",
+    })
+    mocks.submitQuickIngestBatch.mockImplementation((payload: any) => {
+      submissionPayload = payload
+      return new Promise((resolve) => {
+        releaseSubmission = resolve
+      })
+    })
+    useQuickIngestSessionStore.setState({
+      session: createEmptyQuickIngestSession(),
+    } as never)
+
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole("button", { name: "Queue And Process" }))
+    await waitFor(() => {
+      expect(mocks.submitQuickIngestBatch).toHaveBeenCalledTimes(1)
+    })
+    const active = useQuickIngestSessionStore.getState().session!
+    act(() => {
+      useQuickIngestSessionStore.setState({
+        session: {
+          ...active,
+          updatedAt: active.updatedAt + 100,
+          queueItems: [validDirectQueueItem("replacement-during-submit")],
+          tracking: {
+            mode: "webui-direct",
+            sessionId: "qi-direct-replacement-submit",
+            runId: "run-replacement-submit",
+          },
+        },
+        externalAuthorityRevision: 1,
+      } as never)
+    })
+
+    submissionPayload.onTrackingMetadata({
+      mode: "webui-direct",
+      runId: "run-obsolete-callback",
+      submittedItemIds: ["queued-url-1"],
+    })
+    await act(async () => {
+      releaseSubmission({
+        ok: false,
+        accepted: true,
+        submissionCleanupFailed: true,
+        unsentOccurrenceIds: ["queued-url-1"],
+        error: "obsolete warning",
+      })
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(useQuickIngestSessionStore.getState().session?.tracking).toMatchObject({
+      sessionId: "qi-direct-replacement-submit",
+      runId: "run-replacement-submit",
+    })
+    expect(
+      useQuickIngestSessionStore.getState().session?.errorMessage || ""
+    ).not.toContain("obsolete warning")
+    expect(
+      useQuickIngestSessionStore.getState().session?.results || []
+    ).not.toContainEqual(expect.objectContaining({ id: "queued-url-1" }))
+  })
+
+  it("replaces the mounted wizard with a newer durable draft after acquisition reconciliation", async () => {
+    const stale = {
+      ...createEmptyQuickIngestSession(),
+      currentStep: 3 as const,
+      queueItems: [validDirectQueueItem("stale-local-row")],
+    }
+    const durable = {
+      ...stale,
+      updatedAt: stale.updatedAt + 100,
+      queueItems: [validDirectQueueItem("durable-external-row")],
+      selectedPreset: "custom" as const,
+      customBasePreset: "deep" as const,
+      presetConfig: {
+        ...stale.presetConfig,
+        common: {
+          ...stale.presetConfig.common,
+          perform_analysis: false,
+        },
+      },
+      customOptions: { common: { perform_analysis: false } },
+      conferenceBatchMetadata: {
+        collectionName: "Durable conference",
+        sharedTags: ["durable"],
+      },
+      openDetail: {
+        source: "extension_active_tab" as const,
+        action: "playlist_preflight" as const,
+        url: "https://youtube.com/playlist?list=durable",
+        sourceKind: "youtube_playlist" as const,
+      },
+    }
+    const acquireSubmissionLease = vi.fn(async () => {
+      useQuickIngestSessionStore.setState({
+        session: durable,
+        isSubmissionOwner: false,
+        externalAuthorityRevision: 1,
+      } as never)
+      return false
+    })
+    useQuickIngestSessionStore.setState({
+      session: stale,
+      persistenceStatus: "ready",
+      isSubmissionOwner: true,
+      acquireSubmissionLease,
+      externalAuthorityRevision: 0,
+    } as never)
+
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+
+    await waitFor(() => expect(acquireSubmissionLease).toHaveBeenCalledTimes(1))
+    const review = await screen.findByTestId("wizard-review")
+    await waitFor(() => {
+      expect(review).toHaveAttribute("data-queue-ids", "durable-external-row")
+    })
+    expect(review).toHaveAttribute("data-selected-preset", "custom")
+    expect(review).toHaveAttribute("data-config-analysis", "false")
+    expect(JSON.parse(review.getAttribute("data-custom-options") || "null")).toEqual({
+      common: { perform_analysis: false },
+    })
+    expect(JSON.parse(review.getAttribute("data-conference") || "null")).toEqual({
+      collectionName: "Durable conference",
+      sharedTags: ["durable"],
+    })
+    expect(JSON.parse(review.getAttribute("data-open-detail") || "null")).toEqual({
+      source: "extension_active_tab",
+      action: "playlist_preflight",
+      url: "https://youtube.com/playlist?list=durable",
+      sourceKind: "youtube_playlist",
+    })
+  })
+
+  it("never renders an old reducer queue with revised external tracking", async () => {
+    const session = {
+      ...createEmptyQuickIngestSession(),
+      lifecycle: "processing" as const,
+      currentStep: 4 as const,
+      queueItems: [validDirectQueueItem("snapshot-old")],
+      tracking: {
+        mode: "webui-direct" as const,
+        sessionId: "qi-snapshot-old",
+        runId: "run-snapshot-old",
+      },
+    }
+    useQuickIngestSessionStore.setState({ session } as never)
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+    await screen.findByTestId("wizard-processing")
+    mocks.processingRenderSnapshots.splice(0, mocks.processingRenderSnapshots.length)
+
+    act(() => {
+      useQuickIngestSessionStore.setState({
+        session: {
+          ...session,
+          updatedAt: session.updatedAt + 100,
+          queueItems: [validDirectQueueItem("snapshot-new")],
+          tracking: {
+            mode: "webui-direct",
+            sessionId: "qi-snapshot-new",
+            runId: "run-snapshot-new",
+          },
+        },
+        externalAuthorityRevision: 1,
+      } as never)
+    })
+    await waitFor(() => {
+      expect(screen.getByTestId("wizard-processing")).toHaveAttribute(
+        "data-queue-ids",
+        "snapshot-new"
+      )
+    })
+
+    expect(mocks.processingRenderSnapshots).not.toContainEqual({
+      queueIds: "snapshot-old",
+      runId: "run-snapshot-new",
+    })
+  })
+
+  it("rechecks ownership through the real Modal callback and does not duplicate an authoritative run", async () => {
+    const draft = createEmptyQuickIngestSession()
+    const originalAcquire =
+      useQuickIngestSessionStore.getState().acquireSubmissionLease
+    const acquireSubmissionLease = vi
+      .fn<() => Promise<boolean>>()
+      .mockResolvedValueOnce(true)
+      .mockImplementationOnce(async () => {
+        useQuickIngestSessionStore.setState({
+          session: {
+            ...draft,
+            lifecycle: "processing",
+            currentStep: 4,
+            updatedAt: draft.updatedAt + 100,
+            tracking: {
+              mode: "webui-direct",
+              sessionId: "authoritative-stale-review-session",
+              runId: "authoritative-stale-review-run",
+            },
+          },
+          isSubmissionOwner: false,
+        })
+        return false
+      })
+    useQuickIngestSessionStore.setState({
+      session: {
+        ...draft,
+        currentStep: 3,
+        queueItems: [
+          {
+            id: "stale-review-item",
+            sourceRef: {
+              kind: "direct_url",
+              occurrenceId: "stale-review-item",
+              url: "https://example.com/stale-review-item",
+            },
+            kind: "url",
+            url: "https://example.com/stale-review-item",
+            detectedType: "web",
+            icon: "Globe",
+            fileSize: 0,
+            validation: { valid: true },
+          },
+        ],
+      },
+      persistenceStatus: "ready",
+      isSubmissionOwner: true,
+      acquireSubmissionLease,
+    } as never)
+
+    try {
+      render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+      await waitFor(() => {
+        expect(acquireSubmissionLease).toHaveBeenCalledTimes(1)
+      })
+
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: "Start ownership-checked processing",
+        })
+      )
+      await waitFor(() => {
+        expect(acquireSubmissionLease).toHaveBeenCalledTimes(2)
+      })
+
+      expect(mocks.startQuickIngestSession).not.toHaveBeenCalled()
+      expect(useQuickIngestSessionStore.getState().session).toMatchObject({
+        lifecycle: "processing",
+        currentStep: 4,
+        tracking: {
+          sessionId: "authoritative-stale-review-session",
+          runId: "authoritative-stale-review-run",
+        },
+      })
+    } finally {
+      useQuickIngestSessionStore.setState({
+        acquireSubmissionLease: originalAcquire,
+      })
+    }
   })
 
   it("routes a blocked manual quick process to visible Review feedback", async () => {
@@ -1644,8 +2791,6 @@ describe("QuickIngestWizardModal session runtime", () => {
 
   it("does not let stale Provider processing state overwrite durable Review", async () => {
     const user = userEvent.setup()
-    const storageKey = "tldw-quick-ingest-session"
-    window.sessionStorage.clear()
     useQuickIngestSessionStore.getState().createDraftSession()
     mocks.startQuickIngestSession.mockResolvedValue({
       ok: true,
@@ -1685,9 +2830,7 @@ describe("QuickIngestWizardModal session runtime", () => {
     await act(async () => {
       await Promise.resolve()
     })
-    const persisted = JSON.parse(
-      window.sessionStorage.getItem(storageKey) || "null"
-    )?.state?.session
+    const persisted = useQuickIngestSessionStore.getState().session
     expect(persisted).toMatchObject({ currentStep: 3 })
     expect(persisted?.tracking).toBeUndefined()
   })
@@ -2002,16 +3145,20 @@ describe("QuickIngestWizardModal session runtime", () => {
         await Promise.resolve()
       })
 
-      await waitFor(() => {
+      await waitFor(() =>
         expect(mocks.cancelQuickIngestSession).toHaveBeenCalledWith(
           expect.objectContaining({
             sessionId,
             reason: "user_cancelled",
-            occurrenceIds:
-              cancellation === "row" ? ["queued-url-1"] : undefined,
           })
         )
-      })
+      )
+      const request = mocks.cancelQuickIngestSession.mock.calls[0]?.[0]
+      if (cancellation === "row") {
+        expect(request).toHaveProperty("occurrenceIds", ["queued-url-1"])
+      } else {
+        expect(request).not.toHaveProperty("occurrenceIds")
+      }
     }
   )
 
@@ -2075,7 +3222,11 @@ describe("QuickIngestWizardModal session runtime", () => {
       arrayBuffer: vi.fn(() => byteGate),
     } as unknown as File
     mocks.delayedPayloadFile = delayedFile
-    useQuickIngestSessionStore.getState().createDraftSession()
+    const commitProcessingHandoff = vi.fn(commitModalProcessingHandoff)
+    useQuickIngestSessionStore.setState({
+      session: createEmptyQuickIngestSession(),
+      commitProcessingHandoff,
+    } as never)
     mocks.startQuickIngestSession.mockResolvedValue({
       ok: true,
       sessionId: "qi-direct-pre-authority-row-cancel",
@@ -2105,8 +3256,214 @@ describe("QuickIngestWizardModal session runtime", () => {
         expect.objectContaining({ id: "occ-pre-authority-url-continue" }),
       ],
       files: [],
+      pendingRunRequest: {
+        inputs: [
+          expect.objectContaining({
+            occurrenceId: "occ-pre-authority-url-continue",
+          }),
+        ],
+      },
     })
     expect(JSON.stringify(payload)).not.toContain("occ-pre-authority-file-cancel")
+
+    expect(commitProcessingHandoff).toHaveBeenCalledTimes(1)
+    const [durableState, durableTracking] =
+      commitProcessingHandoff.mock.calls[0] || []
+    expect(durableState.queueItems.map((item: any) => item.id)).toEqual([
+      "occ-pre-authority-url-continue",
+    ])
+    expect(
+      durableState.processingState.perItemProgress.map((item: any) => item.id)
+    ).toEqual(["occ-pre-authority-url-continue"])
+    expect(durableTracking.submissionOccurrenceIds).toEqual([
+      "occ-pre-authority-url-continue",
+    ])
+
+    const persisted = useQuickIngestSessionStore.getState().session
+    expect(persisted?.queueItems.map((item) => item.id)).toEqual([
+      "occ-pre-authority-url-continue",
+    ])
+    expect(persisted?.processingState.perItemProgress.map((item) => item.id)).toEqual([
+      "occ-pre-authority-url-continue",
+    ])
+    expect(persisted?.tracking?.submissionOccurrenceIds).toEqual([
+      "occ-pre-authority-url-continue",
+    ])
+
+    const processing = screen.getByTestId("wizard-processing")
+    expect(processing).toHaveAttribute(
+      "data-queue-ids",
+      "occ-pre-authority-url-continue"
+    )
+    expect(processing).toHaveAttribute(
+      "data-progress-ids",
+      "occ-pre-authority-url-continue"
+    )
+    expect(processing).toHaveAttribute(
+      "data-pending-run-ids",
+      "occ-pre-authority-url-continue"
+    )
+  })
+
+  it("freezes out a completed file cancelled while a later file is still preparing", async () => {
+    const firstFile = {
+      name: "finished-a.mp4",
+      type: "video/mp4",
+      size: 1,
+      lastModified: 1,
+      arrayBuffer: vi.fn().mockResolvedValue(Uint8Array.from([1]).buffer),
+    } as unknown as File
+    let releaseSecond!: () => void
+    const secondBytes = new Promise<ArrayBuffer>((resolve) => {
+      releaseSecond = () => resolve(Uint8Array.from([2]).buffer)
+    })
+    const secondFile = {
+      name: "blocked-b.mp4",
+      type: "video/mp4",
+      size: 1,
+      lastModified: 2,
+      arrayBuffer: vi.fn(() => secondBytes),
+    } as unknown as File
+    mocks.staggeredPayloadFiles = { first: firstFile, second: secondFile }
+    const commitProcessingHandoff = vi.fn(commitModalProcessingHandoff)
+    useQuickIngestSessionStore.setState({
+      session: createEmptyQuickIngestSession(),
+      commitProcessingHandoff,
+    } as never)
+    mocks.startQuickIngestSession.mockResolvedValue({
+      ok: true,
+      sessionId: "qi-direct-staggered-file-cancel",
+    })
+    mocks.submitQuickIngestBatch.mockReturnValue(new Promise(() => {}))
+
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+    await userEvent.click(
+      screen.getByRole("button", {
+        name: "Queue Two Staggered Files And Process",
+      })
+    )
+    await waitFor(() => expect(secondFile.arrayBuffer).toHaveBeenCalledTimes(1))
+    expect(firstFile.arrayBuffer).toHaveBeenCalledTimes(1)
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel first item" }))
+    await act(async () => {
+      releaseSecond()
+      await secondBytes
+    })
+
+    await waitFor(() =>
+      expect(mocks.startQuickIngestSession).toHaveBeenCalledTimes(1)
+    )
+    const payload = mocks.startQuickIngestSession.mock.calls[0]?.[0]
+    expect(payload.files.map((file: any) => file.id)).toEqual([
+      "occ-blocked-file-b",
+    ])
+    expect(payload.pendingRunRequest.inputs.map((input: any) => input.occurrenceId)).toEqual([
+      "occ-blocked-file-b",
+    ])
+    expect(Object.keys(payload.conferenceItemMetadata || {})).toEqual([
+      "occ-blocked-file-b",
+    ])
+    expect(JSON.stringify(payload)).not.toContain("occ-finished-file-a")
+
+    const [durableState, durableTracking] =
+      commitProcessingHandoff.mock.calls[0] || []
+    expect(durableState.queueItems.map((item: any) => item.id)).toEqual([
+      "occ-blocked-file-b",
+    ])
+    expect(
+      durableState.processingState.perItemProgress.map((item: any) => item.id)
+    ).toEqual(["occ-blocked-file-b"])
+    expect(durableTracking.submissionOccurrenceIds).toEqual([
+      "occ-blocked-file-b",
+    ])
+
+    const persisted = useQuickIngestSessionStore.getState().session
+    expect(persisted?.queueItems.map((item) => item.id)).toEqual([
+      "occ-blocked-file-b",
+    ])
+    expect(persisted?.processingState.perItemProgress.map((item) => item.id)).toEqual([
+      "occ-blocked-file-b",
+    ])
+    const processing = screen.getByTestId("wizard-processing")
+    expect(processing).toHaveAttribute("data-queue-ids", "occ-blocked-file-b")
+    expect(processing).toHaveAttribute("data-progress-ids", "occ-blocked-file-b")
+    expect(processing).toHaveAttribute("data-pending-run-ids", "occ-blocked-file-b")
+  })
+
+  it("closes preparation cancellation before renewal and ignores a captured stale row callback", async () => {
+    let releaseRenewal!: (renewed: boolean) => void
+    const renewalGate = new Promise<boolean>((resolve) => {
+      releaseRenewal = resolve
+    })
+    const renewSubmissionLease = vi.fn(() => renewalGate)
+    const commitProcessingHandoff = vi.fn(commitModalProcessingHandoff)
+    useQuickIngestSessionStore.setState({
+      session: createEmptyQuickIngestSession(),
+      renewSubmissionLease,
+      commitProcessingHandoff,
+    } as never)
+    mocks.startQuickIngestSession.mockResolvedValue({
+      ok: true,
+      sessionId: "qi-direct-frozen-renewal",
+    })
+    mocks.submitQuickIngestBatch.mockReturnValue(new Promise(() => {}))
+
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+    await userEvent.click(
+      screen.getByRole("button", {
+        name: "Queue Partial Submission And Process",
+      })
+    )
+    await waitFor(() => expect(renewSubmissionLease).toHaveBeenCalledTimes(1))
+    await waitFor(() =>
+      expect(screen.queryByTestId("wizard-processing")).not.toBeInTheDocument()
+    )
+    expect(mocks.latestPreparingCancelItem).toBeTypeOf("function")
+    expect(
+      screen.queryByRole("button", { name: "Cancel first item" })
+    ).not.toBeInTheDocument()
+
+    act(() => {
+      mocks.latestPreparingCancelItem?.("queued-partial-accepted")
+    })
+    await act(async () => {
+      releaseRenewal(true)
+      await renewalGate
+    })
+
+    await waitFor(() =>
+      expect(mocks.startQuickIngestSession).toHaveBeenCalledTimes(1)
+    )
+    const payload = mocks.startQuickIngestSession.mock.calls[0]?.[0]
+    expect(payload.entries.map((entry: any) => entry.id)).toEqual([
+      "queued-partial-accepted",
+      "queued-partial-unsent",
+    ])
+    expect(payload.pendingRunRequest.inputs.map((input: any) => input.occurrenceId)).toEqual([
+      "queued-partial-accepted",
+      "queued-partial-unsent",
+    ])
+
+    const [durableState, durableTracking] =
+      commitProcessingHandoff.mock.calls[0] || []
+    expect(durableState.queueItems.map((item: any) => item.id)).toEqual([
+      "queued-partial-accepted",
+      "queued-partial-unsent",
+    ])
+    expect(durableTracking.submissionOccurrenceIds).toEqual([
+      "queued-partial-accepted",
+      "queued-partial-unsent",
+    ])
+    const processing = screen.getByTestId("wizard-processing")
+    expect(processing).toHaveAttribute(
+      "data-queue-ids",
+      "queued-partial-accepted,queued-partial-unsent"
+    )
+    expect(processing).toHaveAttribute(
+      "data-progress-ids",
+      "queued-partial-accepted,queued-partial-unsent"
+    )
   })
 
   it("does not start a direct run cancelled while payload bytes are still being prepared", async () => {
@@ -2399,12 +3756,7 @@ describe("QuickIngestWizardModal session runtime", () => {
     expect(mocks.reattachQuickIngestSession).not.toHaveBeenCalled()
   })
 
-  it("does not pre-seed direct tracking item identities before backend submissions are acknowledged", async () => {
-    let resolveBatch: ((value: any) => void) | null = null
-    const batchPromise = new Promise((resolve) => {
-      resolveBatch = resolve
-    })
-
+  it("keeps restored processing without tracking display-only", async () => {
     useQuickIngestSessionStore.getState().upsertSession({
       ...createEmptyQuickIngestSession(),
       lifecycle: "processing",
@@ -2437,41 +3789,20 @@ describe("QuickIngestWizardModal session runtime", () => {
       },
     })
 
-    mocks.startQuickIngestSession.mockResolvedValue({
-      ok: true,
-      sessionId: "qi-direct-tracking-preseed",
-    })
-    mocks.submitQuickIngestBatch.mockImplementation(() => batchPromise)
-
     render(<QuickIngestWizardModal open onClose={vi.fn()} />)
 
-    await waitFor(() => {
-      expect(mocks.startQuickIngestSession).toHaveBeenCalledTimes(1)
-    })
-    await waitFor(() => {
-      expect(mocks.submitQuickIngestBatch).toHaveBeenCalledTimes(1)
-    })
-
-    const tracking = useQuickIngestSessionStore.getState().session?.tracking
-    expect(tracking?.mode).toBe("webui-direct")
-    expect(tracking?.sessionId).toBe("qi-direct-tracking-preseed")
-    expect(tracking?.submittedItemIds).toBeUndefined()
-    expect(tracking?.itemIds).toBeUndefined()
-
-    resolveBatch?.({
-      ok: true,
-      results: [
-        {
-          id: "queued-url-1",
-          status: "ok",
-          type: "html",
-        },
-      ],
+    expect(await screen.findByTestId("wizard-processing")).toHaveTextContent(
+      "running:0"
+    )
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
     })
 
-    await waitFor(() => {
-      expect(screen.getByTestId("wizard-results")).toHaveTextContent("complete:1")
-    })
+    expect(mocks.startQuickIngestSession).not.toHaveBeenCalled()
+    expect(mocks.submitQuickIngestBatch).not.toHaveBeenCalled()
+    expect(useQuickIngestSessionStore.getState().session?.tracking).toBeUndefined()
+    expect(screen.queryByTestId("wizard-results")).not.toBeInTheDocument()
   })
 
   it("starts persisted direct-job reattach when tracking metadata arrives after the run begins", async () => {
@@ -3676,9 +5007,83 @@ describe("QuickIngestWizardModal session runtime", () => {
     expect(mocks.acknowledgeQuickIngestSessionReplay).not.toHaveBeenCalled()
   })
 
+  it("waits for durable Review handoff confirmation before leaving processing", async () => {
+    useQuickIngestSessionStore.getState().upsertSession({
+      ...createEmptyQuickIngestSession(),
+      lifecycle: "processing",
+      currentStep: 4,
+      queueItems: [
+        {
+          id: "occ-awaited-review-caller",
+          kind: "url",
+          sourceRef: {
+            kind: "materialized_playlist_item",
+            materializationId: "materialization-awaited-review-caller",
+            occurrenceId: "occ-awaited-review-caller",
+          },
+          detectedType: "video",
+          icon: "Film",
+          fileSize: 0,
+          validation: { valid: true },
+          playlist: { materializationExpiresAt: "2099-01-01T00:00:00Z" },
+          playlistReview: { selected: true },
+        } as any,
+      ],
+      tracking: {
+        mode: "extension-runtime",
+        sessionId: "qi-awaited-review-caller",
+        itemIds: ["occ-awaited-review-caller"],
+      } as any,
+    })
+    const realCommitReviewHandoff =
+      useQuickIngestSessionStore.getState().commitReviewHandoff
+    let resolveCommit!: (value: boolean) => void
+    const durableCommit = new Promise<boolean>((resolve) => {
+      resolveCommit = resolve
+    })
+    useQuickIngestSessionStore.setState({
+      commitReviewHandoff: vi.fn(() => durableCommit),
+    } as never)
+
+    try {
+      render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+      await waitFor(() => {
+        expect(mocks.runtimeListeners.length).toBeGreaterThan(0)
+      })
+
+      emitRuntimeMessage({
+        type: "tldw:quick-ingest/review-required",
+        payload: {
+          sessionId: "qi-awaited-review-caller",
+          reviewRequired: [
+            {
+              occurrenceId: "occ-awaited-review-caller",
+              reason: "duplicate_action_required",
+              evidence: {
+                kind: "library",
+                existingMediaId: 42,
+                duplicateOfOccurrenceId: null,
+              },
+              allowedActions: ["skip", "overwrite"],
+            },
+          ],
+        },
+      })
+
+      await act(async () => {
+        await Promise.resolve()
+      })
+      expect(screen.queryByTestId("wizard-review")).not.toBeInTheDocument()
+      resolveCommit(true)
+      expect(await screen.findByTestId("wizard-review")).toBeInTheDocument()
+    } finally {
+      useQuickIngestSessionStore.setState({
+        commitReviewHandoff: realCommitReviewHandoff,
+      })
+    }
+  })
+
   it("never persists a crash boundary without Review state or extension replay authority", async () => {
-    const storageKey = "tldw-quick-ingest-session"
-    window.sessionStorage.clear()
     useQuickIngestSessionStore.getState().upsertSession({
       ...createEmptyQuickIngestSession(),
       lifecycle: "interrupted",
@@ -3751,9 +5156,7 @@ describe("QuickIngestWizardModal session runtime", () => {
         boundaryError = error
       }
 
-      const persisted = JSON.parse(
-        window.sessionStorage.getItem(storageKey) || "null"
-      )?.state?.session
+      const persisted = useQuickIngestSessionStore.getState().session
       expect(boundaryError).toBeUndefined()
       expect(
         persisted?.currentStep === 3 ||
@@ -4107,23 +5510,7 @@ describe("QuickIngestWizardModal session runtime", () => {
     }
   })
 
-  it("restarts direct processing after refresh when tracking exists without persisted job ids", async () => {
-    mocks.startQuickIngestSession.mockResolvedValue({
-      ok: true,
-      sessionId: "qi-direct-restarted",
-    })
-    mocks.submitQuickIngestBatch.mockResolvedValue({
-      ok: true,
-      results: [
-        {
-          id: "queued-url-1",
-          status: "ok",
-          url: "https://example.com/article",
-          type: "html",
-        },
-      ],
-    })
-
+  it("keeps restored direct processing without job ids display-only", async () => {
     useQuickIngestSessionStore.getState().upsertSession({
       ...createEmptyQuickIngestSession(),
       lifecycle: "processing",
@@ -4154,15 +5541,22 @@ describe("QuickIngestWizardModal session runtime", () => {
 
     render(<QuickIngestWizardModal open onClose={vi.fn()} />)
 
-    await waitFor(() => {
-      expect(mocks.startQuickIngestSession).toHaveBeenCalledTimes(1)
+    expect(await screen.findByTestId("wizard-processing")).toHaveTextContent(
+      "running:0"
+    )
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
     })
-    await waitFor(() => {
-      expect(mocks.submitQuickIngestBatch).toHaveBeenCalledTimes(1)
+
+    expect(mocks.startQuickIngestSession).not.toHaveBeenCalled()
+    expect(mocks.submitQuickIngestBatch).not.toHaveBeenCalled()
+    expect(mocks.reattachQuickIngestSession).not.toHaveBeenCalled()
+    expect(useQuickIngestSessionStore.getState().session?.tracking).toMatchObject({
+      mode: "webui-direct",
+      sessionId: "qi-direct-ack-only",
     })
-    await waitFor(() => {
-      expect(screen.getByTestId("wizard-results")).toHaveTextContent("complete:1")
-    })
+    expect(screen.queryByTestId("wizard-results")).not.toBeInTheDocument()
   })
 
   it("cancels a refreshed direct session using persisted tracking metadata", async () => {

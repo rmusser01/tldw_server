@@ -5,6 +5,7 @@ import React, {
   useEffect,
   useMemo,
   useReducer,
+  useRef,
 } from "react"
 import {
   playlistHasMaterializationCues,
@@ -99,6 +100,7 @@ type Action =
   | { type: "SKIP_TO_PROCESSING" }
   | { type: "MINIMIZE" }
   | { type: "RESTORE" }
+  | { type: "REPLACE_EXTERNAL_STATE"; state: IngestWizardState }
   | { type: "RESET" }
 
 // ---------------------------------------------------------------------------
@@ -646,6 +648,45 @@ export const applyPlaylistReviewRequiredState = (
   }
 }
 
+export const buildProcessingTransition = (
+  state: IngestWizardState
+):
+  | { ok: true; nextState: IngestWizardState }
+  | { ok: false; nextState: IngestWizardState } => {
+  const { request, block } = buildPlaylistIngestRunRequest(state.queueItems)
+  if (!request) {
+    return {
+      ok: false,
+      nextState: {
+        ...state,
+        currentStep: 3,
+        highestStep: Math.max(state.highestStep, 3) as WizardStep,
+        pendingRunRequest: null,
+        processingBlock: block,
+      },
+    }
+  }
+  const perItemProgress = buildInitialProgress(state.queueItems)
+  if (perItemProgress.length === 0) return { ok: false, nextState: state }
+  return {
+    ok: true,
+    nextState: {
+      ...state,
+      pendingRunRequest: request,
+      processingBlock: null,
+      currentStep: 4,
+      highestStep: Math.max(state.highestStep, 4) as WizardStep,
+      processingState: {
+        status: "running",
+        perItemProgress,
+        elapsed: 0,
+        estimatedRemaining: 0,
+      },
+      results: [],
+    },
+  }
+}
+
 const reducer = (
   state: IngestWizardState,
   action: Action,
@@ -746,34 +787,8 @@ const reducer = (
     case "SET_PLAYLIST_PREFLIGHT_SEED":
       return { ...state, playlistPreflightSeed: action.seed }
 
-    case "START_PROCESSING": {
-      const { request, block } = buildPlaylistIngestRunRequest(state.queueItems)
-      if (!request) {
-        return {
-          ...state,
-          currentStep: 3,
-          highestStep: Math.max(state.highestStep, 3) as WizardStep,
-          pendingRunRequest: null,
-          processingBlock: block,
-        }
-      }
-      const perItemProgress = buildInitialProgress(state.queueItems)
-      if (perItemProgress.length === 0) return state
-      return {
-        ...state,
-        pendingRunRequest: request,
-        processingBlock: null,
-        currentStep: 4 as WizardStep,
-        highestStep: Math.max(state.highestStep, 4) as WizardStep,
-        processingState: {
-          status: "running",
-          perItemProgress,
-          elapsed: 0,
-          estimatedRemaining: 0,
-        },
-        results: [],
-      }
-    }
+    case "START_PROCESSING":
+      return buildProcessingTransition(state).nextState
 
     case "CANCEL_PROCESSING":
       return {
@@ -888,41 +903,17 @@ const reducer = (
     case "APPLY_PLAYLIST_REVIEW_REQUIRED":
       return applyPlaylistReviewRequiredState(state, action.items)
 
-    case "SKIP_TO_PROCESSING": {
-      // Quick Mode: skip Steps 2-3, jump directly to Step 4 with default preset
-      const { request, block } = buildPlaylistIngestRunRequest(state.queueItems)
-      if (!request) {
-        return {
-          ...state,
-          currentStep: 3,
-          highestStep: Math.max(state.highestStep, 3) as WizardStep,
-          pendingRunRequest: null,
-          processingBlock: block,
-        }
-      }
-      const perItemProgress = buildInitialProgress(state.queueItems)
-      if (perItemProgress.length === 0) return state
-      return {
-        ...state,
-        pendingRunRequest: request,
-        processingBlock: null,
-        currentStep: 4 as WizardStep,
-        highestStep: 4 as WizardStep,
-        processingState: {
-          status: "running",
-          perItemProgress,
-          elapsed: 0,
-          estimatedRemaining: 0,
-        },
-        results: [],
-      }
-    }
+    case "SKIP_TO_PROCESSING":
+      return buildProcessingTransition(state).nextState
 
     case "MINIMIZE":
       return { ...state, isMinimized: true }
 
     case "RESTORE":
       return { ...state, isMinimized: false }
+
+    case "REPLACE_EXTERNAL_STATE":
+      return action.state
 
     case "RESET":
       return createInitialState(presetMap)
@@ -953,6 +944,7 @@ type IngestWizardContextValue = {
   // Processing
   startProcessing: () => void
   skipToProcessing: () => void
+  applyProcessingTransition: (nextState: IngestWizardState) => void
   cancelProcessing: () => void
   cancelItem: (id: string) => void
   checkStatus: (id: string) => void
@@ -981,6 +973,8 @@ const IngestWizardContext = createContext<IngestWizardContextValue | null>(null)
 type IngestWizardProviderProps = {
   children: React.ReactNode
   initialState?: Partial<IngestWizardState>
+  externalState?: Partial<IngestWizardState>
+  externalStateRevision?: number
   onStateChange?: (state: IngestWizardState) => void
   presetMap?: PresetMap
   onCancelProcessing?: () => boolean
@@ -992,6 +986,8 @@ type IngestWizardProviderProps = {
 export const IngestWizardProvider: React.FC<IngestWizardProviderProps> = ({
   children,
   initialState,
+  externalState,
+  externalStateRevision,
   onStateChange,
   presetMap = DEFAULT_PRESETS,
   onCancelProcessing,
@@ -1009,10 +1005,29 @@ export const IngestWizardProvider: React.FC<IngestWizardProviderProps> = ({
     initialState,
     (seed) => createInitialStateFromSeed(seed, presetMap)
   )
-
+  const appliedExternalRevision = useRef(externalStateRevision)
+  const externalReplacementPending =
+    externalStateRevision !== undefined &&
+    externalStateRevision !== appliedExternalRevision.current
+  const exposedState = useMemo(
+    () =>
+      externalReplacementPending
+        ? createInitialStateFromSeed(externalState, presetMap)
+        : state,
+    [externalReplacementPending, externalState, presetMap, state]
+  )
   useEffect(() => {
+    if (!externalReplacementPending) return
+    appliedExternalRevision.current = externalStateRevision
+    dispatch({
+      type: "REPLACE_EXTERNAL_STATE",
+      state: createInitialStateFromSeed(externalState, presetMap),
+    })
+  }, [externalReplacementPending, externalState, externalStateRevision, presetMap])
+  useEffect(() => {
+    if (externalReplacementPending) return
     onStateChange?.(state)
-  }, [onStateChange, state])
+  }, [externalReplacementPending, onStateChange, state])
 
   const goToStep = useCallback((step: WizardStep) => dispatch({ type: "GO_TO_STEP", step }), [])
   const goNext = useCallback(() => dispatch({ type: "GO_NEXT" }), [])
@@ -1047,6 +1062,11 @@ export const IngestWizardProvider: React.FC<IngestWizardProviderProps> = ({
   )
   const startProcessing = useCallback(() => dispatch({ type: "START_PROCESSING" }), [])
   const skipToProcessing = useCallback(() => dispatch({ type: "SKIP_TO_PROCESSING" }), [])
+  const applyProcessingTransition = useCallback(
+    (nextState: IngestWizardState) =>
+      dispatch({ type: "REPLACE_EXTERNAL_STATE", state: nextState }),
+    []
+  )
   const cancelProcessing = useCallback(() => {
     if (onCancelProcessing?.()) return
     dispatch({ type: "CANCEL_PROCESSING" })
@@ -1085,7 +1105,7 @@ export const IngestWizardProvider: React.FC<IngestWizardProviderProps> = ({
 
   const value = useMemo<IngestWizardContextValue>(
     () => ({
-      state,
+      state: exposedState,
       goToStep,
       goNext,
       goBack,
@@ -1097,6 +1117,7 @@ export const IngestWizardProvider: React.FC<IngestWizardProviderProps> = ({
       setConferenceBatchMetadata,
       startProcessing,
       skipToProcessing,
+      applyProcessingTransition,
       cancelProcessing,
       cancelItem,
       checkStatus,
@@ -1110,7 +1131,7 @@ export const IngestWizardProvider: React.FC<IngestWizardProviderProps> = ({
       reset,
     }),
     [
-      state,
+      exposedState,
       goToStep,
       goNext,
       goBack,
@@ -1122,6 +1143,7 @@ export const IngestWizardProvider: React.FC<IngestWizardProviderProps> = ({
       setConferenceBatchMetadata,
       startProcessing,
       skipToProcessing,
+      applyProcessingTransition,
       cancelProcessing,
       cancelItem,
       checkStatus,

@@ -3,12 +3,15 @@ import { describe, it, expect, vi } from "vitest"
 import { render, screen, act } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import {
+  buildProcessingTransition,
   buildPlaylistIngestRunRequest,
   IngestWizardProvider,
+  type IngestWizardState,
   useIngestWizard,
 } from "../IngestWizardContext"
 import {
   configMatchesPreset,
+  DEFAULT_PRESETS,
   FIRST_SOURCE_QUICK_PRESET_CONFIG,
   resolvePresetMap,
   type PresetMap,
@@ -66,6 +69,7 @@ function TestHarness() {
       <span data-testid="pendingRunRequest">{JSON.stringify(state.pendingRunRequest ?? null)}</span>
       <span data-testid="processingBlock">{JSON.stringify(state.processingBlock ?? null)}</span>
       <span data-testid="queueItems">{JSON.stringify(state.queueItems)}</span>
+      <span data-testid="wizardState">{JSON.stringify(state)}</span>
       <span data-testid="presetAnalysis">{String(state.presetConfig.common.perform_analysis)}</span>
       <span data-testid="presetChunkingMode">{state.presetConfig.common.chunking_mode || ""}</span>
       <span data-testid="presetAutoChunkingGoal">
@@ -275,11 +279,114 @@ function renderWithPresetMap(presetMap: PresetMap) {
   )
 }
 
+function createWizardState(
+  queueItems: WizardQueueItem[],
+  overrides: Partial<IngestWizardState> = {}
+): IngestWizardState {
+  return {
+    currentStep: 3,
+    highestStep: 3,
+    queueItems,
+    selectedPreset: "standard",
+    customBasePreset: "standard",
+    presetConfig: DEFAULT_PRESETS.standard,
+    customOptions: {},
+    playlistPreflightSeed: null,
+    firstSourceAddMode: null,
+    conferenceBatchMetadata: null,
+    processingState: {
+      status: "idle",
+      perItemProgress: [],
+      elapsed: 0,
+      estimatedRemaining: 0,
+    },
+    results: [],
+    pendingRunRequest: null,
+    processingBlock: null,
+    isMinimized: false,
+    ...overrides,
+  }
+}
+
+const createReadyQueueItems = (): WizardQueueItem[] => [
+  {
+    id: "occ-ready",
+    sourceRef: {
+      kind: "direct_url",
+      occurrenceId: "occ-ready",
+      url: "https://example.com/watch?v=ready",
+    },
+    detectedType: "video",
+    icon: "Film",
+    fileSize: 0,
+    validation: { valid: true },
+  },
+  {
+    id: "occ-unselected",
+    sourceRef: {
+      kind: "direct_url",
+      occurrenceId: "occ-unselected",
+      url: "https://example.com/watch?v=unselected",
+    },
+    detectedType: "video",
+    icon: "Film",
+    fileSize: 0,
+    validation: { valid: true },
+    playlistReview: { selected: false },
+  },
+]
+
+function ExactTransitionHarness({ nextState }: { nextState: IngestWizardState }) {
+  const { state, applyProcessingTransition } = useIngestWizard()
+  return (
+    <>
+      <span data-testid="appliedWizardState">{JSON.stringify(state)}</span>
+      <button onClick={() => applyProcessingTransition(nextState)}>applyExactTransition</button>
+    </>
+  )
+}
+
+function ExternalSnapshotProbe({
+  onRender,
+}: {
+  onRender: (queueIds: string[]) => void
+}) {
+  const { state } = useIngestWizard()
+  const queueIds = state.queueItems.map((item) => item.id)
+  onRender(queueIds)
+  return <span data-testid="externalQueueIds">{queueIds.join(",")}</span>
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 describe("IngestWizardContext", () => {
+  it("exposes a revised external snapshot synchronously before reducer convergence", () => {
+    const snapshots: string[][] = []
+    const first = createWizardState([
+      { ...createReadyQueueItems()[0], id: "external-old" },
+    ])
+    const second = createWizardState([
+      { ...createReadyQueueItems()[0], id: "external-new" },
+    ])
+    const view = render(
+      <IngestWizardProvider externalState={first} externalStateRevision={1}>
+        <ExternalSnapshotProbe onRender={(ids) => snapshots.push(ids)} />
+      </IngestWizardProvider>
+    )
+    snapshots.length = 0
+
+    view.rerender(
+      <IngestWizardProvider externalState={second} externalStateRevision={2}>
+        <ExternalSnapshotProbe onRender={(ids) => snapshots.push(ids)} />
+      </IngestWizardProvider>
+    )
+
+    expect(screen.getByTestId("externalQueueIds")).toHaveTextContent("external-new")
+    expect(snapshots).not.toContainEqual(["external-old"])
+  })
+
   describe("hydration", () => {
     it("hydrates the provider from an explicit initial state", () => {
       renderWithInitialState({
@@ -615,6 +722,194 @@ describe("IngestWizardContext", () => {
   // -- Processing -----------------------------------------------------------
 
   describe("processing", () => {
+    it("builds a pure ready transition from selected valid occurrences", () => {
+      const state = createWizardState(createReadyQueueItems(), {
+        highestStep: 5,
+        processingState: {
+          status: "complete",
+          perItemProgress: [],
+          elapsed: 41,
+          estimatedRemaining: 9,
+        },
+        results: [
+          {
+            id: "stale-result",
+            status: "ok",
+            url: "https://example.com/stale",
+            type: "html",
+          },
+        ],
+        processingBlock: {
+          code: "review_required",
+          occurrenceIds: ["stale-block"],
+        },
+      })
+      const unchangedInput = structuredClone(state)
+
+      const transition = buildProcessingTransition(state)
+
+      expect(transition).toEqual({
+        ok: true,
+        nextState: {
+          ...state,
+          currentStep: 4,
+          highestStep: 5,
+          pendingRunRequest: {
+            inputs: [
+              {
+                inputKind: "direct_url",
+                occurrenceId: "occ-ready",
+                url: "https://example.com/watch?v=ready",
+                displayMetadata: { title: null },
+              },
+            ],
+          },
+          processingBlock: null,
+          processingState: {
+            status: "running",
+            perItemProgress: [
+              {
+                id: "occ-ready",
+                status: "queued",
+                progressPercent: 0,
+                currentStage: "",
+                estimatedRemaining: 0,
+              },
+            ],
+            elapsed: 0,
+            estimatedRemaining: 0,
+          },
+          results: [],
+        },
+      })
+      expect(state).toEqual(unchangedInput)
+      expect(transition.nextState).not.toBe(state)
+    })
+
+    it.each([
+      {
+        name: "expired materialization",
+        queueItems: [
+          {
+            id: "occ-expired-transition",
+            sourceRef: {
+              kind: "materialized_playlist_item" as const,
+              materializationId: "expired-transition",
+              occurrenceId: "occ-expired-transition",
+            },
+            detectedType: "video" as const,
+            icon: "Film",
+            fileSize: 0,
+            validation: { valid: true },
+            playlist: { materializationExpiresAt: "2020-01-01T00:00:00Z" },
+          },
+        ],
+        processingBlock: {
+          code: "materialization_expired" as const,
+          occurrenceIds: ["occ-expired-transition"],
+        },
+      },
+      {
+        name: "review-required duplicate",
+        queueItems: [
+          {
+            id: "occ-review-transition",
+            sourceRef: {
+              kind: "materialized_playlist_item" as const,
+              materializationId: "review-transition",
+              occurrenceId: "occ-review-transition",
+            },
+            detectedType: "video" as const,
+            icon: "Film",
+            fileSize: 0,
+            validation: { valid: true },
+            playlist: {
+              duplicateStatus: "duplicate_existing" as const,
+              materializationExpiresAt: "2099-01-01T00:00:00Z",
+            },
+          },
+        ],
+        processingBlock: {
+          code: "review_required" as const,
+          occurrenceIds: ["occ-review-transition"],
+        },
+      },
+      {
+        name: "invalid run authority",
+        queueItems: [
+          {
+            id: "occ-invalid-transition",
+            sourceRef: {
+              kind: "direct_url" as const,
+              occurrenceId: "different-occurrence",
+              url: "https://example.com/watch?v=invalid",
+            },
+            detectedType: "video" as const,
+            icon: "Film",
+            fileSize: 0,
+            validation: { valid: true },
+          },
+        ],
+        processingBlock: {
+          code: "invalid_run_request" as const,
+          occurrenceIds: ["occ-invalid-transition"],
+        },
+      },
+    ])("returns a pure Review transition for $name", ({ queueItems, processingBlock }) => {
+      const state = createWizardState(queueItems, { currentStep: 4, highestStep: 4 })
+      const unchangedInput = structuredClone(state)
+
+      expect(buildProcessingTransition(state)).toEqual({
+        ok: false,
+        nextState: {
+          ...state,
+          currentStep: 3,
+          highestStep: 4,
+          pendingRunRequest: null,
+          processingBlock,
+        },
+      })
+      expect(state).toEqual(unchangedInput)
+    })
+
+    it("applies an exact processing transition state", async () => {
+      const initialState = createWizardState(createReadyQueueItems())
+      const transition = buildProcessingTransition(initialState)
+      if (!transition.ok) throw new Error("expected a ready processing transition")
+
+      render(
+        <IngestWizardProvider initialState={initialState}>
+          <ExactTransitionHarness nextState={transition.nextState} />
+        </IngestWizardProvider>
+      )
+
+      await act(async () => {
+        await userEvent.click(screen.getByText("applyExactTransition"))
+      })
+
+      expect(JSON.parse(screen.getByTestId("appliedWizardState").textContent || "null")).toEqual(
+        JSON.parse(JSON.stringify(transition.nextState))
+      )
+    })
+
+    it.each(["startProcessing", "skipToProcessing"] as const)(
+      "%s applies the shared ready transition",
+      async (command) => {
+        const initialState = createWizardState(createReadyQueueItems(), { highestStep: 5 })
+        const transition = buildProcessingTransition(initialState)
+        if (!transition.ok) throw new Error("expected a ready processing transition")
+
+        renderWithInitialState(initialState)
+        await act(async () => {
+          await userEvent.click(screen.getByText(command))
+        })
+
+        expect(JSON.parse(screen.getByTestId("wizardState").textContent || "null")).toEqual(
+          JSON.parse(JSON.stringify(transition.nextState))
+        )
+      }
+    )
+
     it("builds a playlist run request from occurrence authority and explicit review edits", async () => {
       renderWithInitialState({
         currentStep: 3,

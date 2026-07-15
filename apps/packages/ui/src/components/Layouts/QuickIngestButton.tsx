@@ -13,7 +13,7 @@ import { createEventHost } from "@/utils/create-event-host"
 import {
   consumePendingQuickIngestOpen,
   createQuickIngestSessionSeedFromOpenDetail,
-  rememberQuickIngestOpenRequest,
+  retainQuickIngestOpenRequest,
   type QuickIngestOpenDetail,
   type QuickIngestPendingOpenOptions,
 } from "@/utils/quick-ingest-open"
@@ -220,7 +220,7 @@ export const useQuickIngestEvents = (options?: QuickIngestEventsOptions) => {
   const openQuickIngest = useCallback(
     (nextOptions?: QuickIngestOpenOptions, detail?: QuickIngestOpenDetail) => {
       if (!storageAndSessionReady) {
-        rememberQuickIngestOpenRequest("normal", detail, nextOptions)
+        retainQuickIngestOpenRequest("normal", detail, nextOptions)
         if (!quickIngestSessionHydrated) {
           void rehydrateQuickIngestSession()
         }
@@ -370,7 +370,7 @@ export const useQuickIngestEvents = (options?: QuickIngestEventsOptions) => {
           ? { ...pending.options, focusTrigger: false }
           : { focusTrigger: false }
       if (!storageAndSessionReady) {
-        rememberQuickIngestOpenRequest("intro", detail, openOptions)
+        retainQuickIngestOpenRequest("intro", detail, openOptions)
         if (!quickIngestSessionHydrated) {
           void rehydrateQuickIngestSession()
         }

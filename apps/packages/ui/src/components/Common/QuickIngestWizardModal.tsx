@@ -3,11 +3,11 @@ import { Modal, Button } from "antd"
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "react-router-dom"
 import { XCircle } from "lucide-react"
-import { useShallow } from "zustand/react/shallow"
 import { browser } from "wxt/browser"
 import {
   applyPlaylistReviewRequiredState,
   buildPlaylistIngestRunRequest,
+  buildProcessingTransition,
   IngestWizardProvider,
   useIngestWizard,
   type IngestWizardState,
@@ -50,6 +50,7 @@ import {
   type QuickIngestSessionRecord,
   useQuickIngestSessionStore,
 } from "@/store/quick-ingest-session"
+import type { QuickIngestPersistenceStatus } from "@/db/dexie/quick-ingest"
 import { useQuickIngestStore } from "@/store/quick-ingest"
 import { useConnectionStore } from "@/store/connection"
 import { ConnectionPhase } from "@/types/connection"
@@ -64,6 +65,7 @@ import type {
   PersistedQuickIngestTracking,
   ReattachedQuickIngestJob,
   TypeDefaults,
+  WizardStep,
   WizardQueueItem,
   WizardResultItem,
 } from "./QuickIngest/types"
@@ -157,6 +159,8 @@ type QuickIngestRuntimeMessage = {
 
 const AMBIGUOUS_RUN_CREATE_RECOVERY_MESSAGE =
   "Quick ingest may have created a server run before this page reloaded. Reconnect from a confirmed run instead of starting it again."
+const SAFE_PRE_SUBMIT_FAILURE_MESSAGE =
+  "Quick ingest paused before submission. Check local recovery and submission ownership, then try again."
 
 const RESULT_SUCCESS_STATUS_TOKENS = [
   "ok",
@@ -861,7 +865,7 @@ const buildSessionPatchFromWizardState = (
           null
         : lifecycle === "cancelled"
           ? state.results.find((item) => item.outcome === "cancelled")?.error || null
-          : lifecycle === "processing"
+          : lifecycle === "processing" || lifecycle === "draft"
             ? session.errorMessage
             : null,
     resultSummary: buildResultSummaryFromState(state, lifecycle, session),
@@ -1248,6 +1252,22 @@ const buildQuickIngestPayload = async (
   }
 }
 
+const buildCreatingRunTracking = (
+  payload: QuickIngestRequestPayload,
+  selectedItems: WizardQueueItem[],
+  startedAt: number
+): PersistedQuickIngestTracking => ({
+  mode: "unknown",
+  submissionState: "creating_run",
+  submissionOccurrenceIds: payload.pendingRunRequest
+    ? payload.pendingRunRequest.inputs.map((input) => input.occurrenceId)
+    : selectedItems.map((item) => item.id),
+  startedAt,
+})
+
+const safeSubmissionStartError = (_error: unknown): string =>
+  SAFE_PRE_SUBMIT_FAILURE_MESSAGE
+
 // ---------------------------------------------------------------------------
 // Inner modal content (must be inside IngestWizardProvider)
 // ---------------------------------------------------------------------------
@@ -1258,7 +1278,16 @@ type WizardModalContentProps = {
   autoProcessQueued?: boolean
   session: QuickIngestSessionRecord
   markProcessingTracking: (tracking: PersistedQuickIngestTracking) => void
-  commitReviewHandoff: (state: IngestWizardState) => boolean
+  commitReviewHandoff: (state: IngestWizardState) => Promise<boolean>
+  commitProcessingHandoff: (
+    state: IngestWizardState,
+    tracking: PersistedQuickIngestTracking
+  ) => Promise<boolean>
+  persistenceStatus: QuickIngestPersistenceStatus
+  isSubmissionOwner: boolean
+  externalAuthorityRevision: number
+  acquireSubmissionLease: () => Promise<boolean>
+  renewSubmissionLease: () => Promise<boolean>
   markInterrupted: (reason?: string) => void
   showSession: () => void
   replaceWithNewDraft: () => QuickIngestSessionRecord
@@ -1276,6 +1305,12 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   session,
   markProcessingTracking,
   commitReviewHandoff,
+  commitProcessingHandoff,
+  persistenceStatus,
+  isSubmissionOwner,
+  externalAuthorityRevision,
+  acquireSubmissionLease,
+  renewSubmissionLease,
   markInterrupted,
   showSession,
   replaceWithNewDraft,
@@ -1291,7 +1326,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     minimize,
     restore,
     cancelProcessing,
-    skipToProcessing,
+    applyProcessingTransition,
     updateItemProgress,
     updateProcessingState,
     setResults,
@@ -1308,11 +1343,24 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   const activeSessionIdRef = useRef<string | null>(null)
   const resultsRef = useRef(results)
   const processingStateRef = useRef(processingState)
-  const hasStartedRunRef = useRef(false)
+  const externalAuthorityRevisionRef = useRef(externalAuthorityRevision)
+  externalAuthorityRevisionRef.current = externalAuthorityRevision
+  const stateRef = useRef(state)
+  stateRef.current = state
+  const activeAttemptRef = useRef<symbol | null>(null)
+  const activeAttemptPhaseRef = useRef<{
+    token: symbol
+    backendMutationStarted: boolean
+    sessionId: string | null
+  } | null>(null)
   const runStartedAtRef = useRef<number | null>(null)
   const cancelledSessionIdsRef = useRef<Set<string>>(new Set())
   const preAuthorityCancelledOccurrenceIdsRef = useRef<Set<string>>(new Set())
   const preAuthorityCancelAllRef = useRef(false)
+  const acceptingPreparationCancellationRef = useRef(false)
+  const lastAutoAttemptKeyRef = useRef("")
+  const reviewOwnershipEntryRef = useRef(false)
+  const lastCancellationRequestNonceRef = useRef(0)
   const lastItemCancellationNonceRef = useRef(0)
   const [replayRequestNonce, setReplayRequestNonce] = useState(0)
   const validQueueItems = useMemo(
@@ -1352,10 +1400,15 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     error: string
   } | null>(null)
   const [runSubmissionInFlight, setRunSubmissionInFlight] = useState(false)
+  const [isPreparingSubmission, setIsPreparingSubmission] = useState(false)
+
   useEffect(() => {
     isMountedRef.current = true
     return () => {
       isMountedRef.current = false
+      activeAttemptRef.current = null
+      activeAttemptPhaseRef.current = null
+      acceptingPreparationCancellationRef.current = false
       if (persistedReattachTimerRef.current != null) {
         window.clearTimeout(persistedReattachTimerRef.current)
         persistedReattachTimerRef.current = null
@@ -1389,7 +1442,6 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
 
   useEffect(() => {
     if (!restoredCreatingRunRef.current) return
-    hasStartedRunRef.current = true
     updateProcessingState({
       status: "error",
       estimatedRemaining: 0,
@@ -1518,6 +1570,16 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   // Auto-process on mount if autoProcessQueued is set and there are queued items
   const autoProcessedRef = useRef(false)
 
+  useEffect(() => {
+    if (currentStep !== 3 || persistenceStatus !== "ready") {
+      reviewOwnershipEntryRef.current = false
+      return
+    }
+    if (reviewOwnershipEntryRef.current) return
+    reviewOwnershipEntryRef.current = true
+    void acquireSubmissionLease().catch(() => undefined)
+  }, [acquireSubmissionLease, currentStep, persistenceStatus])
+
   // Whether processing is actively running
   const isProcessingActive = processingState.status === "running"
 
@@ -1622,7 +1684,6 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
           elapsed,
           estimatedRemaining: 0,
         })
-        hasStartedRunRef.current = false
         activeSessionIdRef.current = null
         if (snapshot.lifecycle === "interrupted") {
           markInterrupted(
@@ -1688,10 +1749,17 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   )
 
   const returnToReview = useCallback(
-    (reviewRequired: PlaylistReviewRequiredRecoveryItem[]) => {
-      const reviewState = applyPlaylistReviewRequiredState(state, reviewRequired)
-      if (!commitReviewHandoff(reviewState)) return
-      hasStartedRunRef.current = false
+    async (
+      reviewRequired: PlaylistReviewRequiredRecoveryItem[],
+      sourceState: IngestWizardState = state,
+      isCurrent: () => boolean = () => isMountedRef.current
+    ) => {
+      const reviewState = applyPlaylistReviewRequiredState(
+        sourceState,
+        reviewRequired
+      )
+      if (!(await commitReviewHandoff(reviewState))) return
+      if (!isCurrent()) return
       activeSessionIdRef.current = null
       persistedTrackingRef.current = undefined
       setRunSubmissionInFlight(false)
@@ -1711,7 +1779,6 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
         status: nextStatus,
         estimatedRemaining: 0,
       })
-      hasStartedRunRef.current = false
       activeSessionIdRef.current = null
       goNext()
     },
@@ -1743,9 +1810,8 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     [finalizeRun, trackedQueueItems, validQueueItems]
   )
 
-  const markRunActive = useCallback(() => {
-    runStartedAtRef.current = Date.now()
-    for (const item of validQueueItems) {
+  const markRunActive = useCallback((selectedItems: WizardQueueItem[]) => {
+    for (const item of selectedItems) {
       updateItemProgress({
         id: item.id,
         status: "queued",
@@ -1756,7 +1822,18 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
         terminalOutcome: null,
       })
     }
-  }, [qi, updateItemProgress, validQueueItems])
+  }, [qi, updateItemProgress])
+
+  const invalidateAttemptForSession = useCallback((sessionId: string) => {
+    const phase = activeAttemptPhaseRef.current
+    if (
+      phase?.sessionId === sessionId &&
+      activeAttemptRef.current === phase.token
+    ) {
+      activeAttemptRef.current = null
+      activeAttemptPhaseRef.current = null
+    }
+  }, [])
 
   const handleRuntimeMessage = useCallback(
     (message: QuickIngestRuntimeMessage) => {
@@ -1890,6 +1967,8 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       }
 
       if (message.type === "tldw:quick-ingest/completed") {
+        invalidateAttemptForSession(sessionId)
+        setRunSubmissionInFlight(false)
         const normalizedResults = (message.payload?.results || [])
           .map((item) =>
             applyQueueResultIdentity(normalizeWizardResult(item), queueItems)
@@ -1904,11 +1983,13 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       }
 
       if (message.type === "tldw:quick-ingest/review-required") {
+        invalidateAttemptForSession(sessionId)
+        setRunSubmissionInFlight(false)
         const reviewRequired = Array.isArray(message.payload?.reviewRequired)
           ? message.payload.reviewRequired
           : []
         if (reviewRequired.length > 0) {
-          returnToReview(reviewRequired)
+          void returnToReview(reviewRequired)
           return
         }
         finalizeFailure(
@@ -1919,6 +2000,8 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       }
 
       if (message.type === "tldw:quick-ingest/failed") {
+        invalidateAttemptForSession(sessionId)
+        setRunSubmissionInFlight(false)
         const normalizedResults = (message.payload?.results || [])
           .map((item) =>
             applyQueueResultIdentity(normalizeWizardResult(item), queueItems)
@@ -1933,6 +2016,8 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       }
 
       if (message.type === "tldw:quick-ingest/cancelled") {
+        invalidateAttemptForSession(sessionId)
+        setRunSubmissionInFlight(false)
         const normalizedResults = (message.payload?.results || [])
           .map((item) =>
             applyQueueResultIdentity(normalizeWizardResult(item), queueItems)
@@ -1947,6 +2032,8 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       }
 
       if (message.type === "tldw:quick-ingest/interrupted") {
+        invalidateAttemptForSession(sessionId)
+        setRunSubmissionInFlight(false)
         const error = String(
           message.payload?.error || "Quick ingest recovery was interrupted."
         )
@@ -1958,6 +2045,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       applyResults,
       finalizeFailure,
       finalizeRun,
+      invalidateAttemptForSession,
       markInterrupted,
       markProcessingTracking,
       processingState.perItemProgress,
@@ -2123,44 +2211,354 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     [updateItemProgress]
   )
 
-  const startRun = useCallback(async () => {
-    if (
-      restoredCreatingRunRef.current ||
-      hasStartedRunRef.current ||
-      validQueueItems.length === 0
-    ) {
-      return
-    }
-    preAuthorityCancelledOccurrenceIdsRef.current.clear()
-    preAuthorityCancelAllRef.current = false
-    hasStartedRunRef.current = true
+  const showReviewRecovery = useCallback(
+    (sourceState: IngestWizardState) => {
+      applyProcessingTransition({
+        ...sourceState,
+        currentStep: 3,
+        highestStep: Math.max(sourceState.highestStep, 3) as WizardStep,
+      })
+    },
+    [applyProcessingTransition]
+  )
 
-    try {
-      try {
-        await tldwClient.initialize()
-      } catch {
-        // Best effort; background proxy handles auth for direct runtimes.
+  const handlePreparingCancelItem = useCallback((occurrenceId: string) => {
+    if (!acceptingPreparationCancellationRef.current) return
+    preAuthorityCancelledOccurrenceIdsRef.current.add(occurrenceId)
+  }, [])
+
+  const handlePreparingCancelAll = useCallback(() => {
+    if (!acceptingPreparationCancellationRef.current) return
+    preAuthorityCancelAllRef.current = true
+  }, [])
+
+  const runSubmission = useCallback(
+    async (
+      snapshot: IngestWizardState,
+      requestPayload: QuickIngestRequestPayload,
+      selectedItems: WizardQueueItem[],
+      attemptToken: symbol,
+      authority: {
+        wizardSessionId: string
+        externalAuthorityRevision: number
+        startedAt: number
       }
-      const requestPayload = await buildQuickIngestPayload(
-        validQueueItems,
-        state.conferenceBatchMetadata,
-        state.pendingRunRequest,
-        {
-          ...presetConfig.common,
-          storeRemote: presetConfig.storeRemote,
-          reviewBeforeStorage: presetConfig.reviewBeforeStorage,
-          advancedValues: presetConfig.advancedValues,
-          typeDefaults: presetConfig.typeDefaults,
-        },
-        {
-          isCancelled: () => preAuthorityCancelAllRef.current,
-          isOccurrenceCancelled: (occurrenceId) =>
-            preAuthorityCancelledOccurrenceIdsRef.current.has(occurrenceId),
+    ): Promise<void> => {
+      const attemptIsCurrent = () => {
+        const live = useQuickIngestSessionStore.getState()
+        return (
+          activeAttemptRef.current === attemptToken &&
+          isMountedRef.current &&
+          live.session?.id === authority.wizardSessionId &&
+          live.externalAuthorityRevision === authority.externalAuthorityRevision
+        )
+      }
+      const finalizeSubmissionFailure = (
+        message: string,
+        outcome: "failed" | "cancelled"
+      ) => {
+        const existingResultIds = new Set(
+          resultsRef.current
+            .map((result) => String(result.id || "").trim())
+            .filter(Boolean)
+        )
+        const unresolvedItems = selectedItems.filter(
+          (item) => !existingResultIds.has(item.id)
+        )
+        finalizeRun(
+          outcome === "cancelled" ? "cancelled" : "error",
+          buildFailureResults(unresolvedItems, message, outcome)
+        )
+      }
+      try {
+        try {
+          await tldwClient.initialize()
+        } catch {
+          // Best effort; background proxy handles auth for direct runtimes.
         }
-      )
+        if (!attemptIsCurrent()) return
+
+        markRunActive(selectedItems)
+        if (!attemptIsCurrent()) return
+        const phase = activeAttemptPhaseRef.current
+        if (!phase || phase.token !== attemptToken) return
+        phase.backendMutationStarted = true
+
+        const startAck = await startQuickIngestSession(requestPayload)
+        if (!attemptIsCurrent()) return
+        if (!startAck?.ok || !startAck?.sessionId) {
+          const indeterminateSessionId = String(startAck?.sessionId || "").trim()
+          if (startAck?.indeterminate && indeterminateSessionId) {
+            const currentPhase = activeAttemptPhaseRef.current
+            if (!currentPhase || currentPhase.token !== attemptToken) return
+            currentPhase.sessionId = indeterminateSessionId
+            activeSessionIdRef.current = indeterminateSessionId
+            const indeterminateTracking: PersistedQuickIngestTracking = {
+              mode: "extension-runtime",
+              sessionId: indeterminateSessionId,
+              ...(requestPayload.pendingRunRequest
+                ? {
+                    submissionOccurrenceIds:
+                      requestPayload.pendingRunRequest.inputs.map(
+                        (input) => input.occurrenceId
+                      ),
+                  }
+                : {}),
+              startedAt: authority.startedAt,
+            }
+            if (!attemptIsCurrent()) return
+            persistedTrackingRef.current = indeterminateTracking
+            markProcessingTracking(indeterminateTracking)
+            if (!attemptIsCurrent()) return
+            if (preAuthorityCancelAllRef.current) {
+              void cancelQuickIngestSession({
+                sessionId: indeterminateSessionId,
+                tracking: indeterminateTracking,
+                reason: "user_cancelled",
+              })
+            } else {
+              requestOccurrenceCancellation(
+                indeterminateTracking,
+                [...preAuthorityCancelledOccurrenceIdsRef.current]
+              )
+            }
+            if (!attemptIsCurrent()) return
+            updateProcessingState({ status: "error", estimatedRemaining: 0 })
+            markInterrupted(
+              startAck.error ||
+                "Quick ingest start was accepted but its response was interrupted."
+            )
+            return
+          }
+          if (!attemptIsCurrent()) return
+          finalizeSubmissionFailure(
+            startAck?.error ||
+              "Quick ingest failed to start. Check tldw server settings and try again.",
+            "failed"
+          )
+          return
+        }
+
+        const sessionId = String(startAck.sessionId).trim()
+        const currentPhase = activeAttemptPhaseRef.current
+        if (!currentPhase || currentPhase.token !== attemptToken) return
+        currentPhase.sessionId = sessionId
+        activeSessionIdRef.current = sessionId
+        const extensionRuntime = !sessionId.startsWith("qi-direct-")
+        let initialTracking: PersistedQuickIngestTracking | undefined
+        if (extensionRuntime || !requestPayload.pendingRunRequest) {
+          initialTracking = {
+            mode: extensionRuntime ? "extension-runtime" : "webui-direct",
+            sessionId,
+            ...(extensionRuntime && requestPayload.pendingRunRequest
+              ? {
+                  submissionOccurrenceIds:
+                    requestPayload.pendingRunRequest.inputs.map(
+                      (input) => input.occurrenceId
+                    ),
+                }
+              : {}),
+            startedAt: authority.startedAt,
+          }
+          if (!attemptIsCurrent()) return
+          persistedTrackingRef.current = initialTracking
+          markProcessingTracking(initialTracking)
+          if (!attemptIsCurrent()) return
+        }
+
+        if (preAuthorityCancelAllRef.current) {
+          const cancellationTracking =
+            initialTracking ||
+            ({
+              ...persistedTrackingRef.current,
+              mode: "webui-direct",
+              sessionId,
+              startedAt: authority.startedAt,
+            } as PersistedQuickIngestTracking)
+          const cancellationKey = buildCancellationAuthorityKey(
+            cancellationTracking,
+            sessionId
+          )
+          cancelledSessionIdsRef.current.add(cancellationKey)
+          void cancelQuickIngestSession({
+            sessionId,
+            batchIds: resolveTrackingBatchIds(cancellationTracking),
+            tracking: cancellationTracking,
+            reason: "user_cancelled",
+          })
+        } else if (initialTracking) {
+          requestOccurrenceCancellation(
+            initialTracking,
+            [...preAuthorityCancelledOccurrenceIdsRef.current]
+          )
+        }
+
+        if (extensionRuntime) return
+        if (!attemptIsCurrent()) return
+
+        const submissionAuthorityKey = buildCancellationAuthorityKey(
+          initialTracking,
+          sessionId
+        )
+
+        setRunSubmissionInFlight(Boolean(requestPayload.pendingRunRequest))
+        if (!attemptIsCurrent()) return
+        const response = await submitQuickIngestBatch({
+          ...requestPayload,
+          __quickIngestSessionId: sessionId,
+          __quickIngestShouldStop: () => preAuthorityCancelAllRef.current,
+          __quickIngestIsOccurrenceCancelled: (occurrenceId) =>
+            preAuthorityCancelledOccurrenceIdsRef.current.has(occurrenceId),
+          onTrackingMetadata: (tracking) => {
+            if (!attemptIsCurrent()) return
+            const nextTracking: PersistedQuickIngestTracking = {
+              ...persistedTrackingRef.current,
+              ...tracking,
+              sessionId,
+              mode: "webui-direct",
+              startedAt: tracking.startedAt || authority.startedAt,
+            }
+            if (!attemptIsCurrent()) return
+            persistedTrackingRef.current = nextTracking
+            markProcessingTracking(nextTracking)
+          },
+        })
+        if (!attemptIsCurrent()) return
+
+        if (!response?.submissionCleanupFailed) {
+          setRunSubmissionInFlight(false)
+        }
+        if (!attemptIsCurrent()) return
+
+        const latestAuthorityKey = buildCancellationAuthorityKey(
+          persistedTrackingRef.current,
+          sessionId
+        )
+        if (
+          cancelledSessionIdsRef.current.has(submissionAuthorityKey) ||
+          cancelledSessionIdsRef.current.has(latestAuthorityKey) ||
+          sessionId !== String(activeSessionIdRef.current || "").trim()
+        ) {
+          return
+        }
+
+        if (response?.reviewRequired?.length) {
+          await returnToReview(
+            response.reviewRequired,
+            snapshot,
+            attemptIsCurrent
+          )
+          if (!attemptIsCurrent()) return
+          return
+        }
+
+        if (response?.submissionCleanupFailed) {
+          if (response.accepted) {
+            const unsentOccurrenceIds = new Set(response.unsentOccurrenceIds || [])
+            if (!attemptIsCurrent()) return
+            applyResults(
+              buildFailureResults(
+                selectedItems.filter((item) => unsentOccurrenceIds.has(item.id)),
+                response.error || "Playlist ingest submission stopped. Try again.",
+                "failed"
+              )
+            )
+          }
+          if (!attemptIsCurrent()) return
+          const cleanupError =
+            response.error ||
+            "The server could not cancel unsent items. Retry cancellation before reconnecting."
+          updateProcessingState({
+            status: "error",
+            estimatedRemaining: 0,
+          })
+          activeSessionIdRef.current = null
+          markInterrupted(cleanupError)
+          return
+        }
+
+        if (response?.submissionBlocked && response?.accepted) {
+          const unsentOccurrenceIds = new Set(response.unsentOccurrenceIds || [])
+          if (!attemptIsCurrent()) return
+          applyResults(
+            buildFailureResults(
+              selectedItems.filter((item) => unsentOccurrenceIds.has(item.id)),
+              response.error || "Playlist ingest submission stopped. Try again.",
+              "failed"
+            )
+          )
+          return
+        }
+
+        if (response?.runId && response?.accepted) return
+
+        if (!response?.ok) {
+          if (!attemptIsCurrent()) return
+          finalizeSubmissionFailure(
+            response?.error ||
+              "Quick ingest failed. Check tldw server settings and try again.",
+            "failed"
+          )
+          return
+        }
+
+        const normalizedResults = (response.results || [])
+          .map((item) =>
+            applyQueueResultIdentity(normalizeWizardResult(item), snapshot.queueItems)
+          )
+          .filter((item): item is WizardResultItem => Boolean(item))
+
+        if (normalizedResults.length === 0) {
+          if (!attemptIsCurrent()) return
+          finalizeSubmissionFailure(
+            "Ingest request finished without item results.",
+            "failed"
+          )
+          return
+        }
+
+        if (!attemptIsCurrent()) return
+        finalizeRun("complete", normalizedResults)
+      } catch (error) {
+        if (!attemptIsCurrent()) return
+        setRunSubmissionInFlight(false)
+        if (!attemptIsCurrent()) return
+        finalizeSubmissionFailure(
+          error instanceof Error ? error.message : "Quick ingest failed.",
+          "failed"
+        )
+      } finally {
+        if (activeAttemptRef.current === attemptToken) {
+          activeAttemptRef.current = null
+        }
+        if (activeAttemptPhaseRef.current?.token === attemptToken) {
+          activeAttemptPhaseRef.current = null
+        }
+      }
+    },
+    [
+      applyResults,
+      finalizeRun,
+      markInterrupted,
+      markProcessingTracking,
+      markRunActive,
+      requestOccurrenceCancellation,
+      returnToReview,
+      updateProcessingState,
+    ]
+  )
+
+  const beginProcessing = useCallback(
+    async (candidateState: IngestWizardState): Promise<boolean> => {
+      const transitionBeforeAuthority = buildProcessingTransition(candidateState)
+      if (!transitionBeforeAuthority.ok) {
+        applyProcessingTransition(transitionBeforeAuthority.nextState)
+        return false
+      }
+      const candidateConfig = transitionBeforeAuthority.nextState.presetConfig
       const providerWarning = getQuickIngestAnalysisProviderWarning({
-        common: requestPayload.common,
-        advancedValues: requestPayload.advancedValues,
+        common: candidateConfig.common,
+        advancedValues: candidateConfig.advancedValues,
       })
       if (providerWarning) {
         setAnalysisProviderWarning(
@@ -2169,249 +2567,294 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
             "Choose an analysis provider before running ingest analysis."
           )
         )
-        updateProcessingState({
-          status: "idle",
-          perItemProgress: [],
-          elapsed: 0,
-          estimatedRemaining: 0,
+        applyProcessingTransition({
+          ...candidateState,
+          currentStep: 2,
+          highestStep: Math.max(candidateState.highestStep, 2) as WizardStep,
+          processingState: {
+            status: "idle",
+            perItemProgress: [],
+            elapsed: 0,
+            estimatedRemaining: 0,
+          },
         })
-        hasStartedRunRef.current = false
-        activeSessionIdRef.current = null
         restore()
         showSession()
-        goToStep(2)
-        return
+        return false
       }
+      setAnalysisProviderWarning(null)
+      if (activeAttemptRef.current) return false
 
-      markRunActive()
-
-      if (preAuthorityCancelAllRef.current) return
-
-      const startAck = await startQuickIngestSession(requestPayload)
-      if (!startAck?.ok || !startAck?.sessionId) {
-        const indeterminateSessionId = String(startAck?.sessionId || "").trim()
-        if (startAck?.indeterminate && indeterminateSessionId) {
-          activeSessionIdRef.current = indeterminateSessionId
-          const indeterminateTracking: PersistedQuickIngestTracking = {
-            mode: "extension-runtime",
-            sessionId: indeterminateSessionId,
-            ...(requestPayload.pendingRunRequest
-              ? {
-                  submissionOccurrenceIds:
-                    requestPayload.pendingRunRequest.inputs.map(
-                      (input) => input.occurrenceId
-                    ),
-                }
-              : {}),
-            startedAt: runStartedAtRef.current || Date.now(),
-          }
-          persistedTrackingRef.current = indeterminateTracking
-          markProcessingTracking(indeterminateTracking)
-          if (!preAuthorityCancelAllRef.current) {
-            requestOccurrenceCancellation(
-              indeterminateTracking,
-              [...preAuthorityCancelledOccurrenceIdsRef.current]
-            )
-          }
-          updateProcessingState({ status: "error", estimatedRemaining: 0 })
-          markInterrupted(
-            startAck.error ||
-              "Quick ingest start was accepted but its response was interrupted."
-          )
-          return
-        }
-        finalizeFailure(
-          startAck?.error ||
-            "Quick ingest failed to start. Check tldw server settings and try again.",
-          "failed"
+      preAuthorityCancelledOccurrenceIdsRef.current.clear()
+      preAuthorityCancelAllRef.current = false
+      const attemptToken = Symbol("quick-ingest-submission")
+      activeAttemptRef.current = attemptToken
+      activeAttemptPhaseRef.current = {
+        token: attemptToken,
+        backendMutationStarted: false,
+        sessionId: null,
+      }
+      acceptingPreparationCancellationRef.current = true
+      setProcessingWarning(null)
+      setIsPreparingSubmission(true)
+      let acceptedAuthorityRevision: number | null = null
+      const attemptIsCurrent = () => {
+        const live = useQuickIngestSessionStore.getState()
+        return (
+          activeAttemptRef.current === attemptToken &&
+          isMountedRef.current &&
+          live.session?.id === session.id &&
+          (acceptedAuthorityRevision === null ||
+            live.externalAuthorityRevision === acceptedAuthorityRevision)
         )
-        return
       }
+      let runnerStarted = false
+      let recoveryState = candidateState
 
-      const sessionId = String(startAck.sessionId).trim()
-      activeSessionIdRef.current = sessionId
-      const extensionRuntime = !sessionId.startsWith("qi-direct-")
-      let initialTracking: PersistedQuickIngestTracking | undefined
-      if (extensionRuntime || !requestPayload.pendingRunRequest) {
-        initialTracking = {
-          mode: extensionRuntime ? "extension-runtime" : "webui-direct",
-          sessionId,
-          ...(extensionRuntime && requestPayload.pendingRunRequest
-            ? {
-                submissionOccurrenceIds:
-                  requestPayload.pendingRunRequest.inputs.map(
-                    (input) => input.occurrenceId
-                  ),
-              }
-              : {}),
-          startedAt: runStartedAtRef.current || Date.now(),
+      try {
+        if (persistenceStatus !== "ready") {
+          showReviewRecovery(candidateState)
+          return false
         }
-        persistedTrackingRef.current = initialTracking
-        markProcessingTracking(initialTracking)
-        if (!preAuthorityCancelAllRef.current) {
-          requestOccurrenceCancellation(
-            initialTracking,
-            [...preAuthorityCancelledOccurrenceIdsRef.current]
-          )
+
+        const authorityRevisionBeforeAcquire =
+          externalAuthorityRevisionRef.current
+        const acquired = await acquireSubmissionLease()
+        if (!attemptIsCurrent()) return false
+
+        const liveStore = useQuickIngestSessionStore.getState()
+        acceptedAuthorityRevision = liveStore.externalAuthorityRevision
+        const durableState =
+          liveStore.session?.id === session.id
+            ? buildInitialWizardState(liveStore.session)
+            : null
+        if (!acquired) {
+          showReviewRecovery(durableState || candidateState)
+          return false
         }
-      }
 
-      if (!sessionId.startsWith("qi-direct-")) {
-        return
-      }
+        const authoritativeState =
+          liveStore.externalAuthorityRevision > authorityRevisionBeforeAcquire &&
+          durableState
+            ? durableState
+            : candidateState
+        recoveryState = authoritativeState
+        const transition = buildProcessingTransition(authoritativeState)
+        if (!transition.ok) {
+          applyProcessingTransition(transition.nextState)
+          return false
+        }
 
-      const submissionAuthorityKey = buildCancellationAuthorityKey(
-        initialTracking,
-        sessionId
-      )
-
-      setRunSubmissionInFlight(Boolean(requestPayload.pendingRunRequest))
-      const response = await submitQuickIngestBatch({
-        ...requestPayload,
-        __quickIngestSessionId: sessionId,
-        __quickIngestShouldStop: () => preAuthorityCancelAllRef.current,
-        __quickIngestIsOccurrenceCancelled: (occurrenceId) =>
-          preAuthorityCancelledOccurrenceIdsRef.current.has(occurrenceId),
-        onTrackingMetadata: (tracking) => {
-          const nextTracking: PersistedQuickIngestTracking = {
-            ...persistedTrackingRef.current,
-            ...tracking,
-            sessionId,
-            mode: "webui-direct",
-            startedAt: tracking.startedAt || runStartedAtRef.current || Date.now(),
+        const selectedItems = transition.nextState.queueItems.filter(
+          (item) =>
+            item.validation.valid &&
+            item.conferenceOverride?.selected !== false &&
+            item.playlistReview?.selected !== false
+        )
+        const config = transition.nextState.presetConfig
+        const payload = await buildQuickIngestPayload(
+          selectedItems,
+          transition.nextState.conferenceBatchMetadata,
+          transition.nextState.pendingRunRequest,
+          {
+            ...config.common,
+            storeRemote: config.storeRemote,
+            reviewBeforeStorage: config.reviewBeforeStorage,
+            advancedValues: { ...config.advancedValues },
+            typeDefaults: { ...config.typeDefaults },
+          },
+          {
+            isCancelled: () =>
+              preAuthorityCancelAllRef.current ||
+              activeAttemptRef.current !== attemptToken,
+            isOccurrenceCancelled: (occurrenceId) =>
+              preAuthorityCancelledOccurrenceIdsRef.current.has(occurrenceId),
           }
-          persistedTrackingRef.current = nextTracking
-          markProcessingTracking(nextTracking)
-        },
-      })
-      if (!response?.submissionCleanupFailed) {
-        setRunSubmissionInFlight(false)
-      }
+        )
+        acceptingPreparationCancellationRef.current = false
+        setIsPreparingSubmission(false)
+        if (!attemptIsCurrent()) return false
 
-      const currentAuthorityKey = buildCancellationAuthorityKey(
-        persistedTrackingRef.current,
-        sessionId
-      )
-      if (
-        cancelledSessionIdsRef.current.has(submissionAuthorityKey) ||
-        cancelledSessionIdsRef.current.has(currentAuthorityKey) ||
-        sessionId !== String(activeSessionIdRef.current || "").trim()
-      ) {
-        return
-      }
-
-      if (response?.reviewRequired?.length) {
-        returnToReview(response.reviewRequired)
-        return
-      }
-
-      if (response?.submissionCleanupFailed) {
-        if (response.accepted) {
-          const unsentOccurrenceIds = new Set(response.unsentOccurrenceIds || [])
-          applyResults(
-            buildFailureResults(
-              validQueueItems.filter((item) => unsentOccurrenceIds.has(item.id)),
-              response.error || "Playlist ingest submission stopped. Try again.",
-              "failed"
-            )
-          )
-        }
-        const cleanupError =
-          response.error ||
-          "The server could not cancel unsent items. Retry cancellation before reconnecting."
-        updateProcessingState({
-          status: "error",
-          estimatedRemaining: 0,
+        const remainingOccurrenceIds = new Set(
+          preAuthorityCancelAllRef.current
+            ? []
+            : selectedItems
+                .map((item) => item.id)
+                .filter(
+                  (id) =>
+                    !preAuthorityCancelledOccurrenceIdsRef.current.has(id)
+                )
+        )
+        if (remainingOccurrenceIds.size === 0) return false
+        const filteredTransition = buildProcessingTransition({
+          ...transition.nextState,
+          queueItems: transition.nextState.queueItems.filter(
+            (item) => remainingOccurrenceIds.has(item.id)
+          ),
         })
-        hasStartedRunRef.current = false
-        activeSessionIdRef.current = null
-        markInterrupted(cleanupError)
-        return
-      }
+        if (!filteredTransition.ok) return false
+        const submissionSnapshot = filteredTransition.nextState
+        const submissionItems = submissionSnapshot.queueItems.filter(
+          (item) =>
+            item.validation.valid &&
+            item.conferenceOverride?.selected !== false &&
+            item.playlistReview?.selected !== false
+        )
+        if (submissionItems.length === 0) return false
+        const submissionPayload = {
+          ...payload,
+          entries: payload.entries.filter((entry) =>
+            remainingOccurrenceIds.has(entry.id)
+          ),
+          files: payload.files.filter((file) =>
+            remainingOccurrenceIds.has(file.id)
+          ),
+          pendingRunRequest: payload.pendingRunRequest
+            ? {
+                ...payload.pendingRunRequest,
+                inputs: payload.pendingRunRequest.inputs.filter((input) =>
+                  remainingOccurrenceIds.has(input.occurrenceId)
+                ),
+              }
+            : payload.pendingRunRequest,
+          conferenceItemMetadata: payload.conferenceItemMetadata
+            ? Object.fromEntries(
+                Object.entries(payload.conferenceItemMetadata).filter(
+                  ([occurrenceId]) =>
+                    remainingOccurrenceIds.has(occurrenceId)
+                )
+              )
+            : undefined,
+        }
 
-      if (response?.submissionBlocked && response?.accepted) {
-        const unsentOccurrenceIds = new Set(response.unsentOccurrenceIds || [])
-        applyResults(
-          buildFailureResults(
-            validQueueItems.filter((item) => unsentOccurrenceIds.has(item.id)),
-            response.error || "Playlist ingest submission stopped. Try again.",
-            "failed"
+        const renewed = await renewSubmissionLease()
+        if (!attemptIsCurrent()) return false
+        if (!renewed) {
+          setProcessingWarning(
+            "Quick ingest paused because submission ownership could not be renewed. Check whether another tab owns this ingest, then try again."
           )
+          showReviewRecovery(recoveryState)
+          return false
+        }
+
+        const startedAt = Date.now()
+        const tracking = buildCreatingRunTracking(
+          submissionPayload,
+          submissionItems,
+          startedAt
         )
-        return
-      }
-
-      if (response?.runId && response?.accepted) {
-        return
-      }
-
-      if (!response?.ok) {
-        finalizeFailure(
-          response?.error ||
-            "Quick ingest failed. Check tldw server settings and try again.",
-          "failed"
+        const committed = await commitProcessingHandoff(
+          submissionSnapshot,
+          tracking
         )
-        return
-      }
+        if (!attemptIsCurrent()) return false
+        if (!committed) {
+          setProcessingWarning(
+            "Quick ingest paused because local recovery could not save submission authority. Free browser storage or restore local recovery, then try again."
+          )
+          showReviewRecovery(recoveryState)
+          return false
+        }
 
-      const normalizedResults = (response.results || [])
-        .map((item) =>
-          applyQueueResultIdentity(normalizeWizardResult(item), queueItems)
+        persistedTrackingRef.current = tracking
+        runStartedAtRef.current = startedAt
+        preAuthorityCancelledOccurrenceIdsRef.current.clear()
+        preAuthorityCancelAllRef.current = false
+        setIsPreparingSubmission(false)
+        applyProcessingTransition(submissionSnapshot)
+        runnerStarted = true
+        void runSubmission(
+          submissionSnapshot,
+          submissionPayload,
+          submissionItems,
+          attemptToken,
+          {
+            wizardSessionId: session.id,
+            externalAuthorityRevision: acceptedAuthorityRevision,
+            startedAt,
+          }
         )
-        .filter((item): item is WizardResultItem => Boolean(item))
-
-      if (normalizedResults.length === 0) {
-        finalizeFailure("Ingest request finished without item results.", "failed")
-        return
+        return true
+      } catch (error) {
+        if (!attemptIsCurrent()) return false
+        setProcessingWarning(safeSubmissionStartError(error))
+        showReviewRecovery(recoveryState)
+        return false
+      } finally {
+        acceptingPreparationCancellationRef.current = false
+        if (
+          !runnerStarted &&
+          isMountedRef.current &&
+          (!activeAttemptPhaseRef.current ||
+            activeAttemptPhaseRef.current.token === attemptToken)
+        ) {
+          setIsPreparingSubmission(false)
+        }
+        if (!runnerStarted && activeAttemptRef.current === attemptToken) {
+          activeAttemptRef.current = null
+        }
+        if (
+          !runnerStarted &&
+          activeAttemptPhaseRef.current?.token === attemptToken
+        ) {
+          activeAttemptPhaseRef.current = null
+        }
       }
-
-      finalizeRun("complete", normalizedResults)
-    } catch (error) {
-      setRunSubmissionInFlight(false)
-      finalizeFailure(
-        error instanceof Error ? error.message : "Quick ingest failed.",
-        "failed"
-      )
-    }
-  }, [
-    applyResults,
-    finalizeFailure,
-    finalizeRun,
-    markRunActive,
-    markInterrupted,
-    presetConfig.advancedValues,
-    presetConfig.common,
-    presetConfig.reviewBeforeStorage,
-    presetConfig.storeRemote,
-    presetConfig.typeDefaults,
-    requestOccurrenceCancellation,
-    state.conferenceBatchMetadata,
-    state.pendingRunRequest,
-    goToStep,
-    restore,
-    showSession,
-    markProcessingTracking,
-    qi,
-    returnToReview,
-    updateProcessingState,
-    validQueueItems,
-  ])
+    },
+    [
+      acquireSubmissionLease,
+      applyProcessingTransition,
+      commitProcessingHandoff,
+      persistenceStatus,
+      qi,
+      renewSubmissionLease,
+      restore,
+      runSubmission,
+      session.id,
+      setProcessingWarning,
+      showSession,
+      showReviewRecovery,
+    ]
+  )
 
   useEffect(() => {
-    if (currentStep !== 4 || processingState.status !== "running") return
-    if (session.tracking?.mode === "extension-runtime") {
+    if (
+      !autoProcessQueued ||
+      !isOnlineForIngest ||
+      session.lifecycle !== "draft" ||
+      currentStep >= 4 ||
+      validQueueItems.length === 0
+    ) {
       return
     }
-    if (session.lifecycle === "processing" && session.tracking) {
-      const canReattachDirectJobs =
-        session.tracking.mode === "webui-direct" &&
-        Boolean(session.tracking.jobIds?.length || session.tracking.runId)
-      if (session.tracking.mode !== "webui-direct" || canReattachDirectJobs) {
-        return
-      }
-    }
-    void startRun()
-  }, [currentStep, processingState.status, session.lifecycle, session.tracking, startRun])
+    const attemptKey = JSON.stringify({
+      sessionId: session.id,
+      persistenceStatus,
+      isSubmissionOwner,
+      externalAuthorityRevision,
+      queueItems: buildPersistedQueueItems(state.queueItems),
+      selectedPreset: state.selectedPreset,
+      customBasePreset: state.customBasePreset,
+      presetConfig: state.presetConfig,
+      customOptions: state.customOptions,
+      conferenceBatchMetadata: state.conferenceBatchMetadata,
+    })
+    if (lastAutoAttemptKeyRef.current === attemptKey) return
+    lastAutoAttemptKeyRef.current = attemptKey
+    void beginProcessing(state)
+  }, [
+    autoProcessQueued,
+    beginProcessing,
+    currentStep,
+    externalAuthorityRevision,
+    isOnlineForIngest,
+    isSubmissionOwner,
+    persistenceStatus,
+    session.id,
+    session.lifecycle,
+    state,
+    validQueueItems.length,
+  ])
 
   useEffect(() => {
     if (
@@ -2439,8 +2882,23 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   ])
 
   useEffect(() => {
-    if (cancellationRequestNonce <= 0) return
+    if (
+      cancellationRequestNonce <= 0 ||
+      cancellationRequestNonce <= lastCancellationRequestNonceRef.current
+    ) {
+      return
+    }
+    lastCancellationRequestNonceRef.current = cancellationRequestNonce
     preAuthorityCancelAllRef.current = true
+    const activePhase = activeAttemptPhaseRef.current
+    if (
+      activePhase &&
+      !activePhase.backendMutationStarted &&
+      activeAttemptRef.current === activePhase.token
+    ) {
+      activeAttemptRef.current = null
+      activeAttemptPhaseRef.current = null
+    }
     const persistedTracking = persistedTrackingRef.current
     const sessionId = String(
       activeSessionIdRef.current || persistedTracking?.sessionId || ""
@@ -2649,37 +3107,10 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   // Quick-process callback for AddContentStep (skip to processing with defaults)
   const handleQuickProcess = useCallback(() => {
     if (!isOnlineForIngest || isCheckingConnection) return
-    const providerWarning = getQuickIngestAnalysisProviderWarning({
-      common: presetConfig.common,
-      advancedValues: presetConfig.advancedValues,
+    queueMicrotask(() => {
+      if (isMountedRef.current) void beginProcessing(stateRef.current)
     })
-    if (providerWarning) {
-      setAnalysisProviderWarning(
-        qi(
-          "analysisProvider.required",
-          "Choose an analysis provider before running ingest analysis."
-        )
-      )
-      if (currentStep === 1) {
-        goNext()
-      } else {
-        goToStep(2)
-      }
-      return
-    }
-    setAnalysisProviderWarning(null)
-    skipToProcessing()
-  }, [
-    currentStep,
-    goNext,
-    goToStep,
-    isCheckingConnection,
-    isOnlineForIngest,
-    presetConfig.advancedValues,
-    presetConfig.common,
-    qi,
-    skipToProcessing,
-  ])
+  }, [beginProcessing, isCheckingConnection, isOnlineForIngest])
 
   useEffect(() => {
     if (!open || !autoProcessQueued) {
@@ -2709,14 +3140,17 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   // Navigation callbacks for WizardResultsStep CTAs
   const navigate = useNavigate()
 
+  const handleStartOver = useCallback(() => {
+    activeAttemptRef.current = null
+    activeAttemptPhaseRef.current = null
+    acceptingPreparationCancellationRef.current = false
+    replaceWithNewDraft()
+  }, [replaceWithNewDraft])
+
   const handleSearchKnowledge = useCallback(() => {
     navigate("/knowledge")
     onClose()
   }, [navigate, onClose])
-
-  const handleIngestMore = useCallback(() => {
-    replaceWithNewDraft()
-  }, [replaceWithNewDraft])
 
   const handleOpenWorkspace = useCallback(
     (item: WizardResultItem) => {
@@ -2951,6 +3385,15 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
 
   // Render the current step
   const stepContent = useMemo(() => {
+    if (isPreparingSubmission) {
+      return (
+        <ProcessingStep
+          preparingSubmission
+          onPreparingCancelItem={handlePreparingCancelItem}
+          onPreparingCancelAll={handlePreparingCancelAll}
+        />
+      )
+    }
     switch (currentStep) {
       case 1:
         return (
@@ -2977,6 +3420,11 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
             isCheckingConnection={isCheckingConnection}
             connectionRecoveryMessage={connectionRecoveryMessage}
             onRetryConnection={handleRetryConnection}
+            persistenceStatus={persistenceStatus}
+            isSubmissionOwner={isSubmissionOwner}
+            onCheckSubmissionOwnership={acquireSubmissionLease}
+            onBeginProcessing={beginProcessing}
+            submissionStartError={session.errorMessage}
           />
         )
       case 4:
@@ -2985,7 +3433,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
         return (
           <WizardResultsStep
             onClose={onClose}
-            onIngestMore={handleIngestMore}
+            onStartOver={handleStartOver}
             onRetryItems={handleRetryItems}
             onOpenMedia={handleOpenMedia}
             onSearchKnowledge={handleSearchKnowledge}
@@ -2999,19 +3447,27 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   }, [
     connectionRecoveryMessage,
     currentStep,
+    acquireSubmissionLease,
+    beginProcessing,
     handleOpenMedia,
     handleOpenCollection,
     handleOpenWorkspace,
-    handleIngestMore,
+    handlePreparingCancelAll,
+    handlePreparingCancelItem,
     handleQuickProcess,
     handleRetryConnection,
     handleRetryItems,
     handleSearchKnowledge,
+    handleStartOver,
     isCheckingConnection,
+    isPreparingSubmission,
     isOnlineForIngest,
+    isSubmissionOwner,
     onClose,
     open,
     analysisProviderWarning,
+    persistenceStatus,
+    session.errorMessage,
     state.isMinimized,
   ])
 
@@ -3044,47 +3500,84 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
 // Exported modal component
 // ---------------------------------------------------------------------------
 
-export const QuickIngestWizardModal: React.FC<QuickIngestWizardModalProps> = ({
+type QuickIngestWizardSessionProps = QuickIngestWizardModalProps & {
+  initialSession: QuickIngestSessionRecord
+  sessionId: string
+}
+
+type QuickIngestSessionStoreBridgeProps = Omit<
+  WizardModalContentProps,
+  | "session"
+  | "persistenceStatus"
+  | "isSubmissionOwner"
+  | "shouldAttemptPersistedReattach"
+> & {
+  sessionId: string
+}
+
+const QuickIngestSessionStoreBridge: React.FC<
+  QuickIngestSessionStoreBridgeProps
+> = ({ sessionId, ...props }) => {
+  const session = useQuickIngestSessionStore((store) =>
+    store.session?.id === sessionId ? store.session : null
+  )
+  const persistenceStatus = useQuickIngestSessionStore(
+    (store) => store.persistenceStatus
+  )
+  const isSubmissionOwner = useQuickIngestSessionStore(
+    (store) => store.isSubmissionOwner
+  )
+
+  if (!session) return null
+
+  return (
+    <WizardModalContent
+      {...props}
+      session={session}
+      persistenceStatus={persistenceStatus}
+      isSubmissionOwner={isSubmissionOwner}
+      shouldAttemptPersistedReattach={
+        session.lifecycle === "processing" &&
+        session.tracking?.mode === "webui-direct" &&
+        Boolean(session.tracking?.jobIds?.length || session.tracking?.runId)
+      }
+    />
+  )
+}
+
+const QuickIngestWizardSession: React.FC<QuickIngestWizardSessionProps> = ({
   open,
   onClose,
   autoProcessQueued = false,
   presetMap = DEFAULT_PRESETS,
   openRevision = 0,
   createNewDraft,
+  initialSession,
+  sessionId,
 }) => {
-  const {
-    session,
-    upsertSession,
-    markProcessingTracking,
-    commitReviewHandoff: commitReviewHandoffInStore,
-    markInterrupted: markInterruptedInStore,
-    createDraftSession,
-    showSession,
-    replaceWithNewDraft,
-  } =
-    useQuickIngestSessionStore(
-      useShallow((store) => ({
-        session: store.session,
-        upsertSession: store.upsertSession,
-        markProcessingTracking: store.markProcessingTracking,
-        commitReviewHandoff: store.commitReviewHandoff,
-        markInterrupted: store.markInterrupted,
-        createDraftSession: store.createDraftSession,
-        showSession: store.showSession,
-        replaceWithNewDraft: store.replaceWithNewDraft,
-      }))
-    )
-
-  const initialState = useMemo(
-    () => (session ? buildInitialWizardState(session) : undefined),
-    [session]
+  const externalAuthorityRevision = useQuickIngestSessionStore(
+    (store) => store.externalAuthorityRevision
   )
-  const sessionRef = useRef(session)
+  const initialSessionRef = useRef(initialSession)
+  const initialStateRef = useRef(
+    buildInitialWizardState(initialSessionRef.current)
+  )
+  const currentSession = useQuickIngestSessionStore.getState().session
+  const authoritativeSession =
+    currentSession?.id === sessionId ? currentSession : initialSessionRef.current
+  const externalState = buildInitialWizardState(authoritativeSession)
+  const sessionRef = useRef(authoritativeSession)
+  sessionRef.current = authoritativeSession
+  const showSession = useQuickIngestSessionStore((store) => store.showSession)
+  const replaceWithNewDraft = useQuickIngestSessionStore(
+    (store) => store.replaceWithNewDraft
+  )
   const lastPersistedSignatureRef = useRef<{
     sessionId: string
     signature: string
   } | null>(null)
   const reviewHandoffGuardRef = useRef<string | null>(null)
+  const processingHandoffGuardRef = useRef<IngestWizardState | null>(null)
   const [cancellationRequestNonce, setCancellationRequestNonce] = useState(0)
   const [itemCancellationRequest, setItemCancellationRequest] = useState<{
     id: string
@@ -3092,9 +3585,18 @@ export const QuickIngestWizardModal: React.FC<QuickIngestWizardModalProps> = ({
   } | null>(null)
   const [statusCheckRequestNonce, setStatusCheckRequestNonce] = useState(0)
 
-  useEffect(() => {
-    sessionRef.current = session
-  }, [session])
+  const refreshSessionRef = useCallback(() => {
+    const current = useQuickIngestSessionStore.getState().session
+    if (current?.id === sessionId) sessionRef.current = current
+  }, [sessionId])
+
+  const markSessionProcessingTracking = useCallback(
+    (tracking: PersistedQuickIngestTracking) => {
+      useQuickIngestSessionStore.getState().markProcessingTracking(tracking)
+      refreshSessionRef()
+    },
+    [refreshSessionRef]
+  )
 
   const markSessionInterrupted = useCallback(
     (reason?: string) => {
@@ -3105,9 +3607,10 @@ export const QuickIngestWizardModal: React.FC<QuickIngestWizardModalProps> = ({
           errorMessage: reason || "Quick ingest was interrupted.",
         }
       }
-      markInterruptedInStore(reason)
+      useQuickIngestSessionStore.getState().markInterrupted(reason)
+      refreshSessionRef()
     },
-    [markInterruptedInStore]
+    [refreshSessionRef]
   )
 
   const setSessionProcessingWarning = useCallback(
@@ -3116,26 +3619,40 @@ export const QuickIngestWizardModal: React.FC<QuickIngestWizardModalProps> = ({
       if (!current) return
       sessionRef.current = {
         ...current,
-        lifecycle: "processing",
         errorMessage: reason,
       }
-      upsertSession({ lifecycle: "processing", errorMessage: reason })
+      useQuickIngestSessionStore.getState().upsertSession({
+        errorMessage: reason,
+      })
+      refreshSessionRef()
     },
-    [upsertSession]
+    [refreshSessionRef]
   )
 
-  useEffect(() => {
-    if (!open || session) return
-    createDraftSession({
-      selectedPreset: DEFAULT_PRESET,
-      customBasePreset: DEFAULT_PRESET,
-      presetConfig: presetMap[DEFAULT_PRESET],
-      customOptions: {},
-    })
-  }, [createDraftSession, open, presetMap, session])
+  const acquireSubmissionLease = useCallback(async (): Promise<boolean> => {
+    const acquired = await useQuickIngestSessionStore
+      .getState()
+      .acquireSubmissionLease()
+    refreshSessionRef()
+    return acquired
+  }, [refreshSessionRef])
+
+  const renewSubmissionLease = useCallback(async (): Promise<boolean> => {
+    const renewed = await useQuickIngestSessionStore
+      .getState()
+      .renewSubmissionLease()
+    refreshSessionRef()
+    return renewed
+  }, [refreshSessionRef])
 
   const persistWizardState = useCallback(
     (state: IngestWizardState) => {
+      const processingHandoff = processingHandoffGuardRef.current
+      if (processingHandoff) {
+        if (state !== processingHandoff) return
+        processingHandoffGuardRef.current = null
+        return
+      }
       const handoffRevision = reviewHandoffGuardRef.current
       if (handoffRevision) {
         if (buildReviewHandoffRevision(state) !== handoffRevision) return
@@ -3144,41 +3661,59 @@ export const QuickIngestWizardModal: React.FC<QuickIngestWizardModalProps> = ({
       }
       const currentSession = sessionRef.current
       if (!currentSession) return
+      const liveStore = useQuickIngestSessionStore.getState()
+      const authoritativeSession = liveStore.session
+      if (
+        authoritativeSession?.id === currentSession.id &&
+        liveStore.externalAuthorityRevision > externalAuthorityRevision
+      ) {
+        sessionRef.current = authoritativeSession
+        return
+      }
+      if (
+        authoritativeSession?.id === currentSession.id &&
+        authoritativeSession.lifecycle !== "draft" &&
+        authoritativeSession.currentStep >= 4 &&
+        state.currentStep === 3
+      ) {
+        sessionRef.current = authoritativeSession
+        return
+      }
       const patch = buildSessionPatchFromWizardState(state, currentSession)
       if (patch.completedAt == null) {
         lastPersistedSignatureRef.current = null
-        upsertSession(patch)
-        return
+      } else {
+        const signature = buildWizardPersistenceSignature(patch)
+        if (
+          lastPersistedSignatureRef.current?.sessionId === currentSession.id &&
+          lastPersistedSignatureRef.current.signature === signature
+        ) {
+          return
+        }
+        lastPersistedSignatureRef.current = {
+          sessionId: currentSession.id,
+          signature,
+        }
       }
-      const signature = buildWizardPersistenceSignature(patch)
-      // React may replay queued reducer updates after this synchronous Zustand
-      // write rerenders the parent. Persist each semantic snapshot only once.
-      if (
-        lastPersistedSignatureRef.current?.sessionId === currentSession.id &&
-        lastPersistedSignatureRef.current.signature === signature
-      ) {
-        return
-      }
-      lastPersistedSignatureRef.current = {
-        sessionId: currentSession.id,
-        signature,
-      }
-      upsertSession(patch)
+      liveStore.upsertSession(patch)
+      refreshSessionRef()
     },
-    [upsertSession]
+    [externalAuthorityRevision, refreshSessionRef]
   )
 
   const commitSessionReviewHandoff = useCallback(
-    (state: IngestWizardState): boolean => {
+    async (state: IngestWizardState): Promise<boolean> => {
       const currentSession = sessionRef.current
       if (!currentSession) return false
       const revision = buildReviewHandoffRevision(state)
       reviewHandoffGuardRef.current = revision
       let committed = false
       try {
-        committed = commitReviewHandoffInStore(
-          buildSessionPatchFromWizardState(state, currentSession)
-        )
+        committed = await useQuickIngestSessionStore
+          .getState()
+          .commitReviewHandoff(
+            buildSessionPatchFromWizardState(state, currentSession)
+          )
       } catch {
         reviewHandoffGuardRef.current = null
         return false
@@ -3187,10 +3722,39 @@ export const QuickIngestWizardModal: React.FC<QuickIngestWizardModalProps> = ({
         reviewHandoffGuardRef.current = null
         return false
       }
-      sessionRef.current = useQuickIngestSessionStore.getState().session
+      refreshSessionRef()
       return true
     },
-    [commitReviewHandoffInStore]
+    [refreshSessionRef]
+  )
+  const commitSessionProcessingHandoff = useCallback(
+    async (
+      state: IngestWizardState,
+      tracking: PersistedQuickIngestTracking
+    ): Promise<boolean> => {
+      const currentSession = sessionRef.current
+      if (!currentSession) return false
+      processingHandoffGuardRef.current = state
+      let committed = false
+      try {
+        committed = await useQuickIngestSessionStore
+          .getState()
+          .commitProcessingHandoff(
+            buildSessionPatchFromWizardState(state, currentSession),
+            tracking
+          )
+      } catch {
+        processingHandoffGuardRef.current = null
+        return false
+      }
+      if (!committed) {
+        processingHandoffGuardRef.current = null
+        return false
+      }
+      refreshSessionRef()
+      return true
+    },
+    [refreshSessionRef]
   )
 
   const deferAuthoritativeCancellation = useCallback(() => {
@@ -3222,14 +3786,12 @@ export const QuickIngestWizardModal: React.FC<QuickIngestWizardModalProps> = ({
     void useConnectionStore.getState().checkOnce()
   }, [])
 
-  if (!session || !initialState) return null
-
-  const providerKey = `${session.id}:${openRevision}`
-
   return (
     <IngestWizardProvider
-      key={providerKey}
-      initialState={initialState}
+      key={`${sessionId}:${openRevision}`}
+      initialState={initialStateRef.current}
+      externalState={externalState}
+      externalStateRevision={externalAuthorityRevision}
       onStateChange={persistWizardState}
       presetMap={presetMap}
       onCancelProcessing={deferAuthoritativeCancellation}
@@ -3237,13 +3799,17 @@ export const QuickIngestWizardModal: React.FC<QuickIngestWizardModalProps> = ({
       onCheckStatus={requestAuthoritativeStatus}
       onReconnect={reconnect}
     >
-      <WizardModalContent
+      <QuickIngestSessionStoreBridge
         open={open}
         onClose={onClose}
         autoProcessQueued={autoProcessQueued}
-        session={session}
-        markProcessingTracking={markProcessingTracking}
+        sessionId={sessionId}
+        markProcessingTracking={markSessionProcessingTracking}
         commitReviewHandoff={commitSessionReviewHandoff}
+        commitProcessingHandoff={commitSessionProcessingHandoff}
+        externalAuthorityRevision={externalAuthorityRevision}
+        acquireSubmissionLease={acquireSubmissionLease}
+        renewSubmissionLease={renewSubmissionLease}
         markInterrupted={markSessionInterrupted}
         showSession={showSession}
         replaceWithNewDraft={createNewDraft ?? replaceWithNewDraft}
@@ -3251,13 +3817,76 @@ export const QuickIngestWizardModal: React.FC<QuickIngestWizardModalProps> = ({
         cancellationRequestNonce={cancellationRequestNonce}
         itemCancellationRequest={itemCancellationRequest}
         statusCheckRequestNonce={statusCheckRequestNonce}
-        shouldAttemptPersistedReattach={
-          session.lifecycle === "processing" &&
-          session.tracking?.mode === "webui-direct" &&
-          Boolean(session.tracking?.jobIds?.length || session.tracking?.runId)
-        }
       />
     </IngestWizardProvider>
+  )
+}
+
+export const QuickIngestWizardModal: React.FC<QuickIngestWizardModalProps> = (
+  props
+) => {
+  const {
+    createNewDraft,
+    open,
+    openRevision = 0,
+    presetMap: providedPresetMap,
+  } = props
+  const persistApi = useQuickIngestSessionStore.persist
+  const [sessionHydrated, setSessionHydrated] = useState(
+    () => persistApi?.hasHydrated?.() ?? true
+  )
+  const sessionId = useQuickIngestSessionStore(
+    (store) => store.session?.id ?? null
+  )
+
+  useEffect(() => {
+    if (!persistApi) return
+    const syncHydration = () =>
+      setSessionHydrated(persistApi.hasHydrated?.() ?? true)
+    const unsubscribeHydrate = persistApi.onHydrate?.(() => {
+      setSessionHydrated(false)
+    })
+    const unsubscribeFinishHydration = persistApi.onFinishHydration?.(
+      syncHydration
+    )
+    syncHydration()
+    return () => {
+      unsubscribeHydrate?.()
+      unsubscribeFinishHydration?.()
+    }
+  }, [persistApi])
+
+  useEffect(() => {
+    if (!sessionHydrated || !open || sessionId) return
+    if (createNewDraft) {
+      createNewDraft()
+      return
+    }
+    const presetMap = providedPresetMap ?? DEFAULT_PRESETS
+    useQuickIngestSessionStore.getState().createDraftSession({
+      selectedPreset: DEFAULT_PRESET,
+      customBasePreset: DEFAULT_PRESET,
+      presetConfig: presetMap[DEFAULT_PRESET],
+      customOptions: {},
+    })
+  }, [createNewDraft, open, providedPresetMap, sessionHydrated, sessionId])
+
+  const initialSession = useQuickIngestSessionStore.getState().session
+  if (
+    !sessionHydrated ||
+    !sessionId ||
+    initialSession?.id !== sessionId
+  ) {
+    return null
+  }
+
+  return (
+    <QuickIngestWizardSession
+      key={`${sessionId}:${openRevision}`}
+      {...props}
+      initialSession={initialSession}
+      sessionId={sessionId}
+    />
   )
 }
 

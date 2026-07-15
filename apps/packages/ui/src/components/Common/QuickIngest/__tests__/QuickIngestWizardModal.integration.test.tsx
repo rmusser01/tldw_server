@@ -603,6 +603,14 @@ const InnerWizardContent: React.FC<{
   onQuickProcess?: () => void
   analysisProviderWarning?: string | null
   focusAnalysisProvider?: boolean
+  persistenceStatus?: "ready" | "migrating" | "unavailable" | "quota_error"
+  isSubmissionOwner?: boolean
+  onCheckSubmissionOwnership?: () => Promise<boolean>
+  onBeginProcessing?: (state: IngestWizardState) => Promise<boolean>
+  preparingSubmission?: boolean
+  submissionStartError?: string | null
+  onPreparingCancelItem?: (id: string) => void
+  onPreparingCancelAll?: () => void
 }> = ({
   onClose,
   isStepVisible = true,
@@ -613,6 +621,14 @@ const InnerWizardContent: React.FC<{
   onQuickProcess,
   analysisProviderWarning,
   focusAnalysisProvider,
+  persistenceStatus = "ready",
+  isSubmissionOwner = true,
+  onCheckSubmissionOwnership,
+  onBeginProcessing,
+  preparingSubmission = false,
+  submissionStartError,
+  onPreparingCancelItem,
+  onPreparingCancelAll,
 }) => {
   const ctx = useIngestWizard()
   const { currentStep } = ctx.state
@@ -628,7 +644,14 @@ const InnerWizardContent: React.FC<{
         <span>Processing</span>
         <span>Results</span>
       </nav>
-      {currentStep === 1 && (
+      {preparingSubmission && (
+        <ProcessingStep
+          preparingSubmission
+          onPreparingCancelItem={onPreparingCancelItem}
+          onPreparingCancelAll={onPreparingCancelAll}
+        />
+      )}
+      {!preparingSubmission && currentStep === 1 && (
         <AddContentStep
           isOnlineForIngest={isOnlineForIngest}
           connectionRecoveryMessage={connectionRecoveryMessage}
@@ -637,23 +660,28 @@ const InnerWizardContent: React.FC<{
           onQuickProcess={onQuickProcess}
         />
       )}
-      {currentStep === 2 && (
+      {!preparingSubmission && currentStep === 2 && (
         <WizardConfigureStep
           isStepVisible={isStepVisible}
           analysisProviderWarning={analysisProviderWarning}
           focusAnalysisProvider={focusAnalysisProvider}
         />
       )}
-      {currentStep === 3 && (
+      {!preparingSubmission && currentStep === 3 && (
         <ReviewStep
           isOnlineForIngest={isOnlineForIngest}
           connectionRecoveryMessage={connectionRecoveryMessage}
           isCheckingConnection={isCheckingConnection}
           onRetryConnection={onRetryConnection}
+          persistenceStatus={persistenceStatus}
+          isSubmissionOwner={isSubmissionOwner}
+          onCheckSubmissionOwnership={onCheckSubmissionOwnership}
+          onBeginProcessing={onBeginProcessing}
+          submissionStartError={submissionStartError}
         />
       )}
-      {currentStep === 4 && <ProcessingStep />}
-      {currentStep === 5 && <WizardResultsStep onClose={onClose} />}
+      {!preparingSubmission && currentStep === 4 && <ProcessingStep />}
+      {!preparingSubmission && currentStep === 5 && <WizardResultsStep onClose={onClose} />}
     </div>
   )
 }
@@ -673,6 +701,14 @@ const WizardTestHarness: React.FC<{
   initialState?: Partial<IngestWizardState>
   analysisProviderWarning?: string | null
   focusAnalysisProvider?: boolean
+  persistenceStatus?: "ready" | "migrating" | "unavailable" | "quota_error"
+  isSubmissionOwner?: boolean
+  onCheckSubmissionOwnership?: () => Promise<boolean>
+  onBeginProcessing?: (state: IngestWizardState) => Promise<boolean>
+  preparingSubmission?: boolean
+  submissionStartError?: string | null
+  onPreparingCancelItem?: (id: string) => void
+  onPreparingCancelAll?: () => void
 }> = ({
   onClose,
   isOnlineForIngest,
@@ -687,6 +723,14 @@ const WizardTestHarness: React.FC<{
   initialState,
   analysisProviderWarning,
   focusAnalysisProvider,
+  persistenceStatus,
+  isSubmissionOwner,
+  onCheckSubmissionOwnership,
+  onBeginProcessing,
+  preparingSubmission,
+  submissionStartError,
+  onPreparingCancelItem,
+  onPreparingCancelAll,
 }) => {
   return (
     <IngestWizardProvider
@@ -706,6 +750,14 @@ const WizardTestHarness: React.FC<{
         onQuickProcess={onQuickProcess}
         analysisProviderWarning={analysisProviderWarning}
         focusAnalysisProvider={focusAnalysisProvider}
+        persistenceStatus={persistenceStatus}
+        isSubmissionOwner={isSubmissionOwner}
+        onCheckSubmissionOwnership={onCheckSubmissionOwnership}
+        onBeginProcessing={onBeginProcessing}
+        preparingSubmission={preparingSubmission}
+        submissionStartError={submissionStartError}
+        onPreparingCancelItem={onPreparingCancelItem}
+        onPreparingCancelAll={onPreparingCancelAll}
       />
     </IngestWizardProvider>
   )
@@ -1525,6 +1577,218 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
 
     await user.click(screen.getByRole("button", { name: /back to settings/i }))
     expect(screen.getByRole("button", { name: /standard preset/i })).toBeTruthy()
+  })
+
+  it.each([
+    [
+      "migrating",
+      "Preparing local recovery. Processing will be available shortly.",
+    ],
+    [
+      "unavailable",
+      "Local recovery is unavailable. Enable browser storage before processing.",
+    ],
+    [
+      "quota_error",
+      "Local recovery storage is full. Free browser storage before processing.",
+    ],
+  ] as const)(
+    "Step 3 — blocks processing with concise %s recovery guidance",
+    (persistenceStatus, guidance) => {
+      render(
+        <WizardTestHarness
+          onClose={onClose}
+          persistenceStatus={persistenceStatus}
+          initialState={{
+            currentStep: 3,
+            highestStep: 3,
+            queueItems: [
+              {
+                id: `persistence-${persistenceStatus}`,
+                sourceRef: {
+                  kind: "direct_url",
+                  occurrenceId: `persistence-${persistenceStatus}`,
+                  url: `https://example.com/${persistenceStatus}`,
+                },
+                url: `https://example.com/${persistenceStatus}`,
+                detectedType: "web",
+                icon: "Globe",
+                fileSize: 0,
+                validation: { valid: true },
+              },
+            ],
+          }}
+        />
+      )
+
+      expect(screen.getByText(guidance)).toBeInTheDocument()
+      expect(screen.getByRole("button", { name: /start processing/i })).toBeDisabled()
+    }
+  )
+
+  it("Step 3 — distinguishes another-tab ownership and checks durable authority again", async () => {
+    const checkOwnership = vi.fn().mockResolvedValue(false)
+    render(
+      <WizardTestHarness
+        onClose={onClose}
+        persistenceStatus="ready"
+        isSubmissionOwner={false}
+        onCheckSubmissionOwnership={checkOwnership}
+        initialState={{
+          currentStep: 3,
+          highestStep: 3,
+          queueItems: [
+            {
+              id: "another-tab",
+              sourceRef: {
+                kind: "direct_url",
+                occurrenceId: "another-tab",
+                url: "https://example.com/another-tab",
+              },
+              url: "https://example.com/another-tab",
+              detectedType: "web",
+              icon: "Globe",
+              fileSize: 0,
+              validation: { valid: true },
+            },
+          ],
+        }}
+      />
+    )
+
+    expect(
+      screen.getByText("This ingest is already being processed in another tab.")
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/local recovery is unavailable/i)).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /start processing/i })).toBeDisabled()
+    await userEvent.click(screen.getByRole("button", { name: "Check again" }))
+    expect(checkOwnership).toHaveBeenCalledTimes(1)
+  })
+
+  it("Step 3 — awaits same-owner Start reacquisition before processing", async () => {
+    let releaseReacquire!: (value: boolean) => void
+    const reacquire = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          releaseReacquire = resolve
+        })
+    )
+    render(
+      <WizardTestHarness
+        onClose={onClose}
+        persistenceStatus="ready"
+        isSubmissionOwner
+        onCheckSubmissionOwnership={reacquire}
+        initialState={{
+          currentStep: 3,
+          highestStep: 3,
+          queueItems: [
+            {
+              id: "start-reacquire",
+              sourceRef: {
+                kind: "direct_url",
+                occurrenceId: "start-reacquire",
+                url: "https://example.com/start-reacquire",
+              },
+              url: "https://example.com/start-reacquire",
+              detectedType: "web",
+              icon: "Globe",
+              fileSize: 0,
+              validation: { valid: true },
+            },
+          ],
+        }}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: /start processing/i }))
+    expect(reacquire).toHaveBeenCalledTimes(1)
+    expect(ctxRef?.state.currentStep).toBe(3)
+
+    await act(async () => {
+      releaseReacquire(true)
+      await Promise.resolve()
+    })
+    expect(ctxRef?.state.currentStep).toBe(4)
+  })
+
+  it("Step 3 — awaits the explicit processing command with a loading state", async () => {
+    let releaseBegin!: (value: boolean) => void
+    const beginProcessing = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          releaseBegin = resolve
+        })
+    )
+    render(
+      <WizardTestHarness
+        onClose={onClose}
+        onBeginProcessing={beginProcessing}
+        initialState={{
+          currentStep: 3,
+          highestStep: 3,
+          queueItems: [
+            {
+              id: "explicit-review-start",
+              url: "https://example.com/explicit-review-start",
+              detectedType: "web",
+              icon: "Globe",
+              fileSize: 0,
+              validation: { valid: true },
+            },
+          ],
+        }}
+      />
+    )
+
+    const startButton = screen.getByRole("button", {
+      name: /start processing/i,
+    })
+    fireEvent.click(startButton)
+
+    expect(beginProcessing).toHaveBeenCalledTimes(1)
+    expect(beginProcessing).toHaveBeenCalledWith(
+      expect.objectContaining({ currentStep: 3 })
+    )
+    expect(startButton).toBeDisabled()
+    expect(startButton).toHaveAttribute("aria-busy", "true")
+    expect(ctxRef?.state.currentStep).toBe(3)
+
+    await act(async () => {
+      releaseBegin(false)
+      await Promise.resolve()
+    })
+
+    expect(ctxRef?.state.currentStep).toBe(3)
+    expect(startButton).not.toBeDisabled()
+    expect(startButton).toHaveAttribute("aria-busy", "false")
+  })
+
+  it("Step 3 — renders the dedicated safe pre-submit error as an alert", () => {
+    const safeError =
+      "Quick ingest paused before submission. Check local recovery and submission ownership, then try again."
+    render(
+      <WizardTestHarness
+        onClose={onClose}
+        submissionStartError={safeError}
+        initialState={{
+          currentStep: 3,
+          highestStep: 3,
+          queueItems: [
+            {
+              id: "safe-review-error",
+              url: "https://example.com/safe-review-error",
+              detectedType: "web",
+              icon: "Globe",
+              fileSize: 0,
+              validation: { valid: true },
+            },
+          ],
+        }}
+      />
+    )
+
+    expect(screen.getByRole("alert")).toHaveTextContent(safeError)
   })
 
   // -------------------------------------------------------------------------
@@ -2883,6 +3147,74 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
 
     await user.click(screen.getByRole("button", { name: "Cancel All" }))
     expect(onCancelProcessing).toHaveBeenCalledTimes(1)
+  })
+
+  it("preparation — derives selected rows and exposes row and whole-run cancellation before handoff", async () => {
+    const user = userEvent.setup()
+    const onCancelItem = vi.fn().mockReturnValue(true)
+    const onCancelProcessing = vi.fn().mockReturnValue(true)
+    const onPreparingCancelItem = vi.fn()
+    const onPreparingCancelAll = vi.fn()
+
+    render(
+      <WizardTestHarness
+        onClose={onClose}
+        preparingSubmission
+        onCancelItem={onCancelItem}
+        onCancelProcessing={onCancelProcessing}
+        onPreparingCancelItem={onPreparingCancelItem}
+        onPreparingCancelAll={onPreparingCancelAll}
+        initialState={{
+          currentStep: 1,
+          highestStep: 1,
+          queueItems: [
+            {
+              id: "occ-preparing-row-1",
+              kind: "url",
+              url: "https://example.com/preparing/one",
+              sourceRef: {
+                kind: "direct_url",
+                occurrenceId: "occ-preparing-row-1",
+                url: "https://example.com/preparing/one",
+              },
+              detectedType: "web",
+              icon: "Globe",
+              fileSize: 0,
+              validation: { valid: true },
+            },
+            {
+              id: "occ-preparing-row-2",
+              kind: "url",
+              url: "https://example.com/preparing/two",
+              sourceRef: {
+                kind: "direct_url",
+                occurrenceId: "occ-preparing-row-2",
+                url: "https://example.com/preparing/two",
+              },
+              detectedType: "web",
+              icon: "Globe",
+              fileSize: 0,
+              validation: { valid: true },
+            },
+          ],
+        }}
+      />
+    )
+
+    expect(screen.getAllByRole("listitem")).toHaveLength(2)
+    await user.click(
+      screen.getByRole("button", {
+        name: "Cancel https://example.com/preparing/one",
+      })
+    )
+    expect(onPreparingCancelItem).toHaveBeenCalledWith("occ-preparing-row-1")
+    expect(onCancelItem).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole("button", { name: "Cancel All" }))
+    expect(onPreparingCancelAll).toHaveBeenCalledTimes(1)
+    expect(onCancelProcessing).not.toHaveBeenCalled()
+    expect(ctxRef?.state.currentStep).toBe(1)
+    expect(ctxRef?.state.processingState.status).toBe("idle")
   })
 
   it("Step 4 — bounds 500 lifecycle rows and filters by actionable state", async () => {

@@ -17,7 +17,10 @@ import {
   AlertTriangle,
 } from "lucide-react"
 import type { ItemProgress, ItemProgressStatus, WizardQueueItem } from "./types"
-import { useIngestWizard } from "./IngestWizardContext"
+import {
+  buildProcessingTransition,
+  useIngestWizard,
+} from "./IngestWizardContext"
 import { useQuickIngestSessionStore } from "@/store/quick-ingest-session"
 import { QUICK_INGEST_ACCEPT_STRING } from "./constants"
 import { validateQuickIngestFile } from "./QueueTab/FileDropZone"
@@ -381,10 +384,16 @@ const ItemRow: React.FC<ItemRowProps> = ({
 // ---------------------------------------------------------------------------
 
 type ProcessingStepProps = {
-  onCancelAll?: () => void
+  preparingSubmission?: boolean
+  onPreparingCancelItem?: (id: string) => void
+  onPreparingCancelAll?: () => void
 }
 
-export const ProcessingStep: React.FC<ProcessingStepProps> = ({ onCancelAll }) => {
+export const ProcessingStep: React.FC<ProcessingStepProps> = ({
+  preparingSubmission = false,
+  onPreparingCancelItem,
+  onPreparingCancelAll,
+}) => {
   const { t } = useTranslation(["option"])
   const {
     state,
@@ -396,7 +405,12 @@ export const ProcessingStep: React.FC<ProcessingStepProps> = ({ onCancelAll }) =
     updateQueueItems,
     updateItemProgress,
   } = useIngestWizard()
-  const { processingState, queueItems } = state
+  const displayState = useMemo(() => {
+    if (!preparingSubmission) return state
+    const transition = buildProcessingTransition(state)
+    return transition.ok ? transition.nextState : state
+  }, [preparingSubmission, state])
+  const { processingState, queueItems } = displayState
   const tracking = useQuickIngestSessionStore((store) => store.session?.tracking)
   const [failedExportNotice, setFailedExportNotice] = useState<string | null>(null)
   const [processingFilter, setProcessingFilter] = useState<ProcessingFilter>("all")
@@ -620,12 +634,12 @@ export const ProcessingStep: React.FC<ProcessingStepProps> = ({ onCancelAll }) =
   }, [processingState.perItemProgress])
 
   const handleCancelAll = useCallback(() => {
-    if (onCancelAll) {
-      onCancelAll()
+    if (preparingSubmission) {
+      onPreparingCancelAll?.()
       return
     }
     cancelProcessing()
-  }, [cancelProcessing, onCancelAll])
+  }, [cancelProcessing, onPreparingCancelAll, preparingSubmission])
 
   const handleMinimize = useCallback(() => {
     minimize()
@@ -633,9 +647,13 @@ export const ProcessingStep: React.FC<ProcessingStepProps> = ({ onCancelAll }) =
 
   const handleCancelItem = useCallback(
     (id: string) => {
+      if (preparingSubmission) {
+        onPreparingCancelItem?.(id)
+        return
+      }
       cancelItem(id)
     },
-    [cancelItem]
+    [cancelItem, onPreparingCancelItem, preparingSubmission]
   )
 
   const uploadFile = useCallback(

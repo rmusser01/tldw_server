@@ -2,6 +2,12 @@ import { createWithEqualityFn } from "zustand/traditional"
 import { createJSONStorage, persist, type StateStorage } from "zustand/middleware"
 
 import {
+  createQuickIngestIndexedDbStorage,
+  type QuickIngestIndexedDbStorage,
+  type QuickIngestPersistenceStatus,
+} from "@/db/dexie/quick-ingest"
+
+import {
   playlistHasMaterializationCues,
   type IngestPreset,
   type PresetConfig,
@@ -44,6 +50,7 @@ export type PersistedQuickIngestTracking = {
   submissionOccurrenceIds?: string[]
   sessionId?: string
   runId?: string
+  generation?: string
   batchId?: string
   batchIds?: string[]
   collectionId?: string
@@ -143,6 +150,9 @@ const isCustomBasePreset = (
 
 type QuickIngestSessionState = QuickIngestSessionPersistedState & {
   triggerSummary: QuickIngestTriggerSummary
+  persistenceStatus: QuickIngestPersistenceStatus
+  isSubmissionOwner: boolean
+  externalAuthorityRevision: number
   createDraftSession: (
     seed?: Partial<QuickIngestSessionRecord>
   ) => QuickIngestSessionRecord
@@ -151,7 +161,16 @@ type QuickIngestSessionState = QuickIngestSessionPersistedState & {
   hideSession: () => void
   markProcessingTracking: (tracking: PersistedQuickIngestTracking) => void
   clearProcessingTracking: () => void
-  commitReviewHandoff: (next: Partial<QuickIngestSessionRecord>) => boolean
+  commitReviewHandoff: (
+    next: Partial<QuickIngestSessionRecord>
+  ) => Promise<boolean>
+  commitProcessingHandoff: (
+    next: Partial<QuickIngestSessionRecord>,
+    tracking: PersistedQuickIngestTracking
+  ) => Promise<boolean>
+  acquireSubmissionLease: () => Promise<boolean>
+  renewSubmissionLease: () => Promise<boolean>
+  releaseSubmissionLease: () => Promise<void>
   markInterrupted: (reason?: string) => void
   clearSession: () => void
   replaceWithNewDraft: (
@@ -179,48 +198,6 @@ const INITIAL_RESULT_SUMMARY: QuickIngestSessionResultSummary = {
   errorMessage: null,
 }
 
-const createMemoryStorage = (): StateStorage => ({
-  getItem: () => null,
-  setItem: () => {},
-  removeItem: () => {},
-})
-
-const createSessionStorage = (): StateStorage => {
-  if (typeof window === "undefined") {
-    return createMemoryStorage()
-  }
-  return {
-    getItem: (name: string): string | null => {
-      try {
-        return window.sessionStorage.getItem(name)
-      } catch {
-        return null
-      }
-    },
-    setItem: (name: string, value: string): void => {
-      try {
-        const parsed = JSON.parse(value) as {
-          state?: QuickIngestSessionPersistedState
-        }
-        if (!parsed?.state?.session) {
-          window.sessionStorage.removeItem(name)
-          return
-        }
-        window.sessionStorage.setItem(name, value)
-      } catch {
-        // Ignore storage write failures.
-      }
-    },
-    removeItem: (name: string): void => {
-      try {
-        window.sessionStorage.removeItem(name)
-      } catch {
-        // Ignore storage removal failures.
-      }
-    },
-  }
-}
-
 const generateSessionId = (): string => {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID()
@@ -242,6 +219,11 @@ const normalizeStringIds = (values?: unknown[]): string[] =>
 const MAX_PERSISTED_RUN_ID_LENGTH = 255
 const MAX_PERSISTED_SUBMISSION_OCCURRENCES = 500
 
+const boundedTrackingIds = (values: unknown[]): string[] =>
+  normalizeStringIds(values)
+    .filter((value) => value.length <= MAX_PERSISTED_RUN_ID_LENGTH)
+    .slice(0, MAX_PERSISTED_SUBMISSION_OCCURRENCES)
+
 const sanitizeRunId = (value?: string): string | undefined => {
   const runId = value?.trim() || ""
   return runId.length > 0 && runId.length <= MAX_PERSISTED_RUN_ID_LENGTH
@@ -253,42 +235,57 @@ const sanitizeTracking = (
   tracking?: PersistedQuickIngestTracking
 ): PersistedQuickIngestTracking | undefined => {
   if (!tracking) return undefined
-  const batchIds = normalizeStringIds([
+  const batchIds = boundedTrackingIds([
     ...(Array.isArray(tracking.batchIds) ? tracking.batchIds : []),
     tracking.batchId,
   ])
   const jobIds = Array.isArray(tracking.jobIds)
-    ? tracking.jobIds
-        .map((jobId) => Number(jobId))
-        .filter((jobId) => Number.isFinite(jobId) && jobId > 0)
-        .map((jobId) => Math.trunc(jobId))
+    ? Array.from(
+        new Set(
+          tracking.jobIds
+            .map((jobId) => Number(jobId))
+            .filter((jobId) => Number.isFinite(jobId) && jobId > 0)
+            .map((jobId) => Math.trunc(jobId))
+            .filter((jobId) => Number.isSafeInteger(jobId))
+        )
+      ).slice(0, MAX_PERSISTED_SUBMISSION_OCCURRENCES)
     : undefined
-  const submittedItemIds = normalizeStringIds([
+  const submittedItemIds = boundedTrackingIds([
     ...(Array.isArray(tracking.submittedItemIds)
       ? tracking.submittedItemIds
       : []),
     ...(Array.isArray(tracking.itemIds) ? tracking.itemIds : []),
   ])
-  const plannedItemIds = normalizeStringIds(
+  const plannedItemIds = boundedTrackingIds(
     Array.isArray(tracking.plannedItemIds) ? tracking.plannedItemIds : []
   )
-  const submissionOccurrenceIds = normalizeStringIds(
+  const submissionOccurrenceIds = boundedTrackingIds(
     Array.isArray(tracking.submissionOccurrenceIds)
       ? tracking.submissionOccurrenceIds
       : []
   )
-    .filter(
-      (occurrenceId) => occurrenceId.length <= MAX_PERSISTED_RUN_ID_LENGTH
-    )
-    .slice(0, MAX_PERSISTED_SUBMISSION_OCCURRENCES)
   const jobIdToItemIdEntries = Object.entries(tracking.jobIdToItemId || {})
     .map(([jobId, itemId]) => [String(jobId || "").trim(), String(itemId || "").trim()] as const)
-    .filter(([jobId, itemId]) => jobId && itemId)
+    .filter(
+      ([jobId, itemId]) =>
+        jobId.length > 0 &&
+        jobId.length <= MAX_PERSISTED_RUN_ID_LENGTH &&
+        itemId.length > 0 &&
+        itemId.length <= MAX_PERSISTED_RUN_ID_LENGTH
+    )
+    .slice(0, MAX_PERSISTED_SUBMISSION_OCCURRENCES)
   const jobIdToCollectionItemIdEntries = Object.entries(
     tracking.jobIdToCollectionItemId || {}
   )
     .map(([jobId, itemId]) => [String(jobId || "").trim(), String(itemId || "").trim()] as const)
-    .filter(([jobId, itemId]) => jobId && itemId)
+    .filter(
+      ([jobId, itemId]) =>
+        jobId.length > 0 &&
+        jobId.length <= MAX_PERSISTED_RUN_ID_LENGTH &&
+        itemId.length > 0 &&
+        itemId.length <= MAX_PERSISTED_RUN_ID_LENGTH
+    )
+    .slice(0, MAX_PERSISTED_SUBMISSION_OCCURRENCES)
   const normalizedMode =
     tracking.mode === "webui-direct" ||
     tracking.mode === "extension-runtime" ||
@@ -308,16 +305,16 @@ const sanitizeTracking = (
         : undefined,
     submissionOccurrenceIds:
       submissionOccurrenceIds.length > 0 ? submissionOccurrenceIds : undefined,
-    sessionId: tracking.sessionId?.trim() || undefined,
+    sessionId: sanitizeRunId(tracking.sessionId),
     runId: sanitizeRunId(tracking.runId),
     generation: sanitizeRunId(tracking.generation),
     batchId:
-      tracking.batchId?.trim() ||
+      sanitizeRunId(tracking.batchId) ||
       (batchIds.length > 0 ? batchIds[batchIds.length - 1] : undefined),
     batchIds: batchIds.length > 0 ? batchIds : undefined,
-    collectionId: tracking.collectionId?.trim() || undefined,
+    collectionId: sanitizeRunId(tracking.collectionId),
     plannedItemIds: plannedItemIds.length > 0 ? plannedItemIds : undefined,
-    jobIds: jobIds && jobIds.length > 0 ? Array.from(new Set(jobIds)) : undefined,
+    jobIds: jobIds && jobIds.length > 0 ? jobIds : undefined,
     submittedItemIds:
       submittedItemIds.length > 0 ? submittedItemIds : undefined,
     itemIds: submittedItemIds.length > 0 ? submittedItemIds : undefined,
@@ -819,6 +816,367 @@ const sanitizeQueueItems = (
   })
 }
 
+const ITEM_PROGRESS_STATUSES = new Set([
+  "queued",
+  "uploading",
+  "processing",
+  "analyzing",
+  "storing",
+  "complete",
+  "failed",
+  "cancelled",
+])
+const RUN_ITEM_STATES = new Set([
+  "staged",
+  "preparing",
+  "awaiting_upload",
+  "submit_pending",
+  "queued",
+  "running",
+  "processing",
+  "cancellation_requested",
+  "status_unavailable",
+  "terminal",
+])
+const RUN_ITEM_OUTCOMES = new Set([
+  "completed",
+  "included_existing",
+  "metadata_updated",
+  "skipped_existing",
+  "submit_failed",
+  "processing_failed",
+  "metadata_update_failed",
+  "cancelled",
+])
+const RESULT_OUTCOMES = new Set([
+  "ingested",
+  "processed",
+  "skipped",
+  "submit_failed",
+  "failed",
+  "cancelled",
+])
+const ERROR_CLASSIFICATIONS = new Set([
+  "network",
+  "auth",
+  "validation",
+  "server",
+  "timeout",
+  "unknown",
+])
+const PROCESSING_STATUSES = new Set([
+  "idle",
+  "running",
+  "complete",
+  "cancelled",
+  "error",
+])
+
+const finiteNumber = (value: unknown, fallback = 0): number =>
+  typeof value === "number" && Number.isFinite(value) ? value : fallback
+
+const sanitizeProcessingState = (value: unknown): WizardProcessingState => {
+  const state = asRecord(value)
+  const entries = Array.isArray(state?.perItemProgress)
+    ? state.perItemProgress
+    : []
+  const perItemProgress = entries
+    .slice(0, MAX_PERSISTED_SUBMISSION_OCCURRENCES)
+    .flatMap((value) => {
+      const progress = asRecord(value)
+      const id = canonicalId(progress?.id)
+      if (!progress || !id) return []
+      const status = ITEM_PROGRESS_STATUSES.has(String(progress.status))
+        ? (progress.status as WizardProcessingState["perItemProgress"][number]["status"])
+        : "queued"
+      const lifecycleState = RUN_ITEM_STATES.has(String(progress.lifecycleState))
+        ? (progress.lifecycleState as NonNullable<
+            WizardProcessingState["perItemProgress"][number]["lifecycleState"]
+          >)
+        : undefined
+      const terminalOutcome = RUN_ITEM_OUTCOMES.has(String(progress.terminalOutcome))
+        ? (progress.terminalOutcome as NonNullable<
+            WizardProcessingState["perItemProgress"][number]["terminalOutcome"]
+          >)
+        : progress.terminalOutcome === null
+          ? null
+          : undefined
+      return [{
+        id,
+        status,
+        progressPercent: Math.min(100, Math.max(0, finiteNumber(progress.progressPercent))),
+        currentStage: boundedString(progress.currentStage, MAX_DISPLAY_LENGTH) || "",
+        estimatedRemaining: Math.max(0, finiteNumber(progress.estimatedRemaining)),
+        ...(boundedString(progress.error, MAX_DISPLAY_LENGTH)
+          ? { error: progress.error as string }
+          : {}),
+        ...(lifecycleState ? { lifecycleState } : {}),
+        ...(terminalOutcome !== undefined ? { terminalOutcome } : {}),
+        ...(typeof progress.retryable === "boolean"
+          ? { retryable: progress.retryable }
+          : {}),
+        ...(typeof progress.attempt === "number" &&
+        Number.isSafeInteger(progress.attempt) &&
+        progress.attempt >= 0
+          ? { attempt: Number(progress.attempt) }
+          : {}),
+      }]
+    })
+  return {
+    status: PROCESSING_STATUSES.has(String(state?.status))
+      ? (state?.status as WizardProcessingState["status"])
+      : "idle",
+    perItemProgress,
+    elapsed: Math.max(0, finiteNumber(state?.elapsed)),
+    estimatedRemaining: Math.max(0, finiteNumber(state?.estimatedRemaining)),
+  }
+}
+
+const sanitizeResults = (value: unknown): WizardResultItem[] =>
+  (Array.isArray(value) ? value : [])
+    .slice(0, MAX_PERSISTED_SUBMISSION_OCCURRENCES)
+    .flatMap((value) => {
+      const result = asRecord(value)
+      const id = canonicalId(result?.id)
+      if (!result || !id) return []
+      const outcome = RESULT_OUTCOMES.has(String(result.outcome))
+        ? (result.outcome as WizardResultItem["outcome"])
+        : undefined
+      const terminalOutcome = RUN_ITEM_OUTCOMES.has(String(result.terminalOutcome))
+        ? (result.terminalOutcome as NonNullable<WizardResultItem["terminalOutcome"]>)
+        : result.terminalOutcome === null
+          ? null
+          : undefined
+      const errorClassification = ERROR_CLASSIFICATIONS.has(
+        String(result.errorClassification)
+      )
+        ? (result.errorClassification as WizardResultItem["errorClassification"])
+        : undefined
+      const mediaId =
+        typeof result.mediaId === "number" && Number.isSafeInteger(result.mediaId)
+          ? result.mediaId
+          : boundedString(result.mediaId, MAX_ID_LENGTH)
+      const collectionItemId =
+        typeof result.collectionItemId === "number" &&
+        Number.isSafeInteger(result.collectionItemId)
+          ? result.collectionItemId
+          : boundedString(result.collectionItemId, MAX_ID_LENGTH)
+      return [{
+        id,
+        status: result.status === "error" ? "error" : "ok",
+        ...(outcome ? { outcome } : {}),
+        ...(boundedString(result.url, MAX_URL_LENGTH)
+          ? { url: result.url as string }
+          : {}),
+        ...(boundedString(result.fileName, MAX_DISPLAY_LENGTH)
+          ? { fileName: result.fileName as string }
+          : {}),
+        type: boundedString(result.type, MAX_ID_LENGTH) || "unknown",
+        ...(boundedString(result.error, MAX_DISPLAY_LENGTH)
+          ? { error: result.error as string }
+          : {}),
+        ...(typeof result.persisted === "boolean"
+          ? { persisted: result.persisted }
+          : {}),
+        ...(terminalOutcome !== undefined ? { terminalOutcome } : {}),
+        ...(typeof result.retryable === "boolean"
+          ? { retryable: result.retryable }
+          : {}),
+        ...(errorClassification ? { errorClassification } : {}),
+        ...(finiteNumber(result.durationMs, -1) >= 0
+          ? { durationMs: finiteNumber(result.durationMs) }
+          : {}),
+        ...(mediaId !== undefined ? { mediaId } : {}),
+        ...(collectionItemId !== undefined ? { collectionItemId } : {}),
+        ...(typeof result.retryAttempt === "number" &&
+        Number.isSafeInteger(result.retryAttempt) &&
+        result.retryAttempt >= 0
+          ? { retryAttempt: Number(result.retryAttempt) }
+          : result.retryAttempt === null
+            ? { retryAttempt: null }
+            : {}),
+        ...(boundedString(result.idempotencyKey, MAX_ID_LENGTH)
+          ? { idempotencyKey: result.idempotencyKey as string }
+          : result.idempotencyKey === null
+            ? { idempotencyKey: null }
+            : {}),
+        ...(boundedString(result.title, MAX_DISPLAY_LENGTH)
+          ? { title: result.title as string }
+          : result.title === null
+            ? { title: null }
+            : {}),
+        ...(boundedString(result.message, MAX_DISPLAY_LENGTH)
+          ? { message: result.message as string }
+          : {}),
+      }]
+    })
+
+const sanitizeOpenDetail = (value: unknown): QuickIngestOpenDetail | null => {
+  const detail = asRecord(value)
+  if (!detail) return null
+  const source = boundedString(detail.source, 64)
+  const action = boundedString(detail.action, 64)
+  const url = boundedString(detail.url, MAX_URL_LENGTH)
+  const preferredPreset = isCustomBasePreset(detail.preferredPreset)
+    ? detail.preferredPreset
+    : undefined
+  const sourceKind =
+    detail.sourceKind === "youtube_playlist" ||
+    detail.sourceKind === "youtube_watch_playlist" ||
+    detail.sourceKind === "unknown"
+      ? detail.sourceKind
+      : undefined
+  const firstSourceKind = isFirstSourceQuickIngestKind(detail.firstSourceKind)
+    ? detail.firstSourceKind
+    : undefined
+  return {
+    ...(source ? { source } : {}),
+    ...(action ? { action } : {}),
+    ...(url ? { url } : {}),
+    ...(preferredPreset ? { preferredPreset } : {}),
+    ...(sourceKind ? { sourceKind } : {}),
+    ...(typeof detail.firstSource === "boolean"
+      ? { firstSource: detail.firstSource }
+      : {}),
+    ...(firstSourceKind ? { firstSourceKind } : {}),
+  }
+}
+
+const sanitizeConferenceBatchMetadata = (
+  value: unknown
+): ConferenceBatchMetadata | null => {
+  const metadata = asRecord(value)
+  const collectionName = boundedString(metadata?.collectionName, MAX_DISPLAY_LENGTH)
+  if (!metadata || !collectionName) return null
+  return {
+    collectionName,
+    ...(boundedString(metadata.conferenceName, MAX_DISPLAY_LENGTH)
+      ? { conferenceName: metadata.conferenceName as string }
+      : {}),
+    ...(boundedString(metadata.eventDate, 64)
+      ? { eventDate: metadata.eventDate as string }
+      : {}),
+    ...(boundedString(metadata.eventYear, 16)
+      ? { eventYear: metadata.eventYear as string }
+      : {}),
+    sharedTags:
+      boundedStringArray(metadata.sharedTags, MAX_KEYWORDS, MAX_KEYWORD_LENGTH) || [],
+    ...(boundedString(metadata.sourcePlaylistUrl, MAX_URL_LENGTH)
+      ? { sourcePlaylistUrl: metadata.sourcePlaylistUrl as string }
+      : {}),
+  }
+}
+
+const sanitizeAdvancedValues = (value: unknown): Record<string, unknown> => {
+  const advanced = asRecord(value)
+  if (!advanced) return {}
+  const next: Record<string, unknown> = {}
+  for (const key of [
+    "chunk_method",
+    "chunk_size",
+    "chunk_overlap",
+    "transcription_model",
+  ]) {
+    const entry = advanced[key]
+    if (typeof entry === "boolean" || (typeof entry === "number" && Number.isFinite(entry))) {
+      next[key] = entry
+    } else if (
+      typeof entry === "string" &&
+      entry.length <= MAX_DISPLAY_LENGTH &&
+      !entry.startsWith("data:")
+    ) {
+      next[key] = entry
+    }
+  }
+  return next
+}
+
+const sanitizePresetConfig = (
+  value: unknown,
+  fallback: PresetConfig
+): PresetConfig => {
+  const config = asRecord(value)
+  const common = asRecord(config?.common)
+  const typeDefaults = asRecord(config?.typeDefaults)
+  const audio = asRecord(typeDefaults?.audio)
+  const document = asRecord(typeDefaults?.document)
+  const video = asRecord(typeDefaults?.video)
+  return {
+    common: {
+      perform_analysis:
+        typeof common?.perform_analysis === "boolean"
+          ? common.perform_analysis
+          : fallback.common.perform_analysis,
+      perform_chunking:
+        typeof common?.perform_chunking === "boolean"
+          ? common.perform_chunking
+          : fallback.common.perform_chunking,
+      overwrite_existing:
+        typeof common?.overwrite_existing === "boolean"
+          ? common.overwrite_existing
+          : fallback.common.overwrite_existing,
+      chunking_mode:
+        common?.chunking_mode === "manual" || common?.chunking_mode === "auto"
+          ? common.chunking_mode
+          : fallback.common.chunking_mode,
+      auto_chunking_goal:
+        common?.auto_chunking_goal === "balanced" ||
+        common?.auto_chunking_goal === "qa_search" ||
+        common?.auto_chunking_goal === "navigation_summary"
+          ? common.auto_chunking_goal
+          : fallback.common.auto_chunking_goal,
+      auto_chunking_use_llm:
+        typeof common?.auto_chunking_use_llm === "boolean"
+          ? common.auto_chunking_use_llm
+          : fallback.common.auto_chunking_use_llm,
+    },
+    storeRemote:
+      typeof config?.storeRemote === "boolean"
+        ? config.storeRemote
+        : fallback.storeRemote,
+    reviewBeforeStorage:
+      typeof config?.reviewBeforeStorage === "boolean"
+        ? config.reviewBeforeStorage
+        : fallback.reviewBeforeStorage,
+    typeDefaults: {
+      audio: {
+        ...(boundedString(audio?.language, 64)
+          ? { language: audio?.language as string }
+          : {}),
+        ...(typeof audio?.diarize === "boolean" ? { diarize: audio.diarize } : {}),
+      },
+      document: {
+        ...(typeof document?.ocr === "boolean" ? { ocr: document.ocr } : {}),
+      },
+      video: {
+        ...(typeof video?.captions === "boolean"
+          ? { captions: video.captions }
+          : {}),
+      },
+    },
+    advancedValues: sanitizeAdvancedValues(config?.advancedValues),
+  }
+}
+
+const sanitizeCustomOptions = (value: unknown): Partial<PresetConfig> => {
+  const options = asRecord(value)
+  if (!options) return {}
+  const sanitized = sanitizePresetConfig(options, DEFAULT_PRESETS[DEFAULT_PRESET])
+  return {
+    ...(options.common ? { common: sanitized.common } : {}),
+    ...(typeof options.storeRemote === "boolean"
+      ? { storeRemote: options.storeRemote }
+      : {}),
+    ...(typeof options.reviewBeforeStorage === "boolean"
+      ? { reviewBeforeStorage: options.reviewBeforeStorage }
+      : {}),
+    ...(options.typeDefaults ? { typeDefaults: sanitized.typeDefaults } : {}),
+    ...(options.advancedValues
+      ? { advancedValues: sanitized.advancedValues }
+      : {}),
+  }
+}
+
 const countTerminalFailures = (session: QuickIngestSessionRecord): number => {
   if (session.lifecycle === "partial_failure" || session.lifecycle === "interrupted") {
     return Math.max(
@@ -912,42 +1270,98 @@ const sanitizeSession = (
   const customBasePreset = isCustomBasePreset(session.customBasePreset)
     ? session.customBasePreset
     : DEFAULT_PRESET
+  const selectedPreset =
+    session.selectedPreset === "quick" ||
+    session.selectedPreset === "standard" ||
+    session.selectedPreset === "deep" ||
+    session.selectedPreset === "custom"
+      ? session.selectedPreset
+      : DEFAULT_PRESET
+  const queueItems = sanitizeQueueItems(session.queueItems)
+  const results = sanitizeResults(session.results)
+  const processingState = sanitizeProcessingState(session.processingState)
+  const lifecycle =
+    session.lifecycle === "draft" ||
+    session.lifecycle === "processing" ||
+    session.lifecycle === "completed" ||
+    session.lifecycle === "partial_failure" ||
+    session.lifecycle === "cancelled" ||
+    session.lifecycle === "interrupted"
+      ? session.lifecycle
+      : "draft"
+  const summary = asRecord(session.resultSummary)
+  const summaryStatus =
+    summary?.status === "idle" ||
+    summary?.status === "success" ||
+    summary?.status === "error" ||
+    summary?.status === "cancelled"
+      ? summary.status
+      : "idle"
+  const firstMediaId =
+    typeof summary?.firstMediaId === "number" &&
+    Number.isSafeInteger(summary.firstMediaId)
+      ? String(summary.firstMediaId)
+      : boundedString(summary?.firstMediaId, MAX_ID_LENGTH) || null
 
   return {
     id: session.id || generateSessionId(),
     visibility: session.visibility === "hidden" ? "hidden" : "visible",
-    lifecycle: session.lifecycle || "draft",
-    currentStep: session.currentStep || 1,
-    queueItems: sanitizeQueueItems(session.queueItems),
-    selectedPreset: session.selectedPreset || DEFAULT_PRESET,
+    lifecycle,
+    currentStep:
+      session.currentStep === 1 ||
+      session.currentStep === 2 ||
+      session.currentStep === 3 ||
+      session.currentStep === 4 ||
+      session.currentStep === 5
+        ? session.currentStep
+        : 1,
+    queueItems,
+    selectedPreset,
     customBasePreset,
-    presetConfig: session.presetConfig || DEFAULT_PRESETS[DEFAULT_PRESET],
-    customOptions: session.customOptions || {},
-    processingState: session.processingState || { ...INITIAL_PROCESSING_STATE },
-    results: Array.isArray(session.results) ? session.results : [],
-    openDetail:
-      session.openDetail && typeof session.openDetail === "object"
-        ? session.openDetail
-        : null,
+    presetConfig: sanitizePresetConfig(
+      session.presetConfig,
+      DEFAULT_PRESETS[customBasePreset]
+    ),
+    customOptions: sanitizeCustomOptions(session.customOptions),
+    processingState,
+    results,
+    openDetail: sanitizeOpenDetail(session.openDetail),
     firstSourceAddMode: isFirstSourceQuickIngestKind(
       session.firstSourceAddMode
     )
       ? session.firstSourceAddMode
       : null,
-    conferenceBatchMetadata: session.conferenceBatchMetadata ?? null,
+    conferenceBatchMetadata: sanitizeConferenceBatchMetadata(
+      session.conferenceBatchMetadata
+    ),
     badge: {
       queueCount: Math.max(
         0,
-        normalizeCountLike(session.badge?.queueCount) ?? sanitizeQueueItems(session.queueItems).length
+        normalizeCountLike(session.badge?.queueCount) ?? queueItems.length
       ),
       hasRecentFailure: Boolean(session.badge?.hasRecentFailure),
     },
     resultSummary: {
-      ...INITIAL_RESULT_SUMMARY,
-      ...(session.resultSummary || {}),
+      status: summaryStatus,
+      attemptedAt:
+        typeof summary?.attemptedAt === "number" && Number.isFinite(summary.attemptedAt)
+          ? summary.attemptedAt
+          : null,
+      completedAt:
+        typeof summary?.completedAt === "number" && Number.isFinite(summary.completedAt)
+          ? summary.completedAt
+          : null,
+      totalCount: normalizeCountLike(summary?.totalCount) ?? 0,
+      successCount: normalizeCountLike(summary?.successCount) ?? 0,
+      failedCount: normalizeCountLike(summary?.failedCount) ?? 0,
+      cancelledCount: normalizeCountLike(summary?.cancelledCount) ?? 0,
+      firstMediaId,
+      primarySourceLabel:
+        boundedString(summary?.primarySourceLabel, MAX_DISPLAY_LENGTH) || null,
+      errorMessage: boundedString(summary?.errorMessage, MAX_DISPLAY_LENGTH) || null,
     },
     tracking: sanitizeTracking(session.tracking),
-    errorMessage: session.errorMessage || null,
+    errorMessage: boundedString(session.errorMessage, MAX_DISPLAY_LENGTH) || null,
     createdAt,
     updatedAt,
     completedAt:
@@ -964,24 +1378,65 @@ const normalizeCountLike = (value: unknown): number | null => {
   return Math.floor(value)
 }
 
+export const normalizeQuickIngestPersistenceEnvelope = (
+  value: string
+): string | null => {
+  try {
+    const envelope = asRecord(JSON.parse(value))
+    const state = asRecord(envelope?.state)
+    if (!state || !Object.prototype.hasOwnProperty.call(state, "session")) {
+      return null
+    }
+    if (state.session === null) {
+      return JSON.stringify({ state: { session: null }, version: 0 })
+    }
+    const rawSession = asRecord(state.session)
+    const id = canonicalId(rawSession?.id)
+    const lifecycle = rawSession?.lifecycle
+    if (
+      !rawSession ||
+      !id ||
+      (lifecycle !== "draft" &&
+        lifecycle !== "processing" &&
+        lifecycle !== "completed" &&
+        lifecycle !== "partial_failure" &&
+        lifecycle !== "cancelled" &&
+        lifecycle !== "interrupted") ||
+      typeof rawSession.updatedAt !== "number" ||
+      !Number.isFinite(rawSession.updatedAt)
+    ) {
+      return null
+    }
+    const session = sanitizeSession(
+      rawSession as unknown as QuickIngestSessionRecord
+    )
+    return session
+      ? JSON.stringify({ state: { session }, version: 0 })
+      : null
+  } catch {
+    return null
+  }
+}
+
 const buildPersistedState = (
   session: QuickIngestSessionRecord | null
 ): QuickIngestSessionPersistedState => ({
   session: sanitizeSession(session),
 })
 
-const persistConfirmedSession = (session: QuickIngestSessionRecord): boolean => {
-  if (typeof window === "undefined") return false
-  const serialized = JSON.stringify({
-    state: buildPersistedState(session),
-    version: 0,
-  })
-  try {
-    window.sessionStorage.setItem(STORAGE_KEY, serialized)
-    return window.sessionStorage.getItem(STORAGE_KEY) === serialized
-  } catch {
-    return false
+const serializePersistedSession = (
+  session: QuickIngestSessionRecord
+): string => {
+  const serialized = normalizeQuickIngestPersistenceEnvelope(
+    JSON.stringify({
+      state: buildPersistedState(session),
+      version: 0,
+    })
+  )
+  if (!serialized) {
+    throw new TypeError("Invalid quick ingest persistence envelope")
   }
+  return serialized
 }
 
 export const createEmptyQuickIngestSession = (): QuickIngestSessionRecord => {
@@ -1014,11 +1469,19 @@ export const createEmptyQuickIngestSession = (): QuickIngestSessionRecord => {
   }
 }
 
-const createInitialState = (): QuickIngestSessionPersistedState & {
+const createInitialState = (
+  persistenceStatus: QuickIngestPersistenceStatus
+): QuickIngestSessionPersistedState & {
   triggerSummary: QuickIngestTriggerSummary
+  persistenceStatus: QuickIngestPersistenceStatus
+  isSubmissionOwner: boolean
+  externalAuthorityRevision: number
 } => ({
   session: null,
   triggerSummary: buildTriggerSummary(null),
+  persistenceStatus,
+  isSubmissionOwner: false,
+  externalAuthorityRevision: 0,
 })
 
 const withSessionUpdate = (
@@ -1039,11 +1502,54 @@ const withSessionUpdate = (
   })
 }
 
-export const createQuickIngestSessionStore = () =>
-  createWithEqualityFn<QuickIngestSessionState>()(
+export const createQuickIngestSessionStore = (options: {
+  persistence?: QuickIngestIndexedDbStorage
+} = {}) => {
+  const persistence =
+    options.persistence ||
+    createQuickIngestIndexedDbStorage({
+      normalizeValue: normalizeQuickIngestPersistenceEnvelope,
+    })
+  let lastBackgroundValue: string | null = null
+  const backgroundStorage: StateStorage = {
+    getItem: async (name) => {
+      try {
+        return await persistence.storage.getItem(name)
+      } catch {
+        return null
+      }
+    },
+    setItem: async (name, value) => {
+      try {
+        const envelope = JSON.parse(value) as {
+          state?: QuickIngestSessionPersistedState
+        }
+        if (!envelope.state?.session) return
+      } catch {
+        return
+      }
+      if (value === lastBackgroundValue) return
+      lastBackgroundValue = value
+      try {
+        await persistence.storage.setItem(name, value)
+      } catch {
+        if (lastBackgroundValue === value) lastBackgroundValue = null
+        // The adapter publishes the visible failure status.
+      }
+    },
+    removeItem: async (name) => {
+      lastBackgroundValue = null
+      try {
+        await persistence.storage.removeItem(name)
+      } catch {
+        // The adapter publishes the visible failure status.
+      }
+    },
+  }
+  const store = createWithEqualityFn<QuickIngestSessionState>()(
     persist(
       (set, get) => ({
-        ...createInitialState(),
+        ...createInitialState(persistence.getStatus()),
         createDraftSession: (seed) => {
           const next = sanitizeSession({
             ...createEmptyQuickIngestSession(),
@@ -1122,9 +1628,12 @@ export const createQuickIngestSessionStore = () =>
               updatedAt: Date.now(),
             }
           }),
-        commitReviewHandoff: (next) => {
-          const current = get().session
+        commitReviewHandoff: async (next) => {
+          const state = get()
+          const current = state.session
           if (!current) return false
+          const authorityRevision = state.externalAuthorityRevision
+          const expectedValue = serializePersistedSession(current)
           const session = sanitizeSession({
             ...current,
             ...next,
@@ -1139,12 +1648,163 @@ export const createQuickIngestSessionStore = () =>
             tracking: undefined,
             updatedAt: Date.now(),
           })
-          if (!session || !persistConfirmedSession(session)) return false
+          if (!session) return false
+          try {
+            await persistence.initialize()
+            const committed = await persistence.commitReviewHandoff(
+              expectedValue,
+              serializePersistedSession(session)
+            )
+            if (!committed) return false
+          } catch {
+            return false
+          }
+          const live = get()
+          if (
+            !live.session ||
+            live.session.id !== current.id ||
+            live.externalAuthorityRevision !== authorityRevision ||
+            serializePersistedSession(live.session) !== expectedValue
+          ) {
+            return false
+          }
           set({
             session,
             triggerSummary: buildTriggerSummary(session),
           })
           return true
+        },
+        commitProcessingHandoff: async (next, tracking) => {
+          const state = get()
+          const current = state.session
+          if (
+            !current ||
+            state.persistenceStatus !== "ready" ||
+            !state.isSubmissionOwner ||
+            current.lifecycle !== "draft"
+          ) {
+            return false
+          }
+          const authorityRevision = state.externalAuthorityRevision
+          const expectedValue = serializePersistedSession(current)
+          const session = sanitizeSession({
+            ...current,
+            ...next,
+            lifecycle: "processing",
+            currentStep: 4,
+            badge: {
+              ...current.badge,
+              ...(next.badge || {}),
+            },
+            resultSummary: {
+              ...current.resultSummary,
+              ...(next.resultSummary || {}),
+            },
+            tracking: mergeTracking(current.tracking, {
+              ...tracking,
+              submissionState: "creating_run",
+              startedAt:
+                tracking.startedAt || current.tracking?.startedAt || Date.now(),
+            }),
+            updatedAt: Date.now(),
+          })
+          if (!session) return false
+          try {
+            await persistence.initialize()
+            const committed = await persistence.commitProcessingHandoff(
+              expectedValue,
+              serializePersistedSession(session)
+            )
+            if (!committed) return false
+          } catch {
+            return false
+          }
+          const live = get()
+          if (
+            !live.session ||
+            live.session.id !== current.id ||
+            live.externalAuthorityRevision !== authorityRevision ||
+            live.persistenceStatus !== "ready" ||
+            !live.isSubmissionOwner ||
+            serializePersistedSession(live.session) !== expectedValue
+          ) {
+            return false
+          }
+          set({
+            session,
+            triggerSummary: buildTriggerSummary(session),
+          })
+          return true
+        },
+        acquireSubmissionLease: async () => {
+          const sessionId = get().session?.id
+          if (!sessionId || get().persistenceStatus !== "ready") {
+            set({ isSubmissionOwner: false })
+            return false
+          }
+          let acquired = false
+          try {
+            acquired = await persistence.acquireSubmissionLease(sessionId)
+            const value = await persistence.storage.getItem(STORAGE_KEY)
+            const normalized = value
+              ? normalizeQuickIngestPersistenceEnvelope(value)
+              : null
+            if (normalized) {
+              const envelope = JSON.parse(normalized) as {
+                state?: QuickIngestSessionPersistedState
+              }
+              const durableSession = envelope.state?.session
+              const currentSession = get().session
+              if (
+                durableSession?.id === sessionId &&
+                currentSession?.id === sessionId &&
+                (durableSession.lifecycle !== "draft" ||
+                  durableSession.updatedAt > currentSession.updatedAt)
+              ) {
+                set((state) => ({
+                  session: durableSession,
+                  triggerSummary: buildTriggerSummary(durableSession),
+                  isSubmissionOwner: acquired,
+                  externalAuthorityRevision:
+                    state.externalAuthorityRevision + 1,
+                }))
+                return acquired
+              }
+            }
+            set({ isSubmissionOwner: acquired })
+            return acquired
+          } catch {
+            if (acquired) {
+              await persistence.releaseSubmissionLease(sessionId).catch(() => {})
+            }
+            set({ isSubmissionOwner: false })
+            return false
+          }
+        },
+        renewSubmissionLease: async () => {
+          const sessionId = get().session?.id
+          if (!sessionId || get().persistenceStatus !== "ready") {
+            set({ isSubmissionOwner: false })
+            return false
+          }
+          try {
+            const renewed = await persistence.renewSubmissionLease(sessionId)
+            set({ isSubmissionOwner: renewed })
+            return renewed
+          } catch {
+            set({ isSubmissionOwner: false })
+            return false
+          }
+        },
+        releaseSubmissionLease: async () => {
+          const sessionId = get().session?.id
+          set({ isSubmissionOwner: false })
+          if (!sessionId) return
+          try {
+            await persistence.releaseSubmissionLease(sessionId)
+          } catch {
+            // The persistence status subscription exposes the failure.
+          }
         },
         markInterrupted: (reason) =>
           withSessionUpdate(set, (current) => {
@@ -1167,11 +1827,24 @@ export const createQuickIngestSessionStore = () =>
           }),
         clearSession: () =>
           {
+            const session = get().session
             set({
               session: null,
               triggerSummary: buildTriggerSummary(null),
+              isSubmissionOwner: false,
             })
-            createSessionStorage().removeItem(STORAGE_KEY)
+            if (!session) return
+            if (session.lifecycle === "draft") {
+              void backgroundStorage.removeItem(STORAGE_KEY)
+              return
+            }
+            void persistence
+              .clearAuthoritativeSession({
+                id: session.id,
+                lifecycle: session.lifecycle,
+                updatedAt: session.updatedAt,
+              })
+              .catch(() => {})
           },
         replaceWithNewDraft: (seed) => {
           get().clearSession()
@@ -1184,22 +1857,42 @@ export const createQuickIngestSessionStore = () =>
         // persisted state (see apps/FRONTEND_AUDIT.md §6 / TASK-12102).
         version: 1,
         migrate: (persisted) => persisted as any,
-        storage: createJSONStorage(() => createSessionStorage()),
+        storage: createJSONStorage(() => backgroundStorage),
         partialize: (state) => buildPersistedState(state.session),
         merge: (persistedState, currentState) => {
           const nextSession = sanitizeSession(
             (persistedState as QuickIngestSessionPersistedState | undefined)?.session ||
               null
           )
+          const currentSession = currentState.session
+          const mergedSession =
+            nextSession &&
+            nextSession.lifecycle !== "draft" &&
+            currentSession?.lifecycle === "draft"
+              ? nextSession
+              : currentSession &&
+                  (!nextSession || currentSession.updatedAt > nextSession.updatedAt)
+              ? currentSession
+              : nextSession
           return {
             ...currentState,
-            session: nextSession,
-            triggerSummary: buildTriggerSummary(nextSession),
+            session: mergedSession,
+            triggerSummary: buildTriggerSummary(mergedSession),
           }
         },
       }
     )
   )
+
+  persistence.subscribeStatus((persistenceStatus) => {
+    store.setState({
+      persistenceStatus,
+      ...(persistenceStatus === "ready" ? {} : { isSubmissionOwner: false }),
+    })
+  })
+  void persistence.initialize().catch(() => {})
+  return store
+}
 
 export const useQuickIngestSessionStore = createQuickIngestSessionStore()
 

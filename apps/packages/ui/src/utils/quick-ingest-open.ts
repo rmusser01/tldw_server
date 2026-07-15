@@ -136,6 +136,21 @@ export const rememberQuickIngestOpenRequest = (
   return request
 }
 
+export const retainQuickIngestOpenRequest = (
+  mode: QuickIngestPendingOpenMode,
+  detail?: unknown,
+  fallbackOptions?: QuickIngestPendingOpenOptions
+): QuickIngestPendingOpenRequest | null => {
+  const scope = getQuickIngestWindow()
+  if (!scope) return null
+  const normalizedDetail = normalizeQuickIngestOpenDetail(detail)
+  const pending = scope.__tldwPendingQuickIngestOpen
+  if (pending?.mode === mode && pending.detail === normalizedDetail) {
+    return pending
+  }
+  return rememberQuickIngestOpenRequest(mode, normalizedDetail, fallbackOptions)
+}
+
 export const requestQuickIngestOpen = (
   detail?: unknown,
   options?: QuickIngestPendingOpenOptions
@@ -164,15 +179,19 @@ export const requestQuickIngestIntro = (
   return request
 }
 
-export const consumePendingQuickIngestOpen =
-  (): QuickIngestPendingOpenRequest | null => {
-    const scope = getQuickIngestWindow()
-    const request = scope?.__tldwPendingQuickIngestOpen || null
-    if (scope) {
-      delete scope.__tldwPendingQuickIngestOpen
-    }
-    return request
+export const consumePendingQuickIngestOpen = (
+  mode?: QuickIngestPendingOpenMode
+): QuickIngestPendingOpenRequest | null => {
+  const scope = getQuickIngestWindow()
+  const request = scope?.__tldwPendingQuickIngestOpen || null
+  if (mode && request?.mode !== mode) {
+    return null
   }
+  if (scope) {
+    delete scope.__tldwPendingQuickIngestOpen
+  }
+  return request
+}
 
 const hostnameMatches = (hostname: string, allowedHost: string): boolean =>
   hostname === allowedHost || hostname.endsWith(`.${allowedHost}`)

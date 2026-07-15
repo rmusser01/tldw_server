@@ -442,6 +442,16 @@ Requirements:
 - clean expired preflight state and stale terminal runs;
 - coordinate multiple tabs so one run is not submitted twice.
 
+### Explicit submission command boundary
+
+`currentStep === 4` and `processingState.status === "running"` describe the UI; they are not a command to create backend work. Review Start, quick-process, and `autoProcessQueued` must call one explicit `beginProcessing(candidateState)` command. No effect may infer a new submission from restored or rendered processing state.
+
+The command validates a pure processing transition before taking a lease. After transactional lease acquisition it chooses the caller snapshot unless acquisition advanced `externalAuthorityRevision`, in which case it rebuilds from the reconciled durable session. It then builds the immutable payload, renews the lease, durably writes the exact `processing` / `creating_run` handoff, applies the same processing snapshot to the Provider once, and invokes the backend runner. A handoff guard prevents the Provider's previous state from being persisted across the durable-commit/UI-transition window.
+
+The runner receives only the immutable processing snapshot, payload, session authority, and a transient attempt token. It checks that token and the existing session/revision authority after every await before publishing state. Cancellation, unmount, or a replacement attempt invalidates the token. The existing extension runtime attempt token remains authoritative for extension delivery; the UI token only fences stale component continuations.
+
+Pre-submit storage, ownership, payload-build, or handoff failure performs no backend mutation and does not enter Processing. Quick and automatic entry move to Review so the existing persistence/ownership alerts are visible; a safe local message covers payload-build failure. Restored `processing` and `creating_run` records are reattach/interruption inputs only and can never create a fresh submission. The sole remaining automatic effect consumes `autoProcessQueued` once; it never observes Step 4 as a trigger.
+
 Status transport is normalized but platform-aware:
 
 - WebUI prefers run-scoped SSE and falls back to paginated run polling.

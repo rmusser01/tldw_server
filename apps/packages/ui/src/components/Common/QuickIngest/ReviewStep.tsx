@@ -19,9 +19,11 @@ import {
   buildPlaylistIngestRunRequest,
   MAX_PLAYLIST_RUN_INPUTS,
   useIngestWizard,
+  type IngestWizardState,
 } from "./IngestWizardContext"
 import { estimateTotalSeconds, formatEstimate } from "./timeEstimation"
 import { ItemMetadataTable } from "./ItemMetadataTable"
+import type { QuickIngestPersistenceStatus } from "@/db/dexie/quick-ingest"
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -99,6 +101,11 @@ type ReviewStepProps = {
   isCheckingConnection?: boolean
   connectionRecoveryMessage?: string
   onRetryConnection?: () => void
+  persistenceStatus?: QuickIngestPersistenceStatus
+  isSubmissionOwner?: boolean
+  onCheckSubmissionOwnership?: () => Promise<boolean>
+  onBeginProcessing?: (state: IngestWizardState) => Promise<boolean>
+  submissionStartError?: string | null
 }
 
 export const ReviewStep: React.FC<ReviewStepProps> = ({
@@ -106,6 +113,11 @@ export const ReviewStep: React.FC<ReviewStepProps> = ({
   isCheckingConnection = false,
   connectionRecoveryMessage,
   onRetryConnection,
+  persistenceStatus = "ready",
+  isSubmissionOwner = true,
+  onCheckSubmissionOwnership,
+  onBeginProcessing,
+  submissionStartError,
 }) => {
   const { t } = useTranslation(["option"])
   const { state, goBack, startProcessing } = useIngestWizard()
@@ -116,6 +128,9 @@ export const ReviewStep: React.FC<ReviewStepProps> = ({
   const reviewListOwnsFocusRef = useRef(false)
   const activeReviewRowRef = useRef<{ id: string; index: number } | null>(null)
   const [activeReviewId, setActiveReviewId] = useState<string | null>(null)
+  const [isCheckingSubmissionOwnership, setIsCheckingSubmissionOwnership] =
+    useState(false)
+  const [isStartingProcessing, setIsStartingProcessing] = useState(false)
 
   const qi = useCallback(
     (key: string, defaultValue: string, options?: Record<string, unknown>) =>
@@ -286,16 +301,56 @@ export const ReviewStep: React.FC<ReviewStepProps> = ({
   const exceedsRunInputLimit =
     currentProcessingBlock?.code === "invalid_run_request" &&
     validItemCount > MAX_PLAYLIST_RUN_INPUTS
-  const canStartProcessing =
+  const canStartWithoutPersistence =
     validItemCount > 0 &&
     runRequestBuild.request !== null &&
     state.processingBlock === null &&
     isOnlineForIngest && !isCheckingConnection
+  const canStartProcessing =
+    canStartWithoutPersistence &&
+    persistenceStatus === "ready" &&
+    isSubmissionOwner &&
+    !isCheckingSubmissionOwnership &&
+    !isStartingProcessing
 
-  const handleStartProcessing = useCallback(() => {
-    if (!canStartProcessing) return
+  const handleStartProcessing = useCallback(async () => {
+    if (!canStartProcessing || persistenceStatus !== "ready") return
+    if (onBeginProcessing) {
+      setIsStartingProcessing(true)
+      try {
+        await onBeginProcessing(state)
+      } finally {
+        setIsStartingProcessing(false)
+      }
+      return
+    }
+    if (onCheckSubmissionOwnership) {
+      setIsCheckingSubmissionOwnership(true)
+      try {
+        if (!(await onCheckSubmissionOwnership())) return
+      } finally {
+        setIsCheckingSubmissionOwnership(false)
+      }
+    }
     startProcessing()
-  }, [canStartProcessing, startProcessing])
+  }, [
+    canStartProcessing,
+    onBeginProcessing,
+    onCheckSubmissionOwnership,
+    persistenceStatus,
+    state,
+    startProcessing,
+  ])
+
+  const handleCheckSubmissionOwnership = useCallback(async () => {
+    if (!onCheckSubmissionOwnership || persistenceStatus !== "ready") return
+    setIsCheckingSubmissionOwnership(true)
+    try {
+      await onCheckSubmissionOwnership()
+    } finally {
+      setIsCheckingSubmissionOwnership(false)
+    }
+  }, [onCheckSubmissionOwnership, persistenceStatus])
 
   // Contextual warnings
   const warnings = useMemo(() => {
@@ -532,6 +587,70 @@ export const ReviewStep: React.FC<ReviewStepProps> = ({
           </DesignSystemAlert>
         )}
 
+        {persistenceStatus === "migrating" && (
+          <DesignSystemAlert
+            variant="warning"
+            className="mt-3"
+            title={qi(
+              "review.persistence.migrating",
+              "Preparing local recovery. Processing will be available shortly."
+            )}
+          />
+        )}
+
+        {persistenceStatus === "unavailable" && (
+          <DesignSystemAlert
+            variant="error"
+            className="mt-3"
+            title={qi(
+              "review.persistence.unavailable",
+              "Local recovery is unavailable. Enable browser storage before processing."
+            )}
+          />
+        )}
+
+        {persistenceStatus === "quota_error" && (
+          <DesignSystemAlert
+            variant="error"
+            className="mt-3"
+            title={qi(
+              "review.persistence.quota",
+              "Local recovery storage is full. Free browser storage before processing."
+            )}
+          />
+        )}
+
+        {persistenceStatus === "ready" && !isSubmissionOwner && (
+          <DesignSystemAlert
+            variant="warning"
+            className="mt-3"
+            title={qi(
+              "review.persistence.otherTab",
+              "This ingest is already being processed in another tab."
+            )}
+            action={
+              onCheckSubmissionOwnership
+                ? {
+                    label: isCheckingSubmissionOwnership
+                      ? qi("review.persistence.checking", "Checking...")
+                      : qi("review.persistence.checkAgain", "Check again"),
+                    onClick: () => void handleCheckSubmissionOwnership(),
+                    loading: isCheckingSubmissionOwnership,
+                    disabled: isCheckingSubmissionOwnership,
+                  }
+                : undefined
+            }
+          />
+        )}
+
+        {submissionStartError && (
+          <DesignSystemAlert
+            variant="error"
+            className="mt-3"
+            title={submissionStartError}
+          />
+        )}
+
         {materializationExpired && (
           <DesignSystemAlert
             variant="error"
@@ -589,8 +708,9 @@ export const ReviewStep: React.FC<ReviewStepProps> = ({
 
         <button
           type="button"
-          onClick={handleStartProcessing}
+          onClick={() => void handleStartProcessing()}
           disabled={!canStartProcessing}
+          aria-busy={isStartingProcessing}
           className="inline-flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-primary/90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-focus disabled:cursor-not-allowed disabled:opacity-50"
           aria-label={qi("review.startAriaLabel", "Start processing")}
         >
