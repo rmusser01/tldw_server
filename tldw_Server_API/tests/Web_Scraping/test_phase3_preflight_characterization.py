@@ -213,6 +213,20 @@ def test_analyzer_and_public_entry_point_signatures_match_current_inventory() ->
     assert {
         name: str(inspect.signature(getattr(runner, name))) for name in EXPECTED_SIGNATURES
     } == EXPECTED_SIGNATURES  # nosec B101
+    analyzer_entry_points = {name: getattr(runner, name) for name in EXPECTED_SIGNATURES}
+    assert {  # nosec B101
+        name: inspect.iscoroutinefunction(entry_point) for name, entry_point in analyzer_entry_points.items()
+    } == {
+        "check_robots_txt": False,
+        "analyze_tls_fingerprint": True,
+        "analyze_js_rendering": False,
+        "detect_honeypots": False,
+        "detect_captcha": False,
+        "analyze_fingerprinting": False,
+        "analyze_function_integrity": False,
+        "profile_rate_limits": True,
+        "detect_waf": False,
+    }
     public_entry_points = {
         "gather_analysis": runner.gather_analysis,
         "run_analysis": runner.run_analysis,
@@ -375,6 +389,69 @@ async def test_gather_analysis_preserves_order_and_arguments(
             "strategy": ["A simple, direct scraping approach is likely to work."],
         },
     }
+
+
+@pytest.mark.asyncio
+async def test_gather_analysis_propagates_middle_analyzer_failure_without_later_calls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+    failure = RuntimeError("safe analyzer failure")
+
+    def sync_result(name: str, payload: dict[str, Any]):
+        def call(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+            events.append(name)
+            return payload
+
+        return call
+
+    async def async_result(name: str, payload: dict[str, Any]) -> dict[str, Any]:
+        events.append(name)
+        return payload
+
+    def fail_captcha(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        events.append("captcha")
+        raise failure
+
+    monkeypatch.setattr(
+        runner,
+        "check_robots_txt",
+        sync_result("robots", {"status": "success", "crawl_delay": None}),
+    )
+    monkeypatch.setattr(
+        runner,
+        "analyze_tls_fingerprint",
+        lambda *_args, **_kwargs: async_result("tls", {"status": "inactive"}),
+    )
+    monkeypatch.setattr(runner, "analyze_js_rendering", sync_result("js", {"status": "success"}))
+    monkeypatch.setattr(
+        runner,
+        "detect_honeypots",
+        sync_result("behavioral", {"status": "success"}),
+    )
+    monkeypatch.setattr(runner, "detect_captcha", fail_captcha)
+    monkeypatch.setattr(
+        runner,
+        "analyze_fingerprinting",
+        sync_result("fingerprint", {"status": "success"}),
+    )
+    monkeypatch.setattr(
+        runner,
+        "analyze_function_integrity",
+        sync_result("integrity", {"status": "success"}),
+    )
+    monkeypatch.setattr(
+        runner,
+        "profile_rate_limits",
+        lambda *_args, **_kwargs: async_result("rate_limit", {"status": "success"}),
+    )
+    monkeypatch.setattr(runner, "detect_waf", sync_result("waf", {"status": "success"}))
+
+    with pytest.raises(RuntimeError) as caught:
+        await runner.gather_analysis("https://example.com")
+
+    assert caught.value is failure  # nosec B101
+    assert events == ["robots", "tls", "js", "behavioral", "captcha"]  # nosec B101
 
 
 @pytest.mark.asyncio
