@@ -385,6 +385,31 @@ describe("useSourceSavedViews", () => {
     expect(result.current.announcement).toBe("Saved view replaced.");
   });
 
+  it("ignores a duplicate mutation call before the busy state rerenders", async () => {
+    const pendingCreate = deferred<ReturnType<typeof validView>>();
+    api.createWorkspaceSourceView.mockReturnValue(pendingCreate.promise);
+    const { result } = setup();
+    await waitFor(() =>
+      expect(api.listWorkspaceSourceViews).toHaveBeenCalledTimes(1),
+    );
+
+    let first!: Promise<void>;
+    let duplicate!: Promise<void>;
+    act(() => {
+      first = result.current.createView("One request");
+      duplicate = result.current.createView("One request");
+    });
+
+    expect(api.createWorkspaceSourceView).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      pendingCreate.resolve(validView({ name: "One request" }));
+      await Promise.all([first, duplicate]);
+    });
+    expect(result.current.views[0]?.name).toBe("One request");
+    expect(result.current.busy).toBe(false);
+    expect(result.current.announcement).toBe("Saved view created.");
+  });
+
   it("applies a valid view and ignores an invalid view", async () => {
     const onApply = vi.fn();
     api.listWorkspaceSourceViews.mockResolvedValue({

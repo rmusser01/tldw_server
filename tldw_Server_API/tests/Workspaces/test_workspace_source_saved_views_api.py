@@ -75,7 +75,7 @@ def db(tmp_path: Path) -> Iterator[CharactersRAGDB]:
     try:
         yield database
     finally:
-        database.close_connection()
+        database.close_all_connections()
 
 
 @pytest.fixture

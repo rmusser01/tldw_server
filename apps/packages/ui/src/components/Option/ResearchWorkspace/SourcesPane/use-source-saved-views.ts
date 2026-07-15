@@ -278,6 +278,7 @@ export const useSourceSavedViews = (
 
   const beginMutation = React.useCallback(
     (generation: number): OperationToken | null => {
+      if (mutationInFlightRef.current) return null;
       const token = beginOperation(generation);
       if (token) mutationInFlightRef.current = true;
       return token;

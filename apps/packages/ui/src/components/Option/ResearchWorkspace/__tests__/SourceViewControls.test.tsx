@@ -625,6 +625,36 @@ describe("SourceViewControls", () => {
     expect(screen.queryByDisplayValue("Workspace A")).not.toBeInTheDocument()
   })
 
+  it("restores fallback focus when rejecting a stale unopened overlay", async () => {
+    const handled = vi.fn()
+    const request: SourceViewOverlayRequest = {
+      id: 42,
+      kind: "save",
+      generation: 1,
+      invoker: document.createElement("button")
+    }
+    render(
+      <React.StrictMode>
+        <div role="complementary" aria-label="Sources" tabIndex={-1} />
+        <SourceViewOverlayHost
+          controller={controller({ generation: 2 })}
+          request={request}
+          onRequestHandled={handled}
+        />
+      </React.StrictMode>
+    )
+    const sourcesLandmark = screen.getByRole("complementary", {
+      name: "Sources"
+    })
+    const focusSpy = vi.spyOn(sourcesLandmark, "focus")
+
+    await waitFor(() =>
+      expect(document.activeElement).toBe(sourcesLandmark)
+    )
+    expect(handled).toHaveBeenCalledTimes(1)
+    expect(focusSpy).toHaveBeenCalledTimes(1)
+  })
+
   it("refuses an attached Save handler after its controller generation becomes stale", async () => {
     const user = userEvent.setup()
     const model = controller({ generation: 1 })

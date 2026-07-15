@@ -437,6 +437,7 @@ export const SourceViewOverlayHost: React.FC<SourceViewOverlayHostProps> = ({
       request.generation !== controller.generation ||
       !controller.available
     ) {
+      restoreOverlayFocus(request.invoker)
       onRequestHandled()
       return
     }
