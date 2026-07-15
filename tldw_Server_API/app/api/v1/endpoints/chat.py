@@ -299,6 +299,28 @@ _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS = (
     InputError,
 )
 
+
+def _derive_endpoint_provenance(
+    credentials: ResolvedByokCredentials,
+    *,
+    request_override: bool,
+) -> str:
+    """Return the URL-free ownership class for a resolved provider endpoint."""
+    if request_override:
+        return "request_override"
+    if credentials.uses_byok:
+        return "byok"
+    return "server_config"
+
+
+def _request_has_endpoint_override(request_data: Any) -> bool:
+    """Return whether parsed request data contains an explicit endpoint override."""
+    return any(
+        isinstance(getattr(request_data, field, None), str)
+        and bool(getattr(request_data, field, None).strip())
+        for field in ("base_url", "api_base_url")
+    )
+
 #######################################################################################################################
 #
 # ---------------------------------------------------------------------------
@@ -901,6 +923,10 @@ async def _select_auto_chat_llm_router_choice(
                 streaming=False,
                 user_identifier=str(getattr(current_user, "id", "auto-router")),
                 app_config=byok_resolution.app_config,
+                _endpoint_provenance=_derive_endpoint_provenance(
+                    byok_resolution,
+                    request_override=False,
+                ),
             )
         finally:
             await byok_resolution.touch_last_used()
@@ -3677,6 +3703,10 @@ async def create_chat_completion(
             )
             cleaned_args["request"] = request
             cleaned_args["model"] = cleaned_args.get("model") or model
+            cleaned_args["_endpoint_provenance"] = _derive_endpoint_provenance(
+                byok_resolution,
+                request_override=_request_has_endpoint_override(request_data),
+            )
 
             async def rebuild_call_params_for_provider(
                 target_provider: str,
@@ -3711,6 +3741,10 @@ async def create_chat_completion(
                     grammar_record=_resolve_llamacpp_grammar_record(target_provider),
                 )
                 refreshed_args["request"] = request
+                refreshed_args["_endpoint_provenance"] = _derive_endpoint_provenance(
+                    refreshed_resolution,
+                    request_override=_request_has_endpoint_override(request_data),
+                )
                 refreshed_model = refreshed_args.get("model")
                 use_default_model = False
                 if not refreshed_model:

@@ -219,26 +219,26 @@ Verification used the repository virtual environment at `../../.venv` from the i
 
 **Tests:** Resolver, Chat override/reserved-key guards, table-driven direct adapter execution, and existing adapter contracts.
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Task 3.1: Write failing provenance and execution tests
 
-- [ ] Add resolver tables for all provider aliases and config/environment keys, including the four `LOCAL_LLM_*` aliases and custom slot 37.
-- [ ] Prove the resolver reads current config after loader-cache invalidation rather than Chat's import-time `_config` or a request `app_config`.
-- [ ] Pass fake `configured_endpoint_base_url`, `configured_endpoint_scope`, `http_fetcher`, `http_streamer`, and other reserved keys directly to adapters and through Chat arguments; assert request dictionaries cannot select scope or transport before adapters independently resolve trusted context.
-- [ ] Prove URL/app-config/BYOK overrides cannot mint scope, while the same endpoint selected from current server config supplies one paired base URL/scope value.
-- [ ] Add Chat-endpoint cases for `ResolvedByokCredentials.source` values `user`, `team`, `org`, and server fallback. Assert the endpoint writes only a URL-free private provenance value after request parsing; request extras cannot forge it.
-- [ ] For custom OpenAI, assert `server_config` (or a direct call with no explicit endpoint) uses the fresh trusted pair, while `byok` and `request_override` use their endpoint with no scope and ordinary checked egress.
-- [ ] Give a direct adapter call stale endpoint data in `app_config` and a newer endpoint in current server config; assert the adapter builds its final path from the paired trusted base and the scope matches it.
-- [ ] Add a table-driven direct-registry execution test for `local-llm`, llama, Ooba, Tabby, vLLM, Ollama, Aphrodite, native Kobold, `custom-openai-api`, and custom slot 37. Exercise `chat`, `stream`, `achat`, and `astream` as supported and assert each resolves/forwards the same checked scope without Chat orchestration.
-- [ ] For configured custom aliases, prove no-scope request/BYOK paths use the ordinary checked policy. Prove Novita/Poe/Together remain outside the new scoped path.
-- [ ] Force URL-policy and TLS-pin failures through configured custom sync, stream, `achat`, and `astream`; assert `EgressPolicyError.reason_code` survives instead of being normalized into a generic Chat provider error.
-- [ ] Add one registry-boundary regression showing an adapter obtained and invoked by a generic direct caller is scoped; document the audited direct-call inventory without duplicating tests for every feature.
-- [ ] Preserve merge, parameter forwarding, timeout, role, error mapping, streaming normalization, `[DONE]`, and response-closure contracts.
+- [x] Add resolver tables for all provider aliases and config/environment keys, including the four `LOCAL_LLM_*` aliases and custom slot 37.
+- [x] Prove the resolver reads current config after loader-cache invalidation rather than Chat's import-time `_config` or a request `app_config`.
+- [x] Pass fake `configured_endpoint_base_url`, `configured_endpoint_scope`, `http_fetcher`, `http_streamer`, and other reserved keys directly to adapters and through Chat arguments; assert request dictionaries cannot select scope or transport before adapters independently resolve trusted context.
+- [x] Prove URL/app-config/BYOK overrides cannot mint scope, while the same endpoint selected from current server config supplies one paired base URL/scope value.
+- [x] Add Chat-endpoint cases for `ResolvedByokCredentials.source` values `user`, `team`, `org`, and server fallback. Assert the endpoint writes only a URL-free private provenance value after request parsing; request extras cannot forge it.
+- [x] For custom OpenAI, assert `server_config` (or a direct call with no explicit endpoint) uses the fresh trusted pair, while `byok` and `request_override` use their endpoint with no scope and ordinary checked egress.
+- [x] Give a direct adapter call stale endpoint data in `app_config` and a newer endpoint in current server config; assert the adapter builds its final path from the paired trusted base and the scope matches it.
+- [x] Add a table-driven direct-registry execution test for `local-llm`, llama, Ooba, Tabby, vLLM, Ollama, Aphrodite, native Kobold, `custom-openai-api`, and custom slot 37. Exercise `chat`, `stream`, `achat`, and `astream` as supported and assert each resolves/forwards the same checked scope without Chat orchestration.
+- [x] For configured custom aliases, prove no-scope request/BYOK paths use the ordinary checked policy. Prove Novita/Poe/Together remain outside the new scoped path.
+- [x] Force URL-policy and TLS-pin failures through configured custom sync, stream, `achat`, and `astream`; assert `EgressPolicyError.reason_code` survives instead of being normalized into a generic Chat provider error.
+- [x] Add one registry-boundary regression showing an adapter obtained and invoked by a generic direct caller is scoped; document the audited direct-call inventory without duplicating tests for every feature.
+- [x] Preserve merge, parameter forwarding, timeout, role, error mapping, streaming normalization, `[DONE]`, and response-closure contracts.
 
 ### Task 3.2: Implement fresh trusted resolution
 
-- [ ] In `provider_config_resolution.py`, add a small result value such as:
+- [x] In `provider_config_resolution.py`, add a small result value such as:
 
   ```python
   @dataclass(frozen=True)
@@ -247,23 +247,23 @@ Verification used the repository virtual environment at `../../.venv` from the i
       scope: ConfiguredEndpointScope
   ```
 
-- [ ] Resolve only from current server configuration/environment. Do not accept a caller-supplied app config or endpoint fallback. Normalize registered provider aliases and document numbered-custom handling.
-- [ ] In the Chat endpoint, derive private endpoint provenance from `ResolvedByokCredentials.source`/`uses_byok` and per-request override state after request parsing. Pass only `server_config`, `byok`, or `request_override`; never put a URL in this signal.
-- [ ] In Chat service, add all reserved fields to `skip_keys`, remove the current general extraction of scope/stream hooks from arbitrary `chat_args`, and keep request URL overrides rejected. It accepts endpoint provenance only from the endpoint's private post-parse argument and does not attach scope.
+- [x] Resolve only from current server configuration/environment. Do not accept a caller-supplied app config or endpoint fallback. Normalize registered provider aliases and document numbered-custom handling.
+- [x] In the Chat endpoint, derive private endpoint provenance from `ResolvedByokCredentials.source`/`uses_byok` and per-request override state after request parsing. Pass only `server_config`, `byok`, or `request_override`; never put a URL in this signal.
+- [x] In Chat service, add all reserved fields to `skip_keys`, remove the current general extraction of scope/stream hooks from arbitrary `chat_args`, and keep request URL overrides rejected. It accepts endpoint provenance only from the endpoint's private post-parse argument and does not attach scope.
 
 ### Task 3.3: Resolve and consume context inside configured-local adapters
 
-- [ ] In `_LocalAdapterBase`, discard caller-supplied reserved context, resolve `TrustedProviderEndpoint` from `self.name` immediately before every sync/async dispatch, and pass the paired base/scope only to internal handlers. Move deterministic fetch/stream injection to adapter-owned attributes or module monkeypatches rather than request fields.
-- [ ] Update all local wrappers and native Kobold to consume the internally resolved `configured_endpoint_base_url`, `configured_endpoint_scope`, `http_fetcher`, and `http_streamer`, strip them before validation/serialization, build request paths from the trusted base, and forward the scope to `fetch`/`stream_response`.
-- [ ] Remove the `PYTEST_CURRENT_TEST` raw POST branch; deterministic tests inject checked hooks.
-- [ ] In `CustomOpenAIAdapter`, discard caller-supplied reserved context before `validate_payload`. For configured custom names with no explicit request/BYOK endpoint, resolve the paired base/scope from `self.name`; explicit overrides use ordinary checked egress without scope. Public-service subclasses do not invoke the configured-local resolver.
-- [ ] In configured custom `chat` and `stream`, catch and re-raise `EgressPolicyError` before `normalize_error`; async methods inherit the same typed behavior through their sync wrappers.
-- [ ] Map `dns_unresolved` to the existing reachability/provider category and all other policy denials to sanitized `ChatConfigurationError`.
-- [ ] Keep resolver and adapter consumption in this same commit so no intermediate commit passes unknown context to old handlers.
+- [x] In `_LocalAdapterBase`, discard caller-supplied reserved context, resolve `TrustedProviderEndpoint` from `self.name` immediately before every sync/async dispatch, and pass the paired base/scope only to internal handlers. Move deterministic fetch/stream injection to adapter-owned attributes or module monkeypatches rather than request fields.
+- [x] Update all local wrappers and native Kobold to consume the internally resolved `configured_endpoint_base_url`, `configured_endpoint_scope`, `http_fetcher`, and `http_streamer`, strip them before validation/serialization, build request paths from the trusted base, and forward the scope to `fetch`/`stream_response`.
+- [x] Remove the `PYTEST_CURRENT_TEST` raw POST branch; deterministic tests inject checked hooks.
+- [x] In `CustomOpenAIAdapter`, discard caller-supplied reserved context before `validate_payload`. For configured custom names with no explicit request/BYOK endpoint, resolve the paired base/scope from `self.name`; explicit overrides use ordinary checked egress without scope. Public-service subclasses do not invoke the configured-local resolver.
+- [x] In configured custom `chat` and `stream`, catch and re-raise `EgressPolicyError` before `normalize_error`; async methods inherit the same typed behavior through their sync wrappers.
+- [x] Map `dns_unresolved` to the existing reachability/provider category and all other policy denials to sanitized `ChatConfigurationError`.
+- [x] Keep resolver and adapter consumption in this same commit so no intermediate commit passes unknown context to old handlers.
 
 ### Task 3.4: Verify and commit
 
-- [ ] Run:
+- [x] Run:
 
   ```bash
   source .venv/bin/activate
@@ -279,8 +279,10 @@ Verification used the repository virtual environment at `../../.venv` from the i
     tldw_Server_API/tests/LLM_Calls/test_provider_timeout_and_role_regressions.py -q
   ```
 
-- [ ] Re-run Stages 1–2 and `git diff --check`.
-- [ ] Commit with `fix(llm): trust configured local adapter origins (TASK-12972)`.
+- [x] Re-run Stages 1–2 and `git diff --check`.
+- [x] Commit with `fix(llm): trust configured local adapter origins (TASK-12972)`.
+
+Verification used the repository virtual environment at `../../.venv` from the isolated worktree. The TDD red run produced 26 expected failures and 10 passes before implementation. The final Stage 3 suite passed 72 tests, followed by 66 Stage 1 and 88 Stage 2 regression tests. Focused Ruff correctness checks, Python compilation, and `git diff --check` passed.
 
 ---
 
