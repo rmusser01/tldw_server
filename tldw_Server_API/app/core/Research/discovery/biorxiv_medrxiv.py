@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import re
 import time
+import unicodedata
 from collections.abc import Mapping
 from dataclasses import replace
 from datetime import date
 from html.parser import HTMLParser
 from types import MappingProxyType
 from typing import Any
+from urllib.parse import quote_from_bytes
 
 from .contracts import (
     MAX_PAGINATION_CURSOR,
@@ -48,10 +50,12 @@ from .executor import (
     DiscoveryAdapterError,
     DiscoveryAdapterResult,
     DiscoveryCandidate,
+    NumericCursor,
 )
 from .gateway_adapters import (
     MonotonicClock,
     _base_record,
+    _canonical_decimal_text,
     _checked_response,
     _optional_text,
     _ParseDeadlineExceeded,
@@ -76,7 +80,6 @@ EUROPE_PMC_ADAPTER_ID = "europe_pmc_preprint_v2"
 EUROPE_PMC_ADAPTER_VERSION = "europe-pmc-preprint-v2"
 DETAILS_ADAPTER_ID = "biorxiv_details_v2"
 DETAILS_ADAPTER_VERSION = "biorxiv-details-v2"
-DETAILS_DISABLED_REASON = "details_adapter_fixture_pending"
 
 _EUROPE_PMC_PROFILE = _ParsingProfile(
     max_input_bytes=2_097_152,
@@ -87,7 +90,21 @@ _EUROPE_PMC_PROFILE = _ParsingProfile(
     max_numeric_token_chars=32,
     parse_deadline_ms=500,
 )
-_FAMILY_PARSING_PROFILES = MappingProxyType({(EUROPE_PMC_ADAPTER_ID, EUROPE_PMC_ADAPTER_VERSION): _EUROPE_PMC_PROFILE})
+_DETAILS_PROFILE = _ParsingProfile(
+    max_input_bytes=2_097_152,
+    max_records=120,
+    max_depth=16,
+    max_nodes=50_000,
+    max_string_chars=65_536,
+    max_numeric_token_chars=32,
+    parse_deadline_ms=500,
+)
+_FAMILY_PARSING_PROFILES = MappingProxyType(
+    {
+        (EUROPE_PMC_ADAPTER_ID, EUROPE_PMC_ADAPTER_VERSION): _EUROPE_PMC_PROFILE,
+        (DETAILS_ADAPTER_ID, DETAILS_ADAPTER_VERSION): _DETAILS_PROFILE,
+    }
+)
 _PPR_ID_RE = re.compile(r"PPR[1-9][0-9]*\Z", re.ASCII)
 _DOI_RE = re.compile(
     r"10\.[0-9]{4,9}/[A-Za-z0-9][-A-Za-z0-9._~!$&'()*+,;=:@]*\Z",
@@ -165,7 +182,7 @@ def biorxiv_medrxiv_shadow_registry() -> DiscoveryRegistry:
 
 
 def biorxiv_medrxiv_shadow_readiness(execution_mode: ExecutionMode) -> ReadinessOverlay:
-    """Return explicit shadow readiness without enabling details execution."""
+    """Return explicit shadow readiness for the fixture-proven family routes."""
     foundation = foundation_readiness(execution_mode)
     ready_reason = f"{execution_mode.value}_ready"
     family_entries = tuple(
@@ -175,15 +192,7 @@ def biorxiv_medrxiv_shadow_readiness(execution_mode: ExecutionMode) -> Readiness
             credential_status=CredentialStatus.NOT_REQUIRED,
             reason=ready_reason,
         )
-        for route_id in _GENERAL_ROUTE_IDS
-    ) + tuple(
-        RouteReadiness(
-            route_id=route_id,
-            state=ReadinessState.DISABLED,
-            credential_status=CredentialStatus.NOT_REQUIRED,
-            reason=DETAILS_DISABLED_REASON,
-        )
-        for route_id in _DETAILS_ROUTE_IDS
+        for route_id in _GENERAL_ROUTE_IDS + _DETAILS_ROUTE_IDS
     )
     return ReadinessOverlay(
         overlay_version=SHADOW_READINESS_VERSION,
@@ -204,7 +213,16 @@ def biorxiv_medrxiv_gateway_adapters(
     ) -> DiscoveryAdapterResult:
         return await _execute_europe_pmc_adapter(group, dispatch, monotonic_clock)
 
-    return _compose_adapter_maps({EUROPE_PMC_ADAPTER_ID: europe_pmc_adapter})
+    async def details_adapter(
+        group: PlannedDispatchGroup,
+        dispatch: BoundDispatch,
+    ) -> DiscoveryAdapterResult:
+        return await _execute_details_adapter(group, dispatch, monotonic_clock)
+
+    return _compose_adapter_maps(
+        {EUROPE_PMC_ADAPTER_ID: europe_pmc_adapter},
+        {DETAILS_ADAPTER_ID: details_adapter},
+    )
 
 
 def _compose_adapter_maps(*adapter_maps: Mapping[str, DiscoveryAdapter]) -> Mapping[str, DiscoveryAdapter]:
@@ -538,6 +556,486 @@ async def _execute_europe_pmc_adapter(
         _raise_adapter_error(error)
     except DiscoveryAdapterError:
         raise
+    except (KeyError, TypeError, ValueError, OverflowError):
+        raise DiscoveryAdapterError("provider_payload_invalid") from None
+    return DiscoveryAdapterResult(candidates)
+
+
+def _normalized_details_category(value: Any) -> str:
+    if type(value) is not str or not value:
+        raise _PayloadInvalid
+    if len(value) > 128:
+        raise _ParseLimitExceeded
+    canonical = unicodedata.normalize("NFKC", value).replace("_", " ")
+    if any(not character.isalnum() and character not in " -&/" for character in canonical):
+        raise _PayloadInvalid
+    normalized = " ".join(canonical.split()).casefold()
+    if not normalized or not any(character.isalnum() for character in normalized):
+        raise _PayloadInvalid
+    return normalized
+
+
+def _details_integer(
+    value: Any,
+    profile: _ParsingProfile,
+    *,
+    positive: bool = False,
+) -> int:
+    if type(value) is int:
+        parsed = value
+        if parsed < 0 or (positive and parsed == 0) or parsed > MAX_PAGINATION_CURSOR:
+            raise _PayloadInvalid
+        return parsed
+    return _canonical_decimal_text(
+        value,
+        profile,
+        positive=positive,
+        maximum=MAX_PAGINATION_CURSOR,
+    )
+
+
+def _trusted_details_inputs(
+    group: object,
+) -> tuple[
+    PlannedDispatchGroup,
+    _ParsingProfile,
+    int,
+    int,
+    str,
+    str,
+    str,
+    str | None,
+    str | None,
+    str | None,
+    str | None,
+]:
+    """Validate one exact details plan and expose only its bound request values."""
+    if type(group) is not PlannedDispatchGroup:
+        raise DiscoveryAdapterError("provider_payload_invalid")
+    route_values = {
+        "biorxiv_details_lookup_direct": ("biorxiv", "bioRxiv", "doi"),
+        "medrxiv_details_lookup_direct": ("medrxiv", "medRxiv", "doi"),
+        "biorxiv_details_interval_direct": ("biorxiv", "bioRxiv", "interval"),
+        "medrxiv_details_interval_direct": ("medrxiv", "medRxiv", "interval"),
+    }.get(group.route_id)
+    profile = _FAMILY_PARSING_PROFILES.get((group.adapter_id, group.adapter_version))
+    if route_values is None or profile is None:
+        raise DiscoveryAdapterError("provider_payload_invalid")
+    source_id, response_server, mode = route_values
+    limits = group.limits
+    expected_pages, expected_results, expected_physical = (1, 30, 1) if mode == "doi" else (4, 120, 4)
+    if (
+        group.adapter_id != DETAILS_ADAPTER_ID
+        or group.adapter_version != DETAILS_ADAPTER_VERSION
+        or group.fallback_order != 0
+        or group.backend_id != "biorxiv_details_api"
+        or group.filters
+        or group.allowance.physical_dispatches != expected_physical
+        or group.allowance.pages != expected_pages
+        or group.allowance.redirects != 0
+        or group.allowance.retries != 0
+        or limits.max_pages != expected_pages
+        or limits.max_redirects != 0
+        or limits.max_retries != 0
+        or limits.timeout_ms != 20_000
+        or limits.max_response_bytes != 2_097_152
+        or limits.max_results != expected_results
+        or type(group.intents) is not tuple
+        or len(group.intents) != 1
+    ):
+        raise DiscoveryAdapterError("provider_payload_invalid")
+    intent = group.intents[0]
+    if (
+        intent.route_id != group.route_id
+        or intent.policy_digest != group.policy_digest
+        or intent.operation_kind is not OperationKind.SEARCH
+        or intent.method != "GET"
+        or intent.limits != limits
+        or intent.json_body_pairs
+        or intent.query_bindings
+        or type(group.normalized_query) is not str
+    ):
+        raise DiscoveryAdapterError("provider_payload_invalid")
+
+    doi: str | None = None
+    start_date: str | None = None
+    end_date: str | None = None
+    category: str | None = None
+    if mode == "doi":
+        doi = group.normalized_query
+        if (
+            not doi.isascii()
+            or doi != doi.lower()
+            or doi.count("/") != 1
+            or _DOI_RE.fullmatch(doi) is None
+            or intent.query_pairs
+        ):
+            raise DiscoveryAdapterError("provider_payload_invalid")
+        registrant, suffix = doi.split("/", 1)
+        if len(suffix) > 128:
+            raise DiscoveryAdapterError("provider_payload_invalid")
+        encoded_suffix = quote_from_bytes(suffix.encode("ascii"), safe="")
+        expected_path = f"/details/{source_id}/{registrant}/{encoded_suffix}/na/json"
+        if intent.path != expected_path:
+            raise DiscoveryAdapterError("provider_payload_invalid")
+    else:
+        segments = intent.path.split("/")
+        if len(segments) != 7 or segments[:3] != ["", "details", source_id] or segments[5:] != ["0", "json"]:
+            raise DiscoveryAdapterError("provider_payload_invalid")
+        start_date, end_date = segments[3:5]
+        try:
+            start = date.fromisoformat(start_date)
+            end = date.fromisoformat(end_date)
+        except ValueError:
+            raise DiscoveryAdapterError("provider_payload_invalid") from None
+        if (
+            start.isoformat() != start_date
+            or end.isoformat() != end_date
+            or start > end
+            or (end - start).days + 1 > 366
+        ):
+            raise DiscoveryAdapterError("provider_payload_invalid")
+        pairs = tuple((pair.name, pair.value) for pair in intent.query_pairs)
+        if pairs:
+            if (
+                len(pairs) != 1
+                or pairs[0][0] != "category"
+                or type(pairs[0][1]) is not str
+                or unicodedata.normalize("NFKC", pairs[0][1]) != pairs[0][1]
+                or pairs[0][1] != pairs[0][1].strip()
+                or "  " in pairs[0][1]
+                or "_" in pairs[0][1]
+            ):
+                raise DiscoveryAdapterError("provider_payload_invalid")
+            try:
+                category = _normalized_details_category(pairs[0][1])
+            except (_PayloadInvalid, _ParseLimitExceeded):
+                raise DiscoveryAdapterError("provider_payload_invalid") from None
+        expected_query = f"{start_date}/{end_date}" + (f"/{pairs[0][1]}" if pairs else "")
+        if group.normalized_query != expected_query:
+            raise DiscoveryAdapterError("provider_payload_invalid")
+    return (
+        group,
+        profile,
+        min(profile.max_input_bytes, limits.max_response_bytes),
+        min(profile.max_records, limits.max_results),
+        source_id,
+        response_server,
+        mode,
+        doi,
+        start_date,
+        end_date,
+        category,
+    )
+
+
+def _details_authors(record: dict[str, Any], guard: _ParseGuard) -> tuple[str, ...]:
+    raw = _required_text(record, "authors")
+    parts = raw.split(";")
+    if len(parts) > _MAX_AUTHORS:
+        raise _ParseLimitExceeded
+    authors: list[str] = []
+    for part in parts:
+        guard.checkpoint()
+        author = _plain_text(part, max_chars=_MAX_AUTHOR_CHARS, required=True)
+        if author is None:
+            raise _PayloadInvalid
+        authors.append(author)
+    return tuple(authors)
+
+
+def _details_date(record: dict[str, Any]) -> str:
+    value = _required_text(record, "date")
+    try:
+        parsed = date.fromisoformat(value)
+    except ValueError as error:
+        raise _PayloadInvalid from error
+    if len(value) != 10 or parsed.isoformat() != value:
+        raise _PayloadInvalid
+    return value
+
+
+def _published_doi(record: dict[str, Any]) -> str | None:
+    value = _optional_text(record, "published")
+    if value is None:
+        return None
+    stripped = value.strip()
+    if not stripped or stripped.casefold() == "na":
+        return None
+    canonical = stripped.lower()
+    if (
+        value != stripped
+        or len(value) > _MAX_IDENTIFIER_CHARS
+        or not value.isascii()
+        or _DOI_RE.fullmatch(canonical) is None
+    ):
+        raise _PayloadInvalid
+    return canonical
+
+
+def _details_record(
+    raw: Any,
+    *,
+    guard: _ParseGuard,
+    source_id: str,
+    response_server: str,
+    expected_doi: str | None,
+    start_date: str | None,
+    end_date: str | None,
+    expected_category: str | None,
+    profile: _ParsingProfile,
+) -> dict[str, Any]:
+    record = _require_dict(raw)
+    if record.get("server") != response_server:
+        raise _PayloadInvalid
+    doi = _doi(record)
+    if doi is None or (expected_doi is not None and doi != expected_doi):
+        raise _PayloadInvalid
+    title = _plain_text(_required_text(record, "title"), max_chars=_MAX_TITLE_CHARS, required=True)
+    if title is None:
+        raise _PayloadInvalid
+    raw_abstract = _optional_text(record, "abstract")
+    abstract = (
+        None if raw_abstract is None else _plain_text(raw_abstract, max_chars=_MAX_ABSTRACT_CHARS, required=False)
+    )
+    published_date = _details_date(record)
+    if start_date is not None and end_date is not None and not start_date <= published_date <= end_date:
+        raise _PayloadInvalid
+    version = _details_integer(record.get("version", _MISSING), profile, positive=True)
+    license_value = _plain_text(
+        _required_text(record, "license"),
+        max_chars=_MAX_IDENTIFIER_CHARS,
+        required=True,
+    )
+    if license_value is None:
+        raise _PayloadInvalid
+    category = _normalized_details_category(_required_text(record, "category"))
+    if expected_category is not None and category != expected_category:
+        raise _PayloadInvalid
+    normalized = _base_record(
+        title=title,
+        authors=_details_authors(record, guard),
+        abstract=abstract,
+        snippet=abstract,
+        doi=doi,
+        pmid=None,
+        pmcid=None,
+        arxiv_id=None,
+        url=f"https://doi.org/{doi}",
+        pdf_url=None,
+        provider="biorxiv_details",
+        provider_ids={"doi": doi, "version": str(version)},
+    )
+    normalized.update(
+        {
+            "published_date": published_date,
+            "publication_year": published_date[:4],
+            "version": version,
+            "license": license_value,
+            "category": category,
+            "published_doi": _published_doi(record),
+            "source_platform": source_id,
+        }
+    )
+    return normalized
+
+
+def _details_page(
+    payload: Any,
+    *,
+    guard: _ParseGuard,
+    profile: _ParsingProfile,
+    source_id: str,
+    response_server: str,
+    mode: str,
+    expected_doi: str | None,
+    start_date: str | None,
+    end_date: str | None,
+    expected_category: str | None,
+    current_cursor: int,
+    seen_records: int,
+    expected_total: int | None,
+    remaining_records: int,
+) -> tuple[tuple[dict[str, Any], ...], int, int | None, bool]:
+    root = _require_dict(payload)
+    if set(root) != {"messages", "collection"}:
+        raise _PayloadInvalid
+    messages = _require_list(root.get("messages", _MISSING))
+    collection = _require_list(root.get("collection", _MISSING))
+    if len(messages) != 1:
+        raise _PayloadInvalid
+    message = _require_dict(messages[0])
+    status = message.get("status", _MISSING)
+    if status == "no posts found":
+        if message != {"status": "no posts found"} or collection or current_cursor != 0 or seen_records:
+            raise _PayloadInvalid
+        return (), 0, None, True
+    if status != "ok" or len(collection) > remaining_records:
+        if len(collection) > remaining_records:
+            raise _ParseLimitExceeded
+        raise _PayloadInvalid
+
+    if mode == "doi":
+        if message != {"status": "ok", "category": "all"} or not collection:
+            raise _PayloadInvalid
+        normalized = tuple(
+            _details_record(
+                raw,
+                guard=guard,
+                source_id=source_id,
+                response_server=response_server,
+                expected_doi=expected_doi,
+                start_date=None,
+                end_date=None,
+                expected_category=None,
+                profile=profile,
+            )
+            for raw in collection
+        )
+        guard.checkpoint()
+        return normalized, len(normalized), None, True
+
+    if start_date is None or end_date is None:
+        raise _PayloadInvalid
+    response_category = message.get("category", _MISSING)
+    if expected_category is None:
+        if response_category != "all":
+            raise _PayloadInvalid
+    elif _normalized_details_category(response_category) != expected_category:
+        raise _PayloadInvalid
+    if message.get("interval") != f"{start_date}:{end_date}":
+        raise _PayloadInvalid
+    response_cursor = _details_integer(message.get("cursor", _MISSING), profile)
+    count = _details_integer(message.get("count", _MISSING), profile)
+    total = _details_integer(message.get("total", _MISSING), profile)
+    if (
+        response_cursor != current_cursor
+        or count != len(collection)
+        or count == 0
+        or current_cursor + count > total
+        or (expected_total is not None and total != expected_total)
+    ):
+        raise _PayloadInvalid
+    normalized = tuple(
+        _details_record(
+            raw,
+            guard=guard,
+            source_id=source_id,
+            response_server=response_server,
+            expected_doi=None,
+            start_date=start_date,
+            end_date=end_date,
+            expected_category=expected_category,
+            profile=profile,
+        )
+        for raw in collection
+    )
+    guard.checkpoint()
+    return normalized, count, total, current_cursor + count == total
+
+
+def _details_candidates(records: tuple[dict[str, Any], ...]) -> tuple[DiscoveryCandidate, ...]:
+    order: list[str] = []
+    versions_by_doi: dict[str, dict[int, dict[str, Any]]] = {}
+    for record in records:
+        doi = record["doi"]
+        version = record["version"]
+        versions = versions_by_doi.get(doi)
+        if versions is None:
+            versions = {}
+            versions_by_doi[doi] = versions
+            order.append(doi)
+        existing = versions.get(version)
+        if existing is not None and existing != record:
+            raise _PayloadInvalid
+        versions[version] = record
+
+    candidates: list[DiscoveryCandidate] = []
+    by_candidate_id: dict[str, dict[str, Any]] = {}
+    for doi in order:
+        versions = versions_by_doi[doi]
+        record = versions[max(versions)]
+        candidate_id = DiscoveryOutcomeIdentity.from_fingerprint(build_fingerprint(record)).document_id
+        existing = by_candidate_id.get(candidate_id)
+        if existing is not None:
+            if existing != record:
+                raise _PayloadInvalid
+            continue
+        by_candidate_id[candidate_id] = record
+        candidates.append(DiscoveryCandidate(candidate_id, record))
+    return tuple(candidates)
+
+
+async def _execute_details_adapter(
+    group: object,
+    dispatch: BoundDispatch,
+    clock: MonotonicClock,
+) -> DiscoveryAdapterResult:
+    (
+        trusted_group,
+        profile,
+        max_input_bytes,
+        max_records,
+        source_id,
+        response_server,
+        mode,
+        expected_doi,
+        start_date,
+        end_date,
+        expected_category,
+    ) = _trusted_details_inputs(group)
+    intent = trusted_group.intents[0]
+    current_cursor = 0
+    cursor: NumericCursor | None = None
+    expected_total: int | None = None
+    records: list[dict[str, Any]] = []
+
+    for page_index in range(trusted_group.limits.max_pages):
+        response = await dispatch(intent, cursor=cursor)
+        checked = _checked_response(response)
+        payload, guard = _strict_json(
+            checked,
+            profile=profile,
+            max_input_bytes=max_input_bytes,
+            clock=clock,
+        )
+        try:
+            page, count, total, terminal = _details_page(
+                payload,
+                guard=guard,
+                profile=profile,
+                source_id=source_id,
+                response_server=response_server,
+                mode=mode,
+                expected_doi=expected_doi,
+                start_date=start_date,
+                end_date=end_date,
+                expected_category=expected_category,
+                current_cursor=current_cursor,
+                seen_records=len(records),
+                expected_total=expected_total,
+                remaining_records=max_records - len(records),
+            )
+            records.extend(page)
+            if total is not None and expected_total is None:
+                expected_total = total
+            guard.checkpoint()
+        except (_PayloadInvalid, _ParseLimitExceeded, _ParseDeadlineExceeded) as error:
+            _raise_adapter_error(error)
+        except DiscoveryAdapterError:
+            raise
+        except (KeyError, TypeError, ValueError, OverflowError):
+            raise DiscoveryAdapterError("provider_payload_invalid") from None
+
+        if terminal or mode == "doi" or len(records) >= max_records or page_index + 1 >= trusted_group.limits.max_pages:
+            break
+        current_cursor += count
+        cursor = NumericCursor(current_cursor)
+
+    try:
+        candidates = _details_candidates(tuple(records))
+    except (_PayloadInvalid, _ParseLimitExceeded, _ParseDeadlineExceeded) as error:
+        _raise_adapter_error(error)
     except (KeyError, TypeError, ValueError, OverflowError):
         raise DiscoveryAdapterError("provider_payload_invalid") from None
     return DiscoveryAdapterResult(candidates)

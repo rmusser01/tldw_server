@@ -1,0 +1,46 @@
+{
+  "messages": [
+    {
+      "status": "ok",
+      "category": "all"
+    }
+  ],
+  "collection": [
+    {
+      "title": "Bounded medRxiv details lookup version one",
+      "authors": "Lin Example; Noor Sample",
+      "author_corresponding": "Lin Example",
+      "author_corresponding_institution": "Synthetic Clinic",
+      "doi": "10.5555/medrxiv.details.synthetic",
+      "date": "2026-06-10",
+      "version": "1",
+      "type": "new results",
+      "license": "cc_by_nc_nd",
+      "category": "infectious diseases",
+      "jatsxml": "https://provider.example.invalid/version-one.xml",
+      "abstract": "An invented version-one clinical abstract.",
+      "funder": "Synthetic Health Fund",
+      "published": "NA",
+      "server": "medRxiv"
+    },
+    {
+      "title": "Bounded medRxiv details lookup version two",
+      "authors": "Lin Example; Noor Sample",
+      "author_corresponding": "Lin Example",
+      "author_corresponding_institution": "Synthetic Clinic",
+      "doi": "10.5555/medrxiv.details.synthetic",
+      "date": "2026-06-11",
+      "version": "2",
+      "type": "new results",
+      "license": "cc_by_nc_nd",
+      "category": "infectious diseases",
+      "jatsxml": "https://provider.example.invalid/version-two.xml?token=fixture-secret",
+      "abstract": "An invented version-two clinical abstract.",
+      "funder": "Synthetic Health Fund",
+      "published": "10.5555/published.medrxiv.synthetic",
+      "server": "medRxiv",
+      "providerLandingUrl": "https://provider.example.invalid/preprint",
+      "pdf": "https://provider.example.invalid/preprint.pdf"
+    }
+  ]
+}
