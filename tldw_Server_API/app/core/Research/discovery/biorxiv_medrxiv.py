@@ -566,7 +566,7 @@ async def _execute_europe_pmc_adapter(
     return DiscoveryAdapterResult(candidates)
 
 
-def _normalized_details_category(value: Any) -> str:
+def _details_category_key(value: Any) -> str:
     if type(value) is not str or not value:
         raise _PayloadInvalid
     if len(value) > 128:
@@ -575,10 +575,15 @@ def _normalized_details_category(value: Any) -> str:
     if any(not character.isalnum() and character not in " -&/" for character in canonical):
         raise _PayloadInvalid
     normalized = " ".join(canonical.split()).casefold()
-    if len(normalized) > 128:
-        raise _ParseLimitExceeded
     if not normalized or not any(character.isalnum() for character in normalized):
         raise _PayloadInvalid
+    return normalized
+
+
+def _normalized_details_category(value: Any) -> str:
+    normalized = _details_category_key(value)
+    if len(normalized) > 128:
+        raise _ParseLimitExceeded
     return normalized
 
 
@@ -726,7 +731,7 @@ def _trusted_details_inputs(
             ):
                 raise DiscoveryAdapterError("provider_payload_invalid")
             try:
-                category = _normalized_details_category(pairs[0][1])
+                category = _details_category_key(pairs[0][1])
             except (_PayloadInvalid, _ParseLimitExceeded):
                 raise DiscoveryAdapterError("provider_payload_invalid") from None
         expected_query = f"{start_date}/{end_date}" + (f"/{pairs[0][1]}" if pairs else "")
@@ -920,7 +925,7 @@ def _details_page(
     if expected_category is None:
         if response_category != "all":
             raise _PayloadInvalid
-    elif _normalized_details_category(response_category) != expected_category:
+    elif _details_category_key(response_category) != expected_category:
         raise _PayloadInvalid
     if message.get("interval") != f"{start_date}:{end_date}":
         raise _PayloadInvalid
@@ -974,7 +979,7 @@ def _details_candidates(records: tuple[dict[str, Any], ...]) -> tuple[DiscoveryC
     for doi in order:
         versions = versions_by_doi[doi]
         record = versions[max(versions)]
-        candidate_id = DiscoveryOutcomeIdentity.from_fingerprint(build_fingerprint(record)).document_id
+        candidate_id = DiscoveryOutcomeIdentity.from_fingerprint(f"doi:{doi}").document_id
         existing = by_candidate_id.get(candidate_id)
         if existing is not None:
             if existing != record:

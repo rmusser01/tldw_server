@@ -1782,6 +1782,23 @@ async def test_details_doi_planner_boundaries_execute_bind_and_encode_landing_ur
     assert record["url"] == f"https://doi.org/10.5555/{encoded_suffix}"
 
 
+@pytest.mark.parametrize("doi", ("10.5555/a", "10.5555/a."))
+@pytest.mark.asyncio
+async def test_details_exact_lookup_identity_preserves_terminal_punctuation(doi: str) -> None:
+    payload = json.loads(_details_fixture("biorxiv_details_doi_success"))
+    payload["collection"][0]["doi"] = doi
+
+    result, _dispatch, _group = await _invoke_details_payloads(
+        "biorxiv",
+        IdentifierLookupQuery(doi),
+        [payload],
+    )
+
+    candidate = result.candidates[0]
+    assert candidate.record["doi"] == doi
+    assert candidate.candidate_id == DiscoveryOutcomeIdentity.from_fingerprint(f"doi:{doi}").document_id
+
+
 @pytest.mark.asyncio
 async def test_details_publication_linkage_accepts_bounded_multi_segment_doi() -> None:
     payload = json.loads(_details_fixture("biorxiv_details_doi_success"))
@@ -1796,6 +1813,54 @@ async def test_details_publication_linkage_accepts_bounded_multi_segment_doi() -
     record = result.candidates[0].record
     assert record["published_doi"] == "10.5555/published/extra"
     assert record["url"] == "https://doi.org/10.5555/biorxiv.details.synthetic"
+
+
+@pytest.mark.asyncio
+async def test_details_interval_preserves_distinct_exact_doi_identities_through_executor() -> None:
+    module = _module()
+    query = DateIntervalQuery("2026-06-01", "2026-06-02", "neuroscience")
+    payload = json.loads(_details_fixture("biorxiv_details_interval_page_1"))
+    first = payload["collection"][0]
+    first["doi"] = "10.5555/a"
+    second = dict(first)
+    second["doi"] = "10.5555/a."
+    payload["collection"].append(second)
+    payload["messages"][0].update({"count": 2, "total": "2"})
+    expected_dois = ("10.5555/a", "10.5555/a.")
+    expected_ids = tuple(DiscoveryOutcomeIdentity.from_fingerprint(f"doi:{doi}").document_id for doi in expected_dois)
+
+    adapter_result, adapter_dispatch, adapter_group = await _invoke_details_payloads(
+        "biorxiv",
+        query,
+        [payload],
+    )
+
+    assert tuple(candidate.record["doi"] for candidate in adapter_result.candidates) == expected_dois
+    assert tuple(candidate.candidate_id for candidate in adapter_result.candidates) == expected_ids
+    assert len(set(expected_ids)) == 2
+    assert len(adapter_dispatch.calls) == 1
+
+    registry, plan = _details_plan_for("biorxiv", query)
+    paths: list[str] = []
+
+    async def gateway(route, intent, *, is_policy_active):
+        assert is_policy_active(route.route_id, route.policy.policy_digest)
+        paths.append(intent.path)
+        return _response(route, intent, _payload_bytes(payload))
+
+    execution = await execute_discovery_plan(
+        plan,
+        registry=registry,
+        adapters=module.biorxiv_medrxiv_gateway_adapters(),
+        gateway=gateway,
+        policy_is_active=lambda _route_id, _digest: True,
+        dispatch_id_factory=lambda: "details-exact-identity-1",
+    )
+
+    assert paths == [adapter_group.intents[0].path]
+    assert execution.logical_outcomes[0].state is LogicalOutcomeState.SUCCEEDED
+    assert tuple(candidate.record["doi"] for candidate in execution.candidates) == expected_dois
+    assert tuple(candidate.candidate_id for candidate in execution.candidates) == expected_ids
 
 
 @pytest.mark.asyncio
@@ -2593,6 +2658,45 @@ async def test_details_valid_empty_executes_as_valid_empty_with_one_page() -> No
         dispatch_id_factory=lambda: "biorxiv-empty-dispatch-1",
     )
 
+    assert execution.candidates == ()
+    assert execution.logical_outcomes[0].state is LogicalOutcomeState.VALID_EMPTY
+    assert execution.logical_outcomes[0].code is None
+    assert execution.usage.pages == 1
+    assert execution.usage.physical_records[0].state is PhysicalDispatchState.SUCCEEDED
+
+
+@pytest.mark.asyncio
+async def test_details_expanding_request_category_executes_as_valid_empty() -> None:
+    module = _module()
+    category = "ẞ" * 65
+    registry, plan = _details_plan_for(
+        "biorxiv",
+        DateIntervalQuery("2026-06-03", "2026-06-03", category),
+    )
+    group = plan.dispatch_groups[0]
+    intent = group.intents[0]
+    dispatches: list[tuple[str, tuple[tuple[str, str], ...]]] = []
+
+    async def gateway(route, dispatched_intent, *, is_policy_active):
+        assert is_policy_active(route.route_id, route.policy.policy_digest)
+        dispatches.append(
+            (
+                dispatched_intent.path,
+                tuple((pair.name, pair.value) for pair in dispatched_intent.query_pairs),
+            )
+        )
+        return _response(route, dispatched_intent, _details_fixture("biorxiv_details_interval_empty"))
+
+    execution = await execute_discovery_plan(
+        plan,
+        registry=registry,
+        adapters=module.biorxiv_medrxiv_gateway_adapters(),
+        gateway=gateway,
+        policy_is_active=lambda _route_id, _digest: True,
+        dispatch_id_factory=lambda: "biorxiv-expanding-empty-1",
+    )
+
+    assert dispatches == [(intent.path, (("category", category),))]
     assert execution.candidates == ()
     assert execution.logical_outcomes[0].state is LogicalOutcomeState.VALID_EMPTY
     assert execution.logical_outcomes[0].code is None
