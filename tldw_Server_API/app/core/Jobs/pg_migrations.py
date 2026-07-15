@@ -29,6 +29,41 @@ _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS = (
     UnicodeDecodeError,
 )
 
+_PLAYLIST_RLS_TABLES = (
+    "playlist_preflights",
+    "playlist_preflight_items",
+    "playlist_materializations",
+    "playlist_materialization_items",
+    "media_ingest_runs",
+    "media_ingest_run_items",
+    "media_ingest_run_events",
+)
+_PLAYLIST_RLS_SEQUENCES = (
+    "playlist_preflight_items_id_seq",
+    "playlist_materialization_items_id_seq",
+    "media_ingest_run_items_id_seq",
+    "media_ingest_run_events_event_id_seq",
+)
+_JOBS_RLS_INSERT_TABLES = (
+    "jobs",
+    "job_events",
+    "job_counters",
+    "job_queue_controls",
+    "job_sla_policies",
+    "job_attachments",
+    "job_dependencies",
+    "jobs_archive",
+)
+_JOBS_RLS_SEQUENCES = (
+    "jobs_id_seq",
+    "job_events_id_seq",
+    "job_attachments_id_seq",
+)
+
+
+class JobsRLSInstallationError(RuntimeError):
+    """Raised when a security-critical Postgres RLS install step fails."""
+
 JOBS_POSTGRES_DDL = """
 CREATE TABLE IF NOT EXISTS jobs (
   id SERIAL PRIMARY KEY,
@@ -175,9 +210,201 @@ CREATE INDEX IF NOT EXISTS idx_job_dependencies_depends_on ON job_dependencies(d
 CREATE INDEX IF NOT EXISTS idx_jobs_status_queued ON jobs(domain, queue, job_type, priority, available_at, created_at) WHERE status='queued';
 CREATE INDEX IF NOT EXISTS idx_jobs_status_processing ON jobs(domain, queue, job_type, leased_until) WHERE status='processing';
 
+-- Owner-scoped immutable playlist inspection snapshots
+CREATE TABLE IF NOT EXISTS playlist_preflights (
+  preflight_id TEXT PRIMARY KEY,
+  owner_user_id TEXT NOT NULL,
+  status TEXT NOT NULL,
+  source_url TEXT NOT NULL,
+  source_kind TEXT NOT NULL,
+  playlist_id TEXT,
+  job_id BIGINT,
+  summary_json JSONB,
+  error_json JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  expires_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_playlist_preflights_owner_status
+  ON playlist_preflights(owner_user_id, status);
+CREATE INDEX IF NOT EXISTS idx_playlist_preflights_job ON playlist_preflights(job_id);
+CREATE INDEX IF NOT EXISTS idx_playlist_preflights_expiry ON playlist_preflights(expires_at);
+
+CREATE TABLE IF NOT EXISTS playlist_preflight_items (
+  id BIGSERIAL PRIMARY KEY,
+  preflight_id TEXT NOT NULL,
+  owner_user_id TEXT NOT NULL,
+  occurrence_id TEXT NOT NULL UNIQUE,
+  ordinal INTEGER NOT NULL CHECK (ordinal >= 1),
+  occurrence_index_for_source INTEGER NOT NULL CHECK (occurrence_index_for_source >= 1),
+  source_url TEXT,
+  normalized_source_id TEXT,
+  source_kind TEXT NOT NULL,
+  availability TEXT NOT NULL,
+  duplicate_status TEXT NOT NULL,
+  duplicate_of_occurrence_id TEXT,
+  selected_by_default BOOLEAN NOT NULL DEFAULT TRUE,
+  display_metadata_json JSONB,
+  UNIQUE (preflight_id, ordinal)
+);
+CREATE INDEX IF NOT EXISTS idx_playlist_preflight_items_owner_source
+  ON playlist_preflight_items(owner_user_id, normalized_source_id);
+
+-- Owner-bound queue records copied from a completed preflight
+CREATE TABLE IF NOT EXISTS playlist_materializations (
+  materialization_id TEXT PRIMARY KEY,
+  preflight_id TEXT NOT NULL,
+  owner_user_id TEXT NOT NULL,
+  status TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  expires_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_playlist_materializations_owner_status
+  ON playlist_materializations(owner_user_id, status);
+CREATE INDEX IF NOT EXISTS idx_playlist_materializations_expiry
+  ON playlist_materializations(expires_at);
+
+CREATE TABLE IF NOT EXISTS playlist_materialization_items (
+  id BIGSERIAL PRIMARY KEY,
+  materialization_id TEXT NOT NULL,
+  owner_user_id TEXT NOT NULL,
+  occurrence_id TEXT NOT NULL,
+  ordinal INTEGER NOT NULL CHECK (ordinal >= 1),
+  source_url TEXT NOT NULL,
+  normalized_source_id TEXT,
+  source_kind TEXT NOT NULL,
+  display_metadata_json JSONB,
+  UNIQUE (materialization_id, ordinal),
+  UNIQUE (materialization_id, occurrence_id)
+);
+CREATE INDEX IF NOT EXISTS idx_playlist_materialization_items_owner_source
+  ON playlist_materialization_items(owner_user_id, normalized_source_id);
+CREATE INDEX IF NOT EXISTS idx_playlist_materialization_items_occurrence
+  ON playlist_materialization_items(occurrence_id);
+
+-- Lightweight manifest connecting selected occurrences to Jobs
+CREATE TABLE IF NOT EXISTS media_ingest_runs (
+  run_id TEXT PRIMARY KEY,
+  owner_user_id TEXT NOT NULL,
+  client_request_id TEXT,
+  request_fingerprint TEXT,
+  initialization_token TEXT,
+  initialization_expires_at TIMESTAMPTZ,
+  status TEXT NOT NULL,
+  collection_id BIGINT,
+  processing_options_json JSONB,
+  playlist_summaries_json JSONB,
+  batch_ids_json JSONB,
+  version INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  expires_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_media_ingest_runs_owner_status
+  ON media_ingest_runs(owner_user_id, status);
+CREATE INDEX IF NOT EXISTS idx_media_ingest_runs_expiry ON media_ingest_runs(expires_at);
+
+CREATE TABLE IF NOT EXISTS media_ingest_run_items (
+  id BIGSERIAL PRIMARY KEY,
+  run_id TEXT NOT NULL,
+  owner_user_id TEXT NOT NULL,
+  occurrence_id TEXT NOT NULL,
+  ordinal INTEGER NOT NULL CHECK (ordinal >= 1),
+  input_kind TEXT NOT NULL,
+  materialization_id TEXT,
+  source_url TEXT,
+  normalized_source_id TEXT,
+  source_kind TEXT,
+  display_metadata_json JSONB,
+  duplicate_policy TEXT CHECK (
+    duplicate_policy IS NULL OR duplicate_policy IN ('skip','include_existing','update_metadata_only','overwrite')
+  ),
+  metadata_patch_json JSONB,
+  state TEXT NOT NULL CHECK (
+    state IN (
+      'staged','preparing','awaiting_upload','submit_pending','queued','running',
+      'cancellation_requested','status_unavailable','terminal'
+    )
+  ),
+  outcome TEXT CHECK (
+    outcome IS NULL OR outcome IN (
+      'completed','included_existing','metadata_updated','skipped_existing',
+      'submit_failed','processing_failed','metadata_update_failed','cancelled'
+    )
+  ),
+  job_id BIGINT,
+  batch_id TEXT,
+  attempt INTEGER NOT NULL DEFAULT 1 CHECK (attempt >= 1),
+  idempotency_identity TEXT,
+  submission_queue TEXT,
+  staging_temp_dir TEXT,
+  submission_lease_token TEXT,
+  submission_lease_expires_at TIMESTAMPTZ,
+  submission_lease_generation INTEGER NOT NULL DEFAULT 0 CHECK (submission_lease_generation >= 0),
+  planned_collection_item_id BIGINT,
+  progress_percent REAL CHECK (progress_percent IS NULL OR (progress_percent >= 0 AND progress_percent <= 100)),
+  progress_message TEXT,
+  retryable BOOLEAN NOT NULL DEFAULT FALSE,
+  media_id BIGINT,
+  error_code TEXT,
+  error_message TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (run_id, ordinal),
+  UNIQUE (run_id, occurrence_id),
+  UNIQUE (run_id, occurrence_id, attempt),
+  CHECK (
+    (state = 'terminal' AND outcome IS NOT NULL)
+    OR (state <> 'terminal' AND outcome IS NULL)
+  )
+);
+CREATE INDEX IF NOT EXISTS idx_media_ingest_run_items_owner_state
+  ON media_ingest_run_items(owner_user_id, state);
+CREATE INDEX IF NOT EXISTS idx_media_ingest_run_items_source
+  ON media_ingest_run_items(normalized_source_id);
+CREATE INDEX IF NOT EXISTS idx_media_ingest_run_items_job ON media_ingest_run_items(job_id);
+
+CREATE TABLE IF NOT EXISTS media_ingest_run_events (
+  event_id BIGSERIAL PRIMARY KEY,
+  run_id TEXT NOT NULL,
+  owner_user_id TEXT NOT NULL,
+  occurrence_id TEXT,
+  job_id BIGINT,
+  batch_id TEXT,
+  event_type TEXT NOT NULL,
+  state TEXT CHECK (
+    state IS NULL OR state IN (
+      'staged','preparing','awaiting_upload','submit_pending','queued','running',
+      'cancellation_requested','status_unavailable','terminal'
+    )
+  ),
+  outcome TEXT CHECK (
+    outcome IS NULL OR outcome IN (
+      'completed','included_existing','metadata_updated','skipped_existing',
+      'submit_failed','processing_failed','metadata_update_failed','cancelled'
+    )
+  ),
+  progress_percent REAL CHECK (progress_percent IS NULL OR (progress_percent >= 0 AND progress_percent <= 100)),
+  progress_message TEXT,
+  attrs_json JSONB,
+  occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CHECK (
+    (state IS NULL AND outcome IS NULL)
+    OR (state IS NOT NULL AND state = 'terminal' AND outcome IS NOT NULL)
+    OR (state IS NOT NULL AND state <> 'terminal' AND outcome IS NULL)
+  )
+);
+CREATE INDEX IF NOT EXISTS idx_media_ingest_run_events_owner_run_event
+  ON media_ingest_run_events(owner_user_id, run_id, event_id);
+CREATE INDEX IF NOT EXISTS idx_media_ingest_run_events_occurrence
+  ON media_ingest_run_events(run_id, occurrence_id, event_id);
+CREATE INDEX IF NOT EXISTS idx_media_ingest_run_events_job ON media_ingest_run_events(job_id);
+
 -- Composite uniqueness for idempotency scoped by domain/queue/job_type (NULL key allowed)
 -- A unique index is created outside the DDL block using autocommit.
 """
+
 
 def ensure_jobs_tables_pg(db_url: str) -> str:
     """Ensure the jobs table exists in the given PostgreSQL database.
@@ -190,9 +417,13 @@ def ensure_jobs_tables_pg(db_url: str) -> str:
         raise RuntimeError("psycopg is required for PostgreSQL Jobs backend. Install extras 'db_postgres'.") from e
 
     from .pg_util import negotiate_pg_dsn
+
     _dsn = negotiate_pg_dsn(db_url)
     try:
         with psycopg.connect(_dsn) as conn, conn.cursor() as cur:
+            # JobManager construction can race in worker/test processes. Keep the
+            # multi-statement schema bootstrap in one cluster-local critical section.
+            cur.execute("SELECT pg_advisory_xact_lock(hashtext('tldw_jobs_schema_bootstrap'))")
             cur.execute(JOBS_POSTGRES_DDL)
             # Additional objects: queue controls, attachments, SLA policies
             cur.execute(
@@ -251,6 +482,28 @@ def ensure_jobs_tables_pg(db_url: str) -> str:
                 f.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS error_class TEXT")
                 f.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS error_stack JSONB")
                 f.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS batch_group TEXT")
+                f.execute("ALTER TABLE media_ingest_runs ADD COLUMN IF NOT EXISTS client_request_id TEXT")
+                f.execute("ALTER TABLE media_ingest_runs ADD COLUMN IF NOT EXISTS request_fingerprint TEXT")
+                f.execute("ALTER TABLE media_ingest_runs ADD COLUMN IF NOT EXISTS initialization_token TEXT")
+                f.execute(
+                    "ALTER TABLE media_ingest_runs "
+                    "ADD COLUMN IF NOT EXISTS initialization_expires_at TIMESTAMPTZ"
+                )
+                f.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_media_ingest_runs_owner_client_request "
+                    "ON media_ingest_runs(owner_user_id, client_request_id)"
+                )
+                f.execute("ALTER TABLE media_ingest_run_items ADD COLUMN IF NOT EXISTS submission_queue TEXT")
+                f.execute("ALTER TABLE media_ingest_run_items ADD COLUMN IF NOT EXISTS staging_temp_dir TEXT")
+                f.execute("ALTER TABLE media_ingest_run_items ADD COLUMN IF NOT EXISTS submission_lease_token TEXT")
+                f.execute(
+                    "ALTER TABLE media_ingest_run_items "
+                    "ADD COLUMN IF NOT EXISTS submission_lease_expires_at TIMESTAMPTZ"
+                )
+                f.execute(
+                    "ALTER TABLE media_ingest_run_items "
+                    "ADD COLUMN IF NOT EXISTS submission_lease_generation INTEGER NOT NULL DEFAULT 0"
+                )
                 # Forward-migrate archive table compressed columns (if table exists)
                 try:
                     f.execute("ALTER TABLE jobs_archive ADD COLUMN IF NOT EXISTS payload_compressed BYTEA")
@@ -266,12 +519,18 @@ def ensure_jobs_tables_pg(db_url: str) -> str:
             with psycopg.connect(_dsn, autocommit=True) as c2:
                 with c2.cursor() as k:
                     # Ready vs scheduled scans
-                    k.execute("CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_jobs_status_available_at ON jobs(status, available_at)")
+                    k.execute(
+                        "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_jobs_status_available_at ON jobs(status, available_at)"
+                    )
                     # Composite unique for idempotency (NULLs are allowed and do not conflict)
-                    k.execute("CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_jobs_idempotent_unique ON jobs(domain, queue, job_type, idempotency_key)")
+                    k.execute(
+                        "CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_jobs_idempotent_unique ON jobs(domain, queue, job_type, idempotency_key)"
+                    )
                     # Optional partial index to speed common hot-path queries
                     with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
-                        k.execute("CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_jobs_hot ON jobs(domain, queue, job_type, priority, available_at, created_at) WHERE status IN ('queued','processing')")
+                        k.execute(
+                            "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_jobs_hot ON jobs(domain, queue, job_type, priority, available_at, created_at) WHERE status IN ('queued','processing')"
+                        )
                     # Acquisition ordering index: priority ASC (lower number = higher priority),
                     # then available/created, then id; queued only. The ORDER BY in queries
                     # is explicit; this index simply supports that access pattern.
@@ -291,32 +550,6 @@ def ensure_jobs_tables_pg(db_url: str) -> str:
         # Ensure job_counters exists for counters-enabled deployments
         with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
             ensure_job_counters_pg(db_url)
-        # Optional: enable RLS on core tables when requested via env.
-        try:
-            import os as _os
-
-            import psycopg  # noqa: F401
-            if _is_truthy(_os.getenv("JOBS_PG_RLS_ENABLE", "")):
-                with psycopg.connect(_dsn, autocommit=True) as _c_rls, _c_rls.cursor() as _p:
-                    with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
-                        _p.execute("ALTER TABLE jobs ENABLE ROW LEVEL SECURITY")
-                    with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
-                        _p.execute("ALTER TABLE job_events ENABLE ROW LEVEL SECURITY")
-                    with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
-                        _p.execute("ALTER TABLE job_counters ENABLE ROW LEVEL SECURITY")
-                    with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
-                        _p.execute("ALTER TABLE job_queue_controls ENABLE ROW LEVEL SECURITY")
-                    with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
-                        _p.execute("ALTER TABLE job_attachments ENABLE ROW LEVEL SECURITY")
-                    with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
-                        _p.execute("ALTER TABLE job_sla_policies ENABLE ROW LEVEL SECURITY")
-                    with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
-                        _p.execute("ALTER TABLE job_dependencies ENABLE ROW LEVEL SECURITY")
-                    with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
-                        _p.execute("ALTER TABLE jobs_archive ENABLE ROW LEVEL SECURITY")
-        except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
-            # Ignore in environments without permissions or when tables don't exist yet
-            pass
     except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS as e:
         # Attempt to create database if it doesn't exist, then retry
         msg = str(e)
@@ -338,15 +571,12 @@ def ensure_jobs_tables_pg(db_url: str) -> str:
         else:
             # Re-raise with context for other errors
             raise RuntimeError(f"Failed to ensure Jobs schema in Postgres: {e}") from e
-    # Optionally enable RLS policies for domain scoping when requested
-    try:
-        import os as _os_rls
-        if _is_truthy(_os_rls.getenv("JOBS_PG_RLS_ENABLE", "")):
-            with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
-                ensure_jobs_rls_policies_pg(db_url)
-    except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
-        pass
+    # RLS is a security boundary when enabled; startup must fail if its
+    # policies cannot be installed and verified.
+    if _is_truthy(os.getenv("JOBS_PG_RLS_ENABLE", "")):
+        ensure_jobs_rls_policies_pg(db_url)
     return db_url
+
 
 def ensure_job_events_pg(db_url: str) -> None:
     """Ensure the job_events table and indexes exist in Postgres."""
@@ -355,6 +585,7 @@ def ensure_job_events_pg(db_url: str) -> None:
     except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
         return
     from .pg_util import negotiate_pg_dsn
+
     _dsn = negotiate_pg_dsn(db_url)
     _rls_debug = _is_truthy(os.getenv("JOBS_PG_RLS_DEBUG", ""))
     try:
@@ -386,53 +617,314 @@ def ensure_job_events_pg(db_url: str) -> None:
 
 
 def ensure_jobs_rls_policies_pg(db_url: str) -> None:
-    """Enable Postgres Row Level Security (RLS) for domain scoping.
-
-    Policies restrict SELECT/UPDATE/DELETE to rows where jobs.domain is in
-    current_setting('app.domain_allowlist', true), if set.
-    """
+    """Install Jobs domain policies and fail-closed playlist owner policies."""
     try:
         import psycopg  # type: ignore
     except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
         return
-    import os
-    import re as _re
+    legacy_rls_exceptions = (*_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS, psycopg.Error)
+    from psycopg import sql as _sql  # type: ignore
 
     from .pg_util import negotiate_pg_dsn
+
     _dsn = negotiate_pg_dsn(db_url)
     debug = _is_truthy(os.getenv("JOBS_PG_RLS_DEBUG", ""))
+    raw_role = os.getenv("JOBS_PG_RLS_ROLE")
+    role = raw_role.strip() if raw_role is not None else None
+    if raw_role is not None and (
+        not role or "\x00" in role or len(role.encode("utf-8")) > 63
+    ):
+        raise JobsRLSInstallationError(
+            "JOBS_PG_RLS_ROLE must be a nonempty PostgreSQL identifier of 1 to 63 bytes "
+            "and must not contain NUL"
+        )
     try:
         with psycopg.connect(_dsn, autocommit=True) as conn, conn.cursor() as cur:
-            role = str(os.getenv("JOBS_PG_RLS_ROLE", "")).strip()
-            if role and _re.match(r"^[A-Za-z0-9_]+$", role):
+            if role:
                 try:
                     cur.execute("SELECT current_schema()")
                     schema_row = cur.fetchone()
                     schema_name = (schema_row[0] if schema_row else None) or "public"
-                    cur.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (role,))
-                    if not cur.fetchone():
-                        cur.execute(f"CREATE ROLE {role} NOLOGIN")
-                    try:
-                        cur.execute("SELECT current_user")
-                        user_row = cur.fetchone()
-                        current_user = (user_row[0] if user_row else None) or None
-                        if current_user and _re.match(r"^[A-Za-z0-9_]+$", str(current_user)):
-                            cur.execute(f"GRANT {role} TO {current_user}")
-                    except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
-                        pass
-                    cur.execute(f"GRANT USAGE ON SCHEMA {schema_name} TO {role}")
                     cur.execute(
-                        f"GRANT SELECT, UPDATE, DELETE ON ALL TABLES IN SCHEMA {schema_name} TO {role}"
+                        "SELECT rolcanlogin, rolsuper, rolbypassrls "
+                        "FROM pg_roles WHERE rolname = %s",
+                        (role,),
                     )
-                except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
-                    pass
+                    role_row = cur.fetchone()
+                    if role_row and bool(role_row[0]):
+                        raise JobsRLSInstallationError(
+                            f"JOBS_PG_RLS_ROLE {role!r} must be a NOLOGIN group role"
+                        )
+                    if role_row and bool(role_row[1]):
+                        raise JobsRLSInstallationError(
+                            f"JOBS_PG_RLS_ROLE {role!r} must not be a superuser role"
+                        )
+                    if role_row and bool(role_row[2]):
+                        raise JobsRLSInstallationError(
+                            f"JOBS_PG_RLS_ROLE {role!r} must not have BYPASSRLS"
+                        )
+                    if not role_row:
+                        cur.execute(
+                            _sql.SQL("CREATE ROLE {} NOLOGIN").format(_sql.Identifier(role))
+                        )
+                    cur.execute(
+                        """
+                        SELECT parent.rolname
+                        FROM pg_auth_members membership
+                        JOIN pg_roles member_role ON member_role.oid = membership.member
+                        JOIN pg_roles parent ON parent.oid = membership.roleid
+                        WHERE member_role.rolname = %s
+                        LIMIT 1
+                        """,
+                        (role,),
+                    )
+                    parent_role_row = cur.fetchone()
+                    if parent_role_row:
+                        raise JobsRLSInstallationError(
+                            f"JOBS_PG_RLS_ROLE {role!r} must not be a member of parent role "
+                            f"{parent_role_row[0]!r}"
+                        )
+                    cur.execute("SELECT current_user")
+                    user_row = cur.fetchone()
+                    current_user = (user_row[0] if user_row else None) or None
+                    if current_user:
+                        cur.execute(
+                            _sql.SQL("GRANT {} TO {}").format(
+                                _sql.Identifier(role),
+                                _sql.Identifier(str(current_user)),
+                            )
+                        )
+                    role_ident = _sql.Identifier(role)
+                    schema_ident = _sql.Identifier(str(schema_name))
+                    tables = (*_JOBS_RLS_INSERT_TABLES, *_PLAYLIST_RLS_TABLES)
+                    allowed_sequences = (*_JOBS_RLS_SEQUENCES, *_PLAYLIST_RLS_SEQUENCES)
+                    qualified_tables = _sql.SQL(", ").join(
+                        _sql.Identifier(str(schema_name), table) for table in tables
+                    )
+                    cur.execute(
+                        """
+                        SELECT COALESCE(
+                          array_agg(namespace.nspname::text ORDER BY namespace.nspname),
+                          ARRAY[]::text[]
+                        ) AS managed_schemas
+                        FROM pg_namespace namespace
+                        WHERE namespace.nspname <> 'information_schema'
+                          AND namespace.nspname !~ '^pg_'
+                        """
+                    )
+                    managed_schemas_row = cur.fetchone()
+                    managed_schema_values = managed_schemas_row[0] if managed_schemas_row else ()
+                    managed_schemas = [
+                        str(value)
+                        for value in (managed_schema_values or ())
+                        if str(value) != "information_schema"
+                        and not str(value).startswith("pg_")
+                    ]
+                    if str(schema_name) == "information_schema" or str(schema_name).startswith(
+                        "pg_"
+                    ):
+                        raise JobsRLSInstallationError(
+                            "JOBS_PG_RLS_ROLE cannot use a PostgreSQL system schema"
+                        )
+                    if str(schema_name) not in managed_schemas:
+                        managed_schemas.append(str(schema_name))
+                    # JOBS_PG_RLS_ROLE is a dedicated role. Remove grants left by
+                    # earlier installers across every user schema before applying
+                    # the one schema-qualified allowlist below.
+                    for managed_schema in managed_schemas:
+                        managed_schema_ident = _sql.Identifier(managed_schema)
+                        cur.execute(
+                            _sql.SQL("REVOKE ALL PRIVILEGES ON SCHEMA {} FROM {}").format(
+                                managed_schema_ident,
+                                role_ident,
+                            )
+                        )
+                        cur.execute(
+                            _sql.SQL(
+                                "REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA {} FROM {}"
+                            ).format(managed_schema_ident, role_ident)
+                        )
+                        cur.execute(
+                            _sql.SQL(
+                                "REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA {} FROM {}"
+                            ).format(managed_schema_ident, role_ident)
+                        )
+                    cur.execute(
+                        _sql.SQL("GRANT USAGE ON SCHEMA {} TO {}").format(
+                            schema_ident,
+                            role_ident,
+                        )
+                    )
+                    cur.execute(
+                        _sql.SQL("GRANT SELECT, UPDATE, DELETE ON {} TO {}").format(
+                            qualified_tables,
+                            role_ident,
+                        )
+                    )
+                    cur.execute(
+                        _sql.SQL("GRANT INSERT ON {} TO {}").format(
+                            qualified_tables,
+                            role_ident,
+                        )
+                    )
+                    for sequence in allowed_sequences:
+                        cur.execute(
+                            _sql.SQL("GRANT USAGE, SELECT ON SEQUENCE {} TO {}").format(
+                                _sql.Identifier(str(schema_name), sequence),
+                                role_ident,
+                            )
+                        )
+                    cur.execute(
+                        """
+                        SELECT namespace.nspname, relation.relname AS unauthorized_table
+                        FROM pg_class relation
+                        JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
+                        CROSS JOIN (VALUES (%s::name)) AS configured(role_name)
+                        WHERE namespace.nspname <> 'information_schema'
+                          AND namespace.nspname !~ '^pg_'
+                          AND relation.relkind IN ('r', 'p', 'v', 'm', 'f')
+                          AND NOT (
+                            namespace.nspname = %s
+                            AND relation.relname = ANY(%s)
+                          )
+                          AND (
+                            has_table_privilege(configured.role_name, relation.oid, 'SELECT')
+                            OR has_table_privilege(configured.role_name, relation.oid, 'INSERT')
+                            OR has_table_privilege(configured.role_name, relation.oid, 'UPDATE')
+                            OR has_table_privilege(configured.role_name, relation.oid, 'DELETE')
+                            OR has_table_privilege(configured.role_name, relation.oid, 'TRUNCATE')
+                            OR has_table_privilege(configured.role_name, relation.oid, 'REFERENCES')
+                            OR has_table_privilege(configured.role_name, relation.oid, 'TRIGGER')
+                            OR has_any_column_privilege(configured.role_name, relation.oid, 'SELECT')
+                            OR has_any_column_privilege(configured.role_name, relation.oid, 'INSERT')
+                            OR has_any_column_privilege(configured.role_name, relation.oid, 'UPDATE')
+                            OR has_any_column_privilege(configured.role_name, relation.oid, 'REFERENCES')
+                          )
+                        LIMIT 1
+                        """,
+                        (role, str(schema_name), list(tables)),
+                    )
+                    unauthorized_table_row = cur.fetchone()
+                    if unauthorized_table_row:
+                        raise JobsRLSInstallationError(
+                            "JOBS_PG_RLS_ROLE retains effective privileges on unrelated table "
+                            f"{unauthorized_table_row[0]}.{unauthorized_table_row[1]!s}; "
+                            "remove PUBLIC or inherited grants"
+                        )
+                    cur.execute(
+                        """
+                        SELECT namespace.nspname, relation.relname AS overprivileged_table
+                        FROM pg_class relation
+                        JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
+                        CROSS JOIN (VALUES (%s::name)) AS configured(role_name)
+                        WHERE namespace.nspname = %s
+                          AND relation.relname = ANY(%s)
+                          AND relation.relkind IN ('r', 'p', 'v', 'm', 'f')
+                          AND (
+                            has_table_privilege(configured.role_name, relation.oid, 'TRUNCATE')
+                            OR has_table_privilege(
+                              configured.role_name, relation.oid, 'REFERENCES'
+                            )
+                            OR has_table_privilege(configured.role_name, relation.oid, 'TRIGGER')
+                            OR has_any_column_privilege(
+                              configured.role_name, relation.oid, 'REFERENCES'
+                            )
+                          )
+                        LIMIT 1
+                        """,
+                        (role, str(schema_name), list(tables)),
+                    )
+                    overprivileged_table_row = cur.fetchone()
+                    if overprivileged_table_row:
+                        raise JobsRLSInstallationError(
+                            "JOBS_PG_RLS_ROLE has effective privileges outside the allowed "
+                            "privilege set on allowlisted table "
+                            f"{overprivileged_table_row[0]}.{overprivileged_table_row[1]}"
+                        )
+                    cur.execute(
+                        """
+                        SELECT namespace.nspname, relation.relname AS unauthorized_sequence
+                        FROM pg_class relation
+                        JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
+                        CROSS JOIN (VALUES (%s::name)) AS configured(role_name)
+                        WHERE namespace.nspname <> 'information_schema'
+                          AND namespace.nspname !~ '^pg_'
+                          AND relation.relkind = 'S'
+                          AND NOT (
+                            namespace.nspname = %s
+                            AND relation.relname = ANY(%s)
+                          )
+                          AND (
+                            has_sequence_privilege(configured.role_name, relation.oid, 'USAGE')
+                            OR has_sequence_privilege(configured.role_name, relation.oid, 'SELECT')
+                            OR has_sequence_privilege(configured.role_name, relation.oid, 'UPDATE')
+                          )
+                        LIMIT 1
+                        """,
+                        (role, str(schema_name), list(allowed_sequences)),
+                    )
+                    unauthorized_sequence_row = cur.fetchone()
+                    if unauthorized_sequence_row:
+                        raise JobsRLSInstallationError(
+                            "JOBS_PG_RLS_ROLE retains effective privileges on unrelated sequence "
+                            f"{unauthorized_sequence_row[0]}.{unauthorized_sequence_row[1]!s}; "
+                            "remove PUBLIC or inherited grants"
+                        )
+                    cur.execute(
+                        """
+                        SELECT namespace.nspname, relation.relname AS overprivileged_sequence
+                        FROM pg_class relation
+                        JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
+                        CROSS JOIN (VALUES (%s::name)) AS configured(role_name)
+                        WHERE namespace.nspname = %s
+                          AND relation.relname = ANY(%s)
+                          AND relation.relkind = 'S'
+                          AND has_sequence_privilege(
+                            configured.role_name, relation.oid, 'UPDATE'
+                          )
+                        LIMIT 1
+                        """,
+                        (role, str(schema_name), list(allowed_sequences)),
+                    )
+                    overprivileged_sequence_row = cur.fetchone()
+                    if overprivileged_sequence_row:
+                        raise JobsRLSInstallationError(
+                            "JOBS_PG_RLS_ROLE has effective privileges outside the allowed "
+                            "privilege set on allowlisted sequence "
+                            f"{overprivileged_sequence_row[0]}.{overprivileged_sequence_row[1]}"
+                        )
+                    cur.execute(
+                        """
+                        SELECT namespace.nspname AS unauthorized_schema
+                        FROM pg_namespace namespace
+                        CROSS JOIN (VALUES (%s::name)) AS configured(role_name)
+                        WHERE namespace.nspname <> 'information_schema'
+                          AND namespace.nspname !~ '^pg_'
+                          AND has_schema_privilege(
+                            configured.role_name, namespace.oid, 'CREATE'
+                          )
+                        LIMIT 1
+                        """,
+                        (role,),
+                    )
+                    unauthorized_schema_row = cur.fetchone()
+                    if unauthorized_schema_row:
+                        raise JobsRLSInstallationError(
+                            "JOBS_PG_RLS_ROLE retains effective CREATE privilege on schema "
+                            f"{unauthorized_schema_row[0]!r}; remove PUBLIC or inherited grants"
+                        )
+                except JobsRLSInstallationError:
+                    raise
+                except legacy_rls_exceptions as exc:
+                    raise JobsRLSInstallationError("failed to configure the Postgres RLS role") from exc
+
             def _enable_rls(table: str) -> None:
-                with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
+                with contextlib.suppress(legacy_rls_exceptions):
                     cur.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
-                with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
+                with contextlib.suppress(legacy_rls_exceptions):
                     cur.execute(f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY")
 
-            # Enable and enforce RLS on all Jobs tables
+            # Preserve best-effort installation for legacy Jobs tables.
             for _table in (
                 "jobs",
                 "job_events",
@@ -441,38 +933,129 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
                 "job_sla_policies",
                 "job_attachments",
                 "job_dependencies",
+                "jobs_archive",
             ):
                 _enable_rls(_table)
+
+            # Playlist authority tables are security boundaries: installation is
+            # successful only when both ENABLE and FORCE are confirmed by Postgres.
+            try:
+                for _table in _PLAYLIST_RLS_TABLES:
+                    cur.execute(f"ALTER TABLE {_table} ENABLE ROW LEVEL SECURITY")  # nosec B608
+                    cur.execute(f"ALTER TABLE {_table} FORCE ROW LEVEL SECURITY")  # nosec B608
+                    cur.execute(
+                        "SELECT relrowsecurity, relforcerowsecurity "
+                        "FROM pg_class WHERE oid = to_regclass(%s)",
+                        (_table,),
+                    )
+                    rls_row = cur.fetchone()
+                    if not rls_row or not bool(rls_row[0]) or not bool(rls_row[1]):
+                        raise JobsRLSInstallationError(
+                            f"playlist RLS was not enabled and forced for {_table}"
+                        )
+            except JobsRLSInstallationError:
+                raise
+            except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS as exc:
+                raise JobsRLSInstallationError("playlist RLS installation failed") from exc
             admin_expr = "COALESCE(NULLIF(current_setting('app.is_admin', true), ''), '') = 'true'"
             domain_expr = "NULLIF(current_setting('app.domain_allowlist', true), '')"
             owner_expr = "NULLIF(current_setting('app.owner_user_id', true), '')"
             domain_filter = f"({domain_expr} IS NULL OR domain = ANY(string_to_array({domain_expr}, ',')))"
             owner_filter = f"({owner_expr} IS NULL OR owner_user_id = {owner_expr})"
 
-            cur.execute("DROP POLICY IF EXISTS jobs_domain_select ON jobs")
-            cur.execute(
-                f"""
-                    CREATE POLICY jobs_domain_select ON jobs FOR SELECT
-                    USING (
-                      {admin_expr} OR (
-                        {domain_filter}
-                        AND {owner_filter}
-                      )
-                    )
-                    """
-            )
-            cur.execute("DROP POLICY IF EXISTS jobs_domain_modify ON jobs")
-            cur.execute(
-                f"""
-                    CREATE POLICY jobs_domain_modify ON jobs FOR ALL
-                    USING (
-                      {admin_expr} OR (
-                        {domain_filter}
-                        AND {owner_filter}
-                      )
-                    )
-                    """
-            )
+            def _qualified_owner_filter(table: str) -> str:
+                return f"({owner_expr} IS NOT NULL AND {table}.owner_user_id = {owner_expr})"
+
+            playlist_policy_filters = {
+                "playlist_preflights": (
+                    f"{admin_expr} OR {_qualified_owner_filter('playlist_preflights')}"
+                ),
+                "playlist_preflight_items": (
+                    f"{admin_expr} OR ("  # nosec B608
+                    f"{_qualified_owner_filter('playlist_preflight_items')} AND EXISTS ("
+                    "SELECT 1 FROM playlist_preflights parent "
+                    "WHERE parent.preflight_id = playlist_preflight_items.preflight_id "
+                    "AND parent.owner_user_id = playlist_preflight_items.owner_user_id "
+                    f"AND {_qualified_owner_filter('parent')}))"
+                ),
+                "playlist_materializations": (
+                    f"{admin_expr} OR ("  # nosec B608
+                    f"{_qualified_owner_filter('playlist_materializations')} AND EXISTS ("
+                    "SELECT 1 FROM playlist_preflights parent "
+                    "WHERE parent.preflight_id = playlist_materializations.preflight_id "
+                    "AND parent.owner_user_id = playlist_materializations.owner_user_id "
+                    f"AND {_qualified_owner_filter('parent')}))"
+                ),
+                "playlist_materialization_items": (
+                    f"{admin_expr} OR ("  # nosec B608
+                    f"{_qualified_owner_filter('playlist_materialization_items')} AND EXISTS ("
+                    "SELECT 1 FROM playlist_materializations parent "
+                    "WHERE parent.materialization_id = playlist_materialization_items.materialization_id "
+                    "AND parent.owner_user_id = playlist_materialization_items.owner_user_id "
+                    f"AND {_qualified_owner_filter('parent')}))"
+                ),
+                "media_ingest_runs": (
+                    f"{admin_expr} OR {_qualified_owner_filter('media_ingest_runs')}"
+                ),
+                "media_ingest_run_items": (
+                    f"{admin_expr} OR ("  # nosec B608
+                    f"{_qualified_owner_filter('media_ingest_run_items')} AND EXISTS ("
+                    "SELECT 1 FROM media_ingest_runs parent "
+                    "WHERE parent.run_id = media_ingest_run_items.run_id "
+                    "AND parent.owner_user_id = media_ingest_run_items.owner_user_id "
+                    f"AND {_qualified_owner_filter('parent')}))"
+                ),
+                "media_ingest_run_events": (
+                    f"{admin_expr} OR ("  # nosec B608
+                    f"{_qualified_owner_filter('media_ingest_run_events')} AND EXISTS ("
+                    "SELECT 1 FROM media_ingest_runs parent "
+                    "WHERE parent.run_id = media_ingest_run_events.run_id "
+                    "AND parent.owner_user_id = media_ingest_run_events.owner_user_id "
+                    f"AND {_qualified_owner_filter('parent')}))"
+                ),
+            }
+            for table, policy_filter in playlist_policy_filters.items():
+                cur.execute(f"DROP POLICY IF EXISTS {table}_owner_select ON {table}")  # nosec B608
+                select_policy_sql = f"""
+                    CREATE POLICY {table}_owner_select ON {table} FOR SELECT
+                    USING ({policy_filter})
+                    """  # nosec B608
+                cur.execute(select_policy_sql)
+                cur.execute(f"DROP POLICY IF EXISTS {table}_owner_modify ON {table}")  # nosec B608
+                modify_policy_sql = f"""
+                    CREATE POLICY {table}_owner_modify ON {table} FOR ALL
+                    USING ({policy_filter})
+                    WITH CHECK ({policy_filter})
+                    """  # nosec B608
+                cur.execute(modify_policy_sql)
+
+            try:
+                cur.execute("DROP POLICY IF EXISTS jobs_domain_select ON jobs")
+                cur.execute(
+                    f"""
+                        CREATE POLICY jobs_domain_select ON jobs FOR SELECT
+                        USING (
+                          {admin_expr} OR (
+                            {domain_filter}
+                            AND {owner_filter}
+                          )
+                        )
+                        """
+                )
+                cur.execute("DROP POLICY IF EXISTS jobs_domain_modify ON jobs")
+                cur.execute(
+                    f"""
+                        CREATE POLICY jobs_domain_modify ON jobs FOR ALL
+                        USING (
+                          {admin_expr} OR (
+                            {domain_filter}
+                            AND {owner_filter}
+                          )
+                        )
+                        """
+                )
+            except legacy_rls_exceptions:
+                pass
             # job_events policies (domain + owner, with admin bypass)
             try:
                 cur.execute("DROP POLICY IF EXISTS job_events_select ON job_events")
@@ -499,7 +1082,7 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
                         )
                         """
                 )
-            except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
+            except legacy_rls_exceptions:
                 pass
             # job_counters policies (domain only, with admin bypass)
             try:
@@ -525,7 +1108,7 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
                         )
                         """
                 )
-            except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
+            except legacy_rls_exceptions:
                 pass
             # job_queue_controls policies (domain only, with admin bypass)
             try:
@@ -551,7 +1134,7 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
                         )
                         """
                 )
-            except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
+            except legacy_rls_exceptions:
                 pass
             # job_attachments policies (join to jobs for domain/owner)
             try:
@@ -567,10 +1150,10 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
                           )
                         )
                         """
-                job_attachments_select_policy_sql = job_attachments_select_policy_template.format_map(locals())  # nosec B608
-                cur.execute(
-                    job_attachments_select_policy_sql
-                )
+                job_attachments_select_policy_sql = job_attachments_select_policy_template.format_map(
+                    locals()
+                )  # nosec B608
+                cur.execute(job_attachments_select_policy_sql)
                 cur.execute("DROP POLICY IF EXISTS job_attachments_modify ON job_attachments")
                 job_attachments_modify_policy_template = """
                         CREATE POLICY job_attachments_modify ON job_attachments FOR ALL
@@ -583,11 +1166,11 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
                           )
                         )
                         """
-                job_attachments_modify_policy_sql = job_attachments_modify_policy_template.format_map(locals())  # nosec B608
-                cur.execute(
-                    job_attachments_modify_policy_sql
-                )
-            except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
+                job_attachments_modify_policy_sql = job_attachments_modify_policy_template.format_map(
+                    locals()
+                )  # nosec B608
+                cur.execute(job_attachments_modify_policy_sql)
+            except legacy_rls_exceptions:
                 pass
             # job_dependencies policies (join to jobs for domain/owner)
             try:
@@ -603,10 +1186,10 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
                           )
                         )
                         """
-                job_dependencies_select_policy_sql = job_dependencies_select_policy_template.format_map(locals())  # nosec B608
-                cur.execute(
-                    job_dependencies_select_policy_sql
-                )
+                job_dependencies_select_policy_sql = job_dependencies_select_policy_template.format_map(
+                    locals()
+                )  # nosec B608
+                cur.execute(job_dependencies_select_policy_sql)
                 cur.execute("DROP POLICY IF EXISTS job_dependencies_modify ON job_dependencies")
                 job_dependencies_modify_policy_template = """
                         CREATE POLICY job_dependencies_modify ON job_dependencies FOR ALL
@@ -619,11 +1202,11 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
                           )
                         )
                         """
-                job_dependencies_modify_policy_sql = job_dependencies_modify_policy_template.format_map(locals())  # nosec B608
-                cur.execute(
-                    job_dependencies_modify_policy_sql
-                )
-            except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
+                job_dependencies_modify_policy_sql = job_dependencies_modify_policy_template.format_map(
+                    locals()
+                )  # nosec B608
+                cur.execute(job_dependencies_modify_policy_sql)
+            except legacy_rls_exceptions:
                 pass
             # job_sla_policies policies (domain only)
             try:
@@ -649,7 +1232,7 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
                         )
                         """
                 )
-            except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
+            except legacy_rls_exceptions:
                 pass
             # jobs_archive policies (domain + owner, with admin bypass)
             try:
@@ -677,7 +1260,7 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
                         )
                         """
                 )
-            except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
+            except legacy_rls_exceptions:
                 pass
             if debug:
                 try:
@@ -688,7 +1271,10 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
                             WHERE schemaname = current_schema()
                               AND tablename IN (
                                 'jobs','job_events','job_counters','job_queue_controls',
-                                'job_attachments','job_sla_policies','job_dependencies','jobs_archive'
+                                'job_attachments','job_sla_policies','job_dependencies','jobs_archive',
+                                'playlist_preflights','playlist_preflight_items',
+                                'playlist_materializations','playlist_materialization_items',
+                                'media_ingest_runs','media_ingest_run_items','media_ingest_run_events'
                               )
                             ORDER BY tablename, polname
                             """
@@ -697,11 +1283,13 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
                     print(f"[jobs-rls-debug] policies={rows}")
                 except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
                     pass
-    except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
+    except JobsRLSInstallationError:
+        raise
+    except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS as exc:
         if debug:
             with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
                 print("[jobs-rls-debug] failed to apply RLS policies")
-        return
+        raise JobsRLSInstallationError("failed to apply Postgres Jobs RLS policies") from exc
 
 
 def ensure_job_counters_pg(db_url: str) -> None:
@@ -713,6 +1301,7 @@ def ensure_job_counters_pg(db_url: str) -> None:
     # Normalize DSN to include timeouts and libpq options, similar to other helpers
     try:
         from .pg_util import normalize_pg_dsn
+
         _dsn = normalize_pg_dsn(db_url)
     except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
         _dsn = db_url
@@ -735,6 +1324,8 @@ def ensure_job_counters_pg(db_url: str) -> None:
                     """
                 )
                 with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
-                    cur.execute("CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_job_counters_domain_queue ON job_counters(domain, queue)")
+                    cur.execute(
+                        "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_job_counters_domain_queue ON job_counters(domain, queue)"
+                    )
     except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
         return

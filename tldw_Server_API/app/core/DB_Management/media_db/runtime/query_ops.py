@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 from tldw_Server_API.app.core.DB_Management.media_db import api as media_db_api
@@ -58,6 +59,20 @@ def get_media_by_url(
     return media_db_api.get_media_by_url(
         self,
         url,
+        include_deleted=include_deleted,
+        include_trash=include_trash,
+    )
+
+
+def get_media_by_urls(
+    self,
+    urls: Sequence[str],
+    include_deleted: bool = False,
+    include_trash: bool = False,
+) -> list[dict[str, Any]]:
+    return media_db_api.get_media_by_urls(
+        self,
+        urls,
         include_deleted=include_deleted,
         include_trash=include_trash,
     )
@@ -151,6 +166,7 @@ __all__ = [
     "get_media_by_id",
     "get_media_by_uuid",
     "get_media_by_url",
+    "get_media_by_urls",
     "get_media_by_hash",
     "get_media_by_title",
     "get_paginated_media_list",

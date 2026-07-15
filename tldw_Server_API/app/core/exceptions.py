@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
 import re
+from collections.abc import Mapping, Sequence
 from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Request, status
@@ -59,6 +59,83 @@ class TokenizerUnavailable(Exception):
 
 class BadRequestError(ValueError):
     """Raised when a caller provides invalid arguments for an operation."""
+
+
+class JobSubmissionLimitError(BadRequestError):
+    """Raised when a Jobs submission limit rejects the whole request."""
+
+    def __init__(self, message: str, *, code: str, retry_after: int | None = None) -> None:
+        super().__init__(message)
+        self.code = code
+        self.retry_after = retry_after
+
+
+class PlaylistIngestNotFoundError(LookupError):
+    """Raised for absent, unauthorized, expired, or invalid playlist resources."""
+
+
+class PlaylistIngestConflictError(RuntimeError):
+    """Raised when immutable playlist state or compare-and-set state has changed."""
+
+
+class PlaylistPreflightCapacityError(RuntimeError):
+    """Raised when transactional playlist preflight admission has no free slot."""
+
+
+class PlaylistPreflightLeaseLostError(PlaylistIngestConflictError):
+    """Raised before mutation when a claimed preflight job lease is not authoritative."""
+
+    def __init__(self, *, cancelled: bool = False) -> None:
+        self.cancelled = bool(cancelled)
+        super().__init__("playlist_preflight_lease_lost")
+
+
+class PlaylistPreflightBusyError(RuntimeError):
+    """Raised when no transactional preflight reservation is available."""
+
+
+class InvalidPlaylistUrlError(ValueError):
+    """Raised for input outside the trusted YouTube playlist boundary."""
+
+
+class PlaylistPreflightUnavailableError(RuntimeError):
+    """Raised when a preflight cannot be durably bound to an internal job."""
+
+
+class PlaylistPreflightIncompleteError(RuntimeError):
+    """Raised when materialization is requested before a complete snapshot."""
+
+
+class PlaylistSelectionError(ValueError):
+    """Raised for an invalid server occurrence selection."""
+
+
+class PlaylistRunValidationError(ValueError):
+    """Raised with a stable code when a playlist run request is invalid."""
+
+
+class PlaylistRunPendingError(PlaylistIngestConflictError):
+    """Raised when an existing run still has an ambiguous zero-job action."""
+
+    def __init__(self, run_id: str) -> None:
+        self.run_id = str(run_id)
+        super().__init__("duplicate_action_pending")
+
+
+class PlaylistRunStatusUnavailableError(PlaylistIngestConflictError):
+    """Raised when retry reconciliation cannot establish current owner media state."""
+
+
+class PlaylistPreflightRequiredError(PlaylistRunValidationError):
+    """Raised when a direct URL must first use playlist preflight."""
+
+
+class ReviewRequiredError(RuntimeError):
+    """Raised before persistence when refreshed duplicate evidence changed review."""
+
+    def __init__(self, items: Sequence[Any]) -> None:
+        self.items = tuple(items)
+        super().__init__("review_required")
 
 
 class InvalidMetadataOrderKeyError(ValueError):

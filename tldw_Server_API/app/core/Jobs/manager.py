@@ -9,6 +9,7 @@ import secrets
 import sqlite3
 import time
 import uuid as _uuid
+from collections.abc import Callable, Iterator, Mapping
 from contextvars import ContextVar
 from datetime import datetime
 from datetime import timezone as _tz
@@ -23,7 +24,7 @@ from tldw_Server_API.app.core.DB_Management.jobs_sql_fragments import (
 from tldw_Server_API.app.core.DB_Management.sqlite_policy import (
     configure_sqlite_connection,
 )
-from tldw_Server_API.app.core.exceptions import BadRequestError
+from tldw_Server_API.app.core.exceptions import BadRequestError, JobSubmissionLimitError
 from tldw_Server_API.app.core.Security.crypto import (
     decrypt_json_blob,
     decrypt_json_blob_with_key,
@@ -412,22 +413,32 @@ class JobManager:
                 return False
             return isinstance(exc, pg_errors.SerializationFailure)
 
-        # Apply per-transaction RLS via SET LOCAL to avoid cross-request leakage
-        role = str(os.getenv("JOBS_PG_RLS_ROLE", "")).strip()
-        if role:
-            try:
-                import re as _re
+        # Apply the dedicated RLS role before setting request-scoped policy context.
+        from psycopg import sql as _sql  # type: ignore
 
-                if _re.match(r"^[A-Za-z0-9_]+$", role):
-                    cur.execute(f"SET ROLE {role}")
+        raw_role = os.getenv("JOBS_PG_RLS_ROLE")
+        role = raw_role.strip() if raw_role is not None else ""
+        rls_enforced = (
+            self._is_truthy(os.getenv("JOBS_PG_RLS_ENABLE", ""))
+            and raw_role is not None
+        )
+        role_is_valid = bool(role) and "\x00" not in role and len(role.encode("utf-8")) <= 63
+        if raw_role is not None and not role_is_valid and rls_enforced:
+            raise RuntimeError(
+                "JOBS_PG_RLS_ROLE must be a nonempty PostgreSQL identifier of 1 to 63 bytes "
+                "and must not contain NUL"
+            )
+        if role_is_valid:
+            try:
+                cur.execute(_sql.SQL("SET ROLE {}").format(_sql.Identifier(role)))
             except _JOB_NONCRITICAL_EXCEPTIONS as exc:
                 if _is_serialization_failure(exc):
                     raise
                 with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
                     conn.rollback()
+                if rls_enforced:
+                    raise RuntimeError("failed to assume the configured Postgres RLS role") from exc
         try:
-            from psycopg import sql as _sql  # type: ignore
-
             is_admin = bool(JobManager._RLS_IS_ADMIN.get())
             cur.execute(_sql.SQL("SET app.is_admin = {}").format(_sql.Literal("true" if is_admin else "false")))
 
@@ -443,6 +454,8 @@ class JobManager:
                 try:
                     cur.execute(_sql.SQL("RESET {}").format(_sql.SQL(name)))
                 except _JOB_NONCRITICAL_EXCEPTIONS:
+                    if rls_enforced:
+                        raise
                     with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
                         conn.rollback()
                     try:
@@ -481,6 +494,8 @@ class JobManager:
             # Roll back to clear the error so subsequent statements can proceed.
             with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
                 conn.rollback()
+            if rls_enforced:
+                raise RuntimeError("failed to apply the enforced Postgres RLS context") from exc
         return cur
 
     # --- Acquire ordering policy (env-driven overrides) ---
@@ -554,6 +569,28 @@ class JobManager:
             return None  # noqa: TRY300
         except _JOB_NONCRITICAL_EXCEPTIONS:
             return None
+
+    @classmethod
+    @contextlib.contextmanager
+    def rls_context(
+        cls,
+        *,
+        is_admin: bool,
+        domain_allowlist: str | None,
+        owner_user_id: str | None,
+    ) -> Iterator[None]:
+        """Temporarily apply one RLS identity and restore the caller's context."""
+        domain = domain_allowlist if (domain_allowlist or "").strip() else None
+        owner = owner_user_id if (owner_user_id or "").strip() else None
+        admin_token = cls._RLS_IS_ADMIN.set(bool(is_admin))
+        domain_token = cls._RLS_DOMAIN_ALLOWLIST.set(domain)
+        owner_token = cls._RLS_OWNER_USER_ID.set(owner)
+        try:
+            yield
+        finally:
+            cls._RLS_OWNER_USER_ID.reset(owner_token)
+            cls._RLS_DOMAIN_ALLOWLIST.reset(domain_token)
+            cls._RLS_IS_ADMIN.reset(admin_token)
 
     @classmethod
     def set_rls_context(cls, *, is_admin: bool, domain_allowlist: str | None, owner_user_id: str | None) -> None:
@@ -968,6 +1005,102 @@ class JobManager:
                 return value
         return value
 
+    def normalize_job_binding_view(
+        self,
+        job: Mapping[str, Any] | None,
+        *,
+        owner_user_id: str,
+    ) -> dict[str, Any] | None:
+        """Return a minimal decrypted binding view for one owner-authorized job row.
+
+        This internal coordination view deliberately excludes result/error fields and
+        must not be logged or returned from HTTP handlers.
+        """
+        if not isinstance(job, Mapping):
+            return None
+        try:
+            job_id = int(job.get("id"))
+        except (TypeError, ValueError):
+            return None
+        if job_id < 1 or str(job.get("owner_user_id") or "") != str(owner_user_id):
+            return None
+        raw_payload = self._parse_json_value(job.get("payload"))
+        encrypted_payload = isinstance(raw_payload, dict) and (
+            raw_payload.get("_enc") == "aesgcm:v1" or isinstance(raw_payload.get("_encrypted"), dict)
+        )
+        payload = self._maybe_decrypt_json(raw_payload)
+        if encrypted_payload and payload is raw_payload:
+            return None
+        if not isinstance(payload, dict):
+            return None
+        return {
+            "id": job_id,
+            "uuid": job.get("uuid"),
+            "owner_user_id": str(owner_user_id),
+            "domain": job.get("domain"),
+            "queue": job.get("queue"),
+            "job_type": job.get("job_type"),
+            "status": job.get("status"),
+            "available_at": job.get("available_at"),
+            "batch_group": job.get("batch_group"),
+            "idempotency_key": job.get("idempotency_key"),
+            "created_at": job.get("created_at"),
+            "payload": dict(payload),
+        }
+
+    def _job_matches_expected_binding(
+        self,
+        job: object,
+        expected_binding: Mapping[str, Any],
+    ) -> bool:
+        """Validate one raw Jobs row against an exact caller-observed binding."""
+        required = (
+            "id",
+            "uuid",
+            "owner_user_id",
+            "domain",
+            "queue",
+            "job_type",
+            "batch_group",
+            "idempotency_key",
+            "payload",
+        )
+        if any(key not in expected_binding for key in required):
+            return False
+        expected_payload = expected_binding.get("payload")
+        if not isinstance(expected_payload, Mapping):
+            return False
+        try:
+            raw_job = dict(job)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return False
+        normalized = self.normalize_job_binding_view(
+            raw_job,
+            owner_user_id=str(expected_binding.get("owner_user_id") or ""),
+        )
+        if normalized is None or not all(
+            type(normalized.get(key)) is type(expected_binding.get(key))
+            and normalized.get(key) == expected_binding.get(key)
+            for key in required[:-1]
+        ):
+            return False
+        try:
+            normalized_payload = json.dumps(
+                normalized.get("payload"),
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+            expected_payload_json = json.dumps(
+                dict(expected_payload),
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+        except (TypeError, ValueError):
+            return False
+        return normalized_payload == expected_payload_json
+
     @staticmethod
     def _decode_archive_blob(value: Any) -> Any:
         """Decode compressed archive payload/result values."""
@@ -1145,7 +1278,17 @@ class JobManager:
 
         if result.outcome is OperationOutcome.ADMISSION_REJECTED:
             if result.admission_rejection_reason is AdmissionRejectionReason.QUOTA_EXCEEDED:
-                raise ValueError(result.message or "Quota exceeded")  # noqa: TRY003
+                message = result.message or "Quota exceeded"
+                if "submits per minute" in message.lower():
+                    raise JobSubmissionLimitError(
+                        message,
+                        code="jobs_submit_rate_limited",
+                        retry_after=60,
+                    )
+                raise JobSubmissionLimitError(
+                    message,
+                    code="jobs_max_queued",
+                )
             raise ValueError(result.message or "Admission rejected")  # noqa: TRY003
         if result.row is None:
             raise RuntimeError("Job admission did not return a row")  # noqa: TRY003
@@ -1264,6 +1407,7 @@ class JobManager:
         idempotency_key: str | None = None,
         request_id: str | None = None,
         trace_id: str | None = None,
+        _transaction_guard: Callable[[Any], None] | None = None,
     ) -> dict[str, Any]:
         """Create a new job.
 
@@ -1294,9 +1438,10 @@ class JobManager:
                 scheduler = _get_fair_share()
                 active_count = self._count_active_jobs_for_user(owner_user_id)
                 if not scheduler.can_submit(owner_user_id, active_count):
-                    raise BadRequestError(
+                    raise JobSubmissionLimitError(
                         f"User {owner_user_id} has reached the maximum concurrent job limit "
-                        f"({scheduler.max_per_user})"
+                        f"({scheduler.max_per_user})",
+                        code="jobs_concurrent_limit",
                     )
                 fair_priority = scheduler.calculate_priority(owner_user_id, active_count)
                 fair_priority_mapped = self._map_fair_share_score_to_priority(fair_priority)
@@ -1398,6 +1543,12 @@ class JobManager:
                     now=_now_dt,
                     max_queued_quota=self._quota_get("JOBS_QUOTA_MAX_QUEUED", domain, owner_user_id),
                     submits_per_minute_quota=self._quota_get("JOBS_QUOTA_SUBMITS_PER_MIN", domain, owner_user_id),
+                    quota_lock_key=(
+                        self._pg_advisory_key("quota", str(domain), str(owner_user_id))
+                        if owner_user_id
+                        else None
+                    ),
+                    transaction_guard=_transaction_guard,
                     counters_enabled=JobManager._is_truthy(os.getenv("JOBS_COUNTERS_ENABLED", "")),
                 )
                 d = self._map_admission_result(result)
@@ -1454,6 +1605,7 @@ class JobManager:
                                 domain,
                                 owner_user_id,
                             ),
+                            transaction_guard=_transaction_guard,
                             counters_enabled=JobManager._is_truthy(os.getenv("JOBS_COUNTERS_ENABLED", "")),
                         )
                         d = self._map_admission_result(result)
@@ -1625,6 +1777,47 @@ class JobManager:
                 return d
         finally:
             conn.close()
+
+    def get_job_by_idempotency(
+        self,
+        *,
+        domain: str,
+        queue: str,
+        job_type: str,
+        idempotency_key: str,
+        owner_user_id: str,
+        batch_group: str,
+    ) -> dict[str, Any] | None:
+        """Fetch one exact owner/batch-scoped idempotent Jobs row."""
+        conn = self._connect()
+        try:
+            if self.backend == "postgres":
+                with self._pg_cursor(conn) as cur:
+                    cur.execute(
+                        """
+                        SELECT id FROM jobs
+                        WHERE domain = %s AND queue = %s AND job_type = %s
+                          AND idempotency_key = %s AND owner_user_id = %s
+                          AND batch_group = %s
+                        """,
+                        (domain, queue, job_type, idempotency_key, owner_user_id, batch_group),
+                    )
+                    row = cur.fetchone()
+                    job_id = int(row["id"]) if row else None
+            else:
+                row = conn.execute(
+                    """
+                    SELECT id FROM jobs
+                    WHERE domain = ? AND queue = ? AND job_type = ?
+                      AND idempotency_key = ? AND owner_user_id = ?
+                      AND batch_group = ?
+                    """,
+                    (domain, queue, job_type, idempotency_key, owner_user_id, batch_group),
+                ).fetchone()
+                job_id = int(row["id"]) if row else None
+        finally:
+            conn.close()
+        return self.get_job(job_id) if job_id is not None else None
 
     def get_job_by_uuid(self, job_uuid: str) -> dict[str, Any] | None:
         """Fetch a job by UUID string.
@@ -4688,9 +4881,17 @@ class JobManager:
         finally:
             conn.close()
 
-    def cancel_job(self, job_id: int, *, reason: str | None = None) -> bool:
+    def cancel_job(
+        self,
+        job_id: int,
+        *,
+        reason: str | None = None,
+        expected_binding: Mapping[str, Any] | None = None,
+    ) -> bool:
         """Request cancellation or cancel queued jobs immediately.
 
+        When ``expected_binding`` is supplied, the binding is validated under
+        the same transaction lock as the status mutation.
         Emits gauge updates on successful cancellation for the job's domain/queue/job_type.
         """
         conn = self._connect()
@@ -4702,6 +4903,11 @@ class JobManager:
                         if _test_mode:
                             with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
                                 logger.info(f"[JM TEST MUT] cancel_job enter job_id={job_id} backend=pg")
+                        if expected_binding is not None:
+                            # FOR UPDATE keeps the validated binding stable through the existing mutation.
+                            cur.execute("SELECT * FROM jobs WHERE id = %s FOR UPDATE", (int(job_id),))
+                            if not self._job_matches_expected_binding(cur.fetchone(), expected_binding):
+                                return False
                         # Capture grouping keys for gauges
                         try:
                             cur.execute("SELECT domain, queue, job_type, uuid FROM jobs WHERE id = %s", (int(job_id),))
@@ -4847,6 +5053,15 @@ class JobManager:
                     if _test_mode:
                         with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
                             logger.info(f"[JM TEST MUT] cancel_job enter job_id={job_id} backend=sqlite")
+                    if expected_binding is not None:
+                        # A reserved writer lock keeps the validated binding stable until commit.
+                        conn.execute("BEGIN IMMEDIATE")
+                        guarded_row = conn.execute(
+                            "SELECT * FROM jobs WHERE id = ?",
+                            (int(job_id),),
+                        ).fetchone()
+                        if not self._job_matches_expected_binding(guarded_row, expected_binding):
+                            return False
                     # Capture grouping keys for gauges
                     try:
                         row0 = conn.execute(

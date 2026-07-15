@@ -209,6 +209,197 @@ CREATE TABLE IF NOT EXISTS job_dependencies (
 );
 CREATE INDEX IF NOT EXISTS idx_job_dependencies_job ON job_dependencies(job_uuid);
 CREATE INDEX IF NOT EXISTS idx_job_dependencies_depends_on ON job_dependencies(depends_on_job_uuid);
+
+-- Owner-scoped immutable playlist inspection snapshots
+CREATE TABLE IF NOT EXISTS playlist_preflights (
+  preflight_id TEXT NOT NULL PRIMARY KEY,
+  owner_user_id TEXT NOT NULL,
+  status TEXT NOT NULL,
+  source_url TEXT NOT NULL,
+  source_kind TEXT NOT NULL,
+  playlist_id TEXT,
+  job_id INTEGER,
+  summary_json TEXT CHECK (summary_json IS NULL OR json_valid(summary_json)),
+  error_json TEXT CHECK (error_json IS NULL OR json_valid(error_json)),
+  created_at TEXT NOT NULL DEFAULT (DATETIME('now')),
+  updated_at TEXT NOT NULL DEFAULT (DATETIME('now')),
+  expires_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_playlist_preflights_owner_status
+  ON playlist_preflights(owner_user_id, status);
+CREATE INDEX IF NOT EXISTS idx_playlist_preflights_job ON playlist_preflights(job_id);
+CREATE INDEX IF NOT EXISTS idx_playlist_preflights_expiry ON playlist_preflights(expires_at);
+
+CREATE TABLE IF NOT EXISTS playlist_preflight_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  preflight_id TEXT NOT NULL,
+  owner_user_id TEXT NOT NULL,
+  occurrence_id TEXT NOT NULL UNIQUE,
+  ordinal INTEGER NOT NULL CHECK (ordinal >= 1),
+  occurrence_index_for_source INTEGER NOT NULL CHECK (occurrence_index_for_source >= 1),
+  source_url TEXT,
+  normalized_source_id TEXT,
+  source_kind TEXT NOT NULL,
+  availability TEXT NOT NULL,
+  duplicate_status TEXT NOT NULL,
+  duplicate_of_occurrence_id TEXT,
+  selected_by_default INTEGER NOT NULL DEFAULT 1 CHECK (selected_by_default IN (0, 1)),
+  display_metadata_json TEXT CHECK (display_metadata_json IS NULL OR json_valid(display_metadata_json)),
+  UNIQUE (preflight_id, ordinal)
+);
+CREATE INDEX IF NOT EXISTS idx_playlist_preflight_items_owner_source
+  ON playlist_preflight_items(owner_user_id, normalized_source_id);
+
+-- Owner-bound queue records copied from a completed preflight
+CREATE TABLE IF NOT EXISTS playlist_materializations (
+  materialization_id TEXT NOT NULL PRIMARY KEY,
+  preflight_id TEXT NOT NULL,
+  owner_user_id TEXT NOT NULL,
+  status TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (DATETIME('now')),
+  updated_at TEXT NOT NULL DEFAULT (DATETIME('now')),
+  expires_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_playlist_materializations_owner_status
+  ON playlist_materializations(owner_user_id, status);
+CREATE INDEX IF NOT EXISTS idx_playlist_materializations_expiry
+  ON playlist_materializations(expires_at);
+
+CREATE TABLE IF NOT EXISTS playlist_materialization_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  materialization_id TEXT NOT NULL,
+  owner_user_id TEXT NOT NULL,
+  occurrence_id TEXT NOT NULL,
+  ordinal INTEGER NOT NULL CHECK (ordinal >= 1),
+  source_url TEXT NOT NULL,
+  normalized_source_id TEXT,
+  source_kind TEXT NOT NULL,
+  display_metadata_json TEXT CHECK (display_metadata_json IS NULL OR json_valid(display_metadata_json)),
+  UNIQUE (materialization_id, ordinal),
+  UNIQUE (materialization_id, occurrence_id)
+);
+CREATE INDEX IF NOT EXISTS idx_playlist_materialization_items_owner_source
+  ON playlist_materialization_items(owner_user_id, normalized_source_id);
+CREATE INDEX IF NOT EXISTS idx_playlist_materialization_items_occurrence
+  ON playlist_materialization_items(occurrence_id);
+
+-- Lightweight manifest connecting selected occurrences to Jobs
+CREATE TABLE IF NOT EXISTS media_ingest_runs (
+  run_id TEXT NOT NULL PRIMARY KEY,
+  owner_user_id TEXT NOT NULL,
+  client_request_id TEXT,
+  request_fingerprint TEXT,
+  initialization_token TEXT,
+  initialization_expires_at TEXT,
+  status TEXT NOT NULL,
+  collection_id INTEGER,
+  processing_options_json TEXT CHECK (processing_options_json IS NULL OR json_valid(processing_options_json)),
+  playlist_summaries_json TEXT CHECK (playlist_summaries_json IS NULL OR json_valid(playlist_summaries_json)),
+  batch_ids_json TEXT CHECK (batch_ids_json IS NULL OR json_valid(batch_ids_json)),
+  version INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1),
+  created_at TEXT NOT NULL DEFAULT (DATETIME('now')),
+  updated_at TEXT NOT NULL DEFAULT (DATETIME('now')),
+  expires_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_media_ingest_runs_owner_status
+  ON media_ingest_runs(owner_user_id, status);
+CREATE INDEX IF NOT EXISTS idx_media_ingest_runs_expiry ON media_ingest_runs(expires_at);
+
+CREATE TABLE IF NOT EXISTS media_ingest_run_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id TEXT NOT NULL,
+  owner_user_id TEXT NOT NULL,
+  occurrence_id TEXT NOT NULL,
+  ordinal INTEGER NOT NULL CHECK (ordinal >= 1),
+  input_kind TEXT NOT NULL,
+  materialization_id TEXT,
+  source_url TEXT,
+  normalized_source_id TEXT,
+  source_kind TEXT,
+  display_metadata_json TEXT CHECK (display_metadata_json IS NULL OR json_valid(display_metadata_json)),
+  duplicate_policy TEXT CHECK (
+    duplicate_policy IS NULL OR duplicate_policy IN ('skip','include_existing','update_metadata_only','overwrite')
+  ),
+  metadata_patch_json TEXT CHECK (metadata_patch_json IS NULL OR json_valid(metadata_patch_json)),
+  state TEXT NOT NULL CHECK (
+    state IN (
+      'staged','preparing','awaiting_upload','submit_pending','queued','running',
+      'cancellation_requested','status_unavailable','terminal'
+    )
+  ),
+  outcome TEXT CHECK (
+    outcome IS NULL OR outcome IN (
+      'completed','included_existing','metadata_updated','skipped_existing',
+      'submit_failed','processing_failed','metadata_update_failed','cancelled'
+    )
+  ),
+  job_id INTEGER,
+  batch_id TEXT,
+  attempt INTEGER NOT NULL DEFAULT 1 CHECK (attempt >= 1),
+  idempotency_identity TEXT,
+  submission_queue TEXT,
+  staging_temp_dir TEXT,
+  submission_lease_token TEXT,
+  submission_lease_expires_at TEXT,
+  submission_lease_generation INTEGER NOT NULL DEFAULT 0 CHECK (submission_lease_generation >= 0),
+  planned_collection_item_id INTEGER,
+  progress_percent REAL CHECK (progress_percent IS NULL OR (progress_percent >= 0 AND progress_percent <= 100)),
+  progress_message TEXT,
+  retryable INTEGER NOT NULL DEFAULT 0 CHECK (retryable IN (0, 1)),
+  media_id INTEGER,
+  error_code TEXT,
+  error_message TEXT,
+  created_at TEXT NOT NULL DEFAULT (DATETIME('now')),
+  updated_at TEXT NOT NULL DEFAULT (DATETIME('now')),
+  UNIQUE (run_id, ordinal),
+  UNIQUE (run_id, occurrence_id),
+  UNIQUE (run_id, occurrence_id, attempt),
+  CHECK (
+    (state = 'terminal' AND outcome IS NOT NULL)
+    OR (state <> 'terminal' AND outcome IS NULL)
+  )
+);
+CREATE INDEX IF NOT EXISTS idx_media_ingest_run_items_owner_state
+  ON media_ingest_run_items(owner_user_id, state);
+CREATE INDEX IF NOT EXISTS idx_media_ingest_run_items_source
+  ON media_ingest_run_items(normalized_source_id);
+CREATE INDEX IF NOT EXISTS idx_media_ingest_run_items_job ON media_ingest_run_items(job_id);
+
+CREATE TABLE IF NOT EXISTS media_ingest_run_events (
+  event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id TEXT NOT NULL,
+  owner_user_id TEXT NOT NULL,
+  occurrence_id TEXT,
+  job_id INTEGER,
+  batch_id TEXT,
+  event_type TEXT NOT NULL,
+  state TEXT CHECK (
+    state IS NULL OR state IN (
+      'staged','preparing','awaiting_upload','submit_pending','queued','running',
+      'cancellation_requested','status_unavailable','terminal'
+    )
+  ),
+  outcome TEXT CHECK (
+    outcome IS NULL OR outcome IN (
+      'completed','included_existing','metadata_updated','skipped_existing',
+      'submit_failed','processing_failed','metadata_update_failed','cancelled'
+    )
+  ),
+  progress_percent REAL CHECK (progress_percent IS NULL OR (progress_percent >= 0 AND progress_percent <= 100)),
+  progress_message TEXT,
+  attrs_json TEXT CHECK (attrs_json IS NULL OR json_valid(attrs_json)),
+  occurred_at TEXT NOT NULL DEFAULT (DATETIME('now')),
+  CHECK (
+    (state IS NULL AND outcome IS NULL)
+    OR (state IS NOT NULL AND state = 'terminal' AND outcome IS NOT NULL)
+    OR (state IS NOT NULL AND state <> 'terminal' AND outcome IS NULL)
+  )
+);
+CREATE INDEX IF NOT EXISTS idx_media_ingest_run_events_owner_run_event
+  ON media_ingest_run_events(owner_user_id, run_id, event_id);
+CREATE INDEX IF NOT EXISTS idx_media_ingest_run_events_occurrence
+  ON media_ingest_run_events(run_id, occurrence_id, event_id);
+CREATE INDEX IF NOT EXISTS idx_media_ingest_run_events_job ON media_ingest_run_events(job_id);
 """
 
 
@@ -225,6 +416,7 @@ def ensure_jobs_tables(db_path: Path | None = None) -> Path:
         # Anchor default path to project root to avoid CWD effects
         try:
             from tldw_Server_API.app.core.Utils.Utils import get_project_root as _gpr
+
             db_path = (Path(_gpr()) / "Databases" / "jobs.db").resolve()
         except _JOBS_PATH_EXCEPTIONS:
             db_path = (Path(__file__).resolve().parents[5] / "Databases" / "jobs.db").resolve()
@@ -233,6 +425,7 @@ def ensure_jobs_tables(db_path: Path | None = None) -> Path:
             db_path = Path(db_path)
             if not db_path.is_absolute():
                 from tldw_Server_API.app.core.Utils.Utils import get_project_root as _gpr
+
                 db_path = (Path(_gpr()) / db_path).resolve()
         except _JOBS_PATH_EXCEPTIONS:
             db_path = Path(db_path)
@@ -258,6 +451,31 @@ def ensure_jobs_tables(db_path: Path | None = None) -> Path:
                 conn.execute("ALTER TABLE jobs ADD COLUMN batch_group TEXT")
             with contextlib.suppress(_JOBS_DB_EXCEPTIONS):
                 conn.execute("ALTER TABLE jobs_archive ADD COLUMN batch_group TEXT")
+            with contextlib.suppress(_JOBS_DB_EXCEPTIONS):
+                conn.execute("ALTER TABLE media_ingest_runs ADD COLUMN client_request_id TEXT")
+            with contextlib.suppress(_JOBS_DB_EXCEPTIONS):
+                conn.execute("ALTER TABLE media_ingest_runs ADD COLUMN request_fingerprint TEXT")
+            with contextlib.suppress(_JOBS_DB_EXCEPTIONS):
+                conn.execute("ALTER TABLE media_ingest_runs ADD COLUMN initialization_token TEXT")
+            with contextlib.suppress(_JOBS_DB_EXCEPTIONS):
+                conn.execute("ALTER TABLE media_ingest_runs ADD COLUMN initialization_expires_at TEXT")
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_media_ingest_runs_owner_client_request "
+                "ON media_ingest_runs(owner_user_id, client_request_id)"
+            )
+            with contextlib.suppress(_JOBS_DB_EXCEPTIONS):
+                conn.execute("ALTER TABLE media_ingest_run_items ADD COLUMN submission_queue TEXT")
+            with contextlib.suppress(_JOBS_DB_EXCEPTIONS):
+                conn.execute("ALTER TABLE media_ingest_run_items ADD COLUMN staging_temp_dir TEXT")
+            with contextlib.suppress(_JOBS_DB_EXCEPTIONS):
+                conn.execute("ALTER TABLE media_ingest_run_items ADD COLUMN submission_lease_token TEXT")
+            with contextlib.suppress(_JOBS_DB_EXCEPTIONS):
+                conn.execute("ALTER TABLE media_ingest_run_items ADD COLUMN submission_lease_expires_at TEXT")
+            with contextlib.suppress(_JOBS_DB_EXCEPTIONS):
+                conn.execute(
+                    "ALTER TABLE media_ingest_run_items "
+                    "ADD COLUMN submission_lease_generation INTEGER NOT NULL DEFAULT 0"
+                )
             conn.commit()
         try:
             logger.info(f"Ensured Jobs schema at {Path(db_path).resolve()}")

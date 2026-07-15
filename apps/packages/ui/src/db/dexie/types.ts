@@ -521,6 +521,26 @@ export type MediaReadAlongAudioCacheEntry = {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Quick Ingest Session Types
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type QuickIngestSessionDbRecord = {
+  id: string
+  lifecycle:
+    | "draft"
+    | "processing"
+    | "completed"
+    | "partial_failure"
+    | "cancelled"
+    | "interrupted"
+  updatedAt: number
+  expiresAt: number
+  value: string
+  submissionLeaseOwnerId?: string
+  submissionLeaseExpiresAt?: number
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // TTS Clip Types
 // ─────────────────────────────────────────────────────────────────────────────
 

@@ -19,6 +19,10 @@ const capabilitiesHarness = vi.hoisted(() => ({
   refresh: vi.fn(),
 }))
 
+const virtualizerHarness = vi.hoisted(() => ({
+  scrollToIndex: vi.fn(),
+}))
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (key: string, opts?: any) => {
@@ -29,6 +33,32 @@ vi.mock("react-i18next", () => ({
       )
     },
   }),
+}))
+
+vi.mock("@tanstack/react-virtual", () => ({
+  useVirtualizer: ({ count, getItemKey }: any) => {
+    const [start, setStart] = React.useState(0)
+    const mountedCount = Math.min(count, 12)
+    const boundedStart = Math.min(start, Math.max(0, count - mountedCount))
+    return {
+      getTotalSize: () => count * 64,
+      getVirtualItems: () =>
+        Array.from({ length: mountedCount }, (_, offset) => {
+          const index = boundedStart + offset
+          return {
+            index,
+            start: index * 64,
+            size: 64,
+            key: getItemKey?.(index) ?? index,
+          }
+        }),
+      measureElement: vi.fn(),
+      scrollToIndex: (index: number) => {
+        virtualizerHarness.scrollToIndex(index)
+        setStart(Math.max(0, index - mountedCount + 1))
+      },
+    }
+  },
 }))
 
 vi.mock("../IngestWizardContext", () => ({
@@ -81,7 +111,22 @@ describe("WizardResultsStep navigation buttons", () => {
     capabilitiesHarness.capabilities = { hasKnowledgeQaMediaScope: false }
     capabilitiesHarness.loading = false
     capabilitiesHarness.refresh.mockReset()
+    virtualizerHarness.scrollToIndex.mockReset()
     setSinglePdfResult()
+  })
+
+  it("delegates Start over to durable session replacement when provided", () => {
+    const onStartOver = vi.fn()
+    render(
+      <WizardResultsStep onClose={vi.fn()} onStartOver={onStartOver} />
+    )
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Start a new ingest" })
+    )
+
+    expect(onStartOver).toHaveBeenCalledTimes(1)
+    expect(wizardHarness.reset).not.toHaveBeenCalled()
   })
 
   it("renders Search in Knowledge button when onSearchKnowledge is provided", () => {
@@ -327,6 +372,152 @@ describe("WizardResultsStep navigation buttons", () => {
     expect(onOpenCollection).toHaveBeenCalledWith("7")
   })
 
+  it("renders all eight terminal outcomes as separate truthful groups", () => {
+    const outcomes = [
+      ["completed", "Completed talk"],
+      ["included_existing", "Included talk"],
+      ["metadata_updated", "Metadata-updated talk"],
+      ["skipped_existing", "Skipped talk"],
+      ["submit_failed", "Not-submitted talk"],
+      ["processing_failed", "Processing-failed talk"],
+      ["metadata_update_failed", "Metadata-failed talk"],
+      ["cancelled", "Cancelled talk"],
+    ] as const
+    wizardHarness.results = outcomes.map(([terminalOutcome, title], index) => ({
+      id: `outcome-${index + 1}`,
+      status:
+        terminalOutcome === "completed" ||
+        terminalOutcome === "included_existing" ||
+        terminalOutcome === "metadata_updated" ||
+        terminalOutcome === "skipped_existing"
+          ? "ok"
+          : "error",
+      outcome:
+        terminalOutcome === "completed"
+          ? "processed"
+          : terminalOutcome === "included_existing" ||
+              terminalOutcome === "skipped_existing"
+            ? "skipped"
+            : terminalOutcome === "submit_failed"
+              ? "submit_failed"
+              : terminalOutcome === "cancelled"
+                ? "cancelled"
+                : "failed",
+      terminalOutcome,
+      type: "video",
+      title,
+      mediaId:
+        terminalOutcome === "completed" || terminalOutcome === "included_existing"
+          ? index + 1
+          : null,
+      error:
+        terminalOutcome === "submit_failed" ||
+        terminalOutcome === "processing_failed" ||
+        terminalOutcome === "metadata_update_failed" ||
+        terminalOutcome === "cancelled"
+          ? title
+          : undefined,
+    })) as any
+
+    render(<WizardResultsStep onClose={vi.fn()} />)
+
+    expect(screen.getByText("Completed (1)")).toBeInTheDocument()
+    expect(screen.getByText("Included existing (1)")).toBeInTheDocument()
+    expect(screen.getByText("Metadata updated (1)")).toBeInTheDocument()
+    expect(screen.getByText("Skipped existing (1)")).toBeInTheDocument()
+    expect(screen.getByText("Not submitted (1)")).toBeInTheDocument()
+    expect(screen.getByText("Failed during processing (1)")).toBeInTheDocument()
+    expect(screen.getByText("Metadata update failed (1)")).toBeInTheDocument()
+    expect(screen.getByText("Cancelled (1)")).toBeInTheDocument()
+  })
+
+  it("bounds 500 terminal rows, exposes outcomes, and preserves keyboard focus", async () => {
+    const outcomes = [
+      "completed",
+      "included_existing",
+      "metadata_updated",
+      "skipped_existing",
+      "submit_failed",
+      "processing_failed",
+      "metadata_update_failed",
+      "cancelled",
+    ] as const
+    wizardHarness.results = Array.from({ length: 500 }, (_, index) => {
+      const terminalOutcome = outcomes[index % outcomes.length]
+      const ordinal = index + 1
+      return {
+        id: `terminal-${ordinal}`,
+        status:
+          terminalOutcome === "completed" ||
+          terminalOutcome === "included_existing" ||
+          terminalOutcome === "metadata_updated" ||
+          terminalOutcome === "skipped_existing"
+            ? "ok"
+            : "error",
+        outcome:
+          terminalOutcome === "completed"
+            ? "processed"
+            : terminalOutcome === "included_existing" ||
+                terminalOutcome === "skipped_existing"
+              ? "skipped"
+              : terminalOutcome === "submit_failed"
+                ? "submit_failed"
+                : terminalOutcome === "cancelled"
+                  ? "cancelled"
+                  : "failed",
+        terminalOutcome,
+        type: "video",
+        title: `${ordinal}. Terminal talk ${ordinal}`,
+        error: terminalOutcome.endsWith("failed") ? "Server-reported failure" : undefined,
+      }
+    }) as any
+
+    render(<WizardResultsStep onClose={vi.fn()} />)
+
+    const list = screen.getByRole("list", { name: "Terminal results" })
+    const initialRows = within(list).getAllByRole("listitem")
+    expect(initialRows).toHaveLength(12)
+    expect(initialRows[0]).toHaveAttribute(
+      "aria-setsize",
+      "500"
+    )
+    expect(initialRows[0]).toHaveAttribute(
+      "aria-posinset",
+      "1"
+    )
+    const labels = [
+      "Completed",
+      "Included existing",
+      "Metadata updated",
+      "Skipped existing",
+      "Not submitted",
+      "Failed during processing",
+      "Metadata update failed",
+      "Cancelled",
+    ]
+    initialRows.forEach((row, index) => {
+      expect(within(row).getByText(labels[index % labels.length])).toBeVisible()
+    })
+
+    initialRows[0].focus()
+    fireEvent.keyDown(initialRows[0], { key: "ArrowDown" })
+    expect(initialRows[1]).toHaveFocus()
+    fireEvent.keyDown(initialRows[1], { key: "End" })
+    expect(virtualizerHarness.scrollToIndex).toHaveBeenCalledWith(499)
+    expect(await screen.findByText("500. Terminal talk 500")).toBeInTheDocument()
+    expect(within(list).getAllByRole("listitem").at(-1)).toHaveFocus()
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Filter results by outcome" }), {
+      target: { value: "metadata_update_failed" },
+    })
+    expect(screen.getByText("Metadata update failed (62)")).toBeInTheDocument()
+    expect(within(list).getAllByRole("listitem")[0]).toHaveFocus()
+    for (const row of within(list).getAllByRole("listitem")) {
+      expect(row).toHaveAttribute("data-terminal-outcome", "metadata_update_failed")
+      expect(within(row).getByText("Metadata update failed")).toBeVisible()
+    }
+  })
+
   it("only exposes Ask this collection when media-scope QA is supported and collection content is ready", () => {
     const onSearchKnowledge = vi.fn()
     capabilitiesHarness.capabilities = { hasKnowledgeQaMediaScope: true }
@@ -545,6 +736,132 @@ describe("WizardResultsStep navigation buttons", () => {
           retryAttempt: 1,
           idempotencyKey: "conference-retry-15-1",
         },
+      ]
+    )
+  })
+
+  it("uses canonical retry eligibility before legacy error classification", () => {
+    const onRetryItems = vi.fn()
+    wizardHarness.results = [
+      {
+        id: "server-denied-retry",
+        status: "error",
+        outcome: "failed",
+        terminalOutcome: "processing_failed",
+        retryable: false,
+        type: "video",
+        title: "Server denied retry",
+        error: "Network timed out",
+      },
+      {
+        id: "server-allowed-retry",
+        status: "error",
+        outcome: "failed",
+        terminalOutcome: "processing_failed",
+        retryable: true,
+        type: "video",
+        title: "Server allowed retry",
+        error: "Permanent validation failure",
+      },
+    ] as any
+
+    render(
+      <WizardResultsStep
+        onClose={vi.fn()}
+        onRetryItems={onRetryItems}
+      />
+    )
+
+    expect(
+      screen.queryByRole("button", { name: "Retry Server denied retry" })
+    ).not.toBeInTheDocument()
+    fireEvent.click(
+      screen.getByRole("button", { name: "Retry Server allowed retry" })
+    )
+    expect(onRetryItems).toHaveBeenCalledWith(["server-allowed-retry"])
+  })
+
+  it("uses canonical retryability for durable conference retries", () => {
+    const onRetryItems = vi.fn()
+    wizardHarness.results = [
+      {
+        id: "conference-denied-retry",
+        status: "error",
+        outcome: "failed",
+        terminalOutcome: "processing_failed",
+        retryable: false,
+        type: "video",
+        title: "Conference denied retry",
+        error: "Transient-looking timeout",
+        collectionItemId: "21",
+      },
+      {
+        id: "conference-allowed-retry",
+        status: "error",
+        outcome: "failed",
+        terminalOutcome: "processing_failed",
+        retryable: true,
+        type: "video",
+        title: "Conference allowed retry",
+        error: "Permanent-looking validation error",
+        collectionItemId: "22",
+      },
+      {
+        id: "conference-second-allowed-retry",
+        status: "error",
+        outcome: "failed",
+        terminalOutcome: "processing_failed",
+        retryable: true,
+        type: "video",
+        title: "Conference second allowed retry",
+        error: "Another retryable failure",
+        collectionItemId: "23",
+      },
+    ] as any
+    sessionHarness.tracking = {
+      mode: "webui-direct",
+      runId: "run-conference-canonical-retry",
+      collectionId: "7",
+      plannedItemIds: ["21", "22", "23"],
+      durableMode: "durable_collection",
+      startedAt: Date.now(),
+    }
+
+    render(
+      <WizardResultsStep onClose={vi.fn()} onRetryItems={onRetryItems} />
+    )
+
+    expect(
+      screen.queryByRole("button", { name: "Retry Conference denied retry" })
+    ).not.toBeInTheDocument()
+    fireEvent.click(
+      screen.getByRole("button", { name: "Retry Conference allowed retry" })
+    )
+    expect(onRetryItems).toHaveBeenCalledWith(
+      ["22"],
+      [
+        expect.objectContaining({
+          resultId: "conference-allowed-retry",
+          collectionItemId: "22",
+        }),
+      ]
+    )
+
+    onRetryItems.mockClear()
+    fireEvent.click(
+      screen.getByRole("button", { name: /Retry all .* retryable errors/i })
+    )
+    expect(onRetryItems).toHaveBeenCalledWith(
+      ["22", "23"],
+      [
+        expect.objectContaining({
+          resultId: "conference-allowed-retry",
+          collectionItemId: "22",
+        }),
+        expect.objectContaining({
+          resultId: "conference-second-allowed-retry",
+          collectionItemId: "23",
+        }),
       ]
     )
   })

@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
+import hmac
 import json
 import os
 import shutil
 import threading
-from datetime import datetime
+from collections.abc import Callable
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -15,39 +18,59 @@ from cachetools import LRUCache
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import StreamingResponse
 from loguru import logger
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from starlette.responses import JSONResponse
-from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import try_get_collections_db_for_user
+
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    RequirePermission,
+    User,
     check_rate_limit,
     get_auth_principal,
     get_request_user,
     rbac_rate_limit,
-    RequirePermission,
-    User,
 )
 from tldw_Server_API.app.api.v1.API_Deps.billing_deps import require_within_limit
-from tldw_Server_API.app.api.v1.API_Deps.storage_quota_guard import guard_storage_quota
-from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
+from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import try_get_collections_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.media_add_deps import get_add_media_form
+from tldw_Server_API.app.api.v1.API_Deps.storage_quota_guard import guard_storage_quota
 from tldw_Server_API.app.api.v1.API_Deps.validations_deps import file_validator_instance
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.media_request_models import AddMediaForm
 from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
+from tldw_Server_API.app.core.AuthNZ.crypto_utils import derive_hmac_key
 from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_CREATE
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
+from tldw_Server_API.app.core.DB_Management.playlist_ingest_store import (
+    _RUN_BOUND_JOB_SENTINEL,
+    PlaylistIngestConflictError,
+    PlaylistIngestNotFoundError,
+    PlaylistIngestStore,
+)
+from tldw_Server_API.app.core.exceptions import BadRequestError, JobSubmissionLimitError
 from tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing import (
     TempDirManager,
     save_uploaded_files,
 )
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_staging import (
+    cleanup_exact_run_file_staging as _cleanup_exact_run_file_staging,
+)
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_staging import (
+    run_file_staging_prefix as _run_file_staging_prefix,
+)
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_staging import (
+    validated_run_file_staging_dir as _validated_run_file_staging_dir,
+)
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_preflight import (
+    classify_playlist_url,
+)
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Logging.log_context import ensure_request_id, ensure_traceparent
 from tldw_Server_API.app.core.Streaming.streams import SSEStream
-from tldw_Server_API.app.core.exceptions import BadRequestError
 from tldw_Server_API.app.core.testing import is_test_mode
-from tldw_Server_API.app.services.worker_startup_policy import worker_path_enabled
 from tldw_Server_API.app.services.app_lifecycle import assert_may_start_work
+from tldw_Server_API.app.services.worker_startup_policy import worker_path_enabled
 
 router = APIRouter()
 
@@ -57,6 +80,15 @@ _job_manager_cache: LRUCache = LRUCache(maxsize=MAX_CACHED_JOB_MANAGER_INSTANCES
 _job_manager_lock = threading.Lock()
 _ADMIN_CLAIM_PERMISSIONS = frozenset({"*", "system.configure"})
 _TERMINAL_MEDIA_INGEST_JOB_STATUSES = frozenset({"completed", "failed", "cancelled", "quarantined"})
+_MAX_RUN_BOUND_SUBMISSIONS = 500
+_MAX_RUN_BOUND_ID_LENGTH = 255
+_MAX_RUN_BOUND_ARRAY_BYTES = 256 * 1024
+_MAX_STAGING_JOB_REFERENCE_SCAN = 100
+_SAFE_STAGING_CLEANUP_RESULTS = frozenset({"absent", "deleted"})
+_RUN_FILE_STAGING_MANIFEST = ".tldw-upload.json"
+_MAX_RUN_FILE_STAGING_MANIFEST_BYTES = 8 * 1024
+_RUN_ITEM_BIND_RECONCILE_ATTEMPTS = 6
+_RUN_ITEM_BIND_RECONCILE_DELAY_SECONDS = 0.01
 
 
 def get_job_manager() -> JobManager:
@@ -89,10 +121,23 @@ class MediaIngestJobItem(BaseModel):
     idempotency_key: str | None = None
 
 
+class MediaIngestOccurrenceSubmission(BaseModel):
+    occurrence_id: str
+    status: str
+    accepted: bool
+    job_id: int | None = None
+    batch_id: str
+    error_code: str | None = None
+    message: str | None = None
+    retryable: bool = False
+    attempt: int
+
+
 class SubmitMediaIngestJobsResponse(BaseModel):
     batch_id: str
     jobs: list[MediaIngestJobItem]
     errors: list[str] = Field(default_factory=list)
+    submissions: list[MediaIngestOccurrenceSubmission] = Field(default_factory=list)
 
 
 class MediaIngestJobStatus(BaseModel):
@@ -214,6 +259,549 @@ def _coerce_positive_int(value: Any) -> int | None:
     except (TypeError, ValueError):
         return None
     return parsed if parsed > 0 else None
+
+
+def _strict_positive_int_list(value: Any, *, name: str) -> list[int]:
+    """Parse bounded canonical positive integers without bool/float coercion."""
+    values = _strict_run_bound_array(value, name=name)
+    parsed: list[int] = []
+    for raw in values:
+        if type(raw) is int:
+            number = raw
+        elif type(raw) is str and raw == raw.strip() and len(raw) <= 10 and raw.isascii() and raw.isdigit():
+            if raw.startswith("0"):
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=f"{name} must contain positive integers.",
+                )
+            number = int(raw)
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"{name} must contain positive integers.",
+            )
+        if number < 1 or number > 2_147_483_647:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"{name} must contain positive integers.",
+            )
+        parsed.append(number)
+    return parsed
+
+
+def _strict_run_bound_array(value: Any, *, name: str) -> list[Any]:
+    """Decode one repeated-form array or one JSON array without element coercion."""
+    if value is None:
+        return []
+    values = list(value) if type(value) in {list, tuple} else [value]
+    if len(values) > _MAX_RUN_BOUND_SUBMISSIONS:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"{name} must contain no more than {_MAX_RUN_BOUND_SUBMISSIONS} items.",
+        )
+    if len(values) == 1 and type(values[0]) is str:
+        encoded = values[0]
+        stripped = encoded.lstrip()
+        looks_encoded = stripped.startswith(("[", "{", '"')) or stripped in {"null", "true", "false"}
+        if not looks_encoded:
+            return values
+        try:
+            encoded_bytes = len(encoded.encode("utf-8"))
+        except MemoryError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"{name} must be an array.",
+            ) from exc
+        if encoded_bytes > _MAX_RUN_BOUND_ARRAY_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"{name} encoded array is too large.",
+            )
+        try:
+            decoded = json.loads(encoded)
+        except (TypeError, ValueError, RecursionError, MemoryError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"{name} must be an array.",
+            ) from exc
+        if type(decoded) is not list:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"{name} must be an array.",
+            )
+        if len(decoded) > _MAX_RUN_BOUND_SUBMISSIONS:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"{name} must contain no more than {_MAX_RUN_BOUND_SUBMISSIONS} items.",
+            )
+        return decoded
+    return values
+
+
+def _bounded_identity_list(value: Any, *, name: str) -> list[str]:
+    values = _strict_run_bound_array(value, name=name)
+    if any(
+        type(item) is not str or not item or item != item.strip() or len(item) > _MAX_RUN_BOUND_ID_LENGTH
+        for item in values
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"{name} contains an invalid identifier.",
+        )
+    return list(values)
+
+
+def _validate_aligned(values: list[Any], *, count: int, name: str, required: bool) -> None:
+    if (required or values) and len(values) != count:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"{name} must match the number of submitted items.",
+        )
+
+
+def _derive_run_occurrence_idempotency(
+    *,
+    key: bytes,
+    owner_user_id: str,
+    run_id: str,
+    occurrence_id: str,
+    attempt: int,
+) -> str:
+    message = json.dumps(
+        ["media_ingest_occurrence", owner_user_id, run_id, occurrence_id, attempt],
+        ensure_ascii=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return f"playlist-ingest-v1:{hmac.new(key, message, hashlib.sha256).hexdigest()}"
+
+
+def _write_run_file_staging_manifest(
+    *,
+    store: PlaylistIngestStore,
+    owner_user_id: str,
+    run_id: str,
+    occurrence_id: str,
+    attempt: int,
+    temp_dir: str,
+    batch_id: str,
+    idempotency_identity: str,
+    submission_lease_token: str,
+    submission_lease_generation: int,
+    saved_file: dict[str, Any],
+) -> None:
+    """Atomically mark one validated staged upload as reusable by exact retries."""
+    candidate = _validated_run_file_staging_dir(
+        temp_dir=temp_dir,
+        batch_id=batch_id,
+        idempotency_identity=idempotency_identity,
+    )
+    source_value = saved_file.get("path")
+    if candidate is None or not isinstance(source_value, (str, os.PathLike)):
+        raise ValueError("invalid staged upload")
+    source = Path(source_value)
+    try:
+        resolved_source = source.resolve()
+    except (OSError, RuntimeError) as exc:
+        raise ValueError("invalid staged upload") from exc
+    if (
+        source.is_symlink()
+        or not resolved_source.is_file()
+        or resolved_source.parent != candidate
+        or resolved_source.name.casefold() == _RUN_FILE_STAGING_MANIFEST.casefold()
+    ):
+        raise ValueError("invalid staged upload")
+
+    original_filename = saved_file.get("original_filename")
+    input_ref = saved_file.get("input_ref")
+    if not isinstance(original_filename, str) or not isinstance(input_ref, str):
+        raise ValueError("invalid staged upload metadata")
+    if not original_filename or len(original_filename) > 1024 or not input_ref or len(input_ref) > 1024:
+        raise ValueError("invalid staged upload metadata")
+    manifest = {
+        "version": 1,
+        "source_name": resolved_source.name,
+        "original_filename": original_filename,
+        "input_ref": input_ref,
+    }
+    encoded = json.dumps(manifest, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    if len(encoded) > _MAX_RUN_FILE_STAGING_MANIFEST_BYTES:
+        raise ValueError("invalid staged upload metadata")
+
+    manifest_path = candidate / _RUN_FILE_STAGING_MANIFEST
+    pending_path = candidate / f"{_RUN_FILE_STAGING_MANIFEST}.{uuid4().hex}.tmp"
+    try:
+        pending_path.write_bytes(encoded)
+        with store.guard_run_item_staging_manifest_publication(
+            owner_user_id,
+            run_id,
+            occurrence_id,
+            attempt=attempt,
+            batch_id=batch_id,
+            idempotency_identity=idempotency_identity,
+            submission_lease_token=submission_lease_token,
+            submission_lease_generation=submission_lease_generation,
+            temp_dir=temp_dir,
+        ):
+            os.replace(pending_path, manifest_path)
+    finally:
+        with contextlib.suppress(OSError):
+            pending_path.unlink()
+
+
+def _read_run_file_staging_manifest(
+    *,
+    temp_dir: str,
+    batch_id: str,
+    idempotency_identity: str,
+) -> dict[str, str] | None:
+    """Return a bounded completed-upload manifest for an exact reservation path."""
+    candidate = _validated_run_file_staging_dir(
+        temp_dir=temp_dir,
+        batch_id=batch_id,
+        idempotency_identity=idempotency_identity,
+    )
+    if candidate is None:
+        return None
+    manifest_path = candidate / _RUN_FILE_STAGING_MANIFEST
+    try:
+        if manifest_path.is_symlink() or not manifest_path.is_file():
+            return None
+        size = manifest_path.stat().st_size
+        if size < 2 or size > _MAX_RUN_FILE_STAGING_MANIFEST_BYTES:
+            return None
+        raw = manifest_path.read_bytes()
+        manifest = json.loads(raw.decode("utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError, RecursionError, MemoryError):
+        return None
+    if not isinstance(manifest, dict) or set(manifest) != {
+        "version",
+        "source_name",
+        "original_filename",
+        "input_ref",
+    }:
+        return None
+    source_name = manifest.get("source_name")
+    original_filename = manifest.get("original_filename")
+    input_ref = manifest.get("input_ref")
+    if manifest.get("version") != 1:
+        return None
+    if not all(
+        isinstance(value, str) and 0 < len(value) <= 1024 for value in (source_name, original_filename, input_ref)
+    ):
+        return None
+    if Path(source_name).name != source_name or source_name.casefold() == _RUN_FILE_STAGING_MANIFEST.casefold():
+        return None
+    source = candidate / source_name
+    try:
+        resolved_source = source.resolve()
+    except (OSError, RuntimeError):
+        return None
+    if source.is_symlink() or not resolved_source.is_file() or resolved_source.parent != candidate:
+        return None
+    return {
+        "source": str(Path(temp_dir) / source_name),
+        "original_filename": original_filename,
+        "input_ref": input_ref,
+        "temp_dir": temp_dir,
+    }
+
+
+def _retire_persisted_run_file_staging(
+    *,
+    store: PlaylistIngestStore,
+    owner_user_id: str,
+    run_id: str,
+    occurrence_id: str,
+    attempt: int,
+    batch_id: str,
+    idempotency_identity: str,
+    submission_lease_token: str,
+    temp_dir: str | None,
+    authoritative_temp_dir: Any = None,
+) -> bool:
+    """Delete an obsolete exact path before clearing its durable reservation pointer."""
+    if not temp_dir:
+        return True
+    result = _cleanup_exact_run_file_staging(
+        temp_dir=temp_dir,
+        batch_id=batch_id,
+        idempotency_identity=idempotency_identity,
+        authoritative_temp_dir=authoritative_temp_dir,
+    )
+    if result == "protected":
+        return True
+    if result not in _SAFE_STAGING_CLEANUP_RESULTS:
+        return False
+
+    try:
+        return bool(
+            store.clear_run_item_staging(
+                owner_user_id,
+                run_id,
+                occurrence_id,
+                attempt=attempt,
+                batch_id=batch_id,
+                idempotency_identity=idempotency_identity,
+                submission_lease_token=submission_lease_token,
+                temp_dir=temp_dir,
+            )
+        )
+    except Exception:
+        logger.warning("Failed to clear retired media-ingest staging metadata")
+        return False
+
+
+def _retire_nonauthoritative_run_file_staging(
+    *,
+    store: PlaylistIngestStore,
+    owner_user_id: str,
+    run_id: str,
+    occurrence_id: str,
+    batch_id: str,
+    idempotency_identity: str,
+    temp_dir: str,
+) -> bool:
+    """Retire one generation path only after its durable pointer was replaced."""
+    try:
+        authoritative = store.get_run_item(owner_user_id, run_id, occurrence_id).staging_temp_dir
+    except Exception:
+        return False
+    result = _cleanup_exact_run_file_staging(
+        temp_dir=temp_dir,
+        batch_id=batch_id,
+        idempotency_identity=idempotency_identity,
+        authoritative_temp_dir=authoritative,
+    )
+    return result in _SAFE_STAGING_CLEANUP_RESULTS
+
+
+async def _await_existing_run_item_job_binding(
+    *,
+    store: PlaylistIngestStore,
+    owner_user_id: str,
+    run_id: str,
+    occurrence_id: str,
+    attempt: int,
+    job_id: int,
+    batch_id: str,
+    idempotency_identity: str,
+):
+    """Resolve a narrow race where another lease owner binds the same accepted job."""
+    for retry_index in range(_RUN_ITEM_BIND_RECONCILE_ATTEMPTS):
+        try:
+            item = store.get_run_item(owner_user_id, run_id, occurrence_id)
+            if item.state == "queued" and item.job_id == job_id:
+                return store.bind_run_item_job(
+                    owner_user_id,
+                    run_id,
+                    occurrence_id,
+                    attempt=attempt,
+                    job_id=job_id,
+                    batch_id=batch_id,
+                    idempotency_identity=idempotency_identity,
+                )
+        except (PlaylistIngestConflictError, PlaylistIngestNotFoundError):
+            return None
+        if retry_index + 1 < _RUN_ITEM_BIND_RECONCILE_ATTEMPTS:
+            await asyncio.sleep(_RUN_ITEM_BIND_RECONCILE_DELAY_SECONDS)
+    return None
+
+
+def _cleanup_abandoned_run_file_staging(
+    *,
+    store: PlaylistIngestStore,
+    jm: JobManager,
+    owner_user_id: str,
+    retention_seconds: int,
+    limit: int,
+) -> int:
+    """Delete capped expired reservation paths only when no exact Jobs row exists."""
+    cutoff = datetime.now().astimezone() - timedelta(seconds=max(0, retention_seconds))
+    candidates = store.list_abandoned_run_item_staging(
+        owner_user_id,
+        older_than=cutoff,
+        limit=limit,
+    )
+    deleted = 0
+    for candidate in candidates:
+        batch = str(candidate.batch_id or "")
+        identity = str(candidate.idempotency_identity or "")
+        queue = str(candidate.submission_queue or "")
+        temp_dir = str(candidate.staging_temp_dir or "")
+        if not batch or not identity or not queue or not temp_dir:
+            continue
+        try:
+            job = _find_exact_occurrence_job(
+                jm,
+                queue=queue,
+                owner_user_id=owner_user_id,
+                batch_id=batch,
+                idempotency_key=identity,
+            )
+        except Exception:
+            logger.warning("Skipping abandoned media-ingest staging cleanup because exact job lookup failed")
+            continue
+        if job is not None:
+            continue
+        try:
+            if store.has_live_run_item_staging_reference(
+                owner_user_id,
+                temp_dir,
+                excluding_run_id=str(candidate.run_id),
+                excluding_occurrence_id=str(candidate.occurrence_id),
+            ):
+                continue
+            job_reference_found = False
+            cursor_created_at: datetime | None = None
+            cursor_id: int | None = None
+            while True:
+                owner_jobs = jm.list_jobs(
+                    domain="media_ingest",
+                    owner_user_id=owner_user_id,
+                    job_type="media_ingest_item",
+                    batch_group=batch,
+                    created_before=cursor_created_at,
+                    before_id=cursor_id,
+                    limit=_MAX_STAGING_JOB_REFERENCE_SCAN,
+                    sort_by="created_at",
+                    sort_order="desc",
+                )
+                for owner_job in owner_jobs:
+                    binding_view = jm.normalize_job_binding_view(
+                        owner_job,
+                        owner_user_id=owner_user_id,
+                    )
+                    if binding_view is None:
+                        job_reference_found = True
+                        break
+                    referenced_temp_dir = binding_view["payload"].get("temp_dir")
+                    if referenced_temp_dir is None:
+                        continue
+                    referenced = _validated_run_file_staging_dir(
+                        temp_dir=referenced_temp_dir,
+                        batch_id=str(binding_view.get("batch_group") or ""),
+                        idempotency_identity=str(binding_view.get("idempotency_key") or ""),
+                    )
+                    candidate_path = _validated_run_file_staging_dir(
+                        temp_dir=temp_dir,
+                        batch_id=batch,
+                        idempotency_identity=identity,
+                    )
+                    if referenced is None or candidate_path is None or referenced == candidate_path:
+                        job_reference_found = True
+                        break
+                if job_reference_found or len(owner_jobs) < _MAX_STAGING_JOB_REFERENCE_SCAN:
+                    break
+                last_job = owner_jobs[-1]
+                cursor_created_at = _parse_job_created_at(last_job.get("created_at"))
+                raw_cursor_id = last_job.get("id")
+                if cursor_created_at is None or raw_cursor_id is None:
+                    job_reference_found = True
+                    break
+                cursor_id = int(raw_cursor_id)
+            if job_reference_found:
+                continue
+        except Exception:
+            logger.warning("Skipping abandoned media-ingest staging cleanup because live references are ambiguous")
+            continue
+        cleanup_result = _cleanup_exact_run_file_staging(
+            temp_dir=temp_dir,
+            batch_id=batch,
+            idempotency_identity=identity,
+        )
+        if cleanup_result not in _SAFE_STAGING_CLEANUP_RESULTS:
+            continue
+        try:
+            cleared = store.clear_abandoned_run_item_staging(
+                owner_user_id,
+                candidate.run_id,
+                candidate.occurrence_id,
+                attempt=int(candidate.attempt),
+                batch_id=batch,
+                idempotency_identity=identity,
+                temp_dir=temp_dir,
+            )
+        except Exception:
+            cleared = False
+        if cleanup_result == "deleted" and cleared:
+            deleted += 1
+    return deleted
+
+
+def _submission_rejected(
+    *,
+    occurrence_id: str,
+    batch_id: str,
+    attempt: int,
+    code: str,
+    message: str,
+    retryable: bool = False,
+) -> MediaIngestOccurrenceSubmission:
+    return MediaIngestOccurrenceSubmission(
+        occurrence_id=occurrence_id,
+        status="rejected",
+        accepted=False,
+        batch_id=batch_id,
+        error_code=code,
+        message=message,
+        retryable=retryable,
+        attempt=attempt,
+    )
+
+
+def _submission_accepted(
+    *,
+    occurrence_id: str,
+    batch_id: str,
+    attempt: int,
+    job_id: int,
+) -> MediaIngestOccurrenceSubmission:
+    return MediaIngestOccurrenceSubmission(
+        occurrence_id=occurrence_id,
+        status="accepted",
+        accepted=True,
+        job_id=job_id,
+        batch_id=batch_id,
+        retryable=False,
+        attempt=attempt,
+    )
+
+
+def _job_item_from_row(
+    row: dict[str, Any],
+    *,
+    fallback_kind: str,
+    idempotency_key: str,
+) -> MediaIngestJobItem:
+    payload = _normalize_payload(row.get("payload"))
+    return MediaIngestJobItem(
+        id=int(row["id"]),
+        uuid=row.get("uuid"),
+        source=str(payload.get("source") or ""),
+        source_kind=str(payload.get("source_kind") or fallback_kind),
+        status=str(row.get("status") or "queued"),
+        collection_id=(str(payload["collection_id"]) if payload.get("collection_id") is not None else None),
+        planned_item_id=(str(payload["planned_item_id"]) if payload.get("planned_item_id") is not None else None),
+        idempotency_key=idempotency_key,
+    )
+
+
+def _find_exact_occurrence_job(
+    jm: JobManager,
+    *,
+    queue: str,
+    owner_user_id: str,
+    batch_id: str,
+    idempotency_key: str,
+) -> dict[str, Any] | None:
+    return jm.get_job_by_idempotency(
+        domain="media_ingest",
+        queue=queue,
+        job_type="media_ingest_item",
+        idempotency_key=idempotency_key,
+        owner_user_id=owner_user_id,
+        batch_group=batch_id,
+    )
 
 
 def _validate_per_url_binding_list(
@@ -363,9 +951,7 @@ def _is_heavy_media_ingest_request(form_data: AddMediaForm) -> bool:
     media_type = str(getattr(form_data, "media_type", "") or "").strip().lower()
     if media_type in {"audio", "video"}:
         return True
-    if bool(getattr(form_data, "enable_ocr", False)):
-        return True
-    return False
+    return bool(getattr(form_data, "enable_ocr", False))
 
 
 def _heavy_media_ingest_worker_available() -> bool:
@@ -403,6 +989,8 @@ def _create_media_ingest_job(
     batch_id: str,
     request_id: str | None,
     trace_id: str | None,
+    available_at: datetime | None = None,
+    transaction_guard: Callable[[Any], None] | None = None,
 ) -> dict[str, Any]:
     try:
         return jm.create_job(
@@ -417,14 +1005,20 @@ def _create_media_ingest_job(
             idempotency_key=payload.get("idempotency_key"),
             request_id=request_id,
             trace_id=trace_id,
+            available_at=available_at,
+            _transaction_guard=transaction_guard,
         )
+    except JobSubmissionLimitError as exc:
+        message = str(exc).strip() or "Media ingest job submission limit exceeded"
+        headers = {"Retry-After": str(exc.retry_after)} if exc.retry_after is not None else None
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail={"code": exc.code, "message": message},
+            headers=headers,
+        ) from exc
     except BadRequestError as exc:
         message = str(exc).strip() or "Invalid media ingest job request"
-        normalized = message.lower()
-        status_code = (
-            status.HTTP_429_TOO_MANY_REQUESTS if "concurrent job limit" in normalized else status.HTTP_400_BAD_REQUEST
-        )
-        raise HTTPException(status_code=status_code, detail=message) from exc
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message) from exc
 
 
 def _principal_has_admin_claims(principal: AuthPrincipal) -> bool:
@@ -564,6 +1158,1036 @@ def _resolve_batch_or_session_id(
     raise HTTPException(status_code=400, detail="Either batch_id or session_id is required")
 
 
+async def _submit_run_bound_media_ingest_jobs(
+    *,
+    request: Request,
+    form_data: AddMediaForm,
+    files: list[UploadFile] | None,
+    run_id: str,
+    occurrence_ids: Any,
+    attempts: Any,
+    planned_item_ids: Any,
+    file_occurrence_ids: Any,
+    file_attempts: Any,
+    file_planned_item_ids: Any,
+    current_user: User,
+    jm: JobManager,
+) -> SubmitMediaIngestJobsResponse | JSONResponse:
+    """Submit occurrence-bound jobs while preserving legacy response fields."""
+    owner = str(current_user.id)
+    run_identity = str(run_id).strip()
+    if not run_identity or len(run_identity) > _MAX_RUN_BOUND_ID_LENGTH:
+        raise HTTPException(status_code=422, detail="run_id is invalid.")
+
+    url_list = [str(url).strip() for url in (form_data.urls or []) if str(url).strip()]
+    uploads = list(files or [])
+    url_occurrences = _bounded_identity_list(occurrence_ids, name="occurrence_ids")
+    url_attempts = _strict_positive_int_list(attempts, name="attempts")
+    url_planned = _strict_positive_int_list(planned_item_ids, name="planned_item_ids")
+    upload_occurrences = _bounded_identity_list(file_occurrence_ids, name="file_occurrence_ids")
+    upload_attempts = _strict_positive_int_list(file_attempts, name="file_attempts")
+    upload_planned = _strict_positive_int_list(file_planned_item_ids, name="file_planned_item_ids")
+    _validate_aligned(url_occurrences, count=len(url_list), name="occurrence_ids", required=bool(url_list))
+    _validate_aligned(url_attempts, count=len(url_list), name="attempts", required=bool(url_list))
+    _validate_aligned(url_planned, count=len(url_list), name="planned_item_ids", required=False)
+    _validate_aligned(
+        upload_occurrences,
+        count=len(uploads),
+        name="file_occurrence_ids",
+        required=bool(uploads),
+    )
+    _validate_aligned(upload_attempts, count=len(uploads), name="file_attempts", required=bool(uploads))
+    _validate_aligned(
+        upload_planned,
+        count=len(uploads),
+        name="file_planned_item_ids",
+        required=False,
+    )
+    total = len(url_list) + len(uploads)
+    if not 1 <= total <= _MAX_RUN_BOUND_SUBMISSIONS:
+        raise HTTPException(status_code=422, detail="Run-bound submissions must contain between 1 and 500 items.")
+    all_occurrences = [*url_occurrences, *upload_occurrences]
+    if len(set(all_occurrences)) != len(all_occurrences):
+        raise HTTPException(status_code=422, detail="occurrence_ids must be unique within a submission.")
+
+    store = PlaylistIngestStore(jm)
+    try:
+        retention_seconds = max(
+            300,
+            min(int(os.getenv("MEDIA_INGEST_STAGING_RETENTION_SECONDS", "86400")), 2_592_000),
+        )
+        cleanup_limit = max(0, min(int(os.getenv("MEDIA_INGEST_STAGING_CLEANUP_LIMIT", "10")), 100))
+    except ValueError:
+        retention_seconds, cleanup_limit = 86400, 10
+    if cleanup_limit:
+        with contextlib.suppress(Exception):
+            _cleanup_abandoned_run_file_staging(
+                store=store,
+                jm=jm,
+                owner_user_id=owner,
+                retention_seconds=retention_seconds,
+                limit=cleanup_limit,
+            )
+    try:
+        run = store.get_run(owner, run_identity)
+        items = {item.occurrence_id: item for item in store.list_run_items(owner, run_identity, limit=500)}
+    except PlaylistIngestNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Playlist ingest run not found.") from exc
+    if run.status not in {"staged", "running"}:
+        raise HTTPException(status_code=409, detail="Playlist ingest run is not accepting jobs.")
+
+    merged_form_data = form_data.model_dump(mode="json", exclude={"keywords"})
+    if run.processing_options:
+        merged_form_data.update(run.processing_options)
+    try:
+        effective_form_data = AddMediaForm.model_validate(merged_form_data)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail="invalid_run_processing_options") from exc
+
+    batch_id = str(uuid4())
+    hmac_key = derive_hmac_key()
+    base_options = effective_form_data.model_dump(mode="json")
+    base_options.pop("urls", None)
+    base_options.pop("keywords", None)
+    candidate_queue = _resolve_media_ingest_queue(effective_form_data)
+    rid = ensure_request_id(request) if request is not None else None
+    tp = ensure_traceparent(request) if request is not None else ""
+
+    prepared: list[dict[str, Any]] = []
+    submissions: list[MediaIngestOccurrenceSubmission] = []
+    for index, (source, occurrence, attempt) in enumerate(zip(url_list, url_occurrences, url_attempts, strict=True)):
+        item = items.get(occurrence)
+        client_planned = url_planned[index] if url_planned else None
+        rejection: MediaIngestOccurrenceSubmission | None = None
+        if item is None:
+            rejection = _submission_rejected(
+                occurrence_id=occurrence,
+                batch_id=batch_id,
+                attempt=attempt,
+                code="occurrence_not_found",
+                message="Run occurrence was not found.",
+            )
+        elif item.attempt != attempt:
+            rejection = _submission_rejected(
+                occurrence_id=occurrence,
+                batch_id=batch_id,
+                attempt=attempt,
+                code="occurrence_attempt_mismatch",
+                message="Submitted attempt does not match the run occurrence.",
+            )
+        elif client_planned is not None and client_planned != item.planned_collection_item_id:
+            rejection = _submission_rejected(
+                occurrence_id=occurrence,
+                batch_id=batch_id,
+                attempt=attempt,
+                code="planned_item_mismatch",
+                message="Submitted planned item does not match the run occurrence.",
+            )
+        elif (
+            item.input_kind == "file_stub"
+            or item.action not in {"ingest", "overwrite"}
+            or item.state
+            not in {
+                "staged",
+                "submit_pending",
+                "queued",
+            }
+        ):
+            rejection = _submission_rejected(
+                occurrence_id=occurrence,
+                batch_id=batch_id,
+                attempt=attempt,
+                code="occurrence_not_processable",
+                message="Run occurrence does not require URL processing.",
+            )
+        elif source != item.source_url:
+            rejection = _submission_rejected(
+                occurrence_id=occurrence,
+                batch_id=batch_id,
+                attempt=attempt,
+                code="occurrence_source_mismatch",
+                message="Submitted source does not match the run occurrence.",
+            )
+        else:
+            try:
+                classified = classify_playlist_url(str(item.source_url))
+            except ValueError:
+                rejection = _submission_rejected(
+                    occurrence_id=occurrence,
+                    batch_id=batch_id,
+                    attempt=attempt,
+                    code="occurrence_source_invalid",
+                    message="Stored run source is not a valid media URL.",
+                )
+            else:
+                if classified.is_playlist:
+                    raise HTTPException(
+                        status_code=422,
+                        detail={
+                            "code": "playlist_preflight_required",
+                            "message": "Playlist URLs must be inspected before job submission.",
+                        },
+                    )
+        if rejection is not None:
+            submissions.append(rejection)
+            continue
+        prepared.append(
+            {
+                "kind": "url",
+                "index": index,
+                "item": item,
+                "occurrence_id": occurrence,
+                "attempt": attempt,
+                "planned_item_id": item.planned_collection_item_id,
+            }
+        )
+
+    for index, (occurrence, attempt) in enumerate(zip(upload_occurrences, upload_attempts, strict=True)):
+        item = items.get(occurrence)
+        client_planned = upload_planned[index] if upload_planned else None
+        rejection = None
+        if item is None:
+            rejection = _submission_rejected(
+                occurrence_id=occurrence,
+                batch_id=batch_id,
+                attempt=attempt,
+                code="occurrence_not_found",
+                message="Run occurrence was not found.",
+            )
+        elif item.attempt != attempt:
+            rejection = _submission_rejected(
+                occurrence_id=occurrence,
+                batch_id=batch_id,
+                attempt=attempt,
+                code="occurrence_attempt_mismatch",
+                message="Submitted attempt does not match the run occurrence.",
+            )
+        elif client_planned is not None and client_planned != item.planned_collection_item_id:
+            rejection = _submission_rejected(
+                occurrence_id=occurrence,
+                batch_id=batch_id,
+                attempt=attempt,
+                code="planned_item_mismatch",
+                message="Submitted planned item does not match the run occurrence.",
+            )
+        elif (
+            item.input_kind != "file_stub"
+            or item.action not in {"ingest", "overwrite"}
+            or item.state
+            not in {
+                "awaiting_upload",
+                "submit_pending",
+                "queued",
+            }
+        ):
+            rejection = _submission_rejected(
+                occurrence_id=occurrence,
+                batch_id=batch_id,
+                attempt=attempt,
+                code="occurrence_not_processable",
+                message="Run occurrence is not awaiting this file upload.",
+            )
+        if rejection is not None:
+            submissions.append(rejection)
+            continue
+        prepared.append(
+            {
+                "kind": "file",
+                "index": index,
+                "item": item,
+                "occurrence_id": occurrence,
+                "attempt": attempt,
+                "planned_item_id": item.planned_collection_item_id,
+            }
+        )
+
+    jobs: list[MediaIngestJobItem] = []
+    errors: list[str] = []
+    try:
+        submission_lease_seconds = max(
+            5,
+            min(int(os.getenv("MEDIA_INGEST_SUBMISSION_LEASE_SECONDS", "120")), 900),
+        )
+    except ValueError:
+        submission_lease_seconds = 120
+    for entry in prepared:
+        occurrence = str(entry["occurrence_id"])
+        attempt = int(entry["attempt"])
+        identity = _derive_run_occurrence_idempotency(
+            key=hmac_key,
+            owner_user_id=owner,
+            run_id=run_identity,
+            occurrence_id=occurrence,
+            attempt=attempt,
+        )
+        proposed_lease_token = uuid4().hex
+        try:
+            reserved = store.prepare_run_item_job_submission(
+                owner,
+                run_identity,
+                occurrence,
+                attempt=attempt,
+                batch_id=batch_id,
+                idempotency_identity=identity,
+                submission_queue=candidate_queue,
+                source_kind=str(entry["kind"]),
+                planned_item_id=entry["planned_item_id"],
+                submission_lease_token=proposed_lease_token,
+                submission_lease_seconds=submission_lease_seconds,
+            )
+        except (PlaylistIngestConflictError, PlaylistIngestNotFoundError):
+            submissions.append(
+                _submission_rejected(
+                    occurrence_id=occurrence,
+                    batch_id=batch_id,
+                    attempt=attempt,
+                    code="occurrence_not_processable",
+                    message="Run occurrence state changed before submission.",
+                    retryable=True,
+                )
+            )
+            continue
+
+        identity = str(reserved.idempotency_identity or "")
+        selected_queue = str(reserved.submission_queue or "")
+        if not identity or not selected_queue:
+            submissions.append(
+                _submission_rejected(
+                    occurrence_id=occurrence,
+                    batch_id=str(reserved.batch_id or batch_id),
+                    attempt=attempt,
+                    code="occurrence_binding_pending",
+                    message="Accepted job binding is temporarily unavailable.",
+                    retryable=True,
+                )
+            )
+            continue
+        entry_options = dict(base_options)
+        entry_options["overwrite_existing"] = reserved.action == "overwrite"
+        reserved_batch = str(reserved.batch_id or batch_id)
+        owns_reservation = reserved.submission_lease_token == proposed_lease_token
+        if reserved.state == "queued" and reserved.job_id is not None:
+            existing = jm.normalize_job_binding_view(
+                jm.get_job(reserved.job_id),
+                owner_user_id=owner,
+            )
+            try:
+                bound = (
+                    store.bind_run_item_job(
+                        owner,
+                        run_identity,
+                        occurrence,
+                        attempt=attempt,
+                        job_id=int(reserved.job_id),
+                        batch_id=reserved_batch,
+                        idempotency_identity=identity,
+                        submission_lease_token=reserved.submission_lease_token,
+                    )
+                    if existing is not None
+                    else None
+                )
+            except Exception:
+                bound = None
+            if existing is None or bound is None:
+                submissions.append(
+                    _submission_rejected(
+                        occurrence_id=occurrence,
+                        batch_id=reserved_batch,
+                        attempt=attempt,
+                        code="occurrence_binding_pending",
+                        message="Accepted job binding is temporarily unavailable.",
+                        retryable=True,
+                    )
+                )
+                continue
+            jobs.append(_job_item_from_row(existing, fallback_kind=str(entry["kind"]), idempotency_key=identity))
+            submissions.append(
+                _submission_accepted(
+                    occurrence_id=occurrence,
+                    batch_id=str(bound.batch_id or reserved_batch),
+                    attempt=attempt,
+                    job_id=int(existing["id"]),
+                )
+            )
+            continue
+
+        recovering_reservation = reserved.state == "submit_pending" and not owns_reservation
+        reconciling_reservation = recovering_reservation or (
+            reserved.state == "submit_pending" and owns_reservation and reserved.submission_lease_generation > 1
+        )
+        existing = None
+        if reconciling_reservation:
+            try:
+                existing = _find_exact_occurrence_job(
+                    jm,
+                    queue=selected_queue,
+                    owner_user_id=owner,
+                    batch_id=reserved_batch,
+                    idempotency_key=identity,
+                )
+            except Exception:
+                submissions.append(
+                    _submission_rejected(
+                        occurrence_id=occurrence,
+                        batch_id=reserved_batch,
+                        attempt=attempt,
+                        code="occurrence_binding_pending",
+                        message="Accepted job binding is temporarily unavailable.",
+                        retryable=True,
+                    )
+                )
+                continue
+            raw_existing = existing
+            existing = jm.normalize_job_binding_view(existing, owner_user_id=owner)
+            if raw_existing is not None and existing is None:
+                submissions.append(
+                    _submission_rejected(
+                        occurrence_id=occurrence,
+                        batch_id=reserved_batch,
+                        attempt=attempt,
+                        code="occurrence_binding_pending",
+                        message="Accepted job binding is temporarily unavailable.",
+                        retryable=True,
+                    )
+                )
+                continue
+            if existing is not None and owns_reservation:
+                try:
+                    bound = store.bind_run_item_job(
+                        owner,
+                        run_identity,
+                        occurrence,
+                        attempt=attempt,
+                        job_id=int(existing["id"]),
+                        batch_id=reserved_batch,
+                        idempotency_identity=identity,
+                        submission_lease_token=reserved.submission_lease_token,
+                    )
+                except Exception:
+                    bound = None
+                if bound is None:
+                    submissions.append(
+                        _submission_rejected(
+                            occurrence_id=occurrence,
+                            batch_id=reserved_batch,
+                            attempt=attempt,
+                            code="occurrence_binding_pending",
+                            message="Accepted job binding is temporarily unavailable.",
+                            retryable=True,
+                        )
+                    )
+                    continue
+                jobs.append(
+                    _job_item_from_row(
+                        existing,
+                        fallback_kind=str(entry["kind"]),
+                        idempotency_key=identity,
+                    )
+                )
+                submissions.append(
+                    _submission_accepted(
+                        occurrence_id=occurrence,
+                        batch_id=str(bound.batch_id or reserved_batch),
+                        attempt=attempt,
+                        job_id=int(existing["id"]),
+                    )
+                )
+                continue
+            if existing is not None and not owns_reservation and entry["kind"] == "url":
+                submissions.append(
+                    _submission_rejected(
+                        occurrence_id=occurrence,
+                        batch_id=reserved_batch,
+                        attempt=attempt,
+                        code="occurrence_binding_pending",
+                        message="Accepted job binding is temporarily unavailable.",
+                        retryable=True,
+                    )
+                )
+                continue
+
+        prior_staging_dir = reserved.staging_temp_dir if entry["kind"] == "file" else None
+        recovered_staging: dict[str, str] | None = None
+        if recovering_reservation and entry["kind"] == "file":
+            if prior_staging_dir:
+                recovered_staging = _read_run_file_staging_manifest(
+                    temp_dir=prior_staging_dir,
+                    batch_id=reserved_batch,
+                    idempotency_identity=identity,
+                )
+            if recovered_staging is None:
+                submissions.append(
+                    _submission_rejected(
+                        occurrence_id=occurrence,
+                        batch_id=reserved_batch,
+                        attempt=attempt,
+                        code="occurrence_binding_pending",
+                        message="Accepted job binding is temporarily unavailable.",
+                        retryable=True,
+                    )
+                )
+                continue
+            try:
+                reserved = store.takeover_completed_run_item_submission_lease(
+                    owner,
+                    run_identity,
+                    occurrence,
+                    attempt=attempt,
+                    batch_id=reserved_batch,
+                    idempotency_identity=identity,
+                    expected_submission_lease_token=str(reserved.submission_lease_token or ""),
+                    expected_submission_lease_generation=reserved.submission_lease_generation,
+                    submission_lease_token=proposed_lease_token,
+                    submission_lease_seconds=submission_lease_seconds,
+                )
+                owns_reservation = True
+                recovering_reservation = False
+            except Exception:
+                submissions.append(
+                    _submission_rejected(
+                        occurrence_id=occurrence,
+                        batch_id=reserved_batch,
+                        attempt=attempt,
+                        code="occurrence_binding_pending",
+                        message="Accepted job binding is temporarily unavailable.",
+                        retryable=True,
+                    )
+                )
+                continue
+        elif recovering_reservation:
+            submissions.append(
+                _submission_rejected(
+                    occurrence_id=occurrence,
+                    batch_id=reserved_batch,
+                    attempt=attempt,
+                    code="occurrence_binding_pending",
+                    message="Accepted job binding is temporarily unavailable.",
+                    retryable=True,
+                )
+            )
+            continue
+
+        lease_token = str(reserved.submission_lease_token or "")
+
+        def renew_submission_lease(
+            occurrence_id: str = occurrence,
+            attempt_number: int = attempt,
+            batch_identity: str = reserved_batch,
+            submission_identity: str = identity,
+            token: str = lease_token,
+        ) -> None:
+            store.renew_run_item_submission_lease(
+                owner,
+                run_identity,
+                occurrence_id,
+                attempt=attempt_number,
+                batch_id=batch_identity,
+                idempotency_identity=submission_identity,
+                submission_lease_token=token,
+                submission_lease_seconds=submission_lease_seconds,
+            )
+
+        def release_url_submission_lease(
+            source_kind: str = str(entry["kind"]),
+            owns_lease: bool = owns_reservation,
+            occurrence_id: str = occurrence,
+            attempt_number: int = attempt,
+            batch_identity: str = reserved_batch,
+            submission_identity: str = identity,
+            token: str = lease_token,
+        ) -> None:
+            if source_kind != "url" or not owns_lease:
+                return
+            try:
+                store.release_run_item_url_submission_lease(
+                    owner,
+                    run_identity,
+                    occurrence_id,
+                    attempt=attempt_number,
+                    batch_id=batch_identity,
+                    idempotency_identity=submission_identity,
+                    submission_lease_token=token,
+                )
+            except Exception:
+                logger.warning("Failed to release media-ingest URL submission lease")
+
+        def guard_submission_lease_for_job_create(
+            db: Any,
+            occurrence_id: str = occurrence,
+            attempt_number: int = attempt,
+            batch_identity: str = reserved_batch,
+            submission_identity: str = identity,
+            token: str = lease_token,
+        ) -> None:
+            store.assert_run_item_submission_lease_for_job_create(
+                db,
+                owner,
+                run_identity,
+                occurrence_id,
+                attempt=attempt_number,
+                batch_id=batch_identity,
+                idempotency_identity=submission_identity,
+                submission_lease_token=token,
+            )
+
+        temp_dir_path: str | None = None
+        file_staging_prefix: str | None = None
+        completed_staging_is_shared = recovered_staging is not None
+        if entry["kind"] == "url":
+            source = str(reserved.source_url)
+            payload = {
+                "batch_id": reserved_batch,
+                "media_type": str(effective_form_data.media_type),
+                "source": source,
+                "source_kind": "url",
+                "input_ref": source,
+                "options": entry_options,
+            }
+        elif recovered_staging is not None:
+            source = recovered_staging["source"]
+            payload = {
+                "batch_id": reserved_batch,
+                "media_type": str(effective_form_data.media_type),
+                "source": source,
+                "source_kind": "file",
+                "input_ref": recovered_staging["input_ref"],
+                "original_filename": recovered_staging["original_filename"],
+                "temp_dir": recovered_staging["temp_dir"],
+                "cleanup_temp_dir": True,
+                "options": entry_options,
+            }
+        else:
+            upload = uploads[int(entry["index"])]
+            file_staging_prefix = _run_file_staging_prefix(
+                batch_id=reserved_batch,
+                idempotency_identity=identity,
+                submission_lease_token=lease_token,
+            )
+            try:
+                with TempDirManager(prefix=file_staging_prefix, cleanup=False) as temp_dir:
+                    temp_dir_path = str(temp_dir)
+                    store.record_run_item_staging(
+                        owner,
+                        run_identity,
+                        occurrence,
+                        attempt=attempt,
+                        batch_id=reserved_batch,
+                        idempotency_identity=identity,
+                        submission_lease_token=lease_token,
+                        temp_dir=temp_dir_path,
+                    )
+                    saved_files, file_errors = await save_uploaded_files(
+                        [upload],
+                        temp_dir=temp_dir,
+                        validator=file_validator_instance,
+                        expected_media_type_key=str(effective_form_data.media_type),
+                        progress_callback=renew_submission_lease,
+                    )
+                if file_errors or len(saved_files) != 1:
+                    raise ValueError("upload_staging_failed")
+                saved = saved_files[0]
+                source = str(saved.get("path"))
+                original_filename = saved.get("original_filename")
+                renew_submission_lease()
+                _write_run_file_staging_manifest(
+                    store=store,
+                    owner_user_id=owner,
+                    run_id=run_identity,
+                    occurrence_id=occurrence,
+                    attempt=attempt,
+                    temp_dir=temp_dir_path,
+                    batch_id=reserved_batch,
+                    idempotency_identity=identity,
+                    submission_lease_token=lease_token,
+                    submission_lease_generation=reserved.submission_lease_generation,
+                    saved_file=saved,
+                )
+                completed_staging_is_shared = True
+                payload = {
+                    "batch_id": reserved_batch,
+                    "media_type": str(effective_form_data.media_type),
+                    "source": source,
+                    "source_kind": "file",
+                    "input_ref": saved.get("input_ref") or original_filename or source,
+                    "original_filename": original_filename,
+                    "temp_dir": temp_dir_path,
+                    "cleanup_temp_dir": True,
+                    "options": entry_options,
+                }
+            except Exception as exc:
+                staging_retired = temp_dir_path is None
+                if temp_dir_path:
+                    if isinstance(exc, PlaylistIngestConflictError):
+                        staging_retired = _retire_nonauthoritative_run_file_staging(
+                            store=store,
+                            owner_user_id=owner,
+                            run_id=run_identity,
+                            occurrence_id=occurrence,
+                            batch_id=reserved_batch,
+                            idempotency_identity=identity,
+                            temp_dir=temp_dir_path,
+                        )
+                    else:
+                        cleanup_result = _cleanup_exact_run_file_staging(
+                            temp_dir=temp_dir_path,
+                            batch_id=reserved_batch,
+                            idempotency_identity=identity,
+                        )
+                        staging_retired = cleanup_result in _SAFE_STAGING_CLEANUP_RESULTS
+                    if staging_retired:
+                        try:
+                            store.clear_run_item_staging(
+                                owner,
+                                run_identity,
+                                occurrence,
+                                attempt=attempt,
+                                batch_id=reserved_batch,
+                                idempotency_identity=identity,
+                                submission_lease_token=lease_token,
+                                temp_dir=temp_dir_path,
+                            )
+                        except Exception:
+                            logger.warning("Failed to clear retired media-ingest staging metadata")
+                if staging_retired:
+                    try:
+                        store.reset_run_item_job_submission(
+                            owner,
+                            run_identity,
+                            occurrence,
+                            attempt=attempt,
+                            batch_id=reserved_batch,
+                            idempotency_identity=identity,
+                            submission_lease_token=lease_token,
+                        )
+                    except Exception:
+                        logger.warning("Failed to release media-ingest upload reservation")
+                if isinstance(exc, PlaylistIngestConflictError):
+                    submissions.append(
+                        _submission_rejected(
+                            occurrence_id=occurrence,
+                            batch_id=reserved_batch,
+                            attempt=attempt,
+                            code="occurrence_binding_pending",
+                            message="Accepted job binding is temporarily unavailable.",
+                            retryable=True,
+                        )
+                    )
+                else:
+                    submissions.append(
+                        _submission_rejected(
+                            occurrence_id=occurrence,
+                            batch_id=reserved_batch,
+                            attempt=attempt,
+                            code="upload_staging_failed",
+                            message="Upload staging failed.",
+                            retryable=True,
+                        )
+                    )
+                    errors.append("Upload staging failed")
+                continue
+
+        payload.update(
+            {
+                "run_id": run_identity,
+                "occurrence_id": occurrence,
+                "attempt": attempt,
+                "idempotency_key": identity,
+            }
+        )
+        if run.collection_id is not None:
+            payload["collection_id"] = run.collection_id
+        if entry["planned_item_id"] is not None:
+            payload["planned_item_id"] = entry["planned_item_id"]
+        try:
+            renew_submission_lease()
+            row = _create_media_ingest_job(
+                jm=jm,
+                selected_queue=selected_queue,
+                payload=payload,
+                current_user=current_user,
+                batch_id=reserved_batch,
+                request_id=rid,
+                trace_id=tp or None,
+                available_at=_RUN_BOUND_JOB_SENTINEL,
+                transaction_guard=guard_submission_lease_for_job_create,
+            )
+            row = jm.normalize_job_binding_view(row, owner_user_id=owner)
+            row_id = row.get("id") if row is not None else None
+            if row_id is None:
+                raise ValueError("job_create_failed")
+        except Exception as exc:
+            if isinstance(exc, HTTPException) and isinstance(exc.__cause__, JobSubmissionLimitError):
+                if temp_dir_path and not completed_staging_is_shared:
+                    _retire_persisted_run_file_staging(
+                        store=store,
+                        owner_user_id=owner,
+                        run_id=run_identity,
+                        occurrence_id=occurrence,
+                        attempt=attempt,
+                        batch_id=reserved_batch,
+                        idempotency_identity=identity,
+                        submission_lease_token=lease_token,
+                        temp_dir=temp_dir_path,
+                    )
+                release_url_submission_lease()
+                raise
+            try:
+                existing = _find_exact_occurrence_job(
+                    jm,
+                    queue=selected_queue,
+                    owner_user_id=owner,
+                    batch_id=reserved_batch,
+                    idempotency_key=identity,
+                )
+            except Exception:
+                release_url_submission_lease()
+                submissions.append(
+                    _submission_rejected(
+                        occurrence_id=occurrence,
+                        batch_id=reserved_batch,
+                        attempt=attempt,
+                        code="occurrence_binding_pending",
+                        message="Accepted job binding is temporarily unavailable.",
+                        retryable=True,
+                    )
+                )
+                errors.append("Accepted job binding is temporarily unavailable")
+                continue
+            existing = jm.normalize_job_binding_view(existing, owner_user_id=owner)
+            if existing is not None:
+                stored_payload = existing["payload"]
+                if temp_dir_path and stored_payload.get("source") != payload.get("source"):
+                    if not _retire_persisted_run_file_staging(
+                        store=store,
+                        owner_user_id=owner,
+                        run_id=run_identity,
+                        occurrence_id=occurrence,
+                        attempt=attempt,
+                        batch_id=reserved_batch,
+                        idempotency_identity=identity,
+                        submission_lease_token=lease_token,
+                        temp_dir=temp_dir_path,
+                    ):
+                        submissions.append(
+                            _submission_rejected(
+                                occurrence_id=occurrence,
+                                batch_id=reserved_batch,
+                                attempt=attempt,
+                                code="occurrence_binding_pending",
+                                message="Accepted job binding is temporarily unavailable.",
+                                retryable=True,
+                            )
+                        )
+                        errors.append("Accepted job binding is temporarily unavailable")
+                        continue
+                    temp_dir_path = None
+                try:
+                    renew_submission_lease()
+                    bound = store.bind_run_item_job(
+                        owner,
+                        run_identity,
+                        occurrence,
+                        attempt=attempt,
+                        job_id=int(existing["id"]),
+                        batch_id=reserved_batch,
+                        idempotency_identity=identity,
+                        submission_lease_token=lease_token,
+                    )
+                except Exception:
+                    bound = await _await_existing_run_item_job_binding(
+                        store=store,
+                        owner_user_id=owner,
+                        run_id=run_identity,
+                        occurrence_id=occurrence,
+                        attempt=attempt,
+                        job_id=int(existing["id"]),
+                        batch_id=reserved_batch,
+                        idempotency_identity=identity,
+                    )
+                    if bound is None:
+                        release_url_submission_lease()
+                        submissions.append(
+                            _submission_rejected(
+                                occurrence_id=occurrence,
+                                batch_id=reserved_batch,
+                                attempt=attempt,
+                                code="occurrence_binding_pending",
+                                message="Accepted job binding is temporarily unavailable.",
+                                retryable=True,
+                            )
+                        )
+                        errors.append("Accepted job binding is temporarily unavailable")
+                        continue
+                jobs.append(_job_item_from_row(existing, fallback_kind=str(entry["kind"]), idempotency_key=identity))
+                submissions.append(
+                    _submission_accepted(
+                        occurrence_id=occurrence,
+                        batch_id=str(bound.batch_id or reserved_batch),
+                        attempt=attempt,
+                        job_id=int(existing["id"]),
+                    )
+                )
+                continue
+
+            if temp_dir_path:
+                if completed_staging_is_shared:
+                    _retire_nonauthoritative_run_file_staging(
+                        store=store,
+                        owner_user_id=owner,
+                        run_id=run_identity,
+                        occurrence_id=occurrence,
+                        batch_id=reserved_batch,
+                        idempotency_identity=identity,
+                        temp_dir=temp_dir_path,
+                    )
+                else:
+                    _retire_persisted_run_file_staging(
+                        store=store,
+                        owner_user_id=owner,
+                        run_id=run_identity,
+                        occurrence_id=occurrence,
+                        attempt=attempt,
+                        batch_id=reserved_batch,
+                        idempotency_identity=identity,
+                        submission_lease_token=lease_token,
+                        temp_dir=temp_dir_path,
+                    )
+            if isinstance(exc, HTTPException) and exc.status_code in {429, 503}:
+                release_url_submission_lease()
+                raise
+            if isinstance(exc, PlaylistIngestConflictError) or not owns_reservation:
+                submissions.append(
+                    _submission_rejected(
+                        occurrence_id=occurrence,
+                        batch_id=reserved_batch,
+                        attempt=attempt,
+                        code="occurrence_binding_pending",
+                        message="Accepted job binding is temporarily unavailable.",
+                        retryable=True,
+                    )
+                )
+                errors.append("Accepted job binding is temporarily unavailable")
+                continue
+            release_url_submission_lease()
+            submissions.append(
+                _submission_rejected(
+                    occurrence_id=occurrence,
+                    batch_id=reserved_batch,
+                    attempt=attempt,
+                    code="job_submission_failed",
+                    message="Media ingest job submission failed.",
+                    retryable=True,
+                )
+            )
+            errors.append("Media ingest job submission failed")
+            continue
+
+        stored_payload = row["payload"]
+        if temp_dir_path and stored_payload and stored_payload.get("source") != payload.get("source"):
+            if not _retire_persisted_run_file_staging(
+                store=store,
+                owner_user_id=owner,
+                run_id=run_identity,
+                occurrence_id=occurrence,
+                attempt=attempt,
+                batch_id=reserved_batch,
+                idempotency_identity=identity,
+                submission_lease_token=lease_token,
+                temp_dir=temp_dir_path,
+            ):
+                submissions.append(
+                    _submission_rejected(
+                        occurrence_id=occurrence,
+                        batch_id=reserved_batch,
+                        attempt=attempt,
+                        code="occurrence_binding_pending",
+                        message="Accepted job binding is temporarily unavailable.",
+                        retryable=True,
+                    )
+                )
+                errors.append("Accepted job binding is temporarily unavailable")
+                continue
+            temp_dir_path = None
+        try:
+            renew_submission_lease()
+            bound = store.bind_run_item_job(
+                owner,
+                run_identity,
+                occurrence,
+                attempt=attempt,
+                job_id=int(row_id),
+                batch_id=reserved_batch,
+                idempotency_identity=identity,
+                submission_lease_token=lease_token,
+            )
+        except Exception:
+            bound = await _await_existing_run_item_job_binding(
+                store=store,
+                owner_user_id=owner,
+                run_id=run_identity,
+                occurrence_id=occurrence,
+                attempt=attempt,
+                job_id=int(row_id),
+                batch_id=reserved_batch,
+                idempotency_identity=identity,
+            )
+            if bound is None:
+                release_url_submission_lease()
+                submissions.append(
+                    _submission_rejected(
+                        occurrence_id=occurrence,
+                        batch_id=reserved_batch,
+                        attempt=attempt,
+                        code="occurrence_binding_pending",
+                        message="Accepted job binding is temporarily unavailable.",
+                        retryable=True,
+                    )
+                )
+                errors.append("Accepted job binding is temporarily unavailable")
+                continue
+        effective_payload = stored_payload or payload
+        jobs.append(
+            MediaIngestJobItem(
+                id=int(row_id),
+                uuid=row.get("uuid"),
+                source=str(effective_payload.get("source") or ""),
+                source_kind=str(effective_payload.get("source_kind") or entry["kind"]),
+                status=str(row.get("status") or "queued"),
+                collection_id=(
+                    str(effective_payload["collection_id"])
+                    if effective_payload.get("collection_id") is not None
+                    else None
+                ),
+                planned_item_id=(
+                    str(effective_payload["planned_item_id"])
+                    if effective_payload.get("planned_item_id") is not None
+                    else None
+                ),
+                idempotency_key=identity,
+            )
+        )
+        submissions.append(
+            _submission_accepted(
+                occurrence_id=occurrence,
+                batch_id=str(bound.batch_id or reserved_batch),
+                attempt=attempt,
+                job_id=int(row_id),
+            )
+        )
+
+    order = {occurrence: index for index, occurrence in enumerate(all_occurrences)}
+    submissions.sort(key=lambda record: order[record.occurrence_id])
+    response = SubmitMediaIngestJobsResponse(
+        batch_id=batch_id,
+        jobs=jobs,
+        errors=errors,
+        submissions=submissions,
+    )
+    if any(not record.accepted for record in submissions):
+        return JSONResponse(status_code=status.HTTP_207_MULTI_STATUS, content=response.model_dump())
+    return response
+
+
 @router.post(
     "/ingest/jobs",
     response_model=SubmitMediaIngestJobsResponse,
@@ -584,6 +2208,24 @@ async def submit_media_ingest_jobs(
     request: Request,
     form_data: AddMediaForm = Depends(get_add_media_form),
     files: list[UploadFile] | None = File(None, description="Optional media uploads"),
+    run_id: str | None = Form(None, description="Owner-scoped playlist ingest run identifier"),
+    occurrence_ids: list[str] | None = Form(
+        None,
+        description="Aligned run occurrence identifiers for URL items",
+    ),
+    attempts: list[str] | None = Form(None, description="Aligned positive attempt numbers for URL items"),
+    file_occurrence_ids: list[str] | None = Form(
+        None,
+        description="Aligned run occurrence identifiers for uploaded files",
+    ),
+    file_attempts: list[str] | None = Form(
+        None,
+        description="Aligned positive attempt numbers for uploaded files",
+    ),
+    file_planned_item_ids: list[str] | None = Form(
+        None,
+        description="Optional aligned planned collection item identifiers for files",
+    ),
     media_collection_id: str | None = Form(
         None,
         description="Optional durable media collection id for this job batch",
@@ -612,6 +2254,7 @@ async def submit_media_ingest_jobs(
     jm: JobManager = Depends(get_job_manager),
     collections_db: CollectionsDatabase | None = Depends(try_get_collections_db_for_user),
 ) -> SubmitMediaIngestJobsResponse:
+    assert_may_start_work(request.app, "media.ingest.jobs.submit")
     rid = ensure_request_id(request) if request is not None else None
     tp = ensure_traceparent(request) if request is not None else ""
 
@@ -620,6 +2263,23 @@ async def submit_media_ingest_jobs(
         form_data.urls = None
 
     _validate_submit_inputs(form_data.media_type, form_data.urls, files)
+
+    run_id_value = _coerce_form_string(run_id)
+    if run_id_value is not None:
+        return await _submit_run_bound_media_ingest_jobs(
+            request=request,
+            form_data=form_data,
+            files=files,
+            run_id=run_id_value,
+            occurrence_ids=occurrence_ids,
+            attempts=attempts,
+            planned_item_ids=planned_item_ids,
+            file_occurrence_ids=file_occurrence_ids,
+            file_attempts=file_attempts,
+            file_planned_item_ids=file_planned_item_ids,
+            current_user=current_user,
+            jm=jm,
+        )
 
     options = form_data.model_dump(mode="json")
     options.pop("urls", None)
@@ -634,6 +2294,21 @@ async def submit_media_ingest_jobs(
 
     url_list = form_data.urls or []
     valid_url_count = len([url for url in url_list if url and str(url).strip()])
+    for url in url_list:
+        if not url or not str(url).strip():
+            continue
+        try:
+            is_playlist = classify_playlist_url(str(url)).is_playlist
+        except ValueError:
+            is_playlist = False
+        if is_playlist:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "playlist_preflight_required",
+                    "message": "Playlist URLs must be inspected before job submission.",
+                },
+            )
     collection_id_value, planned_item_values, idempotency_key_values = _resolve_submit_bindings(
         url_count=valid_url_count,
         media_collection_id=media_collection_id,

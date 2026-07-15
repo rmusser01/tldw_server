@@ -1,9 +1,11 @@
 import { describe, expect, expectTypeOf, it } from "vitest"
 import {
   buildQuickIngestOpenDetailFromUrl,
+  consumePendingQuickIngestOpen,
   createQuickIngestSessionSeedFromOpenDetail,
   isFirstSourceOpenDetail,
   isQuickIngestPlaylistPreflightDetail,
+  retainQuickIngestOpenRequest,
   requestQuickIngestOpen
 } from "../quick-ingest-open"
 import type { QuickIngestOpenDetail } from "../quick-ingest-open"
@@ -59,6 +61,31 @@ describe("quick ingest open handoff", () => {
     } finally {
       window.removeEventListener("tldw:open-quick-ingest", listener)
     }
+  })
+
+  it("retains sender options for the matching dispatched event", () => {
+    const detail = {
+      source: "extension_active_tab" as const,
+      url: "https://www.youtube.com/playlist?list=PLx",
+      sourceKind: "youtube_playlist" as const,
+      action: "playlist_preflight" as const
+    }
+    const requested = requestQuickIngestOpen(detail, {
+      autoProcessQueued: true,
+      focusTrigger: false
+    })
+
+    const retained = retainQuickIngestOpenRequest("normal", detail, {
+      autoProcessQueued: false,
+      focusTrigger: true
+    })
+
+    expect(retained).toBe(requested)
+    expect(retained?.options).toEqual({
+      autoProcessQueued: true,
+      focusTrigger: false
+    })
+    consumePendingQuickIngestOpen()
   })
 
   it("creates a wizard session seed that starts playlist preflight", () => {

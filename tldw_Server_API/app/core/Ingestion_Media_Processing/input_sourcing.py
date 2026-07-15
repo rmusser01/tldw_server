@@ -12,10 +12,12 @@ Behavior is intentionally kept backwards compatible with the original helpers.
 """
 
 import asyncio
+import inspect
 import math
 import shutil
 import tempfile
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 from pathlib import Path as FilePath
 from typing import Any
@@ -88,6 +90,7 @@ async def save_uploaded_files(
     allowed_extensions: list[str] | None = None,
     *,
     skip_archive_scanning: bool = False,
+    progress_callback: Callable[[], Any] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """
     Save uploaded files to a temporary directory, validating them via FileValidator.
@@ -103,6 +106,7 @@ async def save_uploaded_files(
         expected_media_type_key: Optional media-type key hint used for validation.
         allowed_extensions: Optional list of allowed file extensions.
         skip_archive_scanning: When True, relaxes deep archive scanning for some types.
+        progress_callback: Optional heartbeat invoked after each persisted upload chunk.
 
     Returns:
         processed_files: List of dicts for successfully saved files:
@@ -137,9 +141,7 @@ async def save_uploaded_files(
 
             original_name = FilePath(original_filename).name
             candidates = _extension_candidates(original_name)
-            file_extension = (
-                candidates[0] if candidates else FilePath(original_name).suffix.lower()
-            )
+            file_extension = candidates[0] if candidates else FilePath(original_name).suffix.lower()
 
             blocked_extensions = {
                 ".exe",
@@ -186,7 +188,9 @@ async def save_uploaded_files(
                 ".appimage",
                 ".snap",
             }
-            if expected_media_type_key == "code" or (normalized_allowed_extensions and ".js" in normalized_allowed_extensions):
+            if expected_media_type_key == "code" or (
+                normalized_allowed_extensions and ".js" in normalized_allowed_extensions
+            ):
                 blocked_extensions.discard(".js")
 
             if file_extension in blocked_extensions:
@@ -255,9 +259,7 @@ async def save_uploaded_files(
             used_secure_names.add(secure_filename)
             local_file_path = temp_dir / secure_filename
 
-            logger.info(
-                f"Attempting to save uploaded file '{original_filename}' securely as: {local_file_path}"
-            )
+            logger.info(f"Attempting to save uploaded file '{original_filename}' securely as: {local_file_path}")
 
             inferred_media_key: str | None = None
             if candidates:
@@ -393,6 +395,10 @@ async def save_uploaded_files(
                                 f"({max_cfg_bytes} bytes) for {inferred_media_key or 'file'}"
                             )
                         await buffer.write(chunk)
+                        if progress_callback is not None:
+                            callback_result = progress_callback()
+                            if inspect.isawaitable(callback_result):
+                                await callback_result
             except Exception as write_err:
                 try:
                     if local_file_path is not None:
@@ -402,11 +408,7 @@ async def save_uploaded_files(
                         f"Failed to remove partially written upload file: {local_file_path}: {unlink_err}",
                         exc_info=True,
                     )
-                error_detail = (
-                    str(write_err)
-                    if isinstance(write_err, ValueError)
-                    else "Failed to save uploaded file"
-                )
+                error_detail = str(write_err) if isinstance(write_err, ValueError) else "Failed to save uploaded file"
                 file_handling_errors.append(
                     {
                         "original_filename": original_filename,
@@ -486,9 +488,7 @@ async def save_uploaded_files(
                     )
             except FileValidationError as validation_err:
                 issues = getattr(validation_err, "issues", None) or [str(validation_err)]
-                logger.warning(
-                    f"Validation raised error for uploaded file '{original_filename}': {issues}"
-                )
+                logger.warning(f"Validation raised error for uploaded file '{original_filename}': {issues}")
                 file_handling_errors.append(
                     {
                         "original_filename": original_filename,
@@ -519,9 +519,7 @@ async def save_uploaded_files(
 
             if not validation_result:
                 issue_msg = "; ".join(getattr(validation_result, "issues", None) or ["Unknown validation failure"])
-                logger.warning(
-                    f"Validation failed for uploaded file '{original_filename}': {issue_msg}"
-                )
+                logger.warning(f"Validation failed for uploaded file '{original_filename}': {issue_msg}")
                 file_handling_errors.append(
                     {
                         "original_filename": original_filename,
@@ -563,9 +561,7 @@ async def save_uploaded_files(
                     local_file_path.unlink(missing_ok=True)
                     logger.debug(f"Cleaned up partially saved/failed file: {local_file_path}")
                 except OSError as unlink_err:  # pragma: no cover - defensive
-                    logger.warning(
-                        f"Failed to clean up partially saved/failed file {local_file_path}: {unlink_err}"
-                    )
+                    logger.warning(f"Failed to clean up partially saved/failed file {local_file_path}: {unlink_err}")
         finally:
             # Ensure the UploadFile is closed, releasing resources
             close = getattr(file, "close", None)

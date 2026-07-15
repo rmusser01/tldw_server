@@ -1,12 +1,17 @@
+import json
+from collections import deque
+
 import pytest
 
+import tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_preflight as playlist_preflight
+import tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_preflight_runner as playlist_preflight_runner
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_preflight import (
+    PlaylistPreflightData,
     classify_playlist_url,
     extract_playlist_preflight,
     normalize_preflight_items,
     resolve_duplicate_policy_action,
 )
-
 
 pytestmark = pytest.mark.unit
 
@@ -63,6 +68,12 @@ def test_preflight_item_without_source_is_not_selected():
     assert items[0].source_url == ""
     assert items[0].duplicate_status == "unknown"
     assert items[0].selected is False
+
+
+def test_preflight_clips_display_only_metadata():
+    items = normalize_preflight_items([{"source_url": "https://youtu.be/abc123", "title": "x" * 3000}])
+
+    assert items[0].title == "x" * 2000
 
 
 def test_extract_playlist_preflight_rejects_single_video_url():
@@ -142,7 +153,7 @@ def test_extract_playlist_preflight_uses_metadata_only_ytdlp_options():
     )
 
 
-def test_extract_playlist_preflight_truncates_large_playlist():
+def test_extract_playlist_preflight_configured_limit_plus_one_is_not_partial_success():
     class FakeYoutubeDL:
         def __init__(self, _opts):
             pass
@@ -165,15 +176,14 @@ def test_extract_playlist_preflight_truncates_large_playlist():
                 ],
             }
 
-    result = extract_playlist_preflight(
-        "https://www.youtube.com/playlist?list=PLtest",
-        max_items=2,
-        youtube_dl_cls=FakeYoutubeDL,
-    )
+    with pytest.raises(playlist_preflight.PlaylistPreflightProcessError, match="playlist_too_large") as exc_info:
+        extract_playlist_preflight(
+            "https://www.youtube.com/playlist?list=PLtest",
+            max_items=2,
+            youtube_dl_cls=FakeYoutubeDL,
+        )
 
-    assert result.item_count == 2
-    assert result.selected_count == 2
-    assert result.warnings == ["Playlist truncated to 2 items."]
+    assert exc_info.value.code == "playlist_too_large"
 
 
 def test_extract_playlist_preflight_warns_and_deselects_entry_without_source():
@@ -209,6 +219,126 @@ def test_extract_playlist_preflight_warns_and_deselects_entry_without_source():
     assert result.warnings == ["Playlist entry 1 has no source URL."]
     assert result.items[0].duplicate_status == "unknown"
     assert result.items[0].selected is False
+
+
+@pytest.mark.parametrize(
+    "availability",
+    ["private", "unavailable", "needs_auth", "premium_only", "subscriber_only"],
+)
+def test_explicit_unavailable_playlist_entry_with_source_remains_visible_and_nonselectable(availability):
+    class FakeYoutubeDL:
+        def __init__(self, _opts):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def extract_info(self, _url, *, download):
+            assert download is False
+            return {
+                "id": "PLtest",
+                "entries": [
+                    {
+                        "id": "private123",
+                        "webpage_url": "https://www.youtube.com/watch?v=private123",
+                        "title": "Restricted talk",
+                        "availability": availability,
+                    }
+                ],
+            }
+
+    result = extract_playlist_preflight(
+        "https://www.youtube.com/playlist?list=PLtest",
+        max_items=10,
+        youtube_dl_cls=FakeYoutubeDL,
+    )
+
+    assert result.item_count == 1
+    assert result.items[0].title == "Restricted talk"
+    assert result.items[0].availability == availability
+    assert result.items[0].source_url == ""
+    assert result.items[0].duplicate_status == "unknown"
+    assert result.items[0].selected is False
+
+
+@pytest.mark.parametrize("availability", ["public", "unlisted", None])
+def test_accessible_playlist_entry_availability_remains_ingestible(availability):
+    item = {
+        "id": "public123",
+        "source_url": "https://www.youtube.com/watch?v=public123",
+        "title": "Accessible talk",
+    }
+    if availability is not None:
+        item["availability"] = availability
+
+    normalized = normalize_preflight_items([item])
+
+    assert normalized[0].availability == "available"
+    assert normalized[0].source_url == "https://www.youtube.com/watch?v=public123"
+    assert normalized[0].duplicate_status == "new"
+    assert normalized[0].selected is True
+
+
+def test_deleted_missing_source_entry_remains_visible_in_ordinal_order():
+    items = normalize_preflight_items(
+        [
+            {"source_url": "https://youtu.be/first123", "title": "First"},
+            {"title": "Deleted video", "availability": "deleted"},
+            {"source_url": "https://youtu.be/last123", "title": "Last"},
+        ]
+    )
+
+    assert [item.ordinal for item in items] == [1, 2, 3]
+    assert items[1].title == "Deleted video"
+    assert items[1].availability == "deleted"
+    assert items[1].source_url == ""
+    assert items[1].duplicate_status == "unknown"
+    assert items[1].selected is False
+
+
+@pytest.mark.parametrize(
+    ("title", "expected_availability"),
+    [
+        ("[Deleted video]", "deleted"),
+        ("[Private video]", "private"),
+        ("  [Deleted video]  ", "deleted"),
+    ],
+)
+def test_ytdlp_bracketed_placeholder_with_generated_url_is_not_ingestible(title, expected_availability):
+    items = normalize_preflight_items(
+        [
+            {
+                "id": "placeholder123",
+                "webpage_url": "https://www.youtube.com/watch?v=placeholder123",
+                "title": title,
+            }
+        ]
+    )
+
+    assert items[0].title == title.strip()
+    assert items[0].availability == expected_availability
+    assert items[0].source_url == ""
+    assert items[0].duplicate_status == "unknown"
+    assert items[0].selected is False
+
+
+def test_ordinary_title_containing_deleted_video_words_remains_ingestible():
+    items = normalize_preflight_items(
+        [
+            {
+                "source_url": "https://youtu.be/ordinary123",
+                "title": "Why [Deleted video] placeholders matter",
+            }
+        ]
+    )
+
+    assert items[0].availability == "available"
+    assert items[0].source_url == "https://www.youtube.com/watch?v=ordinary123"
+    assert items[0].duplicate_status == "new"
+    assert items[0].selected is True
 
 
 @pytest.mark.parametrize(
@@ -248,3 +378,411 @@ def test_duplicate_policy_action_does_not_skip_unknown_items():
 
     assert action.planned_status == "planned"
     assert action.should_submit_job is True
+
+
+class _FakeRecvConnection:
+    def __init__(self, messages=()):
+        self.messages = deque(
+            message if isinstance(message, bytes) else json.dumps(message, separators=(",", ":")).encode("utf-8")
+            for message in messages
+        )
+        self.closed = False
+
+    def poll(self, _timeout=0.0):
+        return bool(self.messages)
+
+    def recv_bytes(self, maxlength=None):
+        message = self.messages.popleft()
+        if maxlength is not None and len(message) > maxlength:
+            raise OSError("bad message length")
+        return message
+
+    def close(self):
+        self.closed = True
+
+
+class _FakeSendConnection:
+    def __init__(self, recv):
+        self.recv = recv
+        self.closed = False
+
+    def send_bytes(self, payload):
+        self.recv.messages.append(payload)
+
+    def close(self):
+        self.closed = True
+
+
+class _FakeProcess:
+    def __init__(self, *, target, args, run_target=True, stubborn=False, exit_without_target=False):
+        self.target = target
+        self.args = args
+        self.run_target = run_target
+        self.stubborn = stubborn
+        self.exit_without_target = exit_without_target
+        self.alive = False
+        self.started = False
+        self.terminate_calls = 0
+        self.kill_calls = 0
+        self.join_calls = []
+        self.closed = False
+
+    def start(self):
+        self.started = True
+        self.alive = True
+        if self.exit_without_target:
+            self.alive = False
+            return
+        if self.run_target:
+            self.target(*self.args)
+            self.alive = False
+
+    def is_alive(self):
+        return self.alive
+
+    def terminate(self):
+        self.terminate_calls += 1
+        if not self.stubborn:
+            self.alive = False
+
+    def kill(self):
+        self.kill_calls += 1
+        self.alive = False
+
+    def join(self, timeout=None):
+        self.join_calls.append(timeout)
+
+    def close(self):
+        self.closed = True
+
+
+class _FakeSpawnContext:
+    def __init__(
+        self,
+        *,
+        messages=(),
+        run_target=True,
+        stubborn=False,
+        exit_without_target=False,
+        process_error=False,
+    ):
+        self.recv = _FakeRecvConnection(messages)
+        self.send = _FakeSendConnection(self.recv)
+        self.run_target = run_target
+        self.stubborn = stubborn
+        self.exit_without_target = exit_without_target
+        self.process_error = process_error
+        self.process = None
+
+    def Pipe(self, *, duplex):
+        assert duplex is False
+        return self.recv, self.send
+
+    def Process(self, *, target, args):
+        if self.process_error:
+            raise RuntimeError("local process capacity detail")
+        self.process = _FakeProcess(
+            target=target,
+            args=args,
+            run_target=self.run_target,
+            stubborn=self.stubborn,
+            exit_without_target=self.exit_without_target,
+        )
+        return self.process
+
+
+@pytest.mark.asyncio
+async def test_process_runner_returns_successful_normalized_extraction(monkeypatch):
+    extracted = PlaylistPreflightData(
+        source_url="https://www.youtube.com/playlist?list=PLtest",
+        source_kind="youtube_playlist",
+        playlist_id="PLtest",
+        playlist_title="Conference",
+        video_id=None,
+        item_count=1,
+        selected_count=1,
+        duplicate_count=0,
+        warnings=[],
+        items=normalize_preflight_items(
+            [{"id": "abc123", "source_url": "https://youtu.be/abc123", "title": "Opening"}]
+        ),
+    )
+    calls = []
+
+    def fake_extract(url, *, max_items):
+        calls.append((url, max_items))
+        return extracted
+
+    monkeypatch.setattr(playlist_preflight, "extract_playlist_preflight", fake_extract, raising=True)
+    context = _FakeSpawnContext()
+
+    result = await playlist_preflight_runner.run_playlist_preflight_process(
+        extracted.source_url,
+        max_items=10,
+        timeout_seconds=1,
+        mp_context=context,
+    )
+
+    assert calls == [(extracted.source_url, 10)]
+    assert result.items[0].source_url == "https://www.youtube.com/watch?v=abc123"
+    assert context.recv.closed is True
+    assert context.send.closed is True
+    assert context.process.join_calls
+    assert context.process.closed is True
+
+
+@pytest.mark.asyncio
+async def test_process_runner_timeout_terminates_then_kills_stubborn_child():
+    context = _FakeSpawnContext(run_target=False, stubborn=True)
+
+    with pytest.raises(playlist_preflight_runner.PlaylistPreflightProcessError, match="playlist_preflight_timeout"):
+        await playlist_preflight_runner.run_playlist_preflight_process(
+            "https://www.youtube.com/playlist?list=PLtest",
+            max_items=10,
+            timeout_seconds=0.001,
+            poll_interval_seconds=0.001,
+            join_timeout_seconds=0.001,
+            mp_context=context,
+        )
+
+    assert context.process.terminate_calls == 1
+    assert context.process.kill_calls == 1
+    assert len(context.process.join_calls) >= 2
+    assert context.recv.closed is True
+    assert context.send.closed is True
+    assert context.process.closed is True
+
+
+@pytest.mark.asyncio
+async def test_process_runner_process_creation_failure_closes_pipe_with_safe_error():
+    context = _FakeSpawnContext(process_error=True)
+
+    with pytest.raises(
+        playlist_preflight_runner.PlaylistPreflightProcessError,
+        match="playlist_preflight_capacity_unavailable",
+    ):
+        await playlist_preflight_runner.run_playlist_preflight_process(
+            "https://www.youtube.com/playlist?list=PLtest",
+            max_items=10,
+            timeout_seconds=1,
+            mp_context=context,
+        )
+
+    assert context.recv.closed is True
+    assert context.send.closed is True
+
+
+@pytest.mark.asyncio
+async def test_process_runner_real_spawn_preserves_single_safe_child_error():
+    with pytest.raises(playlist_preflight_runner.PlaylistPreflightProcessError) as exc_info:
+        await playlist_preflight_runner.run_playlist_preflight_process(
+            "https://example.com/not-a-playlist",
+            max_items=1,
+            timeout_seconds=5,
+        )
+
+    assert exc_info.value.code == "not_playlist_url"
+
+
+@pytest.mark.asyncio
+async def test_process_runner_child_exit_without_payload_is_invalid_and_cleans_up():
+    context = _FakeSpawnContext(run_target=False, exit_without_target=True)
+
+    with pytest.raises(
+        playlist_preflight_runner.PlaylistPreflightProcessError,
+        match="playlist_preflight_invalid_result",
+    ) as exc_info:
+        await playlist_preflight_runner.run_playlist_preflight_process(
+            "https://www.youtube.com/playlist?list=PLtest&token=secret",
+            max_items=10,
+            timeout_seconds=1,
+            mp_context=context,
+        )
+
+    assert "secret" not in str(exc_info.value)
+    assert context.recv.closed is True
+    assert context.send.closed is True
+    assert context.process.join_calls
+    assert context.process.closed is True
+
+
+@pytest.mark.asyncio
+async def test_process_runner_cancellation_terminates_child_without_kill():
+    context = _FakeSpawnContext(run_target=False)
+
+    with pytest.raises(playlist_preflight_runner.PlaylistPreflightProcessError, match="playlist_preflight_cancelled"):
+        await playlist_preflight_runner.run_playlist_preflight_process(
+            "https://www.youtube.com/playlist?list=PLtest",
+            max_items=10,
+            timeout_seconds=1,
+            cancel_check=lambda: True,
+            poll_interval_seconds=0.001,
+            join_timeout_seconds=0.001,
+            mp_context=context,
+        )
+
+    assert context.process.terminate_calls == 1
+    assert context.process.kill_calls == 0
+    assert context.process.join_calls
+
+
+@pytest.mark.asyncio
+async def test_process_runner_cancel_check_failure_is_safe_and_terminates_child():
+    context = _FakeSpawnContext(run_target=False)
+
+    def failed_cancel_check():
+        raise RuntimeError("token=do-not-expose")
+
+    with pytest.raises(playlist_preflight_runner.PlaylistPreflightProcessError) as exc_info:
+        await playlist_preflight_runner.run_playlist_preflight_process(
+            "https://www.youtube.com/playlist?list=PLtest&token=secret",
+            max_items=10,
+            timeout_seconds=1,
+            cancel_check=failed_cancel_check,
+            mp_context=context,
+        )
+
+    assert exc_info.value.code == "playlist_preflight_cancelled"
+    assert "do-not-expose" not in str(exc_info.value)
+    assert context.process.terminate_calls == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "messages",
+    [
+        (["not-a-mapping"]),
+        ([{"status": "ok", "result": []}]),
+        ([{"status": "ok", "result": {}}, {"status": "error", "code": "second"}]),
+        ([b'{"status":"error","status":"ok","code":"not_playlist_url"}']),
+    ],
+)
+async def test_process_runner_rejects_malformed_or_multiple_child_payloads(messages):
+    context = _FakeSpawnContext(messages=messages, run_target=False, exit_without_target=True)
+    context.process = None
+
+    with pytest.raises(
+        playlist_preflight_runner.PlaylistPreflightProcessError, match="playlist_preflight_invalid_result"
+    ):
+        await playlist_preflight_runner.run_playlist_preflight_process(
+            "https://www.youtube.com/playlist?list=PLtest",
+            max_items=10,
+            timeout_seconds=1,
+            mp_context=context,
+        )
+
+    assert context.recv.closed is True
+    assert context.send.closed is True
+    assert context.process.closed is True
+
+
+@pytest.mark.asyncio
+async def test_process_runner_rejects_inconsistent_child_counts():
+    extracted = PlaylistPreflightData(
+        source_url="https://www.youtube.com/playlist?list=PLtest",
+        source_kind="youtube_playlist",
+        playlist_id="PLtest",
+        playlist_title="Conference",
+        video_id=None,
+        item_count=1,
+        selected_count=1,
+        duplicate_count=0,
+        warnings=[],
+        items=normalize_preflight_items([{"source_url": "https://youtu.be/abc123"}]),
+    )
+    payload = extracted.to_dict()
+    payload["selected_count"] = 0
+    context = _FakeSpawnContext(
+        messages=[{"status": "ok", "result": payload}],
+        run_target=False,
+        exit_without_target=True,
+    )
+
+    with pytest.raises(
+        playlist_preflight_runner.PlaylistPreflightProcessError,
+        match="playlist_preflight_invalid_result",
+    ):
+        await playlist_preflight_runner.run_playlist_preflight_process(
+            extracted.source_url,
+            max_items=10,
+            timeout_seconds=1,
+            mp_context=context,
+        )
+
+
+@pytest.mark.parametrize("field", ["source_url", "thumbnail_url"])
+def test_process_runner_rejects_oversized_identity_url(field):
+    extracted = PlaylistPreflightData(
+        source_url="https://www.youtube.com/playlist?list=PLtest",
+        source_kind="youtube_playlist",
+        playlist_id="PLtest",
+        playlist_title="Conference",
+        video_id=None,
+        item_count=1,
+        selected_count=1,
+        duplicate_count=0,
+        warnings=[],
+        items=normalize_preflight_items([{"source_url": "https://youtu.be/abc123"}]),
+    )
+    payload = extracted.to_dict()
+    payload["items"][0][field] = "https://example.com/" + ("x" * 8193)
+
+    with pytest.raises(playlist_preflight_runner.PlaylistPreflightProcessError) as exc_info:
+        playlist_preflight_runner._validated_preflight_result(
+            {"status": "ok", "result": payload},
+            max_items=10,
+        )
+
+    assert exc_info.value.code == "playlist_preflight_result_too_large"
+
+
+def test_process_runner_clips_display_metadata_and_warning_limits():
+    extracted = PlaylistPreflightData(
+        source_url="https://www.youtube.com/playlist?list=PLtest",
+        source_kind="youtube_playlist",
+        playlist_id="PLtest",
+        playlist_title="p" * 3000,
+        video_id=None,
+        item_count=1,
+        selected_count=1,
+        duplicate_count=0,
+        warnings=["w" * 1500 for _ in range(101)],
+        items=normalize_preflight_items(
+            [
+                {
+                    "source_url": "https://youtu.be/abc123",
+                    "title": "t" * 3000,
+                    "uploader": "u" * 3000,
+                }
+            ]
+        ),
+    )
+
+    validated = playlist_preflight_runner._validated_preflight_result(
+        {"status": "ok", "result": extracted.to_dict()},
+        max_items=10,
+    )
+
+    assert validated.playlist_title == "p" * 2000
+    assert validated.items[0].title == "t" * 2000
+    assert validated.items[0].speaker == "u" * 2000
+    assert validated.warnings == ["w" * 1000 for _ in range(100)]
+
+
+@pytest.mark.asyncio
+async def test_process_runner_rejects_payload_over_aggregate_byte_limit():
+    context = _FakeSpawnContext(
+        messages=[b"x" * ((4 * 1024 * 1024) + 1)],
+        run_target=False,
+        exit_without_target=True,
+    )
+
+    with pytest.raises(playlist_preflight_runner.PlaylistPreflightProcessError) as exc_info:
+        await playlist_preflight_runner.run_playlist_preflight_process(
+            "https://www.youtube.com/playlist?list=PLtest",
+            max_items=10,
+            timeout_seconds=1,
+            mp_context=context,
+        )
+
+    assert exc_info.value.code == "playlist_preflight_result_too_large"

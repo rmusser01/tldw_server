@@ -1,8 +1,8 @@
 import React from "react"
 import { existsSync, readFileSync } from "node:fs"
 import path from "node:path"
-import { describe, it, expect, vi, beforeEach } from "vitest"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { afterEach, describe, it, expect, vi, beforeEach } from "vitest"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 // ---------------------------------------------------------------------------
@@ -17,6 +17,27 @@ const getProvidersStatusMock = vi.hoisted(() =>
 
 const capabilityMocks = vi.hoisted(() => ({
   useServerCapabilities: vi.fn(),
+}))
+
+const lifecycleMocks = vi.hoisted(() => ({
+  cancelQuickIngestSession: vi.fn(),
+  queryQuickIngestSession: vi.fn(),
+  reattachQuickIngestSession: vi.fn(),
+  retryQuickIngestSession: vi.fn(),
+  retryRunItems: vi.fn(),
+  submitQuickIngestBatch: vi.fn(),
+}))
+
+const transportMocks = vi.hoisted(() => ({
+  bgRequest: vi.fn(),
+}))
+
+const runtimeMocks = vi.hoisted(() => ({
+  listeners: [] as Array<(message: any) => void>,
+}))
+
+const virtualizerMocks = vi.hoisted(() => ({
+  latestOptions: null as any,
 }))
 
 // react-i18next
@@ -276,7 +297,8 @@ vi.mock("antd", () => ({
 }))
 
 // lucide-react — render simple spans with the icon name for testability
-vi.mock("lucide-react", () => {
+vi.mock("lucide-react", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("lucide-react")>()
   const iconNames = [
     "ArrowLeft",
     "ArrowRight",
@@ -309,7 +331,7 @@ vi.mock("lucide-react", () => {
     "Search",
     "Download",
   ]
-  const mocks: Record<string, any> = {}
+  const mocks: Record<string, any> = { ...actual }
   for (const name of iconNames) {
     mocks[name] = (props: any) => (
       <span
@@ -326,17 +348,53 @@ vi.mock("wxt/browser", () => ({
   browser: {
     runtime: {
       onMessage: {
-        addListener: vi.fn(),
-        removeListener: vi.fn(),
+        addListener: (listener: (message: any) => void) => {
+          runtimeMocks.listeners.push(listener)
+        },
+        removeListener: (listener: (message: any) => void) => {
+          const index = runtimeMocks.listeners.indexOf(listener)
+          if (index >= 0) runtimeMocks.listeners.splice(index, 1)
+        },
       },
     },
   },
 }))
 
+vi.mock("react-router-dom", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("react-router-dom")>()
+  return { ...actual, useNavigate: () => vi.fn() }
+})
+
 // SSE hook — no-op
 vi.mock("@/components/Common/QuickIngest/useIngestSSE", () => ({
   useIngestSSE: () => {},
   default: () => {},
+}))
+
+vi.mock("@tanstack/react-virtual", () => ({
+  useVirtualizer: (options: any) => {
+    virtualizerMocks.latestOptions = options
+    const { count, getItemKey } = options
+    const [start, setStart] = React.useState(0)
+    const mountedCount = Math.min(count, 12)
+    const boundedStart = Math.min(start, Math.max(0, count - mountedCount))
+    return {
+      getTotalSize: () => count * 72,
+      getVirtualItems: () =>
+        Array.from({ length: mountedCount }, (_, offset) => {
+          const index = boundedStart + offset
+          return {
+          index,
+          start: index * 72,
+          size: 72,
+          key: getItemKey?.(index) ?? index,
+          }
+        }),
+      measureElement: vi.fn(),
+      scrollToIndex: (index: number) =>
+        setStart(Math.max(0, index - mountedCount + 1)),
+    }
+  },
 }))
 
 // FileDropZone — simple placeholder div
@@ -368,6 +426,10 @@ vi.mock(
         </div>
       )
     },
+    validateQuickIngestFile: (file: File) =>
+      file.name === "invalid-replacement.bin"
+        ? "Unsupported replacement file"
+        : null,
     default: function MockFileDropZone({ onFilesAdded, autoFocus }: any) {
       const ref = React.useRef<HTMLDivElement>(null)
       React.useEffect(() => {
@@ -398,14 +460,25 @@ vi.mock(
 
 // background-proxy
 vi.mock("@/services/background-proxy", () => ({
-  bgRequest: vi.fn().mockResolvedValue({}),
+  bgRequest: transportMocks.bgRequest,
 }))
 
 vi.mock("@/services/tldw/quick-ingest-batch", () => ({
-  cancelQuickIngestSession: vi.fn().mockResolvedValue({ ok: true }),
+  cancelQuickIngestSession: lifecycleMocks.cancelQuickIngestSession,
+  queryQuickIngestSession: lifecycleMocks.queryQuickIngestSession,
+  retryQuickIngestSession: lifecycleMocks.retryQuickIngestSession,
   startQuickIngestSession: vi.fn().mockResolvedValue({ ok: true, sessionId: "qi-test" }),
-  submitQuickIngestBatch: vi.fn().mockResolvedValue({ ok: true, results: [] }),
+  submitQuickIngestBatch: lifecycleMocks.submitQuickIngestBatch,
 }))
+
+vi.mock("@/services/tldw/quick-ingest-session-reattach", () => ({
+  reattachQuickIngestSession: lifecycleMocks.reattachQuickIngestSession,
+}))
+
+vi.mock("@/services/tldw/playlist-ingest", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/services/tldw/playlist-ingest")>()
+  return { ...actual, retryRunItems: lifecycleMocks.retryRunItems }
+})
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
@@ -427,6 +500,8 @@ vi.mock("@/components/Common/QuickIngest/FloatingProgressWidget", () => ({
 let uuidCounter = 0
 beforeEach(() => {
   uuidCounter = 0
+  runtimeMocks.listeners.splice(0)
+  virtualizerMocks.latestOptions = null
   getTranscriptionModelsMock.mockReset().mockResolvedValue({ all_models: [] })
   getProvidersStatusMock.mockReset().mockResolvedValue({
     providers: [],
@@ -437,6 +512,34 @@ beforeEach(() => {
     capabilities: { ffmpegAvailable: true },
     loading: false,
   })
+  lifecycleMocks.cancelQuickIngestSession.mockReset().mockResolvedValue({ ok: true })
+  lifecycleMocks.queryQuickIngestSession.mockReset().mockResolvedValue({
+    ok: true,
+    active: true,
+    event: null,
+  })
+  lifecycleMocks.retryQuickIngestSession.mockReset().mockResolvedValue({ ok: true })
+  lifecycleMocks.submitQuickIngestBatch.mockReset().mockResolvedValue({
+    ok: true,
+    accepted: true,
+    runId: "run-file-resume",
+  })
+  transportMocks.bgRequest.mockReset().mockResolvedValue({})
+  lifecycleMocks.retryRunItems.mockReset().mockResolvedValue({
+    contractVersion: 2,
+    runId: "run-lifecycle",
+    version: 2,
+    processingOccurrences: [],
+  })
+  lifecycleMocks.reattachQuickIngestSession.mockReset().mockResolvedValue({
+    lifecycle: "processing",
+    jobs: [],
+    errorMessage: null,
+  })
+})
+
+afterEach(() => {
+  vi.useRealTimers()
 })
 vi.stubGlobal(
   "crypto",
@@ -458,12 +561,17 @@ import { WizardConfigureStep } from "@/components/Common/QuickIngest/WizardConfi
 import { ReviewStep } from "@/components/Common/QuickIngest/ReviewStep"
 import { ProcessingStep } from "@/components/Common/QuickIngest/ProcessingStep"
 import { WizardResultsStep } from "@/components/Common/QuickIngest/WizardResultsStep"
+import { QuickIngestWizardModal } from "@/components/Common/QuickIngestWizardModal"
 import { useQuickIngestSessionStore } from "@/store/quick-ingest-session"
 import { resolvePresetMap } from "@/components/Common/QuickIngest/presets"
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+const emitRuntimeMessage = (message: any) => {
+  for (const listener of [...runtimeMocks.listeners]) listener(message)
+}
 
 /**
  * ContextSpy renders nothing but captures the wizard context reference
@@ -495,6 +603,14 @@ const InnerWizardContent: React.FC<{
   onQuickProcess?: () => void
   analysisProviderWarning?: string | null
   focusAnalysisProvider?: boolean
+  persistenceStatus?: "ready" | "migrating" | "unavailable" | "quota_error"
+  isSubmissionOwner?: boolean
+  onCheckSubmissionOwnership?: () => Promise<boolean>
+  onBeginProcessing?: (state: IngestWizardState) => Promise<boolean>
+  preparingSubmission?: boolean
+  submissionStartError?: string | null
+  onPreparingCancelItem?: (id: string) => void
+  onPreparingCancelAll?: () => void
 }> = ({
   onClose,
   isStepVisible = true,
@@ -505,6 +621,14 @@ const InnerWizardContent: React.FC<{
   onQuickProcess,
   analysisProviderWarning,
   focusAnalysisProvider,
+  persistenceStatus = "ready",
+  isSubmissionOwner = true,
+  onCheckSubmissionOwnership,
+  onBeginProcessing,
+  preparingSubmission = false,
+  submissionStartError,
+  onPreparingCancelItem,
+  onPreparingCancelAll,
 }) => {
   const ctx = useIngestWizard()
   const { currentStep } = ctx.state
@@ -520,7 +644,14 @@ const InnerWizardContent: React.FC<{
         <span>Processing</span>
         <span>Results</span>
       </nav>
-      {currentStep === 1 && (
+      {preparingSubmission && (
+        <ProcessingStep
+          preparingSubmission
+          onPreparingCancelItem={onPreparingCancelItem}
+          onPreparingCancelAll={onPreparingCancelAll}
+        />
+      )}
+      {!preparingSubmission && currentStep === 1 && (
         <AddContentStep
           isOnlineForIngest={isOnlineForIngest}
           connectionRecoveryMessage={connectionRecoveryMessage}
@@ -529,23 +660,28 @@ const InnerWizardContent: React.FC<{
           onQuickProcess={onQuickProcess}
         />
       )}
-      {currentStep === 2 && (
+      {!preparingSubmission && currentStep === 2 && (
         <WizardConfigureStep
           isStepVisible={isStepVisible}
           analysisProviderWarning={analysisProviderWarning}
           focusAnalysisProvider={focusAnalysisProvider}
         />
       )}
-      {currentStep === 3 && (
+      {!preparingSubmission && currentStep === 3 && (
         <ReviewStep
           isOnlineForIngest={isOnlineForIngest}
           connectionRecoveryMessage={connectionRecoveryMessage}
           isCheckingConnection={isCheckingConnection}
           onRetryConnection={onRetryConnection}
+          persistenceStatus={persistenceStatus}
+          isSubmissionOwner={isSubmissionOwner}
+          onCheckSubmissionOwnership={onCheckSubmissionOwnership}
+          onBeginProcessing={onBeginProcessing}
+          submissionStartError={submissionStartError}
         />
       )}
-      {currentStep === 4 && <ProcessingStep />}
-      {currentStep === 5 && <WizardResultsStep onClose={onClose} />}
+      {!preparingSubmission && currentStep === 4 && <ProcessingStep />}
+      {!preparingSubmission && currentStep === 5 && <WizardResultsStep onClose={onClose} />}
     </div>
   )
 }
@@ -558,9 +694,21 @@ const WizardTestHarness: React.FC<{
   isCheckingConnection?: boolean
   onRetryConnection?: () => void
   onQuickProcess?: () => void
+  onCancelProcessing?: () => boolean
+  onCancelItem?: (id: string) => boolean
+  onCheckStatus?: (id: string) => void
+  onReconnect?: () => void
   initialState?: Partial<IngestWizardState>
   analysisProviderWarning?: string | null
   focusAnalysisProvider?: boolean
+  persistenceStatus?: "ready" | "migrating" | "unavailable" | "quota_error"
+  isSubmissionOwner?: boolean
+  onCheckSubmissionOwnership?: () => Promise<boolean>
+  onBeginProcessing?: (state: IngestWizardState) => Promise<boolean>
+  preparingSubmission?: boolean
+  submissionStartError?: string | null
+  onPreparingCancelItem?: (id: string) => void
+  onPreparingCancelAll?: () => void
 }> = ({
   onClose,
   isOnlineForIngest,
@@ -568,12 +716,30 @@ const WizardTestHarness: React.FC<{
   isCheckingConnection,
   onRetryConnection,
   onQuickProcess,
+  onCancelProcessing,
+  onCancelItem,
+  onCheckStatus,
+  onReconnect,
   initialState,
   analysisProviderWarning,
   focusAnalysisProvider,
+  persistenceStatus,
+  isSubmissionOwner,
+  onCheckSubmissionOwnership,
+  onBeginProcessing,
+  preparingSubmission,
+  submissionStartError,
+  onPreparingCancelItem,
+  onPreparingCancelAll,
 }) => {
   return (
-    <IngestWizardProvider initialState={initialState}>
+    <IngestWizardProvider
+      initialState={initialState}
+      onCancelProcessing={onCancelProcessing}
+      onCancelItem={onCancelItem}
+      onCheckStatus={onCheckStatus}
+      onReconnect={onReconnect}
+    >
       <ContextSpy />
       <InnerWizardContent
         onClose={onClose}
@@ -584,6 +750,14 @@ const WizardTestHarness: React.FC<{
         onQuickProcess={onQuickProcess}
         analysisProviderWarning={analysisProviderWarning}
         focusAnalysisProvider={focusAnalysisProvider}
+        persistenceStatus={persistenceStatus}
+        isSubmissionOwner={isSubmissionOwner}
+        onCheckSubmissionOwnership={onCheckSubmissionOwnership}
+        onBeginProcessing={onBeginProcessing}
+        preparingSubmission={preparingSubmission}
+        submissionStartError={submissionStartError}
+        onPreparingCancelItem={onPreparingCancelItem}
+        onPreparingCancelAll={onPreparingCancelAll}
       />
     </IngestWizardProvider>
   )
@@ -764,6 +938,250 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
     expect(configureButton).toBeTruthy()
     expect(configureButton).not.toBeDisabled()
   })
+
+  it("keeps a 500-item playlist queue bounded and filters visibility without removing rows", async () => {
+    const queueItems = Array.from({ length: 500 }, (_, index) => ({
+      id: `occ-queue-scale-${index + 1}`,
+      sourceRef: {
+        kind: "materialized_playlist_item" as const,
+        materializationId: "queue-scale-materialization",
+        occurrenceId: `occ-queue-scale-${index + 1}`,
+      },
+      detectedType: "video" as const,
+      icon: "Film",
+      fileSize: 0,
+      validation: { valid: true },
+      playlist: {
+        title: `Queued video ${index + 1}`,
+        playlistTitle: index < 250 ? "Queue playlist A" : "Queue playlist B",
+        ordinal: index + 1,
+        duplicateStatus: index % 2 === 0 ? ("new" as const) : ("duplicate_existing" as const),
+        materializationExpiresAt: "2099-01-01T00:00:00Z",
+      },
+      playlistReview: { selected: true },
+    }))
+    render(<WizardTestHarness onClose={onClose} initialState={{ queueItems }} />)
+
+    const queueList = screen.getByRole("list", { name: "Queued ingest items" })
+    expect(within(queueList).getAllByRole("listitem").length).toBeLessThan(30)
+
+    const twelfth = queueList.querySelector<HTMLElement>(
+      '[data-occurrence-id="occ-queue-scale-12"]'
+    )
+    twelfth?.focus()
+    fireEvent.keyDown(twelfth as HTMLElement, { key: "ArrowDown" })
+    await waitFor(() =>
+      expect(document.activeElement).toHaveAttribute(
+        "data-occurrence-id",
+        "occ-queue-scale-13"
+      )
+    )
+
+    const thirteenth = queueList.querySelector<HTMLElement>(
+      '[data-occurrence-id="occ-queue-scale-13"]'
+    )
+    const removeButton = within(thirteenth as HTMLElement).getByRole("button", {
+      name: "Remove this item from queue",
+    })
+    removeButton.focus()
+    fireEvent.keyDown(removeButton, { key: "ArrowDown" })
+    expect(removeButton).toHaveFocus()
+    fireEvent.keyDown(removeButton, { key: "Escape" })
+    expect(thirteenth).toHaveFocus()
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Filter queued items by playlist" }), {
+      target: { value: "Queue playlist B" },
+    })
+    await waitFor(() =>
+      expect(document.activeElement).toHaveAttribute(
+        "data-occurrence-id",
+        "occ-queue-scale-263"
+      )
+    )
+
+    act(() => {
+      ctxRef?.updateQueueItems((current) =>
+        current.filter((item) => item.id !== "occ-queue-scale-263")
+      )
+    })
+    await waitFor(() =>
+      expect(document.activeElement).toHaveAttribute(
+        "data-occurrence-id",
+        "occ-queue-scale-264"
+      )
+    )
+
+    await userEvent.selectOptions(
+      screen.getByRole("combobox", {
+        name: "Filter queued items by duplicate state",
+      }),
+      "duplicates"
+    )
+
+    expect(screen.getByText("Showing 125 of 499 queued items")).toBeInTheDocument()
+    expect(ctxRef?.state.queueItems).toHaveLength(499)
+    for (const row of within(queueList).getAllByRole("listitem")) {
+      const occurrenceNumber = Number(row.getAttribute("data-occurrence-id")?.split("-").at(-1))
+      expect(occurrenceNumber % 2).toBe(0)
+    }
+  })
+
+  it("resets stale queue filters when the last playlist row is removed", async () => {
+    const ordinaryUrl = "https://example.com/ordinary-after-filter-reset"
+    render(
+      <WizardTestHarness
+        onClose={onClose}
+        initialState={{
+          queueItems: [
+            {
+              id: "filter-reset-playlist",
+              sourceRef: {
+                kind: "materialized_playlist_item",
+                materializationId: "filter-reset-materialization",
+                occurrenceId: "filter-reset-playlist",
+              },
+              detectedType: "video",
+              icon: "Film",
+              fileSize: 0,
+              validation: { valid: true },
+              playlist: {
+                title: "Playlist filter row",
+                playlistTitle: "Temporary playlist",
+                ordinal: 1,
+                duplicateStatus: "new",
+                materializationExpiresAt: "2099-01-01T00:00:00Z",
+              },
+              playlistReview: { selected: true },
+            },
+            {
+              id: "filter-reset-ordinary",
+              sourceRef: {
+                kind: "direct_url",
+                occurrenceId: "filter-reset-ordinary",
+                url: ordinaryUrl,
+              },
+              url: ordinaryUrl,
+              detectedType: "web",
+              icon: "Globe",
+              fileSize: 0,
+              validation: { valid: true },
+            },
+          ],
+        }}
+      />
+    )
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Filter queued items by playlist" }), {
+      target: { value: "Temporary playlist" },
+    })
+    const queueList = screen.getByRole("list", { name: "Queued ingest items" })
+    expect(within(queueList).queryByText(ordinaryUrl)).not.toBeInTheDocument()
+
+    act(() => {
+      ctxRef?.updateQueueItems((current) =>
+        current.filter((item) => item.id !== "filter-reset-playlist")
+      )
+    })
+
+    await waitFor(() => expect(within(queueList).getByText(ordinaryUrl)).toBeInTheDocument())
+    expect(
+      screen.queryByRole("combobox", { name: "Filter queued items by playlist" })
+    ).not.toBeInTheDocument()
+  })
+
+  it("keeps conference metadata opt-in reachable for a materialized playlist", () => {
+    render(
+      <WizardTestHarness
+        onClose={onClose}
+        initialState={{
+          queueItems: [
+            {
+              id: "occ-conference-opt-in",
+              sourceRef: {
+                kind: "materialized_playlist_item",
+                materializationId: "conference-opt-in-materialization",
+                occurrenceId: "occ-conference-opt-in",
+              },
+              detectedType: "video",
+              icon: "Film",
+              fileSize: 0,
+              validation: { valid: true },
+              playlist: {
+                title: "Opening keynote",
+                playlistTitle: "Conference playlist",
+                ordinal: 1,
+                duplicateStatus: "new",
+                materializationExpiresAt: "2099-01-01T00:00:00Z",
+              },
+              playlistReview: { selected: true },
+            },
+          ],
+        }}
+      />
+    )
+
+    expect(screen.getByRole("region", { name: "Conference batch metadata" })).toBeInTheDocument()
+    expect(screen.getByRole("textbox", { name: "Collection name" })).toHaveValue(
+      "Conference playlist"
+    )
+  })
+
+  it("keeps virtual conference rows keyboard reachable and re-homes focus after removal", async () => {
+    const queueItems = Array.from({ length: 30 }, (_, index) => {
+      const id = `conference-row-${index + 1}`
+      const url = `https://example.com/talk-${index + 1}`
+      return {
+        id,
+        sourceRef: { kind: "direct_url" as const, occurrenceId: id, url },
+        url,
+        detectedType: "video" as const,
+        icon: "Film",
+        fileSize: 0,
+        validation: { valid: true },
+      }
+    })
+    render(
+      <WizardTestHarness
+        onClose={onClose}
+        initialState={{
+          queueItems,
+          conferenceBatchMetadata: {
+            collectionName: "Conference talks",
+            conferenceName: "ExampleConf",
+            eventDate: "",
+            eventYear: "2026",
+            sharedTags: [],
+            sourcePlaylistUrl: "",
+          },
+        }}
+      />
+    )
+
+    const list = screen.getByRole("list", { name: "Conference item metadata" })
+    const twelfth = list.querySelector<HTMLElement>('[data-occurrence-id="conference-row-12"]')
+    twelfth?.focus()
+    fireEvent.keyDown(twelfth as HTMLElement, { key: "ArrowDown" })
+    await waitFor(() =>
+      expect(document.activeElement).toHaveAttribute("data-occurrence-id", "conference-row-13")
+    )
+
+    const titleInput = screen.getByRole("textbox", { name: "Title override for item 13" })
+    titleInput.focus()
+    fireEvent.keyDown(titleInput, { key: "ArrowDown" })
+    expect(titleInput).toHaveFocus()
+    fireEvent.keyDown(titleInput, { key: "Escape" })
+    expect(document.activeElement).toHaveAttribute("data-occurrence-id", "conference-row-13")
+
+    act(() => {
+      ctxRef?.updateQueueItems((current) =>
+        current.filter((item) => item.id !== "conference-row-13")
+      )
+    })
+    await waitFor(() =>
+      expect(document.activeElement).toHaveAttribute("data-occurrence-id", "conference-row-14")
+    )
+  })
+
 
   it("Step 1 — blocks quick processing while disconnected and shows recovery", async () => {
     const user = userEvent.setup()
@@ -1161,6 +1579,218 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
     expect(screen.getByRole("button", { name: /standard preset/i })).toBeTruthy()
   })
 
+  it.each([
+    [
+      "migrating",
+      "Preparing local recovery. Processing will be available shortly.",
+    ],
+    [
+      "unavailable",
+      "Local recovery is unavailable. Enable browser storage before processing.",
+    ],
+    [
+      "quota_error",
+      "Local recovery storage is full. Free browser storage before processing.",
+    ],
+  ] as const)(
+    "Step 3 — blocks processing with concise %s recovery guidance",
+    (persistenceStatus, guidance) => {
+      render(
+        <WizardTestHarness
+          onClose={onClose}
+          persistenceStatus={persistenceStatus}
+          initialState={{
+            currentStep: 3,
+            highestStep: 3,
+            queueItems: [
+              {
+                id: `persistence-${persistenceStatus}`,
+                sourceRef: {
+                  kind: "direct_url",
+                  occurrenceId: `persistence-${persistenceStatus}`,
+                  url: `https://example.com/${persistenceStatus}`,
+                },
+                url: `https://example.com/${persistenceStatus}`,
+                detectedType: "web",
+                icon: "Globe",
+                fileSize: 0,
+                validation: { valid: true },
+              },
+            ],
+          }}
+        />
+      )
+
+      expect(screen.getByText(guidance)).toBeInTheDocument()
+      expect(screen.getByRole("button", { name: /start processing/i })).toBeDisabled()
+    }
+  )
+
+  it("Step 3 — distinguishes another-tab ownership and checks durable authority again", async () => {
+    const checkOwnership = vi.fn().mockResolvedValue(false)
+    render(
+      <WizardTestHarness
+        onClose={onClose}
+        persistenceStatus="ready"
+        isSubmissionOwner={false}
+        onCheckSubmissionOwnership={checkOwnership}
+        initialState={{
+          currentStep: 3,
+          highestStep: 3,
+          queueItems: [
+            {
+              id: "another-tab",
+              sourceRef: {
+                kind: "direct_url",
+                occurrenceId: "another-tab",
+                url: "https://example.com/another-tab",
+              },
+              url: "https://example.com/another-tab",
+              detectedType: "web",
+              icon: "Globe",
+              fileSize: 0,
+              validation: { valid: true },
+            },
+          ],
+        }}
+      />
+    )
+
+    expect(
+      screen.getByText("This ingest is already being processed in another tab.")
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/local recovery is unavailable/i)).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /start processing/i })).toBeDisabled()
+    await userEvent.click(screen.getByRole("button", { name: "Check again" }))
+    expect(checkOwnership).toHaveBeenCalledTimes(1)
+  })
+
+  it("Step 3 — awaits same-owner Start reacquisition before processing", async () => {
+    let releaseReacquire!: (value: boolean) => void
+    const reacquire = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          releaseReacquire = resolve
+        })
+    )
+    render(
+      <WizardTestHarness
+        onClose={onClose}
+        persistenceStatus="ready"
+        isSubmissionOwner
+        onCheckSubmissionOwnership={reacquire}
+        initialState={{
+          currentStep: 3,
+          highestStep: 3,
+          queueItems: [
+            {
+              id: "start-reacquire",
+              sourceRef: {
+                kind: "direct_url",
+                occurrenceId: "start-reacquire",
+                url: "https://example.com/start-reacquire",
+              },
+              url: "https://example.com/start-reacquire",
+              detectedType: "web",
+              icon: "Globe",
+              fileSize: 0,
+              validation: { valid: true },
+            },
+          ],
+        }}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: /start processing/i }))
+    expect(reacquire).toHaveBeenCalledTimes(1)
+    expect(ctxRef?.state.currentStep).toBe(3)
+
+    await act(async () => {
+      releaseReacquire(true)
+      await Promise.resolve()
+    })
+    expect(ctxRef?.state.currentStep).toBe(4)
+  })
+
+  it("Step 3 — awaits the explicit processing command with a loading state", async () => {
+    let releaseBegin!: (value: boolean) => void
+    const beginProcessing = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          releaseBegin = resolve
+        })
+    )
+    render(
+      <WizardTestHarness
+        onClose={onClose}
+        onBeginProcessing={beginProcessing}
+        initialState={{
+          currentStep: 3,
+          highestStep: 3,
+          queueItems: [
+            {
+              id: "explicit-review-start",
+              url: "https://example.com/explicit-review-start",
+              detectedType: "web",
+              icon: "Globe",
+              fileSize: 0,
+              validation: { valid: true },
+            },
+          ],
+        }}
+      />
+    )
+
+    const startButton = screen.getByRole("button", {
+      name: /start processing/i,
+    })
+    fireEvent.click(startButton)
+
+    expect(beginProcessing).toHaveBeenCalledTimes(1)
+    expect(beginProcessing).toHaveBeenCalledWith(
+      expect.objectContaining({ currentStep: 3 })
+    )
+    expect(startButton).toBeDisabled()
+    expect(startButton).toHaveAttribute("aria-busy", "true")
+    expect(ctxRef?.state.currentStep).toBe(3)
+
+    await act(async () => {
+      releaseBegin(false)
+      await Promise.resolve()
+    })
+
+    expect(ctxRef?.state.currentStep).toBe(3)
+    expect(startButton).not.toBeDisabled()
+    expect(startButton).toHaveAttribute("aria-busy", "false")
+  })
+
+  it("Step 3 — renders the dedicated safe pre-submit error as an alert", () => {
+    const safeError =
+      "Quick ingest paused before submission. Check local recovery and submission ownership, then try again."
+    render(
+      <WizardTestHarness
+        onClose={onClose}
+        submissionStartError={safeError}
+        initialState={{
+          currentStep: 3,
+          highestStep: 3,
+          queueItems: [
+            {
+              id: "safe-review-error",
+              url: "https://example.com/safe-review-error",
+              detectedType: "web",
+              icon: "Globe",
+              fileSize: 0,
+              validation: { valid: true },
+            },
+          ],
+        }}
+      />
+    )
+
+    expect(screen.getByRole("alert")).toHaveTextContent(safeError)
+  })
+
   // -------------------------------------------------------------------------
   // Step 3 -> Step 4: Start Processing
   // -------------------------------------------------------------------------
@@ -1213,6 +1843,522 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
     // Cancel All button should be present
     expect(screen.getByText("Cancel All")).toBeTruthy()
   })
+
+  it("Step 3 playlist review requires an explicit duplicate policy and serializes only edited allowlisted patches", async () => {
+    const user = userEvent.setup()
+    render(
+      <WizardTestHarness
+        onClose={onClose}
+        initialState={{
+          currentStep: 3,
+          highestStep: 3,
+          queueItems: [
+            {
+              id: "occ-review-4",
+              kind: "url",
+              url: "https://cached.example.invalid/watch?v=display-only",
+              sourceRef: {
+                kind: "materialized_playlist_item",
+                materializationId: "owner-bound-materialization",
+                occurrenceId: "occ-review-4",
+              },
+              detectedType: "video",
+              icon: "Film",
+              fileSize: 0,
+              validation: { valid: true },
+              playlist: {
+                title: "Playlist row",
+                playlistTitle: "Research playlist",
+                ordinal: 4,
+                duplicateStatus: "duplicate_existing",
+                materializationExpiresAt: "2099-01-01T00:00:00Z",
+              },
+              playlistReview: { selected: true },
+            },
+          ],
+        }}
+      />
+    )
+
+    expect(screen.getAllByText("4. Playlist row")).toHaveLength(2)
+    expect(screen.getByText("Research playlist")).toBeInTheDocument()
+    expect(
+      screen.getByText("https://cached.example.invalid/watch?v=display-only").closest("details")
+    ).toBeInTheDocument()
+    const start = screen.getByRole("button", { name: /start processing/i })
+    expect(start).toBeDisabled()
+
+    const duplicatePolicy = screen.getByRole("combobox", {
+      name: "Duplicate policy for occurrence occ-review-4",
+    })
+    expect(
+      within(duplicatePolicy).getByRole("option", {
+        name: "update metadata only",
+      })
+    ).toBeDisabled()
+    await user.type(
+      screen.getByRole("textbox", {
+        name: "Title override for occurrence occ-review-4",
+      }),
+      "Edited title"
+    )
+    await user.type(
+      screen.getByRole("textbox", {
+        name: "Author override for occurrence occ-review-4",
+      }),
+      "Display-only author"
+    )
+    await user.type(
+      screen.getByRole("textbox", {
+        name: "Keywords to add for occurrence occ-review-4",
+      }),
+      "research, video"
+    )
+    await user.selectOptions(duplicatePolicy, "update_metadata_only")
+    expect(start).toBeEnabled()
+
+    await user.click(start)
+
+    expect(ctxRef?.state.pendingRunRequest).toEqual({
+      inputs: [
+        {
+          inputKind: "materialized_playlist_item",
+          occurrenceId: "occ-review-4",
+          materializationId: "owner-bound-materialization",
+        },
+      ],
+      reviewOverrides: {
+        "occ-review-4": {
+          duplicatePolicy: "update_metadata_only",
+          metadataPatch: {
+            title: "Edited title",
+            author: "Display-only author",
+            keywordsAdd: ["research", "video"],
+          },
+        },
+      },
+    })
+    expect(ctxRef?.state.pendingRunRequest).not.toEqual(
+      expect.objectContaining({
+        url: expect.stringContaining("cached.example.invalid"),
+      })
+    )
+    expect(screen.queryByRole("textbox", { name: /speaker for item/i })).not.toBeInTheDocument()
+  })
+
+  it("Step 3 offers only safe initial actions for an in-run duplicate", () => {
+    render(
+      <WizardTestHarness
+        onClose={onClose}
+        initialState={{
+          currentStep: 3,
+          highestStep: 3,
+          queueItems: [
+            {
+              id: "occ-in-run-actions",
+              sourceRef: {
+                kind: "materialized_playlist_item",
+                materializationId: "in-run-actions-materialization",
+                occurrenceId: "occ-in-run-actions",
+              },
+              detectedType: "video",
+              icon: "Film",
+              fileSize: 0,
+              validation: { valid: true },
+              playlist: {
+                duplicateStatus: "duplicate_in_batch",
+                materializationExpiresAt: "2099-01-01T00:00:00Z",
+              },
+              playlistReview: { selected: true },
+            },
+          ],
+        }}
+      />
+    )
+
+    const policy = screen.getByRole("combobox", {
+      name: "Duplicate policy for occurrence occ-in-run-actions",
+    }) as HTMLSelectElement
+    expect(Array.from(policy.options).map((option) => option.value)).toEqual([
+      "",
+      "skip",
+      "overwrite",
+    ])
+  })
+
+  it("lets a user clear one playlist metadata edit and then choose skip", async () => {
+    const user = userEvent.setup()
+    render(
+      <WizardTestHarness
+        onClose={onClose}
+        initialState={{
+          currentStep: 3,
+          highestStep: 3,
+          queueItems: [
+            {
+              id: "occ-clear-edit",
+              sourceRef: {
+                kind: "materialized_playlist_item",
+                materializationId: "materialization-clear-edit",
+                occurrenceId: "occ-clear-edit",
+              },
+              detectedType: "video",
+              icon: "Film",
+              fileSize: 0,
+              validation: { valid: true },
+              playlist: {
+                title: "Original title",
+                duplicateStatus: "duplicate_existing",
+                materializationExpiresAt: "2099-01-01T00:00:00Z",
+              },
+              playlistReview: {
+                selected: true,
+                duplicatePolicy: "update_metadata_only",
+                metadataPatch: {
+                  title: "Remove this edit",
+                  author: "Keep this edit",
+                },
+                editedFields: ["title", "author"],
+              },
+            },
+          ],
+        }}
+      />
+    )
+
+    await user.clear(
+      screen.getByRole("textbox", {
+        name: "Title override for occurrence occ-clear-edit",
+      })
+    )
+    await user.clear(
+      screen.getByRole("textbox", {
+        name: "Author override for occurrence occ-clear-edit",
+      })
+    )
+    expect(
+      screen.getByRole("combobox", {
+        name: "Duplicate policy for occurrence occ-clear-edit",
+      })
+    ).toHaveValue("")
+    await user.selectOptions(
+      screen.getByRole("combobox", {
+        name: "Duplicate policy for occurrence occ-clear-edit",
+      }),
+      "skip"
+    )
+
+    const start = screen.getByRole("button", { name: /start processing/i })
+    expect(start).toBeEnabled()
+    await user.click(start)
+    expect(ctxRef?.state.pendingRunRequest).toEqual({
+      inputs: [
+        {
+          inputKind: "materialized_playlist_item",
+          occurrenceId: "occ-clear-edit",
+          materializationId: "materialization-clear-edit",
+        },
+      ],
+      reviewOverrides: {
+        "occ-clear-edit": { duplicatePolicy: "skip" },
+      },
+    })
+  })
+
+  it("does not offer duplicate actions or metadata patches for a known-new playlist row", () => {
+    render(
+      <WizardTestHarness
+        onClose={onClose}
+        initialState={{
+          currentStep: 3,
+          highestStep: 3,
+          queueItems: [
+            {
+              id: "occ-known-new",
+              sourceRef: {
+                kind: "materialized_playlist_item",
+                materializationId: "materialization-known-new",
+                occurrenceId: "occ-known-new",
+              },
+              detectedType: "video",
+              icon: "Film",
+              fileSize: 0,
+              validation: { valid: true },
+              playlist: {
+                title: "Known new row",
+                duplicateStatus: "new",
+                materializationExpiresAt: "2099-01-01T00:00:00Z",
+              },
+              playlistReview: {
+                selected: true,
+                duplicateEvidence: {
+                  kind: "none",
+                  existingMediaId: null,
+                  duplicateOfOccurrenceId: null,
+                },
+              },
+            },
+          ],
+        }}
+      />
+    )
+
+    expect(screen.getByText("No duplicate action needed")).toBeInTheDocument()
+    expect(
+      screen.queryByRole("combobox", {
+        name: "Duplicate policy for occurrence occ-known-new",
+      })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("textbox", {
+        name: "Title override for occurrence occ-known-new",
+      })
+    ).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /start processing/i })).toBeEnabled()
+  })
+
+  it("Step 3 playlist review blocks expired materializations with reinspection guidance", () => {
+    render(
+      <WizardTestHarness
+        onClose={onClose}
+        initialState={{
+          currentStep: 3,
+          highestStep: 3,
+          queueItems: [
+            {
+              id: "occ-expired-review",
+              url: "https://cached.example.invalid/watch?v=expired",
+              sourceRef: {
+                kind: "materialized_playlist_item",
+                materializationId: "expired-materialization",
+                occurrenceId: "occ-expired-review",
+              },
+              detectedType: "video",
+              icon: "Film",
+              fileSize: 0,
+              validation: { valid: true },
+              playlist: {
+                title: "Expired playlist row",
+                ordinal: 1,
+                materializationExpiresAt: "2020-01-01T00:00:00Z",
+              },
+              playlistReview: { selected: true },
+            },
+          ],
+        }}
+      />
+    )
+
+    expect(
+      screen.getByText("This staged playlist expired. Inspect it again before processing.")
+    ).toBeInTheDocument()
+    const sourceDetails = screen
+      .getByText("https://cached.example.invalid/watch?v=expired")
+      .closest("details")
+    expect(sourceDetails).not.toBeNull()
+    expect(sourceDetails?.closest(".truncate")).toBeNull()
+    expect(screen.getByRole("button", { name: /start processing/i })).toBeDisabled()
+  })
+
+  it("Step 3 blocks a live 500-item playlist plus an ordinary URL without dropping either", () => {
+    const playlistItems = Array.from({ length: 500 }, (_, index) => ({
+      id: `occ-run-cap-${index + 1}`,
+      sourceRef: {
+        kind: "materialized_playlist_item" as const,
+        materializationId: "materialization-run-cap",
+        occurrenceId: `occ-run-cap-${index + 1}`,
+      },
+      detectedType: "video" as const,
+      icon: "Film",
+      fileSize: 0,
+      validation: { valid: true },
+      playlist: {
+        title: `Capacity video ${index + 1}`,
+        playlistTitle: "Capacity playlist",
+        ordinal: index + 1,
+        duplicateStatus: "new" as const,
+        materializationExpiresAt: "2099-01-01T00:00:00Z",
+      },
+      playlistReview: { selected: true },
+    }))
+    const directUrl = "https://example.com/ordinary-after-playlist"
+
+    render(
+      <WizardTestHarness
+        onClose={onClose}
+        initialState={{
+          currentStep: 3,
+          highestStep: 3,
+          queueItems: [
+            ...playlistItems,
+            {
+              id: "ordinary-after-playlist",
+              sourceRef: {
+                kind: "direct_url",
+                occurrenceId: "ordinary-after-playlist",
+                url: directUrl,
+              },
+              url: directUrl,
+              detectedType: "web",
+              icon: "Globe",
+              fileSize: 0,
+              validation: { valid: true },
+            },
+          ],
+        }}
+      />
+    )
+
+    expect(screen.getByText(/501 items \| Standard preset/i)).toBeInTheDocument()
+    expect(
+      screen.getByText("Too many items selected. Select no more than 500 items before processing.")
+    ).toBeInTheDocument()
+    expect(ctxRef?.state.queueItems).toHaveLength(501)
+    expect(ctxRef?.state.queueItems.at(-1)?.url).toBe(directUrl)
+    expect(screen.getByRole("button", { name: /start processing/i })).toBeDisabled()
+  })
+
+  it("revalidates materialization expiry atomically when Start Processing is clicked", () => {
+    let now = Date.parse("2026-07-13T00:00:00Z")
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => now)
+    try {
+      render(
+        <WizardTestHarness
+          onClose={onClose}
+          initialState={{
+            currentStep: 3,
+            highestStep: 3,
+            queueItems: [
+              {
+                id: "occ-expiry-boundary",
+                sourceRef: {
+                  kind: "materialized_playlist_item",
+                  materializationId: "boundary-materialization",
+                  occurrenceId: "occ-expiry-boundary",
+                },
+                detectedType: "video",
+                icon: "Film",
+                fileSize: 0,
+                validation: { valid: true },
+                playlist: {
+                  title: "Boundary row",
+                  duplicateStatus: "new",
+                  materializationExpiresAt: "2026-07-13T00:00:01Z",
+                },
+                playlistReview: { selected: true },
+              },
+            ],
+          }}
+        />
+      )
+
+      const start = screen.getByRole("button", { name: /start processing/i })
+      expect(start).toBeEnabled()
+      now = Date.parse("2026-07-13T00:00:02Z")
+      fireEvent.click(start)
+
+      expect(ctxRef?.state.currentStep).toBe(3)
+      expect(ctxRef?.state.pendingRunRequest).toBeNull()
+      expect(ctxRef?.state.processingBlock).toEqual({
+        code: "materialization_expired",
+        occurrenceIds: ["occ-expiry-boundary"],
+      })
+      expect(screen.getByRole("button", { name: /start processing/i })).toBeInTheDocument()
+    } finally {
+      nowSpy.mockRestore()
+    }
+  })
+
+  it("keeps a 500-item playlist review bounded and filters visibility without changing selection", async () => {
+    const queueItems = Array.from({ length: 500 }, (_, index) => ({
+      id: `occ-scale-${index + 1}`,
+      sourceRef: {
+        kind: "materialized_playlist_item" as const,
+        materializationId: "materialization-scale",
+        occurrenceId: `occ-scale-${index + 1}`,
+      },
+      detectedType: "video" as const,
+      icon: "Film",
+      fileSize: 0,
+      validation: { valid: true },
+      playlist: {
+        title: `Video ${index + 1}`,
+        playlistTitle: "Scale playlist",
+        ordinal: index + 1,
+        duplicateStatus: index % 2 === 0 ? ("new" as const) : ("duplicate_existing" as const),
+        materializationExpiresAt: "2099-01-01T00:00:00Z",
+      },
+      playlistReview: { selected: true },
+    }))
+    render(
+      <WizardTestHarness
+        onClose={onClose}
+        initialState={{ currentStep: 3, highestStep: 3, queueItems }}
+      />
+    )
+
+    const reviewList = screen.getByRole("list", { name: "Items to process" })
+    expect(within(reviewList).getAllByRole("listitem").length).toBeLessThan(30)
+    expect(screen.getByText(/500 items \| Standard preset/i)).toBeInTheDocument()
+
+    const firstReviewRow = reviewList.querySelector<HTMLElement>(
+      '[data-occurrence-id="occ-scale-1"]'
+    )
+    firstReviewRow?.focus()
+    fireEvent.change(screen.getByRole("combobox", { name: "Filter review items" }), {
+      target: { value: "duplicates" },
+    })
+    await waitFor(() =>
+      expect(document.activeElement).toHaveAttribute("data-occurrence-id", "occ-scale-2")
+    )
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Filter review items" }), {
+      target: { value: "selected" },
+    })
+    const twelfthReviewRow = reviewList.querySelector<HTMLElement>(
+      '[data-occurrence-id="occ-scale-12"]'
+    )
+    twelfthReviewRow?.focus()
+    fireEvent.keyDown(twelfthReviewRow as HTMLElement, { key: "ArrowDown" })
+    await waitFor(() =>
+      expect(document.activeElement).toHaveAttribute("data-occurrence-id", "occ-scale-13")
+    )
+
+    const overrideList = screen.getByRole("list", { name: "Playlist review override items" })
+    const twelfthOverrideRow = overrideList.querySelector<HTMLElement>(
+      '[data-occurrence-id="occ-scale-12"]'
+    )
+    twelfthOverrideRow?.focus()
+    fireEvent.keyDown(twelfthOverrideRow as HTMLElement, { key: "ArrowDown" })
+    await waitFor(() =>
+      expect(document.activeElement).toHaveAttribute("data-occurrence-id", "occ-scale-13")
+    )
+
+    const firstOverrideRow = overrideList.querySelector<HTMLElement>(
+      '[data-occurrence-id="occ-scale-3"]'
+    )
+    firstOverrideRow?.focus()
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Filter review items" }), {
+      target: { value: "duplicates" },
+    })
+    await waitFor(() =>
+      expect(document.activeElement).toHaveAttribute("data-occurrence-id", "occ-scale-6")
+    )
+    expect(screen.getByText("Showing 250 of 500 review items")).toBeInTheDocument()
+    expect(ctxRef?.state.queueItems.filter((item) => item.playlistReview?.selected)).toHaveLength(
+      500
+    )
+    for (const row of within(reviewList).getAllByRole("listitem")) {
+      const occurrenceNumber = Number(row.getAttribute("data-occurrence-id")?.split("-").at(-1))
+      expect(occurrenceNumber % 2).toBe(0)
+    }
+    for (const row of within(overrideList).getAllByRole("listitem")) {
+      const occurrenceNumber = Number(row.getAttribute("data-occurrence-id")?.split("-").at(-1))
+      expect(occurrenceNumber % 2).toBe(0)
+    }
+  })
+
 
   it("Step 4 — shows durable collection tracking and exports failed URLs", async () => {
     const user = userEvent.setup()
@@ -1316,6 +2462,1041 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
         value: originalClipboard,
       })
     }
+  })
+
+  it("Step 4 — renders authoritative lifecycle evidence without fabricated stages", async () => {
+    const onCheckStatus = vi.fn()
+    const onReconnect = vi.fn()
+    const lifecycleStates = [
+      ["upload-ready", "Upload ready", "awaiting_upload"],
+      ["file-missing", "Missing file", "awaiting_upload"],
+      ["submit-pending", "Pending submit", "submit_pending"],
+      ["queued", "Queued talk", "queued"],
+      ["running", "Running talk", "running"],
+      ["cancel-requested", "Cancelling talk", "cancellation_requested"],
+      ["status-unavailable", "Offline talk", "status_unavailable"],
+      ["terminal", "Finished talk", "terminal"],
+    ] as const
+    const queueItems = lifecycleStates.map(([id, title], index) => ({
+      id,
+      kind: id.includes("file") || id === "upload-ready" ? "file" : "url",
+      ...(id.includes("file") || id === "upload-ready"
+        ? {
+            fileName: `${id}.mp4`,
+            sourceRef: { kind: "file_stub", occurrenceId: id },
+            ...(id === "upload-ready"
+              ? { file: new File(["video"], `${id}.mp4`, { type: "video/mp4" }) }
+              : {}),
+          }
+        : {
+            url: `https://example.com/${id}`,
+            sourceRef: {
+              kind: "direct_url",
+              occurrenceId: id,
+              url: `https://example.com/${id}`,
+            },
+          }),
+      detectedType: "video",
+      icon: "Film",
+      fileSize: 5,
+      validation: { valid: true },
+      playlist: { title, ordinal: index + 1 },
+    })) as any
+    const perItemProgress = lifecycleStates.map(([id, , lifecycleState]) => ({
+      id,
+      status: "processing",
+      lifecycleState,
+      terminalOutcome: lifecycleState === "terminal" ? "completed" : null,
+      progressPercent: lifecycleState === "running" ? 37 : 0,
+      currentStage:
+        lifecycleState === "running" ? "Downloading source" : lifecycleState,
+      estimatedRemaining: 0,
+      retryable: lifecycleState === "status_unavailable",
+    })) as any
+
+    render(
+      <WizardTestHarness
+        onClose={onClose}
+        onCheckStatus={onCheckStatus}
+        onReconnect={onReconnect}
+        initialState={{
+          currentStep: 4,
+          highestStep: 4,
+          queueItems,
+          processingState: {
+            status: "running",
+            elapsed: 12,
+            estimatedRemaining: 0,
+            perItemProgress,
+          },
+        }}
+      />
+    )
+
+    expect(screen.getByText("Awaiting upload")).toBeInTheDocument()
+    expect(screen.getByText("File reattach required")).toBeInTheDocument()
+    expect(screen.getByText("Submit pending")).toBeInTheDocument()
+    expect(screen.getByText("Queued")).toBeInTheDocument()
+    expect(screen.getByText("Running")).toBeInTheDocument()
+    expect(screen.getByText("Cancellation requested")).toBeInTheDocument()
+    expect(screen.getByText("Status unavailable")).toBeInTheDocument()
+    expect(screen.getByText("Completed")).toBeInTheDocument()
+    expect(screen.getByText("5. Running talk")).toBeInTheDocument()
+    expect(screen.getByText("Downloading source")).toBeInTheDocument()
+    expect(screen.queryByText("Analyze")).not.toBeInTheDocument()
+    expect(screen.queryByText("Store")).not.toBeInTheDocument()
+    expect(virtualizerMocks.latestOptions?.count).toBe(0)
+
+    await userEvent.click(screen.getByRole("button", { name: "Check again" }))
+    expect(onCheckStatus).toHaveBeenCalledWith("status-unavailable")
+    await userEvent.click(screen.getByRole("button", { name: "Reconnect" }))
+    expect(onReconnect).toHaveBeenCalledTimes(1)
+  })
+
+  it("Step 4 — reselects a missing local file without changing occurrence authority", async () => {
+    const sourceRef = {
+      kind: "file_stub" as const,
+      occurrenceId: "occ-missing-file",
+    }
+    render(
+      <WizardTestHarness
+        onClose={onClose}
+        initialState={{
+          currentStep: 4,
+          highestStep: 4,
+          queueItems: [
+            {
+              id: "occ-missing-file",
+              kind: "file",
+              fileName: "missing-recording.mp4",
+              sourceRef,
+              detectedType: "video",
+              icon: "Film",
+              fileSize: 10,
+              validation: { valid: true },
+              playlist: { title: "Missing recording", ordinal: 4 },
+            },
+          ] as any,
+          processingState: {
+            status: "running",
+            elapsed: 5,
+            estimatedRemaining: 0,
+            perItemProgress: [
+              {
+                id: "occ-missing-file",
+                status: "queued",
+                lifecycleState: "awaiting_upload",
+                terminalOutcome: null,
+                progressPercent: 0,
+                currentStage: "File reattach required",
+                estimatedRemaining: 0,
+                retryable: true,
+              },
+            ],
+          },
+        }}
+      />
+    )
+
+    const replacement = new File(["replacement"], "replacement.mp4", {
+      type: "video/mp4",
+    })
+    expect(
+      screen.getByRole("button", {
+        name: "Reselect file for 4. Missing recording",
+      })
+    ).toBeInTheDocument()
+    fireEvent.change(
+      screen.getByLabelText("Replacement file for 4. Missing recording"),
+      { target: { files: [replacement] } }
+    )
+
+    await waitFor(() => {
+      expect(ctxRef?.state.queueItems[0]).toMatchObject({
+        id: "occ-missing-file",
+        fileName: "replacement.mp4",
+        sourceRef,
+        validation: { valid: true },
+      })
+      expect(ctxRef?.state.queueItems[0]?.file).toBe(replacement)
+    })
+  })
+
+  it("Step 4 — resumes the same awaiting-upload occurrence in its existing run after file reselection", async () => {
+    useQuickIngestSessionStore.getState().upsertSession({
+      lifecycle: "processing",
+      currentStep: 4,
+      queueItems: [
+        {
+          id: "occ-existing-run-file",
+          kind: "file",
+          fileName: "missing-existing-run.mp4",
+          sourceRef: {
+            kind: "file_stub",
+            occurrenceId: "occ-existing-run-file",
+          },
+          detectedType: "video",
+          icon: "Film",
+          fileSize: 10,
+          validation: { valid: false, warnings: ["File reattach required"] },
+          playlist: { title: "Existing run recording", ordinal: 6 },
+        } as any,
+      ],
+      processingState: {
+        status: "running",
+        elapsed: 5,
+        estimatedRemaining: 0,
+        perItemProgress: [
+          {
+            id: "occ-existing-run-file",
+            status: "queued",
+            lifecycleState: "awaiting_upload",
+            terminalOutcome: null,
+            progressPercent: 0,
+            currentStage: "File reattach required",
+            estimatedRemaining: 0,
+            retryable: true,
+          },
+        ],
+      },
+      tracking: {
+        mode: "webui-direct",
+        sessionId: "qi-existing-run-file",
+        runId: "run-existing-file-resume",
+        submissionOccurrenceIds: ["occ-existing-run-file"],
+        submittedItemIds: ["occ-existing-run-file"],
+        startedAt: Date.now(),
+      },
+    })
+    lifecycleMocks.reattachQuickIngestSession.mockResolvedValue({
+      lifecycle: "processing",
+      jobs: [
+        {
+          jobId: null,
+          status: "awaiting_upload",
+          sourceItemId: "occ-existing-run-file",
+          lifecycleState: "awaiting_upload",
+          terminalOutcome: null,
+          progressPercent: 0,
+          progressMessage: "File reattach required",
+          retryable: true,
+          attempt: 4,
+        },
+      ],
+      errorMessage: null,
+    })
+
+    render(<QuickIngestWizardModal open onClose={onClose} />)
+    const replacement = new File(["replacement"], "replacement-existing.mp4", {
+      type: "video/mp4",
+    })
+    Object.defineProperty(replacement, "arrayBuffer", {
+      configurable: true,
+      value: undefined,
+    })
+    fireEvent.change(
+      await screen.findByLabelText(
+        "Replacement file for 6. Existing run recording"
+      ),
+      { target: { files: [replacement] } }
+    )
+
+    await waitFor(() => {
+      expect(lifecycleMocks.submitQuickIngestBatch).toHaveBeenCalledWith(
+        expect.objectContaining({
+          __quickIngestSessionId: "qi-existing-run-file",
+          __quickIngestRunId: "run-existing-file-resume",
+          pendingRunRequest: {
+            inputs: [
+              expect.objectContaining({
+                inputKind: "file_stub",
+                occurrenceId: "occ-existing-run-file",
+                attempt: 4,
+              }),
+            ],
+          },
+          files: [
+            expect.objectContaining({
+              id: "occ-existing-run-file",
+              name: "replacement-existing.mp4",
+            }),
+          ],
+        })
+      )
+    })
+    expect(
+      useQuickIngestSessionStore.getState().session?.queueItems[0]
+    ).toMatchObject({
+      id: "occ-existing-run-file",
+      fileName: "replacement-existing.mp4",
+    })
+  })
+
+  it("Step 4 — preserves an extension retry attempt through reattach and a failed replacement upload retry", async () => {
+    useQuickIngestSessionStore.getState().upsertSession({
+      lifecycle: "processing",
+      currentStep: 4,
+      queueItems: [
+        {
+          id: "occ-existing-run-file-retry",
+          kind: "file",
+          fileName: "missing-existing-run-retry.mp4",
+          sourceRef: {
+            kind: "file_stub",
+            occurrenceId: "occ-existing-run-file-retry",
+          },
+          detectedType: "video",
+          icon: "Film",
+          fileSize: 10,
+          validation: { valid: false, warnings: ["File reattach required"] },
+          playlist: { title: "Existing retry recording", ordinal: 7 },
+        } as any,
+      ],
+      processingState: {
+        status: "running",
+        elapsed: 5,
+        estimatedRemaining: 0,
+        perItemProgress: [
+          {
+            id: "occ-existing-run-file-retry",
+            status: "queued",
+            lifecycleState: "awaiting_upload",
+            terminalOutcome: null,
+            progressPercent: 0,
+            currentStage: "File reattach required",
+            estimatedRemaining: 0,
+            retryable: true,
+          },
+        ],
+      },
+      tracking: {
+        mode: "extension-runtime",
+        sessionId: "qi-existing-run-file-retry",
+        runId: "run-existing-file-retry",
+        generation: "generation-existing-file-retry",
+        submissionOccurrenceIds: ["occ-existing-run-file-retry"],
+        submittedItemIds: ["occ-existing-run-file-retry"],
+        startedAt: Date.now(),
+      },
+    })
+    lifecycleMocks.submitQuickIngestBatch
+      .mockResolvedValueOnce({
+        ok: false,
+        accepted: false,
+        error: "Upload temporarily unavailable",
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        accepted: true,
+        runId: "run-existing-file-retry",
+      })
+
+    render(<QuickIngestWizardModal open onClose={onClose} />)
+    await screen.findByLabelText(
+      "Replacement file for 7. Existing retry recording"
+    )
+    act(() => {
+      emitRuntimeMessage({
+        type: "tldw:quick-ingest/progress",
+        payload: {
+          sessionId: "qi-existing-run-file-retry",
+          runId: "run-existing-file-retry",
+          generation: "generation-existing-file-retry",
+          occurrenceId: "occ-existing-run-file-retry",
+          jobId: null,
+          attempt: 4,
+          status: "awaiting_upload",
+          lifecycleState: "awaiting_upload",
+          progressPercentage: 0,
+          progressMessage: "File reattach required",
+          retryable: true,
+          result: {
+            id: "occ-existing-run-file-retry",
+            status: "awaiting_upload",
+            type: "video",
+          },
+        },
+      })
+    })
+    await waitFor(() => {
+      expect(
+        useQuickIngestSessionStore.getState().session?.processingState
+          .perItemProgress[0]
+      ).toMatchObject({ attempt: 4, lifecycleState: "awaiting_upload" })
+    })
+
+    const invalidReplacement = new File(
+      ["invalid"],
+      "invalid-replacement.bin"
+    )
+    fireEvent.change(
+      screen.getByLabelText("Replacement file for 7. Existing retry recording"),
+      { target: { files: [invalidReplacement] } }
+    )
+    await waitFor(() => {
+      expect(
+        useQuickIngestSessionStore.getState().session?.processingState
+          .perItemProgress[0]
+      ).toMatchObject({
+        attempt: 4,
+        lifecycleState: "awaiting_upload",
+        currentStage: "Unsupported replacement file",
+      })
+    })
+
+    const replacement = new File(["replacement"], "replacement-retry.mp4", {
+      type: "video/mp4",
+    })
+    let releaseFirstRead!: (bytes: ArrayBuffer) => void
+    const firstReadGate = new Promise<ArrayBuffer>((resolve) => {
+      releaseFirstRead = resolve
+    })
+    const readBytes = vi
+      .fn()
+      .mockImplementationOnce(() => firstReadGate)
+      .mockResolvedValue(Uint8Array.from([9, 8, 7]).buffer)
+    Object.defineProperty(replacement, "arrayBuffer", {
+      configurable: true,
+      value: readBytes,
+    })
+    fireEvent.change(
+      screen.getByLabelText("Replacement file for 7. Existing retry recording"),
+      { target: { files: [replacement] } }
+    )
+
+    await waitFor(() => {
+      expect(
+        useQuickIngestSessionStore.getState().session?.processingState
+          .perItemProgress[0]
+      ).toMatchObject({
+        attempt: 4,
+        lifecycleState: "awaiting_upload",
+        currentStage: "File selected. Ready to upload.",
+      })
+    })
+    act(() => {
+      releaseFirstRead(Uint8Array.from([9, 8, 7]).buffer)
+    })
+
+    await waitFor(() => {
+      expect(lifecycleMocks.submitQuickIngestBatch).toHaveBeenCalledTimes(1)
+      expect(
+        useQuickIngestSessionStore.getState().session?.processingState
+          .perItemProgress[0]
+      ).toMatchObject({
+        attempt: 4,
+        lifecycleState: "awaiting_upload",
+        currentStage: "Upload temporarily unavailable",
+        retryable: true,
+      })
+    })
+
+    await userEvent.click(
+      screen.getByRole("button", {
+        name: "Retry upload for 7. Existing retry recording",
+      })
+    )
+
+    await waitFor(() =>
+      expect(lifecycleMocks.submitQuickIngestBatch).toHaveBeenCalledTimes(2)
+    )
+    expect(readBytes).toHaveBeenCalledTimes(2)
+    for (const [payload] of lifecycleMocks.submitQuickIngestBatch.mock.calls) {
+      expect(payload).toMatchObject({
+        __quickIngestSessionId: "qi-existing-run-file-retry",
+        __quickIngestRunId: "run-existing-file-retry",
+        pendingRunRequest: {
+          inputs: [
+            expect.objectContaining({
+              occurrenceId: "occ-existing-run-file-retry",
+              attempt: 4,
+            }),
+          ],
+        },
+        files: [
+          {
+            id: "occ-existing-run-file-retry",
+            name: "replacement-retry.mp4",
+            data: [9, 8, 7],
+          },
+        ],
+      })
+    }
+    await waitFor(() => {
+      expect(
+        useQuickIngestSessionStore.getState().session?.processingState
+          .perItemProgress[0]
+      ).toMatchObject({
+        attempt: 4,
+        lifecycleState: "queued",
+        currentStage: "Queued",
+        retryable: false,
+      })
+    })
+  })
+
+  it.each([
+    ["rate limited", 429],
+    ["service unavailable", 503],
+    ["network disconnected", undefined],
+  ])(
+    "maps %s status errors to recoverable status-unavailable evidence",
+    async (message, status) => {
+      const modalModule = await import(
+        "@/components/Common/QuickIngestWizardModal"
+      )
+      const buildUnavailableProgress = (modalModule as any)
+        .buildStatusUnavailableProgressFromReattachError
+      expect(buildUnavailableProgress).toBeTypeOf("function")
+      if (typeof buildUnavailableProgress !== "function") return
+      const queueItems = [
+        {
+          id: "occ-status-recovery",
+          kind: "url",
+          url: "https://example.com/status-recovery",
+          detectedType: "video",
+          icon: "Film",
+          fileSize: 0,
+          validation: { valid: true },
+        },
+      ] as any
+      const perItemProgress = buildUnavailableProgress(
+        Object.assign(new Error(message), status == null ? {} : { status }),
+        queueItems,
+        [
+          {
+            id: "occ-status-recovery",
+            status: "processing",
+            lifecycleState: "running",
+            terminalOutcome: null,
+            progressPercent: 31,
+            currentStage: "Running",
+            estimatedRemaining: 0,
+          },
+        ]
+      )
+
+      render(
+        <WizardTestHarness
+          onClose={onClose}
+          initialState={{
+            currentStep: 4,
+            highestStep: 4,
+            queueItems,
+            processingState: {
+              status: "running",
+              elapsed: 1,
+              estimatedRemaining: 0,
+              perItemProgress,
+            },
+          }}
+        />
+      )
+
+      expect(perItemProgress[0]).toMatchObject({
+        lifecycleState: "status_unavailable",
+        terminalOutcome: null,
+        progressPercent: 31,
+        retryable: true,
+        currentStage: expect.stringMatching(new RegExp(message, "i")),
+      })
+      expect(
+        screen.getByRole("button", { name: "Check again" })
+      ).toBeInTheDocument()
+      expect(
+        screen.getByRole("button", { name: "Reconnect" })
+      ).toBeInTheDocument()
+    }
+  )
+
+  it.each([
+    ["rate limited", 429, /too many|rate|try again/i],
+    ["service unavailable", 503, /unavailable|try again/i],
+    ["network disconnected", undefined, /network|connect|unavailable/i],
+  ])(
+    "propagates real service %s recovery evidence into the Modal",
+    async (message, status, expectedMessage) => {
+      const actualReattach = await vi.importActual<
+        typeof import("@/services/tldw/quick-ingest-session-reattach")
+      >("@/services/tldw/quick-ingest-session-reattach")
+      lifecycleMocks.reattachQuickIngestSession.mockImplementation(
+        actualReattach.reattachQuickIngestSession
+      )
+      transportMocks.bgRequest.mockRejectedValue(
+        Object.assign(
+          new Error(message),
+          status == null ? {} : { status }
+        )
+      )
+      useQuickIngestSessionStore.getState().upsertSession({
+        lifecycle: "processing",
+        currentStep: 4,
+        queueItems: [
+          {
+            id: "occ-real-status-unavailable",
+            kind: "url",
+            url: "https://example.com/real-status-unavailable",
+            detectedType: "video",
+            icon: "Film",
+            fileSize: 0,
+            validation: { valid: true },
+            playlist: { title: "Recovery target", ordinal: 2 },
+          } as any,
+        ],
+        processingState: {
+          status: "running",
+          elapsed: 1,
+          estimatedRemaining: 0,
+          perItemProgress: [
+            {
+              id: "occ-real-status-unavailable",
+              status: "processing",
+              lifecycleState: "running",
+              terminalOutcome: null,
+              progressPercent: 31,
+              currentStage: "Running",
+              estimatedRemaining: 0,
+            },
+          ],
+        },
+        tracking: {
+          mode: "webui-direct",
+          sessionId: `qi-real-status-${status ?? "network"}`,
+          runId: `run-real-status-${status ?? "network"}`,
+          jobIds: [717],
+          submissionOccurrenceIds: ["occ-real-status-unavailable"],
+          submittedItemIds: ["occ-real-status-unavailable"],
+          startedAt: Date.now(),
+        },
+      })
+
+      render(<QuickIngestWizardModal open onClose={onClose} />)
+
+      await waitFor(() => {
+        expect(
+          useQuickIngestSessionStore.getState().session?.processingState
+            .perItemProgress[0]
+        ).toMatchObject({
+          id: "occ-real-status-unavailable",
+          lifecycleState: "status_unavailable",
+          retryable: true,
+          currentStage: expect.stringMatching(expectedMessage),
+        })
+      })
+      expect(
+        screen.getByRole("button", { name: "Check again" })
+      ).toBeInTheDocument()
+    }
+  )
+
+  it("Step 4 — keeps authoritative row and run cancellation pending", async () => {
+    const user = userEvent.setup()
+    const onCancelItem = vi.fn().mockReturnValue(true)
+    const onCancelProcessing = vi.fn().mockReturnValue(true)
+
+    render(
+      <WizardTestHarness
+        onClose={onClose}
+        onCancelItem={onCancelItem}
+        onCancelProcessing={onCancelProcessing}
+        initialState={{
+          currentStep: 4,
+          highestStep: 4,
+          queueItems: [
+            {
+              id: "occ-cancel-row",
+              kind: "url",
+              url: "https://example.com/cancel-row",
+              sourceRef: {
+                kind: "direct_url",
+                occurrenceId: "occ-cancel-row",
+                url: "https://example.com/cancel-row",
+              },
+              detectedType: "video",
+              icon: "Film",
+              fileSize: 0,
+              validation: { valid: true },
+              playlist: { title: "Cancellation target", ordinal: 9 },
+            },
+          ],
+          processingState: {
+            status: "running",
+            elapsed: 2,
+            estimatedRemaining: 0,
+            perItemProgress: [
+              {
+                id: "occ-cancel-row",
+                status: "processing",
+                lifecycleState: "running",
+                terminalOutcome: null,
+                progressPercent: 25,
+                currentStage: "Downloading source",
+                estimatedRemaining: 0,
+              } as any,
+            ],
+          },
+        }}
+      />
+    )
+
+    await user.click(
+      screen.getByRole("button", { name: "Cancel 9. Cancellation target" })
+    )
+    expect(onCancelItem).toHaveBeenCalledWith("occ-cancel-row")
+    expect(screen.getByText("Cancellation requested")).toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "Cancel All" }))
+    expect(onCancelProcessing).toHaveBeenCalledTimes(1)
+  })
+
+  it("preparation — derives selected rows and exposes row and whole-run cancellation before handoff", async () => {
+    const user = userEvent.setup()
+    const onCancelItem = vi.fn().mockReturnValue(true)
+    const onCancelProcessing = vi.fn().mockReturnValue(true)
+    const onPreparingCancelItem = vi.fn()
+    const onPreparingCancelAll = vi.fn()
+
+    render(
+      <WizardTestHarness
+        onClose={onClose}
+        preparingSubmission
+        onCancelItem={onCancelItem}
+        onCancelProcessing={onCancelProcessing}
+        onPreparingCancelItem={onPreparingCancelItem}
+        onPreparingCancelAll={onPreparingCancelAll}
+        initialState={{
+          currentStep: 1,
+          highestStep: 1,
+          queueItems: [
+            {
+              id: "occ-preparing-row-1",
+              kind: "url",
+              url: "https://example.com/preparing/one",
+              sourceRef: {
+                kind: "direct_url",
+                occurrenceId: "occ-preparing-row-1",
+                url: "https://example.com/preparing/one",
+              },
+              detectedType: "web",
+              icon: "Globe",
+              fileSize: 0,
+              validation: { valid: true },
+            },
+            {
+              id: "occ-preparing-row-2",
+              kind: "url",
+              url: "https://example.com/preparing/two",
+              sourceRef: {
+                kind: "direct_url",
+                occurrenceId: "occ-preparing-row-2",
+                url: "https://example.com/preparing/two",
+              },
+              detectedType: "web",
+              icon: "Globe",
+              fileSize: 0,
+              validation: { valid: true },
+            },
+          ],
+        }}
+      />
+    )
+
+    expect(screen.getAllByRole("listitem")).toHaveLength(2)
+    await user.click(
+      screen.getByRole("button", {
+        name: "Cancel https://example.com/preparing/one",
+      })
+    )
+    expect(onPreparingCancelItem).toHaveBeenCalledWith("occ-preparing-row-1")
+    expect(onCancelItem).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole("button", { name: "Cancel All" }))
+    expect(onPreparingCancelAll).toHaveBeenCalledTimes(1)
+    expect(onCancelProcessing).not.toHaveBeenCalled()
+    expect(ctxRef?.state.currentStep).toBe(1)
+    expect(ctxRef?.state.processingState.status).toBe("idle")
+  })
+
+  it("Step 4 — bounds 500 lifecycle rows and filters by actionable state", async () => {
+    const queueItems = Array.from({ length: 500 }, (_, index) => {
+      const occurrence = index + 1
+      return {
+        id: `occ-lifecycle-${occurrence}`,
+        kind: "url",
+        url: `https://example.com/watch/${occurrence}`,
+        sourceRef: {
+          kind: "direct_url",
+          occurrenceId: `occ-lifecycle-${occurrence}`,
+          url: `https://example.com/watch/${occurrence}`,
+        },
+        detectedType: "video",
+        icon: "Film",
+        fileSize: 0,
+        validation: { valid: true },
+        playlist: { title: `Lifecycle talk ${occurrence}`, ordinal: occurrence },
+      }
+    }) as any
+    const perItemProgress = queueItems.map((item: any, index: number) => {
+      const group = index % 3
+      return {
+        id: item.id,
+        status: group === 2 ? "complete" : "processing",
+        lifecycleState:
+          group === 0
+            ? "running"
+            : group === 1
+              ? "status_unavailable"
+              : "terminal",
+        terminalOutcome: group === 2 ? "completed" : null,
+        progressPercent: group === 2 ? 100 : 20,
+        currentStage: group === 0 ? "Downloading source" : "",
+        estimatedRemaining: 0,
+      }
+    }) as any
+
+    render(
+      <WizardTestHarness
+        onClose={onClose}
+        initialState={{
+          currentStep: 4,
+          highestStep: 4,
+          queueItems,
+          processingState: {
+            status: "running",
+            elapsed: 10,
+            estimatedRemaining: 0,
+            perItemProgress,
+          },
+        }}
+      />
+    )
+
+    const list = screen.getByRole("list", { name: "Processing items" })
+    expect(within(list).getAllByRole("listitem").length).toBeLessThanOrEqual(12)
+    expect(within(list).getAllByRole("listitem")[0]).toHaveAttribute(
+      "aria-setsize",
+      "500"
+    )
+    expect(within(list).getAllByRole("listitem")[0]).toHaveAttribute(
+      "aria-posinset",
+      "1"
+    )
+    expect(virtualizerMocks.latestOptions?.count).toBe(500)
+
+    const initialRows = within(list).getAllByRole("listitem")
+    initialRows[0].focus()
+    fireEvent.keyDown(initialRows[0], { key: "ArrowDown" })
+    expect(initialRows[1]).toHaveFocus()
+
+    fireEvent.keyDown(initialRows[1], { key: "End" })
+    await waitFor(() => {
+      expect(screen.getByText("500. Lifecycle talk 500")).toBeInTheDocument()
+      expect(within(list).getAllByRole("listitem").at(-1)).toHaveFocus()
+    })
+
+    fireEvent.keyDown(within(list).getAllByRole("listitem").at(-1)!, {
+      key: "Home",
+    })
+    await waitFor(() => {
+      expect(screen.getByText("1. Lifecycle talk 1")).toBeInTheDocument()
+      expect(within(list).getAllByRole("listitem")[0]).toHaveFocus()
+    })
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Filter processing items" }), {
+      target: { value: "attention" },
+    })
+    expect(screen.getByText("Needs attention (167)")).toBeInTheDocument()
+    expect(within(list).getAllByRole("listitem")[0]).toHaveFocus()
+    for (const row of within(list).getAllByRole("listitem")) {
+      expect(row).toHaveAttribute("data-lifecycle-group", "attention")
+    }
+  })
+
+  it("dispatches occurrence and whole-run cancellation to durable run authority", async () => {
+    const user = userEvent.setup()
+    useQuickIngestSessionStore.getState().upsertSession({
+      lifecycle: "processing",
+      currentStep: 4,
+      queueItems: [
+        {
+          id: "occ-real-cancel",
+          kind: "url",
+          url: "https://example.com/real-cancel",
+          sourceRef: {
+            kind: "direct_url",
+            occurrenceId: "occ-real-cancel",
+            url: "https://example.com/real-cancel",
+          },
+          detectedType: "video",
+          icon: "Film",
+          fileSize: 0,
+          validation: { valid: true },
+          playlist: { title: "Real cancellation", ordinal: 12 },
+        } as any,
+      ],
+      processingState: {
+        status: "running",
+        elapsed: 4,
+        estimatedRemaining: 0,
+        perItemProgress: [
+          {
+            id: "occ-real-cancel",
+            status: "processing",
+            lifecycleState: "running",
+            terminalOutcome: null,
+            progressPercent: 25,
+            currentStage: "Downloading source",
+            estimatedRemaining: 0,
+          } as any,
+        ],
+      },
+      tracking: {
+        mode: "webui-direct",
+        sessionId: "qi-real-cancel",
+        runId: "run-real-cancel",
+        submittedItemIds: ["occ-real-cancel"],
+        startedAt: Date.now(),
+      },
+    })
+    lifecycleMocks.reattachQuickIngestSession.mockResolvedValue({
+      lifecycle: "processing",
+      jobs: [
+        {
+          jobId: 77,
+          status: "running",
+          sourceItemId: "occ-real-cancel",
+          lifecycleState: "running",
+          terminalOutcome: null,
+          progressPercent: 25,
+          progressMessage: "Downloading source",
+        },
+      ],
+      errorMessage: null,
+    })
+
+    render(<QuickIngestWizardModal open onClose={onClose} />)
+    await user.click(
+      await screen.findByRole("button", { name: "Cancel 12. Real cancellation" })
+    )
+    await waitFor(() => {
+      expect(lifecycleMocks.cancelQuickIngestSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tracking: expect.objectContaining({ runId: "run-real-cancel" }),
+          occurrenceIds: ["occ-real-cancel"],
+        })
+      )
+    })
+    expect(screen.getByText("Cancellation requested")).toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "Cancel All" }))
+    await waitFor(() => {
+      expect(lifecycleMocks.cancelQuickIngestSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tracking: expect.objectContaining({ runId: "run-real-cancel" }),
+          occurrenceIds: undefined,
+        })
+      )
+    })
+  })
+
+  it("retries eligible run occurrences and reconciles the authoritative snapshot", async () => {
+    vi.useFakeTimers()
+    useQuickIngestSessionStore.getState().upsertSession({
+      lifecycle: "partial_failure",
+      currentStep: 5,
+      queueItems: [
+        {
+          id: "occ-retry-run",
+          kind: "url",
+          url: "https://example.com/retry-target",
+          detectedType: "video",
+          icon: "Film",
+          fileSize: 0,
+          validation: { valid: true },
+          playlist: { title: "Retry target", ordinal: 1 },
+          sourceRef: {
+            kind: "direct_url",
+            occurrenceId: "occ-retry-run",
+            url: "https://example.com/retry-target",
+          },
+        } as any,
+      ],
+      results: [
+        {
+          id: "occ-retry-run",
+          status: "error",
+          outcome: "failed",
+          terminalOutcome: "processing_failed",
+          type: "video",
+          title: "Retry target",
+          error: "Network timed out",
+        } as any,
+      ],
+      tracking: {
+        mode: "webui-direct",
+        sessionId: "qi-retry-run",
+        runId: "run-retry-run",
+        submittedItemIds: ["occ-retry-run"],
+        startedAt: Date.now(),
+      },
+    })
+    lifecycleMocks.reattachQuickIngestSession
+      .mockResolvedValueOnce({
+        lifecycle: "processing",
+        jobs: [
+          {
+            jobId: null,
+            status: "queued",
+            sourceItemId: "occ-retry-run",
+            lifecycleState: "queued",
+            terminalOutcome: null,
+            progressPercent: 0,
+            progressMessage: "Queued after retry reconciliation",
+          },
+        ],
+        errorMessage: null,
+      })
+      .mockResolvedValue({
+        lifecycle: "processing",
+        jobs: [
+          {
+            jobId: 901,
+            status: "failed",
+            sourceItemId: "occ-retry-run",
+            lifecycleState: "terminal",
+            terminalOutcome: "processing_failed",
+            progressPercent: 100,
+            error: "Worker failed after retry",
+          },
+        ],
+        errorMessage: null,
+      })
+
+    render(<QuickIngestWizardModal open onClose={onClose} />)
+    fireEvent.click(
+      screen.getByRole("button", { name: "Retry Retry target" })
+    )
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(lifecycleMocks.retryQuickIngestSession).toHaveBeenCalledWith({
+      sessionId: "qi-retry-run",
+      tracking: expect.objectContaining({ runId: "run-retry-run" }),
+      occurrenceIds: ["occ-retry-run"],
+    })
+    expect(lifecycleMocks.reattachQuickIngestSession).toHaveBeenCalledWith(
+      expect.objectContaining({ runId: "run-retry-run" })
+    )
+    expect(screen.getByText("Queued after retry reconciliation")).toBeInTheDocument()
+    expect(lifecycleMocks.reattachQuickIngestSession).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000)
+    })
+
+    expect(lifecycleMocks.reattachQuickIngestSession).toHaveBeenCalledTimes(2)
+    expect(screen.getAllByText("Worker failed after retry")).not.toHaveLength(0)
   })
 
   // -------------------------------------------------------------------------

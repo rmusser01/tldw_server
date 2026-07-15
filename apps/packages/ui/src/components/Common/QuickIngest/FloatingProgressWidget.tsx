@@ -21,16 +21,28 @@ type CompletionSummaryInput = {
   completedCount: number
   totalCount: number
   results: WizardResultItem[]
+  formatMessage?: (
+    key: string,
+    defaultValue: string,
+    options?: Record<string, unknown>
+  ) => string
 }
 
-const plural = (count: number, singular: string, pluralLabel: string): string =>
-  `${count} ${count === 1 ? singular : pluralLabel}`
+const defaultFormatMessage = (
+  _key: string,
+  defaultValue: string,
+  options?: Record<string, unknown>
+): string =>
+  defaultValue.replace(/\{\{(\w+)\}\}/g, (_match, token: string) =>
+    options?.[token] == null ? `{{${token}}}` : String(options[token])
+  )
 
 export const buildFloatingProgressCompletionSummary = ({
   collectionName,
   completedCount,
   totalCount,
   results,
+  formatMessage = defaultFormatMessage,
 }: CompletionSummaryInput): {
   title: string
   detail: string | null
@@ -42,7 +54,11 @@ export const buildFloatingProgressCompletionSummary = ({
       title,
       detail:
         totalCount > 0
-          ? `${completedCount}/${totalCount} finished`
+          ? formatMessage(
+              "widget.summary.finished",
+              "{{completed}}/{{total}} finished",
+              { completed: completedCount, total: totalCount }
+            )
           : null,
       readinessHint: null,
     }
@@ -53,11 +69,19 @@ export const buildFloatingProgressCompletionSummary = ({
   let failed = 0
   let cancelled = 0
   for (const item of results) {
-    if (item.outcome === "cancelled") {
+    const outcome = item.terminalOutcome
+    if (outcome === "cancelled" || item.outcome === "cancelled") {
       cancelled += 1
-    } else if (item.outcome === "skipped") {
+    } else if (outcome === "skipped_existing" || item.outcome === "skipped") {
       skipped += 1
-    } else if (item.status === "error" || item.outcome === "failed" || item.outcome === "submit_failed") {
+    } else if (
+      outcome === "submit_failed" ||
+      outcome === "processing_failed" ||
+      outcome === "metadata_update_failed" ||
+      item.status === "error" ||
+      item.outcome === "failed" ||
+      item.outcome === "submit_failed"
+    ) {
       failed += 1
     } else {
       succeeded += 1
@@ -65,10 +89,26 @@ export const buildFloatingProgressCompletionSummary = ({
   }
 
   const parts = [
-    succeeded > 0 ? plural(succeeded, "succeeded", "succeeded") : null,
-    skipped > 0 ? plural(skipped, "skipped", "skipped") : null,
-    failed > 0 ? plural(failed, "failed", "failed") : null,
-    cancelled > 0 ? plural(cancelled, "cancelled", "cancelled") : null,
+    succeeded > 0
+      ? formatMessage("widget.summary.succeeded", "{{count}} succeeded", {
+          count: succeeded,
+        })
+      : null,
+    skipped > 0
+      ? formatMessage("widget.summary.skipped", "{{count}} skipped", {
+          count: skipped,
+        })
+      : null,
+    failed > 0
+      ? formatMessage("widget.summary.failed", "{{count}} failed", {
+          count: failed,
+        })
+      : null,
+    cancelled > 0
+      ? formatMessage("widget.summary.cancelled", "{{count}} cancelled", {
+          count: cancelled,
+        })
+      : null,
   ].filter((part): part is string => Boolean(part))
 
   return {
@@ -76,7 +116,10 @@ export const buildFloatingProgressCompletionSummary = ({
     detail: parts.length > 0 ? parts.join(", ") : null,
     readinessHint:
       collectionName && results.length > 1
-        ? "Open the wizard for collection readiness and retry options."
+        ? formatMessage(
+            "widget.collectionReadiness",
+            "Open the wizard for collection readiness and retry options."
+          )
         : null,
   }
 }
@@ -88,7 +131,13 @@ export const buildFloatingProgressCompletionSummary = ({
 export const FloatingProgressWidget: React.FC = () => {
   const { t } = useTranslation(["option"])
   const { state, restore } = useIngestWizard()
-  const { processingState, isMinimized, results, conferenceBatchMetadata } = state
+  const {
+    processingState,
+    isMinimized,
+    results,
+    conferenceBatchMetadata,
+    queueItems,
+  } = state
   const { sessionVisibility, sessionLifecycle, showSession } = useQuickIngestSessionStore(
     useShallow((store) => ({
       sessionLifecycle: store.session?.lifecycle,
@@ -108,15 +157,53 @@ export const FloatingProgressWidget: React.FC = () => {
   )
 
   // Compute counts and overall progress
-  const { completedCount, totalCount, overallPercent } = useMemo(() => {
+  const {
+    completedCount,
+    totalCount,
+    overallPercent,
+    activeCount,
+    attentionCount,
+    terminalCount,
+    workerProgressMessage,
+  } = useMemo(() => {
     const items = processingState.perItemProgress
-    if (items.length === 0) return { completedCount: 0, totalCount: 0, overallPercent: 0 }
+    if (items.length === 0) {
+      return {
+        completedCount: 0,
+        totalCount: 0,
+        overallPercent: 0,
+        activeCount: 0,
+        attentionCount: 0,
+        terminalCount: 0,
+        workerProgressMessage: null,
+      }
+    }
 
     let completed = 0
     let percentSum = 0
+    let active = 0
+    let attention = 0
+    let terminal = 0
+    let progressMessage: string | null = null
+    const queueItemMap = new Map(queueItems.map((item) => [item.id, item]))
     for (const p of items) {
-      if (p.status === "complete" || p.status === "failed" || p.status === "cancelled") {
+      const queueItem = queueItemMap.get(p.id)
+      const isTerminal =
+        p.lifecycleState === "terminal" ||
+        (!p.lifecycleState &&
+          (p.status === "complete" || p.status === "failed" || p.status === "cancelled"))
+      const needsAttention =
+        p.lifecycleState === "status_unavailable" ||
+        p.lifecycleState === "cancellation_requested" ||
+        (p.lifecycleState === "awaiting_upload" && !queueItem?.file)
+      if (isTerminal) {
         completed++
+        terminal++
+      } else if (needsAttention) {
+        attention++
+      } else {
+        active++
+        if (!progressMessage && p.currentStage) progressMessage = p.currentStage
       }
       percentSum += p.progressPercent
     }
@@ -125,23 +212,46 @@ export const FloatingProgressWidget: React.FC = () => {
       completedCount: completed,
       totalCount: items.length,
       overallPercent: Math.round(percentSum / items.length),
+      activeCount: active,
+      attentionCount: attention,
+      terminalCount: terminal,
+      workerProgressMessage: progressMessage,
     }
-  }, [processingState.perItemProgress])
+  }, [processingState.perItemProgress, queueItems])
 
   const terminalState = useMemo<WidgetTerminalState | null>(() => {
     const items = processingState.perItemProgress
     const hasItems = items.length > 0
-    const hasFailed = items.some((item) => item.status === "failed")
-    const hasCancelled = items.some((item) => item.status === "cancelled")
+    const hasFailed = items.some(
+      (item) =>
+        item.status === "failed" ||
+        item.terminalOutcome === "submit_failed" ||
+        item.terminalOutcome === "processing_failed" ||
+        item.terminalOutcome === "metadata_update_failed"
+    )
+    const hasCancelled = items.some(
+      (item) => item.status === "cancelled" || item.terminalOutcome === "cancelled"
+    )
     const allTerminal =
       hasItems &&
       items.every((item) =>
+        item.lifecycleState === "terminal" ||
         item.status === "complete" ||
         item.status === "failed" ||
         item.status === "cancelled"
       )
-    const allComplete = hasItems && items.every((item) => item.status === "complete")
-    const allCancelled = hasItems && items.every((item) => item.status === "cancelled")
+    const allComplete =
+      hasItems &&
+      items.every(
+        (item) =>
+          item.status === "complete" || item.terminalOutcome === "completed"
+      )
+    const allCancelled =
+      hasItems &&
+      items.every(
+        (item) =>
+          item.status === "cancelled" || item.terminalOutcome === "cancelled"
+      )
 
     if (sessionLifecycle === "interrupted") return "interrupted"
     if (
@@ -183,8 +293,9 @@ export const FloatingProgressWidget: React.FC = () => {
         completedCount,
         totalCount,
         results,
+        formatMessage: qi,
       }),
-    [completedCount, conferenceBatchMetadata?.collectionName, results, totalCount]
+    [completedCount, conferenceBatchMetadata?.collectionName, qi, results, totalCount]
   )
 
   // Auto-dismiss after completion
@@ -226,8 +337,12 @@ export const FloatingProgressWidget: React.FC = () => {
   const estimatedText =
     processingState.estimatedRemaining > 0
       ? processingState.estimatedRemaining < 60
-        ? `~${Math.ceil(processingState.estimatedRemaining)}s`
-        : `~${Math.ceil(processingState.estimatedRemaining / 60)} min`
+        ? qi("widget.etaSeconds", "~{{count}}s", {
+            count: Math.ceil(processingState.estimatedRemaining),
+          })
+        : qi("widget.etaMinutes", "~{{count}} min", {
+            count: Math.ceil(processingState.estimatedRemaining / 60),
+          })
       : ""
 
   const terminalPresentation = terminalState
@@ -290,12 +405,20 @@ export const FloatingProgressWidget: React.FC = () => {
 
         {/* Processing description */}
         {!terminalPresentation && (
-          <p className="text-[11px] leading-tight text-text-muted">
-            {qi(
-              "widget.processingHint",
-              "Processing and indexing content..."
-            )}
-          </p>
+          <div className="space-y-0.5 text-[11px] leading-tight text-text-muted">
+            <p>
+              {qi(
+                "widget.lifecycleSummary",
+                "{{active}} active, {{attention}} needs attention, {{terminal}} terminal",
+                {
+                  active: activeCount,
+                  attention: attentionCount,
+                  terminal: terminalCount,
+                }
+              )}
+            </p>
+            {workerProgressMessage && <p>{workerProgressMessage}</p>}
+          </div>
         )}
 
         {allDone && (completionSummary.detail || completionSummary.readinessHint) && (

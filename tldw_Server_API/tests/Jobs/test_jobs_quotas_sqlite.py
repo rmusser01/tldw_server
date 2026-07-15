@@ -1,12 +1,11 @@
-import os
 import pytest
 
-from tldw_Server_API.app.core.Jobs.migrations import ensure_jobs_tables
+from tldw_Server_API.app.core.exceptions import BadRequestError
 from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.Jobs.migrations import ensure_jobs_tables
 
 
 def test_max_queued_quota_sqlite(monkeypatch, tmp_path):
-
 
     db_path = tmp_path / "jobs_quota.db"
     ensure_jobs_tables(db_path)
@@ -19,8 +18,10 @@ def test_max_queued_quota_sqlite(monkeypatch, tmp_path):
     jm.create_job(domain="chatbooks", queue="default", job_type="t", payload={}, owner_user_id="1")
 
     # Second job for same user/domain should hit quota
-    with pytest.raises(ValueError):
+    with pytest.raises(BadRequestError) as caught:
         jm.create_job(domain="chatbooks", queue="default", job_type="t", payload={}, owner_user_id="1")
+    assert caught.value.code == "jobs_max_queued"
+    assert caught.value.retry_after is None
 
     # Different user should not be blocked by user-specific quota
     jm.create_job(domain="chatbooks", queue="default", job_type="t", payload={}, owner_user_id="2")
@@ -30,7 +31,6 @@ def test_max_queued_quota_sqlite(monkeypatch, tmp_path):
 
 
 def test_submits_per_minute_quota_precedence_sqlite(monkeypatch, tmp_path):
-
 
     db_path = tmp_path / "jobs_quota_spm.db"
     ensure_jobs_tables(db_path)
@@ -45,17 +45,20 @@ def test_submits_per_minute_quota_precedence_sqlite(monkeypatch, tmp_path):
     jm.create_job(domain="chatbooks", queue="default", job_type="t2", payload={}, owner_user_id="1")
 
     # Third submit should be blocked by the 2/min override
-    with pytest.raises(ValueError):
+    with pytest.raises(BadRequestError) as caught:
         jm.create_job(domain="chatbooks", queue="default", job_type="t3", payload={}, owner_user_id="1")
+    assert caught.value.code == "jobs_submit_rate_limited"
+    assert caught.value.retry_after == 60
 
     # For another domain, the global 1/min applies; second submit should fail
     jm.create_job(domain="other", queue="default", job_type="x", payload={}, owner_user_id="1")
-    with pytest.raises(ValueError):
+    with pytest.raises(BadRequestError) as caught:
         jm.create_job(domain="other", queue="default", job_type="y", payload={}, owner_user_id="1")
+    assert caught.value.code == "jobs_submit_rate_limited"
+    assert caught.value.retry_after == 60
 
 
 def test_max_inflight_quota_sqlite(monkeypatch, tmp_path):
-
 
     db_path = tmp_path / "jobs_quota_inflight.db"
     ensure_jobs_tables(db_path)
@@ -78,12 +81,13 @@ def test_max_inflight_quota_sqlite(monkeypatch, tmp_path):
 
     # Different user is not blocked by user-specific inflight quota
     jm.create_job(domain="chatbooks", queue="default", job_type="t", payload={}, owner_user_id="2")
-    acq_other = jm.acquire_next_job(domain="chatbooks", queue="default", lease_seconds=30, worker_id="w3", owner_user_id="2")
+    acq_other = jm.acquire_next_job(
+        domain="chatbooks", queue="default", lease_seconds=30, worker_id="w3", owner_user_id="2"
+    )
     assert acq_other is not None
 
 
 def test_max_inflight_ignores_expired_leases_sqlite(monkeypatch, tmp_path):
-
 
     db_path = tmp_path / "jobs_quota_inflight_expired.db"
     ensure_jobs_tables(db_path)

@@ -1657,7 +1657,14 @@ export async function bgUpload<T = any, P extends AllowedPath = AllowedPath, M e
       const uploadTimeoutPromise = new Promise<null>((resolve) =>
         setTimeout(() => resolve(null), uploadTimeout)
       )
-      const resp = await Promise.race([uploadPromise, uploadTimeoutPromise]) as { ok: boolean; error?: string; status?: number; data: T } | undefined | null
+      const resp = await Promise.race([uploadPromise, uploadTimeoutPromise]) as {
+        ok: boolean
+        error?: string
+        status?: number
+        data: T
+        headers?: Record<string, string>
+        retryAfterMs?: number | null
+      } | undefined | null
       if (resp === null) {
         throw markNoFallbackError(
           new Error("Extension messaging timeout"),
@@ -1669,8 +1676,15 @@ export async function bgUpload<T = any, P extends AllowedPath = AllowedPath, M e
           resp?.error,
           `Upload failed: ${resp?.status}`
         )
-        const error = new Error(msg) as Error & { status?: number; details?: unknown }
+        const error = new Error(msg) as Error & {
+          status?: number
+          details?: unknown
+          headers?: Record<string, string>
+          retryAfterMs?: number | null
+        }
         error.status = resp?.status
+        error.headers = resp?.headers
+        error.retryAfterMs = resp?.retryAfterMs
         if (typeof resp?.data !== "undefined") {
           error.details = sanitizeResponseData(resp.data)
         }
@@ -1755,8 +1769,15 @@ export async function bgUpload<T = any, P extends AllowedPath = AllowedPath, M e
       resp?.error,
       `Upload failed: ${resp?.status}`
     )
-    const error = new Error(msg) as Error & { status?: number; details?: unknown }
+    const error = new Error(msg) as Error & {
+      status?: number
+      details?: unknown
+      headers?: Record<string, string>
+      retryAfterMs?: number | null
+    }
     error.status = resp?.status
+    error.headers = resp?.headers
+    error.retryAfterMs = resp?.retryAfterMs
     if (typeof resp?.data !== "undefined") {
       error.details = sanitizeResponseData(resp.data)
     }

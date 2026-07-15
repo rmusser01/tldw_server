@@ -212,6 +212,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.synced_document_upd
     apply_synced_document_content_update,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.media_item_update_ops import (
+    apply_media_metadata_patch,
     apply_media_item_update,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.document_version_rollback_ops import (
@@ -386,6 +387,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.query_ops import (
     get_media_status_by_id,
     get_media_by_title,
     get_media_by_url,
+    get_media_by_urls,
     get_media_by_uuid,
     get_paginated_media_list,
     get_paginated_files,
@@ -1865,6 +1867,7 @@ MediaDatabase.get_media_by_hash = get_media_by_hash
 MediaDatabase.get_media_status_by_id = get_media_status_by_id
 MediaDatabase.get_media_by_title = get_media_by_title
 MediaDatabase.get_media_by_url = get_media_by_url
+MediaDatabase.get_media_by_urls = get_media_by_urls
 MediaDatabase.get_media_by_uuid = get_media_by_uuid
 MediaDatabase.count_chatbook_scope_category = count_chatbook_scope_category
 MediaDatabase.list_chatbook_scope_ids = list_chatbook_scope_ids
@@ -1987,6 +1990,7 @@ MediaDatabase.soft_delete_data_table = soft_delete_data_table
 MediaDatabase.persist_data_table_generation = persist_data_table_generation
 MediaDatabase.replace_data_table_contents = replace_data_table_contents
 MediaDatabase.search_by_safe_metadata = search_by_safe_metadata
+MediaDatabase.apply_media_metadata_patch = apply_media_metadata_patch
 MediaDatabase.apply_media_item_update = apply_media_item_update
 MediaDatabase.apply_synced_document_content_update = (
     apply_synced_document_content_update

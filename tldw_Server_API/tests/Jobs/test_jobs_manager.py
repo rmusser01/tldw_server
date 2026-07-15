@@ -1,13 +1,11 @@
 import json
-import os
 import sqlite3
-import tempfile
 from datetime import datetime, timedelta
 
 import pytest
 
-from tldw_Server_API.app.core.Jobs.migrations import ensure_jobs_tables
 from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.Jobs.migrations import ensure_jobs_tables
 
 
 @pytest.fixture()
@@ -18,7 +16,6 @@ def jobs_db(tmp_path):
 
 
 def test_create_and_acquire_and_complete(jobs_db):
-
 
     jm = JobManager(jobs_db)
     job = jm.create_job(
@@ -61,7 +58,6 @@ def test_update_job_result_merges(jobs_db):
 
 def test_acquire_decrypts_payload(jobs_db, monkeypatch):
 
-
     from tldw_Server_API.app.core.Security.crypto import encrypt_json_blob
 
     monkeypatch.setenv("JOBS_ENCRYPT_SECURE", "true")
@@ -89,7 +85,6 @@ def test_acquire_decrypts_payload(jobs_db, monkeypatch):
 
 def test_rotate_encryption_keys_respects_filters_sqlite(jobs_db, monkeypatch):
 
-
     from tldw_Server_API.app.core.Security.crypto import encrypt_json_blob
 
     monkeypatch.setenv("JOBS_ENCRYPT", "true")
@@ -115,9 +110,8 @@ def test_rotate_encryption_keys_respects_filters_sqlite(jobs_db, monkeypatch):
 
 def test_retryable_fail_and_backoff(jobs_db):
 
-
     jm = JobManager(jobs_db)
-    job = jm.create_job(
+    jm.create_job(
         domain="chatbooks",
         queue="default",
         job_type="import",
@@ -138,7 +132,6 @@ def test_retryable_fail_and_backoff(jobs_db):
 
 def test_cancel_paths(jobs_db):
 
-
     jm = JobManager(jobs_db)
     j1 = jm.create_job(domain="chatbooks", queue="default", job_type="export", payload={}, owner_user_id="1")
     # cancel queued
@@ -148,7 +141,7 @@ def test_cancel_paths(jobs_db):
     assert j1r["status"] == "cancelled"
 
     # cancel request on processing
-    j2 = jm.create_job(domain="chatbooks", queue="default", job_type="export", payload={}, owner_user_id="1")
+    jm.create_job(domain="chatbooks", queue="default", job_type="export", payload={}, owner_user_id="1")
     acq = jm.acquire_next_job(domain="chatbooks", queue="default", lease_seconds=5, worker_id="w3")
     assert acq is not None
     ok2 = jm.cancel_job(int(acq["id"]))
@@ -161,7 +154,6 @@ def test_cancel_paths(jobs_db):
 
 
 def test_idempotency_key_returns_existing(jobs_db):
-
 
     jm = JobManager(jobs_db)
     idem_key = "cb-export-uniq-key"
@@ -187,8 +179,110 @@ def test_idempotency_key_returns_existing(jobs_db):
     assert j2["status"] == "queued"
 
 
-def test_available_at_scheduling_delays_acquire(jobs_db):
+def test_idempotent_scheduled_create_increments_counter_once(jobs_db, monkeypatch):
+    monkeypatch.setenv("JOBS_COUNTERS_ENABLED", "true")
+    jm = JobManager(jobs_db)
 
+    jm.create_job(
+        domain="media_ingest",
+        queue="default",
+        job_type="media_ingest_item",
+        payload={},
+        owner_user_id="1",
+        idempotency_key="scheduled-counter",
+        available_at=datetime.utcnow() + timedelta(minutes=5),
+    )
+
+    with jm._connect() as connection:
+        row = connection.execute(
+            """
+            SELECT ready_count, scheduled_count FROM job_counters
+            WHERE domain = 'media_ingest' AND queue = 'default'
+              AND job_type = 'media_ingest_item'
+            """
+        ).fetchone()
+    assert row is not None
+    assert (int(row[0]), int(row[1])) == (0, 1)
+
+
+def test_idempotent_conflict_after_transaction_guard_does_not_insert_job_again(
+    jobs_db,
+    monkeypatch,
+):
+    import tldw_Server_API.app.core.Jobs.manager as manager_module
+
+    monkeypatch.setenv("JOBS_COUNTERS_ENABLED", "true")
+    monkeypatch.delenv("JOBS_EVENTS_OUTBOX", raising=False)
+    created_metrics: list[dict[str, str]] = []
+    emitted_events: list[str] = []
+    monkeypatch.setattr(manager_module, "increment_created", created_metrics.append)
+    monkeypatch.setattr(
+        manager_module,
+        "emit_job_event",
+        lambda event_type, **_kwargs: emitted_events.append(event_type),
+    )
+    jm = JobManager(jobs_db)
+    scheduled_at = datetime.utcnow() + timedelta(minutes=5)
+    first = jm.create_job(
+        domain="media_ingest",
+        queue="default",
+        job_type="media_ingest_item",
+        payload={"value": "first"},
+        owner_user_id="1",
+        idempotency_key="guarded-conflict",
+        available_at=scheduled_at,
+    )
+
+    def transaction_guard(connection):
+        updated = connection.execute(
+            "UPDATE jobs SET updated_at = updated_at WHERE id = ?",
+            (int(first["id"]),),
+        )
+        assert updated.rowcount == 1
+
+    replay = jm.create_job(
+        domain="media_ingest",
+        queue="default",
+        job_type="media_ingest_item",
+        payload={"value": "replay"},
+        owner_user_id="1",
+        idempotency_key="guarded-conflict",
+        available_at=scheduled_at,
+        _transaction_guard=transaction_guard,
+    )
+
+    with jm._connect() as connection:
+        job_count = connection.execute(
+            """
+            SELECT COUNT(*) FROM jobs
+            WHERE domain = 'media_ingest' AND queue = 'default'
+              AND job_type = 'media_ingest_item'
+            """
+        ).fetchone()[0]
+        created_event_count = connection.execute(
+            """
+            SELECT COUNT(*) FROM job_events
+            WHERE domain = 'media_ingest' AND queue = 'default'
+              AND job_type = 'media_ingest_item' AND event_type = 'job.created'
+            """
+        ).fetchone()[0]
+        counter = connection.execute(
+            """
+            SELECT ready_count, scheduled_count FROM job_counters
+            WHERE domain = 'media_ingest' AND queue = 'default'
+              AND job_type = 'media_ingest_item'
+            """
+        ).fetchone()
+    assert int(replay["id"]) == int(first["id"])
+    assert int(job_count) == 1
+    assert int(created_event_count) == 2
+    assert emitted_events == ["job.created", "job.created"]
+    assert len(created_metrics) == 1
+    assert counter is not None
+    assert (int(counter[0]), int(counter[1])) == (0, 1)
+
+
+def test_available_at_scheduling_delays_acquire(jobs_db):
 
     jm = JobManager(jobs_db)
     future = datetime.utcnow() + timedelta(seconds=1)
@@ -205,6 +299,7 @@ def test_available_at_scheduling_delays_acquire(jobs_db):
     assert j is None
     # Wait for availability window
     import time as _t
+
     _t.sleep(1.2)
     j2 = jm.acquire_next_job(domain="chatbooks", queue="default", lease_seconds=5, worker_id="w4")
     assert j2 is not None
@@ -212,7 +307,6 @@ def test_available_at_scheduling_delays_acquire(jobs_db):
 
 
 def test_create_job_backfills_missing_batch_group(tmp_path, monkeypatch):
-
 
     db_path = tmp_path / "jobs_legacy.db"
     conn = sqlite3.connect(db_path)
@@ -344,7 +438,6 @@ def test_count_jobs_backfills_missing_batch_group(tmp_path, monkeypatch):
 
 def test_dependencies_gate_acquire_and_unblock(jobs_db):
 
-
     jm = JobManager(jobs_db)
     root = jm.create_job(
         domain="embeddings",
@@ -376,7 +469,6 @@ def test_dependencies_gate_acquire_and_unblock(jobs_db):
 
 def test_dependency_failure_cancels_children(jobs_db):
 
-
     jm = JobManager(jobs_db)
     root = jm.create_job(
         domain="embeddings",
@@ -404,7 +496,6 @@ def test_dependency_failure_cancels_children(jobs_db):
 
 def test_dependency_cancel_cascades(jobs_db):
 
-
     jm = JobManager(jobs_db)
     root = jm.create_job(
         domain="embeddings",
@@ -428,7 +519,6 @@ def test_dependency_cancel_cascades(jobs_db):
 
 
 def test_dependency_cycle_rejected(jobs_db):
-
 
     jm = JobManager(jobs_db)
     a = jm.create_job(

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
+from itertools import islice
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
@@ -21,6 +23,7 @@ class PlaylistPreflightItemData:
     source_url: str
     normalized_source_id: str | None
     source_kind: str
+    availability: str
     title: str | None
     speaker: str | None
     duration_seconds: int | None
@@ -56,6 +59,32 @@ class DuplicatePolicyAction:
     planned_status: str
     should_submit_job: bool
     force_overwrite: bool
+
+
+class PlaylistPreflightProcessError(RuntimeError):
+    """Safe typed failure from playlist extraction or its child process."""
+
+    def __init__(self, code: str) -> None:
+        self.code = str(code)
+        super().__init__(self.code)
+
+
+_NON_INGESTIBLE_AVAILABILITIES = frozenset(
+    {
+        "deleted",
+        "needs_auth",
+        "premium_only",
+        "private",
+        "subscriber_only",
+        "unavailable",
+    }
+)
+_YTDLP_UNAVAILABLE_TITLES = {
+    "[Deleted video]": "deleted",
+    "[Private video]": "private",
+}
+_MAX_DISPLAY_TEXT_LENGTH = 2000
+_MAX_IDENTITY_URL_LENGTH = 8192
 
 
 def _is_duplicate_status(value: str | None) -> bool:
@@ -192,6 +221,17 @@ def _string_or_none(value: Any) -> str | None:
     return text or None
 
 
+def _display_text_or_none(value: Any) -> str | None:
+    text = _string_or_none(value)
+    return text[:_MAX_DISPLAY_TEXT_LENGTH] if text is not None else None
+
+
+def _bounded_identity_url(value: str | None) -> str | None:
+    if value is not None and len(value) > _MAX_IDENTITY_URL_LENGTH:
+        raise PlaylistPreflightProcessError("playlist_preflight_result_too_large")
+    return value
+
+
 def _source_url_from_entry(
     entry: dict[str, Any],
     *,
@@ -219,9 +259,14 @@ def normalize_preflight_items(raw_items: list[dict[str, Any]]) -> list[PlaylistP
 
     for index, raw in enumerate(raw_items):
         ordinal = int(raw.get("ordinal") or index + 1)
-        source_url = _source_url_from_entry(raw) or ""
+        source_url = _bounded_identity_url(_source_url_from_entry(raw)) or ""
         source_kind = str(raw.get("source_kind") or "generic_url")
         normalized_source_id = _string_or_none(raw.get("normalized_source_id"))
+        normalized_title = _display_text_or_none(raw.get("title"))
+        upstream_availability = str(raw.get("availability") or "").strip().lower()
+        if upstream_availability in {"", "unknown"} and normalized_title in _YTDLP_UNAVAILABLE_TITLES:
+            upstream_availability = _YTDLP_UNAVAILABLE_TITLES[normalized_title]
+        explicitly_unavailable = upstream_availability in _NON_INGESTIBLE_AVAILABILITIES
 
         if source_url:
             try:
@@ -234,8 +279,15 @@ def normalize_preflight_items(raw_items: list[dict[str, Any]]) -> list[PlaylistP
             except ValueError:
                 normalized_source_id = normalized_source_id or f"url:{source_url}"
 
-        has_source = bool(source_url)
-        dedupe_key = normalized_source_id or source_url
+        has_source = bool(source_url) and not explicitly_unavailable
+        availability = (
+            upstream_availability
+            if explicitly_unavailable
+            else "available" if has_source else upstream_availability or "unavailable"
+        )
+        if not has_source:
+            source_url = ""
+        dedupe_key = (normalized_source_id or source_url) if has_source else ""
         duplicate_of = seen.get(dedupe_key)
         duplicate_status = "unknown" if not has_source else "duplicate_in_batch" if duplicate_of is not None else "new"
         if duplicate_of is None and dedupe_key:
@@ -247,11 +299,12 @@ def normalize_preflight_items(raw_items: list[dict[str, Any]]) -> list[PlaylistP
                 source_url=source_url,
                 normalized_source_id=normalized_source_id,
                 source_kind=source_kind,
-                title=_string_or_none(raw.get("title")),
-                speaker=_string_or_none(raw.get("speaker") or raw.get("channel") or raw.get("uploader")),
+                availability=availability,
+                title=normalized_title,
+                speaker=_display_text_or_none(raw.get("speaker") or raw.get("channel") or raw.get("uploader")),
                 duration_seconds=_coerce_duration(raw.get("duration") or raw.get("duration_seconds")),
-                published_at=_string_or_none(raw.get("published_at") or raw.get("upload_date")),
-                thumbnail_url=_string_or_none(raw.get("thumbnail") or raw.get("thumbnail_url")),
+                published_at=_display_text_or_none(raw.get("published_at") or raw.get("upload_date")),
+                thumbnail_url=_bounded_identity_url(_string_or_none(raw.get("thumbnail") or raw.get("thumbnail_url"))),
                 duplicate_status=duplicate_status,
                 duplicate_of_ordinal=duplicate_of,
                 selected=duplicate_status == "new" and has_source,
@@ -313,6 +366,8 @@ def extract_playlist_preflight(
     max_items: int = 100,
     youtube_dl_cls: type | None = None,
 ) -> PlaylistPreflightData:
+    if type(max_items) is not int or max_items < 1:
+        raise PlaylistPreflightProcessError("playlist_preflight_invalid_request")
     classified = classify_playlist_url(url)
     if not classified.is_playlist:
         raise ValueError("not_playlist_url")
@@ -324,6 +379,7 @@ def extract_playlist_preflight(
         "skip_download": True,
         "extract_flat": True,
         "noplaylist": False,
+        "playlistend": max_items + 1,
     }
 
     with ydl_cls(ydl_opts) as ydl:
@@ -332,15 +388,15 @@ def extract_playlist_preflight(
     if not isinstance(info, dict):
         raise ValueError("playlist_metadata_unavailable")
 
-    entries = [entry for entry in (info.get("entries") or []) if isinstance(entry, dict)]
+    entries = list(islice(iter(info.get("entries") or ()), max_items + 1))
     warnings: list[str] = []
     if len(entries) > max_items:
-        warnings.append(f"Playlist truncated to {max_items} items.")
-    limited_entries = entries[:max_items]
+        raise PlaylistPreflightProcessError("playlist_too_large")
 
     raw_items: list[dict[str, Any]] = []
     assume_youtube_entries = classified.source_kind.startswith("youtube")
-    for index, entry in enumerate(limited_entries, start=1):
+    for index, raw_entry in enumerate(entries, start=1):
+        entry = dict(raw_entry) if isinstance(raw_entry, Mapping) else {}
         raw_item = dict(entry)
         raw_item["ordinal"] = index
         source_url = _source_url_from_entry(
@@ -360,7 +416,7 @@ def extract_playlist_preflight(
         source_url=url,
         source_kind=classified.source_kind,
         playlist_id=_string_or_none(info.get("id")) or classified.playlist_id,
-        playlist_title=_string_or_none(info.get("title")),
+        playlist_title=_display_text_or_none(info.get("title")),
         video_id=classified.video_id,
         item_count=len(items),
         selected_count=selected_count,

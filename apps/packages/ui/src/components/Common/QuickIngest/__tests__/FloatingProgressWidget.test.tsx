@@ -11,9 +11,9 @@ import {
   useQuickIngestSessionStore,
 } from "@/store/quick-ingest-session"
 
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({
-    t: (
+const translationMock = vi.hoisted(() =>
+  vi.fn(
+    (
       key: string,
       defaultValueOrOptions?:
         | string
@@ -29,7 +29,13 @@ vi.mock("react-i18next", () => ({
           ? `{{${token}}}`
           : String(defaultValueOrOptions[token])
       )
-    },
+    }
+  )
+)
+
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({
+    t: translationMock,
   }),
 }))
 
@@ -49,6 +55,7 @@ vi.mock("lucide-react", () => {
 afterEach(() => {
   cleanup()
   vi.useRealTimers()
+  translationMock.mockClear()
   useQuickIngestSessionStore.setState({
     session: null,
     triggerSummary: { count: 0, label: null, hadFailure: false },
@@ -59,10 +66,17 @@ const renderWidget = ({
   processingStatus,
   itemStatus,
   lifecycle = "completed",
+  estimatedRemaining = 0,
 }: {
   processingStatus: ProcessingStatus
   itemStatus: ItemProgressStatus
-  lifecycle?: "completed" | "partial_failure" | "cancelled" | "interrupted"
+  lifecycle?:
+    | "processing"
+    | "completed"
+    | "partial_failure"
+    | "cancelled"
+    | "interrupted"
+  estimatedRemaining?: number
 }) => {
   useQuickIngestSessionStore.setState({
     session: {
@@ -84,11 +98,11 @@ const renderWidget = ({
               status: itemStatus,
               progressPercent: 100,
               currentStage: itemStatus,
-              estimatedRemaining: 0,
+              estimatedRemaining,
             },
           ],
           elapsed: 10,
-          estimatedRemaining: 0,
+          estimatedRemaining,
         },
       }}
     >
@@ -228,5 +242,148 @@ describe("FloatingProgressWidget", () => {
     expect(widget).toHaveTextContent("2 succeeded, 1 skipped, 1 failed")
     expect(widget).toHaveTextContent("Open the wizard for collection readiness")
     expect(widget).not.toHaveTextContent(/searchable/i)
+    expect(translationMock).toHaveBeenCalledWith(
+      "quickIngest.widget.summary.succeeded",
+      expect.objectContaining({ count: 2 })
+    )
+    expect(translationMock).toHaveBeenCalledWith(
+      "quickIngest.widget.summary.skipped",
+      expect.objectContaining({ count: 1 })
+    )
+    expect(translationMock).toHaveBeenCalledWith(
+      "quickIngest.widget.summary.failed",
+      expect.objectContaining({ count: 1 })
+    )
+    expect(translationMock).toHaveBeenCalledWith(
+      "quickIngest.widget.collectionReadiness",
+      expect.anything()
+    )
   })
+
+  it("translates the finished-count fallback instead of composing English directly", () => {
+    renderWidget({ processingStatus: "complete", itemStatus: "complete" })
+
+    expect(translationMock).toHaveBeenCalledWith(
+      "quickIngest.widget.summary.finished",
+      expect.objectContaining({ completed: 1, total: 1 })
+    )
+  })
+
+  it("summarizes active, attention, and terminal lifecycle evidence", () => {
+    useQuickIngestSessionStore.setState({
+      session: {
+        ...createEmptyQuickIngestSession(),
+        visibility: "hidden",
+        lifecycle: "processing",
+      },
+    })
+
+    render(
+      <IngestWizardProvider
+        initialState={{
+          isMinimized: true,
+          processingState: {
+            status: "running",
+            elapsed: 12,
+            estimatedRemaining: 0,
+            perItemProgress: [
+              {
+                id: "active",
+                status: "processing",
+                lifecycleState: "running",
+                terminalOutcome: null,
+                progressPercent: 35,
+                currentStage: "Downloading source",
+                estimatedRemaining: 0,
+              } as any,
+              {
+                id: "attention",
+                status: "processing",
+                lifecycleState: "status_unavailable",
+                terminalOutcome: null,
+                progressPercent: 0,
+                currentStage: "Status unavailable",
+                estimatedRemaining: 0,
+              } as any,
+              {
+                id: "terminal",
+                status: "complete",
+                lifecycleState: "terminal",
+                terminalOutcome: "completed",
+                progressPercent: 100,
+                currentStage: "Completed",
+                estimatedRemaining: 0,
+              } as any,
+            ],
+          },
+        }}
+      >
+        <FloatingProgressWidget />
+      </IngestWizardProvider>
+    )
+
+    const widget = screen.getByRole("status", { name: "Ingest progress" })
+    expect(widget).toHaveTextContent("1 active, 1 needs attention, 1 terminal")
+  })
+
+  it("shows worker progress evidence without inventing analyze or store stages", () => {
+    useQuickIngestSessionStore.setState({
+      session: {
+        ...createEmptyQuickIngestSession(),
+        visibility: "hidden",
+        lifecycle: "processing",
+      },
+    })
+
+    render(
+      <IngestWizardProvider
+        initialState={{
+          isMinimized: true,
+          processingState: {
+            status: "running",
+            elapsed: 12,
+            estimatedRemaining: 0,
+            perItemProgress: [
+              {
+                id: "active",
+                status: "processing",
+                lifecycleState: "running",
+                terminalOutcome: null,
+                progressPercent: 35,
+                currentStage: "Downloading source",
+                estimatedRemaining: 0,
+              } as any,
+            ],
+          },
+        }}
+      >
+        <FloatingProgressWidget />
+      </IngestWizardProvider>
+    )
+
+    const widget = screen.getByRole("status", { name: "Ingest progress" })
+    expect(widget).toHaveTextContent("Downloading source")
+    expect(widget).not.toHaveTextContent(/processing and indexing/i)
+    expect(widget).not.toHaveTextContent(/analyz|storing/i)
+  })
+
+  it.each([
+    [42, "quickIngest.widget.etaSeconds", { count: 42 }],
+    [120, "quickIngest.widget.etaMinutes", { count: 2 }],
+  ] as const)(
+    "localizes active ETA evidence for %s seconds",
+    (estimatedRemaining, key, options) => {
+      renderWidget({
+        processingStatus: "running",
+        itemStatus: "processing",
+        lifecycle: "processing",
+        estimatedRemaining,
+      })
+
+      expect(translationMock).toHaveBeenCalledWith(
+        key,
+        expect.objectContaining(options)
+      )
+    }
+  )
 })

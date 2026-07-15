@@ -105,12 +105,8 @@ import { getProviderDisplayName } from "@/utils/provider-registry"
 import { useAntdNotification } from "@/hooks/useAntdNotification"
 import { useSetting } from "@/hooks/useSetting"
 import { useFocusComposerOnConnect } from "@/hooks/useComposerFocus"
-import { useQuickIngestStore } from "@/store/quick-ingest"
 import { useQuickIngestSessionStore } from "@/store/quick-ingest-session"
-import {
-  createQuickIngestSessionSeedFromOpenDetail,
-  type QuickIngestOpenDetail
-} from "@/utils/quick-ingest-open"
+import { useSidepanelQuickIngestOpen } from "./useSidepanelQuickIngestOpen"
 import { useUiModeStore } from "@/store/ui-mode"
 import { useStoreMessageOption } from "@/store/option"
 import { shallow } from "zustand/shallow"
@@ -316,8 +312,6 @@ export const SidepanelForm = ({
   React.useEffect(() => {
     setVoiceChatTriggerInput(voiceChatTriggerPhrases.join(", "))
   }, [voiceChatTriggerPhrases])
-  const queuedQuickIngestCount = useQuickIngestStore((s) => s.queuedCount)
-  const quickIngestHadFailure = useQuickIngestStore((s) => s.hadRecentFailure)
   const uiMode = useUiModeStore((state) => state.mode)
   const isProMode = uiMode === "pro"
   const { replyTarget, clearReplyTarget, ragPinnedResults } = useStoreMessageOption(
@@ -572,16 +566,10 @@ export const SidepanelForm = ({
     React.useState(false)
   const {
     quickIngestSession,
-    createDraftQuickIngestSession,
-    upsertQuickIngestSession,
-    showQuickIngestSession,
     hideQuickIngestSession
   } = useQuickIngestSessionStore(
     (state) => ({
       quickIngestSession: state.session,
-      createDraftQuickIngestSession: state.createDraftSession,
-      upsertQuickIngestSession: state.upsertSession,
-      showQuickIngestSession: state.showSession,
       hideQuickIngestSession: state.hideSession
     }),
     shallow
@@ -1092,27 +1080,11 @@ export const SidepanelForm = ({
     browserSupportsSpeechRecognition || hasServerStt || hasServerVoiceChat
 
   // Composer window events hook
-  const handleOpenQuickIngest = React.useCallback((detail?: QuickIngestOpenDetail) => {
-    const seed = createQuickIngestSessionSeedFromOpenDetail(detail)
-    setAutoProcessQueuedIngest(false)
-    if (quickIngestSession) {
-      if (seed) {
-        upsertQuickIngestSession(seed)
-      }
-      showQuickIngestSession()
-    } else {
-      createDraftQuickIngestSession(seed ?? undefined)
-    }
-    setIngestOpen(true)
-    requestAnimationFrame(() => {
-      quickIngestBtnRef.current?.focus()
-    })
-  }, [
-    createDraftQuickIngestSession,
-    quickIngestSession,
-    showQuickIngestSession,
-    upsertQuickIngestSession
-  ])
+  const handleOpenQuickIngest = useSidepanelQuickIngestOpen({
+    focusTriggerRef: quickIngestBtnRef,
+    setAutoProcessQueued: setAutoProcessQueuedIngest,
+    setIngestOpen
+  })
 
   const {
     openActorSettings,
@@ -2358,56 +2330,6 @@ export const SidepanelForm = ({
   const handleRagToggle = React.useCallback(() => {
     window.dispatchEvent(new CustomEvent("tldw:toggle-rag"))
   }, [])
-
-  const handleQuickIngestOpen = React.useCallback((detail?: QuickIngestOpenDetail) => {
-    const seed = createQuickIngestSessionSeedFromOpenDetail(detail)
-    setAutoProcessQueuedIngest(false)
-    if (quickIngestSession) {
-      if (seed) {
-        upsertQuickIngestSession(seed)
-      }
-      showQuickIngestSession()
-    } else {
-      createDraftQuickIngestSession(seed ?? undefined)
-    }
-    setIngestOpen(true)
-  }, [
-    createDraftQuickIngestSession,
-    quickIngestSession,
-    showQuickIngestSession,
-    upsertQuickIngestSession
-  ])
-
-  const handleProcessQueuedIngest = React.useCallback(() => {
-    if (!isConnectionReady) return
-
-    // Snapshot the current queue size; if it has been cleared between
-    // render and click, we still open the modal but skip auto-processing.
-    if (queuedQuickIngestCount <= 0) {
-      setAutoProcessQueuedIngest(false)
-      if (quickIngestSession) {
-        showQuickIngestSession()
-      } else {
-        createDraftQuickIngestSession()
-      }
-      setIngestOpen(true)
-      return
-    }
-
-    setAutoProcessQueuedIngest(true)
-    if (quickIngestSession) {
-      showQuickIngestSession()
-    } else {
-      createDraftQuickIngestSession()
-    }
-    setIngestOpen(true)
-  }, [
-    createDraftQuickIngestSession,
-    isConnectionReady,
-    queuedQuickIngestCount,
-    quickIngestSession,
-    showQuickIngestSession
-  ])
 
   React.useEffect(() => {
     if (!sttError) return

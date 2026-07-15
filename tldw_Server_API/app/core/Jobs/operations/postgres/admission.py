@@ -240,6 +240,8 @@ def create_job_admission(
     max_queued_quota: int,
     submits_per_minute_quota: int,
     counters_enabled: bool,
+    quota_lock_key: int | None = None,
+    transaction_guard: Callable[[Any], None] | None = None,
 ) -> AdmissionResult:
     """Create or replay a queued job admission inside a Postgres transaction."""
 
@@ -247,6 +249,10 @@ def create_job_admission(
 
     with conn:
         with cursor_factory(conn) as cur:
+            if transaction_guard is not None:
+                transaction_guard(cur)
+            if quota_lock_key is not None and (max_queued_quota or submits_per_minute_quota):
+                cur.execute("SELECT pg_advisory_xact_lock(%s)", (quota_lock_key,))
             quota_result = _quota_rejection(
                 cur,
                 command=command,

@@ -1,16 +1,17 @@
 from __future__ import annotations
 
 import json
-from math import ceil
 import sqlite3
+from collections.abc import Sequence
+from math import ceil
 from typing import Any
 
 from loguru import logger
 
-from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError, InputError
 from tldw_Server_API.app.core.DB_Management.media_db.dedupe_urls import (
     media_dedupe_url_candidates,
 )
+from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError, InputError
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.validation import (
     MediaDbLike,
     require_media_database_like,
@@ -24,7 +25,7 @@ class MediaLookupRepository:
         self.session = session
 
     @classmethod
-    def from_legacy_db(cls, db: MediaDbLike) -> "MediaLookupRepository":
+    def from_legacy_db(cls, db: MediaDbLike) -> MediaLookupRepository:
         return cls(session=require_media_database_like(
             db,
             error_message="db_instance must be a Database object.",
@@ -194,6 +195,56 @@ class MediaLookupRepository:
                 exc_info=True,
             )
             raise DatabaseError(f"Unexpected error fetching media by URL: {exc}") from exc  # noqa: TRY003
+
+    def by_urls(
+        self,
+        urls: Sequence[str],
+        *,
+        include_deleted: bool = False,
+        include_trash: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Return media matching normalized or legacy forms of any candidate URL."""
+        if isinstance(urls, (str, bytes)):
+            raise InputError("urls must be a sequence of URL strings.")  # noqa: TRY003
+
+        if any(type(url) is not str for url in urls):
+            raise InputError("urls entries must be strings.")  # noqa: TRY003
+
+        candidates = tuple(
+            dict.fromkeys(
+                candidate
+                for url in urls
+                for candidate in media_dedupe_url_candidates(url)
+            )
+        )
+        if not candidates:
+            return []
+
+        backend_name = getattr(getattr(self.session, "backend_type", None), "name", None)
+        if backend_name == "POSTGRESQL":
+            query = "SELECT * FROM Media WHERE url = ANY(?)"
+            params: tuple[Any, ...] = (list(candidates),)
+        else:
+            query = (
+                "SELECT * FROM Media "
+                "WHERE url IN (SELECT value FROM json_each(?))"
+            )
+            params = (json.dumps(candidates),)
+        if not include_deleted:
+            query += " AND deleted = 0"
+        if not include_trash:
+            query += " AND is_trash = 0"
+        query += " ORDER BY id ASC"
+
+        try:
+            rows = self.session.execute_query(query, params).fetchall()
+            return [dict(row) for row in rows]
+        except (DatabaseError, sqlite3.Error) as exc:
+            logger.error("Error fetching media by URL candidates: {}", exc, exc_info=True)
+            raise DatabaseError(f"Failed fetch media by URLs: {exc}") from exc  # noqa: TRY003
+        except Exception as exc:
+            logger.error("Unexpected error fetching media by URL candidates: {}", exc, exc_info=True)
+            raise DatabaseError(f"Unexpected error fetching media by URLs: {exc}") from exc  # noqa: TRY003
 
     def by_hash(
         self,

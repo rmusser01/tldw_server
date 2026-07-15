@@ -1,3 +1,8 @@
+import type {
+  PlaylistRunItemOutcome,
+  PlaylistRunItemState,
+} from "@/services/tldw/playlist-ingest"
+
 /**
  * Represents a status summary for Quick Ingest items.
  * @property label - Display text for the status.
@@ -141,7 +146,16 @@ export type QuickIngestSessionLifecycle =
 
 export type PersistedQuickIngestTracking = {
   mode: "webui-direct" | "extension-runtime" | "unknown"
+  submissionState?:
+    | "creating_run"
+    | "run_created"
+    | "submitting"
+    | "cleanup_required"
+    | "acknowledged"
+  submissionOccurrenceIds?: string[]
   sessionId?: string
+  runId?: string
+  generation?: string
   batchId?: string
   batchIds?: string[]
   collectionId?: string
@@ -157,8 +171,14 @@ export type PersistedQuickIngestTracking = {
 }
 
 export type ReattachedQuickIngestJob = {
-  jobId: number
+  jobId: number | null
+  attempt?: number
   status: string
+  lifecycleState?: PlaylistRunItemState
+  terminalOutcome?: PlaylistRunItemOutcome | null
+  progressPercent?: number | null
+  progressMessage?: string | null
+  retryable?: boolean
   result?: unknown
   error?: string
   sourceItemId?: string
@@ -206,15 +226,75 @@ export type PlaylistQueueMetadata = {
   playlistId?: string | null
   playlistTitle?: string | null
   ordinal?: number
+  title?: string | null
+  channelOrUploader?: string | null
+  durationSeconds?: number | null
   normalizedSourceId?: string | null
   duplicateStatus?: "new" | "duplicate_in_batch" | "duplicate_existing" | "unknown"
+  /** Cached display-only source. Never use this in place of an expired materialization. */
+  sourceUrl?: string
+  materializationExpiresAt?: string
 }
 
-export type ConferenceDuplicatePolicy =
+export const playlistHasMaterializationCues = (
+  playlist?: PlaylistQueueMetadata
+): boolean =>
+  Boolean(
+    playlist &&
+      ([
+        playlist.sourceUrl,
+        playlist.playlistId,
+        playlist.playlistTitle,
+        playlist.channelOrUploader,
+        playlist.normalizedSourceId,
+        playlist.materializationExpiresAt,
+      ].some((value) => typeof value === "string" && value.length > 0) ||
+        typeof playlist.ordinal === "number" ||
+        typeof playlist.durationSeconds === "number")
+  )
+
+export type WizardDuplicatePolicy =
   | "skip"
   | "overwrite"
   | "update_metadata_only"
   | "include_existing"
+
+export type ConferenceDuplicatePolicy = WizardDuplicatePolicy
+
+/**
+ * The authoritative source identity submitted at run creation.
+ * `materializationId` is the server's single opaque, owner-bound token.
+ */
+export type WizardSourceRef =
+  | {
+      kind: "materialized_playlist_item"
+      materializationId: string
+      occurrenceId: string
+    }
+  | { kind: "direct_url"; occurrenceId: string; url: string }
+  | { kind: "file_stub"; occurrenceId: string }
+
+export type PlaylistReviewMetadataField = "title" | "author" | "keywordsAdd"
+
+export type PlaylistDuplicateEvidence = {
+  kind: "library" | "in_run" | "none"
+  existingMediaId: number | null
+  duplicateOfOccurrenceId: string | null
+}
+
+export type PlaylistReviewState = {
+  selected: boolean
+  duplicatePolicy?: WizardDuplicatePolicy
+  duplicateEvidence?: PlaylistDuplicateEvidence
+  allowedDuplicatePolicies?: WizardDuplicatePolicy[]
+  reviewReason?: string
+  metadataPatch?: {
+    title?: string
+    author?: string
+    keywordsAdd?: string[]
+  }
+  editedFields?: PlaylistReviewMetadataField[]
+}
 
 export type ConferenceBatchMetadata = {
   collectionName: string
@@ -241,6 +321,8 @@ export type ConferenceItemMetadataOverride = {
 export type WizardQueueItem = {
   /** Unique identifier for this queue item. */
   id: string
+  /** Authoritative run input identity. */
+  sourceRef?: WizardSourceRef
   /** Persisted queue item kind for refresh restore. */
   kind?: "url" | "file"
   /** Original file name (for file uploads). */
@@ -267,6 +349,8 @@ export type WizardQueueItem = {
   validation: QueueItemValidation
   /** Metadata carried from a playlist preflight response. */
   playlist?: PlaylistQueueMetadata
+  /** Playlist-specific Review choices, kept separate from conference metadata. */
+  playlistReview?: PlaylistReviewState
   /** Conference-specific metadata overrides for bulk review workflows. */
   conferenceOverride?: ConferenceItemMetadataOverride
 }
@@ -300,6 +384,14 @@ export type ItemProgress = {
   estimatedRemaining: number
   /** Error message if status is 'failed'. */
   error?: string
+  /** Authoritative server lifecycle for durable run occurrences. */
+  lifecycleState?: PlaylistRunItemState
+  /** Authoritative terminal result, present only when lifecycleState is terminal. */
+  terminalOutcome?: PlaylistRunItemOutcome | null
+  /** Whether the server currently permits retrying this occurrence. */
+  retryable?: boolean
+  /** Authoritative server attempt for an existing run occurrence. */
+  attempt?: number
 }
 
 /**
@@ -327,6 +419,10 @@ export type ErrorClassification =
  * Extended result item with error classification for the wizard.
  */
 export type WizardResultItem = ResultItem & {
+  /** Authoritative terminal outcome from the durable run. */
+  terminalOutcome?: PlaylistRunItemOutcome | null
+  /** Authoritative retry eligibility from the durable run. */
+  retryable?: boolean
   /** Classification of the error, if status is "error". */
   errorClassification?: ErrorClassification
   /** Duration of processing in milliseconds. */

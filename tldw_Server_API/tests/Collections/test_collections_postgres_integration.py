@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import os
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 import pytest
 
-from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseConfig
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 
 pytest_plugins = ["tldw_Server_API.tests._plugins.authnz_full_fixtures"]
 
@@ -127,6 +128,186 @@ def test_collections_postgres_round_trip(request: pytest.FixtureRequest, monkeyp
 
     purged = db.purge_expired_outputs()
     assert purged >= 1
+
+
+def test_playlist_collection_actions_are_cas_safe_on_postgres(
+    request: pytest.FixtureRequest,
+    monkeypatch,
+    tmp_path,
+):
+    _client, db_name = request.getfixturevalue("isolated_test_environment")  # type: ignore[assignment]
+    monkeypatch.setenv("USER_DB_BASE_DIR", str((tmp_path / "user_dbs").resolve()))
+
+    backend = _pg_backend(db_name)
+    db = CollectionsDatabase.from_backend(user_id="1", backend=backend)
+    expected_items = [
+        {
+            "occurrence_id": "pg-occ-one",
+            "source_url": "https://example.com/one",
+            "normalized_source_id": None,
+            "ordinal": 1,
+            "metadata": {"playlist_ingest_occurrence_id": "pg-occ-one"},
+        },
+        {
+            "occurrence_id": "pg-occ-two",
+            "source_url": "https://example.com/two",
+            "normalized_source_id": None,
+            "ordinal": 2,
+            "metadata": {"playlist_ingest_occurrence_id": "pg-occ-two"},
+        },
+    ]
+    created = db.create_media_collection_with_items(
+        name="Playlist CAS",
+        kind="playlist_ingest",
+        metadata={
+            "playlist_ingest_run_id": "pg-run-cas",
+        },
+        playlist_ingest_initialization_token="pg-token-a",
+        items=expected_items,
+    )
+
+    def resolve(media_id: int):
+        try:
+            return db.resolve_media_collection_item(created.items[0].id, media_id=media_id)
+        except ValueError as exc:
+            return exc
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(resolve, (17, 18)))
+
+    resolved = db.get_media_collection_item(created.items[0].id)
+    assert len([result for result in results if not isinstance(result, Exception)]) == 1
+    assert len([result for result in results if isinstance(result, ValueError)]) == 1
+    assert resolved.media_id in {17, 18}
+    repeated = db.resolve_media_collection_item(
+        resolved.id,
+        media_id=resolved.media_id,
+        status="completed",
+    )
+    assert repeated.updated_at == resolved.updated_at
+
+    restored = db.restore_media_collection_item_plan(
+        resolved.id,
+        expected_media_id=resolved.media_id,
+        expected_status="completed",
+        expected_updated_at=resolved.updated_at,
+    )
+    repeated_restore = db.restore_media_collection_item_plan(
+        resolved.id,
+        expected_media_id=resolved.media_id,
+        expected_status="completed",
+        expected_updated_at=resolved.updated_at,
+    )
+    assert repeated_restore.updated_at == restored.updated_at
+
+    claimed = db.claim_playlist_ingest_collection(
+        created.id,
+        run_id="pg-run-cas",
+        initialization_token="pg-token-b",
+        expected_initialization_token="pg-token-a",
+        expected_item_ids=[item.id for item in created.items],
+        expected_items=expected_items,
+    )
+    assert claimed._playlist_ingest_initialization_token == "pg-token-b"
+    assert "playlist_ingest_initialization_token" not in claimed.metadata
+
+    with pytest.raises(
+        ValueError,
+        match="media_collection_discard_ownership_transferred",
+    ):
+        db.discard_media_collection(
+            created.id,
+            expected_item_ids=[item.id for item in created.items],
+            expected_run_id="pg-run-cas",
+            expected_initialization_token="pg-token-a",
+        )
+    assert db.get_media_collection(created.id).id == created.id
+
+    assert db.discard_media_collection(
+        created.id,
+        expected_item_ids=[item.id for item in created.items],
+        expected_run_id="pg-run-cas",
+        expected_initialization_token="pg-token-b",
+    )
+
+
+def test_playlist_collection_commit_then_error_recovery_attaches_run_on_postgres(
+    request: pytest.FixtureRequest,
+    monkeypatch,
+    tmp_path,
+):
+    _client, db_name = request.getfixturevalue("isolated_test_environment")  # type: ignore[assignment]
+    monkeypatch.setenv("USER_DB_BASE_DIR", str((tmp_path / "user_dbs").resolve()))
+    monkeypatch.setenv("TEST_MODE", "true")
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_service import (
+        PlaylistIngestService,
+    )
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_ingest_store import (
+        PlaylistIngestStore,
+    )
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    backend = _pg_backend(db_name)
+    db = CollectionsDatabase.from_backend(user_id="1", backend=backend)
+    malformed = db.create_media_collection(
+        name="Malformed legacy playlist",
+        kind="playlist_ingest",
+    )
+    backend.execute(
+        "UPDATE media_collections SET metadata_json = ? WHERE id = ? AND user_id = ?",
+        ("{malformed", malformed.id, "1"),
+    )
+
+    original_create = db.create_media_collection_with_items
+    committed = None
+
+    def create_then_raise(**kwargs):
+        nonlocal committed
+        committed = original_create(**kwargs)
+        raise RuntimeError("private post-commit detail")
+
+    monkeypatch.setattr(db, "create_media_collection_with_items", create_then_raise)
+    monkeypatch.setattr(db, "close", lambda: None)
+
+    class _NoDuplicateMediaDB:
+        @staticmethod
+        def get_media_by_urls(_urls, **_kwargs):
+            return []
+
+        @staticmethod
+        def close_connection():
+            return None
+
+    manager = JobManager(db_path=tmp_path / "playlist-recovery-jobs.db")
+    service = PlaylistIngestService(
+        manager,
+        media_db_factory=lambda _owner: _NoDuplicateMediaDB(),
+        collections_db_factory=lambda owner: db if owner == "1" else None,
+    )
+    created = service.create_run(
+        "1",
+        inputs=[
+            {
+                "input_kind": "direct_url",
+                "occurrence_id": "pg-recovery-occurrence",
+                "url": "https://example.com/postgres-recovery",
+                "source_kind": "video",
+                "display_metadata": {"title": "PostgreSQL recovery"},
+            }
+        ],
+        review_overrides={},
+        new_collection={"name": "Recovered playlist plan"},
+    )
+
+    assert committed is not None
+    recovered = db.get_playlist_ingest_collection_for_run(created.run_id)
+    item = PlaylistIngestStore(manager).list_run_items("1", created.run_id)[0]
+    assert created.collection_id == committed.id == recovered.id
+    assert item.planned_collection_item_id == committed.items[0].id
+    other_owner = CollectionsDatabase.from_backend(user_id="2", backend=backend)
+    with pytest.raises(KeyError, match="media_collection_not_found"):
+        other_owner.get_playlist_ingest_collection_for_run(created.run_id)
 
 
 def test_collections_postgres_backfills_notification_delivery_columns(

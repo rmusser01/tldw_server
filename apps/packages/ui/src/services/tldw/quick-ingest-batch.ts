@@ -48,6 +48,22 @@ import {
   type ApiMediaCollectionItem,
   type MediaCollectionItemStatus,
 } from "@/services/tldw/conference-collections";
+import { mediaMethods } from "@/services/tldw/domains/media";
+import {
+  PlaylistIngestPublicError,
+  cancelRun,
+  createRun,
+  pollRunSnapshot,
+  retryRunItems,
+  submitPendingChunks,
+  type PlaylistIngestRunCreateRequest,
+  type PlaylistIngestRunCreateResult,
+  type PlaylistIngestRunRetryResult,
+  type PlaylistIngestRunSnapshot,
+  type PlaylistIngestRunSubmissionRequest,
+  type PlaylistProcessingOccurrence,
+  type PlaylistReviewRequiredRecoveryItem,
+} from "@/services/tldw/playlist-ingest";
 
 type TypeDefaults = {
   audio?: { language?: string; diarize?: boolean };
@@ -93,10 +109,23 @@ type QuickIngestBatchInput = {
   advancedValues?: Record<string, any>;
   fileDefaults?: TypeDefaults;
   conferenceBatchMetadata?: ConferenceBatchMetadata | null;
+  conferenceItemMetadata?: Record<
+    string,
+    {
+      playlist?: PlaylistQueueMetadata;
+      conferenceOverride?: ConferenceItemMetadataOverride;
+    }
+  >;
   chunkingTemplateName?: string;
   autoApplyTemplate?: boolean;
+  pendingRunRequest?: PlaylistIngestRunCreateRequest | null;
   __quickIngestSessionId?: string;
-  onTrackingMetadata?: (tracking: PersistedQuickIngestTracking) => void;
+  __quickIngestRunId?: string;
+  __quickIngestShouldStop?: () => boolean;
+  __quickIngestIsOccurrenceCancelled?: (occurrenceId: string) => boolean;
+  onTrackingMetadata?: (
+    tracking: PersistedQuickIngestTracking,
+  ) => void | Promise<void>;
 };
 
 type QuickIngestBatchResult = {
@@ -118,8 +147,15 @@ type QuickIngestBatchResult = {
 
 type QuickIngestBatchResponse = {
   ok: boolean;
+  accepted?: boolean;
+  submissionBlocked?: boolean;
+  submissionCleanupFailed?: boolean;
+  runId?: string;
+  retryAfterMs?: number | null;
+  unsentOccurrenceIds?: string[];
   error?: string;
   results?: QuickIngestBatchResult[];
+  reviewRequired?: PlaylistReviewRequiredRecoveryItem[];
 };
 
 export const QUICK_INGEST_ANALYSIS_PROVIDER_WARNING =
@@ -144,19 +180,50 @@ export const getQuickIngestAnalysisProviderWarning = (
 export type QuickIngestStartAck = {
   ok: boolean;
   sessionId?: string;
+  indeterminate?: boolean;
   error?: string;
 };
 
 export type QuickIngestCancelInput = {
   sessionId: string;
   reason?: string;
+  occurrenceIds?: string[];
   batchIds?: string[];
   tracking?: PersistedQuickIngestTracking;
 };
 
 export type QuickIngestCancelResponse = {
   ok: boolean;
+  generation?: string;
+  indeterminate?: boolean;
+  notAdvanced?: boolean;
   error?: string;
+};
+
+export type QuickIngestRetryInput = {
+  sessionId: string;
+  occurrenceIds: string[];
+  tracking?: PersistedQuickIngestTracking;
+};
+
+export type QuickIngestSessionReplayResponse = {
+  ok: boolean;
+  active?: boolean;
+  event?: {
+    type: string;
+    payload: Record<string, unknown>;
+  } | null;
+  replayAck?: {
+    runId: string;
+    generation: string;
+  };
+  error?: string;
+};
+
+export type QuickIngestReplayAckInput = {
+  sessionId: string;
+  runId: string;
+  generation: string;
 };
 
 const EXTENSION_TIMEOUT_MS = 10_000;
@@ -172,12 +239,79 @@ const directQuickIngestSessionTrackers = new Map<
   string,
   DirectQuickIngestTracker
 >();
-const directQuickIngestCancelledSessions = new Set<string>();
+type DirectQuickIngestCancellation = {
+  cancelAll: boolean;
+  occurrenceIds: Set<string>;
+};
+const directQuickIngestCancellations = new Map<
+  string,
+  DirectQuickIngestCancellation
+>();
+const directQuickIngestGenerations = new Map<string, string>();
+type DirectQuickIngestRetryReservation = {
+  sessionId: string;
+  runId: string;
+  occurrenceIds: string[];
+  generation: string;
+  previousGeneration?: string;
+  createdAt: number;
+  expiresAt: number;
+};
+const directQuickIngestRetryReservations = new Map<
+  string,
+  DirectQuickIngestRetryReservation
+>();
+const directQuickIngestRetryOwners = new Set<string>();
+const MAX_DIRECT_QUICK_INGEST_RETRY_RESERVATIONS = 64;
+const DIRECT_QUICK_INGEST_RETRY_RESERVATION_TTL_MS = 24 * 60 * 60 * 1_000;
 let lastQuickIngestRuntimeHealthCheckAt = 0;
 let quickIngestRuntimeMessagingUsable: boolean | null = null;
+let fallbackIdentitySequence = 0;
 
 const DIRECT_QUICK_INGEST_SESSION_PREFIX = "qi-direct-";
 const DIRECT_QUICK_INGEST_TRANSPORT = { preferDirect: true } as const;
+
+const pruneDirectQuickIngestRetryReservations = (now = Date.now()): void => {
+  for (const [sessionId, reservation] of directQuickIngestRetryReservations) {
+    if (
+      reservation.expiresAt <= now &&
+      !directQuickIngestRetryOwners.has(sessionId)
+    ) {
+      directQuickIngestRetryReservations.delete(sessionId);
+      if (directQuickIngestGenerations.get(sessionId) === reservation.generation) {
+        directQuickIngestGenerations.delete(sessionId);
+      }
+    }
+  }
+};
+
+const retainDirectQuickIngestRetryReservation = (
+  reservation: Omit<DirectQuickIngestRetryReservation, "createdAt" | "expiresAt">,
+): DirectQuickIngestRetryReservation | undefined => {
+  const now = Date.now();
+  pruneDirectQuickIngestRetryReservations(now);
+  if (
+    !directQuickIngestRetryReservations.has(reservation.sessionId) &&
+    directQuickIngestRetryReservations.size >=
+      MAX_DIRECT_QUICK_INGEST_RETRY_RESERVATIONS
+  ) {
+    return undefined;
+  }
+  const retained = {
+    ...reservation,
+    createdAt: now,
+    expiresAt: now + DIRECT_QUICK_INGEST_RETRY_RESERVATION_TTL_MS,
+  };
+  directQuickIngestRetryReservations.set(reservation.sessionId, retained);
+  return retained;
+};
+
+const getDirectQuickIngestRetryReservation = (
+  sessionId: string,
+): DirectQuickIngestRetryReservation | undefined => {
+  pruneDirectQuickIngestRetryReservations();
+  return directQuickIngestRetryReservations.get(sessionId);
+};
 
 const buildDirectSessionSuffix = (): string => {
   try {
@@ -200,8 +334,31 @@ const buildDirectSessionSuffix = (): string => {
   } catch {
     // Fall through to timestamp suffix below.
   }
-  return Date.now().toString(36).slice(-8);
+  fallbackIdentitySequence += 1;
+  return `${Date.now().toString(36).slice(-8)}-${fallbackIdentitySequence.toString(36)}`;
 };
+
+const createOpaqueExtensionIdentity = (
+  prefix: "qi" | "qia" | "generation",
+): string => {
+  try {
+    if (typeof globalThis.crypto?.randomUUID === "function") {
+      return `${prefix}-${globalThis.crypto.randomUUID()}`;
+    }
+  } catch {
+    // Fall back to the existing bounded local suffix below.
+  }
+  return `${prefix}-${Date.now()}-${buildDirectSessionSuffix()}`;
+};
+
+const createExtensionQuickIngestSessionId = (): string =>
+  createOpaqueExtensionIdentity("qi");
+
+const createExtensionQuickIngestAttemptToken = (): string =>
+  createOpaqueExtensionIdentity("qia");
+
+const createQuickIngestGeneration = (): string =>
+  createOpaqueExtensionIdentity("generation");
 
 const normalizeBatchIds = (batchIds?: string[]): string[] =>
   Array.from(
@@ -242,17 +399,68 @@ const ensureDirectSessionTracker = (
   return created;
 };
 
-const clearDirectSessionTracking = (sessionId: string | undefined) => {
+const ensureDirectCancellation = (
+  sessionId: string | undefined,
+): DirectQuickIngestCancellation | undefined => {
+  const normalizedSessionId = String(sessionId || "").trim();
+  if (!normalizedSessionId) return undefined;
+  const existing = directQuickIngestCancellations.get(normalizedSessionId);
+  if (existing) return existing;
+  const created = { cancelAll: false, occurrenceIds: new Set<string>() };
+  directQuickIngestCancellations.set(normalizedSessionId, created);
+  return created;
+};
+
+const clearDirectSessionExecutionTracking = (sessionId: string | undefined) => {
   const normalizedSessionId = String(sessionId || "").trim();
   if (!normalizedSessionId) return;
   directQuickIngestSessionTrackers.delete(normalizedSessionId);
-  directQuickIngestCancelledSessions.delete(normalizedSessionId);
+  directQuickIngestCancellations.delete(normalizedSessionId);
+};
+
+const retireDirectSessionAuthority = (sessionId: string | undefined) => {
+  const normalizedSessionId = String(sessionId || "").trim();
+  if (!normalizedSessionId) return;
+  directQuickIngestGenerations.delete(normalizedSessionId);
+  directQuickIngestRetryReservations.delete(normalizedSessionId);
+};
+
+/** Retire only the direct-session authority owned by the expected generation. */
+export const retireDirectQuickIngestSessionAuthority = (
+  sessionId: string,
+  expectedGeneration: string,
+): boolean => {
+  const normalizedSessionId = String(sessionId || "").trim();
+  const normalizedGeneration = String(expectedGeneration || "").trim();
+  if (
+    !normalizedSessionId ||
+    !normalizedGeneration ||
+    directQuickIngestGenerations.get(normalizedSessionId) !==
+      normalizedGeneration
+  ) {
+    return false;
+  }
+  retireDirectSessionAuthority(normalizedSessionId);
+  return true;
 };
 
 const isDirectSessionCancelled = (sessionId: string | undefined) => {
   const normalizedSessionId = String(sessionId || "").trim();
   if (!normalizedSessionId) return false;
-  return directQuickIngestCancelledSessions.has(normalizedSessionId);
+  return Boolean(
+    directQuickIngestCancellations.get(normalizedSessionId)?.cancelAll,
+  );
+};
+
+const isDirectOccurrenceCancelled = (
+  sessionId: string | undefined,
+  occurrenceId: string,
+): boolean => {
+  const normalizedSessionId = String(sessionId || "").trim();
+  const normalizedOccurrenceId = String(occurrenceId || "").trim();
+  if (!normalizedSessionId || !normalizedOccurrenceId) return false;
+  const cancellation = directQuickIngestCancellations.get(normalizedSessionId);
+  return Boolean(cancellation?.occurrenceIds.has(normalizedOccurrenceId));
 };
 
 const cancelDirectSessionBatches = async (
@@ -281,23 +489,6 @@ const cancelDirectSessionBatches = async (
 
 const hasExtensionMessagingRuntime = (): boolean =>
   Boolean(browser?.runtime?.sendMessage && browser?.runtime?.id);
-
-const getRuntimeManifestVersion = (): number | null => {
-  try {
-    const manifest = browser?.runtime?.getManifest?.() as
-      | { manifest_version?: number }
-      | undefined;
-    const manifestVersion = Number(manifest?.manifest_version);
-    return Number.isFinite(manifestVersion) && manifestVersion > 0
-      ? Math.trunc(manifestVersion)
-      : null;
-  } catch {
-    return null;
-  }
-};
-
-const shouldPreferDirectQuickIngestSession = (): boolean =>
-  (getRuntimeManifestVersion() || 0) >= 3;
 
 const isDirectQuickIngestSessionId = (sessionId: string | undefined): boolean =>
   String(sessionId || "").trim().startsWith(DIRECT_QUICK_INGEST_SESSION_PREFIX);
@@ -521,6 +712,487 @@ const buildFields = ({
   });
 
   return fields;
+};
+
+const mediaTypeForProcessingSource = (sourceKind: string | null): string => {
+  const normalized = String(sourceKind || "").toLowerCase();
+  if (normalized.includes("audio")) return "audio";
+  if (normalized.includes("pdf")) return "pdf";
+  if (normalized.includes("document") || normalized.includes("web")) {
+    return "document";
+  }
+  return "video";
+};
+
+const compactRunMetadata = (
+  value: Record<string, unknown>,
+): Record<string, unknown> =>
+  Object.fromEntries(
+    Object.entries(value).filter(([, entry]) => {
+      if (entry === undefined || entry === null || entry === "") return false;
+      return !Array.isArray(entry) || entry.length > 0;
+    }),
+  );
+
+const buildVersion2RunRequest = (
+  input: QuickIngestBatchInput,
+  pendingRunRequest: PlaylistIngestRunCreateRequest,
+): PlaylistIngestRunSubmissionRequest => {
+  const normalizedProcessingOptions = buildFields({
+    rawType: "auto",
+    common: input.common,
+    advancedValues: input.advancedValues,
+    chunkingTemplateName: input.chunkingTemplateName,
+    autoApplyTemplate: input.autoApplyTemplate,
+    persist: input.storeRemote && !input.processOnly,
+  });
+  delete normalizedProcessingOptions.media_type;
+  delete normalizedProcessingOptions.keep_original_file;
+
+  const pendingOccurrenceIds = new Set(
+    pendingRunRequest.inputs.map((runInput) => runInput.occurrenceId),
+  );
+  const conferenceSummaries = Object.entries(
+    input.conferenceItemMetadata || {},
+  ).flatMap(([occurrenceId, metadata]) => {
+    if (!pendingOccurrenceIds.has(occurrenceId)) return [];
+    const playlist = metadata.playlist;
+    const override = metadata.conferenceOverride;
+    if (!playlist && !override) return [];
+    return [
+      compactRunMetadata({
+        occurrence_id: occurrenceId,
+        playlist: playlist
+          ? compactRunMetadata({
+              playlist_id: playlist.playlistId,
+              playlist_title: playlist.playlistTitle,
+              ordinal: playlist.ordinal,
+              title: playlist.title,
+              channel_or_uploader: playlist.channelOrUploader,
+              duration_seconds: playlist.durationSeconds,
+              normalized_source_id: playlist.normalizedSourceId,
+              duplicate_status: playlist.duplicateStatus,
+            })
+          : undefined,
+        conference_override: override
+          ? compactRunMetadata({
+              title: override.title,
+              speaker: override.speaker,
+              talk_date: override.talkDate,
+              track: override.track,
+              tags: Array.from(
+                new Set(
+                  (override.tags || [])
+                    .map((tag) => String(tag).trim())
+                    .filter(Boolean),
+                ),
+              ),
+              duplicate_policy: override.duplicatePolicy,
+              selected: override.selected,
+            })
+          : undefined,
+      }),
+    ];
+  });
+
+  const collection = input.conferenceBatchMetadata
+    ? buildConferenceCollectionCreatePayload(input.conferenceBatchMetadata)
+    : null;
+  const processingOptions = {
+    ...(pendingRunRequest.processingOptions || {}),
+    ...normalizedProcessingOptions,
+  };
+  const playlistSummaries = [
+    ...(pendingRunRequest.playlistSummaries || []),
+    ...conferenceSummaries,
+  ];
+
+  return {
+    ...pendingRunRequest,
+    clientRequestId: String(input.__quickIngestSessionId || "").trim(),
+    ...(Object.keys(processingOptions).length > 0 ? { processingOptions } : {}),
+    ...(playlistSummaries.length > 0 ? { playlistSummaries } : {}),
+    ...(collection
+      ? {
+          newCollection: {
+            name: collection.name,
+            ...(collection.source_url
+              ? { sourceUrl: collection.source_url }
+              : {}),
+            defaultTags: collection.default_tags,
+          },
+        }
+      : {}),
+  };
+};
+
+const runVersion2QuickIngestBatch = async (
+  input: QuickIngestBatchInput,
+): Promise<QuickIngestBatchResponse> => {
+  const requestedRun = input.pendingRunRequest;
+  if (!requestedRun) {
+    return { ok: false, error: "Missing playlist ingest run request." };
+  }
+  const sessionId = String(input.__quickIngestSessionId || "").trim();
+  if (!sessionId) {
+    return { ok: false, error: "Missing quick ingest session id." };
+  }
+  if (isDirectQuickIngestSessionId(sessionId)) {
+    ensureDirectCancellation(sessionId);
+  }
+  if (
+    input.__quickIngestShouldStop?.() ||
+    isDirectSessionCancelled(sessionId)
+  ) {
+    clearDirectSessionExecutionTracking(sessionId);
+    return {
+      ok: false,
+      accepted: false,
+      submissionBlocked: true,
+      error: "Cancelled by user.",
+      retryAfterMs: null,
+      unsentOccurrenceIds: requestedRun.inputs.map(
+        (runInput) => runInput.occurrenceId,
+      ),
+    };
+  }
+  const isOccurrenceCancelled = (occurrenceId: string): boolean =>
+    Boolean(
+      input.__quickIngestIsOccurrenceCancelled?.(occurrenceId) ||
+        isDirectOccurrenceCancelled(sessionId, occurrenceId),
+    );
+  const pendingRunRequest: PlaylistIngestRunCreateRequest = {
+    ...requestedRun,
+    inputs: requestedRun.inputs.filter(
+      (runInput) => !isOccurrenceCancelled(runInput.occurrenceId),
+    ),
+  };
+  if (pendingRunRequest.inputs.length === 0) {
+    clearDirectSessionExecutionTracking(sessionId);
+    return {
+      ok: false,
+      accepted: false,
+      submissionBlocked: true,
+      error: "Every pending occurrence was cancelled before submission.",
+      retryAfterMs: null,
+      unsentOccurrenceIds: [],
+    };
+  }
+
+  const submittedItemIds = pendingRunRequest.inputs.map(
+    (runInput) => runInput.occurrenceId,
+  );
+  const startedAt = Date.now();
+  const isCancelled = () =>
+    Boolean(
+      input.__quickIngestShouldStop?.() || isDirectSessionCancelled(sessionId),
+    );
+  const publishTracking = async (
+    submissionState: NonNullable<
+      PersistedQuickIngestTracking["submissionState"]
+    >,
+    patch: Partial<PersistedQuickIngestTracking> = {},
+  ): Promise<void> => {
+    await input.onTrackingMetadata?.({
+      mode: isDirectQuickIngestSessionId(sessionId)
+        ? "webui-direct"
+        : "extension-runtime",
+      submissionState,
+      sessionId: sessionId || undefined,
+      submissionOccurrenceIds: submittedItemIds,
+      ...(submissionState === "creating_run"
+        ? {}
+        : { submittedItemIds, itemIds: submittedItemIds }),
+      startedAt,
+      ...patch,
+    });
+  };
+
+  let run: PlaylistIngestRunCreateResult;
+  const existingRunId = String(input.__quickIngestRunId || "").trim();
+  if (existingRunId) {
+    run = {
+      contractVersion: 2,
+      runId: existingRunId,
+      status: "processing",
+      version: 0,
+      statusUrl: `/api/v1/media/ingest/runs/${encodeURIComponent(existingRunId)}`,
+      itemsUrl: `/api/v1/media/ingest/runs/${encodeURIComponent(existingRunId)}/items`,
+      eventsUrl: `/api/v1/media/ingest/runs/${encodeURIComponent(existingRunId)}/events/stream`,
+      processingOccurrences: pendingRunRequest.inputs.map((runInput, index) => ({
+        occurrenceId: runInput.occurrenceId,
+        ordinal: index + 1,
+        inputKind: runInput.inputKind,
+        sourceUrl:
+          runInput.inputKind === "direct_url" ? runInput.url : null,
+        sourceKind:
+          runInput.inputKind === "direct_url" ? runInput.sourceKind || null : null,
+        displayMetadata: runInput.displayMetadata || {},
+        state:
+          runInput.inputKind === "file_stub" ? "awaiting_upload" : "staged",
+        outcome: null,
+        jobId: null,
+        batchId: null,
+        attempt:
+          runInput.inputKind === "file_stub" &&
+          Number.isSafeInteger(runInput.attempt) &&
+          Number(runInput.attempt) > 0
+            ? Number(runInput.attempt)
+            : 1,
+        plannedCollectionItemId: null,
+      })),
+    };
+  } else {
+    await publishTracking("creating_run");
+    try {
+      run = await createRun(
+        mediaMethods,
+        buildVersion2RunRequest(input, pendingRunRequest),
+        DIRECT_QUICK_INGEST_TRANSPORT,
+      );
+    } catch (error) {
+      if (
+        error instanceof PlaylistIngestPublicError &&
+        error.recovery?.kind === "reviewRequired"
+      ) {
+        clearDirectSessionExecutionTracking(sessionId);
+        return {
+          ok: false,
+          error: error.message,
+          reviewRequired: error.recovery.items,
+        };
+      }
+      clearDirectSessionExecutionTracking(sessionId);
+      throw error;
+    }
+  }
+
+  await publishTracking("run_created", { runId: run.runId });
+
+  if (isCancelled()) {
+    let cleanupFailed = false;
+    try {
+      await cancelRun(
+        mediaMethods,
+        run.runId,
+        { reason: "user_cancelled" },
+        DIRECT_QUICK_INGEST_TRANSPORT,
+      );
+    } catch {
+      cleanupFailed = true;
+    }
+    await publishTracking(cleanupFailed ? "cleanup_required" : "acknowledged", {
+      runId: run.runId,
+    });
+    clearDirectSessionExecutionTracking(sessionId);
+    return {
+      ok: false,
+      accepted: false,
+      submissionBlocked: true,
+      ...(cleanupFailed ? { submissionCleanupFailed: true } : {}),
+      runId: run.runId,
+      retryAfterMs: null,
+      unsentOccurrenceIds: run.processingOccurrences.map(
+        (occurrence) => occurrence.occurrenceId,
+      ),
+      error: cleanupFailed
+        ? "Cancellation was requested, but the server did not confirm run cancellation."
+        : "Cancelled by user.",
+    };
+  }
+
+  const cancelledAfterCreate = run.processingOccurrences
+    .map((occurrence) => occurrence.occurrenceId)
+    .filter(isOccurrenceCancelled);
+  if (cancelledAfterCreate.length > 0) {
+    try {
+      await cancelRun(
+        mediaMethods,
+        run.runId,
+        {
+          occurrenceIds: cancelledAfterCreate,
+          reason: "user_cancelled",
+        },
+        DIRECT_QUICK_INGEST_TRANSPORT,
+      );
+    } catch (error) {
+      await publishTracking("cleanup_required", { runId: run.runId });
+      clearDirectSessionExecutionTracking(sessionId);
+      return {
+        ok: false,
+        accepted: false,
+        submissionBlocked: true,
+        submissionCleanupFailed: true,
+        runId: run.runId,
+        retryAfterMs: null,
+        unsentOccurrenceIds: run.processingOccurrences.map(
+          (occurrence) => occurrence.occurrenceId,
+        ),
+        error:
+          error instanceof Error
+            ? `The server did not confirm occurrence cancellation. ${error.message}`
+            : "The server did not confirm occurrence cancellation.",
+      };
+    }
+    run = {
+      ...run,
+      processingOccurrences: run.processingOccurrences.filter(
+        (occurrence) =>
+          !cancelledAfterCreate.includes(occurrence.occurrenceId),
+      ),
+    };
+  }
+
+  const entriesByOccurrenceId = new Map(
+    input.entries.map((entry) => [entry.id, entry] as const),
+  );
+  const filePayloadsByOccurrenceId = new Map(
+    input.files.flatMap((file) => {
+      const occurrenceId = String(file.id || "").trim();
+      return occurrenceId ? [[occurrenceId, file] as const] : [];
+    }),
+  );
+  const filesByOccurrenceId = Object.fromEntries(
+    input.files.flatMap((file) => {
+      const occurrenceId = String(file.id || "").trim();
+      if (!occurrenceId) return [];
+      return [
+        [
+          occurrenceId,
+          {
+            name: String(file.name || "upload"),
+            type: String(file.type || "application/octet-stream"),
+            data: file.data || [],
+          },
+        ] as const,
+      ];
+    }),
+  );
+  const baseFieldsByOccurrenceId = Object.fromEntries(
+    run.processingOccurrences.map((occurrence) => {
+      const entry = entriesByOccurrenceId.get(occurrence.occurrenceId);
+      const file = filePayloadsByOccurrenceId.get(occurrence.occurrenceId);
+      const rawType = entry?.type
+        ? entry.type
+        : file
+          ? inferUploadMediaTypeFromFile(file.name, file.type)
+          : mediaTypeForProcessingSource(occurrence.sourceKind);
+      return [
+        occurrence.occurrenceId,
+        buildFields({
+          rawType,
+          entry,
+          defaults:
+            entry?.defaults ||
+            (file?.defaults && typeof file.defaults === "object"
+              ? file.defaults
+              : input.fileDefaults),
+          common: input.common,
+          advancedValues: input.advancedValues,
+          chunkingTemplateName: input.chunkingTemplateName,
+          autoApplyTemplate: input.autoApplyTemplate,
+          persist: input.storeRemote && !input.processOnly,
+        }),
+      ] as const;
+    }),
+  );
+  const publishSubmittedTracking = async (
+    submitted: Awaited<ReturnType<typeof submitPendingChunks>>,
+    submissionState: NonNullable<
+      PersistedQuickIngestTracking["submissionState"]
+    >,
+  ): Promise<void> => {
+    const accepted = submitted.submissions.filter(
+      (submission) => submission.accepted,
+    );
+    const jobIds = accepted.flatMap((submission) =>
+      submission.jobId === null ? [] : [submission.jobId],
+    );
+    await publishTracking(submissionState, {
+      runId: run.runId,
+      batchId: submitted.batchIds.at(-1),
+      batchIds: submitted.batchIds,
+      jobIds,
+      jobIdToItemId: Object.fromEntries(
+        accepted.flatMap((submission) =>
+          submission.jobId === null
+            ? []
+            : [[String(submission.jobId), submission.occurrenceId]],
+        ),
+      ),
+    });
+  };
+
+  const submitted = await submitPendingChunks({
+    run,
+    baseFields: {},
+    baseFieldsByOccurrenceId,
+    filesByOccurrenceId,
+    shouldStop: isCancelled,
+    isOccurrenceCancelled,
+    onProgress: (progress) => publishSubmittedTracking(progress, "submitting"),
+    submitChunk: (request) =>
+      bgUpload({
+        ...request,
+        timeoutMs: DIRECT_INGEST_TIMEOUT_MS,
+        ...DIRECT_QUICK_INGEST_TRANSPORT,
+      }),
+  });
+
+  const accepted = submitted.submissions.filter(
+    (submission) => submission.accepted,
+  );
+
+  let submissionCleanupError: string | null = null;
+  if (submitted.stopped && submitted.unsentOccurrenceIds.length > 0) {
+    try {
+      const userCancelled = isCancelled();
+      await cancelRun(
+        mediaMethods,
+        run.runId,
+        userCancelled
+          ? { reason: "user_cancelled" }
+          : {
+              occurrenceIds: submitted.unsentOccurrenceIds,
+              reason: "submission_stopped",
+            },
+        DIRECT_QUICK_INGEST_TRANSPORT,
+      );
+    } catch (error) {
+      submissionCleanupError =
+        error instanceof Error
+          ? error.message
+          : "The server did not confirm occurrence cancellation.";
+    }
+  }
+
+  await publishSubmittedTracking(
+    submitted,
+    submissionCleanupError ? "cleanup_required" : "acknowledged",
+  );
+  clearDirectSessionExecutionTracking(sessionId);
+
+  return {
+    ok: !submitted.stopped,
+    accepted: !submitted.stopped || accepted.length > 0,
+    runId: run.runId,
+    ...(submitted.stopped
+      ? {
+          submissionBlocked: true,
+          ...(submissionCleanupError
+            ? { submissionCleanupFailed: true }
+            : {}),
+          error:
+            submissionCleanupError !== null
+              ? `Submission stopped, but the server could not cancel the unsent occurrences. ${submissionCleanupError} Retry cancellation before reconnecting.`
+              : submitted.retryAfterMs === null
+              ? "Playlist ingest submission stopped before every item was accepted. Try again."
+              : `Playlist ingest submission was rate limited. Try again in ${Math.ceil(submitted.retryAfterMs / 1000)} seconds.`,
+          retryAfterMs: submitted.retryAfterMs,
+          unsentOccurrenceIds: submitted.unsentOccurrenceIds,
+        }
+      : {}),
+  };
 };
 
 const processWebScrape = async ({
@@ -748,8 +1420,7 @@ const runDirectQuickIngestBatch = async (
     input.fileDefaults && typeof input.fileDefaults === "object"
       ? input.fileDefaults
       : {};
-  const shouldStoreRemote =
-    Boolean(input.storeRemote) && !Boolean(input.processOnly);
+  const shouldStoreRemote = input.storeRemote && !input.processOnly;
   const directSessionId =
     String(input.__quickIngestSessionId || "").trim() || undefined;
 
@@ -799,7 +1470,7 @@ const runDirectQuickIngestBatch = async (
 
   try {
     if (directSessionId) {
-      directQuickIngestCancelledSessions.delete(directSessionId);
+      ensureDirectCancellation(directSessionId);
       directQuickIngestSessionTrackers.set(
         directSessionId,
         createIngestJobsTracker<{ sourceId: string }>(),
@@ -1217,13 +1888,20 @@ const runDirectQuickIngestBatch = async (
 
     return { ok: true, results: out };
   } finally {
-    clearDirectSessionTracking(directSessionId);
+    clearDirectSessionExecutionTracking(directSessionId);
   }
 };
 
 export const submitQuickIngestBatch = async (
   input: QuickIngestBatchInput,
 ): Promise<QuickIngestBatchResponse> => {
+  if (input?.pendingRunRequest) {
+    try {
+      return await runVersion2QuickIngestBatch(input);
+    } finally {
+      clearDirectSessionExecutionTracking(input.__quickIngestSessionId);
+    }
+  }
   if (
     !isDirectQuickIngestSessionId(input?.__quickIngestSessionId) &&
     (await canUseExtensionMessagingRuntime())
@@ -1247,24 +1925,122 @@ export const submitQuickIngestBatch = async (
 export const startQuickIngestSession = async (
   input: QuickIngestBatchInput,
 ): Promise<QuickIngestStartAck> => {
-  if (!shouldPreferDirectQuickIngestSession() && (await canUseExtensionMessagingRuntime())) {
+  if (await canUseExtensionMessagingRuntime()) {
+    const sessionId = createExtensionQuickIngestSessionId();
+    const attemptToken = createExtensionQuickIngestAttemptToken();
     try {
-      return await sendExtensionMessageWithTimeout<QuickIngestStartAck>({
+      const ack = await sendExtensionMessageWithTimeout<QuickIngestStartAck>({
         type: "tldw:quick-ingest/start",
+        sessionId,
+        attemptToken,
         payload: input,
       });
+      if (!ack?.ok || ack.sessionId !== sessionId) {
+        return {
+          ok: false,
+          sessionId,
+          error:
+            ack?.error ||
+            "Extension quick ingest returned a conflicting session identity.",
+        };
+      }
+      return ack;
     } catch {
-      // Fall through to the direct session ack when the runtime exists
-      // but message delivery is unhealthy.
+      try {
+        const replay =
+          await sendExtensionMessageWithTimeout<QuickIngestSessionReplayResponse>(
+            {
+              type: "tldw:quick-ingest/replay",
+              payload: { sessionId },
+            },
+          );
+        if (replay?.ok) return { ok: true, sessionId };
+        return {
+          ok: false,
+          sessionId,
+          error:
+            replay?.error ||
+            "Quick ingest start delivery was interrupted and no retained session was found.",
+        };
+      } catch (error) {
+        return {
+          ok: false,
+          indeterminate: true,
+          sessionId,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Quick ingest start delivery was interrupted.",
+        };
+      }
     }
   }
 
   // Direct runtimes currently run ingest synchronously. Return a local ack
   // so session-native callers can still establish a run identity.
+  const sessionId = `${DIRECT_QUICK_INGEST_SESSION_PREFIX}${Date.now()}-${buildDirectSessionSuffix()}`;
+  ensureDirectCancellation(sessionId);
   return {
     ok: true,
-    sessionId: `${DIRECT_QUICK_INGEST_SESSION_PREFIX}${Date.now()}-${buildDirectSessionSuffix()}`,
+    sessionId,
   };
+};
+
+const replayQuickIngestSessionMessage = async (
+  sessionId: string,
+): Promise<QuickIngestSessionReplayResponse> =>
+  sendExtensionMessageWithTimeout<QuickIngestSessionReplayResponse>({
+    type: "tldw:quick-ingest/replay",
+    payload: { sessionId },
+  });
+
+export const queryQuickIngestSession = async (
+  sessionId: string,
+): Promise<QuickIngestSessionReplayResponse> => {
+  const normalizedSessionId = String(sessionId || "").trim();
+  if (!normalizedSessionId) return { ok: false, error: "Missing session id." };
+  if (!(await canUseExtensionMessagingRuntime())) {
+    return { ok: false, error: "Extension runtime is unavailable." };
+  }
+  try {
+    return await replayQuickIngestSessionMessage(normalizedSessionId);
+  } catch (error) {
+    return {
+      ok: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : "Quick ingest session replay failed.",
+    };
+  }
+};
+
+export const acknowledgeQuickIngestSessionReplay = async (
+  input: QuickIngestReplayAckInput,
+): Promise<QuickIngestCancelResponse> => {
+  const sessionId = String(input?.sessionId || "").trim();
+  const runId = String(input?.runId || "").trim();
+  const generation = String(input?.generation || "").trim();
+  if (!sessionId || !runId || !generation) {
+    return { ok: false, error: "Replay acknowledgement is incomplete." };
+  }
+  if (!(await canUseExtensionMessagingRuntime())) {
+    return { ok: false, error: "Extension runtime is unavailable." };
+  }
+  try {
+    return await sendExtensionMessageWithTimeout<QuickIngestCancelResponse>({
+      type: "tldw:quick-ingest/replay-ack",
+      payload: { sessionId, runId, generation },
+    });
+  } catch (error) {
+    return {
+      ok: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : "Quick ingest replay acknowledgement failed.",
+    };
+  }
 };
 
 export const cancelQuickIngestSession = async (
@@ -1272,53 +2048,725 @@ export const cancelQuickIngestSession = async (
 ): Promise<QuickIngestCancelResponse> => {
   const sessionId = String(input?.sessionId || "").trim();
   const tracking = input?.tracking;
+  const reason = input?.reason || "user_cancelled";
+  const occurrenceIds = Array.from(
+    new Set(
+      (input?.occurrenceIds || [])
+        .map((occurrenceId) => String(occurrenceId || "").trim())
+        .filter(Boolean),
+    ),
+  );
+  const isOccurrenceScoped = occurrenceIds.length > 0;
   if (!sessionId) {
     return { ok: false, error: "Missing session id." };
   }
 
-  if (
-    !isDirectQuickIngestSessionId(sessionId) &&
-    (await canUseExtensionMessagingRuntime())
-  ) {
+  const directSession =
+    isDirectQuickIngestSessionId(sessionId) ||
+    tracking?.mode === "webui-direct" ||
+    directQuickIngestSessionTrackers.has(sessionId) ||
+    directQuickIngestCancellations.has(sessionId);
+
+  if (directSession) {
+    const expectedGeneration = String(tracking?.generation || "").trim();
+    const currentGeneration = directQuickIngestGenerations.get(sessionId);
+    if (
+      currentGeneration &&
+      (!expectedGeneration || expectedGeneration !== currentGeneration)
+    ) {
+      return {
+        ok: false,
+        generation: currentGeneration,
+        error: "Quick ingest cancellation was superseded by a newer generation.",
+      };
+    }
+    if (!currentGeneration && expectedGeneration) {
+      directQuickIngestGenerations.set(sessionId, expectedGeneration);
+    }
+  }
+
+  if (directSession) {
+    const cancellation = ensureDirectCancellation(sessionId);
+    if (cancellation) {
+      if (isOccurrenceScoped) {
+        for (const occurrenceId of occurrenceIds) {
+          cancellation.occurrenceIds.add(occurrenceId);
+        }
+      } else {
+        cancellation.cancelAll = true;
+      }
+    }
+  }
+
+  if (tracking?.runId && tracking.mode !== "extension-runtime") {
+    try {
+      await cancelRun(mediaMethods, tracking.runId, {
+        reason,
+        ...(isOccurrenceScoped
+          ? { occurrenceIds }
+          : {}),
+      });
+      if (!isOccurrenceScoped) retireDirectSessionAuthority(sessionId);
+      return { ok: true };
+    } catch (error) {
+      const status =
+        error instanceof PlaylistIngestPublicError ? error.status : null;
+      if (status !== 404 && status !== 405 && status !== 501) {
+        return {
+          ok: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "The ingest run could not be cancelled.",
+        };
+      }
+      if (isOccurrenceScoped) {
+        return {
+          ok: false,
+          error: `Occurrence-scoped run cancellation is unsupported. ${
+            error instanceof Error ? error.message : ""
+          }`.trim(),
+        };
+      }
+      // Older servers may not support run cancellation; try tracked batches.
+    }
+  }
+
+  if (!directSession) {
+    if (!(await canUseExtensionMessagingRuntime())) {
+      return {
+        ok: false,
+        error:
+          "The extension runtime is unavailable; cancellation remains unconfirmed and will be reconciled when it reconnects.",
+      };
+    }
     try {
       return await sendExtensionMessageWithTimeout<QuickIngestCancelResponse>({
         type: "tldw:quick-ingest/cancel",
         payload: {
           sessionId,
+          ...(tracking?.runId ? { runId: tracking.runId } : {}),
+          ...(tracking?.generation
+            ? { expectedGeneration: tracking.generation }
+            : {}),
           reason: input?.reason,
+          ...(isOccurrenceScoped
+            ? { occurrenceIds }
+            : {}),
         },
       });
-    } catch {
-      // Fall through to the direct cancellation path when runtime messaging
-      // stops responding in packaged extension contexts.
+    } catch (error) {
+      return {
+        ok: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "The extension runtime did not confirm cancellation.",
+      };
     }
   }
 
-  directQuickIngestCancelledSessions.add(sessionId);
-  await cancelDirectSessionBatches(
-    sessionId,
-    input?.reason || "user_cancelled",
-  );
-  for (const batchId of normalizeBatchIds([
+  if (isOccurrenceScoped) {
+    return { ok: true };
+  }
+
+  await cancelDirectSessionBatches(sessionId, reason);
+  const batchIds = normalizeBatchIds([
     ...(input?.batchIds || []),
     tracking?.batchId || "",
     ...(tracking?.batchIds || []),
-  ])) {
+  ]);
+  let cancelledBatchCount = 0;
+  let lastBatchError: unknown = null;
+  for (const batchId of batchIds) {
     try {
       await bgRequest<any>({
         path: `/api/v1/media/ingest/jobs/cancel?batch_id=${encodeURIComponent(
           batchId,
-        )}&reason=${encodeURIComponent(input?.reason || "user_cancelled")}`,
+        )}&reason=${encodeURIComponent(reason)}`,
         method: "POST",
         timeoutMs: 10_000,
         returnResponse: true,
         ...DIRECT_QUICK_INGEST_TRANSPORT,
       });
-    } catch {
-      // best effort cancellation for resumed sessions without in-memory trackers
+      cancelledBatchCount += 1;
+    } catch (error) {
+      lastBatchError = error;
     }
   }
+  if (batchIds.length > 0 && cancelledBatchCount === 0) {
+    return {
+      ok: false,
+      error:
+        lastBatchError instanceof Error
+          ? lastBatchError.message
+          : "The tracked ingest batches could not be cancelled.",
+    };
+  }
+  if (tracking?.runId && batchIds.length === 0) {
+    return {
+      ok: false,
+      error: "This server does not support run cancellation, and no tracked batches were available.",
+    };
+  }
+  retireDirectSessionAuthority(sessionId);
   return { ok: true };
+};
+
+const isAmbiguousQuickIngestRetryFailure = (error: unknown): boolean => {
+  const rawStatus =
+    error instanceof PlaylistIngestPublicError
+      ? error.status
+      : error && typeof error === "object"
+        ? (error as { status?: unknown }).status
+        : undefined;
+  if (rawStatus === undefined || rawStatus === null || rawStatus === 0) {
+    return true;
+  }
+  const status = Number(rawStatus);
+  return (
+    !Number.isInteger(status) ||
+    status < 400 ||
+    status > 599 ||
+    status === 500 ||
+    status === 502 ||
+    status === 503 ||
+    status === 504
+  );
+};
+
+const quickIngestRetryErrorMessage = (error: unknown): string =>
+  error instanceof Error
+    ? error.message
+    : "The ingest occurrences could not be retried.";
+
+/**
+ * Submit only retry occurrences returned by the backend retry contract.
+ * Display and queue caches are deliberately outside this interface.
+ */
+export const submitRetriedQuickIngestOccurrences = async (
+  retryResult: PlaylistIngestRunRetryResult,
+): Promise<QuickIngestCancelResponse> => {
+  const runId = String(retryResult?.runId || "").trim();
+  if (!runId) {
+    return { ok: false, error: "Authoritative retry run id is missing." };
+  }
+  const processingOccurrences = Array.isArray(
+    retryResult?.processingOccurrences,
+  )
+    ? retryResult.processingOccurrences
+    : [];
+  for (const occurrence of processingOccurrences) {
+    const occurrenceId = String(occurrence?.occurrenceId || "").trim();
+    const attempt = Number(occurrence?.attempt);
+    if (
+      !occurrenceId ||
+      !Number.isSafeInteger(attempt) ||
+      attempt <= 0
+    ) {
+      return {
+        ok: false,
+        error: "Authoritative retry occurrence id or attempt is missing.",
+      };
+    }
+    if (occurrence.inputKind === "file_stub") {
+      if (occurrence.state !== "awaiting_upload") {
+        return {
+          ok: false,
+          error: "Authoritative file retry state is invalid.",
+        };
+      }
+      continue;
+    }
+    if (
+      occurrence.state !== "staged" ||
+      !String(occurrence.sourceUrl || "").trim()
+    ) {
+      return {
+        ok: false,
+        error: "Authoritative retry source or staged state is missing.",
+      };
+    }
+  }
+
+  const staged = processingOccurrences.filter(
+    (occurrence) => occurrence.inputKind !== "file_stub",
+  );
+  if (staged.length === 0) return { ok: true };
+  const run: PlaylistIngestRunCreateResult = {
+    contractVersion: 2,
+    runId,
+    status: "running",
+    version: Number(retryResult.version) || 0,
+    statusUrl: `/api/v1/media/ingest/runs/${encodeURIComponent(runId)}`,
+    itemsUrl: `/api/v1/media/ingest/runs/${encodeURIComponent(runId)}/items`,
+    eventsUrl: `/api/v1/media/ingest/runs/${encodeURIComponent(runId)}/events/stream`,
+    processingOccurrences: staged,
+  };
+  const submitted = await submitPendingChunks({
+    run,
+    baseFields: {},
+    submitChunk: (request) =>
+      bgUpload({
+        ...request,
+        timeoutMs: DIRECT_INGEST_TIMEOUT_MS,
+        ...DIRECT_QUICK_INGEST_TRANSPORT,
+      }),
+  });
+  if (submitted.stopped || submitted.error) {
+    return {
+      ok: false,
+      ...(isAmbiguousQuickIngestRetryFailure(submitted.error)
+        ? { indeterminate: true }
+        : {}),
+      error:
+        submitted.error instanceof Error
+          ? submitted.error.message
+          : "The retried ingest occurrences could not be submitted.",
+    };
+  }
+  const acceptedOccurrenceIds = new Set(
+    submitted.submissions
+      .filter((submission) => submission.accepted)
+      .map((submission) => submission.occurrenceId),
+  );
+  const rejected = staged.find(
+    (occurrence) => !acceptedOccurrenceIds.has(occurrence.occurrenceId),
+  );
+  if (rejected) {
+    const rejection = submitted.submissions.find(
+      (submission) => submission.occurrenceId === rejected.occurrenceId,
+    );
+    return {
+      ok: false,
+      error:
+        rejection?.message ||
+        "The backend did not accept every authoritative retry occurrence.",
+    };
+  }
+  return { ok: true };
+};
+
+type DirectRetryManifestResolution =
+  | {
+      kind: "processing";
+      retryResult: PlaylistIngestRunRetryResult;
+      hasUnadvancedRetryableOccurrence: boolean;
+    }
+  | { kind: "active" }
+  | { kind: "resolved" }
+  | { kind: "not_advanced" }
+  | { kind: "invalid"; error: string };
+
+const resolveAuthoritativeRetryManifest = (
+  snapshot: PlaylistIngestRunSnapshot,
+  reservation: DirectQuickIngestRetryReservation,
+): DirectRetryManifestResolution => {
+  const itemsByOccurrenceId = new Map(
+    snapshot.items.map((item) => [item.occurrenceId, item] as const),
+  );
+  const selected = reservation.occurrenceIds.map((occurrenceId) =>
+    itemsByOccurrenceId.get(occurrenceId),
+  );
+  if (selected.some((item) => !item)) {
+    return {
+      kind: "invalid",
+      error: "Authoritative retry manifest is missing a selected occurrence.",
+    };
+  }
+  const items = selected.filter((item): item is NonNullable<typeof item> =>
+    Boolean(item),
+  );
+  const processingItems = items.filter(
+    (item) => item.inputKind !== "file_stub" && item.state === "staged",
+  );
+  const hasUnadvancedRetryableOccurrence = items.some(
+    (item) => item.state === "terminal" && item.retryable,
+  );
+  if (
+    items.some(
+      (item) =>
+        item.inputKind !== "file_stub" && item.state === "status_unavailable",
+    )
+  ) {
+    return {
+      kind: "invalid",
+      error: "Authoritative retry manifest is temporarily unavailable.",
+    };
+  }
+  if (processingItems.length > 0) {
+    const processingOccurrences: PlaylistProcessingOccurrence[] =
+      processingItems.map((item) => ({
+        occurrenceId: item.occurrenceId,
+        ordinal: item.ordinal,
+        inputKind: item.inputKind,
+        sourceUrl: item.sourceUrl,
+        sourceKind: item.sourceKind,
+        displayMetadata: item.displayMetadata,
+        state: "staged",
+        outcome: null,
+        jobId: null,
+        batchId: null,
+        attempt: item.attempt,
+        plannedCollectionItemId: item.plannedCollectionItemId,
+      }));
+    return {
+      kind: "processing",
+      retryResult: {
+        contractVersion: 2,
+        runId: reservation.runId,
+        version: snapshot.summary.version,
+        processingOccurrences,
+      },
+      hasUnadvancedRetryableOccurrence,
+    };
+  }
+  if (items.some((item) => item.state === "status_unavailable")) {
+    return {
+      kind: "invalid",
+      error: "Authoritative retry manifest is temporarily unavailable.",
+    };
+  }
+  if (hasUnadvancedRetryableOccurrence) {
+    return { kind: "not_advanced" };
+  }
+  if (
+    items.some(
+      (item) =>
+        item.state !== "terminal" ||
+        (item.inputKind === "file_stub" && item.state === "awaiting_upload"),
+    )
+  ) {
+    return { kind: "active" };
+  }
+  return { kind: "resolved" };
+};
+
+type DirectRetryReconciliation = QuickIngestCancelResponse & {
+  notAdvanced?: boolean;
+};
+
+const TERMINAL_DIRECT_RETRY_RUN_STATUSES = new Set([
+  "completed",
+  "cancelled",
+  "partial_failure",
+]);
+
+export const reconcileRetriedQuickIngestOccurrences = async (
+  runId: string,
+  occurrenceIds: string[],
+): Promise<DirectRetryReconciliation> => {
+  const normalizedRunId = String(runId || "").trim();
+  const normalizedOccurrenceIds = Array.from(
+    new Set(
+      occurrenceIds
+        .map((occurrenceId) => String(occurrenceId || "").trim())
+        .filter(Boolean),
+    ),
+  );
+  if (!normalizedRunId || normalizedOccurrenceIds.length === 0) {
+    return { ok: false, error: "Retry reconciliation identity is invalid." };
+  }
+  let snapshot: PlaylistIngestRunSnapshot;
+  try {
+    snapshot = await pollRunSnapshot(
+      mediaMethods,
+      normalizedRunId,
+      undefined,
+      DIRECT_QUICK_INGEST_TRANSPORT,
+    );
+  } catch (error) {
+    return {
+      ok: false,
+      indeterminate: true,
+      error: quickIngestRetryErrorMessage(error),
+    };
+  }
+  const now = Date.now();
+  const resolved = resolveAuthoritativeRetryManifest(snapshot, {
+    sessionId: "reconcile-only",
+    runId: normalizedRunId,
+    occurrenceIds: normalizedOccurrenceIds,
+    generation: "reconcile-only",
+    createdAt: now,
+    expiresAt: now,
+  });
+  if (resolved.kind === "not_advanced") {
+    return {
+      ok: false,
+      indeterminate: true,
+      notAdvanced: true,
+      error: "The authoritative run has not advanced to the reserved retry yet.",
+    };
+  }
+  if (resolved.kind === "invalid") {
+    return { ok: false, indeterminate: true, error: resolved.error };
+  }
+  if (resolved.kind === "active" || resolved.kind === "resolved") {
+    return { ok: true };
+  }
+  const submitted = await submitRetriedQuickIngestOccurrences(
+    resolved.retryResult,
+  );
+  if (submitted.ok && resolved.hasUnadvancedRetryableOccurrence) {
+    return {
+      ok: false,
+      indeterminate: true,
+      error: "Retry reconciliation is waiting for every selected occurrence to advance.",
+    };
+  }
+  return submitted;
+};
+
+const reconcileDirectQuickIngestRetryReservation = async (
+  reservation: DirectQuickIngestRetryReservation,
+): Promise<DirectRetryReconciliation> => {
+  let snapshot: PlaylistIngestRunSnapshot;
+  try {
+    snapshot = await pollRunSnapshot(
+      mediaMethods,
+      reservation.runId,
+      undefined,
+      DIRECT_QUICK_INGEST_TRANSPORT,
+    );
+  } catch (error) {
+    return {
+      ok: false,
+      indeterminate: true,
+      generation: reservation.generation,
+      error: quickIngestRetryErrorMessage(error),
+    };
+  }
+  const resolved = resolveAuthoritativeRetryManifest(snapshot, reservation);
+  if (resolved.kind === "not_advanced") {
+    return {
+      ok: false,
+      indeterminate: true,
+      generation: reservation.generation,
+      notAdvanced: true,
+      error: "The authoritative run has not advanced to the reserved retry yet.",
+    };
+  }
+  if (resolved.kind === "invalid") {
+    return {
+      ok: false,
+      indeterminate: true,
+      generation: reservation.generation,
+      error: resolved.error,
+    };
+  }
+  if (resolved.kind === "active") {
+    directQuickIngestRetryReservations.delete(reservation.sessionId);
+    return { ok: true, generation: reservation.generation };
+  }
+  if (resolved.kind === "resolved") {
+    if (
+      TERMINAL_DIRECT_RETRY_RUN_STATUSES.has(snapshot.summary.status) &&
+      directQuickIngestGenerations.get(reservation.sessionId) ===
+        reservation.generation
+    ) {
+      retireDirectSessionAuthority(reservation.sessionId);
+    } else {
+      directQuickIngestRetryReservations.delete(reservation.sessionId);
+    }
+    return { ok: true, generation: reservation.generation };
+  }
+  const submitted = await submitRetriedQuickIngestOccurrences(
+    resolved.retryResult,
+  );
+  if (submitted.ok && !resolved.hasUnadvancedRetryableOccurrence) {
+    directQuickIngestRetryReservations.delete(reservation.sessionId);
+  }
+  if (submitted.ok && resolved.hasUnadvancedRetryableOccurrence) {
+    return {
+      ok: false,
+      indeterminate: true,
+      generation: reservation.generation,
+      error: "Retry reconciliation is waiting for every selected occurrence to advance.",
+    };
+  }
+  return { ...submitted, generation: reservation.generation };
+};
+
+const rollbackDirectQuickIngestRetryReservation = (
+  reservation: DirectQuickIngestRetryReservation,
+): void => {
+  if (
+    directQuickIngestGenerations.get(reservation.sessionId) !==
+    reservation.generation
+  ) {
+    return;
+  }
+  directQuickIngestRetryReservations.delete(reservation.sessionId);
+  if (reservation.previousGeneration) {
+    directQuickIngestGenerations.set(
+      reservation.sessionId,
+      reservation.previousGeneration,
+    );
+  } else {
+    directQuickIngestGenerations.delete(reservation.sessionId);
+  }
+};
+
+const executeDirectQuickIngestRetry = async (
+  reservation: DirectQuickIngestRetryReservation,
+): Promise<QuickIngestCancelResponse> => {
+  try {
+    const retryResult = await retryRunItems(
+      mediaMethods,
+      reservation.runId,
+      reservation.occurrenceIds,
+    );
+    const submitted = await submitRetriedQuickIngestOccurrences(retryResult);
+    if (submitted.ok && retryResult.processingOccurrences.length === 0) {
+      return reconcileDirectQuickIngestRetryReservation(reservation);
+    }
+    if (submitted.ok) {
+      directQuickIngestRetryReservations.delete(reservation.sessionId);
+    }
+    return { ...submitted, generation: reservation.generation };
+  } catch (error) {
+    if (!isAmbiguousQuickIngestRetryFailure(error)) {
+      rollbackDirectQuickIngestRetryReservation(reservation);
+      return { ok: false, error: quickIngestRetryErrorMessage(error) };
+    }
+    const reconciled =
+      await reconcileDirectQuickIngestRetryReservation(reservation);
+    if (reconciled.notAdvanced) {
+      return {
+        ...reconciled,
+        error: quickIngestRetryErrorMessage(error),
+      };
+    }
+    return reconciled;
+  }
+};
+
+const runAsDirectQuickIngestRetryOwner = async (
+  reservation: DirectQuickIngestRetryReservation,
+  execute: () => Promise<QuickIngestCancelResponse>,
+): Promise<QuickIngestCancelResponse> => {
+  if (directQuickIngestRetryOwners.has(reservation.sessionId)) {
+    return {
+      ok: false,
+      indeterminate: true,
+      generation: reservation.generation,
+      error: "Quick ingest retry is already in progress for this session.",
+    };
+  }
+  directQuickIngestRetryOwners.add(reservation.sessionId);
+  try {
+    return await execute();
+  } finally {
+    directQuickIngestRetryOwners.delete(reservation.sessionId);
+  }
+};
+
+export const retryQuickIngestSession = async (
+  input: QuickIngestRetryInput,
+): Promise<QuickIngestCancelResponse> => {
+  const sessionId = String(input?.sessionId || "").trim();
+  const runId = String(input?.tracking?.runId || "").trim();
+  const occurrenceIds = Array.from(
+    new Set(
+      (input?.occurrenceIds || [])
+        .map((value) => String(value || "").trim())
+        .filter(Boolean),
+    ),
+  );
+  if (!sessionId) return { ok: false, error: "Missing session id." };
+  if (!runId) return { ok: false, error: "Missing run id." };
+  if (occurrenceIds.length === 0) {
+    return { ok: false, error: "No retryable occurrences were selected." };
+  }
+
+  if (input.tracking?.mode !== "extension-runtime") {
+    const expectedGeneration = String(input.tracking?.generation || "").trim();
+    pruneDirectQuickIngestRetryReservations();
+    const currentGeneration = directQuickIngestGenerations.get(sessionId);
+    if (
+      currentGeneration &&
+      (!expectedGeneration || expectedGeneration !== currentGeneration)
+    ) {
+      return {
+        ok: false,
+        generation: currentGeneration,
+        error: "Quick ingest retry was superseded by a newer generation.",
+      };
+    }
+    if (!currentGeneration && expectedGeneration) {
+      directQuickIngestGenerations.set(sessionId, expectedGeneration);
+    }
+    const retainedReservation =
+      getDirectQuickIngestRetryReservation(sessionId);
+    if (retainedReservation) {
+      if (
+        retainedReservation.runId !== runId ||
+        retainedReservation.generation !== expectedGeneration ||
+        retainedReservation.occurrenceIds.length !== occurrenceIds.length ||
+        retainedReservation.occurrenceIds.some(
+          (occurrenceId, index) => occurrenceId !== occurrenceIds[index],
+        )
+      ) {
+        return {
+          ok: false,
+          generation: retainedReservation.generation,
+          error: "Quick ingest retry authority is reserved for another request.",
+        };
+      }
+      return runAsDirectQuickIngestRetryOwner(
+        retainedReservation,
+        async () => {
+          const reconciled =
+            await reconcileDirectQuickIngestRetryReservation(retainedReservation);
+          if (!reconciled.notAdvanced) return reconciled;
+          return executeDirectQuickIngestRetry(retainedReservation);
+        },
+      );
+    }
+    const generation = createQuickIngestGeneration();
+    const previousGeneration = currentGeneration || expectedGeneration;
+    directQuickIngestGenerations.set(sessionId, generation);
+    const reservation = retainDirectQuickIngestRetryReservation({
+      sessionId,
+      runId,
+      occurrenceIds,
+      generation,
+      ...(previousGeneration ? { previousGeneration } : {}),
+    });
+    if (!reservation) {
+      if (previousGeneration) {
+        directQuickIngestGenerations.set(sessionId, previousGeneration);
+      } else {
+        directQuickIngestGenerations.delete(sessionId);
+      }
+      return {
+        ok: false,
+        error: "Quick ingest retry recovery capacity is full. Reconcile an earlier retry before starting another.",
+      };
+    }
+    return runAsDirectQuickIngestRetryOwner(reservation, () =>
+      executeDirectQuickIngestRetry(reservation),
+    );
+  }
+
+  if (!(await canUseExtensionMessagingRuntime())) {
+    return { ok: false, error: "Extension runtime is unavailable." };
+  }
+  try {
+    return await sendExtensionMessageWithTimeout<QuickIngestCancelResponse>({
+      type: "tldw:quick-ingest/retry",
+      payload: { sessionId, runId, occurrenceIds },
+    });
+  } catch (error) {
+    return {
+      ok: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : "The extension runtime did not confirm the retry.",
+    };
+  }
 };
 
 export const __resetQuickIngestRuntimeHealthForTests = (): void => {

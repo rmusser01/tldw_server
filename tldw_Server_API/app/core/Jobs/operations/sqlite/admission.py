@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -259,6 +260,7 @@ def create_job_admission(
     max_queued_quota: int,
     submits_per_minute_quota: int,
     counters_enabled: bool,
+    transaction_guard: Callable[[sqlite3.Connection], None] | None = None,
 ) -> AdmissionResult:
     """Create or replay a queued job admission inside a SQLite transaction."""
 
@@ -267,6 +269,8 @@ def create_job_admission(
     available_at_sql = _sqlite_timestamp(command.available_at) if command.available_at else None
 
     with conn:
+        if transaction_guard is not None:
+            transaction_guard(conn)
         quota_result = _quota_rejection(
             conn,
             command=command,

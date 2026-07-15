@@ -64,6 +64,10 @@ quotas, metrics, events, audit hooks, and worker SDK utilities.
 ### Security And Operations
 
 - Postgres paths preserve RLS and domain allowlist behavior through endpoint context and manager calls. Do not fabricate owner or principal context to make an admin route easier.
+- Treat Postgres RLS as a guardrail against trusted-application query bugs, not as the primary authentication boundary. It does not protect against direct database access, SQL injection, a compromised application login, or database owner/superuser access; restrict network access and credentials independently.
+- `JOBS_PG_RLS_ROLE` must name a dedicated `NOLOGIN`, non-superuser group role without `BYPASSRLS` or parent-role memberships. Across every non-system schema, the installer removes all direct schema, table, and sequence privileges from that role, then grants only current-schema `USAGE` plus the enumerated Jobs/playlist objects. Any custom direct grants on this dedicated role are removed during migration and must move to a different role. Installation fails if `PUBLIC`, inherited, or ownership-derived privileges expose an unrelated object, grant `CREATE` on a non-system schema, or exceed the allowlist ceiling (`SELECT`/`INSERT`/`UPDATE`/`DELETE` on tables and `USAGE`/`SELECT` on sequences); it does not mutate `PUBLIC`. Grant the application login membership and let `JobManager` assume the role.
+- When both `JOBS_PG_RLS_ENABLE` and `JOBS_PG_RLS_ROLE` are configured, managed Postgres connections fail closed if role assumption or RLS context setup fails; they never continue as the application login.
+- Use `JobManager.rls_context(...)` for owner-scoped work so nested and exceptional paths restore the previous context. Playlist authority queries fail closed unless a nonblank owner is set; reserve admin context for genuinely global operations.
 - Destructive admin operations such as prune, batch cancel, and quarantine requeue require scoped filters and confirmation behavior outside test mode.
 - Leases are the concurrency boundary. Workers must complete, fail, or renew with the expected worker and lease identifiers rather than updating rows directly.
 

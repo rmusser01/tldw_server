@@ -40,6 +40,11 @@ const createDeferred = <T,>() => {
 }
 
 const mocks = vi.hoisted(() => ({
+  capabilities: {
+    hasMcp: false,
+    hasMediaPlaylistPreflight: false,
+    hasWebSearch: true,
+  },
   selectedAssistant: null as null | {
     kind: "character"
     id: string
@@ -52,6 +57,9 @@ const mocks = vi.hoisted(() => ({
   fetchChatModels: vi.fn(async () => []),
   runtimeGetURL: vi.fn((path: string) => `chrome-extension://handoff${path}`),
   tabsCreate: vi.fn(),
+  tabsQuery: vi.fn(),
+  buildQuickIngestOpenDetailFromUrl: vi.fn(),
+  requestQuickIngestOpen: vi.fn(),
   createSidepanelChatHandoff: vi.fn(),
   consumeSidepanelChatHandoff: vi.fn(),
   buildSidepanelChatHandoffRoute: vi.fn(
@@ -75,7 +83,8 @@ vi.mock("wxt/browser", () => ({
       getURL: mocks.runtimeGetURL
     },
     tabs: {
-      create: mocks.tabsCreate
+      create: mocks.tabsCreate,
+      query: mocks.tabsQuery,
     }
   }
 }))
@@ -190,11 +199,7 @@ vi.mock("@/hooks/useChatMoodBadgePreference", () => ({
 
 vi.mock("@/hooks/useServerCapabilities", () => ({
   useServerCapabilities: () => ({
-    capabilities: {
-      hasMcp: false,
-      hasMediaPlaylistPreflight: false,
-      hasWebSearch: true
-    }
+    capabilities: mocks.capabilities,
   })
 }))
 
@@ -233,8 +238,8 @@ vi.mock("@/services/tldw-server", () => ({
 }))
 
 vi.mock("@/utils/quick-ingest-open", () => ({
-  buildQuickIngestOpenDetailFromUrl: vi.fn(),
-  requestQuickIngestOpen: vi.fn()
+  buildQuickIngestOpenDetailFromUrl: mocks.buildQuickIngestOpenDetailFromUrl,
+  requestQuickIngestOpen: mocks.requestQuickIngestOpen,
 }))
 
 vi.mock("@/hooks/useSelectedAssistant", () => ({
@@ -262,6 +267,7 @@ const defaultProps = () => ({
 describe("ControlRow sidepanel chat handoff", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.capabilities.hasMediaPlaylistPreflight = false
     mocks.selectedAssistant = null
     mocks.createSidepanelChatHandoff.mockResolvedValue({
       id: "handoff-123",
@@ -271,6 +277,31 @@ describe("ControlRow sidepanel chat handoff", () => {
       draft: { text: "Summarize this" }
     })
     vi.spyOn(window, "open").mockImplementation(() => null)
+  })
+
+  it("passes only typed active-tab playlist detail to the shared wizard", async () => {
+    const detail = {
+      source: "extension_active_tab" as const,
+      url: "https://www.youtube.com/playlist?list=PLtyped",
+      sourceKind: "youtube_playlist" as const,
+      action: "playlist_preflight" as const,
+    }
+    mocks.capabilities.hasMediaPlaylistPreflight = true
+    mocks.tabsQuery.mockResolvedValue([
+      { id: 7, title: "Playlist tab", url: detail.url },
+    ])
+    mocks.buildQuickIngestOpenDetailFromUrl.mockReturnValue(detail)
+    render(<ControlRow {...defaultProps()} draftMessage="" />)
+
+    fireEvent.click(screen.getByTestId("chat-quick-ingest"))
+
+    await waitFor(() => {
+      expect(mocks.requestQuickIngestOpen).toHaveBeenCalledWith(detail)
+    })
+    expect(mocks.buildQuickIngestOpenDetailFromUrl).toHaveBeenCalledWith(
+      detail.url
+    )
+    expect(mocks.requestQuickIngestOpen.mock.calls[0]?.[0]).toEqual(detail)
   })
 
   it("keeps Open full app route-only with no handoff parameter", () => {

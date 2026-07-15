@@ -23,6 +23,36 @@ interface FileDropZoneProps {
   className?: string
 }
 
+const QUICK_INGEST_ACCEPT_ENTRIES = QUICK_INGEST_ACCEPT_STRING.split(",")
+  .map((entry) => entry.trim().toLowerCase())
+  .filter(Boolean)
+const QUICK_INGEST_VALID_EXTENSIONS = QUICK_INGEST_ACCEPT_ENTRIES.filter(
+  (entry) => entry.startsWith(".")
+)
+const QUICK_INGEST_VALID_MIME_TYPES = QUICK_INGEST_ACCEPT_ENTRIES.filter(
+  (entry) => entry.includes("/")
+)
+
+const quickIngestMimeTypeIsAllowed = (mimeType: string): boolean => {
+  const normalized = mimeType.toLowerCase()
+  if (!normalized) return false
+  if (QUICK_INGEST_VALID_MIME_TYPES.includes(normalized)) return true
+  const category = normalized.split("/")[0]
+  return QUICK_INGEST_VALID_MIME_TYPES.includes(`${category}/*`)
+}
+
+export const validateQuickIngestFile = (file: File): string | null => {
+  if (file.size > QUICK_INGEST_MAX_FILE_SIZE) {
+    return `${file.name} exceeds ${QUICK_INGEST_MAX_FILE_SIZE_LABEL} quick-ingest limit`
+  }
+  const fileExtension = `.${file.name.split(".").pop()?.toLowerCase() || ""}`
+  const validExtension = QUICK_INGEST_VALID_EXTENSIONS.includes(fileExtension)
+  const validMime = file.type ? quickIngestMimeTypeIsAllowed(file.type) : false
+  return validExtension || validMime
+    ? null
+    : `${file.name} is not a supported file type`
+}
+
 /**
  * Drag-and-drop file zone for Quick Ingest.
  * Based on pattern from Flashcards/FileDropZone.tsx with:
@@ -57,7 +87,7 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({
       return
     }
     if (disabled || hasAutoFocusedRef.current) return
-    dropZoneRef.current?.focus()
+    dropZoneRef.current?.querySelector<HTMLButtonElement>("button")?.focus()
     hasAutoFocusedRef.current = true
   }, [autoFocus, disabled])
 
@@ -67,51 +97,14 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({
     [t]
   )
 
-  const acceptEntries = React.useMemo(() => {
-    return QUICK_INGEST_ACCEPT_STRING.split(",")
-      .map((entry) => entry.trim().toLowerCase())
-      .filter(Boolean)
-  }, [])
-
-  // Validate extensions from accept string
-  const validExtensions = React.useMemo(() => {
-    return acceptEntries.filter((entry) => entry.startsWith("."))
-  }, [acceptEntries])
-
-  const validMimeTypes = React.useMemo(() => {
-    return acceptEntries.filter((entry) => entry.includes("/"))
-  }, [acceptEntries])
-
   const isMimeTypeAllowed = useCallback(
-    (mimeType: string) => {
-      const normalized = mimeType.toLowerCase()
-      if (!normalized) return false
-      if (validMimeTypes.includes(normalized)) return true
-      const category = normalized.split("/")[0]
-      return validMimeTypes.includes(`${category}/*`)
-    },
-    [validMimeTypes]
+    (mimeType: string) => quickIngestMimeTypeIsAllowed(mimeType),
+    []
   )
 
   const validateFile = useCallback(
-    (file: File): string | null => {
-      // Size check
-      if (file.size > QUICK_INGEST_MAX_FILE_SIZE) {
-        return `${file.name} exceeds ${QUICK_INGEST_MAX_FILE_SIZE_LABEL} quick-ingest limit`
-      }
-
-      // Type check - allow if extension matches OR MIME type matches
-      const fileExt = "." + (file.name.split(".").pop()?.toLowerCase() || "")
-      const isValidExtension = validExtensions.includes(fileExt)
-      const isValidMime = file.type ? isMimeTypeAllowed(file.type) : false
-
-      if (!isValidExtension && !isValidMime) {
-        return `${file.name} is not a supported file type`
-      }
-
-      return null
-    },
-    [isMimeTypeAllowed, validExtensions]
+    (file: File): string | null => validateQuickIngestFile(file),
+    []
   )
 
   const resetDragState = useCallback(() => {
@@ -241,25 +234,18 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({
     }
   }, [disabled])
 
-  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (event.currentTarget !== event.target) return
-    if (event.key !== "Enter" && event.key !== " ") return
-    event.preventDefault()
-    handleBrowseClick(event)
-  }
-
   // Determine visual state
   const getStateStyles = () => {
     if (disabled) {
       return "border-border bg-surface2 opacity-50 cursor-not-allowed"
     }
     if (isDragging && isDragReject) {
-      return "border-danger/50 bg-danger/10 cursor-pointer"
+      return "border-danger/50 bg-danger/10"
     }
     if (isDragging) {
-      return "border-primary bg-primary/5 cursor-pointer"
+      return "border-primary bg-primary/5"
     }
-    return "border-border bg-surface2 hover:border-primary/50 cursor-pointer"
+    return "border-border bg-surface2 hover:border-primary/50"
   }
 
   const releaseLabel =
@@ -288,17 +274,14 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-      onClick={handleBrowseClick}
-      onKeyDown={handleKeyDown}
       className={`mt-3 w-full rounded-md border border-dashed px-4 py-4 text-center transition-colors ${getStateStyles()} ${className || ""}`}
       data-testid="qi-file-dropzone"
-      role="button"
+      role="group"
       aria-label={qi(
         "dropzoneAriaLabel",
-        "File upload zone. Drag and drop files or press Enter to browse."
+        "File upload zone. Drag and drop files or use Browse files."
       )}
       aria-disabled={disabled}
-      tabIndex={disabled ? -1 : 0}
     >
       <div className="flex flex-col gap-2 items-center justify-center">
         {/* Icon based on state */}

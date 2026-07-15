@@ -42,16 +42,24 @@ export const BatchMetadataPanel: React.FC = () => {
         .length,
     [queueItems]
   )
-  const hasPlaylistItems = queueItems.some((item) => item.playlist)
+  const hasConferenceOverrides = queueItems.some((item) => item.conferenceOverride)
+  const hasPlaylistItems = queueItems.some((item) => Boolean(item.playlist))
+  const hasMaterializedPlaylistItems = queueItems.some(
+    (item) => item.sourceRef?.kind === "materialized_playlist_item"
+  )
   const likelyConferenceVideoBatch =
+    !hasMaterializedPlaylistItems &&
     queueItems.length > 1 &&
     queueItems.every(
       (item) =>
         item.detectedType === "video" ||
-        Boolean(item.playlist) ||
         isLikelyConferenceVideo(item.url)
     )
-  const shouldShow = hasPlaylistItems || likelyConferenceVideoBatch
+  const shouldShow =
+    Boolean(conferenceBatchMetadata) ||
+    hasConferenceOverrides ||
+    hasPlaylistItems ||
+    likelyConferenceVideoBatch
 
   const metadata: ConferenceBatchMetadata = useMemo(
     () => ({

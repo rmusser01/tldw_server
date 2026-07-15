@@ -95,10 +95,10 @@ describe("sidepanel queued request contract", () => {
   })
 
   it("passes extension playlist handoff detail into the Quick Ingest session", () => {
+    expect(sidepanelFormSource).toContain("useSidepanelQuickIngestOpen")
     expect(sidepanelFormSource).toContain(
-      "createQuickIngestSessionSeedFromOpenDetail(detail)"
+      "onOpenQuickIngest: handleOpenQuickIngest"
     )
-    expect(sidepanelFormSource).toContain("upsertQuickIngestSession(seed)")
     expect(controlRowSource).toContain("buildQuickIngestOpenDetailFromUrl")
     expect(controlRowSource).toContain("Import playlist to tldw")
   })

@@ -1,0 +1,531 @@
+# YouTube Playlist Ingest Backend Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Add the owner-scoped backend contracts that inspect a YouTube playlist completely, materialize selected occurrences, and track every selected occurrence through one ingest run without allowing an opaque playlist job.
+
+**Architecture:** Reuse the existing Jobs SQLite/PostgreSQL database, leases, events, and media-ingest worker. Add focused playlist-ingest tables and a repository beside Jobs, keep yt-dlp in a bounded child process, and let a small service translate run occurrences into existing media jobs or terminal duplicate actions. Keep the synchronous preflight endpoint only as a compatibility surface.
+
+**Tech Stack:** FastAPI, Pydantic v2, SQLite/PostgreSQL Jobs backends, yt-dlp, existing `JobManager`, Media DB and Collections DB abstractions, pytest, Hypothesis, Bandit.
+
+**Backlog:** `TASK-12110`
+
+**Spec:** `Docs/superpowers/specs/2026-07-12-youtube-playlist-per-item-ingest-design.md`
+
+---
+
+## File map
+
+**Create**
+
+- `tldw_Server_API/app/api/v1/schemas/media_playlist_ingest.py` — version-2 preflight, materialization, run, item, event, retry, and structured submission models.
+- `tldw_Server_API/app/core/Ingestion_Media_Processing/Video/playlist_ingest_store.py` — owner-filtered persistence, cursor encoding, expiry cleanup, and atomic state transitions over the Jobs database.
+- `tldw_Server_API/app/core/Ingestion_Media_Processing/Video/playlist_preflight_runner.py` — bounded child-process extraction and cancellation/timeout termination.
+- `tldw_Server_API/app/core/Ingestion_Media_Processing/Video/playlist_ingest_service.py` — preflight scheduling, materialization, run validation, duplicate-action resolution, and job/run reconciliation.
+- `tldw_Server_API/app/api/v1/endpoints/media/playlist_ingest.py` — version-2 HTTP and SSE routes.
+- `tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_ingest_store.py` — SQLite repository and state-machine tests.
+- `tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_ingest_service.py` — orchestration, duplicate, idempotency, and metadata-patch tests.
+- `tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_ingest_endpoint.py` — route, auth, cursor, and error-contract tests.
+- `tldw_Server_API/tests/MediaIngestion_NEW/integration/test_playlist_ingest_store_postgres.py` — repository parity against the existing isolated PostgreSQL fixture.
+- `tldw_Server_API/tests/MediaIngestion_NEW/integration/test_playlist_ingest_run_workflow.py` — real Jobs DB/worker workflow with media processing faked.
+- `tldw_Server_API/tests/MediaIngestion_NEW/property/test_playlist_ingest_properties.py` — pagination, identity, action-resolution, and retry invariants.
+
+**Modify**
+
+- `tldw_Server_API/app/core/Jobs/migrations.py` — SQLite tables/indexes for preflights, items, materializations, runs, run items, and run events.
+- `tldw_Server_API/app/core/Jobs/pg_migrations.py` — PostgreSQL-equivalent schema and indexes.
+- `tldw_Server_API/app/core/Ingestion_Media_Processing/Video/playlist_preflight.py` — configured-limit-plus-one extraction and availability/occurrence normalization.
+- `tldw_Server_API/app/api/v1/endpoints/media/__init__.py` — register `playlist_ingest` beside the compatibility preflight router.
+- `tldw_Server_API/app/api/v1/endpoints/media/ingest_jobs.py` — reject playlist candidates; accept aligned run/occurrence/attempt bindings; return structured per-occurrence acceptance.
+- `tldw_Server_API/app/services/media_ingest_jobs_worker.py` — handle the internal preflight job and require exactly one media result for a concrete occurrence.
+- `tldw_Server_API/app/core/DB_Management/media_db/runtime/media_item_update_ops.py` — atomic allowlisted metadata-only patch.
+- `tldw_Server_API/app/core/DB_Management/media_db/repositories/media_lookup_repository.py`, `api.py`, and `runtime/query_ops.py` — one owner-database bulk URL lookup shared by preflight enrichment and run validation.
+- `tldw_Server_API/app/core/DB_Management/media_db/media_database_impl.py` — bind the metadata-patch method.
+- `tldw_Server_API/app/core/DB_Management/Collections_DB.py` — transactional optional collection plus planned-item creation.
+- `tldw_Server_API/app/api/v1/endpoints/config_info.py` — advertise contract version/readiness.
+- Existing tests under `tldw_Server_API/tests/Jobs/`, `MediaIngestion_NEW/unit/`, `DB_Management/`, and `Media/` — extend migration, worker, collection, compatibility, and capability coverage.
+
+## Stage 1: Durable owner-scoped storage
+
+**Goal:** Establish portable persistence and strict state transitions before adding routes.
+
+**Success Criteria:** Both Jobs backends create the same schema; owner-scoped reads, immutable ordering, expiry, and cursors are deterministic.
+
+**Tests:** SQLite/PostgreSQL migration tests, repository unit tests, Hypothesis pagination/identity tests.
+
+**Status:** Complete
+
+### Task 1: Add contract models and Jobs migrations
+
+- [x] **Step 1: Write failing migration and schema tests**
+
+Add table assertions to `tldw_Server_API/tests/Jobs/test_jobs_migrations_sqlite.py` and `test_jobs_migrations_postgres.py`. Add model-validation tests to `test_playlist_ingest_store.py` proving duplicate policies are explicit and `file_reattach_required` is rejected as a server state.
+
+```python
+EXPECTED_PLAYLIST_TABLES = {
+    "playlist_preflights",
+    "playlist_preflight_items",
+    "playlist_materializations",
+    "playlist_materialization_items",
+    "media_ingest_runs",
+    "media_ingest_run_items",
+    "media_ingest_run_events",
+}
+
+def test_run_state_rejects_client_only_file_reattach_state():
+    with pytest.raises(ValidationError):
+        RunItemSnapshot(occurrence_id="occ-1", ordinal=1, state="file_reattach_required")
+```
+
+- [x] **Step 2: Run the tests and verify RED**
+
+Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Jobs/test_jobs_migrations_sqlite.py tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_ingest_store.py -q`
+
+Expected: FAIL because the tables and `media_playlist_ingest` schemas do not exist.
+
+- [x] **Step 3: Add the minimum portable schema**
+
+Define Pydantic enums/models in `media_playlist_ingest.py`. Add matching `CREATE TABLE IF NOT EXISTS` DDL to both Jobs migration modules. Store bounded display metadata and patches as JSON, but keep owner, status, ordinal, occurrence ID, normalized source ID, job ID, attempt, event ID, and expiry as indexed columns. Add uniqueness constraints for `(preflight_id, ordinal)`, occurrence IDs, `(run_id, occurrence_id)`, and `(run_id, occurrence_id, attempt)` job mappings.
+
+- [x] **Step 4: Run SQLite and PostgreSQL migration tests**
+
+Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Jobs/test_jobs_migrations_sqlite.py tldw_Server_API/tests/Jobs/test_jobs_migrations_postgres.py -q`
+
+Expected: PASS (PostgreSQL test skips only through its existing fixture when unavailable).
+
+- [x] **Step 5: Commit**
+
+```bash
+git add tldw_Server_API/app/api/v1/schemas/media_playlist_ingest.py tldw_Server_API/app/core/Jobs/migrations.py tldw_Server_API/app/core/Jobs/pg_migrations.py tldw_Server_API/tests/Jobs tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_ingest_store.py
+git commit -m "feat: add playlist ingest persistence schema (TASK-12110)"
+```
+
+### Task 2: Implement the focused repository and cursor contract
+
+- [x] **Step 1: Write failing repository tests**
+
+Cover creation, owner isolation, ready-only materialization, selected occurrence copying, immutable ordering, cursor tampering, expiry, event replay, compare-and-set state transitions, and one-query Media DB lookup of normalized URL candidates.
+
+```python
+def test_materialization_copies_identity_but_not_review_policy(store):
+    ready = store.seed_ready_preflight(owner_id="1", item_count=2)
+    materialized = store.create_materialization(
+        owner_id="1", preflight_id=ready.preflight_id, occurrence_ids=["occ-2"]
+    )
+    item = store.list_materialization_items("1", materialized.id)[0]
+    assert item.occurrence_id == "occ-2"
+    assert item.source_url.endswith("v=2")
+    assert "duplicate_policy" not in item.display_metadata
+    assert "metadata_patch" not in item.display_metadata
+```
+
+- [x] **Step 2: Run the repository tests and verify RED**
+
+Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_ingest_store.py tldw_Server_API/tests/MediaDB2/test_dedupe_url_normalization.py -q`
+
+Expected: FAIL because `PlaylistIngestStore` is missing.
+
+- [x] **Step 3: Implement `PlaylistIngestStore`**
+
+Accept the existing `JobManager` and use its package-owned `_connect`/`_pg_cursor` helpers so backend/DSN selection is not duplicated. The playlist store itself must not open the Media DB or AuthNZ DB. Every public method requires `owner_user_id`. Use one transaction for snapshot replacement, materialization copying, run creation, event append/version bump, and cleanup. Sign opaque cursors with `AuthNZ.crypto_utils.derive_hmac_key()` and bind them to owner, resource, ordering, and last ordinal.
+
+In the same red/green cycle, add `get_media_by_urls(urls)` through `media_lookup_repository.py` → `media_db/api.py` → `runtime/query_ops.py` → `MediaDatabase`. Normalize all URL candidates and execute one parameterized query against the already owner-specific Media DB. This helper is shared by preflight duplicate enrichment and Start Processing validation.
+
+- [x] **Step 4: Add and run property tests**
+
+For arbitrary unique occurrence lists and page sizes, concatenated pages must equal the source ordering exactly once. Invalid owner/cursor pairs must never disclose whether a resource exists.
+
+Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_ingest_store.py tldw_Server_API/tests/MediaIngestion_NEW/integration/test_playlist_ingest_store_postgres.py tldw_Server_API/tests/MediaDB2/test_dedupe_url_normalization.py tldw_Server_API/tests/MediaIngestion_NEW/property/test_playlist_ingest_properties.py -q`
+
+Expected: PASS.
+
+- [x] **Step 5: Commit**
+
+```bash
+git add tldw_Server_API/app/core/Ingestion_Media_Processing/Video/playlist_ingest_store.py tldw_Server_API/app/core/DB_Management/media_db/repositories/media_lookup_repository.py tldw_Server_API/app/core/DB_Management/media_db/api.py tldw_Server_API/app/core/DB_Management/media_db/runtime/query_ops.py tldw_Server_API/app/core/DB_Management/media_db/media_database_impl.py tldw_Server_API/tests/MediaDB2/test_dedupe_url_normalization.py tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_ingest_store.py tldw_Server_API/tests/MediaIngestion_NEW/integration/test_playlist_ingest_store_postgres.py tldw_Server_API/tests/MediaIngestion_NEW/property/test_playlist_ingest_properties.py
+git commit -m "feat: persist playlist ingest resources (TASK-12110)"
+```
+
+## Stage 2: Asynchronous inspection and materialization
+
+**Goal:** Replace optional synchronous preview with a bounded, cancellable version-2 resource.
+
+**Success Criteria:** The API returns 202, worker extraction is terminable, complete snapshots paginate, oversize playlists block, and materialization survives preflight expiry.
+
+**Tests:** Runner process tests, worker tests, endpoint tests, configured-limit-plus-one tests.
+
+**Status:** Complete
+
+### Task 3: Add the bounded preflight child-process runner
+
+- [x] **Step 1: Write failing runner tests**
+
+Test successful normalized extraction, child timeout termination, cancellation termination, malformed child payload, `configured_limit + 1` producing `playlist_too_large` without a partial-ready snapshot, owner-library duplicates being marked `duplicate_existing`/counted/deselected before ready, and a failed library lookup producing `unknown` evidence plus a warning rather than falsely reporting `new`.
+
+- [x] **Step 2: Verify RED**
+
+Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_preflight.py -k "process or configured_limit" -q`
+
+Expected: FAIL because the process runner and hard-ceiling behavior are absent.
+
+- [x] **Step 3: Implement the runner and tighten extraction**
+
+Use `multiprocessing.get_context("spawn")`, one result pipe, and a small polling loop. On timeout/cancel, call `terminate()`, then `kill()` only if the child remains alive after a bounded join. The child calls the existing yt-dlp normalizer. Request at most `limit + 1`, return unavailable entries visibly, generate opaque occurrence IDs server-side, and never return truncation as success.
+
+- [x] **Step 4: Extend the media worker**
+
+Handle `job_type == "playlist_preflight"` before `media_ingest_item`; call the runner, open the owner's Media DB, bulk-resolve extracted URLs with `get_media_by_urls`, and merge `duplicate_existing` evidence with in-snapshot duplicates before atomically storing the complete snapshot. Recompute duplicate/selected counts from the enriched items. A library lookup failure marks otherwise-new evidence `unknown` and adds a typed warning; extraction, capacity, or snapshot-write failure blocks the resource with a safe error code. Keep Jobs leases as the only cross-process extraction claim.
+
+- [x] **Step 5: Run tests and commit**
+
+Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_preflight.py tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest_jobs_worker.py -q`
+
+Expected: PASS.
+
+```bash
+git add tldw_Server_API/app/core/Ingestion_Media_Processing/Video/playlist_preflight.py tldw_Server_API/app/core/Ingestion_Media_Processing/Video/playlist_preflight_runner.py tldw_Server_API/app/services/media_ingest_jobs_worker.py tldw_Server_API/tests/MediaIngestion_NEW/unit
+git commit -m "feat: run playlist inspection as bounded jobs (TASK-12110)"
+```
+
+### Task 4: Expose preflight, pages, cancellation, and materialization
+
+- [x] **Step 1: Write failing route tests**
+
+Cover POST 202, summary polling, paginated pages, delete/cancel, ready-only materialization, cross-owner 404-equivalent behavior, `preflight_busy`, expiry, and sanitized errors.
+
+- [x] **Step 2: Verify RED**
+
+Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_ingest_endpoint.py -k preflight -q`
+
+Expected: FAIL because `/playlist-preflights` routes are missing.
+
+- [x] **Step 3: Implement the routes and service methods**
+
+`POST /playlist-preflights` validates the trusted YouTube boundary, reserves capacity transactionally, creates the resource, and enqueues the internal job. Item routes return bounded pages. Materialization accepts only selected occurrence IDs and returns compact identity records; it never accepts policies or patches. `DELETE` requests job cancellation and expires the resource.
+
+- [x] **Step 4: Register the router and keep compatibility explicit**
+
+Add `playlist_ingest` to `_MEDIA_ENDPOINT_MODULES`. Leave `/playlists/preflight` working for older clients, but add compatibility tests proving version-2 clients are advertised separately.
+
+- [x] **Step 5: Run tests and commit**
+
+Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_ingest_endpoint.py tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_preflight_endpoint.py -q`
+
+Expected: PASS.
+
+```bash
+git add tldw_Server_API/app/api/v1/endpoints/media/playlist_ingest.py tldw_Server_API/app/api/v1/endpoints/media/__init__.py tldw_Server_API/app/core/Ingestion_Media_Processing/Video/playlist_ingest_service.py tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_ingest_endpoint.py
+git commit -m "feat: expose playlist preflight resources (TASK-12110)"
+```
+
+## Stage 3: Run creation and duplicate actions
+
+**Goal:** Resolve every selected occurrence exactly once before any media job is accepted.
+
+**Success Criteria:** Mixed materialized URLs/direct URLs/file stubs validate atomically; stale duplicate choices return `review_required`; non-processing policies terminate without jobs.
+
+**Tests:** Service tests, Media DB patch tests, Collections DB transaction tests, action-resolution properties.
+
+**Status:** Complete
+
+### Task 5: Validate and create ingest runs atomically
+
+- [x] **Step 1: Write failing service tests**
+
+Test mixed input unions, playlist rejection in `direct_url`, expired materialization, unique occurrence IDs, file `awaiting_upload`, missing/extra review overrides, and a fresh duplicate appearing after Review.
+
+```python
+def test_fresh_duplicate_requires_review_without_side_effects(service, media_db):
+    materialized = service.seed_materialized_video("youtube:video:abc")
+    media_db.seed_existing(url="https://www.youtube.com/watch?v=abc")
+    with pytest.raises(ReviewRequiredError) as exc:
+        service.create_run(inputs=[materialized], review_overrides={})
+    assert exc.value.items[0].occurrence_id == materialized.occurrence_id
+    assert service.count_runs() == 0
+    assert service.count_media_jobs() == 0
+```
+
+- [x] **Step 2: Verify RED**
+
+Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_ingest_service.py -k create_run -q`
+
+Expected: FAIL because run creation is absent.
+
+- [x] **Step 3: Implement validation and fresh duplicate lookup**
+
+Resolve materialized identity server-side, canonicalize non-playlist direct URLs, and create file stubs without bytes. Reuse the Stage 1 `get_media_by_urls(urls)` owner-database bulk lookup to refresh library evidence. Resolve in-run repeats by normalized source ID plus occurrence order. Validate Review overrides only after this fresh evidence. Return structured `review_required` before opening the run transaction when choices are stale.
+
+- [x] **Step 4: Persist the run and initial events in one transaction**
+
+Store immutable ordinal/identity plus mutable state/outcome/attempt. Initial action is `ingest`, `overwrite`, `skip`, `include_existing`, or `update_metadata_only`; do not create jobs yet. Append one initial event per occurrence and one summary version bump.
+
+- [x] **Step 5: Run tests and commit**
+
+Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_ingest_service.py tldw_Server_API/tests/MediaIngestion_NEW/property/test_playlist_ingest_properties.py -q`
+
+Expected: PASS.
+
+```bash
+git add tldw_Server_API/app/api/v1/schemas/media_playlist_ingest.py tldw_Server_API/app/core/Ingestion_Media_Processing/Video/playlist_ingest_service.py tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_ingest_service.py tldw_Server_API/tests/MediaIngestion_NEW/property/test_playlist_ingest_properties.py
+git commit -m "feat: validate playlist ingest runs (TASK-12112)"
+```
+
+### Task 6: Execute non-processing duplicate policies and optional collection planning
+
+- [x] **Step 1: Write failing atomicity tests**
+
+Add tests proving `skip`, `include_existing`, and `update_metadata_only` create zero media jobs and distinct outcomes. Test allowlisted title/author/keyword union, empty/forbidden patches, optimistic conflict rollback, and collection-plus-items rollback.
+
+- [x] **Step 2: Verify RED**
+
+Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/DB_Management/test_media_db_media_item_update_ops.py tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_ingest_service.py -k "metadata or collection or duplicate" -q`
+
+Expected: FAIL because the atomic patch and action executor are missing.
+
+- [x] **Step 3: Add the narrow Media DB patch**
+
+Implement `apply_media_metadata_patch(media_id, title=None, author=None, keywords_add=())` in `media_item_update_ops.py`. In one Media DB transaction, fetch the active row/version and current keywords, validate non-empty values, union keywords case-insensitively, update title/author/version, update FTS when title changes, update keyword links with the same connection, and log one sync event. Do not expose content/type/analysis mutation.
+
+- [x] **Step 4: Add transactional collection planning and action execution**
+
+Add one `CollectionsDatabase.create_media_collection_with_items(...)` method using its existing transaction helpers. In the service, execute non-processing actions after the run transaction exists: set terminal outcome/media ID, resolve optional planned items, and append events. On error, use `metadata_update_failed`; never silently fall back to a media job.
+
+- [x] **Step 5: Run tests and commit**
+
+Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/DB_Management/test_media_db_media_item_update_ops.py tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_ingest_service.py -q`
+
+Expected: PASS.
+
+```bash
+git add tldw_Server_API/app/core/DB_Management/media_db/runtime/media_item_update_ops.py tldw_Server_API/app/core/DB_Management/media_db/media_database_impl.py tldw_Server_API/app/core/DB_Management/Collections_DB.py tldw_Server_API/app/core/Ingestion_Media_Processing/Video/playlist_ingest_service.py tldw_Server_API/tests
+git commit -m "feat: resolve playlist duplicate actions (TASK-12112)"
+```
+
+## Stage 4: Processing jobs, status, cancellation, and retry
+
+**Goal:** Bind processing-required occurrences to existing Jobs with durable run reconciliation.
+
+**Success Criteria:** One accepted job per occurrence attempt, structured partial acceptance, dynamic run events, real cancellation, and reconciled retry.
+
+**Tests:** Endpoint/worker tests, event replay tests, cancellation races, integration workflow.
+
+**Status:** Complete
+
+### Task 7: Tighten media-job submission and worker boundaries
+
+**Status:** Complete
+
+**Specification review follow-up:** Complete
+
+- [x] **Step 1: Write failing endpoint and worker tests**
+
+Cover aligned URL/file occurrence arrays, length mismatch, owner/run/state validation, derived idempotency, repeated ambiguous submit, opaque playlist 422, client URL mismatch, canonical server-authoritative payload, and worker rejection when processing returns zero or multiple items.
+
+- [x] **Step 2: Verify RED**
+
+Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest_jobs_endpoint.py tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest_jobs_worker.py -q`
+
+Expected: FAIL on the new occurrence contract.
+
+- [x] **Step 3: Extend `/media/ingest/jobs` minimally**
+
+Accept `run_id`, aligned `occurrence_ids`, `attempts`, and optional planned IDs for URLs; use equivalent `file_*` arrays for uploads. Derive the Jobs idempotency key as an HMAC/hash over authenticated owner, run, occurrence, and attempt. Validate run membership/state before staging files. Resolve the authoritative concrete URL from the run item; reject any non-matching client URL with `occurrence_source_mismatch`, then write only the stored URL into the job payload. Return one structured accepted/rejected record per occurrence while retaining legacy response fields during deprecation.
+
+- [x] **Step 4: Enforce one concrete worker result**
+
+Reject `classify_playlist_url(source).is_playlist` before job creation and again defensively in the worker. Replace `results[0]` projection with a length check: exactly one dict is required for a media occurrence. Include `run_id`, `occurrence_id`, and attempt in the payload/result for reconciliation.
+
+- [x] **Step 5: Run tests and commit**
+
+Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest_jobs_endpoint.py tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest_jobs_worker.py tldw_Server_API/tests/Media/test_media_ingest_jobs_endpoint_sanitization.py -q`
+
+Expected: PASS.
+
+```bash
+git add tldw_Server_API/app/api/v1/endpoints/media/ingest_jobs.py tldw_Server_API/app/services/media_ingest_jobs_worker.py tldw_Server_API/tests/MediaIngestion_NEW/unit tldw_Server_API/tests/Media/test_media_ingest_jobs_endpoint_sanitization.py
+git commit -m "feat: bind media jobs to ingest occurrences (TASK-12110)"
+```
+
+- [x] Strictly parse run-bound identity/integer arrays without coercion.
+- [x] Reconcile ambiguous job creation before exact-reservation reset.
+- [x] Stop chunks on typed global quota/rate failures and preserve retry metadata.
+- [x] Re-run Task 7 and prior-stage verification, then commit the follow-up.
+
+**Final recovery follow-up:** Complete
+
+- [x] Recover an exact preserved reservation by idempotently creating with its stored batch and identity.
+- [x] Cover two-request URL/file recovery, repeated ambiguity, concurrency ownership, and typed quota reset.
+- [x] Prove file recovery leaves only the authoritative committed staging path.
+- [x] Re-run focused, PostgreSQL, property, static, and Bandit verification, then commit.
+
+**Shared-reservation race follow-up:** Complete
+
+- [x] Add deterministic RED coverage for recovery after upload staging failure, typed quota rejection, and confirmed no-job creation failure.
+- [x] Reproduce a cooperative retry creating the exact job before the original submitter reaches its former reset-before-bind path.
+- [x] Preserve run-bound submit-pending reservations on every retryable submission failure while leaving legacy non-run behavior unchanged.
+- [x] Re-run focused, PostgreSQL, property, static, and Bandit verification, update TASK-12112, and commit.
+
+**Cooperative-retry status propagation follow-up:** Complete
+
+- [x] Add RED coverage proving generic HTTP 429/503 remains global after a preserved-reservation retry confirms no exact job.
+- [x] Preserve Retry-After, stop later entries, and leave the exact reservation submit-pending.
+- [x] Keep exact committed-job reconciliation authoritative over the prior create exception.
+- [x] Re-run focused, PostgreSQL, property, static, and Bandit verification, update TASK-12112, and commit.
+
+**Quality-review safety follow-up:** Complete
+
+- [x] **Group A — Bound decoding and legacy-worker compatibility**
+
+  In `test_media_ingest_jobs_endpoint.py` and `test_media_ingest_jobs_worker.py`, add behavior tests for malformed, non-list, over-500, and encoded-over-256-KiB arrays, plus `JSONDecodeError`, `RecursionError`, and `MemoryError` sanitization before run lookup or upload staging. Add legacy worker cases proving zero results retain the old empty-dict projection, multiple results use the first item, and a non-dict first result returns the old safe error, while occurrence-bound jobs remain exactly-one-dict strict.
+
+  RED: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest_jobs_endpoint.py -k "run_bound and (encoded or malformed or recursion or memory or more_than_500)" tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest_jobs_worker.py -k "legacy_media_worker or bound_media_worker_requires" -q` — expected failures are unbounded/unsanitized decoding and changed legacy projection.
+
+  Implement the 256-KiB pre-decode cap, immediate top-level-list/500-element checks, exact exception handling, and conditional worker projection in `ingest_jobs.py` and `media_ingest_jobs_worker.py`. GREEN: rerun the RED command, then both complete test files.
+
+- [x] **Group B — Durable reservation authority, encrypted binding views, and migration parity**
+
+  In the SQLite/PostgreSQL migration tests, playlist store tests, endpoint tests, and PostgreSQL store parity tests, add upgrade coverage for nullable `submission_queue` and `staging_temp_dir`, dataclass/row-converter parity, old rows with `submission_queue IS NULL`, secret rotation, heavy/default queue config drift, mixed URL/file ingest+overwrite actions, malicious opposite client options, and encrypted URL/file create/retry/bind cleanup. New reservations atomically persist the current HMAC identity and queue selected by `_resolve_media_ingest_queue`; pending/queued retries return the stored identity without recomputing it and always use the stored queue. For an upgraded NULL queue reservation, adopt the queue of one exact existing job when present; otherwise initialize the current resolver choice once with a CAS, after which configuration is never consulted for that reservation.
+
+  Add a public owner-authorized, job-scoped `JobManager` binding-view normalizer that returns only immutable job metadata plus a safely decrypted dict payload. It must fail closed on owner/payload mismatch, never log decrypted content, and never serialize the view into responses. New create results, idempotent-create results, exact lookups, endpoint file cleanup, and store binding all use this normalized view. Per-entry copied options force `overwrite_existing = (reserved.action == "overwrite")` for URL and file submissions; store binding defensively verifies the decrypted option against the reserved action.
+
+  RED: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Jobs/test_jobs_migrations_sqlite.py tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_ingest_store.py tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest_jobs_endpoint.py -k "submission_queue or staging_temp_dir or rotation or queue_drift or overwrite or encrypted" -q` — expected failures are absent columns/record fields, recomputed authority, shared options, and encrypted-envelope rejection.
+
+  Modify `migrations.py`, `pg_migrations.py`, `manager.py`, `playlist_ingest_store.py`, and `ingest_jobs.py`. GREEN: rerun the RED command, then the complete SQLite migration/store/endpoint files and `RUN_JOBS=1 python -m pytest tldw_Server_API/tests/Jobs/test_jobs_migrations_postgres.py tldw_Server_API/tests/MediaIngestion_NEW/integration/test_playlist_ingest_store_postgres.py -k "submission_queue or encrypted or binding" -q`.
+
+- [x] **Group C — Non-acquirable creation, transactional bind/publish, and release repair**
+
+  Following the existing preflight sentinel, create occurrence jobs with far-future `available_at`. In the store binding transaction, recheck the unexpired accepting run, exact attempt/reservation/queue/action, normalized binding view, and held Jobs row; atomically bind the run item and publish via database-clock `available_at`. Add an idempotent repair branch for a deliberately seeded `queued` run item whose exact job remains held: retry revalidates owner/run/occurrence/attempt/queue/payload and performs release-only CAS. Already-published exact jobs are a no-op; expired/nonaccepting runs and ambiguous rows remain held.
+
+  RED: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_ingest_store.py tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest_jobs_endpoint.py -k "held or acquisition_before_bind or bind_publish or release_repair or run_expired_during_bind" -q` — expected failures show a pre-bind acquisition and absent repair. Modify only the existing create helper/available-at field and store bind transaction; add no new Jobs state/framework. GREEN: rerun RED plus complete store/endpoint/worker files, then `RUN_JOBS=1 python -m pytest tldw_Server_API/tests/MediaIngestion_NEW/integration/test_playlist_ingest_store_postgres.py -k "bind_publish or held or release" -q`.
+
+- [x] **Group D — PostgreSQL quota serialization and structured quota codes**
+
+  In `test_jobs_quotas_postgres.py`, add barrier-synchronized real-PostgreSQL tests proving concurrent max-queued and submissions-per-minute requests admit no more than the configured limit. In `JobManager.create_job`, within the existing transaction and before both counts and insert, take one stable `pg_advisory_xact_lock` keyed by the exact owner/domain quota scope; all submissions use that fixed single-lock order, and SQLite is unchanged. Endpoint tests assert a typed quota failure uses `detail.code` and `detail.message` in the global 429 payload and the same code in a structured rejected submission if that response path is used; no raw-message matching.
+
+  RED: `source .venv/bin/activate && RUN_JOBS=1 python -m pytest tldw_Server_API/tests/Jobs/test_jobs_quotas_postgres.py -k "concurrent and (max_queued or submits_per_minute)" -q` and `python -m pytest tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest_jobs_endpoint.py -k "quota_code" -q` — expected failures are quota oversubscription and absent `detail.code`. GREEN: rerun both, the complete SQLite/PostgreSQL quota files, and endpoint tests.
+
+- [x] **Group E — Persisted, bounded abandoned-staging cleanup and complete verification**
+
+  Persist each reservation's exact `staging_temp_dir` immediately after its task-specific directory is created. A bounded store query supplies at most the configured deletion cap of owner-scoped `submit_pending` candidates older than the retention cutoff; cleanup never discovers candidates by walking the temp root. For each candidate, require the resolved path's parent to equal `tempfile.gettempdir()`, its basename to match the reservation-derived prefix, and no live run-item or Jobs binding view to reference it. Delete only that exact directory, then CAS-clear the exact stored path. Live reservations/jobs and bound authoritative paths survive; malformed/cross-owner/out-of-root paths fail closed.
+
+  RED: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_ingest_store.py tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest_jobs_endpoint.py -k "abandoned_staging or staging_cleanup" -q` — expected failures are no persisted candidates or retention cleanup. Modify the store and existing run-bound endpoint mutation seam only. GREEN: rerun RED and complete endpoint/store files.
+
+  Final gate: run endpoint/store/worker/manager/migration/encryption/cleanup suites, the complete Task 1–7 and property matrix, `/process-videos` legacy coverage, explicitly enabled real PostgreSQL concurrency/encryption, Black, Ruff, compileall, `git diff --check`, and Bandit on every touched production path. Record exact RED/GREEN evidence and any pre-existing baseline in TASK-12112, then commit coherent follow-up(s) with `TASK-12112` in each message.
+
+  Verification evidence: endpoint `110 passed`; store `122 passed`; worker plus SQLite migrations `70 passed`; PostgreSQL migrations, quota concurrency, and playlist-store integration `21 passed`. Ruff, Black, compileall, and `git diff --check` exited zero. Bandit scanned all six touched production paths and reported zero findings. Focused RED/GREEN evidence is recorded in TASK-12112.
+
+  Independent-review remediation: lifecycle-safe already-bound retries; fail-closed encrypted binding views; retain staging metadata after deletion failure; reuse completed staging across cooperative retries; reject shared-path deletion and case-insensitive manifest-name collisions; keep pre-record retries pending; release only exact owner reservations after confirmed pre-manifest cleanup with a NULL-staging CAS; sanitize JSON decoder integer-limit `ValueError` before lookup/staging; strengthen overwrite, malformed-JSON, and file-race coverage. Status: Complete. Independent re-review found no remaining Critical or Important issues.
+
+**Final submission-lifecycle safety follow-up:** Complete
+
+- [x] **Group F — Durable submission lease, heartbeat, and generation CAS**
+
+  Add additive SQLite/PostgreSQL migration coverage and record/store tests for an opaque lease token, bounded expiry, and monotonic generation on every acquired or taken-over `submit_pending` reservation. Use the injected Jobs clock and short configured test leases without sleeps. An active retry with a valid complete manifest may reuse it through an explicit generation CAS; a retry seeing a NULL or incomplete staging pointer waits only while the current lease is valid, then atomically takes over after expiry with a caller-proposed new token. Require the current token for pointer/manifest recording and held-job creation/binding, not only for renewal around those steps. Prove pre-record and pre-manifest crash recovery, one-winner expiry takeover, lease renewal during upload chunks and create/bind critical sections, and generation-owned staging paths. A stale owner must fail record/clear/reset/bind CAS, may delete only its own abandoned uncommitted directory, and must never delete the new owner's directory. Preserve the original batch, idempotency identity, and queue across takeover.
+
+  RED: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Jobs/test_jobs_migrations_sqlite.py tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_ingest_store.py tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest_jobs_endpoint.py -k "submission_lease or lease_takeover or upload_heartbeat or stale_owner" -q`; expected failures are absent lease columns/record fields and mutation CAS authority. GREEN: rerun that command, then the complete migration/store/endpoint suites and `RUN_JOBS=1 python -m pytest tldw_Server_API/tests/Jobs/test_jobs_migrations_postgres.py tldw_Server_API/tests/MediaIngestion_NEW/integration/test_playlist_ingest_store_postgres.py -k "submission_lease or lease_takeover" -q`.
+
+- [x] **Group G — Expired-run held-job cancellation and quota release**
+
+  Add SQLite and real-PostgreSQL tests proving the `cleanup_expired_resources`/`cleanup_expired` path locks expired run/item/job authority, cancels only an exact owner/run/occurrence/attempt/job/batch/idempotency/queue match that is still queued at the held sentinel, releases queued quota and decrements scheduled counters, and only then deletes run authority in the same Jobs transaction. Assert a fresh quota-limited submit is admitted after cleanup. Published, processing, and terminal jobs must survive. Inject a failure after cancellation and prove the entire transaction rolls back before any authority is deleted. Only after the transaction commits may staging cleanup retire an unreferenced directory; a published job's staging reference stays protected after run authority disappears.
+
+  RED: `source .venv/bin/activate && JOBS_COUNTERS_ENABLED=true python -m pytest tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_ingest_store.py -k "cleanup_expired and (held_job or published_job or rollback or quota)" -q`; expected failure is the current child-first deletion without held-job reconciliation. GREEN: implement the transaction contract while reusing existing cancellation/counter semantics where practical, rerun that command and the complete store suite, then `RUN_JOBS=1 JOBS_COUNTERS_ENABLED=true python -m pytest tldw_Server_API/tests/MediaIngestion_NEW/integration/test_playlist_ingest_store_postgres.py -k "cleanup_expired and (held_job or published_job or rollback or quota)" -q`.
+
+- [x] **Group H — Canonical staging paths and exact candidate reference lookup**
+
+  Add real filesystem tests for dot/dot-dot aliases, symlinked directories and components, root escapes, casefold-based manifest filename collisions with deterministic behavior across case-sensitive/case-insensitive platforms, and platform separator edge cases. Validate lexical canonical form before resolution or deletion, reject every symlink component, and canonicalize candidate and live-reference paths through one fail-closed helper. Replace the broad owner `list_jobs(limit=101)` scan with bounded exact candidate lookups so more than 100 unrelated active jobs do not starve cleanup and an encrypted exact reference still preserves its candidate without broad unbounded decryption.
+
+  RED: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest_jobs_endpoint.py -k "staging_path_alias or symlink or root_escape or manifest_casefold or more_than_100_jobs or encrypted_exact_reference" -q`; expected failures are alias acceptance and over-100 cleanup starvation. GREEN: implement the shared validator and bounded exact candidate binding lookup, then rerun the RED selector and all staging/cleanup/encryption endpoint tests.
+
+- [x] **Group I — Already-bound future schedule compatibility**
+
+  Add a store test showing an exact already-bound queued job with any non-sentinel `available_at`, including a future retry/backoff timestamp, is a valid idempotent binding. Keep the sentinel as the only held-repair state and continue rejecting non-queued unbound jobs.
+
+  RED: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_ingest_store.py -k "already_bound_future_available_at" -q`; expected failure is the current wall-clock `is_published` check. GREEN: simplify the already-bound lifecycle predicate and rerun complete store tests plus PostgreSQL binding parity.
+
+- [x] **Group J — Final verification, independent review, and commit**
+
+  Run endpoint/store/worker/migrations/manager/cleanup, Tasks 1–7/property coverage, real PostgreSQL lease+cleanup parity, encrypted binding coverage, Black, Ruff, compileall, `git diff --check`, and Bandit over every touched production path. Request an independent correctness/security re-review, remediate any Critical or Important findings with another RED/GREEN cycle, record exact evidence in TASK-12112, and commit as `fix: finalize playlist submission lifecycle safety (TASK-12112)`.
+
+  Final evidence: endpoint/store `264 passed`; SQLite JobManager/idempotency/admin-counter/fault `31 passed, 2 skipped`; specification focus `27 passed`; Ruff and Black clean on all 16 touched Python files; compileall clean on seven production modules; `git diff --check` clean; Bandit zero findings across 15,690 LOC. Real PostgreSQL migrations/integration passed `18 passed` before the final SQLite-only counter-attribution correction. The post-correction PostgreSQL reprovisioning retry reached the three-attempt infrastructure cap (two unreachable skips and one aborted provisioning run), so it is recorded as not freshly rerun. Independent reviews returned `✅ Spec compliant` and `Ready to proceed? Yes`.
+
+### Task 8: Add run routes, reconciliation, event replay, cancellation, and retry
+
+**Status:** Complete
+
+- [x] **Step 1: Write failing run-route tests**
+
+Cover run POST, summary, paginated items, SSE initial snapshot/replay/resync, a stream-only client observing job progress without polling, later chunk jobs appearing in the same stream, occurrence-scoped cancellation of unsent/accepted work, whole-run cancellation, `status_unavailable`, and retry after media reconciliation.
+
+- [x] **Step 2: Verify RED**
+
+Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_ingest_endpoint.py -k run -q`
+
+Expected: FAIL because run routes are missing.
+
+- [x] **Step 3: Implement run routes and reconciliation**
+
+Run POST calls the service, executes terminal duplicate actions, and returns processing occurrences ready for bounded client chunks. Summary/items reconcile Jobs by stored mappings and append occurrence events only on actual changes. On every SSE cycle, call `reconcile_run_jobs(owner_id, run_id)` before reading new run events; it must query the current run/job mappings dynamically, compare state/progress/result, and transactionally append occurrence events/version changes. SSE then reads events by monotonically increasing ID; expired replay emits `resync_required`.
+
+Define `POST /ingest/runs/{run_id}/cancel` with optional body `{ occurrence_ids?: string[], reason?: string }`. Before a run exists, cancellation is client-local. Once a run exists, supplied occurrence IDs terminalize unsent items and cancel their accepted jobs; an omitted list cancels the whole run. Repeated requests are idempotent and completion may win the race.
+
+- [x] **Step 4: Implement retry with media-first reconciliation**
+
+Before incrementing attempt, query the current user's Media DB by normalized URL and planned item. If media exists, resolve terminally without a new job. Otherwise increment once with compare-and-set, clear the prior job mapping, and return the occurrence for resubmission.
+
+- [x] **Step 5: Run tests and commit**
+
+Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_ingest_endpoint.py tldw_Server_API/tests/MediaIngestion_NEW/integration/test_playlist_ingest_run_workflow.py -q`
+
+Expected: PASS.
+
+```bash
+git add tldw_Server_API/app/api/v1/endpoints/media/playlist_ingest.py tldw_Server_API/app/core/Ingestion_Media_Processing/Video/playlist_ingest_service.py tldw_Server_API/tests/MediaIngestion_NEW
+git commit -m "feat: track playlist ingest runs (TASK-12112)"
+```
+
+Final evidence: Task 8 route/workflow `64 passed`; complete Task 1–8 affected matrix `534 passed, 18 skipped`; Black and Ruff clean on eight touched Python files; four production modules compiled; `git diff --check` clean; Bandit zero findings across 7,267 LOC. The skips are fixture-declared PostgreSQL migration/store tests; the parity assertions were collected but not executed because the local fixture was unavailable. Independent reviews returned `✅ Spec compliant` and `Ready to proceed? Yes`.
+
+## Stage 5: Capability rollout and release gates
+
+**Goal:** Make version negotiation, cleanup, compatibility, security, and operational limits explicit.
+
+**Success Criteria:** Version-2 capability is truthful, expired resources clean up, compatibility remains covered, all focused gates and Bandit pass.
+
+**Tests:** Config capability tests, cleanup tests, owner isolation, `/process-videos` compatibility, full focused suite.
+
+**Status:** Complete
+
+### Task 9: Finish rollout, cleanup, and verification
+
+- [x] **Step 1: Add failing capability and cleanup tests**
+
+Assert `mediaPlaylistIngestContractVersion == 2` only when preflight/run routes and worker readiness are enabled. Test bounded cleanup of expired preflights/materializations/runs/events and lease release after worker crash. Keep `/process-videos` multi-result playlist behavior covered.
+
+- [x] **Step 2: Implement capability and cleanup wiring**
+
+Update `config_info.py` with granular flags. Invoke bounded cleanup from preflight/run mutations and worker startup; do not add a new scheduler. Emit only counts/error codes in logs and metrics, never full playlist URLs.
+
+- [x] **Step 3: Run the complete focused backend gate**
+
+Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Jobs/test_jobs_migrations_sqlite.py tldw_Server_API/tests/Jobs/test_jobs_migrations_postgres.py tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_preflight.py tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_ingest_store.py tldw_Server_API/tests/MediaIngestion_NEW/integration/test_playlist_ingest_store_postgres.py tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_ingest_service.py tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_ingest_endpoint.py tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest_jobs_endpoint.py tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest_jobs_worker.py tldw_Server_API/tests/MediaIngestion_NEW/integration/test_playlist_ingest_run_workflow.py tldw_Server_API/tests/MediaIngestion_NEW/property/test_playlist_ingest_properties.py -q`
+
+Expected: PASS with only fixture-declared PostgreSQL skips.
+
+- [x] **Step 4: Run security and diff gates**
+
+Run: `source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/api/v1/endpoints/media/playlist_ingest.py tldw_Server_API/app/core/Ingestion_Media_Processing/Video/playlist_ingest_store.py tldw_Server_API/app/core/Ingestion_Media_Processing/Video/playlist_preflight_runner.py tldw_Server_API/app/core/Ingestion_Media_Processing/Video/playlist_ingest_service.py tldw_Server_API/app/api/v1/endpoints/media/ingest_jobs.py tldw_Server_API/app/services/media_ingest_jobs_worker.py -f json -o /tmp/bandit_task_12110.json`
+
+Run: `git diff --check`
+
+Expected: Bandit exits 0 with no new findings; diff check exits 0.
+
+- [x] **Step 5: Update docs/task and commit**
+
+Record exact test counts, PostgreSQL skips, Bandit result, touched files, and compatibility result in `TASK-12112`.
+
+```bash
+git add tldw_Server_API Docs backlog/tasks
+git commit -m "test: verify playlist ingest backend contract (TASK-12112)"
+```
+
+Final evidence: the complete focused backend gate passed `570 passed, 18 skipped` with exit status 0; the exact Task 9 changed-module matrix passed `319 passed, 15 skipped` with exit status 0; and the complete store file passed `172 passed`. All skips were fixture-declared PostgreSQL tests because a live local PostgreSQL fixture was unavailable. The missing pytest footer was traced to the command wrapper discarding nested child-process metadata and obscuring captured output; redirected logs plus explicit child status files proved normal pytest completion, so no application-code change was required. Black and py_compile/import passed on the nine Task 9 Python files; `git diff --check` passed; Ruff introduced no findings beyond the five unchanged `config_info.py` baseline findings; Bandit reported zero findings on the four touched production files. Legacy `/process-videos` playlist behavior passed its six focused controls. Independent final reviews returned `✅ Spec compliant` and `✅ Quality approved` with no actionable findings.

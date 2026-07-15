@@ -1,10 +1,8 @@
-import os
 from io import BytesIO
 from pathlib import Path
 
 import pytest
 from loguru import logger
-
 
 from tldw_Server_API.app.api.v1.API_Deps.validations_deps import file_validator_instance
 from tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing import (
@@ -35,6 +33,25 @@ def tmp_media_dir(tmp_path: Path) -> Path:
     d = tmp_path / "media_uploads"
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+@pytest.mark.asyncio
+async def test_save_uploaded_files_calls_submission_lease_heartbeat_for_each_chunk(tmp_media_dir):
+    heartbeats = 0
+
+    def heartbeat() -> None:
+        nonlocal heartbeats
+        heartbeats += 1
+
+    await save_uploaded_files(
+        [DummyUploadFile("long.txt", b"x" * (2 * 1024 * 1024 + 1))],
+        tmp_media_dir,
+        validator=file_validator_instance,
+        allowed_extensions=[".txt"],
+        progress_callback=heartbeat,
+    )
+
+    assert heartbeats == 3
 
 
 @pytest.mark.asyncio
