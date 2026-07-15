@@ -113,3 +113,79 @@ def test_playlist_store_sets_owner_before_postgres_cursor_and_restores(monkeypat
         ("connect", (True, "media_ingest", "u3")),
         ("cursor", (True, "media_ingest", "u3")),
     ]
+
+
+def test_pg_cursor_aborts_when_enforced_role_assumption_fails(monkeypatch):
+    psycopg = pytest.importorskip("psycopg")
+    manager = object.__new__(JobManager)
+
+    class FailingCursor:
+        def execute(self, statement):
+            rendered = (
+                statement.as_string() if hasattr(statement, "as_string") else str(statement)
+            )
+            if rendered.startswith("SET ROLE"):
+                raise psycopg.errors.InsufficientPrivilege("role membership revoked")
+
+    class FakeConnection:
+        rollback_count = 0
+
+        def cursor(self, **_kwargs):
+            return FailingCursor()
+
+        def rollback(self):
+            self.rollback_count += 1
+
+    connection = FakeConnection()
+    monkeypatch.setenv("JOBS_PG_RLS_ENABLE", "true")
+    monkeypatch.setenv("JOBS_PG_RLS_ROLE", "jobs_rls")
+
+    with pytest.raises(RuntimeError, match="SET ROLE|RLS role"):
+        manager._pg_cursor(connection)
+
+    assert connection.rollback_count == 1
+
+
+def test_pg_cursor_aborts_when_enforced_rls_guc_setup_fails(monkeypatch):
+    psycopg = pytest.importorskip("psycopg")
+    manager = object.__new__(JobManager)
+
+    class FailingCursor:
+        def execute(self, statement):
+            rendered = (
+                statement.as_string() if hasattr(statement, "as_string") else str(statement)
+            )
+            if rendered.startswith("SET app.is_admin"):
+                raise psycopg.Error("custom GUC denied")
+
+    class FakeConnection:
+        rollback_count = 0
+
+        def cursor(self, **_kwargs):
+            return FailingCursor()
+
+        def rollback(self):
+            self.rollback_count += 1
+
+    connection = FakeConnection()
+    monkeypatch.setenv("JOBS_PG_RLS_ENABLE", "true")
+    monkeypatch.setenv("JOBS_PG_RLS_ROLE", "jobs_rls")
+
+    with pytest.raises(RuntimeError, match="RLS context|GUC"):
+        manager._pg_cursor(connection)
+
+    assert connection.rollback_count == 1
+
+
+def test_pg_cursor_rejects_invalid_role_when_rls_is_enforced(monkeypatch):
+    manager = object.__new__(JobManager)
+
+    class FakeConnection:
+        def cursor(self, **_kwargs):
+            return object()
+
+    monkeypatch.setenv("JOBS_PG_RLS_ENABLE", "true")
+    monkeypatch.setenv("JOBS_PG_RLS_ROLE", "x" * 64)
+
+    with pytest.raises(RuntimeError, match="1 to 63 bytes"):
+        manager._pg_cursor(FakeConnection())

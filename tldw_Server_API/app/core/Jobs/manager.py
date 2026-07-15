@@ -413,22 +413,32 @@ class JobManager:
                 return False
             return isinstance(exc, pg_errors.SerializationFailure)
 
-        # Apply per-transaction RLS via SET LOCAL to avoid cross-request leakage
-        role = str(os.getenv("JOBS_PG_RLS_ROLE", "")).strip()
-        if role:
-            try:
-                import re as _re
+        # Apply the dedicated RLS role before setting request-scoped policy context.
+        from psycopg import sql as _sql  # type: ignore
 
-                if _re.match(r"^[A-Za-z0-9_]+$", role):
-                    cur.execute(f"SET ROLE {role}")
+        raw_role = os.getenv("JOBS_PG_RLS_ROLE")
+        role = raw_role.strip() if raw_role is not None else ""
+        rls_enforced = (
+            self._is_truthy(os.getenv("JOBS_PG_RLS_ENABLE", ""))
+            and raw_role is not None
+        )
+        role_is_valid = bool(role) and "\x00" not in role and len(role.encode("utf-8")) <= 63
+        if raw_role is not None and not role_is_valid and rls_enforced:
+            raise RuntimeError(
+                "JOBS_PG_RLS_ROLE must be a nonempty PostgreSQL identifier of 1 to 63 bytes "
+                "and must not contain NUL"
+            )
+        if role_is_valid:
+            try:
+                cur.execute(_sql.SQL("SET ROLE {}").format(_sql.Identifier(role)))
             except _JOB_NONCRITICAL_EXCEPTIONS as exc:
                 if _is_serialization_failure(exc):
                     raise
                 with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
                     conn.rollback()
+                if rls_enforced:
+                    raise RuntimeError("failed to assume the configured Postgres RLS role") from exc
         try:
-            from psycopg import sql as _sql  # type: ignore
-
             is_admin = bool(JobManager._RLS_IS_ADMIN.get())
             cur.execute(_sql.SQL("SET app.is_admin = {}").format(_sql.Literal("true" if is_admin else "false")))
 
@@ -444,6 +454,8 @@ class JobManager:
                 try:
                     cur.execute(_sql.SQL("RESET {}").format(_sql.SQL(name)))
                 except _JOB_NONCRITICAL_EXCEPTIONS:
+                    if rls_enforced:
+                        raise
                     with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
                         conn.rollback()
                     try:
@@ -482,6 +494,8 @@ class JobManager:
             # Roll back to clear the error so subsequent statements can proceed.
             with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
                 conn.rollback()
+            if rls_enforced:
+                raise RuntimeError("failed to apply the enforced Postgres RLS context") from exc
         return cur
 
     # --- Acquire ordering policy (env-driven overrides) ---

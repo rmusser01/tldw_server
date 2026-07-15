@@ -550,33 +550,6 @@ def ensure_jobs_tables_pg(db_url: str) -> str:
         # Ensure job_counters exists for counters-enabled deployments
         with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
             ensure_job_counters_pg(db_url)
-        # Optional: enable RLS on core tables when requested via env.
-        try:
-            import os as _os
-
-            import psycopg  # noqa: F401
-
-            if _is_truthy(_os.getenv("JOBS_PG_RLS_ENABLE", "")):
-                with psycopg.connect(_dsn, autocommit=True) as _c_rls, _c_rls.cursor() as _p:
-                    with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
-                        _p.execute("ALTER TABLE jobs ENABLE ROW LEVEL SECURITY")
-                    with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
-                        _p.execute("ALTER TABLE job_events ENABLE ROW LEVEL SECURITY")
-                    with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
-                        _p.execute("ALTER TABLE job_counters ENABLE ROW LEVEL SECURITY")
-                    with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
-                        _p.execute("ALTER TABLE job_queue_controls ENABLE ROW LEVEL SECURITY")
-                    with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
-                        _p.execute("ALTER TABLE job_attachments ENABLE ROW LEVEL SECURITY")
-                    with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
-                        _p.execute("ALTER TABLE job_sla_policies ENABLE ROW LEVEL SECURITY")
-                    with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
-                        _p.execute("ALTER TABLE job_dependencies ENABLE ROW LEVEL SECURITY")
-                    with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
-                        _p.execute("ALTER TABLE jobs_archive ENABLE ROW LEVEL SECURITY")
-        except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
-            # Ignore in environments without permissions or when tables don't exist yet
-            pass
     except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS as e:
         # Attempt to create database if it doesn't exist, then retry
         msg = str(e)
@@ -650,25 +623,28 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
     except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
         return
     legacy_rls_exceptions = (*_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS, psycopg.Error)
-    import os
-    import re as _re
+    from psycopg import sql as _sql  # type: ignore
 
     from .pg_util import negotiate_pg_dsn
 
     _dsn = negotiate_pg_dsn(db_url)
     debug = _is_truthy(os.getenv("JOBS_PG_RLS_DEBUG", ""))
+    raw_role = os.getenv("JOBS_PG_RLS_ROLE")
+    role = raw_role.strip() if raw_role is not None else None
+    if raw_role is not None and (
+        not role or "\x00" in role or len(role.encode("utf-8")) > 63
+    ):
+        raise JobsRLSInstallationError(
+            "JOBS_PG_RLS_ROLE must be a nonempty PostgreSQL identifier of 1 to 63 bytes "
+            "and must not contain NUL"
+        )
     try:
         with psycopg.connect(_dsn, autocommit=True) as conn, conn.cursor() as cur:
-            role = str(os.getenv("JOBS_PG_RLS_ROLE", "")).strip()
             if role:
-                if not _re.fullmatch(r"[A-Za-z0-9_]+", role):
-                    raise JobsRLSInstallationError("JOBS_PG_RLS_ROLE must be a simple PostgreSQL identifier")
                 try:
                     cur.execute("SELECT current_schema()")
                     schema_row = cur.fetchone()
                     schema_name = (schema_row[0] if schema_row else None) or "public"
-                    if not _re.fullmatch(r"[A-Za-z0-9_]+", str(schema_name)):
-                        raise JobsRLSInstallationError("current PostgreSQL schema is not a simple identifier")
                     cur.execute(
                         "SELECT rolcanlogin, rolsuper, rolbypassrls "
                         "FROM pg_roles WHERE rolname = %s",
@@ -688,25 +664,60 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
                             f"JOBS_PG_RLS_ROLE {role!r} must not have BYPASSRLS"
                         )
                     if not role_row:
-                        cur.execute(f"CREATE ROLE {role} NOLOGIN")
+                        cur.execute(
+                            _sql.SQL("CREATE ROLE {} NOLOGIN").format(_sql.Identifier(role))
+                        )
                     cur.execute("SELECT current_user")
                     user_row = cur.fetchone()
                     current_user = (user_row[0] if user_row else None) or None
-                    if current_user and _re.fullmatch(r"[A-Za-z0-9_]+", str(current_user)):
-                        cur.execute(f"GRANT {role} TO {current_user}")
-                    cur.execute(f"GRANT USAGE ON SCHEMA {schema_name} TO {role}")
-                    cur.execute(f"GRANT SELECT, UPDATE, DELETE ON ALL TABLES IN SCHEMA {schema_name} TO {role}")
+                    if current_user:
+                        cur.execute(
+                            _sql.SQL("GRANT {} TO {}").format(
+                                _sql.Identifier(role),
+                                _sql.Identifier(str(current_user)),
+                            )
+                        )
+                    role_ident = _sql.Identifier(role)
+                    schema_ident = _sql.Identifier(str(schema_name))
+                    tables = (*_JOBS_RLS_INSERT_TABLES, *_PLAYLIST_RLS_TABLES)
+                    qualified_tables = _sql.SQL(", ").join(
+                        _sql.Identifier(str(schema_name), table) for table in tables
+                    )
                     cur.execute(
-                        f"GRANT INSERT ON "  # nosec B608
-                        f"{', '.join((*_JOBS_RLS_INSERT_TABLES, *_PLAYLIST_RLS_TABLES))} TO {role}"
+                        _sql.SQL("GRANT USAGE ON SCHEMA {} TO {}").format(
+                            schema_ident,
+                            role_ident,
+                        )
+                    )
+                    # JOBS_PG_RLS_ROLE is a dedicated role. Remove grants left by
+                    # earlier schema-wide installers before applying least privilege.
+                    cur.execute(
+                        _sql.SQL(
+                            "REVOKE SELECT, UPDATE, DELETE ON ALL TABLES IN SCHEMA {} FROM {}"
+                        ).format(schema_ident, role_ident)
+                    )
+                    cur.execute(
+                        _sql.SQL("GRANT SELECT, UPDATE, DELETE ON {} TO {}").format(
+                            qualified_tables,
+                            role_ident,
+                        )
+                    )
+                    cur.execute(
+                        _sql.SQL("GRANT INSERT ON {} TO {}").format(
+                            qualified_tables,
+                            role_ident,
+                        )
                     )
                     for sequence in (*_JOBS_RLS_SEQUENCES, *_PLAYLIST_RLS_SEQUENCES):
                         cur.execute(
-                            f"GRANT USAGE, SELECT ON SEQUENCE {sequence} TO {role}"  # nosec B608
+                            _sql.SQL("GRANT USAGE, SELECT ON SEQUENCE {} TO {}").format(
+                                _sql.Identifier(str(schema_name), sequence),
+                                role_ident,
+                            )
                         )
                 except JobsRLSInstallationError:
                     raise
-                except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS as exc:
+                except legacy_rls_exceptions as exc:
                     raise JobsRLSInstallationError("failed to configure the Postgres RLS role") from exc
 
             def _enable_rls(table: str) -> None:
@@ -724,6 +735,7 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
                 "job_sla_policies",
                 "job_attachments",
                 "job_dependencies",
+                "jobs_archive",
             ):
                 _enable_rls(_table)
 
@@ -819,30 +831,33 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
                     """  # nosec B608
                 cur.execute(modify_policy_sql)
 
-            cur.execute("DROP POLICY IF EXISTS jobs_domain_select ON jobs")
-            cur.execute(
-                f"""
-                    CREATE POLICY jobs_domain_select ON jobs FOR SELECT
-                    USING (
-                      {admin_expr} OR (
-                        {domain_filter}
-                        AND {owner_filter}
-                      )
-                    )
-                    """
-            )
-            cur.execute("DROP POLICY IF EXISTS jobs_domain_modify ON jobs")
-            cur.execute(
-                f"""
-                    CREATE POLICY jobs_domain_modify ON jobs FOR ALL
-                    USING (
-                      {admin_expr} OR (
-                        {domain_filter}
-                        AND {owner_filter}
-                      )
-                    )
-                    """
-            )
+            try:
+                cur.execute("DROP POLICY IF EXISTS jobs_domain_select ON jobs")
+                cur.execute(
+                    f"""
+                        CREATE POLICY jobs_domain_select ON jobs FOR SELECT
+                        USING (
+                          {admin_expr} OR (
+                            {domain_filter}
+                            AND {owner_filter}
+                          )
+                        )
+                        """
+                )
+                cur.execute("DROP POLICY IF EXISTS jobs_domain_modify ON jobs")
+                cur.execute(
+                    f"""
+                        CREATE POLICY jobs_domain_modify ON jobs FOR ALL
+                        USING (
+                          {admin_expr} OR (
+                            {domain_filter}
+                            AND {owner_filter}
+                          )
+                        )
+                        """
+                )
+            except legacy_rls_exceptions:
+                pass
             # job_events policies (domain + owner, with admin bypass)
             try:
                 cur.execute("DROP POLICY IF EXISTS job_events_select ON job_events")
@@ -869,7 +884,7 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
                         )
                         """
                 )
-            except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
+            except legacy_rls_exceptions:
                 pass
             # job_counters policies (domain only, with admin bypass)
             try:
@@ -895,7 +910,7 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
                         )
                         """
                 )
-            except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
+            except legacy_rls_exceptions:
                 pass
             # job_queue_controls policies (domain only, with admin bypass)
             try:
@@ -921,7 +936,7 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
                         )
                         """
                 )
-            except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
+            except legacy_rls_exceptions:
                 pass
             # job_attachments policies (join to jobs for domain/owner)
             try:
@@ -957,7 +972,7 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
                     locals()
                 )  # nosec B608
                 cur.execute(job_attachments_modify_policy_sql)
-            except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
+            except legacy_rls_exceptions:
                 pass
             # job_dependencies policies (join to jobs for domain/owner)
             try:
@@ -993,7 +1008,7 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
                     locals()
                 )  # nosec B608
                 cur.execute(job_dependencies_modify_policy_sql)
-            except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
+            except legacy_rls_exceptions:
                 pass
             # job_sla_policies policies (domain only)
             try:
@@ -1019,7 +1034,7 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
                         )
                         """
                 )
-            except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
+            except legacy_rls_exceptions:
                 pass
             # jobs_archive policies (domain + owner, with admin bypass)
             try:
@@ -1047,7 +1062,7 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
                         )
                         """
                 )
-            except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
+            except legacy_rls_exceptions:
                 pass
             if debug:
                 try:

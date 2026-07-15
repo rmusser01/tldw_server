@@ -36,6 +36,11 @@ JOBS_RLS_SEQUENCES = (
     "job_attachments_id_seq",
 )
 
+
+def _render_sql(statement) -> str:
+    return statement.as_string() if hasattr(statement, "as_string") else str(statement)
+
+
 PLAYLIST_RLS_CHILD_PARENTS = {
     "playlist_preflight_items": "playlist_preflights",
     "playlist_materializations": "playlist_preflights",
@@ -58,7 +63,7 @@ def test_playlist_rls_installer_covers_every_authority_table(monkeypatch):
             return False
 
         def execute(self, statement, _params=None):
-            self.last_statement = str(statement)
+            self.last_statement = _render_sql(statement)
             statements.append(self.last_statement)
 
         def fetchone(self):
@@ -144,9 +149,11 @@ def test_playlist_rls_installer_keeps_legacy_tables_best_effort_for_psycopg_erro
             return False
 
         def execute(self, statement, _params=None):
-            self.last_statement = str(statement)
+            self.last_statement = _render_sql(statement)
             if self.last_statement == "ALTER TABLE jobs ENABLE ROW LEVEL SECURITY":
                 raise psycopg.Error("legacy table unavailable")
+            if "CREATE POLICY jobs_domain_select" in self.last_statement:
+                raise psycopg.Error("legacy policy unavailable")
 
         def fetchone(self):
             if "relrowsecurity" in self.last_statement:
@@ -180,6 +187,8 @@ def test_jobs_schema_bootstrap_propagates_security_critical_rls_failure(monkeypa
             return False
 
         def execute(self, _statement, _params=None):
+            if str(_statement) == "ALTER TABLE jobs ENABLE ROW LEVEL SECURITY":
+                raise psycopg.Error("legacy RLS bootstrap must be delegated")
             return None
 
         def fetchone(self):
@@ -224,7 +233,7 @@ def test_playlist_rls_role_grants_are_scoped_and_role_must_be_nologin(monkeypatc
             return False
 
         def execute(self, statement, _params=None):
-            self.last_statement = str(statement)
+            self.last_statement = _render_sql(statement)
             statements.append(self.last_statement)
 
         def fetchone(self):
@@ -254,8 +263,24 @@ def test_playlist_rls_role_grants_are_scoped_and_role_must_be_nologin(monkeypatc
     ensure_jobs_rls_policies_pg("postgresql://example/jobs")
 
     installed_sql = "\n".join(statements)
+    expected_tables = (*JOBS_RLS_INSERT_TABLES, *PLAYLIST_RLS_TABLES)
+    assert (
+        'REVOKE SELECT, UPDATE, DELETE ON ALL TABLES IN SCHEMA "public" FROM "jobs_rls"'
+        in installed_sql
+    )
+    scoped_grant = next(
+        statement
+        for statement in statements
+        if statement.startswith("GRANT SELECT, UPDATE, DELETE ON ")
+    )
+    assert scoped_grant == (
+        "GRANT SELECT, UPDATE, DELETE ON "
+        + ", ".join(f'"public"."{table}"' for table in expected_tables)
+        + ' TO "jobs_rls"'
+    )
+    assert "GRANT SELECT, UPDATE, DELETE ON ALL TABLES IN SCHEMA" not in installed_sql
     assert "GRANT INSERT ON" in installed_sql
-    for table in (*JOBS_RLS_INSERT_TABLES, *PLAYLIST_RLS_TABLES):
+    for table in expected_tables:
         assert table in installed_sql
     assert "GRANT USAGE, SELECT ON SEQUENCE" in installed_sql
     for sequence in (
@@ -266,6 +291,78 @@ def test_playlist_rls_role_grants_are_scoped_and_role_must_be_nologin(monkeypatc
         "media_ingest_run_events_event_id_seq",
     ):
         assert sequence in installed_sql
+
+
+def test_playlist_rls_role_quotes_database_identifiers(monkeypatch):
+    statements: list[str] = []
+
+    class QuotedIdentifierCursor:
+        last_statement = ""
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, statement, _params=None):
+            self.last_statement = _render_sql(statement)
+            statements.append(self.last_statement)
+
+        def fetchone(self):
+            if "current_schema" in self.last_statement:
+                return ("Tenant-Schema",)
+            if "FROM pg_roles" in self.last_statement:
+                return (False, False, False)
+            if "current_user" in self.last_statement:
+                return ("App-Login",)
+            if "relrowsecurity" in self.last_statement:
+                return (True, True)
+            return None
+
+    class QuotedIdentifierConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def cursor(self):
+            return QuotedIdentifierCursor()
+
+    monkeypatch.setenv("JOBS_PG_RLS_ROLE", "Jobs-RLS")
+    monkeypatch.setattr(psycopg, "connect", lambda *_args, **_kwargs: QuotedIdentifierConnection())
+
+    ensure_jobs_rls_policies_pg("postgresql://example/jobs")
+
+    installed_sql = "\n".join(statements)
+    assert 'GRANT "Jobs-RLS" TO "App-Login"' in installed_sql
+    assert 'GRANT USAGE ON SCHEMA "Tenant-Schema" TO "Jobs-RLS"' in installed_sql
+    assert (
+        'REVOKE SELECT, UPDATE, DELETE ON ALL TABLES IN SCHEMA "Tenant-Schema" '
+        'FROM "Jobs-RLS"'
+    ) in installed_sql
+    assert '"Tenant-Schema"."jobs"' in installed_sql
+
+
+@pytest.mark.parametrize("role", ["", "x" * 64, "contains-nul"])
+def test_playlist_rls_rejects_invalid_configured_role(monkeypatch, role):
+    from tldw_Server_API.app.core.Jobs import pg_migrations
+
+    if role == "contains-nul":
+        real_getenv = os.getenv
+
+        def fake_getenv(name, default=None):
+            if name == "JOBS_PG_RLS_ROLE":
+                return "bad\x00role"
+            return real_getenv(name, default)
+
+        monkeypatch.setattr(pg_migrations.os, "getenv", fake_getenv)
+    else:
+        monkeypatch.setenv("JOBS_PG_RLS_ROLE", role)
+
+    with pytest.raises(JobsRLSInstallationError, match="1 to 63 bytes|NUL"):
+        ensure_jobs_rls_policies_pg("postgresql://example/jobs")
 
 
 @pytest.mark.parametrize(
@@ -287,7 +384,7 @@ def test_playlist_rls_rejects_configured_privileged_role(monkeypatch, role_flags
             return False
 
         def execute(self, statement, _params=None):
-            self.last_statement = str(statement)
+            self.last_statement = _render_sql(statement)
 
         def fetchone(self):
             if "current_schema" in self.last_statement:
@@ -644,6 +741,45 @@ def test_playlist_rls_role_and_table_flags_are_hardened(monkeypatch):
             )
             flags = {row[0]: (bool(row[1]), bool(row[2])) for row in cur.fetchall()}
     assert flags == dict.fromkeys(sorted(PLAYLIST_RLS_TABLES), (True, True))
+
+
+@pytest.mark.pg_jobs
+def test_playlist_rls_role_cannot_access_unrelated_tables(monkeypatch):
+    admin_dsn, _rls_dsn = _dsn_or_skip(monkeypatch)
+    ensure_jobs_tables_pg(admin_dsn)
+    probe_table = "jobs_rls_unrelated_privilege_probe"
+
+    from psycopg import sql as _sql
+
+    with psycopg.connect(admin_dsn, autocommit=True) as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT current_schema()")
+            schema_name = cur.fetchone()[0]
+            probe_ident = _sql.Identifier(schema_name, probe_table)
+            cur.execute(_sql.SQL("DROP TABLE IF EXISTS {}").format(probe_ident))
+            cur.execute(_sql.SQL("CREATE TABLE {} (id INTEGER)").format(probe_ident))
+            cur.execute(
+                _sql.SQL("GRANT SELECT, UPDATE, DELETE ON {} TO jobs_rls").format(probe_ident)
+            )
+
+    try:
+        ensure_jobs_rls_policies_pg(admin_dsn)
+        qualified_probe = probe_ident.as_string()
+        with psycopg.connect(admin_dsn, autocommit=True) as conn:
+            with conn.cursor() as cur:
+                for privilege in ("SELECT", "UPDATE", "DELETE"):
+                    cur.execute(
+                        "SELECT has_table_privilege(%s, %s, %s)",
+                        ("jobs_rls", qualified_probe, privilege),
+                    )
+                    assert cur.fetchone()[0] is False
+                cur.execute("SET ROLE jobs_rls")
+                with pytest.raises(psycopg.errors.InsufficientPrivilege):
+                    cur.execute(_sql.SQL("SELECT * FROM {}").format(probe_ident))
+    finally:
+        with psycopg.connect(admin_dsn, autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute(_sql.SQL("DROP TABLE IF EXISTS {}").format(probe_ident))
 
 
 @pytest.mark.pg_jobs
