@@ -35,7 +35,7 @@
 **Goal:** Load, save, apply, replace, reset, and delete saved views without blocking ordinary filters or built-ins.
 **Success Criteria:** Reload restore, duplicate confirmation, invalid recovery, nonblocking failures, keyboard operation, and focus behavior pass.
 **Tests:** API client, hook, and component/integration Vitest suites.
-**Status:** In Progress
+**Status:** Complete
 
 ## Stage 5: Integration And Release Gates
 **Goal:** Register tests in CI, run focused/full verification, security checks, and finalize Backlog evidence.
@@ -462,11 +462,11 @@ git commit -m "Add source saved view client orchestration (TASK-12093.2)"
 - Modify: `apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/SourcesPane.stage4.filters-and-sort.test.tsx`
 - Modify: `apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/ResearchWorkspace.stage12.source-list-view-state.test.tsx`
 
-- [ ] **Step 1: Write failing presentational accessibility tests**
+- [x] **Step 1: Write failing presentational accessibility tests**
 
 Cover grouped built-in/saved items, fixed ordering, Save accessible name, keyboard menu navigation, Enter/Space activation, Escape close, modal focus trap/return, Modified label, retry error, invalid warning, disabled invalid Apply, Reset/Delete, field-specific local-state save validation, replacement confirmation, and non-retryable saved-view-limit guidance. When unavailable, Save/manage actions are disabled, expose an accessible "Select a workspace" explanation, and do not open a dialog; built-ins remain enabled. Opening captures the controller generation; a generation change closes the overlay and discards its draft, and submit refuses a stale generation. Focus returns to the invoker only while it remains connected/focusable, otherwise to the visible saved-view trigger or Sources pane landmark. Request errors use `role="alert"`/an appropriate live region, mutation controls expose an accessible busy/disabled state, and create/replace/reset/delete success uses one polite status region.
 
-- [ ] **Step 2: Run control tests and verify RED**
+- [x] **Step 2: Run control tests and verify RED**
 
 ```bash
 bun run test:run -- ../packages/ui/src/components/Option/ResearchWorkspace/__tests__/SourceViewControls.test.tsx --maxWorkers=1 --no-file-parallelism
@@ -474,15 +474,15 @@ bun run test:run -- ../packages/ui/src/components/Option/ResearchWorkspace/__tes
 
 Expected: FAIL because the component does not exist.
 
-- [ ] **Step 3: Implement the focused control component**
+- [x] **Step 3: Implement the focused control component**
 
 Use existing Ant Design menu/modal primitives and Lucide icons. Keep the row compact and unframed near search/advanced controls. Split repeated trigger/menu controls from a single `SourceViewOverlayHost` exported by the same module; only the page-level host renders modal portals. It stores the invoking element and captured controller generation, resets all overlay-local state on generation change, validates generation again before submit, and uses the documented focus fallback. Every icon-only control needs both a tooltip and `aria-label`; do not add nested cards or explanatory feature copy.
 
-- [ ] **Step 4: Write failing integration tests**
+- [x] **Step 4: Write failing integration tests**
 
 Test that Research Workspace creates exactly one saved-view controller beside `useSourceListViewState`, passes the same controller to simultaneous desktop/drawer SourcesPane mounts, and renders exactly one page-level overlay host. Invoking Save or confirmation from either pane yields one dialog/alert portal and closing restores focus to that pane's actual invoking control. Open Save and Replace in workspace A, switch to B and separately to null, and verify the dialog closes synchronously, drafts/confirmation state are discarded, and stale submission cannot call either controller generation. Unmount the invoking pane before close and verify focus falls back to the visible trigger or Sources landmark. Verify a null active workspace causes no request, old rows disappear synchronously, Save neither opens a dialog nor issues a request, and the ID is never converted to the synthetic pane fallback `"local"`. Test applying presets before filtering, saving current state, preserving `expanded`, and leaving search/folder/selection state untouched. After remount/reload, verify the server-backed view is listed and the user can reselect it to restore filters/sort. Do not persist or automatically restore an active/default view. Test workspace changes reload the correct list, clear active selection, and ignore deferred responses after non-null to null and A to B to A generation changes.
 
-- [ ] **Step 5: Run integration tests and verify RED**
+- [x] **Step 5: Run integration tests and verify RED**
 
 ```bash
 bun run test:run -- ../packages/ui/src/components/Option/ResearchWorkspace/__tests__/SourcesPane.stage4.filters-and-sort.test.tsx ../packages/ui/src/components/Option/ResearchWorkspace/__tests__/ResearchWorkspace.stage12.source-list-view-state.test.tsx --maxWorkers=1 --no-file-parallelism
@@ -490,11 +490,11 @@ bun run test:run -- ../packages/ui/src/components/Option/ResearchWorkspace/__tes
 
 Expected: FAIL until props/hook wiring exists.
 
-- [ ] **Step 6: Wire controls into Research Workspace**
+- [x] **Step 6: Wire controls into Research Workspace**
 
 Expose `applySourceListViewState` from the page hook. Instantiate `useSourceSavedViews` exactly once in `ResearchWorkspace`, beside the source-list state hook, with the raw nullable active-store workspace ID. Pass one controller model and full-state apply callback to every SourcesPane instance; panes render portal-free `SourceViewControls` above `SourceAdvancedControls` but never create their own controller or issue requests for the synthetic `"local"` fallback. Render one `SourceViewOverlayHost` at page level and route dialog opens through it with the invoking element and current controller generation; generation changes synchronously reset the host. Keep server-view errors local and nonblocking.
 
-- [ ] **Step 7: Re-run Stage 4 UI tests and verify GREEN**
+- [x] **Step 7: Re-run Stage 4 UI tests and verify GREEN**
 
 ```bash
 bun run test:run -- ../packages/ui/src/components/Option/ResearchWorkspace/__tests__/SourceViewControls.test.tsx ../packages/ui/src/components/Option/ResearchWorkspace/__tests__/use-source-saved-views.test.tsx ../packages/ui/src/components/Option/ResearchWorkspace/__tests__/SourcesPane.stage4.filters-and-sort.test.tsx ../packages/ui/src/components/Option/ResearchWorkspace/__tests__/ResearchWorkspace.stage12.source-list-view-state.test.tsx --maxWorkers=1 --no-file-parallelism
@@ -502,7 +502,7 @@ bun run test:run -- ../packages/ui/src/components/Option/ResearchWorkspace/__tes
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit Task 5**
+- [x] **Step 8: Commit Task 5**
 
 ```bash
 git add apps/packages/ui/src/components/Option/ResearchWorkspace/SourcesPane/SourceViewControls.tsx apps/packages/ui/src/components/Option/ResearchWorkspace/SourcesPane/index.tsx apps/packages/ui/src/components/Option/ResearchWorkspace/index.tsx apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/SourceViewControls.test.tsx apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/SourcesPane.stage4.filters-and-sort.test.tsx apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/ResearchWorkspace.stage12.source-list-view-state.test.tsx
