@@ -20,6 +20,7 @@ type WorkspaceConnectionGateProps = {
   unreachableDescription?: React.ReactNode
   renderDemo?: () => React.ReactNode
   renderTesting?: () => React.ReactNode
+  pageHeader?: React.ReactNode
 }
 
 const defaultTestingState = () => (
@@ -45,7 +46,8 @@ export const WorkspaceConnectionGate: React.FC<
   unreachableTitle,
   unreachableDescription,
   renderDemo,
-  renderTesting
+  renderTesting,
+  pageHeader
 }) => {
   const navigate = useNavigate()
   const location = useLocation()
@@ -62,6 +64,7 @@ export const WorkspaceConnectionGate: React.FC<
   if (uxState === "testing") {
     return (
       <PageShell className={className} maxWidthClassName={maxWidthClassName}>
+        {pageHeader}
         {renderTesting ? renderTesting() : defaultTestingState()}
       </PageShell>
     )
@@ -70,6 +73,7 @@ export const WorkspaceConnectionGate: React.FC<
   if (uxState === "error_auth" || uxState === "configuring_auth") {
     return (
       <PageShell className={className} maxWidthClassName={maxWidthClassName}>
+        {pageHeader}
         <FeatureEmptyState
           title={
             authTitle ||
@@ -92,6 +96,7 @@ export const WorkspaceConnectionGate: React.FC<
     const needsFirstRun = !hasCompletedFirstRun
     return (
       <PageShell className={className} maxWidthClassName={maxWidthClassName}>
+        {pageHeader}
         <FeatureEmptyState
           title={
             setupTitle || `Finish setup before using ${featureName}.`
@@ -111,6 +116,7 @@ export const WorkspaceConnectionGate: React.FC<
   if (uxState === "error_unreachable") {
     return (
       <PageShell className={className} maxWidthClassName={maxWidthClassName}>
+        {pageHeader}
         <FeatureEmptyState
           title={
             unreachableTitle || "Can't reach your tldw server right now."

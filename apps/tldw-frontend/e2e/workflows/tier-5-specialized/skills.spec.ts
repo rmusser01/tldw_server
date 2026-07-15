@@ -23,6 +23,7 @@ import {
   mockSkillsImportValidationFailure,
   mockSkillsSlowList,
   mockSkillsStaleVersionConflict,
+  mockSkillsTrashWorkflow,
 } from "../../utils/skills-fixtures"
 
 test.describe("Skills beginner journey (mocked)", () => {
@@ -128,7 +129,7 @@ test.describe("Skills beginner journey (mocked)", () => {
     diagnostics,
   }) => {
     await page.setViewportSize({ width: 390, height: 844 })
-    await mockSkillsBeginnerApi(page, { seeded: true })
+    const api = await mockSkillsBeginnerApi(page, { seeded: true })
     await seedAuth(page, {
       serverUrl: TEST_CONFIG.serverUrl,
       allowOffline: true,
@@ -153,8 +154,19 @@ test.describe("Skills beginner journey (mocked)", () => {
     const argsInput = previewDialog.getByPlaceholder("Enter test arguments...")
     await argsInput.focus()
     await page.keyboard.type("Keyboard-only workflow")
+    await page.keyboard.press("Enter")
+    await expect(previewDialog.getByText("Dry render", { exact: true })).toBeVisible()
+    expect(api.executeRequests.at(-1)).toEqual({
+      args: "Keyboard-only workflow",
+      dry_run: true,
+    })
+
     await previewDialog.getByRole("button", { name: "Run test" }).focus()
     await page.keyboard.press("Enter")
+    await expect.poll(() => api.executeRequests.at(-1)).toEqual({
+      args: "Keyboard-only workflow",
+      dry_run: false,
+    })
     await expect(previewDialog.getByText("Rendered Prompt", { exact: true })).toBeVisible()
     await expect(
       previewDialog.locator("textarea").last()
@@ -176,12 +188,48 @@ test.describe("Skills beginner journey (mocked)", () => {
     await drawer.getByRole("button", { name: "Cancel" }).focus()
     await page.keyboard.press("Enter")
     await expect(newSkillButton).toBeFocused()
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth
+      )
+    ).toBe(true)
 
     await assertNoCriticalErrors(diagnostics)
   })
 })
 
 test.describe("Skills power-user journey (mocked)", () => {
+  test("restores committed filters with browser Back and Forward", async ({
+    page,
+    diagnostics,
+  }) => {
+    const api = await mockPowerUserSkillsLibrary(page)
+    await seedAuth(page, {
+      serverUrl: TEST_CONFIG.serverUrl,
+      allowOffline: true,
+    })
+
+    await page.goto("/skills", { waitUntil: "domcontentloaded" })
+    await forceSkillsConnectionState(page)
+
+    await page.getByRole("button", { name: "Filters", exact: true }).click()
+    await page.getByLabel("Skill mode filter").click()
+    await page.getByTitle("Fork", { exact: true }).click()
+    await expect(page).toHaveURL(/(?:\?|&)mode=fork(?:&|$)/)
+    await expect.poll(() => api.lastListUrl()?.searchParams.get("context")).toBe("fork")
+    await expect(page.getByText("target-research-formatter", { exact: true })).toBeVisible()
+
+    await page.goBack()
+    await expect(page).not.toHaveURL(/(?:\?|&)mode=fork(?:&|$)/)
+    await expect(page.getByText("archive-helper-01", { exact: true })).toBeVisible()
+
+    await page.goForward()
+    await expect(page).toHaveURL(/(?:\?|&)mode=fork(?:&|$)/)
+    await expect(page.getByText("target-research-formatter", { exact: true })).toBeVisible()
+
+    await assertNoCriticalErrors(diagnostics)
+  })
+
   test("fixture accepts body-less skill deletes with trailing slashes", async ({ page }) => {
     const api = await mockPowerUserSkillsLibrary(page)
     await seedAuth(page, {
@@ -231,10 +279,20 @@ test.describe("Skills power-user journey (mocked)", () => {
       .poll(() => api.lastListUrl()?.searchParams.get("q"))
       .toBe("target-research-formatter")
     await expect(page.getByText("Target research formatter")).toBeVisible()
+    await expect(page.getByText("1 skill", { exact: true })).toBeVisible()
+    await expect(
+      page.getByRole("button", { name: "View target-research-formatter" })
+    ).toBeVisible()
 
     await searchInput.clear()
-    await page.getByRole("button", { name: "Fork" }).click()
-    await page.getByRole("button", { name: "Has tools" }).click()
+    await expect(page.getByText("30 skills", { exact: true })).toBeVisible()
+    await expect(page.getByRole("button", { name: "View archive-helper-02" })).toBeVisible()
+
+    await page.getByRole("button", { name: "Filters", exact: true }).click()
+    await page.getByLabel("Skill mode filter").click()
+    await page.getByTitle("Fork", { exact: true }).click()
+    await page.getByLabel("Skill tools filter").click()
+    await page.getByTitle("Has tools", { exact: true }).click()
     await expect(page.getByText("Batch cleanup helper")).toBeVisible()
     await expect(page.getByText("Target research formatter")).toBeVisible()
     await expect
@@ -243,6 +301,7 @@ test.describe("Skills power-user journey (mocked)", () => {
     await expect
       .poll(() => api.lastListUrl()?.searchParams.get("has_tools"))
       .toBe("true")
+    await page.getByRole("button", { name: /^Filters/ }).click()
 
     await page.getByRole("columnheader", { name: "Name" }).click()
     await expect
@@ -252,12 +311,117 @@ test.describe("Skills power-user journey (mocked)", () => {
     await page.getByLabel("Select target-research-formatter").check()
     await page.getByLabel("Select batch-cleanup-helper").check()
     await expect(page.getByText("2 selected")).toBeVisible()
-
     await page.getByRole("button", { name: "Delete selected" }).click()
     await expect(
       page.getByRole("dialog", { name: "Delete selected skills?" })
     ).toBeVisible()
     expect(api.deleteRequests).toHaveLength(0)
+
+    await assertNoCriticalErrors(diagnostics)
+  })
+})
+
+test.describe("Skills Trash journey (mocked)", () => {
+  test("offers immediate undo after moving a skill to Trash", async ({
+    page,
+    diagnostics,
+  }) => {
+    const api = await mockSkillsTrashWorkflow(page)
+    await seedAuth(page, {
+      serverUrl: TEST_CONFIG.serverUrl,
+      allowOffline: true,
+    })
+
+    await page.goto("/skills", { waitUntil: "domcontentloaded" })
+    await forceSkillsConnectionState(page)
+
+    await page.getByRole("button", { name: "More actions for summarize" }).click()
+    await page.getByRole("menuitem", { name: "Delete" }).click()
+    const confirmDialog = page.getByRole("dialog", { name: "Delete summarize?" })
+    await confirmDialog.getByRole("button", { name: "Move to Trash" }).click()
+
+    await expect(page.getByText("Skill moved to Trash")).toBeVisible()
+    await page.getByRole("button", { name: "Undo delete summarize" }).click()
+    await expect(page.getByText("Summarize source material")).toBeVisible()
+    expect(api.operations).toEqual(["delete", "restore"])
+    expect(api.state()).toBe("active")
+
+    await assertNoCriticalErrors(diagnostics)
+  })
+
+  test("restores a skill from the durable Trash view", async ({
+    page,
+    diagnostics,
+  }) => {
+    const api = await mockSkillsTrashWorkflow(page)
+    await seedAuth(page, {
+      serverUrl: TEST_CONFIG.serverUrl,
+      allowOffline: true,
+    })
+
+    await page.goto("/skills", { waitUntil: "domcontentloaded" })
+    await forceSkillsConnectionState(page)
+
+    await page.getByRole("button", { name: "More actions for summarize" }).click()
+    await page.getByRole("menuitem", { name: "Delete" }).click()
+    const deleteDialog = page.getByRole("dialog", { name: "Delete summarize?" })
+    await deleteDialog.getByRole("button", { name: "Move to Trash" }).click()
+    await expect(deleteDialog).toBeHidden()
+    await page
+      .getByRole("radiogroup", { name: "Skills view" })
+      .getByText("Trash", { exact: true })
+      .click()
+    await expect(page.getByRole("radio", { name: "Trash" })).toBeChecked()
+
+    await expect(page.getByText("1 in Trash", { exact: true })).toBeVisible()
+    await page.getByRole("button", { name: "Restore summarize" }).click()
+    await expect(page.getByRole("heading", { name: "Trash is empty" })).toBeVisible()
+    await page
+      .getByRole("radiogroup", { name: "Skills view" })
+      .getByText("Library", { exact: true })
+      .click()
+    await expect(page.getByRole("radio", { name: "Library" })).toBeChecked()
+    await expect(page.getByText("Summarize source material")).toBeVisible()
+    expect(api.operations).toEqual(["delete", "restore"])
+    expect(api.state()).toBe("active")
+
+    await assertNoCriticalErrors(diagnostics)
+  })
+
+  test("permanently deletes only after explicit confirmation", async ({
+    page,
+    diagnostics,
+  }) => {
+    const api = await mockSkillsTrashWorkflow(page)
+    await seedAuth(page, {
+      serverUrl: TEST_CONFIG.serverUrl,
+      allowOffline: true,
+    })
+
+    await page.goto("/skills", { waitUntil: "domcontentloaded" })
+    await forceSkillsConnectionState(page)
+
+    await page.getByRole("button", { name: "More actions for summarize" }).click()
+    await page.getByRole("menuitem", { name: "Delete" }).click()
+    const deleteDialog = page.getByRole("dialog", { name: "Delete summarize?" })
+    await deleteDialog.getByRole("button", { name: "Move to Trash" }).click()
+    await expect(deleteDialog).toBeHidden()
+    await page
+      .getByRole("radiogroup", { name: "Skills view" })
+      .getByText("Trash", { exact: true })
+      .click()
+    await expect(page.getByRole("radio", { name: "Trash" })).toBeChecked()
+
+    await page.getByRole("button", { name: "Permanently delete summarize" }).click()
+    const confirmDialog = page.getByRole("dialog", {
+      name: "Permanently delete summarize?",
+    })
+    await expect(confirmDialog).toContainText("This cannot be undone.")
+    await confirmDialog.getByRole("button", { name: "Delete permanently" }).click()
+
+    await expect(page.getByRole("heading", { name: "Trash is empty" })).toBeVisible()
+    expect(api.operations).toEqual(["delete", "purge"])
+    expect(api.state()).toBe("purged")
 
     await assertNoCriticalErrors(diagnostics)
   })
@@ -327,10 +491,11 @@ test.describe("Skills failure states (mocked)", () => {
     await page.goto("/skills", { waitUntil: "domcontentloaded" })
     await forceSkillsConnectionState(page)
 
-    await page.getByRole("button", { name: "Delete summarize" }).click()
-    const confirmDialog = page.getByRole("dialog", { name: "Delete skill?" })
+    await page.getByRole("button", { name: "More actions for summarize" }).click()
+    await page.getByRole("menuitem", { name: "Delete" }).click()
+    const confirmDialog = page.getByRole("dialog", { name: "Delete summarize?" })
     await expect(confirmDialog).toBeVisible()
-    await confirmDialog.getByRole("button", { name: "Delete" }).click()
+    await confirmDialog.getByRole("button", { name: "Move to Trash" }).click()
 
     await expect(page.getByText("Skill changed elsewhere")).toBeVisible()
     await expect(page.getByText("Reload skills before deleting this version.")).toBeVisible()

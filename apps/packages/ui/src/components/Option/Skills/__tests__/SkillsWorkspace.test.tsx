@@ -47,7 +47,12 @@ vi.mock("@/hooks/useConnectionState", () => ({
 }))
 
 vi.mock("../Manager", () => ({
-  SkillsManager: () => <div data-testid="skills-manager">Skills manager</div>
+  SkillsManager: () => (
+    <>
+      <h1>Skills</h1>
+      <div data-testid="skills-manager">Skills manager</div>
+    </>
+  )
 }))
 
 const renderWorkspace = () =>
@@ -79,6 +84,7 @@ describe("SkillsWorkspace capability states", () => {
 
     renderWorkspace()
 
+    expect(screen.getByRole("heading", { level: 1, name: "Skills" })).toBeInTheDocument()
     expect(screen.getByRole("status")).toHaveTextContent(
       "Checking Skills API support"
     )
@@ -95,6 +101,7 @@ describe("SkillsWorkspace capability states", () => {
 
     renderWorkspace()
 
+    expect(screen.getByRole("heading", { level: 1, name: "Skills" })).toBeInTheDocument()
     expect(
       screen.getByRole("heading", {
         name: "Skills are not available on this server"
@@ -120,6 +127,7 @@ describe("SkillsWorkspace capability states", () => {
 
     renderWorkspace()
 
+    expect(screen.getByRole("heading", { level: 1, name: "Skills" })).toBeInTheDocument()
     expect(
       screen.getByRole("heading", {
         name: "Finish setup before using Skills."
@@ -131,6 +139,7 @@ describe("SkillsWorkspace capability states", () => {
   it("renders SkillsManager only after Skills support is known", () => {
     renderWorkspace()
 
+    expect(screen.getByRole("heading", { level: 1, name: "Skills" })).toBeInTheDocument()
     expect(screen.getByTestId("skills-manager")).toBeInTheDocument()
   })
 
@@ -142,6 +151,7 @@ describe("SkillsWorkspace capability states", () => {
 
     renderWorkspace()
 
+    expect(screen.getByRole("heading", { level: 1, name: "Skills" })).toBeInTheDocument()
     expect(screen.getByTestId("skills-manager")).toBeInTheDocument()
   })
 
@@ -153,6 +163,7 @@ describe("SkillsWorkspace capability states", () => {
 
     renderWorkspace()
 
+    expect(screen.getByRole("heading", { level: 1, name: "Skills" })).toBeInTheDocument()
     expect(
       screen.getByRole("heading", {
         name: "Can't reach your tldw server right now."

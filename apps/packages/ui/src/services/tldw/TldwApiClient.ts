@@ -1782,8 +1782,18 @@ export class TldwApiClientBase {
   }
 
   async upload<T>(init: any, requireAuth = true): Promise<T> {
+    const throwIfAborted = () => {
+      if (!init?.abortSignal?.aborted) return
+      const error = new Error("Upload was cancelled")
+      error.name = "AbortError"
+      throw error
+    }
+    throwIfAborted()
     await this.ensureConfigForRequest(requireAuth)
-    return await bgUpload<T>(init)
+    throwIfAborted()
+    const result = await bgUpload<T>(init)
+    throwIfAborted()
+    return result
   }
 
   async *stream(init: any, requireAuth = true): AsyncGenerator<string> {

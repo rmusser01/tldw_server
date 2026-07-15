@@ -12,6 +12,7 @@ Provides CRUD operations for SKILL.md-based skills:
 - Execute skills with argument substitution
 """
 
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -28,16 +29,16 @@ from fastapi import (
 from fastapi.responses import Response
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import CurrentPrincipal
+from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 
 # Local Imports
 from tldw_Server_API.app.api.v1.schemas.skills_schemas import (
-    SkillContext,
-    SkillContextPayload,
     SkillBulkDeleteRequest,
     SkillBulkDeleteResponse,
+    SkillContext,
+    SkillContextPayload,
     SkillCreate,
     SkillExecuteRequest,
     SkillExecutionResult,
@@ -49,19 +50,21 @@ from tldw_Server_API.app.api.v1.schemas.skills_schemas import (
     SkillResponse,
     SkillsListResponse,
     SkillSummary,
+    SkillTrashItem,
+    SkillTrashListResponse,
     SkillUpdate,
 )
+from tldw_Server_API.app.core.Context_Integrity.resolver import ContextIntegrityBlocked
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
-from tldw_Server_API.app.core.Context_Integrity.resolver import ContextIntegrityBlocked
 from tldw_Server_API.app.core.Skills.exceptions import (
     SkillConflictError,
     SkillNotFoundError,
     SkillsError,
     SkillValidationError,
 )
-from tldw_Server_API.app.core.Skills.skill_executor import RequestContext, SkillExecutor
 from tldw_Server_API.app.core.Skills.runtime_metadata import build_skill_runtime_metadata
+from tldw_Server_API.app.core.Skills.skill_executor import RequestContext, SkillExecutor
 from tldw_Server_API.app.core.Skills.skills_service import SkillsService
 
 router = APIRouter()
@@ -69,16 +72,18 @@ router = APIRouter()
 MAX_SKILL_IMPORT_PREVIEW_UPLOAD_BYTES = 6 * 1024 * 1024
 _ZIP_UPLOAD_SIGNATURES = (b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08")
 CONTEXT_INTEGRITY_LOCKED_DETAIL = "Asset is quarantined pending admin review."
+_SKILLS_SERVICE_ATTRIBUTE = "_tldw_skills_service"
+_MAX_SKILL_VERSION = 9_223_372_036_854_775_807
 
 
-async def _read_skill_import_preview_upload(file: UploadFile) -> bytes:
-    """Read a preview upload with a hard size cap."""
+async def _read_skill_import_upload(file: UploadFile) -> bytes:
+    """Read a skill import upload with a hard size cap."""
     content = await file.read(MAX_SKILL_IMPORT_PREVIEW_UPLOAD_BYTES + 1)
     if len(content) > MAX_SKILL_IMPORT_PREVIEW_UPLOAD_BYTES:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             detail=(
-                "Skill import preview file exceeds "
+                "Skill import file exceeds "
                 f"{MAX_SKILL_IMPORT_PREVIEW_UPLOAD_BYTES // (1024 * 1024)}MB limit"
             ),
         )
@@ -112,7 +117,40 @@ async def get_skills_service(
     user_id = principal.user_id
     user_base_dir = DatabasePaths.get_user_base_directory(user_id)
 
-    return SkillsService(user_id=user_id, base_path=user_base_dir, db=chacha_db)
+    return _get_cached_skills_service(user_id, user_base_dir, chacha_db)
+
+
+def _get_cached_skills_service(
+    user_id: int,
+    base_path: Path,
+    db: CharactersRAGDB,
+) -> SkillsService:
+    """Reuse service state without extending the owning database's lifetime."""
+    cached = getattr(db, _SKILLS_SERVICE_ATTRIBUTE, None)
+    if (
+        isinstance(cached, SkillsService)
+        and cached.user_id == user_id
+        and cached.base_path == Path(base_path)
+    ):
+        return cached
+    service = SkillsService(user_id=user_id, base_path=base_path, db=db)
+    setattr(db, _SKILLS_SERVICE_ATTRIBUTE, service)
+    return service
+
+
+def _parse_if_match_version(value: str | None) -> int | None:
+    """Parse a plain numeric version or a standard quoted numeric entity tag."""
+    if value is None:
+        return None
+    match = re.fullmatch(r'(?:"([0-9]{1,19})"|([0-9]{1,19}))', value.strip())
+    if match is not None:
+        version = int(match.group(1) or match.group(2))
+        if version <= _MAX_SKILL_VERSION:
+            return version
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="If-Match must be a numeric skill version",
+    )
 
 
 def _skill_data_to_response(skill_data: dict) -> SkillResponse:
@@ -131,6 +169,7 @@ def _skill_data_to_response(skill_data: dict) -> SkillResponse:
         allowed_tools=allowed_tools,
         model=model,
         context=context,
+        raw_content=skill_data.get("raw_content") or skill_data["content"],
         runtime=build_skill_runtime_metadata(
             context=context,
             allowed_tools=allowed_tools,
@@ -168,6 +207,34 @@ def _metadata_to_summary(metadata) -> SkillSummary:
             disable_model_invocation=disable_model_invocation,
         ),
         version=metadata.version or 1,
+    )
+
+
+def _trash_data_to_response(skill_data: dict) -> SkillTrashItem:
+    """Convert deleted service metadata to a typed Trash item."""
+    context = skill_data.get("context") or "inline"
+    allowed_tools = skill_data.get("allowed_tools")
+    model = skill_data.get("model")
+    disable_model_invocation = bool(skill_data.get("disable_model_invocation"))
+    return SkillTrashItem(
+        name=skill_data["name"],
+        description=skill_data.get("description"),
+        argument_hint=skill_data.get("argument_hint"),
+        user_invocable=skill_data.get("user_invocable", True),
+        disable_model_invocation=disable_model_invocation,
+        allowed_tools=allowed_tools,
+        model=model,
+        context=context,
+        runtime=build_skill_runtime_metadata(
+            context=context,
+            allowed_tools=allowed_tools,
+            model=model,
+            disable_model_invocation=disable_model_invocation,
+        ),
+        version=skill_data["version"],
+        deleted_at=skill_data["deleted_at"],
+        restorable=skill_data["restorable"],
+        restore_unavailable_reason=skill_data.get("restore_unavailable_reason"),
     )
 
 
@@ -329,6 +396,127 @@ async def bulk_delete_skills(
         ) from e
 
 
+@router.get("/trash", response_model=SkillTrashListResponse)
+async def list_skill_trash(
+    limit: int = Query(100, ge=1, le=500, description="Maximum deleted skills to return"),
+    offset: int = Query(0, ge=0, description="Offset for Trash pagination"),
+    service: SkillsService = Depends(get_skills_service),
+) -> SkillTrashListResponse:
+    """List deleted skills and whether each archived bundle is restorable."""
+    try:
+        skills = await service.list_trash(limit=limit, offset=offset)
+        total = await service.get_trash_count()
+        return SkillTrashListResponse(
+            skills=[_trash_data_to_response(skill) for skill in skills],
+            count=len(skills),
+            total=total,
+            limit=limit,
+            offset=offset,
+            pagination=build_offset_pagination_meta(
+                limit=limit,
+                offset=offset,
+                total=total,
+                count=len(skills),
+            ),
+        )
+    except SkillsError as e:
+        logger.error(
+            "Error listing Skills Trash user_id={} limit={} offset={} error_type={}",
+            service.user_id,
+            limit,
+            offset,
+            type(e).__name__,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to list Skills Trash",
+        ) from e
+
+
+@router.post("/{skill_name}/restore", response_model=SkillResponse)
+async def restore_skill(
+    skill_name: str,
+    if_match: Optional[str] = Header(None, alias="If-Match"),
+    service: SkillsService = Depends(get_skills_service),
+) -> SkillResponse:
+    """Restore a complete skill bundle from Trash."""
+    expected_version = _parse_if_match_version(if_match)
+    try:
+        skill_data = await service.restore_skill(
+            skill_name,
+            expected_version=expected_version,
+        )
+        return _skill_data_to_response(skill_data)
+    except SkillNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Skill '{skill_name}' not found in Trash",
+        ) from None
+    except SkillConflictError as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(e),
+        ) from e
+    except SkillValidationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from e
+    except SkillsError as e:
+        logger.error(
+            "Error restoring skill from Trash user_id={} skill_name={} "
+            "expected_version={} error_type={}",
+            service.user_id,
+            skill_name,
+            expected_version,
+            type(e).__name__,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to restore skill",
+        ) from e
+
+
+@router.delete("/{skill_name}/purge", status_code=status.HTTP_204_NO_CONTENT)
+async def purge_skill(
+    skill_name: str,
+    if_match: Optional[str] = Header(None, alias="If-Match"),
+    service: SkillsService = Depends(get_skills_service),
+) -> None:
+    """Permanently delete a skill already in Trash."""
+    expected_version = _parse_if_match_version(if_match)
+    try:
+        await service.purge_skill(skill_name, expected_version=expected_version)
+    except SkillNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Skill '{skill_name}' not found in Trash",
+        ) from None
+    except SkillConflictError as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(e),
+        ) from e
+    except SkillValidationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from e
+    except SkillsError as e:
+        logger.error(
+            "Error permanently deleting skill from Trash user_id={} skill_name={} "
+            "expected_version={} error_type={}",
+            service.user_id,
+            skill_name,
+            expected_version,
+            type(e).__name__,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to permanently delete skill",
+        ) from e
+
+
 @router.get("/{skill_name}", response_model=SkillResponse)
 async def get_skill(
     skill_name: str,
@@ -396,14 +584,15 @@ async def create_skill(
 async def update_skill(
     skill_name: str,
     skill: SkillUpdate,
-    expected_version: Optional[int] = Header(None, alias="If-Match"),
+    if_match: Optional[str] = Header(None, alias="If-Match"),
     service: SkillsService = Depends(get_skills_service),
-):
+) -> SkillResponse:
     """
     Update an existing skill.
 
-    Supports optimistic locking via If-Match header with version number.
+    Supports optimistic locking via a plain or quoted numeric If-Match version.
     """
+    expected_version = _parse_if_match_version(if_match)
     try:
         skill_data = await service.update_skill(
             name=skill_name,
@@ -438,14 +627,15 @@ async def update_skill(
 @router.delete("/{skill_name}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_skill(
     skill_name: str,
-    expected_version: Optional[int] = Header(None, alias="If-Match"),
+    if_match: Optional[str] = Header(None, alias="If-Match"),
     service: SkillsService = Depends(get_skills_service),
-):
+) -> None:
     """
     Delete a skill.
 
-    Supports optimistic locking via If-Match header with version number.
+    Supports optimistic locking via a plain or quoted numeric If-Match version.
     """
+    expected_version = _parse_if_match_version(if_match)
     try:
         await service.delete_skill(skill_name, expected_version=expected_version)
     except SkillNotFoundError:
@@ -508,6 +698,7 @@ async def import_skill(
             name=request.name,
             supporting_files=request.supporting_files,
             overwrite=request.overwrite,
+            expected_version=request.expected_version,
         )
         return _skill_data_to_response(skill_data)
     except SkillConflictError as e:
@@ -540,7 +731,7 @@ async def preview_import_skill_from_file(
     """
     filename = _upload_log_name(file.filename)
     try:
-        content = await _read_skill_import_preview_upload(file)
+        content = await _read_skill_import_upload(file)
 
         if _is_zip_upload(content):
             preview = await service.preview_import_from_zip(content)
@@ -582,6 +773,11 @@ async def preview_import_skill_from_file(
 async def import_skill_from_file(
     file: UploadFile = File(..., description="SKILL.md file or zip archive"),
     overwrite: bool = Query(False, description="Overwrite existing skill"),
+    expected_version: Optional[int] = Query(
+        None,
+        ge=1,
+        description="Existing version confirmed by import preview",
+    ),
     service: SkillsService = Depends(get_skills_service),
 ):
     """
@@ -590,11 +786,15 @@ async def import_skill_from_file(
     Accepts either a SKILL.md file or a zip archive containing a skill directory.
     """
     try:
-        content = await file.read()
+        content = await _read_skill_import_upload(file)
 
-        if file.filename and file.filename.lower().endswith(".zip"):
+        if _is_zip_upload(content):
             # Import from zip
-            skill_data = await service.import_from_zip(content, overwrite=overwrite)
+            skill_data = await service.import_from_zip(
+                content,
+                overwrite=overwrite,
+                expected_version=expected_version,
+            )
         else:
             # Import from SKILL.md content
             try:
@@ -613,6 +813,7 @@ async def import_skill_from_file(
                 content=text_content,
                 name=name,
                 overwrite=overwrite,
+                expected_version=expected_version,
             )
 
         return _skill_data_to_response(skill_data)

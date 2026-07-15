@@ -95,7 +95,7 @@ describe("SkillPreview test-run semantics", () => {
   it("discloses execution risk before running a skill", () => {
     renderPreview()
 
-    const dialog = screen.getByRole("dialog", { name: "Test run" })
+    const dialog = screen.getByRole("dialog", { name: "Test run: summarize" })
     expect(within(dialog).getByRole("status")).toHaveTextContent("")
     expect(
       within(dialog).getByText(
@@ -119,7 +119,7 @@ describe("SkillPreview test-run semantics", () => {
       }
     })
 
-    const dialog = screen.getByRole("dialog", { name: "Test run" })
+    const dialog = screen.getByRole("dialog", { name: "Test run: summarize" })
     expect(within(dialog).getByText("Runtime impact")).toBeInTheDocument()
     expect(within(dialog).getByText("Fork")).toBeInTheDocument()
     expect(within(dialog).getByText("Test may call model")).toBeInTheDocument()
@@ -145,7 +145,7 @@ describe("SkillPreview test-run semantics", () => {
       }
     })
 
-    const dialog = screen.getByRole("dialog", { name: "Test run" })
+    const dialog = screen.getByRole("dialog", { name: "Test run: summarize" })
     expect(within(dialog).getByText("Fork")).toBeInTheDocument()
     expect(within(dialog).getByText("Prompt only by default")).toBeInTheDocument()
     expect(
@@ -161,7 +161,7 @@ describe("SkillPreview test-run semantics", () => {
   it("runs the skill with supplied arguments from the explicit test action", async () => {
     renderPreview()
 
-    const dialog = screen.getByRole("dialog", { name: "Test run" })
+    const dialog = screen.getByRole("dialog", { name: "Test run: summarize" })
     fireEvent.change(within(dialog).getByPlaceholderText("Enter test arguments..."), {
       target: { value: "chapter 1" }
     })
@@ -171,7 +171,7 @@ describe("SkillPreview test-run semantics", () => {
       expect(tldwClientMock.executeSkill).toHaveBeenCalledWith(
         "summarize",
         "chapter 1",
-        { dryRun: false }
+        { dryRun: false, signal: expect.any(AbortSignal) }
       )
     })
   })
@@ -189,7 +189,7 @@ describe("SkillPreview test-run semantics", () => {
 
     renderPreview()
 
-    const dialog = screen.getByRole("dialog", { name: "Test run" })
+    const dialog = screen.getByRole("dialog", { name: "Test run: summarize" })
     fireEvent.change(within(dialog).getByPlaceholderText("Enter test arguments..."), {
       target: { value: "chapter 1" }
     })
@@ -199,7 +199,7 @@ describe("SkillPreview test-run semantics", () => {
       expect(tldwClientMock.executeSkill).toHaveBeenCalledWith(
         "summarize",
         "chapter 1",
-        { dryRun: true }
+        { dryRun: true, signal: expect.any(AbortSignal) }
       )
     })
 
@@ -226,7 +226,7 @@ describe("SkillPreview test-run semantics", () => {
 
     renderPreview()
 
-    const dialog = screen.getByRole("dialog", { name: "Test run" })
+    const dialog = screen.getByRole("dialog", { name: "Test run: summarize" })
     const argsInput = within(dialog).getByPlaceholderText("Enter test arguments...")
     fireEvent.click(within(dialog).getByRole("button", { name: "Run test" }))
 
@@ -306,12 +306,94 @@ describe("SkillPreview test-run semantics", () => {
     expect(completedStatus.closest('[role="status"]')).toBeInTheDocument()
   })
 
+  it("uses Enter for the safe dry render rather than live execution", async () => {
+    renderPreview()
+
+    const argsInput = screen.getByRole("textbox", { name: "Test Arguments" })
+    fireEvent.change(argsInput, { target: { value: "chapter 2" } })
+    fireEvent.keyDown(argsInput, { key: "Enter", code: "Enter", charCode: 13 })
+
+    await waitFor(() => {
+      expect(tldwClientMock.executeSkill).toHaveBeenCalledWith(
+        "summarize",
+        "chapter 2",
+        { dryRun: true, signal: expect.any(AbortSignal) }
+      )
+    })
+  })
+
+  it("associates labels with argument and result fields", async () => {
+    renderPreview()
+
+    expect(screen.getByRole("textbox", { name: "Test Arguments" })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Run test" }))
+
+    expect(await screen.findByRole("textbox", { name: "Rendered Prompt" })).toHaveAttribute("readonly")
+    expect(screen.getByRole("textbox", { name: "Fork Output" })).toHaveAttribute("readonly")
+  })
+
+  it("aborts and ignores a late result after the selected skill changes", async () => {
+    let resolveFirst: (value: {
+      skill_name: string
+      rendered_prompt: string
+      allowed_tools: string[]
+      model_override: null
+      execution_mode: "inline"
+      fork_output: null
+      dry_run: true
+    }) => void = () => {}
+    let firstSignal: AbortSignal | undefined
+    tldwClientMock.executeSkill.mockImplementationOnce(
+      (_name: string, _args: string, options: { signal?: AbortSignal }) => {
+        firstSignal = options.signal
+        return new Promise((resolve) => {
+          resolveFirst = resolve
+        })
+      }
+    )
+
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
+    })
+    const renderFor = (name: string) => (
+      <QueryClientProvider client={queryClient}>
+        <SkillPreview skillName={name} onClose={vi.fn()} />
+      </QueryClientProvider>
+    )
+    const view = render(renderFor("summarize"))
+
+    fireEvent.click(screen.getByRole("button", { name: "Render prompt only" }))
+    await waitFor(() => expect(tldwClientMock.executeSkill).toHaveBeenCalledTimes(1))
+
+    view.rerender(renderFor("explain"))
+    expect(firstSignal?.aborted).toBe(true)
+    expect(screen.getByRole("dialog", { name: "Test run: explain" })).toBeInTheDocument()
+
+    resolveFirst({
+      skill_name: "summarize",
+      rendered_prompt: "STALE SUMMARIZE RESULT",
+      allowed_tools: [],
+      model_override: null,
+      execution_mode: "inline",
+      fork_output: null,
+      dry_run: true
+    })
+
+    await waitFor(() => {
+      expect(screen.queryByDisplayValue("STALE SUMMARIZE RESULT")).not.toBeInTheDocument()
+    })
+  })
+
   it("renders execution failures as alerts", async () => {
-    tldwClientMock.executeSkill.mockRejectedValueOnce(new Error("Model unavailable"))
+    tldwClientMock.executeSkill.mockRejectedValueOnce(
+      new Error("POST /api/v1/skills/summarize/execute failed at /Users/me/private-key\nTraceback")
+    )
     renderPreview()
 
     fireEvent.click(screen.getByRole("button", { name: "Run test" }))
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("Model unavailable")
+    const alert = await screen.findByRole("alert")
+    expect(alert).toHaveTextContent("POST [server-endpoint] failed at [redacted-path]")
+    expect(alert).not.toHaveTextContent("/Users/me/private-key")
   })
 })

@@ -4,6 +4,7 @@ import { Alert, Button, Input, Modal, Tag } from "antd"
 import { useTranslation } from "react-i18next"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import type { SkillExecutionResult, SkillRuntimeMetadata } from "@/types/skill"
+import { sanitizeServerErrorMessage } from "@/utils/server-error-message"
 
 interface SkillPreviewProps {
   skillName: string | null
@@ -14,6 +15,14 @@ interface SkillPreviewProps {
 
 type SkillRunMode = "dry-run" | "test-run"
 
+interface SkillExecutionVariables {
+  requestId: number
+  skillName: string
+  args: string
+  dryRun: boolean
+  signal: AbortSignal
+}
+
 export const SkillPreview: React.FC<SkillPreviewProps> = ({
   skillName,
   runtime,
@@ -23,46 +32,106 @@ export const SkillPreview: React.FC<SkillPreviewProps> = ({
   const { t } = useTranslation(["option", "common"])
   const [args, setArgs] = React.useState("")
   const [result, setResult] = React.useState<SkillExecutionResult | null>(null)
+  const [runError, setRunError] = React.useState<unknown>(null)
   const [activeRunMode, setActiveRunMode] = React.useState<SkillRunMode | null>(null)
-  const skillRunPendingRef = React.useRef(false)
-
-  React.useEffect(() => {
-    if (!skillName) {
-      setArgs("")
-      setResult(null)
-      setActiveRunMode(null)
-      skillRunPendingRef.current = false
-    }
-  }, [skillName])
+  const requestIdRef = React.useRef(0)
+  const activeRequestRef = React.useRef<{
+    requestId: number
+    skillName: string
+    controller: AbortController
+  } | null>(null)
+  const activeSkillNameRef = React.useRef(skillName)
 
   const executeMutation = useMutation({
-    mutationFn: ({ dryRun }: { dryRun: boolean }) =>
-      tldwClient.executeSkill(skillName!, args, { dryRun }),
-    onSuccess: (data: SkillExecutionResult) => {
+    mutationFn: (variables: SkillExecutionVariables) =>
+      tldwClient.executeSkill(variables.skillName, variables.args, {
+        dryRun: variables.dryRun,
+        signal: variables.signal
+      }),
+    onSuccess: (data: SkillExecutionResult, variables: SkillExecutionVariables) => {
+      const activeRequest = activeRequestRef.current
+      if (
+        variables.signal.aborted
+        || !activeRequest
+        || activeRequest.requestId !== variables.requestId
+        || activeRequest.skillName !== variables.skillName
+        || activeSkillNameRef.current !== variables.skillName
+      ) {
+        return
+      }
       setResult(data)
     },
-    onSettled: () => {
-      skillRunPendingRef.current = false
+    onError: (error: unknown, variables: SkillExecutionVariables) => {
+      const activeRequest = activeRequestRef.current
+      if (
+        variables.signal.aborted
+        || !activeRequest
+        || activeRequest.requestId !== variables.requestId
+        || activeSkillNameRef.current !== variables.skillName
+      ) {
+        return
+      }
+      setRunError(error)
+    },
+    onSettled: (_data, _error, variables: SkillExecutionVariables) => {
+      if (activeRequestRef.current?.requestId !== variables.requestId) return
+      activeRequestRef.current = null
       setActiveRunMode(null)
     }
   })
+  const resetMutation = executeMutation.reset
+
+  const resetExecution = React.useCallback(() => {
+    requestIdRef.current += 1
+    activeRequestRef.current?.controller.abort()
+    activeRequestRef.current = null
+    resetMutation()
+    setResult(null)
+    setRunError(null)
+    setActiveRunMode(null)
+  }, [resetMutation])
+
+  React.useEffect(() => {
+    activeSkillNameRef.current = skillName
+    resetExecution()
+    setArgs("")
+  }, [resetExecution, skillName])
+
+  React.useEffect(
+    () => () => {
+      requestIdRef.current += 1
+      activeRequestRef.current?.controller.abort()
+      activeRequestRef.current = null
+    },
+    []
+  )
 
   const handleRun = (dryRun: boolean) => {
-    if (!skillName || skillRunPendingRef.current || executeMutation.isPending) return
+    if (!skillName || activeRequestRef.current) return
 
-    skillRunPendingRef.current = true
+    const controller = new AbortController()
+    const requestId = requestIdRef.current + 1
+    requestIdRef.current = requestId
+    activeRequestRef.current = { requestId, skillName, controller }
     setResult(null)
+    setRunError(null)
     setActiveRunMode(dryRun ? "dry-run" : "test-run")
-    executeMutation.mutate({ dryRun })
+    executeMutation.mutate({
+      requestId,
+      skillName,
+      args,
+      dryRun,
+      signal: controller.signal
+    })
   }
 
   const handleRunTest = () => handleRun(false)
   const handleRenderOnly = () => handleRun(true)
 
-  const errorMessage =
-    executeMutation.error instanceof Error
-      ? executeMutation.error.message
-      : t("option:skills.testRunError", { defaultValue: "Execution failed" })
+  const fallbackErrorMessage = t("option:skills.testRunError", {
+    defaultValue: "Execution failed"
+  })
+  const errorMessage = sanitizeServerErrorMessage(runError, fallbackErrorMessage)
   const runtimeToolLabel = runtime
     ? t("option:skills.runtimeDeclaredTools", {
         defaultValue: `${runtime.declared_tool_count} tools declared`,
@@ -89,7 +158,8 @@ export const SkillPreview: React.FC<SkillPreviewProps> = ({
             defaultValue: "Run test uses inline prompt execution for this skill."
           })
     : ""
-  const runStatusMessage = executeMutation.isPending && skillName
+  const isRunning = activeRunMode !== null
+  const runStatusMessage = isRunning && skillName
     ? activeRunMode === "dry-run"
       ? t("option:skills.renderingPromptStatus", {
           defaultValue: `Rendering prompt for ${skillName}`,
@@ -114,11 +184,14 @@ export const SkillPreview: React.FC<SkillPreviewProps> = ({
   return (
     <Modal
       title={t("option:skills.testRunTitle", {
-        defaultValue: "Test run",
+        defaultValue: `Test run: ${skillName ?? ""}`,
         name: skillName
       })}
       open={Boolean(skillName)}
-      onCancel={onClose}
+      onCancel={() => {
+        resetExecution()
+        onClose()
+      }}
       afterClose={onAfterClose}
       footer={null}
       width={640}
@@ -130,19 +203,20 @@ export const SkillPreview: React.FC<SkillPreviewProps> = ({
         </div>
 
         <div>
-          <label className="mb-1 block text-sm font-medium">
+          <label htmlFor="skill-preview-arguments" className="mb-1 block text-sm font-medium">
             {t("option:skills.previewArgs", {
               defaultValue: "Test Arguments"
             })}
           </label>
           <Input
+            id="skill-preview-arguments"
             value={args}
             onChange={(e) => setArgs(e.target.value)}
             placeholder={t("option:skills.previewArgsPlaceholder", {
               defaultValue: "Enter test arguments..."
             })}
-            onPressEnter={handleRunTest}
-            disabled={executeMutation.isPending}
+            onPressEnter={handleRenderOnly}
+            disabled={isRunning}
           />
         </div>
 
@@ -212,22 +286,22 @@ export const SkillPreview: React.FC<SkillPreviewProps> = ({
         <div className="flex flex-col gap-2 sm:flex-row">
           <Button
             onClick={handleRenderOnly}
-            loading={executeMutation.isPending && activeRunMode === "dry-run"}
-            disabled={executeMutation.isPending}
+            loading={isRunning && activeRunMode === "dry-run"}
+            disabled={isRunning}
           >
             {t("option:skills.renderOnlyAction", { defaultValue: "Render prompt only" })}
           </Button>
           <Button
             type="primary"
             onClick={handleRunTest}
-            loading={executeMutation.isPending && activeRunMode === "test-run"}
-            disabled={executeMutation.isPending}
+            loading={isRunning && activeRunMode === "test-run"}
+            disabled={isRunning}
           >
             {t("option:skills.testRunAction", { defaultValue: "Run test" })}
           </Button>
         </div>
 
-        {executeMutation.isError && (
+        {runError && (
           <Alert role="alert" type="error" showIcon title={errorMessage} />
         )}
 
@@ -253,12 +327,13 @@ export const SkillPreview: React.FC<SkillPreviewProps> = ({
             </div>
 
             <div>
-              <label className="mb-1 block text-sm font-medium">
+              <label htmlFor="skill-preview-rendered-prompt" className="mb-1 block text-sm font-medium">
                 {t("option:skills.previewRendered", {
                   defaultValue: "Rendered Prompt"
                 })}
               </label>
               <Input.TextArea
+                id="skill-preview-rendered-prompt"
                 value={result.rendered_prompt}
                 readOnly
                 rows={10}
@@ -268,12 +343,13 @@ export const SkillPreview: React.FC<SkillPreviewProps> = ({
 
             {result.fork_output && (
               <div>
-                <label className="mb-1 block text-sm font-medium">
+                <label htmlFor="skill-preview-fork-output" className="mb-1 block text-sm font-medium">
                   {t("option:skills.previewForkOutput", {
                     defaultValue: "Fork Output"
                   })}
                 </label>
                 <Input.TextArea
+                  id="skill-preview-fork-output"
                   value={result.fork_output}
                   readOnly
                   rows={6}
