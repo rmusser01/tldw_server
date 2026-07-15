@@ -470,10 +470,180 @@ async def test_http_hop_error_maps_to_stable_bounded_safe_error() -> None:
     error = caught.value
     assert error.code == "hop_failed"
     assert error.retryable is True
+    assert error.timed_out is True
     assert str(error) == "Discovery gateway hop failed"
     assert len(str(error)) <= 64
     assert error.__cause__ is None
     assert error.__context__ is None
+
+
+@pytest.mark.parametrize(
+    "timed_out",
+    (None, 0, 1, "true", object()),
+)
+def test_gateway_error_timeout_state_requires_an_exact_boolean(timed_out: object) -> None:
+    with pytest.raises(TypeError, match="timed_out must be a boolean"):
+        DiscoveryGatewayError("hop_failed", timed_out=timed_out)
+
+
+def test_gateway_error_timeout_state_defaults_false_and_has_safe_repr() -> None:
+    default = DiscoveryGatewayError("hop_failed")
+    timeout = DiscoveryGatewayError("hop_failed", retryable=True, timed_out=True)
+
+    assert DiscoveryGatewayError.__slots__ == ("code", "retryable", "timed_out")
+    assert default.timed_out is False
+    assert timeout.code == "hop_failed"
+    assert timeout.retryable is True
+    assert timeout.timed_out is True
+    assert repr(timeout) == "DiscoveryGatewayError('Discovery gateway hop failed')"
+    assert "timeout" not in repr(timeout).casefold()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "hop_code",
+    ("dns_timeout", "connect_timeout", "read_timeout", "write_timeout", "total_timeout"),
+)
+async def test_trusted_http_hop_timeout_codes_are_preserved_without_detail(hop_code: str) -> None:
+    route, intent = _route_and_intent()
+    unsafe = HTTPHopError(hop_code, retryable=True)
+    unsafe.args = (f"provider-secret:{hop_code}",)
+
+    async def one_hop(request: NormalizedHTTPHopRequest) -> HTTPHopResponse:
+        raise unsafe
+
+    with pytest.raises(DiscoveryGatewayError) as caught:
+        await dispatch_once(
+            route,
+            intent,
+            is_policy_active=lambda _route_id, _digest: True,
+            one_hop=one_hop,
+        )
+
+    assert caught.value.code == "hop_failed"
+    assert caught.value.retryable is True
+    assert caught.value.timed_out is True
+    assert hop_code not in repr(caught.value)
+    assert "provider-secret" not in repr(caught.value)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "hop_code",
+    (
+        "invalid_request",
+        "dns_resolution_failed",
+        "dns_address_denied",
+        "peer_verification_failed",
+        "tls_error",
+        "protocol_error",
+        "response_headers_too_large",
+        "response_too_large",
+        "decompressed_response_too_large",
+        "parser_input_too_large",
+        "unsupported_content_encoding",
+        "invalid_content_encoding",
+        "transport_error",
+    ),
+)
+async def test_non_timeout_http_hop_codes_remain_not_timed_out(hop_code: str) -> None:
+    route, intent = _route_and_intent()
+
+    async def one_hop(request: NormalizedHTTPHopRequest) -> HTTPHopResponse:
+        raise HTTPHopError(hop_code, retryable=True)
+
+    with pytest.raises(DiscoveryGatewayError) as caught:
+        await dispatch_once(
+            route,
+            intent,
+            is_policy_active=lambda _route_id, _digest: True,
+            one_hop=one_hop,
+        )
+
+    assert caught.value.code == "hop_failed"
+    assert caught.value.retryable is True
+    assert caught.value.timed_out is False
+
+
+@pytest.mark.asyncio
+async def test_untyped_timeout_exception_is_not_trusted_timeout_state() -> None:
+    route, intent = _route_and_intent()
+
+    async def one_hop(request: NormalizedHTTPHopRequest) -> HTTPHopResponse:
+        raise TimeoutError("provider-secret")
+
+    with pytest.raises(DiscoveryGatewayError) as caught:
+        await dispatch_once(
+            route,
+            intent,
+            is_policy_active=lambda _route_id, _digest: True,
+            one_hop=one_hop,
+        )
+
+    assert caught.value.code == "hop_failed"
+    assert caught.value.retryable is False
+    assert caught.value.timed_out is False
+    assert "provider-secret" not in repr(caught.value)
+
+
+@pytest.mark.asyncio
+async def test_raising_http_hop_code_accessor_fails_closed_without_detail() -> None:
+    route, intent = _route_and_intent()
+
+    class HostileHTTPHopError(HTTPHopError):
+        def __getattribute__(self, name: str) -> object:
+            if name == "code":
+                raise RuntimeError("provider-secret")
+            return super().__getattribute__(name)
+
+    unsafe = HostileHTTPHopError("dns_timeout", retryable=True)
+
+    async def one_hop(request: NormalizedHTTPHopRequest) -> HTTPHopResponse:
+        raise unsafe
+
+    with pytest.raises(DiscoveryGatewayError) as caught:
+        await dispatch_once(
+            route,
+            intent,
+            is_policy_active=lambda _route_id, _digest: True,
+            one_hop=one_hop,
+        )
+
+    assert caught.value.code == "hop_failed"
+    assert caught.value.retryable is True
+    assert caught.value.timed_out is False
+    assert "provider-secret" not in repr(caught.value)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", ("missing", "non-string", "string-subclass"))
+async def test_untrusted_http_hop_code_value_fails_closed(case: str) -> None:
+    class StringSubclass(str):
+        pass
+
+    route, intent = _route_and_intent()
+    unsafe = HTTPHopError("dns_timeout", retryable=True)
+    if case == "missing":
+        del unsafe.code
+    elif case == "non-string":
+        unsafe.code = object()
+    else:
+        unsafe.code = StringSubclass("dns_timeout")
+
+    async def one_hop(request: NormalizedHTTPHopRequest) -> HTTPHopResponse:
+        raise unsafe
+
+    with pytest.raises(DiscoveryGatewayError) as caught:
+        await dispatch_once(
+            route,
+            intent,
+            is_policy_active=lambda _route_id, _digest: True,
+            one_hop=one_hop,
+        )
+
+    assert caught.value.code == "hop_failed"
+    assert caught.value.retryable is True
+    assert caught.value.timed_out is False
 
 
 @pytest.mark.asyncio

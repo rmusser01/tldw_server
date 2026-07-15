@@ -46,6 +46,9 @@ _ERROR_MESSAGES: dict[GatewayErrorCode, str] = {
     "hop_failed": "Discovery gateway hop failed",
     "invalid_hop_response": "Discovery gateway hop response rejected",
 }
+_TIMEOUT_HOP_ERROR_CODES = frozenset(
+    {"dns_timeout", "connect_timeout", "read_timeout", "write_timeout", "total_timeout"}
+)
 _HEADER_NAME_PATTERN = re.compile(r"[!#$%&'*+\-.^_`|~0-9A-Za-z]+\Z")
 _BAD_PERCENT_ESCAPE = re.compile(r"%(?![0-9A-Fa-f]{2})")
 _MAX_CONTENT_TYPE_BYTES = 256
@@ -64,15 +67,24 @@ _DENIED_IPV6_TRANSITION_NETWORKS = (
 class DiscoveryGatewayError(Exception):
     """Stable failure without request, response, or provider detail."""
 
-    __slots__ = ("code", "retryable")
+    __slots__ = ("code", "retryable", "timed_out")
 
-    def __init__(self, code: GatewayErrorCode, *, retryable: bool = False) -> None:
+    def __init__(
+        self,
+        code: GatewayErrorCode,
+        *,
+        retryable: bool = False,
+        timed_out: bool = False,
+    ) -> None:
         if code not in _ERROR_MESSAGES:
             raise ValueError("Unsupported discovery gateway error code")
         if type(retryable) is not bool:
             raise TypeError("retryable must be a boolean")
+        if type(timed_out) is not bool:
+            raise TypeError("timed_out must be a boolean")
         self.code = code
         self.retryable = retryable
+        self.timed_out = timed_out
         super().__init__(_ERROR_MESSAGES[code])
 
 
@@ -645,6 +657,14 @@ def _safe_retryable(error: HTTPHopError) -> bool:
     return type(value) is bool and value is True
 
 
+def _safe_timed_out(error: HTTPHopError) -> bool:
+    try:
+        value = error.code
+    except Exception:  # noqa: BLE001 - never retain hostile provider state.
+        return False
+    return type(value) is str and value in _TIMEOUT_HOP_ERROR_CODES
+
+
 async def dispatch_once(
     route: AccessRoute,
     intent: DispatchIntent,
@@ -670,7 +690,11 @@ async def dispatch_once(
     try:
         raw_response = await one_hop(request)
     except HTTPHopError as error:
-        mapped_error = DiscoveryGatewayError("hop_failed", retryable=_safe_retryable(error))
+        mapped_error = DiscoveryGatewayError(
+            "hop_failed",
+            retryable=_safe_retryable(error),
+            timed_out=_safe_timed_out(error),
+        )
     except Exception:  # noqa: BLE001 - never expose unexpected provider detail.
         mapped_error = DiscoveryGatewayError("hop_failed")
     elapsed_ms = max(0, int((time.monotonic() - started_at) * 1000))
