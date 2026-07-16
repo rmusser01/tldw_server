@@ -1,6 +1,42 @@
 # Setting up a Local LLM
 
-# FIXME - last updated?
+## Connect tldw_server to a local endpoint
+
+Start the model server so it listens on an address reachable from the `tldw_server` process. Binding a model server to `127.0.0.1` exposes it only inside that host or container; use the LAN/container interface when the API runs elsewhere, and protect the service with firewall rules and authentication where supported.
+
+Configure the provider in `tldw_Server_API/Config_Files/config.txt`. Common examples are:
+
+```ini
+[Local-API]
+# llama.cpp on another LAN host
+llama_api_IP = http://192.168.1.50:8080/v1
+llama_model = local-model.gguf
+
+# A Docker Compose service reachable by service DNS
+vllm_api_IP = http://vllm:8000/v1
+vllm_model = organization/model-name
+
+# A Tailscale address; a resolvable MagicDNS hostname also works
+ooba_api_IP = http://100.90.80.70:5000/v1
+ooba_model = local-model
+```
+
+Use the base path expected by the provider, commonly `/v1` for OpenAI-compatible servers. The configured scheme, hostname, and effective port form one exact trusted origin. tldw permits that origin on loopback, private LAN, Docker, or approved overlay addresses while keeping the global SSRF policy intact. Redirects cannot change the configured origin, DNS changes fail closed, and metadata/link-local targets remain blocked.
+
+The shared model catalog powers both the WebUI and browser extension. After setup reports `status="saved"`, the saving context writes a unique invalidation marker to the existing shared model-cache record. Open WebUI tabs and extension sidepanel/background contexts observe that marker, clear both model-cache layers once, and fetch current backend metadata on their next selector request. The saving context ignores its own storage echo, and later model records remain local cache data rather than cross-context update messages.
+
+### Troubleshooting readiness
+
+Check the provider's `readiness_reason_code` in the model/provider metadata response or setup diagnostics:
+
+- `egress_blocked`: the origin does not exactly match the trusted configuration, a denylist matched, or DNS returned a forbidden special-use address. Do not work around it by globally allowing private addresses.
+- `endpoint_unreachable`: the API process could not resolve or connect to the endpoint. Test DNS and connectivity from the API host/container. For Docker Desktop, a host service may be reachable as `host.docker.internal`; in Compose, prefer the service name on a shared network.
+- `auth_failed`: the local server rejected the configured credential.
+- `endpoint_error`: the server returned an error or incompatible response. Confirm its OpenAI-compatible URL and inspect its logs.
+- `model_discovery_unavailable`: the server's model-list response is unsupported. Configure the provider's explicit `*_model` field.
+- `no_models_reported`: discovery worked but the server reported no loaded models. Load a model or set the explicit model field.
+
+If a previous workaround set `[Egress] block_private=false`, return it to `true` only after auditing unrelated webhooks, workflows, and integrations that might depend on that global setting. tldw_server will not rewrite the value automatically.
 
 https://github.com/ggerganov/llama.cpp/blob/cddae4884c853b1a7ab420458236d666e2e34423/examples/quantize/README.md#L27
 

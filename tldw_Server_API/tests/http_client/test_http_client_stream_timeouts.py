@@ -1,5 +1,5 @@
 import asyncio
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timedelta, timezone
 from email.utils import format_datetime
 from types import SimpleNamespace
@@ -28,6 +28,215 @@ def _has_aiohttp():
 
 requires_httpx = pytest.mark.skipif(not _has_httpx(), reason="httpx not installed")
 requires_aiohttp = pytest.mark.skipif(not _has_aiohttp(), reason="aiohttp not installed")
+
+
+@requires_httpx
+def test_stream_response_scoped_lan_lifetime_and_borrowed_client(monkeypatch):
+    from tldw_Server_API.app.core import http_client as hc
+    from tldw_Server_API.app.core.Security import egress as egress_mod
+    from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
+    import httpx
+
+    monkeypatch.setattr(
+        egress_mod,
+        "_resolve_host_ips",
+        lambda _host: ["192.168.1.50"],
+    )
+    monkeypatch.setenv("WORKFLOWS_EGRESS_BLOCK_PRIVATE", "true")
+    monkeypatch.setenv("WORKFLOWS_EGRESS_ALLOWED_PORTS", "80,443")
+    url = "http://192.168.1.50:11434/v1/chat/completions"
+    scope = ConfiguredEndpointScope.from_url(url)
+    calls: list[str] = []
+
+    class StreamingBody(httpx.SyncByteStream):
+        def __iter__(self):
+            yield b"one\n"
+            yield b"two\n"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(str(request.url))
+        return httpx.Response(200, request=request, stream=StreamingBody())
+
+    client = hc.create_client(transport=httpx.MockTransport(handler))
+    try:
+        with hc.stream_response(
+            method="POST",
+            url=url,
+            client=client,
+            configured_endpoint=scope,
+            json={"stream": True},
+        ) as response:
+            assert not response.is_closed
+            assert b"".join(response.iter_bytes()) == b"one\ntwo\n"
+        assert response.is_closed
+        assert not client.is_closed
+    finally:
+        client.close()
+
+    assert calls == [url]
+
+
+@requires_httpx
+def test_stream_response_connects_to_vetted_ip_and_preserves_http_identity(monkeypatch):
+    from tldw_Server_API.app.core import http_client as hc
+    from tldw_Server_API.app.core.Security import egress as egress_mod
+    from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
+    import httpx
+    import types
+
+    original_url = "https://models.internal:11434/v1/chat/completions"
+    scope = ConfiguredEndpointScope.from_url(original_url)
+    observed: dict[str, object] = {}
+
+    class StreamingBody(httpx.SyncByteStream):
+        def __iter__(self):
+            yield b"ok"
+
+    def allow(_url, **_kwargs):
+        return types.SimpleNamespace(
+            allowed=True,
+            reason=None,
+            reason_code=None,
+            resolved_ips=("192.0.2.10",),
+        )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed["transport_url"] = str(request.url)
+        observed["host"] = request.headers.get("host")
+        observed["sni"] = request.extensions.get("sni_hostname")
+        return httpx.Response(200, request=request, stream=StreamingBody())
+
+    monkeypatch.setattr(egress_mod, "evaluate_url_policy", allow)
+    client = hc.create_client(transport=httpx.MockTransport(handler))
+    try:
+        with hc.stream_response(
+            method="POST",
+            url=original_url,
+            client=client,
+            configured_endpoint=scope,
+        ) as response:
+            assert b"".join(response.iter_bytes()) == b"ok"
+            assert str(response.request.url) == original_url
+    finally:
+        client.close()
+
+    assert observed == {
+        "transport_url": "https://192.0.2.10:11434/v1/chat/completions",
+        "host": "models.internal:11434",
+        "sni": "models.internal",
+    }
+
+
+@requires_httpx
+def test_stream_response_owns_client_and_forces_redirects_off(monkeypatch):
+    from tldw_Server_API.app.core import http_client as hc
+
+    monkeypatch.setattr(hc, "_validate_egress_or_raise", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(hc, "_validate_proxies_or_raise", lambda _proxies: None)
+    state = {"closed": False, "create": None, "stream": None}
+    response = SimpleNamespace(status_code=302)
+
+    class DummyClient:
+        @contextmanager
+        def stream(self, method, url, **kwargs):  # noqa: ARG002
+            state["stream"] = kwargs
+            yield response
+
+        def close(self):
+            state["closed"] = True
+
+    def fake_create_client(**kwargs):
+        state["create"] = kwargs
+        return DummyClient()
+
+    monkeypatch.setattr(hc, "create_client", fake_create_client)
+
+    with hc.stream_response(
+        method="GET",
+        url="https://example.com/start",
+        follow_redirects=True,
+        headers={"Accept-Encoding": "gzip, zstd"},
+        proxies="http://proxy.example:8080",
+        timeout=7.5,
+        trust_env="false",
+        verify=False,
+    ) as yielded:
+        assert yielded is response
+        assert not state["closed"]
+
+    assert state["closed"] is True
+    assert state["create"] == {
+        "timeout": 7.5,
+        "proxies": "http://proxy.example:8080",
+        "trust_env": False,
+        "cert_pinning": None,
+        "verify": False,
+    }
+    assert state["stream"]["follow_redirects"] is False
+    assert state["stream"]["timeout"] == 7.5
+    assert state["stream"]["headers"]["Accept-Encoding"] == "gzip"
+
+
+@requires_httpx
+def test_stream_response_rejects_scope_mismatch_before_io():
+    from tldw_Server_API.app.core import http_client as hc
+    from tldw_Server_API.app.core.exceptions import EgressPolicyError
+    from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
+
+    calls = {"stream": 0}
+
+    class DummyClient:
+        def stream(self, *_args, **_kwargs):
+            calls["stream"] += 1
+            raise AssertionError("network I/O must not start")
+
+    scope = ConfiguredEndpointScope.from_url("http://192.168.1.50:11434")
+    with pytest.raises(EgressPolicyError) as exc:
+        with hc.stream_response(
+            method="GET",
+            url="http://192.168.1.50:11435/models",
+            client=DummyClient(),
+            configured_endpoint=scope,
+        ):
+            pass
+
+    assert exc.value.reason_code == "origin_mismatch"
+    assert calls["stream"] == 0
+
+
+@requires_httpx
+def test_stream_response_enforces_certificate_pin(monkeypatch):
+    from tldw_Server_API.app.core import http_client as hc
+    from tldw_Server_API.app.core.exceptions import EgressPolicyError
+    from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
+
+    scope = ConfiguredEndpointScope.from_url("https://93.184.216.34:11434")
+    calls = {"stream": 0}
+
+    class DummyClient:
+        def stream(self, *_args, **_kwargs):
+            calls["stream"] += 1
+            raise AssertionError("network I/O must not start")
+
+    def deny_pin(*_args, **kwargs):
+        assert kwargs["configured_endpoint"] is scope
+        assert kwargs["accepted_resolved_ips"] == ("93.184.216.34",)
+        raise EgressPolicyError("pin error", reason_code="tls_pin_error")
+
+    monkeypatch.setattr(hc, "_check_cert_pinning", deny_pin)
+
+    with pytest.raises(EgressPolicyError) as exc:
+        with hc.stream_response(
+            method="GET",
+            url="https://93.184.216.34:11434/stream",
+            client=DummyClient(),
+            configured_endpoint=scope,
+            cert_pinning={"93.184.216.34": {"pin"}},
+        ):
+            pass
+
+    assert exc.value.reason_code == "tls_pin_error"
+    assert calls["stream"] == 0
 
 
 class StreamResponse:

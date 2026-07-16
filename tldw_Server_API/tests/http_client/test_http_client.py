@@ -1,6 +1,6 @@
 import asyncio
+import types
 from pathlib import Path
-from typing import Optional
 
 import pytest
 
@@ -17,6 +17,12 @@ def _has_httpx():
 
 
 requires_httpx = pytest.mark.skipif(not _has_httpx(), reason="httpx not installed")
+
+
+def test_stream_response_is_public_export():
+    from tldw_Server_API.app.core import http_client as hc
+
+    assert "stream_response" in hc.__all__
 
 
 @requires_httpx
@@ -56,6 +62,210 @@ async def test_retry_succeeds_on_third_attempt():
         assert calls["n"] == 3
     finally:
         await client.aclose()
+
+
+@requires_httpx
+def test_scoped_fetch_retry_preserves_scope_and_initial_dns_pin(monkeypatch):
+    import httpx
+
+    from tldw_Server_API.app.core import http_client as hc
+    from tldw_Server_API.app.core.Security import egress as egress_mod
+    from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
+
+    scope = ConfiguredEndpointScope.from_url("http://93.184.216.34:11434")
+    validations: list[tuple[object, object]] = []
+
+    def fake_policy(
+        _url: str,
+        *,
+        configured_endpoint=None,
+        pinned_resolved_ips=None,
+        **_kwargs,
+    ):
+        validations.append((configured_endpoint, pinned_resolved_ips))
+        return types.SimpleNamespace(
+            allowed=True,
+            reason=None,
+            reason_code=None,
+            resolved_ips=("93.184.216.34",),
+        )
+
+    monkeypatch.setattr(egress_mod, "evaluate_url_policy", fake_policy)
+    monkeypatch.setattr(hc.time, "sleep", lambda _delay: None)
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        return httpx.Response(500 if calls["n"] == 1 else 200, request=request)
+
+    client = hc.create_client(transport=httpx.MockTransport(handler))
+    try:
+        response = hc.fetch(
+            method="GET",
+            url="http://93.184.216.34:11434/retry",
+            client=client,
+            retry=hc.RetryPolicy(attempts=2),
+            configured_endpoint=scope,
+        )
+    finally:
+        client.close()
+
+    assert response.status_code == 200
+    assert calls["n"] == 2
+    assert len(validations) >= 3
+    assert all(item[0] is scope for item in validations)
+    assert all(item[1] == ("93.184.216.34",) for item in validations[1:])
+
+
+@requires_httpx
+@pytest.mark.asyncio
+@pytest.mark.parametrize("denial_source", ["policy", "certificate"])
+async def test_async_client_head_range_fallback_preserves_egress_denial(
+    monkeypatch,
+    denial_source,
+):
+    from tldw_Server_API.app.core import http_client as hc
+    from tldw_Server_API.app.core.exceptions import EgressPolicyError
+
+    class DummyAsyncClient:
+        async def aclose(self):
+            return None
+
+    validations = 0
+    get_calls = 0
+
+    async def validate_fallback(*_args, **_kwargs):
+        nonlocal validations
+        validations += 1
+        if validations >= 4 and denial_source == "policy":
+            raise EgressPolicyError("pin denied", reason_code="tls_pin_mismatch")
+
+    def validate_certificate(*_args, **_kwargs):
+        if denial_source == "certificate":
+            raise EgressPolicyError("pin denied", reason_code="tls_pin_mismatch")
+
+    async def fail_head(*, method, **_kwargs):
+        nonlocal get_calls
+        if method == "HEAD":
+            raise OSError("HEAD failed")
+        get_calls += 1
+        raise AssertionError("GET I/O must not start after fallback validation is denied")
+
+    async_request_io = "_httpx_arequest_io"
+    monkeypatch.setattr(hc, "_avalidate_egress_or_raise", validate_fallback)
+    monkeypatch.setattr(hc, "_check_cert_pins_for_url", validate_certificate)
+    monkeypatch.setattr(hc, async_request_io, fail_head)
+    monkeypatch.setattr(hc, "create_async_client", lambda **_kwargs: DummyAsyncClient())
+
+    with pytest.raises(EgressPolicyError) as exc:
+        await hc._afetch_httpx(
+            method="HEAD",
+            url="https://93.184.216.34/resource",
+            client=DummyAsyncClient(),
+            retry=hc.RetryPolicy(attempts=1),
+        )
+
+    assert exc.value.reason_code == "tls_pin_mismatch"
+    assert get_calls == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("denial_source", ["policy", "certificate"])
+async def test_async_session_head_range_fallback_preserves_egress_denial(
+    monkeypatch,
+    denial_source,
+):
+    from tldw_Server_API.app.core import http_client as hc
+    from tldw_Server_API.app.core.exceptions import EgressPolicyError
+
+    validations = 0
+    get_calls = 0
+
+    async def validate_fallback(*_args, **_kwargs):
+        nonlocal validations
+        validations += 1
+        if validations >= 3 and denial_source == "policy":
+            raise EgressPolicyError("address denied", reason_code="address_forbidden")
+
+    def validate_certificate(*_args, **_kwargs):
+        if denial_source == "certificate":
+            raise EgressPolicyError("pin denied", reason_code="tls_pin_mismatch")
+
+    async def fail_head(*, method, **_kwargs):
+        nonlocal get_calls
+        if method == "HEAD":
+            raise OSError("HEAD failed")
+        get_calls += 1
+        raise AssertionError("GET I/O must not start after fallback validation is denied")
+
+    aio_request_io = "_aiohttp_request_io"
+    monkeypatch.setattr(hc, "_avalidate_egress_or_raise", validate_fallback)
+    monkeypatch.setattr(hc, "_check_cert_pins_for_url", validate_certificate)
+    monkeypatch.setattr(hc, aio_request_io, fail_head)
+
+    with pytest.raises(EgressPolicyError) as exc:
+        await hc._afetch_aiohttp(
+            method="HEAD",
+            url="https://93.184.216.34/resource",
+            client=object(),
+            retry=hc.RetryPolicy(attempts=1),
+        )
+
+    expected_reason = "address_forbidden" if denial_source == "policy" else "tls_pin_mismatch"
+    assert exc.value.reason_code == expected_reason
+    assert get_calls == 0
+
+
+@requires_httpx
+@pytest.mark.parametrize("denial_source", ["policy", "certificate"])
+def test_sync_client_head_range_fallback_preserves_egress_denial(
+    monkeypatch,
+    denial_source,
+):
+    from tldw_Server_API.app.core import http_client as hc
+    from tldw_Server_API.app.core.exceptions import EgressPolicyError
+
+    class DummySyncClient:
+        def close(self):
+            return None
+
+    validations = 0
+    get_calls = 0
+
+    def validate_fallback(*_args, **_kwargs):
+        nonlocal validations
+        validations += 1
+        if validations >= 4 and denial_source == "policy":
+            raise EgressPolicyError("origin denied", reason_code="origin_mismatch")
+
+    def validate_certificate(*_args, **_kwargs):
+        if denial_source == "certificate":
+            raise EgressPolicyError("pin denied", reason_code="tls_pin_mismatch")
+
+    def fail_head(*, method, **_kwargs):
+        nonlocal get_calls
+        if method == "HEAD":
+            raise OSError("HEAD failed")
+        get_calls += 1
+        raise AssertionError("GET I/O must not start after fallback validation is denied")
+
+    sync_request_io = "_httpx_request_io"
+    monkeypatch.setattr(hc, "_validate_egress_or_raise", validate_fallback)
+    monkeypatch.setattr(hc, "_check_cert_pins_for_url", validate_certificate)
+    monkeypatch.setattr(hc, sync_request_io, fail_head)
+    monkeypatch.setattr(hc, "create_client", lambda **_kwargs: DummySyncClient())
+
+    with pytest.raises(EgressPolicyError) as exc:
+        hc._fetch_httpx_response(
+            method="HEAD",
+            url="https://93.184.216.34/resource",
+            client=DummySyncClient(),
+            retry=hc.RetryPolicy(attempts=1),
+        )
+
+    expected_reason = "origin_mismatch" if denial_source == "policy" else "tls_pin_mismatch"
+    assert exc.value.reason_code == expected_reason
+    assert get_calls == 0
 
 
 @requires_httpx

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
 import re
+from collections.abc import Mapping
 from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Request, status
@@ -23,6 +23,10 @@ class VideoProcessingError(Exception):
 
 class EgressPolicyError(Exception):
     """Raised when an outbound URL violates the egress/SSRF policy."""
+
+    def __init__(self, message: str, *, reason_code: str | None = None) -> None:
+        super().__init__(message)
+        self.reason_code = reason_code
 
 
 class NetworkError(Exception):

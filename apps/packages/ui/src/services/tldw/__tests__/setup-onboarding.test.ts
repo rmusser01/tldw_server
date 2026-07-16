@@ -53,6 +53,7 @@ describe("setup onboarding API domain", () => {
   });
 
   it("saves provider setup without leaking raw secret into return shape", async () => {
+    const dispatchEvent = vi.spyOn(window, "dispatchEvent");
     vi.mocked(bgRequest).mockResolvedValueOnce({
       provider_key: "openai",
       status: "saved",
@@ -82,6 +83,9 @@ describe("setup onboarding API domain", () => {
     expect(result.masked_api_key).toBe("sk-...abcd");
     expect(result).not.toHaveProperty("api_key");
     expect(JSON.stringify(result)).not.toContain("sk-secret");
+    expect(dispatchEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "tldw:config-updated" }),
+    );
     expect(bgRequest).toHaveBeenCalledWith({
       path: "/api/v1/setup/first-run/providers",
       method: "POST",
@@ -93,6 +97,25 @@ describe("setup onboarding API domain", () => {
         make_default: true,
       },
     });
+    dispatchEvent.mockRestore();
+  });
+
+  it("does not dispatch a config update when provider setup fails", async () => {
+    const dispatchEvent = vi.spyOn(window, "dispatchEvent");
+    vi.mocked(bgRequest).mockResolvedValueOnce({
+      provider_key: "llama",
+      status: "failed",
+    });
+
+    await setupOnboardingMethods.saveSetupProvider.call(
+      {},
+      { provider_key: "llama", base_url: "http://192.168.2.216:18080/v1" },
+    );
+
+    expect(dispatchEvent).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "tldw:config-updated" }),
+    );
+    dispatchEvent.mockRestore();
   });
 
   it("posts setup completion through the unauthenticated recovery surface", async () => {

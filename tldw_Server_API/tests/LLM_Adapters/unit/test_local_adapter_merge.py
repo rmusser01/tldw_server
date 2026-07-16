@@ -34,17 +34,18 @@ class _FakeClient:
         return None
 
 
-def test_local_adapter_merges_extra_body_and_headers():
+def test_local_adapter_merges_extra_body_and_headers(monkeypatch):
     from tldw_Server_API.app.core.LLM_Calls.providers.local_adapters import LocalLLMAdapter
 
     captured: Dict[str, Any] = {}
 
-    def _factory(timeout: int):
-        client = _FakeClient(timeout=timeout)
-        captured["client"] = client
-        return client
+    def _fetch(**kwargs: Any):
+        captured["request"] = kwargs
+        return _FakeResponse(200)
 
     adapter = LocalLLMAdapter()
+    adapter.http_fetcher = _fetch
+    monkeypatch.setenv("LOCAL_LLM_API_URL", "http://example")
     request = {
         "messages": [{"role": "user", "content": "hi"}],
         "model": "dummy",
@@ -62,14 +63,14 @@ def test_local_adapter_merges_extra_body_and_headers():
                 "model": "dummy",
             }
         },
-        "http_client_factory": _factory,
     }
     _ = adapter.chat(request)
-    payload = captured["client"].last_post["json"]
-    headers = captured["client"].last_post["headers"]
+    payload = captured["request"]["json"]
+    headers = captured["request"]["headers"]
     assert payload.get("temperature") == 0.1
     assert payload.get("x_extra") == "y"
     assert headers.get("Authorization") == "Bearer k"
     assert headers.get("Content-Type") == "application/json"
     assert headers.get("X-Test") == "1"
     assert "content-type" not in headers
+    assert captured["request"]["configured_endpoint"].matches("http://example/v1/chat/completions")
