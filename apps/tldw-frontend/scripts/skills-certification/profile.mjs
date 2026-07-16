@@ -81,7 +81,8 @@ function scrubCredentialValues(text) {
       if (!match) {
         return line;
       }
-      if (!/(?:api_?key|token|secret|password)$/.test(normalizedIniKey(match[2]))) {
+      const key = normalizedIniKey(match[2]);
+      if (!/(?:^|_)api(?:_[a-z0-9]+)*_key(?:_|$)|api_?key$|(?:token|secret|password)$/.test(key)) {
         return line;
       }
       return `${match[1]}${match[2]}${match[3]}`;

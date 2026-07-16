@@ -39,8 +39,11 @@ OPENAI_API_KEY = host-provider-secret
 anthropic-token = host-anthropic-token
 service secret = host-service-secret
 database.password = host-database-password
+search_engine_api_key_baidu = host-baidu-api-key
+api_secret_key = host-api-secret-key
 # commented_api_key = host-comment-secret
 provider_name = retained-provider
+max_tokens = 4096
 
 [TTS-Settings]
 USER_DB_BASE_DIR = /host/user-databases
@@ -164,12 +167,17 @@ describe('Skills certification profile', () => {
     expect(configText).toContain('anthropic-token =');
     expect(configText).toContain('service secret =');
     expect(configText).toContain('database.password =');
+    expect(configText).toMatch(/^search_engine_api_key_baidu =\s*$/m);
+    expect(configText).toMatch(/^api_secret_key =\s*$/m);
     expect(configText).toContain('# commented_api_key =');
     expect(configText).toContain('provider_name = retained-provider');
+    expect(configText).toContain('max_tokens = 4096');
     expect(configText).not.toContain('host-provider-secret');
     expect(configText).not.toContain('host-anthropic-token');
     expect(configText).not.toContain('host-service-secret');
     expect(configText).not.toContain('host-database-password');
+    expect(configText).not.toContain('host-baidu-api-key');
+    expect(configText).not.toContain('host-api-secret-key');
     expect(configText).not.toContain('host-comment-secret');
     expect(configText).not.toContain('copied-auth-key');
   });
