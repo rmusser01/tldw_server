@@ -12,6 +12,7 @@ import {
   gateExitCode,
   parseAsOf,
   parseRepeatedOption,
+  selectInventoryPython,
   sha256,
   validateInventoryDocuments,
 } from "../validate_research_source_inventory.mjs";
@@ -1076,6 +1077,27 @@ test("the CLI parses explicit reviewer and approval trust inputs", () => {
 });
 
 
+test("selects the inventory Python interpreter portably", () => {
+  assert.equal(
+    selectInventoryPython({
+      RESEARCH_INVENTORY_PYTHON: "custom-python",
+      VIRTUAL_ENV: "C:\\ignored",
+    }, "win32"),
+    "custom-python",
+  );
+  assert.equal(
+    selectInventoryPython({ VIRTUAL_ENV: "/tmp/research-venv" }, "linux"),
+    "/tmp/research-venv/bin/python",
+  );
+  assert.equal(
+    selectInventoryPython({ VIRTUAL_ENV: "C:\\research-venv" }, "win32"),
+    "C:\\research-venv\\Scripts\\python.exe",
+  );
+  assert.equal(selectInventoryPython({}, "darwin"), "python3");
+  assert.equal(selectInventoryPython({}, "win32"), "python");
+});
+
+
 test("certification collection rejects symlinks outside the repository", (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "research-inventory-artifacts-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -1103,10 +1125,7 @@ test("certification collection rejects symlinks outside the repository", (t) => 
 
 
 test("the authoritative CLI composes schema and semantic validation", (t) => {
-  const python = process.env.RESEARCH_INVENTORY_PYTHON
-    ?? (process.env.VIRTUAL_ENV
-      ? path.join(process.env.VIRTUAL_ENV, "bin", "python")
-      : "python3");
+  const python = selectInventoryPython();
   const args = [
     VALIDATOR_PATH,
     "--root", ROOT,

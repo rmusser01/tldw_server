@@ -1382,11 +1382,18 @@ function parseGate(argv) {
 }
 
 
+export function selectInventoryPython(env = process.env, platform = process.platform) {
+  const override = env.RESEARCH_INVENTORY_PYTHON;
+  if (override !== undefined && override !== null) return override;
+  if (!env.VIRTUAL_ENV) return platform === "win32" ? "python" : "python3";
+  return platform === "win32"
+    ? path.win32.join(env.VIRTUAL_ENV, "Scripts", "python.exe")
+    : path.posix.join(env.VIRTUAL_ENV, "bin", "python");
+}
+
+
 function runSchemaGate(root, schemaPath, manifestPath, ledgerPath, certificationPaths) {
-  const python = process.env.RESEARCH_INVENTORY_PYTHON
-    ?? (process.env.VIRTUAL_ENV
-      ? path.join(process.env.VIRTUAL_ENV, "bin", "python")
-      : "python3");
+  const python = selectInventoryPython();
   const checkerPath = path.join(
     root,
     "Helper_Scripts",
