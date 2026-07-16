@@ -97,39 +97,22 @@ _OPENAI_SOURCE_OAUTH = "oauth"
 _OPENAI_CREDENTIAL_VERSION = 2
 _OPENAI_DEFAULT_OAUTH_STATE_TTL_MINUTES = 10
 _TTS_GATEWAY_VERIFICATION_METADATA_KEY = "tts_gateway_verification_status"
-_TTS_GATEWAY_FORBIDDEN_METADATA_ALIASES = frozenset(
-    {
-        "accesstoken",
-        "apiendpoint",
-        "apikey",
-        "apibaseuri",
-        "apibaseurl",
-        "apiuri",
-        "apiurl",
-        "auth",
-        "authheaders",
-        "authscheme",
-        "authentication",
-        "authorization",
-        "baseuri",
-        "baseurl",
-        "bearer",
-        "credential",
-        "credentials",
-        "endpoint",
-        "endpointuri",
-        "endpointurl",
-        "headers",
-        "host",
-        "hostname",
-        "httpheaders",
-        "password",
-        "requestheaders",
-        "secret",
-        "token",
-        "uri",
-        "url",
-    }
+_TTS_GATEWAY_AUTHORITY_KEY_CONCEPTS = (
+    "url",
+    "uri",
+    "host",
+    "endpoint",
+    "header",
+    "authorization",
+    "authentication",
+    "authscheme",
+    "authtype",
+    "credential",
+    "apikey",
+    "bearer",
+    "password",
+    "secret",
+    "token",
 )
 
 
@@ -394,7 +377,10 @@ def _metadata_contains_gateway_authority(value: Any) -> bool:
                 for character in str(key).casefold()
                 if character.isalnum()
             )
-            if canonical_key in _TTS_GATEWAY_FORBIDDEN_METADATA_ALIASES:
+            if canonical_key == "auth" or any(
+                concept in canonical_key
+                for concept in _TTS_GATEWAY_AUTHORITY_KEY_CONCEPTS
+            ):
                 return True
             if _metadata_contains_gateway_authority(child):
                 return True

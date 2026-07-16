@@ -470,6 +470,48 @@ def _gateway_endpoint_spec(
     )
 
 
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        {"nested": [{"header": {"X-Api-Key": "attacker"}}]},
+        {"nested": {"authorizationHeader": "Bearer attacker"}},
+        {"nested": [{"apiHost": "attacker.example"}]},
+        {"nested": {"authType": "basic"}},
+        {"nested": [{"authSchemeName": "bearer"}]},
+        {"nested": {"credentialSource": "metadata"}},
+        {"nested": [{"apiKeyAlias": "attacker"}]},
+        {"nested": {"bearerAuthority": "metadata"}},
+        {"nested": [{"serviceEndpointOptions": {}}]},
+        {"nested": {"discoveryURIValue": "https://attacker.example/v1"}},
+        {"nested": [{"customURLValue": "https://attacker.example/v1"}]},
+    ],
+)
+def test_gateway_metadata_authority_variants_are_rejected(metadata):
+    from fastapi import HTTPException
+
+    from tldw_Server_API.app.api.v1.endpoints.user_keys import (
+        _validate_gateway_metadata,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        _validate_gateway_metadata("gateway:voice-lab", metadata)
+
+    assert exc_info.value.status_code == 400
+    _validate_gateway_metadata("openrouter", metadata)
+
+
+@pytest.mark.parametrize("key", ["author", "description", "model_family"])
+def test_gateway_metadata_benign_keys_are_allowed(key):
+    from tldw_Server_API.app.api.v1.endpoints.user_keys import (
+        _validate_gateway_metadata,
+    )
+
+    _validate_gateway_metadata(
+        "gateway:voice-lab",
+        {"nested": [{key: "informational"}]},
+    )
+
+
 @pytest.mark.asyncio
 async def test_gateway_byok_endpoints_sqlite(tmp_path, monkeypatch):
     state = await _setup_byok_sqlite(tmp_path, monkeypatch)
@@ -605,13 +647,9 @@ async def test_gateway_byok_endpoints_sqlite(tmp_path, monkeypatch):
                 assert response.status_code == 400
 
         benign_metadata = {
-            "url_count": 2,
-            "base_url_verified": True,
-            "endpoint_latency_ms": 15,
-            "authorization_note": "managed by the server",
-            "authSchemeDescription": "informational only",
-            "apiBaseUrlStatus": "healthy",
-            "httpHeadersObserved": 4,
+            "author": "gateway administrator",
+            "description": "voice lab credential",
+            "model_family": "speech",
         }
         benign = client.post(
             "/api/v1/users/keys",
