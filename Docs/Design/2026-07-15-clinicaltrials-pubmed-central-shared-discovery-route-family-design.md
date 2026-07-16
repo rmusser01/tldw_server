@@ -4,7 +4,7 @@
 
 **Parent:** TASK-12968
 
-**Status:** Requester-approved design (2026-07-15); independent spec review pending
+**Status:** Requester-approved design; independent spec review approved (2026-07-15)
 
 **Execution scope:** Shadow registry and fixture execution only
 
