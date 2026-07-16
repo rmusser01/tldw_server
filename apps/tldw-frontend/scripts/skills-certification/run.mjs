@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -26,6 +27,12 @@ const reportStats = ['expected', 'skipped', 'flaky', 'unexpected'];
 
 function boundedDetail(value) {
   return redactText(String(value ?? 'unknown failure')).slice(0, failureDetailLimit);
+}
+
+/** Format the only diagnostic emitted by the standalone certification command. */
+export function formatSkillsCertificationDiagnostic(summary) {
+  if (summary?.artifact_safety?.passed === false) return 'artifact_safety';
+  return boundedDetail(summary?.primary_category ?? 'certification_failed');
 }
 
 function defaultReadJson(filePath) {
@@ -107,6 +114,7 @@ export async function runSkillsCertification({ operations: suppliedOperations = 
     reservePorts,
     runChild: defaultRunChild,
     startChild: (registry, command, logPath) => registry.spawn(command, logPath),
+    stopChild: (registry, record) => registry.stop(record),
     waitForHttpOk,
     ...suppliedOperations,
   };
@@ -124,6 +132,8 @@ export async function runSkillsCertification({ operations: suppliedOperations = 
   let backendUrl;
   let commands;
   let backendUsable = false;
+  let backendRecord;
+  let webuiAttempted = false;
   let webReady = false;
   let finalSummary;
 
@@ -169,7 +179,12 @@ export async function runSkillsCertification({ operations: suppliedOperations = 
         passed = false;
         fail('postcondition', `${detailRoute} status ${detail.status}`, surface);
       }
-      const trashRoute = '/api/v1/skills/trash?limit=500&offset=0';
+    } catch {
+      passed = false;
+      fail('postcondition', `${detailRoute} status/invariant`, surface);
+    }
+    const trashRoute = '/api/v1/skills/trash?limit=500&offset=0';
+    try {
       const trash = await operations.fetch(apiUrl(backendUrl, trashRoute), {
         headers: { 'X-API-KEY': SKILLS_CERT_API_KEY },
       });
@@ -184,7 +199,7 @@ export async function runSkillsCertification({ operations: suppliedOperations = 
       }
     } catch {
       passed = false;
-      fail('postcondition', `${detailRoute} status/invariant`, surface);
+      fail('postcondition', `${trashRoute} status/invariant`, surface);
     }
     surfaces[surface].postcondition = passed;
   };
@@ -198,7 +213,7 @@ export async function runSkillsCertification({ operations: suppliedOperations = 
       },
     });
     evidence = operations.createEvidence({ frontendRoot });
-    profile = operations.createProfile({ repoRoot, temporaryBase: path.join(repoRoot, '.tmp') });
+    profile = operations.createProfile({ repoRoot, temporaryBase: tmpdir() });
 
     for (const key of ['webuiChromiumProbe', 'extensionChromiumProbe']) {
       const probeCommands = operations.buildCommands({
@@ -222,14 +237,19 @@ export async function runSkillsCertification({ operations: suppliedOperations = 
     }
 
     if (!failures.some((failure) => failure.category === 'preflight')) {
-      for (let attempt = 1; attempt <= 3 && !backendUsable; attempt += 1) {
-        const ports = await operations.reservePorts(['backend', 'web']);
+      for (let attempt = 1; attempt <= 3 && !webReady; attempt += 1) {
         if (urlLocked)
           throw new Error('Certification URLs are immutable after browser execution starts');
+        const ports = await operations.reservePorts(['backend', 'web']);
         backendUrl = `http://127.0.0.1:${ports.backend}`;
         commands = operations.buildCommands({ repoRoot, frontendRoot, profile, ports });
+        let frontendRecord;
         try {
-          await operations.startChild(registry, commands.backend, logPath('backend'));
+          backendRecord = await operations.startChild(
+            registry,
+            commands.backend,
+            logPath('backend')
+          );
         } catch (error) {
           const detail = `${error?.message ?? ''} ${operations.readText(logPath('backend'))}`;
           if (operations.isBindConflict(detail) && attempt < 3 && !urlLocked) continue;
@@ -240,13 +260,24 @@ export async function runSkillsCertification({ operations: suppliedOperations = 
           await health();
           backendUsable = true;
           try {
-            await operations.startChild(registry, commands.frontend, logPath('frontend'));
+            frontendRecord = await operations.startChild(
+              registry,
+              commands.frontend,
+              logPath('frontend')
+            );
             await operations.waitForHttpOk(`http://127.0.0.1:${ports.web}`);
             webReady = true;
           } catch (error) {
             const detail = `${error?.message ?? ''} ${operations.readText(logPath('frontend'))}`;
-            if (operations.isBindConflict(detail) && attempt < 3 && !urlLocked) continue;
+            if (operations.isBindConflict(detail) && attempt < 3 && !urlLocked) {
+              if (frontendRecord) await operations.stopChild(registry, frontendRecord);
+              if (backendRecord) await operations.stopChild(registry, backendRecord);
+              backendRecord = undefined;
+              backendUsable = false;
+              continue;
+            }
             fail('webui_startup', 'frontend startup failed', 'webui');
+            break;
           }
         } catch (error) {
           const detail = `${error?.message ?? ''} ${operations.readText(logPath('backend'))}`;
@@ -263,27 +294,44 @@ export async function runSkillsCertification({ operations: suppliedOperations = 
     if (backendUsable) await directInitial();
     if (backendUsable && webReady) {
       urlLocked = true;
+      webuiAttempted = true;
       const webResultPath = path.join(evidence.webuiDir, 'result.json');
       const webReportPath = path.join(evidence.webuiDir, 'report.json');
-      const outcome = await runFinite(
-        commandWithEvidence(commands.webuiPlaywright, {
-          TLDW_SKILLS_CERT_WEB_OUTPUT: path.join(evidence.webuiDir, 'output'),
-          TLDW_SKILLS_CERT_WEB_REPORT: webReportPath,
-          TLDW_SKILLS_CERT_WEB_RESULT: webResultPath,
-        })
-      );
-      const surfaceResult = operations.readJson(webResultPath);
+      let outcome;
+      let surfaceResult;
+      let surfaceReport;
+      let browserThrew = false;
+      try {
+        outcome = await runFinite(
+          commandWithEvidence(commands.webuiPlaywright, {
+            TLDW_SKILLS_CERT_WEB_OUTPUT: path.join(evidence.webuiDir, 'output'),
+            TLDW_SKILLS_CERT_WEB_REPORT: webReportPath,
+            TLDW_SKILLS_CERT_WEB_RESULT: webResultPath,
+          })
+        );
+      } catch {
+        browserThrew = true;
+      }
+      try {
+        surfaceResult = operations.readJson(webResultPath);
+        surfaceReport = operations.readJson(webReportPath);
+      } catch {
+        surfaceResult = undefined;
+        surfaceReport = undefined;
+      }
       const categories = resultCategories(surfaceResult, new Set(['webui_workflow']));
       const passed =
         outcome?.code === 0 &&
-        exactReport(operations.readJson(webReportPath)) &&
+        exactReport(surfaceReport) &&
         surfaceResult?.status === 'passed' &&
         categories?.length === 0;
       if (passed) surfaces.webui.state = 'passed';
       else {
         surfaces.webui.state = 'failed';
         fail(
-          outcome?.code !== 0 && surfaceResult === undefined ? 'webui_launch' : 'webui_workflow',
+          (browserThrew || outcome?.code !== 0) && surfaceResult === undefined
+            ? 'webui_launch'
+            : 'webui_workflow',
           'WebUI report/result failed',
           'webui'
         );
@@ -291,13 +339,18 @@ export async function runSkillsCertification({ operations: suppliedOperations = 
       await directPostcondition(SKILLS_CERT_NAMES.webui, 'webui');
     }
 
-    if (backendUsable) {
+    if (backendUsable && webuiAttempted) {
       try {
         await health();
       } catch {
         fail('backend_health', 'backend crashed after WebUI');
         try {
-          await operations.startChild(registry, commands.backend, logPath('backend-restart'));
+          await operations.stopChild(registry, backendRecord);
+          backendRecord = await operations.startChild(
+            registry,
+            commands.backend,
+            logPath('backend-restart')
+          );
           await health();
         } catch {
           backendUsable = false;
@@ -306,25 +359,50 @@ export async function runSkillsCertification({ operations: suppliedOperations = 
     }
 
     if (backendUsable) {
-      const build = await runFinite(commands.extensionBuild);
+      let build;
+      try {
+        build = await runFinite(commands.extensionBuild);
+      } catch {
+        build = { code: 1 };
+      }
       if (build?.code !== 0 || build?.signal) {
         surfaces.extension.state = 'failed';
         fail('extension_build', 'extension build failed', 'extension');
       } else {
         try {
           await health();
+        } catch {
+          backendUsable = false;
+          surfaces.extension.state = 'not_run_infrastructure';
+          fail('backend_health', 'backend unavailable before extension');
+        }
+        if (backendUsable) {
           urlLocked = true;
           const resultPath = path.join(evidence.extensionDir, 'result.json');
           const reportPath = path.join(evidence.extensionDir, 'report.json');
-          const outcome = await runFinite(
-            commandWithEvidence(commands.extensionPlaywright, {
-              TLDW_SKILLS_CERT_EXTENSION_LEDGER: evidence.relayLedgerPath,
-              TLDW_SKILLS_CERT_EXTENSION_OUTPUT: path.join(evidence.extensionDir, 'output'),
-              TLDW_SKILLS_CERT_EXTENSION_REPORT: reportPath,
-              TLDW_SKILLS_CERT_EXTENSION_RESULT: resultPath,
-            })
-          );
-          const surfaceResult = operations.readJson(resultPath);
+          let outcome;
+          let browserThrew = false;
+          try {
+            outcome = await runFinite(
+              commandWithEvidence(commands.extensionPlaywright, {
+                TLDW_SKILLS_CERT_EXTENSION_LEDGER: evidence.relayLedgerPath,
+                TLDW_SKILLS_CERT_EXTENSION_OUTPUT: path.join(evidence.extensionDir, 'output'),
+                TLDW_SKILLS_CERT_EXTENSION_REPORT: reportPath,
+                TLDW_SKILLS_CERT_EXTENSION_RESULT: resultPath,
+              })
+            );
+          } catch {
+            browserThrew = true;
+          }
+          let surfaceResult;
+          let surfaceReport;
+          try {
+            surfaceResult = operations.readJson(resultPath);
+            surfaceReport = operations.readJson(reportPath);
+          } catch {
+            surfaceResult = undefined;
+            surfaceReport = undefined;
+          }
           const categories = resultCategories(
             surfaceResult,
             new Set([
@@ -336,29 +414,27 @@ export async function runSkillsCertification({ operations: suppliedOperations = 
           );
           const passed =
             outcome?.code === 0 &&
-            exactReport(operations.readJson(reportPath)) &&
+            exactReport(surfaceReport) &&
             surfaceResult?.status === 'passed' &&
             categories?.length === 0;
           if (passed) surfaces.extension.state = 'passed';
           else {
             surfaces.extension.state = 'failed';
-            if (categories?.length)
+            if (categories?.length) {
               categories.forEach((category) =>
                 fail(category, 'Extension result failed', 'extension')
               );
-            else
+            } else {
               fail(
-                outcome?.code !== 0 && surfaceResult === undefined
+                (browserThrew || outcome?.code !== 0) && surfaceResult === undefined
                   ? 'extension_launch'
                   : 'extension_workflow',
                 'Extension report/result failed',
                 'extension'
               );
+            }
           }
           await directPostcondition(SKILLS_CERT_NAMES.extension, 'extension');
-        } catch {
-          surfaces.extension.state = 'not_run_infrastructure';
-          fail('backend_health', 'backend unavailable before extension');
         }
       }
     } else {
@@ -410,9 +486,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     (summary) => {
       process.exitCode = summary.status === 'passed' ? 0 : 1;
       if (summary.status !== 'passed') {
-        process.stderr.write(
-          `${boundedDetail(summary.primary_category ?? 'certification_failed')}\n`
-        );
+        process.stderr.write(`${formatSkillsCertificationDiagnostic(summary)}\n`);
       }
     },
     (error) => {

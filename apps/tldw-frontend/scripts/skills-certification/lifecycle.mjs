@@ -47,6 +47,7 @@ export function createProcessRegistry({
 } = {}) {
   const registered = [];
   const states = new WeakMap();
+  const stopped = new WeakSet();
   let teardownPromise;
 
   function spawn(command, logPath) {
@@ -81,11 +82,63 @@ export function createProcessRegistry({
     return state.closePromise;
   }
 
+  async function stop(record) {
+    const state = states.get(record);
+    if (!state) {
+      throw new Error('Cannot stop an unregistered process record');
+    }
+    if (stopped.has(record)) {
+      return;
+    }
+    stopped.add(record);
+
+    const errors = [];
+    const child = childFromRecord(record);
+    try {
+      await stopProcessTree(record, { timeoutMs: stopTimeoutMs });
+    } catch (error) {
+      errors.push(error);
+    }
+    try {
+      await withTimeout(
+        state.closePromise,
+        closeTimeoutMs,
+        `Timed out waiting for process ${child?.pid ?? 'unknown'} to close`
+      );
+    } catch (error) {
+      errors.push(error);
+    }
+    if (!Number.isInteger(child?.pid) || child.pid <= 0) {
+      errors.push(new Error('Cannot verify a process without a positive PID'));
+    } else {
+      const target = platform === 'win32' ? child.pid : -child.pid;
+      try {
+        const alive = await withTimeout(
+          probeProcessTree(target),
+          probeTimeoutMs,
+          `Timed out probing process ${target}`
+        );
+        if (alive) {
+          const label = platform === 'win32' ? 'process' : 'process group';
+          errors.push(new Error(`${label} ${target} is still running`));
+        }
+      } catch (error) {
+        errors.push(error);
+      }
+    }
+    if (errors.length > 0) {
+      throw new AggregateError(errors, 'Skills certification process stop failed');
+    }
+  }
+
   async function teardownRegisteredProcesses() {
     const errors = [];
     const records = [...registered].reverse();
 
     for (const record of records) {
+      if (stopped.has(record)) {
+        continue;
+      }
       const child = childFromRecord(record);
       const state = states.get(record);
 
@@ -145,7 +198,7 @@ export function createProcessRegistry({
     return teardownPromise;
   }
 
-  return { spawn, teardown, wait };
+  return { spawn, stop, teardown, wait };
 }
 
 /** Install removable SIGINT and SIGTERM handlers that share registry teardown. */

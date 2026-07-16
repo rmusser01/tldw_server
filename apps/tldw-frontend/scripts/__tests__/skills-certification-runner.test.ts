@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
+import { tmpdir } from 'node:os';
 
-import { runSkillsCertification } from '../skills-certification/run.mjs';
+import {
+  formatSkillsCertificationDiagnostic,
+  runSkillsCertification,
+} from '../skills-certification/run.mjs';
 
 const webName = 'skills-cert-web';
 const extensionName = 'skills-cert-extension';
@@ -18,6 +22,7 @@ function harness(overrides: Record<string, unknown> = {}) {
   const files = new Map<string, unknown>();
   const registry = {
     spawn: vi.fn((command) => ({ command })),
+    stop: vi.fn(async () => undefined),
     teardown: vi.fn(async () => undefined),
     wait: vi.fn(async () => ({ code: 0, signal: null })),
   };
@@ -272,7 +277,7 @@ describe('Skills certification runner', () => {
     );
   });
 
-  it('fails zero, skipped, flaky, unexpected, missing, and malformed Playwright reports', async () => {
+  it('fails zero, skipped, flaky, unexpected, missing, and malformed reports for both surfaces', async () => {
     for (const value of [
       report({ expected: 0, flaky: 0, skipped: 0, unexpected: 0 }),
       report({ expected: 1, flaky: 0, skipped: 1, unexpected: 0 }),
@@ -281,35 +286,201 @@ describe('Skills certification runner', () => {
       undefined,
       {},
     ]) {
-      const test = harness();
-      test.files.set('/evidence/webui/report.json', value);
-      const summary = await runSkillsCertification({ operations: test.operations });
-      expect(
-        summary.failures.some(
-          (failure: { category: string }) => failure.category === 'webui_workflow'
-        )
-      ).toBe(true);
+      for (const surface of ['webui', 'extension']) {
+        const test = harness();
+        test.files.set(`/evidence/${surface}/report.json`, value);
+        const summary = await runSkillsCertification({ operations: test.operations });
+        expect(
+          summary.failures.some(
+            (failure: { category: string }) => failure.category === `${surface}_workflow`
+          )
+        ).toBe(true);
+      }
     }
   });
 
-  it('constructs a final summary after preflight, workflow, postcondition, cleanup, and artifact failures', async () => {
+  it('retains workflow, postcondition, cleanup, and artifact safety in the final summary', async () => {
     const test = harness({
+      fetch: vi.fn(async (url) => {
+        const pathname = new URL(url).pathname;
+        if (pathname.endsWith(webName)) return { json: async () => ({}), status: 500 };
+        if (pathname.includes('/trash'))
+          return { json: async () => ({ skills: [], total: 0 }), status: 200 };
+        return { json: async () => ({ total: 0 }), status: 200 };
+      }),
       finalize: vi.fn(async ({ summaryInput }) => ({
         ...summaryInput,
+        artifact_safety: { passed: false },
+        cleanup: { children_closed: false, runtime_deleted: false },
         failures: [
           ...summaryInput.failures,
           { category: 'artifact_safety' },
           { category: 'cleanup' },
         ],
       })),
-      runChild: vi.fn(async (registry, command) => {
-        const record = registry.spawn(command, '/log');
-        await registry.wait(record);
-        return { code: command.name.includes('probe') ? 1 : 0, signal: null };
+    });
+    test.files.set('/evidence/webui/result.json', result('failed', ['webui_workflow']));
+    const summary = await runSkillsCertification({ operations: test.operations });
+    expect(test.operations.finalize).toHaveBeenCalledTimes(1);
+    expect(summary.failures.map((failure: { category: string }) => failure.category)).toEqual(
+      expect.arrayContaining(['webui_workflow', 'postcondition', 'cleanup', 'artifact_safety'])
+    );
+    expect(summary.artifact_safety).toEqual({ passed: false });
+    expect(summary.cleanup).toEqual({ children_closed: false, runtime_deleted: false });
+  });
+
+  it('keeps extension evidence after thrown WebUI run and result reads', async () => {
+    for (const failure of ['run', 'read']) {
+      const test = harness();
+      if (failure === 'run') {
+        test.files.delete('/evidence/webui/result.json');
+        test.operations.runChild = vi.fn(async (registry, command) => {
+          const record = registry.spawn(command, '/log');
+          if (command.name === 'webui-playwright') throw new Error('web child exploded');
+          return registry.wait(record);
+        });
+      } else {
+        test.operations.readJson = vi.fn((filePath) => {
+          if (filePath === '/evidence/webui/result.json') throw new Error('web result unreadable');
+          return test.files.get(filePath);
+        });
+      }
+      const summary = await runSkillsCertification({ operations: test.operations });
+      expect(summary.failures.map((failure: { category: string }) => failure.category)).toContain(
+        failure === 'run' ? 'webui_launch' : 'webui_workflow'
+      );
+      expect(test.registry.spawn.mock.calls.map(([command]) => command.name)).toContain(
+        'extension-playwright'
+      );
+    }
+  });
+
+  it('classifies thrown build and extension browser operations without reclassifying backend health', async () => {
+    for (const target of ['extension-build', 'extension-playwright', 'extension-read']) {
+      const test = harness();
+      if (target === 'extension-read') {
+        test.operations.readJson = vi.fn((filePath) => {
+          if (filePath === '/evidence/extension/result.json')
+            throw new Error('extension result unreadable');
+          return test.files.get(filePath);
+        });
+      } else {
+        if (target === 'extension-playwright') test.files.delete('/evidence/extension/result.json');
+        test.operations.runChild = vi.fn(async (registry, command) => {
+          const record = registry.spawn(command, '/log');
+          if (command.name === target) throw new Error(`${target} exploded`);
+          return registry.wait(record);
+        });
+      }
+      const summary = await runSkillsCertification({ operations: test.operations });
+      expect(summary.failures.map((failure: { category: string }) => failure.category)).toContain(
+        target === 'extension-build'
+          ? 'extension_build'
+          : target === 'extension-playwright'
+            ? 'extension_launch'
+            : 'extension_workflow'
+      );
+      expect(
+        summary.failures.map((failure: { category: string }) => failure.category)
+      ).not.toContain('backend_health');
+    }
+  });
+
+  it('retries a frontend-only bind conflict with fresh pairs and stops old attempt children', async () => {
+    const pairs = [
+      { backend: 8100, web: 3100 },
+      { backend: 8101, web: 3101 },
+    ];
+    const test = harness({
+      reservePorts: vi.fn(async () => pairs.shift()),
+      waitForHttpOk: vi.fn(async (url) => {
+        if (url.includes(':3100')) throw new Error('EADDRINUSE');
       }),
     });
     await runSkillsCertification({ operations: test.operations });
-    expect(test.operations.finalize).toHaveBeenCalledTimes(1);
-    expect(test.registry.spawn).toHaveBeenCalled();
+    expect(test.operations.reservePorts).toHaveBeenCalledTimes(2);
+    expect(
+      test.operations.buildCommands.mock.calls.filter(([value]) => value?.ports?.backend === 8100)
+    ).toHaveLength(1);
+    expect(test.registry.stop).toHaveBeenCalledTimes(2);
+  });
+
+  it('caps frontend bind retries at three fresh pairs', async () => {
+    let next = 0;
+    const test = harness({
+      reservePorts: vi.fn(async () => ({ backend: 8100 + next, web: 3100 + next++ })),
+      waitForHttpOk: vi.fn(async (url) => {
+        if (url.includes(':31')) throw new Error('EADDRINUSE');
+      }),
+    });
+    await runSkillsCertification({ operations: test.operations });
+    expect(test.operations.reservePorts).toHaveBeenCalledTimes(3);
+    expect(test.registry.stop).toHaveBeenCalledTimes(4);
+  });
+
+  it('does not restart a backend when no WebUI browser child was attempted', async () => {
+    let healthCalls = 0;
+    const test = harness({
+      waitForHttpOk: vi.fn(async (url) => {
+        if (url.includes(':3100')) throw new Error('frontend unavailable');
+        if (++healthCalls > 1) throw new Error('backend unavailable');
+      }),
+    });
+    await runSkillsCertification({ operations: test.operations });
+    expect(
+      test.registry.spawn.mock.calls
+        .map(([command]) => command.name)
+        .filter((name) => name === 'backend')
+    ).toHaveLength(1);
+  });
+
+  it('stops the prior backend before its one same-port evidence restart and blocks a second crash', async () => {
+    let healthCalls = 0;
+    const test = harness({
+      waitForHttpOk: vi.fn(async () => {
+        healthCalls += 1;
+        if (healthCalls === 3 || healthCalls >= 5) throw new Error('backend crashed');
+      }),
+    });
+    const summary = await runSkillsCertification({ operations: test.operations });
+    expect(test.registry.stop).toHaveBeenCalledTimes(1);
+    expect(summary.surfaces.extension.state).toBe('not_run_infrastructure');
+  });
+
+  it('runs Trash exclusion even when a surface detail request throws', async () => {
+    const test = harness({
+      fetch: vi.fn(async (url) => {
+        const pathname = new URL(url).pathname;
+        test.calls.push(`fetch:${pathname}`);
+        if (pathname.endsWith(webName) || pathname.endsWith(extensionName))
+          throw new Error('detail failed');
+        if (pathname.includes('/trash'))
+          return { json: async () => ({ skills: [], total: 0 }), status: 200 };
+        return { json: async () => ({ total: 0 }), status: 200 };
+      }),
+    });
+    await runSkillsCertification({ operations: test.operations });
+    expect(test.calls.filter((value) => value === 'fetch:/api/v1/skills/trash')).toHaveLength(3);
+  });
+
+  it('uses a generic artifact safety diagnostic and bounds/redacts other diagnostics', () => {
+    expect(
+      formatSkillsCertificationDiagnostic({
+        artifact_safety: { passed: false },
+        primary_category: 'webui_workflow',
+      })
+    ).toBe('artifact_safety');
+    expect(
+      formatSkillsCertificationDiagnostic({
+        artifact_safety: { passed: true },
+        primary_category: `x${'y'.repeat(600)}`,
+      })
+    ).toHaveLength(500);
+  });
+
+  it('creates the disposable profile below the system temporary directory', async () => {
+    const test = harness();
+    await runSkillsCertification({ operations: test.operations });
+    expect(test.operations.createProfile.mock.calls[0][0].temporaryBase).toBe(tmpdir());
   });
 });

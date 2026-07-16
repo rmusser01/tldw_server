@@ -256,6 +256,24 @@ describe('Skills certification process registry', () => {
 
     expect(stopProcessTree).toHaveBeenCalledTimes(1);
   });
+
+  it('stops one registered child once and leaves final teardown compatible', async () => {
+    const first = new FakeChild(4113);
+    const second = new FakeChild(4114);
+    const stopProcessTree = vi.fn(async (record) => {
+      record.child.emit('close', 0, null);
+    });
+    const { registry } = createHarness({ stopProcessTree });
+    const firstRecord = registry.spawn(command('first', first), '/tmp/first.log');
+    registry.spawn(command('second', second), '/tmp/second.log');
+
+    await registry.stop(firstRecord);
+    await registry.stop(firstRecord);
+    await registry.teardown();
+
+    expect(stopProcessTree).toHaveBeenCalledTimes(2);
+    expect(stopProcessTree).toHaveBeenNthCalledWith(1, firstRecord, { timeoutMs: 25 });
+  });
 });
 
 describe('Skills certification signal handlers', () => {
