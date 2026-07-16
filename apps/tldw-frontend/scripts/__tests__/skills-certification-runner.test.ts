@@ -104,17 +104,33 @@ function harness(overrides: Record<string, unknown> = {}) {
 }
 
 describe('Skills certification runner', () => {
-  it('requires both initial Library and Trash totals to be exactly zero', async () => {
-    const test = harness({
-      fetch: vi.fn(async (url: string) => ({
-        json: async () => (url.includes('/trash') ? { total: 1 } : { total: 0 }),
-        status: 200,
-      })),
-    });
-    const summary = await runSkillsCertification({ operations: test.operations });
-    expect(summary.failures).toEqual(
-      expect.arrayContaining([expect.objectContaining({ category: 'postcondition' })])
-    );
+  it('checks both initial Library and Trash totals independently', async () => {
+    for (const totals of [
+      { library: 1, trash: 0 },
+      { library: 0, trash: 1 },
+    ]) {
+      const test = harness({
+        fetch: vi.fn(async (url: string) => ({
+          json: async () => ({
+            total: url.includes('/trash') ? totals.trash : totals.library,
+            skills: [],
+          }),
+          status: 200,
+        })),
+      });
+      const summary = await runSkillsCertification({ operations: test.operations });
+      expect(summary.failures).toEqual(
+        expect.arrayContaining([expect.objectContaining({ category: 'postcondition' })])
+      );
+      expect(test.operations.fetch).toHaveBeenCalledWith(
+        expect.stringContaining('/api/v1/skills/'),
+        expect.anything()
+      );
+      expect(test.operations.fetch).toHaveBeenCalledWith(
+        expect.stringContaining('/api/v1/skills/trash'),
+        expect.anything()
+      );
+    }
   });
 
   it('tracks both package-local Chromium probes and treats a missing browser as preflight', async () => {
@@ -150,6 +166,48 @@ describe('Skills certification runner', () => {
     expect(test.calls.indexOf('webui-playwright')).toBeGreaterThan(
       test.calls.lastIndexOf('backend')
     );
+  });
+
+  it('stops a health-bind backend before reserving a fresh pair and does not continue when stop fails', async () => {
+    const events: string[] = [];
+    const test = harness({
+      reservePorts: vi.fn(async () => {
+        events.push('reserve');
+        return { backend: 8100 + events.length, web: 3100 + events.length };
+      }),
+      startChild: vi.fn((registry, command) => {
+        events.push(`start:${command.name}`);
+        return registry.spawn(command, '/log');
+      }),
+      stopChild: vi.fn(async () => {
+        events.push('stop:backend');
+      }),
+      waitForHttpOk: vi.fn(async (_url) => {
+        events.push('health');
+        if (events.filter((event) => event === 'health').length === 1)
+          throw new Error('EADDRINUSE');
+      }),
+    });
+    await runSkillsCertification({ operations: test.operations });
+    expect(events.slice(0, 5)).toEqual([
+      'reserve',
+      'start:backend',
+      'health',
+      'stop:backend',
+      'reserve',
+    ]);
+
+    const failingStop = harness({
+      reservePorts: vi.fn(async () => ({ backend: 8200, web: 3200 })),
+      stopChild: vi.fn(async () => {
+        throw new Error('stop failed');
+      }),
+      waitForHttpOk: vi.fn(async () => {
+        throw new Error('EADDRINUSE');
+      }),
+    });
+    await runSkillsCertification({ operations: failingStop.operations });
+    expect(failingStop.operations.reservePorts).toHaveBeenCalledTimes(1);
   });
 
   it('does not retry a non-bind startup failure', async () => {
@@ -355,6 +413,31 @@ describe('Skills certification runner', () => {
     }
   });
 
+  it('keeps a present WebUI result when only report reading throws', async () => {
+    const test = harness();
+    test.files.set('/evidence/webui/result.json', result('failed', ['webui_workflow']));
+    test.operations.runChild = vi.fn(async (registry, command) => {
+      const record = registry.spawn(command, '/log');
+      return command.name === 'webui-playwright'
+        ? { code: 1, signal: null }
+        : registry.wait(record);
+    });
+    test.operations.readJson = vi.fn((filePath) => {
+      if (filePath === '/evidence/webui/report.json') throw new Error('report unreadable');
+      return test.files.get(filePath);
+    });
+    const summary = await runSkillsCertification({ operations: test.operations });
+    expect(summary.failures.map((failure: { category: string }) => failure.category)).toContain(
+      'webui_workflow'
+    );
+    expect(summary.failures.map((failure: { category: string }) => failure.category)).not.toContain(
+      'webui_launch'
+    );
+    expect(test.registry.spawn.mock.calls.map(([command]) => command.name)).toContain(
+      'extension-playwright'
+    );
+  });
+
   it('classifies thrown build and extension browser operations without reclassifying backend health', async () => {
     for (const target of ['extension-build', 'extension-playwright', 'extension-read']) {
       const test = harness();
@@ -386,6 +469,25 @@ describe('Skills certification runner', () => {
     }
   });
 
+  it('retains every present extension category when only its report read throws', async () => {
+    const test = harness();
+    const categories = [
+      'extension_launch',
+      'extension_worker',
+      'extension_workflow',
+      'extension_relay',
+    ];
+    test.files.set('/evidence/extension/result.json', result('failed', categories));
+    test.operations.readJson = vi.fn((filePath) => {
+      if (filePath === '/evidence/extension/report.json') throw new Error('report unreadable');
+      return test.files.get(filePath);
+    });
+    const summary = await runSkillsCertification({ operations: test.operations });
+    expect(summary.failures.map((failure: { category: string }) => failure.category)).toEqual(
+      expect.arrayContaining(categories)
+    );
+  });
+
   it('retries a frontend-only bind conflict with fresh pairs and stops old attempt children', async () => {
     const pairs = [
       { backend: 8100, web: 3100 },
@@ -407,7 +509,12 @@ describe('Skills certification runner', () => {
 
   it('caps frontend bind retries at three fresh pairs', async () => {
     let next = 0;
+    const pairs: string[] = [];
     const test = harness({
+      buildCommands: vi.fn((input) => {
+        if (input.ports.backend > 1) pairs.push(`${input.ports.backend}:${input.ports.web}`);
+        return test.commands;
+      }),
       reservePorts: vi.fn(async () => ({ backend: 8100 + next, web: 3100 + next++ })),
       waitForHttpOk: vi.fn(async (url) => {
         if (url.includes(':31')) throw new Error('EADDRINUSE');
@@ -415,6 +522,7 @@ describe('Skills certification runner', () => {
     });
     await runSkillsCertification({ operations: test.operations });
     expect(test.operations.reservePorts).toHaveBeenCalledTimes(3);
+    expect(pairs).toEqual(['8100:3100', '8101:3101', '8102:3102']);
     expect(test.registry.stop).toHaveBeenCalledTimes(4);
   });
 
@@ -445,6 +553,75 @@ describe('Skills certification runner', () => {
     const summary = await runSkillsCertification({ operations: test.operations });
     expect(test.registry.stop).toHaveBeenCalledTimes(1);
     expect(summary.surfaces.extension.state).toBe('not_run_infrastructure');
+  });
+
+  it('locks all reserve and startup command construction before WebUI execution', async () => {
+    const events: string[] = [];
+    const test = harness({
+      buildCommands: vi.fn((input) => {
+        if (input.ports.backend > 1) events.push(`build:${input.ports.backend}:${input.ports.web}`);
+        return test.commands;
+      }),
+      reservePorts: vi.fn(async () => {
+        events.push('reserve');
+        return { backend: 8100, web: 3100 };
+      }),
+      runChild: vi.fn(async (registry, command) => {
+        if (command.name === 'webui-playwright') events.push('webui');
+        const record = registry.spawn(command, '/log');
+        return registry.wait(record);
+      }),
+    });
+    await runSkillsCertification({ operations: test.operations });
+    const webuiIndex = events.indexOf('webui');
+    expect(webuiIndex).toBeGreaterThan(0);
+    expect(events.slice(0, webuiIndex)).toEqual(
+      expect.arrayContaining(['reserve', 'build:8100:3100'])
+    );
+    expect(events.slice(webuiIndex + 1)).not.toContain('reserve');
+    expect(events.slice(webuiIndex + 1)).not.toContain('build:8100:3100');
+  });
+
+  it('restarts the exact original backend after WebUI without a fresh reserve or build', async () => {
+    const events: string[] = [];
+    let healthCalls = 0;
+    const test = harness({
+      buildCommands: vi.fn((input) => {
+        const commands = Object.fromEntries(
+          Object.entries(test.commands).map(([key, command]) => [
+            key,
+            { ...command, args: [`--port=${input.ports.backend}`] },
+          ])
+        );
+        if (input.ports.backend > 1) events.push(`build:${input.ports.backend}:${input.ports.web}`);
+        return commands;
+      }),
+      reservePorts: vi.fn(async () => {
+        events.push('reserve');
+        return { backend: 8100, web: 3100 };
+      }),
+      startChild: vi.fn((registry, command) => {
+        events.push(`start:${command.name}:${command.args[0]}`);
+        return registry.spawn(command, '/log');
+      }),
+      stopChild: vi.fn(async (_registry, record) => {
+        events.push(`stop:${record.command.name}:${record.command.args[0]}`);
+      }),
+      waitForHttpOk: vi.fn(async () => {
+        if (++healthCalls === 3) throw new Error('backend crashed');
+      }),
+    });
+    await runSkillsCertification({ operations: test.operations });
+    const webuiStart = events.findIndex((event) => event.startsWith('start:frontend'));
+    const restartStop = events.indexOf('stop:backend:--port=8100');
+    const backendStarts = events
+      .map((event, index) => [event, index] as const)
+      .filter(([event]) => event === 'start:backend:--port=8100');
+    expect(webuiStart).toBeGreaterThan(-1);
+    expect(backendStarts).toHaveLength(2);
+    expect(restartStop).toBeLessThan(backendStarts[1][1]);
+    expect(events.filter((event) => event === 'reserve')).toHaveLength(1);
+    expect(events.filter((event) => event === 'build:8100:3100')).toHaveLength(1);
   });
 
   it('runs Trash exclusion even when a surface detail request throws', async () => {

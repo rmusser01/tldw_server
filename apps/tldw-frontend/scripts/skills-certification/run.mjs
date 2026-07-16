@@ -281,7 +281,17 @@ export async function runSkillsCertification({ operations: suppliedOperations = 
           }
         } catch (error) {
           const detail = `${error?.message ?? ''} ${operations.readText(logPath('backend'))}`;
-          if (operations.isBindConflict(detail) && attempt < 3 && !urlLocked) continue;
+          if (operations.isBindConflict(detail) && attempt < 3 && !urlLocked) {
+            try {
+              await operations.stopChild(registry, backendRecord);
+            } catch {
+              fail('backend_health', 'backend health retry cleanup failed');
+              break;
+            }
+            backendRecord = undefined;
+            backendUsable = false;
+            continue;
+          }
           fail('backend_health', 'backend health failed');
           break;
         }
@@ -314,9 +324,12 @@ export async function runSkillsCertification({ operations: suppliedOperations = 
       }
       try {
         surfaceResult = operations.readJson(webResultPath);
-        surfaceReport = operations.readJson(webReportPath);
       } catch {
         surfaceResult = undefined;
+      }
+      try {
+        surfaceReport = operations.readJson(webReportPath);
+      } catch {
         surfaceReport = undefined;
       }
       const categories = resultCategories(surfaceResult, new Set(['webui_workflow']));
@@ -398,9 +411,12 @@ export async function runSkillsCertification({ operations: suppliedOperations = 
           let surfaceReport;
           try {
             surfaceResult = operations.readJson(resultPath);
-            surfaceReport = operations.readJson(reportPath);
           } catch {
             surfaceResult = undefined;
+          }
+          try {
+            surfaceReport = operations.readJson(reportPath);
+          } catch {
             surfaceReport = undefined;
           }
           const categories = resultCategories(

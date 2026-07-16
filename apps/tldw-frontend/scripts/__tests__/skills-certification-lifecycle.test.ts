@@ -274,6 +274,58 @@ describe('Skills certification process registry', () => {
     expect(stopProcessTree).toHaveBeenCalledTimes(2);
     expect(stopProcessTree).toHaveBeenNthCalledWith(1, firstRecord, { timeoutMs: 25 });
   });
+
+  it('shares one in-progress stop promise for concurrent callers', async () => {
+    const child = new FakeChild(4118);
+    const { registry, stopProcessTree } = createHarness();
+    const record = registry.spawn(command('shared-stop', child), '/tmp/shared-stop.log');
+
+    const first = registry.stop(record);
+    const second = registry.stop(record);
+    expect(first).toBe(second);
+    expect(stopProcessTree).toHaveBeenCalledTimes(1);
+
+    child.emit('close', 0, null);
+    await expect(Promise.all([first, second])).resolves.toEqual([undefined, undefined]);
+  });
+
+  it('retries a failed alive-process stop during teardown instead of silently skipping it', async () => {
+    const child = new FakeChild(4115);
+    const stopProcessTree = vi.fn(async () => undefined);
+    const probeProcessTree = vi.fn(async () => true);
+    const { registry } = createHarness({ probeProcessTree, stopProcessTree });
+    const record = registry.spawn(command('alive', child), '/tmp/alive.log');
+    child.emit('close', 0, null);
+
+    await expect(registry.stop(record)).rejects.toBeInstanceOf(AggregateError);
+    await expect(registry.teardown()).rejects.toBeInstanceOf(AggregateError);
+    expect(stopProcessTree).toHaveBeenCalledTimes(2);
+    expect(probeProcessTree).toHaveBeenCalledTimes(2);
+  });
+
+  it('retries a stopProcessTree rejection during teardown', async () => {
+    const child = new FakeChild(4116);
+    const stopProcessTree = vi.fn(async () => {
+      throw new Error('stop exploded');
+    });
+    const { registry } = createHarness({ stopProcessTree });
+    const record = registry.spawn(command('stop-error', child), '/tmp/stop-error.log');
+    child.emit('close', 0, null);
+
+    await expect(registry.stop(record)).rejects.toBeInstanceOf(AggregateError);
+    await expect(registry.teardown()).rejects.toBeInstanceOf(AggregateError);
+    expect(stopProcessTree).toHaveBeenCalledTimes(2);
+  });
+
+  it('retries a close timeout during teardown', async () => {
+    const child = new FakeChild(4117);
+    const { registry, stopProcessTree } = createHarness({ closeTimeoutMs: 5 });
+    const record = registry.spawn(command('close-timeout', child), '/tmp/close-timeout.log');
+
+    await expect(registry.stop(record)).rejects.toBeInstanceOf(AggregateError);
+    await expect(registry.teardown()).rejects.toBeInstanceOf(AggregateError);
+    expect(stopProcessTree).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe('Skills certification signal handlers', () => {

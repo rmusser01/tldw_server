@@ -48,6 +48,7 @@ export function createProcessRegistry({
   const registered = [];
   const states = new WeakMap();
   const stopped = new WeakSet();
+  const stopping = new WeakMap();
   let teardownPromise;
 
   function spawn(command, logPath) {
@@ -82,16 +83,31 @@ export function createProcessRegistry({
     return state.closePromise;
   }
 
-  async function stop(record) {
+  function stop(record) {
     const state = states.get(record);
     if (!state) {
       throw new Error('Cannot stop an unregistered process record');
     }
     if (stopped.has(record)) {
-      return;
+      return Promise.resolve();
     }
-    stopped.add(record);
+    const inProgress = stopping.get(record);
+    if (inProgress) {
+      return inProgress;
+    }
 
+    const stopPromise = stopRegisteredRecord(record, state)
+      .then(() => {
+        stopped.add(record);
+      })
+      .finally(() => {
+        stopping.delete(record);
+      });
+    stopping.set(record, stopPromise);
+    return stopPromise;
+  }
+
+  async function stopRegisteredRecord(record, state) {
     const errors = [];
     const child = childFromRecord(record);
     try {
@@ -127,7 +143,12 @@ export function createProcessRegistry({
       }
     }
     if (errors.length > 0) {
-      throw new AggregateError(errors, 'Skills certification process stop failed');
+      throw new AggregateError(
+        errors,
+        `Skills certification process stop failed: ${errors
+          .map((error) => error?.message ?? String(error))
+          .join('; ')}`
+      );
     }
   }
 
@@ -139,41 +160,8 @@ export function createProcessRegistry({
       if (stopped.has(record)) {
         continue;
       }
-      const child = childFromRecord(record);
-      const state = states.get(record);
-
       try {
-        await stopProcessTree(record, { timeoutMs: stopTimeoutMs });
-      } catch (error) {
-        errors.push(error);
-      }
-
-      try {
-        await withTimeout(
-          state.closePromise,
-          closeTimeoutMs,
-          `Timed out waiting for process ${child?.pid ?? 'unknown'} to close`
-        );
-      } catch (error) {
-        errors.push(error);
-      }
-
-      if (!Number.isInteger(child?.pid) || child.pid <= 0) {
-        errors.push(new Error('Cannot verify a process without a positive PID'));
-        continue;
-      }
-
-      const target = platform === 'win32' ? child.pid : -child.pid;
-      try {
-        const alive = await withTimeout(
-          probeProcessTree(target),
-          probeTimeoutMs,
-          `Timed out probing process ${target}`
-        );
-        if (alive) {
-          const label = platform === 'win32' ? 'process' : 'process group';
-          errors.push(new Error(`${label} ${target} is still running`));
-        }
+        await stop(record);
       } catch (error) {
         errors.push(error);
       }
