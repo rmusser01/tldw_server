@@ -2,7 +2,7 @@ import React from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Button, Form, Input, Skeleton } from "antd"
 import { useTranslation } from "react-i18next"
-import { useSearchParams } from "react-router-dom"
+import { Link, useSearchParams } from "react-router-dom"
 
 import { useConfirmDanger } from "@/components/Common/confirm-danger"
 import { Alert, Badge } from "@/components/ui/primitives"
@@ -46,6 +46,15 @@ type PendingHistoryRestore = {
 
 let pendingHistoryRestore: PendingHistoryRestore | null = null
 let pendingHistoryRestoreTimer: ReturnType<typeof setTimeout> | null = null
+let historyEntryTokenSequence = 0
+
+const createHistoryEntryToken = (): string => {
+  if (typeof globalThis.crypto?.randomUUID === "function") {
+    return globalThis.crypto.randomUUID()
+  }
+  historyEntryTokenSequence += 1
+  return `service-prompt-${Date.now().toString(36)}-${historyEntryTokenSequence.toString(36)}`
+}
 
 const clearPendingHistoryRestore = () => {
   if (pendingHistoryRestoreTimer !== null) {
@@ -61,20 +70,15 @@ const stagePendingHistoryRestore = (restore: PendingHistoryRestore) => {
   pendingHistoryRestoreTimer = setTimeout(clearPendingHistoryRestore, 2_000)
 }
 
-const consumePendingHistoryRestore = (
+const claimPendingHistoryRestore = (
   url: string,
-  definitionId: string,
-  scopeKey: string
+  definitionId: string
 ): PendingHistoryRestore | null => {
   const restore = pendingHistoryRestore
-  if (!restore) return null
-  if (restore.url !== url || restore.definitionId !== definitionId ||
-    restore.scopeKey !== scopeKey) {
-    clearPendingHistoryRestore()
-    return null
-  }
   clearPendingHistoryRestore()
-  return restore
+  return restore?.url === url && restore.definitionId === definitionId
+    ? restore
+    : null
 }
 
 type MigrationItem = LegacyServicePromptCandidate & {
@@ -217,6 +221,22 @@ const getHistoryForwardDestination = (state: unknown): string | null => {
   return typeof destination === "string" ? destination : null
 }
 
+const getHistoryEntryToken = (state: unknown): string | null => {
+  if (!state || typeof state !== "object") return null
+  const token = (state as {
+    servicePromptHistoryEntryToken?: unknown
+  }).servicePromptHistoryEntryToken
+  return typeof token === "string" && token ? token : null
+}
+
+const getHistoryForwardEntryToken = (state: unknown): string | null => {
+  if (!state || typeof state !== "object") return null
+  const token = (state as {
+    servicePromptHistoryForwardEntryToken?: unknown
+  }).servicePromptHistoryForwardEntryToken
+  return typeof token === "string" && token ? token : null
+}
+
 const toDomId = (value: string): string =>
   value.replace(/[^a-zA-Z0-9_-]+/g, "-")
 
@@ -253,10 +273,16 @@ export const ServicePromptsSettings = () => {
   const historyIndexRef = React.useRef(0)
   const historyInitializedRef = React.useRef(false)
   const historyForwardDestinationRef = React.useRef<string | null>(null)
+  const historyForwardEntryTokenRef = React.useRef<string | null>(null)
+  const pendingHistoryDestinationRef = React.useRef<{
+    token: string
+    url: string
+  } | null>(null)
   const historyUrlRef = React.useRef(
     typeof window === "undefined" ? "" : window.location.href
   )
   const historyRestoreCheckedRef = React.useRef(false)
+  const claimedHistoryRestoreRef = React.useRef<PendingHistoryRestore | null>(null)
   const historyFocusRef = React.useRef<{
     element: HTMLElement | null
     id: string | null
@@ -303,6 +329,7 @@ export const ServicePromptsSettings = () => {
     if (activeOperationRef.current?.identity === operation.identity) {
       activeOperationRef.current = null
     }
+    if (operation.controller.signal.aborted) return
     setActiveOperation((current) =>
       current?.identity === operation.identity ? null : current
     )
@@ -313,19 +340,37 @@ export const ServicePromptsSettings = () => {
   const isResetting = activeKind === "reset"
 
   const replaceHistoryForwardDestination = React.useCallback(
-    (destination: string | null) => {
+    (destination: string | null, token: string | null = null) => {
       const existing = window.history.state ?? {}
       const next = { ...existing }
       if (destination === null) {
         delete next.servicePromptHistoryForwardDestination
+        delete next.servicePromptHistoryForwardEntryToken
       } else {
         next.servicePromptHistoryForwardDestination = destination
+        if (token) {
+          next.servicePromptHistoryForwardEntryToken = token
+        } else {
+          delete next.servicePromptHistoryForwardEntryToken
+        }
       }
       window.history.replaceState(next, "", window.location.href)
       historyForwardDestinationRef.current = destination
+      historyForwardEntryTokenRef.current = token
     },
     []
   )
+
+  const stampPendingHistoryDestination = React.useCallback(() => {
+    const pending = pendingHistoryDestinationRef.current
+    if (!pending || window.location.href !== pending.url) return
+    const next = { ...(window.history.state ?? {}) }
+    delete next.servicePromptHistoryForwardDestination
+    delete next.servicePromptHistoryForwardEntryToken
+    next.servicePromptHistoryEntryToken = pending.token
+    window.history.replaceState(next, "", window.location.href)
+    pendingHistoryDestinationRef.current = null
+  }, [])
 
   React.useEffect(() => {
     scopeRef.current = scope
@@ -340,14 +385,22 @@ export const ServicePromptsSettings = () => {
   }, [dirty])
 
   React.useEffect(() => {
-    if (historyRestoreCheckedRef.current || !selectedId || !scope) return
+    if (historyRestoreCheckedRef.current || !selectedId) return
     historyRestoreCheckedRef.current = true
-    const restore = consumePendingHistoryRestore(
+    claimedHistoryRestoreRef.current = claimPendingHistoryRestore(
       window.location.href,
-      selectedId,
-      scope.scopeKey
+      selectedId
     )
-    if (!restore) return
+  }, [selectedId])
+
+  React.useEffect(() => {
+    const restore = claimedHistoryRestoreRef.current
+    if (!restore || !selectedId || !scope) return
+    claimedHistoryRestoreRef.current = null
+    if (restore.url !== window.location.href ||
+      restore.definitionId !== selectedId || restore.scopeKey !== scope.scopeKey) {
+      return
+    }
     historyFocusRef.current = { element: null, id: restore.focusId }
     dirtyRef.current = true
     setDraft({ ...restore.draft, parts: { ...restore.draft.parts } })
@@ -368,6 +421,7 @@ export const ServicePromptsSettings = () => {
     }
     historyUrlRef.current = window.location.href
     historyForwardDestinationRef.current = getHistoryForwardDestination(existing)
+    historyForwardEntryTokenRef.current = getHistoryForwardEntryToken(existing)
     window.history.replaceState(
       { ...existing, servicePromptHistoryIndex: historyIndexRef.current },
       "",
@@ -387,6 +441,7 @@ export const ServicePromptsSettings = () => {
       })
       .catch((error) => {
         if (controller.signal.aborted || isAbortError(error)) return
+        claimedHistoryRestoreRef.current = null
         setScopeError(error)
         setScopeLoading(false)
       })
@@ -397,6 +452,8 @@ export const ServicePromptsSettings = () => {
     const handleScopeChange = () => {
       const oldScope = scopeRef.current
       clearPendingHistoryRestore()
+      claimedHistoryRestoreRef.current = null
+      pendingHistoryDestinationRef.current = null
       abortActiveOperation()
       if (oldScope) {
         const queryKey = ["service-prompts", oldScope.scopeKey]
@@ -526,7 +583,7 @@ export const ServicePromptsSettings = () => {
 
   React.useEffect(() => {
     const selectionFocusPending = pendingFocusDefinitionRef.current === selectedId
-    const historyFocusPending = Boolean(historyFocusRef.current?.id)
+    const historyFocusPending = historyFocusRef.current !== null
     if (!selectedId || (!selectionFocusPending && !historyFocusPending) ||
       !detailFocusReady) {
       return
@@ -537,13 +594,16 @@ export const ServicePromptsSettings = () => {
       if (selectedIdRef.current !== selectedId || !target.isConnected) {
         return
       }
-      const historyTargetId = historyFocusRef.current?.id
-      const historyTarget = historyTargetId
-        ? document.getElementById(historyTargetId)
-        : null
-      if (historyTarget) {
+      const historyFocus = historyFocusRef.current
+      if (historyFocus) {
+        const historyTarget = historyFocus.id
+          ? document.getElementById(historyFocus.id)
+          : null
+        const restored = historyTarget ?? (historyFocus.element?.isConnected
+          ? historyFocus.element
+          : target)
         historyFocusRef.current = null
-        historyTarget.focus()
+        restored.focus()
         return
       }
       if (pendingFocusDefinitionRef.current === selectedId) {
@@ -586,28 +646,46 @@ export const ServicePromptsSettings = () => {
         setDirty(false)
       }
       clearPendingHistoryRestore()
-      replaceHistoryForwardDestination(destination.href)
+      claimedHistoryRestoreRef.current = null
+      const token = createHistoryEntryToken()
+      pendingHistoryDestinationRef.current = { token, url: destination.href }
+      replaceHistoryForwardDestination(destination.href, token)
+      queueMicrotask(stampPendingHistoryDestination)
     }
     const popstate = (event: PopStateEvent) => {
       if (suppressPopstateRef.current) {
         suppressPopstateRef.current = false
         const index = getHistoryIndex(event.state)
         if (index !== null) historyIndexRef.current = index
+        historyForwardDestinationRef.current = getHistoryForwardDestination(event.state)
+        historyForwardEntryTokenRef.current = getHistoryForwardEntryToken(event.state)
         const focusTarget = historyFocusRef.current
-        const restored = focusTarget?.id
-          ? document.getElementById(focusTarget.id)
-          : focusTarget?.element?.isConnected
+        const restoreFocus = (allowFallback: boolean) => {
+          if (!focusTarget || historyFocusRef.current !== focusTarget) return
+          const restoredById = focusTarget.id
+            ? document.getElementById(focusTarget.id)
+            : null
+          const restored = restoredById ?? (focusTarget.element?.isConnected
             ? focusTarget.element
-            : detailFocusRef.current
-        if (restored) {
-          historyFocusRef.current = null
-          restored.focus()
+            : allowFallback && detailFocusRef.current?.isConnected
+              ? detailFocusRef.current
+              : null)
+          if (restored) {
+            historyFocusRef.current = null
+            restored.focus()
+          }
+        }
+        restoreFocus(false)
+        if (historyFocusRef.current === focusTarget) {
+          window.requestAnimationFrame(() => restoreFocus(true))
         }
         return
       }
       if (!dirtyRef.current) {
         const index = getHistoryIndex(event.state)
         if (index !== null) historyIndexRef.current = index
+        historyForwardDestinationRef.current = getHistoryForwardDestination(event.state)
+        historyForwardEntryTokenRef.current = getHistoryForwardEntryToken(event.state)
         return
       }
       const leave = window.confirm(t("servicePrompts.unsaved.leave", {
@@ -619,11 +697,16 @@ export const ServicePromptsSettings = () => {
         setDirty(false)
         const index = getHistoryIndex(event.state)
         if (index !== null) historyIndexRef.current = index
+        historyForwardDestinationRef.current = getHistoryForwardDestination(event.state)
+        historyForwardEntryTokenRef.current = getHistoryForwardEntryToken(event.state)
         return
       }
       const targetIndex = getHistoryIndex(event.state)
+      const forwardEntryToken = historyForwardEntryTokenRef.current
       const delta = targetIndex === null
-        ? historyForwardDestinationRef.current === window.location.href ? -1 : 1
+        ? forwardEntryToken
+          ? getHistoryEntryToken(event.state) === forwardEntryToken ? -1 : 1
+          : historyForwardDestinationRef.current === window.location.href ? -1 : 1
         : historyIndexRef.current - targetIndex
       const activeElement = document.activeElement instanceof HTMLElement
         ? document.activeElement
@@ -654,6 +737,7 @@ export const ServicePromptsSettings = () => {
     window.addEventListener("popstate", popstate)
     document.addEventListener("click", anchorClick, true)
     return () => {
+      stampPendingHistoryDestination()
       window.removeEventListener("beforeunload", beforeUnload)
       window.removeEventListener("popstate", popstate)
       document.removeEventListener("click", anchorClick, true)
@@ -665,6 +749,7 @@ export const ServicePromptsSettings = () => {
     operationError,
     preview,
     replaceHistoryForwardDestination,
+    stampPendingHistoryDestination,
     t
   ])
 
@@ -687,6 +772,8 @@ export const ServicePromptsSettings = () => {
       return
     }
     clearPendingHistoryRestore()
+    claimedHistoryRestoreRef.current = null
+    pendingHistoryDestinationRef.current = null
     abortActiveOperation()
     if (scope && selectedId) {
       const oldDetailKey = [
@@ -861,124 +948,122 @@ export const ServicePromptsSettings = () => {
   }
 
   const resetPrompt = async (revision: string | null, corrupt = false) => {
-    if (!selectedDefinition || !scope || (!corrupt && !draftIsCurrent)) return
+    if (!selectedDefinition || !scope || (!corrupt && !draftIsCurrent) ||
+      activeOperationRef.current !== null) {
+      return
+    }
     const operationScope = scope.scopeKey
     const definitionId = selectedDefinition.id
     const label = definitionLabel(selectedDefinition)
-    let confirmed = false
-    try {
-      confirmed = await confirmDanger({
-        title: t("servicePrompts.reset.title", {
-          defaultValue: "Reset {{name}}?",
-          name: label
-        }),
-        content: t("servicePrompts.reset.content", {
-          defaultValue:
-            "This will permanently remove the saved customization. There is no history or undo.",
-          name: label
-        }),
-        okText: t("servicePrompts.actions.resetConfirm", { defaultValue: "Reset" })
-      })
-    } catch {
-      if (scopeRef.current?.scopeKey === operationScope &&
-        selectedIdRef.current === definitionId) {
-        setOperationError(t("servicePrompts.errors.resetFailed", {
-          defaultValue: "Unable to reset this workflow prompt."
-        }))
-      }
-      return
-    }
-    if (!confirmed || scopeRef.current?.scopeKey !== operationScope ||
-      selectedIdRef.current !== definitionId) {
-      return
-    }
-    const operation = startOperation(
-      "reset",
-      operationScope,
-      definitionId
-    )
+    const operation = startOperation("reset", operationScope, definitionId)
     const operationDetailKey = [
       "service-prompts",
       operationScope,
       "detail",
       definitionId
     ] as const
-    setOperationError(null)
-    setOperationAnnouncement(t("servicePrompts.operations.resetting", {
-      defaultValue: "Resetting workflow prompt…"
-    }))
     try {
-      const reset = await tldwClient.resetServicePrompt(
-        definitionId,
-        revision,
-        { signal: operation.controller.signal }
-      )
-      if (!isCurrentOperation(operation)) return
-      queryClient.setQueryData(operationDetailKey, reset)
-      setDraft({
-        scopeKey: operationScope,
-        definitionId: reset.id,
-        parts: { ...reset.effective_parts },
-        revision: null
-      })
-      setDirty(false)
-      setFieldErrors({})
-      setPreview(null)
-      setConflict(false)
-      setOperationAnnouncement(t("servicePrompts.operations.reset", {
-        defaultValue: "Workflow prompt reset to the server default."
+      let confirmed = false
+      try {
+        confirmed = await confirmDanger({
+          title: t("servicePrompts.reset.title", {
+            defaultValue: "Reset {{name}}?",
+            name: label
+          }),
+          content: t("servicePrompts.reset.content", {
+            defaultValue:
+              "This will permanently remove the saved customization. There is no history or undo.",
+            name: label
+          }),
+          okText: t("servicePrompts.actions.resetConfirm", { defaultValue: "Reset" })
+        })
+      } catch {
+        if (isCurrentOperation(operation)) {
+          setOperationError(t("servicePrompts.errors.resetFailed", {
+            defaultValue: "Unable to reset this workflow prompt."
+          }))
+        }
+        return
+      }
+      if (!confirmed || !isCurrentOperation(operation)) return
+
+      setOperationError(null)
+      setOperationAnnouncement(t("servicePrompts.operations.resetting", {
+        defaultValue: "Resetting workflow prompt…"
       }))
-      await queryClient.invalidateQueries({
-        queryKey: operationDetailKey,
-        refetchType: "none"
-      })
-    } catch (error) {
-      if (!isCurrentOperation(operation) || isAbortError(error)) return
-      setOperationAnnouncement("")
-      if (error instanceof ServicePromptApiError && error.status === 409) {
-        if (corrupt) {
-          try {
-            const refreshed = await queryClient.fetchQuery({
-              queryKey: operationDetailKey,
-              queryFn: () => tldwClient.getServicePrompt(definitionId, {
-                signal: operation.controller.signal
-              }),
-              retry: false,
-              staleTime: 0
-            })
-            if (!isCurrentOperation(operation)) return
-            setDraft({
-              scopeKey: operationScope,
-              definitionId: refreshed.id,
-              parts: { ...refreshed.effective_parts },
-              revision: refreshed.revision
-            })
-            setDirty(false)
-            setConflict(false)
-          } catch (refreshError) {
-            if (!isCurrentOperation(operation) || isAbortError(refreshError)) return
-            if (!(refreshError instanceof ServicePromptApiError &&
-              refreshError.code === "service_prompt_corrupt_override" &&
-              refreshError.canReset === true &&
-              typeof refreshError.revision === "string")) {
-              setOperationError(t("servicePrompts.errors.resetFailed", {
-                defaultValue: "Unable to reset this workflow prompt."
-              }))
-            } else {
-              const message = t("servicePrompts.corrupt.rebound", {
-                defaultValue:
-                  "The saved customization changed. The latest revision was loaded. Retry reset."
+      try {
+        const reset = await tldwClient.resetServicePrompt(
+          definitionId,
+          revision,
+          { signal: operation.controller.signal }
+        )
+        if (!isCurrentOperation(operation)) return
+        queryClient.setQueryData(operationDetailKey, reset)
+        setDraft({
+          scopeKey: operationScope,
+          definitionId: reset.id,
+          parts: { ...reset.effective_parts },
+          revision: null
+        })
+        setDirty(false)
+        setFieldErrors({})
+        setPreview(null)
+        setConflict(false)
+        setOperationAnnouncement(t("servicePrompts.operations.reset", {
+          defaultValue: "Workflow prompt reset to the server default."
+        }))
+        await queryClient.invalidateQueries({
+          queryKey: operationDetailKey,
+          refetchType: "none"
+        })
+      } catch (error) {
+        if (!isCurrentOperation(operation) || isAbortError(error)) return
+        setOperationAnnouncement("")
+        if (error instanceof ServicePromptApiError && error.status === 409) {
+          if (corrupt) {
+            try {
+              const refreshed = await queryClient.fetchQuery({
+                queryKey: operationDetailKey,
+                queryFn: () => tldwClient.getServicePrompt(definitionId, {
+                  signal: operation.controller.signal
+                }),
+                retry: false,
+                staleTime: 0
               })
-              setOperationError(message)
+              if (!isCurrentOperation(operation)) return
+              setDraft({
+                scopeKey: operationScope,
+                definitionId: refreshed.id,
+                parts: { ...refreshed.effective_parts },
+                revision: refreshed.revision
+              })
+              setDirty(false)
+              setConflict(false)
+            } catch (refreshError) {
+              if (!isCurrentOperation(operation) || isAbortError(refreshError)) return
+              if (!(refreshError instanceof ServicePromptApiError &&
+                refreshError.code === "service_prompt_corrupt_override" &&
+                refreshError.canReset === true &&
+                typeof refreshError.revision === "string")) {
+                setOperationError(t("servicePrompts.errors.resetFailed", {
+                  defaultValue: "Unable to reset this workflow prompt."
+                }))
+              } else {
+                const message = t("servicePrompts.corrupt.rebound", {
+                  defaultValue:
+                    "The saved customization changed. The latest revision was loaded. Retry reset."
+                })
+                setOperationError(message)
+              }
             }
+          } else {
+            setConflict(true)
           }
         } else {
-          setConflict(true)
+          setOperationError(t("servicePrompts.errors.resetFailed", {
+            defaultValue: "Unable to reset this workflow prompt."
+          }))
         }
-      } else {
-        setOperationError(t("servicePrompts.errors.resetFailed", {
-          defaultValue: "Unable to reset this workflow prompt."
-        }))
       }
     } finally {
       finishOperation(operation)
@@ -1106,37 +1191,41 @@ export const ServicePromptsSettings = () => {
   }
 
   const discardMigration = async () => {
-    if (!scope || migrationItems.length === 0 || activeKind !== null) return
-    let confirmed = false
-    try {
-      confirmed = await confirmDanger({
-        title: t("servicePrompts.migration.discardTitle", {
-          defaultValue: "Discard browser-local workflow prompts?"
-        }),
-        content: t("servicePrompts.migration.discardContent", {
-          defaultValue:
-            "This permanently removes only the three mapped browser-local values."
-        }),
-        okText: t("servicePrompts.migration.discardAction", {
-          defaultValue: "Discard"
-        })
-      })
-    } catch {
-      if (scopeRef.current?.scopeKey === scope.scopeKey) {
-        setMigrationError(t("servicePrompts.migration.discardFailed", {
-          defaultValue: "Discard failed. The browser-local value was preserved."
-        }))
-      }
+    if (!scope || migrationItems.length === 0 || activeKind !== null ||
+      activeOperationRef.current !== null) {
       return
     }
-    if (!confirmed || scopeRef.current?.scopeKey !== scope.scopeKey) return
     const operationScope = scope.scopeKey
     const operation = startOperation("migration-discard", operationScope)
-    setOperationAnnouncement("")
-    setMigrationError(null)
-    setMigrationMessage(null)
-    let remaining = [...migrationItems]
     try {
+      let confirmed = false
+      try {
+        confirmed = await confirmDanger({
+          title: t("servicePrompts.migration.discardTitle", {
+            defaultValue: "Discard browser-local workflow prompts?"
+          }),
+          content: t("servicePrompts.migration.discardContent", {
+            defaultValue:
+              "This permanently removes only the three mapped browser-local values."
+          }),
+          okText: t("servicePrompts.migration.discardAction", {
+            defaultValue: "Discard"
+          })
+        })
+      } catch {
+        if (isCurrentOperation(operation)) {
+          setMigrationError(t("servicePrompts.migration.discardFailed", {
+            defaultValue: "Discard failed. The browser-local value was preserved."
+          }))
+        }
+        return
+      }
+      if (!confirmed || !isCurrentOperation(operation)) return
+
+      setOperationAnnouncement("")
+      setMigrationError(null)
+      setMigrationMessage(null)
+      let remaining = [...migrationItems]
       for (const item of migrationItems) {
         if (!isCurrentOperation(operation)) return
         try {
@@ -1199,14 +1288,14 @@ export const ServicePromptsSettings = () => {
             })}
           </p>
         </div>
-        <a
-          href="/prompts"
+        <Link
+          to="/prompts"
           className="w-fit text-sm font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
         >
           {t("servicePrompts.actions.openLibrary", {
             defaultValue: "Open reusable Prompts workspace"
           })}
-        </a>
+        </Link>
       </div>
 
       {scopeChanged ? (

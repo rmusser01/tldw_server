@@ -10,7 +10,14 @@ import {
 import userEvent from "@testing-library/user-event"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { App } from "antd"
-import { BrowserRouter, Link, Route, Routes } from "react-router-dom"
+import {
+  BrowserRouter,
+  HashRouter,
+  Link,
+  Route,
+  Routes,
+  useNavigate
+} from "react-router-dom"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { ServicePromptsSettings } from "../ServicePromptsSettings"
@@ -290,6 +297,21 @@ const renderSettings = (client = createClient()) => ({
   )
 })
 
+const DelayedRouteLink = () => {
+  const navigate = useNavigate()
+  return (
+    <a
+      href="/settings/chat"
+      onClick={(event) => {
+        event.preventDefault()
+        window.setTimeout(() => navigate("/settings/chat"), 0)
+      }}
+    >
+      Delayed settings test route
+    </a>
+  )
+}
+
 const openPrompt = async (name: string) => {
   fireEvent.click(await screen.findByRole("button", { name }))
   await screen.findByRole("heading", { name })
@@ -383,6 +405,102 @@ describe("ServicePromptsSettings", () => {
     expect(screen.getByText("https://research-one.test")).toBeInTheDocument()
     expect(screen.getByText(scopeOne.scopeKey)).toBeInTheDocument()
     expect(screen.queryByText("Server translation")).not.toBeInTheDocument()
+  })
+
+  it("uses the Prompts Link and reverses dirty HashRouter Back and Forward", async () => {
+    window.history.replaceState(
+      { hostMarker: "hash-a" },
+      "",
+      "/options.html#/prompts"
+    )
+    window.history.pushState(
+      { hostMarker: "hash-b" },
+      "",
+      "/options.html#/settings/prompt?prompt=chat.rag.answer"
+    )
+    const client = createClient()
+    render(
+      <HashRouter>
+        <QueryClientProvider client={client}>
+          <App>
+            <Routes>
+              <Route path="/settings/prompt" element={<ServicePromptsSettings />} />
+              <Route path="/prompts" element={<p>Reusable prompts test route</p>} />
+            </Routes>
+          </App>
+        </QueryClientProvider>
+      </HashRouter>
+    )
+
+    const libraryLink = await screen.findByRole("link", {
+      name: "Open reusable Prompts workspace"
+    })
+    expect(libraryLink).toHaveAttribute("href", "#/prompts")
+    fireEvent.click(libraryLink)
+
+    expect(await screen.findByText("Reusable prompts test route"))
+      .toBeInTheDocument()
+    expect(window.location.pathname).toBe("/options.html")
+    expect(window.location.hash).toBe("#/prompts")
+    const destinationToken = window.history.state
+      .servicePromptHistoryEntryToken as string
+    expect(destinationToken).toEqual(expect.any(String))
+    const historyLength = window.history.length
+
+    await act(async () => {
+      window.history.back()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+    await screen.findByRole("heading", { name: "RAG answer" })
+    expect(window.history.state).toMatchObject({
+      hostMarker: "hash-b",
+      servicePromptHistoryForwardEntryToken: destinationToken
+    })
+
+    const authoredValue = "Hash dirty {context} {question}"
+    const editor = screen.getByRole("textbox", { name: "Template" })
+    fireEvent.change(editor, { target: { value: authoredValue } })
+    editor.focus()
+    vi.mocked(window.confirm).mockReturnValue(false)
+
+    const confirmationsBeforeBack = vi.mocked(window.confirm).mock.calls.length
+    await act(async () => {
+      window.history.back()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+    await waitFor(() => {
+      expect(window.confirm).toHaveBeenCalledTimes(confirmationsBeforeBack + 1)
+    })
+    await waitFor(() => {
+      expect(window.location.hash).toContain("#/settings/prompt")
+    })
+    await screen.findByRole("heading", { name: "RAG answer" })
+    expect(screen.getByRole("textbox", { name: "Template" }))
+      .toHaveValue(authoredValue)
+
+    const confirmationsBeforeForward = vi.mocked(window.confirm).mock.calls.length
+    await act(async () => {
+      window.history.forward()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+    await waitFor(() => {
+      expect(window.confirm).toHaveBeenCalledTimes(confirmationsBeforeForward + 1)
+    })
+    await waitFor(() => {
+      expect(window.location.hash).toContain("#/settings/prompt")
+    })
+    await screen.findByRole("heading", { name: "RAG answer" })
+    const restored = screen.getByRole("textbox", { name: "Template" })
+    expect(restored).toHaveValue(authoredValue)
+    await waitFor(() => expect(restored).toHaveFocus())
+    expect(window.history.length).toBe(historyLength)
+    expect(JSON.stringify(window.history.state)).not.toContain(authoredValue)
+    for (const storage of [window.localStorage, window.sessionStorage]) {
+      for (let index = 0; index < storage.length; index += 1) {
+        expect(storage.getItem(storage.key(index)!) ?? "")
+          .not.toContain(authoredValue)
+      }
+    }
   })
 
   it("uses escaped server English metadata for an unknown catalog ID", async () => {
@@ -594,6 +712,28 @@ describe("ServicePromptsSettings", () => {
     })
     expect(screen.getByRole("textbox", { name: "Template" }))
       .toHaveValue("History: {chat_history}\nQuestion: {question}")
+  })
+
+  it("claims reset confirmation synchronously and ignores approval after unmount", async () => {
+    mocks.get.mockResolvedValue(detailFor(catalog[0], { source: "user" }))
+    const pendingConfirmation = deferred<boolean>()
+    mocks.confirmDanger.mockReturnValue(pendingConfirmation.promise)
+    const view = renderSettings()
+    await openPrompt("RAG answer")
+    const resetButton = screen.getByRole("button", { name: "Reset to default" })
+
+    act(() => {
+      resetButton.click()
+      resetButton.click()
+    })
+
+    view.unmount()
+    await act(async () => {
+      pendingConfirmation.resolve(true)
+      await pendingConfirmation.promise
+    })
+    expect(mocks.confirmDanger).toHaveBeenCalledTimes(1)
+    expect(mocks.reset).not.toHaveBeenCalled()
   })
 
   it("names permanent customization removal before a conditional reset", async () => {
@@ -1076,6 +1216,30 @@ describe("ServicePromptsSettings", () => {
       .toBeInTheDocument()
   })
 
+  it("claims discard confirmation synchronously and ignores approval after unmount", async () => {
+    mocks.readLegacy.mockResolvedValue([legacyRagCandidate])
+    const pendingConfirmation = deferred<boolean>()
+    mocks.confirmDanger.mockReturnValue(pendingConfirmation.promise)
+    const view = renderSettings()
+    await screen.findByText("Browser-local workflow prompts found")
+    const discardButton = screen.getByRole("button", {
+      name: "Discard local values"
+    })
+
+    act(() => {
+      discardButton.click()
+      discardButton.click()
+    })
+
+    view.unmount()
+    await act(async () => {
+      pendingConfirmation.resolve(true)
+      await pendingConfirmation.promise
+    })
+    expect(mocks.confirmDanger).toHaveBeenCalledTimes(1)
+    expect(mocks.clearLegacy).not.toHaveBeenCalled()
+  })
+
   it.each(["resolve", "reject"] as const)(
     "does not restore old migration state when non-abortable discard %s settles after scope change",
     async (outcome) => {
@@ -1363,7 +1527,288 @@ describe("ServicePromptsSettings", () => {
     await waitFor(() => expect(restored).toHaveFocus())
   })
 
-  it("restores dirty prompt state after declining unindexed Forward to an outside route", async () => {
+  it("stamps a delayed SPA destination during cleanup before declined reversal", async () => {
+    window.history.replaceState(
+      { __N: true, key: "delayed-prompt", hostMarker: "preserved" },
+      "",
+      "/settings/prompt?prompt=chat.rag.answer"
+    )
+    installNextStyleHistory()
+    const client = createClient()
+    render(
+      <BrowserRouter>
+        <QueryClientProvider client={client}>
+          <App>
+            <Routes>
+              <Route
+                path="/settings/prompt"
+                element={(
+                  <>
+                    <ServicePromptsSettings />
+                    <DelayedRouteLink />
+                  </>
+                )}
+              />
+              <Route path="*" element={<p>Delayed outside route</p>} />
+            </Routes>
+          </App>
+        </QueryClientProvider>
+      </BrowserRouter>
+    )
+    await screen.findByRole("heading", { name: "RAG answer" })
+
+    fireEvent.click(screen.getByRole("link", {
+      name: "Delayed settings test route"
+    }))
+    await screen.findByText("Delayed outside route")
+    const destinationToken = window.history.state
+      .servicePromptHistoryEntryToken as string
+    expect(destinationToken).toEqual(expect.any(String))
+    const historyLength = window.history.length
+
+    await act(async () => {
+      window.history.back()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+    await screen.findByRole("heading", { name: "RAG answer" })
+    expect(window.history.state).toMatchObject({
+      hostMarker: "preserved",
+      servicePromptHistoryForwardEntryToken: destinationToken
+    })
+
+    const dirtyUrl = window.location.href
+    const authoredValue = "Delayed route dirty {context} {question}"
+    const editor = screen.getByRole("textbox", { name: "Template" })
+    fireEvent.change(editor, { target: { value: authoredValue } })
+    editor.focus()
+    vi.mocked(window.confirm).mockReturnValue(false)
+
+    await act(async () => {
+      window.history.forward()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+    await screen.findByRole("heading", { name: "RAG answer" })
+    await waitFor(() => expect(window.location.href).toBe(dirtyUrl))
+    const restored = screen.getByRole("textbox", { name: "Template" })
+    expect(restored).toHaveValue(authoredValue)
+    await waitFor(() => expect(restored).toHaveFocus())
+    expect(window.history.length).toBe(historyLength)
+    expect(JSON.stringify(window.history.state)).not.toContain(authoredValue)
+    for (const storage of [window.localStorage, window.sessionStorage]) {
+      for (let index = 0; index < storage.length; index += 1) {
+        expect(storage.getItem(storage.key(index)!) ?? "")
+          .not.toContain(authoredValue)
+      }
+    }
+  })
+
+  it.each(["native UUID", "fallback token"] as const)(
+    "uses %s entry identity for identical outside URLs",
+    async (tokenSource) => {
+    const randomUuidDescriptor = Object.getOwnPropertyDescriptor(
+      window.crypto,
+      "randomUUID"
+    )
+    if (tokenSource === "fallback token") {
+      Object.defineProperty(window.crypto, "randomUUID", {
+        configurable: true,
+        value: undefined
+      })
+    }
+    window.history.replaceState(
+      { __N: true, key: "outside-a", hostMarker: "outside-a" },
+      "",
+      "/settings/chat"
+    )
+    window.history.pushState(
+      { __N: true, key: "prompt-b", hostMarker: "prompt-b" },
+      "",
+      "/settings/prompt?prompt=chat.rag.answer"
+    )
+    installNextStyleHistory()
+    const visitedStates: unknown[] = []
+    const captureState = (event: PopStateEvent) => visitedStates.push(event.state)
+    window.addEventListener("popstate", captureState)
+    try {
+      renderSettings()
+      await screen.findByRole("heading", { name: "RAG answer" })
+
+      fireEvent.click(screen.getByRole("link", {
+        name: "Chat settings test route"
+      }))
+      expect(await screen.findByText("Outside workflow prompt route"))
+        .toBeInTheDocument()
+      const outsideUrl = window.location.href
+      const destinationState = window.history.state as Record<string, unknown>
+      expect(destinationState).toMatchObject({
+        __N: true,
+        hostMarker: "preserved",
+        servicePromptHistoryEntryToken: expect.any(String)
+      })
+      const destinationToken = destinationState.servicePromptHistoryEntryToken
+      const historyLength = window.history.length
+
+      await act(async () => {
+        window.history.back()
+        await new Promise((resolve) => setTimeout(resolve, 0))
+      })
+      await screen.findByRole("heading", { name: "RAG answer" })
+      expect(window.history.state).toMatchObject({
+        __N: true,
+        hostMarker: "preserved",
+        servicePromptHistoryForwardEntryToken: destinationToken
+      })
+
+      const dirtyUrl = window.location.href
+      const authoredValue = "Duplicate URL dirty {context} {question}"
+      const editor = screen.getByRole("textbox", { name: "Template" })
+      fireEvent.change(editor, { target: { value: authoredValue } })
+      editor.focus()
+      vi.mocked(window.confirm).mockReturnValue(false)
+
+      await act(async () => {
+        window.history.back()
+        await new Promise((resolve) => setTimeout(resolve, 0))
+      })
+      await screen.findByRole("heading", { name: "RAG answer" })
+      await waitFor(() => expect(window.location.href).toBe(dirtyUrl))
+      expect(screen.getByRole("textbox", { name: "Template" }))
+        .toHaveValue(authoredValue)
+      expect(visitedStates).toContainEqual(expect.objectContaining({
+        hostMarker: "outside-a"
+      }))
+
+      await act(async () => {
+        window.history.forward()
+        await new Promise((resolve) => setTimeout(resolve, 0))
+      })
+      await screen.findByRole("heading", { name: "RAG answer" })
+      await waitFor(() => expect(window.location.href).toBe(dirtyUrl))
+      expect(window.history.length).toBe(historyLength)
+      expect(screen.getByRole("textbox", { name: "Template" }))
+        .toHaveValue(authoredValue)
+      expect(visitedStates).toContainEqual(expect.objectContaining({
+        hostMarker: "preserved",
+        servicePromptHistoryEntryToken: destinationToken
+      }))
+      expect(window.history.state).toMatchObject({
+        __N: true,
+        hostMarker: "preserved",
+        servicePromptHistoryForwardEntryToken: destinationToken
+      })
+      expect(window.location.href).not.toBe(outsideUrl)
+      expect(JSON.stringify([window.history.state, ...visitedStates]))
+        .not.toContain(authoredValue)
+      for (const storage of [window.localStorage, window.sessionStorage]) {
+        for (let index = 0; index < storage.length; index += 1) {
+          expect(storage.getItem(storage.key(index)!) ?? "")
+            .not.toContain(authoredValue)
+        }
+      }
+    } finally {
+      window.removeEventListener("popstate", captureState)
+      if (tokenSource === "fallback token") {
+        if (randomUuidDescriptor) {
+          Object.defineProperty(window.crypto, "randomUUID", randomUuidDescriptor)
+        } else {
+          Reflect.deleteProperty(window.crypto, "randomUUID")
+        }
+      }
+    }
+    }
+  )
+
+  it.each([
+    { resolvedScope: scopeOne, restoresDraft: true, scopeCase: "matching scope" },
+    { resolvedScope: scopeTwo, restoresDraft: false, scopeCase: "mismatched scope" }
+  ] as const)(
+    "claims the RAM handoff before slow $scopeCase resolution",
+    async ({ resolvedScope, restoresDraft }) => {
+      const delayedScope = deferred<typeof scopeOne | typeof scopeTwo>()
+      mocks.resolveScope
+        .mockResolvedValueOnce(scopeOne)
+        .mockResolvedValueOnce(scopeOne)
+        .mockReturnValueOnce(delayedScope.promise)
+      window.history.replaceState(
+        { __N: true, key: "next-root", hostMarker: "preserved" },
+        "",
+        "/settings/prompt"
+      )
+      installNextStyleHistory()
+      renderSettings()
+      await openPrompt("RAG answer")
+      fireEvent.click(screen.getByRole("link", {
+        name: "Chat settings test route"
+      }))
+      await screen.findByText("Outside workflow prompt route")
+      await act(async () => {
+        window.history.back()
+        await new Promise((resolve) => setTimeout(resolve, 0))
+      })
+      await screen.findByRole("heading", { name: "RAG answer" })
+
+      const realSetTimeout = globalThis.setTimeout
+      let capsuleTimerCount = 0
+      let expireCapsule: (() => void) | null = null
+      vi.spyOn(globalThis, "setTimeout").mockImplementation(((
+        ...args: Parameters<typeof setTimeout>
+      ) => {
+        const [handler, delay, ...handlerArgs] = args
+        if (delay === 2_000 && typeof handler === "function") {
+          capsuleTimerCount += 1
+          expireCapsule = () => handler(...handlerArgs)
+          return Number.MAX_SAFE_INTEGER as unknown as ReturnType<typeof setTimeout>
+        }
+        return realSetTimeout(...args)
+      }) as typeof setTimeout)
+
+      const dirtyUrl = window.location.href
+      const authoredValue = "Slow scope dirty {context} {question}"
+      fireEvent.change(screen.getByRole("textbox", { name: "Template" }), {
+        target: { value: authoredValue }
+      })
+      vi.mocked(window.confirm).mockReturnValue(false)
+
+      await act(async () => {
+        window.history.forward()
+        await new Promise((resolve) => setTimeout(resolve, 0))
+      })
+      await waitFor(() => expect(mocks.resolveScope).toHaveBeenCalledTimes(3))
+      expect(window.location.href).toBe(dirtyUrl)
+      expect(capsuleTimerCount).toBe(1)
+      expect(expireCapsule).not.toBeNull()
+      act(() => expireCapsule!())
+      await act(async () => {
+        delayedScope.resolve(resolvedScope)
+        await delayedScope.promise
+      })
+
+      const restored = await screen.findByRole("textbox", { name: "Template" })
+      if (restoresDraft) {
+        expect(restored).toHaveValue(authoredValue)
+        expect(screen.getByText("Unsaved")).toBeInTheDocument()
+      } else {
+        expect(restored).toHaveValue("Context: {context}\nQuestion: {question}")
+        expect(restored).not.toHaveValue(authoredValue)
+        expect(screen.queryByText("Unsaved")).not.toBeInTheDocument()
+      }
+      expect(JSON.stringify(window.history.state)).not.toContain(authoredValue)
+      for (const storage of [window.localStorage, window.sessionStorage]) {
+        for (let index = 0; index < storage.length; index += 1) {
+          expect(storage.getItem(storage.key(index)!) ?? "")
+            .not.toContain(authoredValue)
+        }
+      }
+    }
+  )
+
+  it.each([
+    { focusCase: "stable editor ID", expectedFocus: "editor" },
+    { focusCase: "no saved ID", expectedFocus: "detail" },
+    { focusCase: "a stale saved ID", expectedFocus: "detail" }
+  ] as const)(
+    "restores dirty prompt state and focus with $focusCase after declined outside-route Forward",
+    async ({ focusCase, expectedFocus }) => {
     window.history.replaceState(
       { __N: true, key: "next-root", hostMarker: "preserved" },
       "",
@@ -1406,7 +1851,19 @@ describe("ServicePromptsSettings", () => {
     fireEvent.change(editor, {
       target: { value: authoredValue }
     })
-    editor.focus()
+    if (focusCase === "stable editor ID") {
+      editor.focus()
+    } else {
+      const temporaryTarget = document.createElement("button")
+      temporaryTarget.type = "button"
+      temporaryTarget.textContent = "Temporary history focus target"
+      if (focusCase === "a stale saved ID") {
+        temporaryTarget.id = "removed-history-focus-target"
+      }
+      screen.getByRole("region", { name: "Workflow prompt details" })
+        .append(temporaryTarget)
+      temporaryTarget.focus()
+    }
     vi.mocked(window.confirm).mockReturnValue(false)
 
     await act(async () => {
@@ -1417,14 +1874,18 @@ describe("ServicePromptsSettings", () => {
     expect(window.history.length).toBe(historyLength)
     const restored = await screen.findByRole("textbox", { name: "Template" })
     expect(restored).toHaveValue(authoredValue)
-    await waitFor(() => expect(restored).toHaveFocus())
+    const restoredFocus = expectedFocus === "editor"
+      ? restored
+      : screen.getByRole("region", { name: "Workflow prompt details" })
+    await waitFor(() => expect(restoredFocus).toHaveFocus())
     expect(JSON.stringify(window.history.state)).not.toContain(authoredValue)
     for (const storage of [window.localStorage, window.sessionStorage]) {
       for (let index = 0; index < storage.length; index += 1) {
         expect(storage.getItem(storage.key(index)!) ?? "").not.toContain(authoredValue)
       }
     }
-  })
+    }
+  )
 
   it.each(["success", "error"] as const)(
     "focuses the shared narrow-layout detail target after explicit selection %s",
