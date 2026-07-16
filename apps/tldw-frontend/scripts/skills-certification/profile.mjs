@@ -134,6 +134,7 @@ function writeProfileEnv(profile) {
     profile.envPath,
     [
       'AUTH_MODE=single_user',
+      'CONTEXT_INTEGRITY_MODE=audit_only',
       `SINGLE_USER_API_KEY=${SKILLS_CERT_API_KEY}`,
       `DATABASE_URL=${sqliteUrl(profile.usersDbPath)}`,
       `USER_DB_BASE_DIR=${profile.userDatabasesDir}`,
@@ -287,6 +288,7 @@ export function buildSkillsCertificationEnvironments({ profile, ports, baseEnv =
     backendEnv: {
       ...safeBaseEnvironment(baseEnv),
       ...backendSettings,
+      CONTEXT_INTEGRITY_MODE: 'audit_only',
     },
     frontendEnv: {
       ...safeBaseEnvironment(baseEnv),

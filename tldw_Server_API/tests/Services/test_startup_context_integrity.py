@@ -17,6 +17,7 @@ def _clear_context_integrity_environment(monkeypatch: pytest.MonkeyPatch) -> Ite
         "CONTEXT_INTEGRITY_MANIFEST_PATH",
         "CONTEXT_INTEGRITY_HMAC_SECRET",
         "CONTEXT_INTEGRITY_HMAC_KEY_ID",
+        "CONTEXT_INTEGRITY_MODE",
     ):
         monkeypatch.delenv(env_name, raising=False)
     for env_name in list(os.environ):
@@ -162,6 +163,90 @@ def test_invalid_context_integrity_mode_is_rejected(tmp_path: Path) -> None:
             user_skill_roots=[],
             approved_entries=[],
             mode="permissive",
+        )
+
+
+@pytest.mark.parametrize("mode", ["audit_only", "enforce", "hardened"])
+def test_context_integrity_mode_uses_supported_deployment_setting(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mode: str,
+) -> None:
+    from tldw_Server_API.app.services.startup_context_integrity import (
+        produce_context_integrity_startup_warnings,
+    )
+    from tldw_Server_API.app.services.startup_warning_registry import (
+        StartupWarningRegistry,
+    )
+
+    prompts = tmp_path / "Prompts"
+    prompts.mkdir()
+    app_state = _state()
+    monkeypatch.setenv("CONTEXT_INTEGRITY_MODE", mode)
+
+    produce_context_integrity_startup_warnings(
+        app_state=app_state,
+        registry=StartupWarningRegistry(startup_id=f"boot-{mode}"),
+        prompts_dir=prompts,
+        user_skill_roots=[],
+        approved_entries=[],
+    )
+
+    assert app_state.context_integrity_boot_state.mode == mode
+
+
+def test_context_integrity_mode_defaults_to_enforce_when_setting_is_unset(
+    tmp_path: Path,
+) -> None:
+    from tldw_Server_API.app.services.startup_context_integrity import (
+        produce_context_integrity_startup_warnings,
+    )
+    from tldw_Server_API.app.services.startup_warning_registry import (
+        StartupWarningRegistry,
+    )
+
+    prompts = tmp_path / "Prompts"
+    prompts.mkdir()
+    app_state = _state()
+
+    produce_context_integrity_startup_warnings(
+        app_state=app_state,
+        registry=StartupWarningRegistry(startup_id="boot-default-mode"),
+        prompts_dir=prompts,
+        user_skill_roots=[],
+        approved_entries=[],
+    )
+
+    assert app_state.context_integrity_boot_state.mode == "enforce"
+
+
+@pytest.mark.parametrize("mode", ["", "   ", "permissive"])
+def test_invalid_context_integrity_mode_setting_blocks_startup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mode: str,
+) -> None:
+    from tldw_Server_API.app.services.startup_context_integrity import (
+        produce_context_integrity_startup_warnings,
+    )
+    from tldw_Server_API.app.services.startup_warning_registry import (
+        StartupWarningRegistry,
+    )
+
+    prompts = tmp_path / "Prompts"
+    prompts.mkdir()
+    monkeypatch.setenv("CONTEXT_INTEGRITY_MODE", mode)
+
+    with pytest.raises(
+        ValueError,
+        match=r"Invalid CONTEXT_INTEGRITY_MODE.*Expected one of",
+    ):
+        produce_context_integrity_startup_warnings(
+            app_state=_state(),
+            registry=StartupWarningRegistry(startup_id="boot-invalid-setting"),
+            prompts_dir=prompts,
+            user_skill_roots=[],
+            approved_entries=[],
         )
 
 

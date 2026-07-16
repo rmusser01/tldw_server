@@ -219,7 +219,7 @@ describe('Skills certification profile', () => {
     expect(configText).not.toContain('copied-auth-key');
   });
 
-  it('writes only single-user auth and isolated absolute paths to .env', () => {
+  it('writes only single-user auth, audit mode, and isolated paths to .env', () => {
     const fixture = createFixture();
     const profile = createProfile(fixture);
     const envText = readFileSync(profile.envPath, 'utf8');
@@ -227,6 +227,7 @@ describe('Skills certification profile', () => {
 
     expect(Object.keys(env).sort()).toEqual([
       'AUTH_MODE',
+      'CONTEXT_INTEGRITY_MODE',
       'DATABASE_URL',
       'SINGLE_USER_API_KEY',
       'TLDW_USER_DB_BASE_DIR_ALLOWED_ROOTS',
@@ -235,6 +236,7 @@ describe('Skills certification profile', () => {
     ]);
     expect(env).toEqual({
       AUTH_MODE: 'single_user',
+      CONTEXT_INTEGRITY_MODE: 'audit_only',
       DATABASE_URL: `sqlite:///${profile.usersDbPath}`,
       SINGLE_USER_API_KEY: SKILLS_CERT_API_KEY,
       TLDW_USER_DB_BASE_DIR_ALLOWED_ROOTS: profile.databaseDir,
@@ -259,6 +261,7 @@ describe('Skills certification profile', () => {
     const environments = buildSkillsCertificationEnvironments({
       baseEnv: {
         ANTHROPIC_API_KEY: 'host-anthropic',
+        CONTEXT_INTEGRITY_MODE: 'hardened',
         HOME: '/host/home',
         HOST_PROVIDER_SECRET: 'host-provider-secret',
         LANG: 'en_US.UTF-8',
@@ -278,7 +281,7 @@ describe('Skills certification profile', () => {
 
     const childEnvironments = Object.values(environments);
     expect(new Set(childEnvironments).size).toBe(childEnvironments.length);
-    for (const childEnv of childEnvironments) {
+    for (const [name, childEnv] of Object.entries(environments)) {
       expect(childEnv.PATH).toBe('/usr/bin:/bin');
       expect(childEnv.LANG).toBe('en_US.UTF-8');
       expect(childEnv.PLAYWRIGHT_BROWSERS_PATH).toBe('/host/playwright-browsers');
@@ -289,6 +292,11 @@ describe('Skills certification profile', () => {
       expect(childEnv).not.toHaveProperty('TESTING');
       expect(childEnv).not.toHaveProperty('TEST_MODE');
       expect(childEnv).not.toHaveProperty('UNSAFE_UNRELATED_VALUE');
+      if (name === 'backendEnv') {
+        expect(childEnv.CONTEXT_INTEGRITY_MODE).toBe('audit_only');
+      } else {
+        expect(childEnv).not.toHaveProperty('CONTEXT_INTEGRITY_MODE');
+      }
     }
 
     expect(environments.authInitEnv.HOME).toBe(profile.homeDir);

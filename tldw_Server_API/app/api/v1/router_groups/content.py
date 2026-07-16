@@ -279,6 +279,13 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
             tags=("outputs-templates",),
             route_key="outputs-templates",
         ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.skills",
+            log_name="skills",
+            prefix=f"{API_V1_PREFIX}/skills",
+            tags=("skills",),
+            route_key="skills",
+        ),
     ):
         append_imported_router_spec(specs, utility_spec)
 
