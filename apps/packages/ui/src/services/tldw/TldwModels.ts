@@ -182,6 +182,21 @@ export class TldwModelsService {
     this.cacheScopeKey = null
   }
 
+  private reconcileCacheScope(
+    scopeKey: string,
+    requestGeneration: number
+  ): number {
+    if (requestGeneration !== this.invalidationGeneration) {
+      return requestGeneration
+    }
+    if (this.cacheScopeKey && this.cacheScopeKey !== scopeKey) {
+      this.invalidateCacheState()
+      requestGeneration = this.invalidationGeneration
+    }
+    this.cacheScopeKey = scopeKey
+    return requestGeneration
+  }
+
   private isConfiguredForModels(config: TldwConfig | null): boolean {
     if (!config) return false
     const serverUrl = String(config.serverUrl || "").trim()
@@ -218,13 +233,7 @@ export class TldwModelsService {
     let fetchGeneration = this.invalidationGeneration
     const config = await tldwClient.getConfig().catch(() => null)
     const scopeKey = this.buildCacheScope(config)
-    if (this.cacheScopeKey && this.cacheScopeKey !== scopeKey) {
-      this.invalidateCacheState()
-      fetchGeneration = this.invalidationGeneration
-    }
-    if (fetchGeneration === this.invalidationGeneration) {
-      this.cacheScopeKey = scopeKey
-    }
+    fetchGeneration = this.reconcileCacheScope(scopeKey, fetchGeneration)
 
     const now = Date.now()
 
@@ -314,14 +323,10 @@ export class TldwModelsService {
 
   async getCachedChatModels(): Promise<ModelInfo[]> {
     await this.ensureStorageLoaded()
+    const requestGeneration = this.invalidationGeneration
     const config = await tldwClient.getConfig().catch(() => null)
     const scopeKey = this.buildCacheScope(config)
-    if (this.cacheScopeKey && this.cacheScopeKey !== scopeKey) {
-      this.cachedModels = null
-      this.lastFetchTime = 0
-      this.lastForcedFetchTime = 0
-    }
-    this.cacheScopeKey = scopeKey
+    this.reconcileCacheScope(scopeKey, requestGeneration)
     return (this.cachedModels || []).filter((model) =>
       this.isSelectableChatModel(model)
     )

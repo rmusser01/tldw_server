@@ -588,6 +588,113 @@ describe("TldwModelsService caching", () => {
     ])
   })
 
+  it("does not let an old-scope fetch invalidate a newer in-flight scope", async () => {
+    const oldConfig = {
+      serverUrl: "http://old-server:8000",
+      authMode: "single-user",
+      apiKey: "test-key"
+    }
+    const newConfig = {
+      serverUrl: "http://new-server:8000",
+      authMode: "single-user",
+      apiKey: "test-key"
+    }
+    const oldConfigGate = deferred<typeof oldConfig>()
+    const fresh = deferred<Array<Record<string, unknown>>>()
+    mocks.getConfig
+      .mockImplementationOnce(() => oldConfigGate.promise)
+      .mockResolvedValue(newConfig)
+    mocks.getModels.mockImplementationOnce(() => fresh.promise)
+
+    const { TldwModelsService } = await importService()
+    const service = new TldwModelsService()
+
+    const oldScopeFetch = service.getModels(true)
+    await vi.waitFor(() => expect(mocks.getConfig).toHaveBeenCalledTimes(1))
+    await service.clearCache()
+
+    const newScopeFetch = service.getModels(true)
+    await vi.waitFor(() => expect(mocks.getModels).toHaveBeenCalledTimes(1))
+
+    oldConfigGate.resolve(oldConfig)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(mocks.getModels).toHaveBeenCalledTimes(1)
+
+    const newScopeFollower = service.getModels(true)
+    expect(mocks.getModels).toHaveBeenCalledTimes(1)
+
+    fresh.resolve([
+      { id: "fresh-model", name: "Fresh Model", provider: "llama", type: "chat" }
+    ])
+    await expect(
+      Promise.all([oldScopeFetch, newScopeFetch, newScopeFollower])
+    ).resolves.toEqual([
+      [expect.objectContaining({ id: "fresh-model" })],
+      [expect.objectContaining({ id: "fresh-model" })],
+      [expect.objectContaining({ id: "fresh-model" })]
+    ])
+
+    await expect(service.getModels()).resolves.toEqual([
+      expect.objectContaining({ id: "fresh-model" })
+    ])
+    expect(mocks.getModels).toHaveBeenCalledTimes(1)
+    expect(mocks.storageSet).toHaveBeenLastCalledWith(
+      "tldwModelsCache",
+      expect.objectContaining({
+        models: [expect.objectContaining({ id: "fresh-model" })],
+        scope: "http://new-server:8000|single-user|key|none",
+        timestamp: expect.any(Number)
+      })
+    )
+    expect(JSON.stringify(mocks.storageSet.mock.calls)).not.toContain(
+      "old-server"
+    )
+  })
+
+  it("keeps a newer fetch owned when an old cached lookup resolves", async () => {
+    const oldConfig = {
+      serverUrl: "http://old-server:8000",
+      authMode: "single-user",
+      apiKey: "test-key"
+    }
+    const newConfig = {
+      serverUrl: "http://new-server:8000",
+      authMode: "single-user",
+      apiKey: "test-key"
+    }
+    const oldConfigGate = deferred<typeof oldConfig>()
+    const fresh = deferred<Array<Record<string, unknown>>>()
+    mocks.getConfig
+      .mockImplementationOnce(() => oldConfigGate.promise)
+      .mockResolvedValue(newConfig)
+    mocks.getModels.mockImplementationOnce(() => fresh.promise)
+
+    const { TldwModelsService } = await importService()
+    const service = new TldwModelsService()
+
+    const oldCachedLookup = service.getCachedChatModels()
+    await vi.waitFor(() => expect(mocks.getConfig).toHaveBeenCalledTimes(1))
+    await service.clearCache()
+
+    const newScopeFetch = service.getModels(true)
+    await vi.waitFor(() => expect(mocks.getModels).toHaveBeenCalledTimes(1))
+
+    oldConfigGate.resolve(oldConfig)
+    await expect(oldCachedLookup).resolves.toEqual([])
+
+    const newScopeFollower = service.getModels(true)
+    expect(mocks.getModels).toHaveBeenCalledTimes(1)
+
+    fresh.resolve([
+      { id: "fresh-model", name: "Fresh Model", provider: "llama", type: "chat" }
+    ])
+    await expect(Promise.all([newScopeFetch, newScopeFollower])).resolves.toEqual([
+      [expect.objectContaining({ id: "fresh-model" })],
+      [expect.objectContaining({ id: "fresh-model" })]
+    ])
+    expect(mocks.getModels).toHaveBeenCalledTimes(1)
+  })
+
   it("keeps legacy chat models when provider availability metadata is absent", async () => {
     mocks.getModels.mockResolvedValue([
       {

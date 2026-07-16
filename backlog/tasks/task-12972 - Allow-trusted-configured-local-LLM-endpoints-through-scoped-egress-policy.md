@@ -4,7 +4,7 @@ title: Allow trusted configured local LLM endpoints through scoped egress policy
 status: In Progress
 assignee: []
 created_date: '2026-07-15 19:34'
-updated_date: '2026-07-16 00:41'
+updated_date: '2026-07-16 00:53'
 labels:
   - browser-extension
 dependencies: []
@@ -64,6 +64,8 @@ Docs/Plans/IMPLEMENTATION_PLAN_scoped_local_llm_egress_TASK_12972.md
 2026-07-15 Stage 5 implementation is ready for independent review but remains In Progress. Frontend TDD RED: 4 failures/36 passes for stale inner persistence, missing inner invalidation, stale outer repopulation, and missing saved event; an additional config-lookup ownership race failed 1/1 before its guard. GREEN: the shared WebUI suite and browser-extension config each pass 43/43. The Stages 1-4 backend union passes 492 tests with 5 warnings. Bandit scanned all touched Python production paths (25,013 LOC) with 0 findings and 0 errors; py_compile passed. Pinned ESLint reported 0 errors (baseline warnings only), and the 8 GB shared-package tsc run reported no diagnostics in touched paths while retaining unrelated repository baseline failures. Ruff passed after excluding only audited pre-existing rule codes. git diff --check passed. Live LAN UAT was skipped because no safe external local-model server/route was available. ADR-030 and LAN/Docker/Tailscale troubleshooting docs were added. TASK-12972.1 tracks the intentionally deferred Novita/Poe/Together checked-egress migration.
 
 Stage 5 touched paths: apps/packages/ui/src/services/tldw/TldwModels.ts; apps/packages/ui/src/services/tldw-server.ts; apps/packages/ui/src/services/tldw/domains/setup-onboarding.ts; their focused tests; apps/packages/ui/src/routes/__tests__/option-quick-chat-popout.test.tsx; Docs/ADR/030-configured-local-llm-egress-policy.md and Docs/ADR/README.md; tldw_Server_API/Config_Files/README.md; Docs/User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md; Docs/Plans/IMPLEMENTATION_PLAN_scoped_local_llm_egress_TASK_12972.md; and follow-up backlog task TASK-12972.1.
+
+2026-07-15 Stage 5 post-review correction: distinct OLD/NEW scope regressions failed 2/2 before the fix. Stale getModels request A could invalidate newer in-flight request B after old getConfig resolved, and stale getCachedChatModels scope reconciliation could clear B. A single generation-aware scope helper now prevents stale generations from mutating or adopting current scope while allowing a current-generation scope change to own its resulting invalidation generation. Focused GREEN passed 2/2; complete shared WebUI and extension suites each pass 45/45. Pinned ESLint has 0 errors (2 existing warnings in the correction file), and the 8 GB package tsc run reports no TldwModels diagnostics while retaining unrelated baseline failures. The backend remains unchanged; prior 492-test backend and zero-finding Bandit evidence remains valid. TASK-12972 and Stage 5 remain In Progress pending re-review.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
