@@ -2,6 +2,15 @@
 
 Published release notes entry point.
 
+## 0.1.41 - 2026-07-15
+
+- See the repository `CHANGELOG.md` for the full `0.1.41` rollup from the
+  frozen `dev` snapshot through PR #2744 into `main`.
+- This patch highlights Research Workspace and source-grounded learning
+  expansion, Skills catalog/rendering parity, Quick Ingest and Chatbooks
+  hardening, single-user auth recovery, Watchlists/Jobs operations, and checked
+  local/custom provider egress.
+
 ## 0.1.40 - 2026-07-10
 
 - See the repository `CHANGELOG.md` for the full `0.1.40` rollup from

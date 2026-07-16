@@ -108,10 +108,10 @@ Optional add-ons (apply AFTER your base profile is healthy):
 ## Current Status
 
 Current release line:
-- `0.1.40` Beta status. Expect rough edges and please report issues.
+- `0.1.41` Beta status. Expect rough edges and please report issues.
 - Primary client surfaces are the Next.js WebUI, Admin UI, and browser extension.
 - Package metadata is prepared under the canonical PyPI name `tldw-server`; use a repository checkout until publishing is complete.
-- The `dev` branch carries work beyond `0.1.40`, including post-`0.1.40` branch work, and `main` is prepared for the `0.1.40` release; see [CHANGELOG.md](CHANGELOG.md) for the PR rollup and [Docs/Published/RELEASE_NOTES.md](Docs/Published/RELEASE_NOTES.md) for the published release entry point.
+- The `dev` branch carries work beyond `0.1.41`, including post-`0.1.41` branch work, and `main` is prepared for the `0.1.41` release; see [CHANGELOG.md](CHANGELOG.md) for the PR rollup and [Docs/Published/RELEASE_NOTES.md](Docs/Published/RELEASE_NOTES.md) for the published release entry point.
 
 <details>
 <summary>Current focus and migration notes from the old Gradio version</summary>
@@ -146,6 +146,22 @@ Current release line:
 ## What's New (in the last few releases)
 
 <details>
+<summary>0.1.41 release</summary>
+
+Included in the `0.1.41` release:
+- Research and source-grounded learning expanded through spaced repetition, advanced quizzes, Paperless source workflows, Research Workspace discovery/PDF handoff foundations, beginner UAT, and status/reconciliation work.
+- Skills gained MCP catalog rendering, render-tool binding, UX and extension parity, and focused UAT gates, with service-prompt customization groundwork documented for follow-on delivery.
+- Quick Ingest, Chatbooks, authentication recovery, Parakeet ONNX configuration, extension launch behavior, frontend CodeQL paths, Watchlists briefings, Jobs operations, and local/custom provider egress were hardened.
+- Package, FastAPI, README, release-note, and MkDocs metadata were bumped to `0.1.41`.
+
+Still active on `dev`:
+- Treat [CHANGELOG.md](CHANGELOG.md) as the authoritative branch-level history for what has entered the release train.
+
+See [CHANGELOG.md](CHANGELOG.md) for the full running history and [Docs/Published/RELEASE_NOTES.md](Docs/Published/RELEASE_NOTES.md) for published release notes.
+
+</details>
+
+<details>
 <summary>0.1.40 release</summary>
 
 Included in the `0.1.40` release:
@@ -155,6 +171,7 @@ Included in the `0.1.40` release:
 - Package, FastAPI, README, and MkDocs metadata were bumped to `0.1.40`.
 
 Still active on `dev`:
+- `0.1.40` is superseded by the `0.1.41` release metadata above.
 - Treat [CHANGELOG.md](CHANGELOG.md) as the authoritative branch-level history for what has entered the release train.
 
 See [CHANGELOG.md](CHANGELOG.md) for the full running history and [Docs/Published/RELEASE_NOTES.md](Docs/Published/RELEASE_NOTES.md) for published release notes.

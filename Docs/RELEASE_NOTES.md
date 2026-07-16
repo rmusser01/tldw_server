@@ -6,6 +6,42 @@ This page is the release notes index placeholder for published versions.
 
 No published changes yet.
 
+## 0.1.41 - 2026-07-15
+
+### Research and source-grounded learning
+
+- Added source-grounded spaced repetition and advanced quiz controls, plus
+  Paperless source review and saved-view workflows.
+- Expanded the Research Workspace foundations for source discovery and PDF
+  handoff, with beginner UAT coverage, workspace status rails, and current
+  decision and reconciliation records.
+
+### Skills and service prompt groundwork
+
+- Added Skills MCP catalog rendering, render-tool binding, WebUI and extension
+  parity, and focused Skills UAT quality gates.
+- Documented the reviewed groundwork for user-customizable service prompts as
+  follow-on work rather than presenting it as a completed user feature.
+
+### Operations and reliability
+
+- Hardened Quick Ingest advanced transport when no server URL is persisted,
+  default and render-loop behavior, preset provider selection, and E2E
+  analysis-provider guards.
+- Closed Chatbooks post-merge UAT issues, strengthened Watchlists briefing
+  contracts across backend and shared product surfaces, and added Jobs
+  admission and operations extraction.
+- Fixed Parakeet ONNX feature configuration, extension launch and cancellation
+  races, frontend CodeQL paths, and related release-review regressions.
+
+### Security, authentication, and provider egress
+
+- Improved single-user API-key device persistence, media authentication refresh
+  behavior, metadata-only ingestion guards, and stale-session recovery after a
+  WebUI relaunch.
+- Centralized checked outbound access for configured local providers and public
+  custom OpenAI-compatible adapters.
+
 ## 0.1.40 - 2026-07-10
 
 ### Chatbooks
