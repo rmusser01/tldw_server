@@ -111,7 +111,7 @@ class ServicePromptOverrideRow:
     """Raw persisted Service Prompt override state."""
 
     definition_id: str
-    parts_json: str
+    parts_json: str | bytes
     revision: str
 
 
@@ -601,7 +601,7 @@ class PromptsDatabase:
                 self.get_connection()
                 .execute(
                     """
-                SELECT definition_id, parts_json, revision
+                SELECT definition_id, CAST(parts_json AS BLOB) AS parts_json_blob, revision
                 FROM ServicePromptOverrides
                 WHERE definition_id = ?
                 """,
@@ -613,9 +613,14 @@ class PromptsDatabase:
             raise DatabaseError("Failed to read Service Prompt override.") from None
         if row is None:
             return None
+        parts_json_blob: bytes = row["parts_json_blob"]
+        try:
+            parts_json: str | bytes = parts_json_blob.decode("utf-8")
+        except UnicodeDecodeError:
+            parts_json = parts_json_blob
         return ServicePromptOverrideRow(
             definition_id=row["definition_id"],
-            parts_json=row["parts_json"],
+            parts_json=parts_json,
             revision=row["revision"],
         )
 

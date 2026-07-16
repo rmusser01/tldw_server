@@ -37,6 +37,10 @@ from tldw_Server_API.app.core.DB_Management.Prompts_DB import (
 from tldw_Server_API.app.core.DB_Management.Prompts_DB import (
     view_prompt_keywords_markdown as standalone_view_prompt_keywords_markdown,
 )
+from tldw_Server_API.app.core.Prompt_Management.service_prompts import (
+    ServicePromptCorruptOverride,
+    resolve_service_prompt,
+)
 
 #
 ########################################################################################################################
@@ -490,6 +494,34 @@ def test_service_prompt_override_undecodable_text_can_be_reset_without_reading_c
         ).fetchone()[0]
         == 0
     )
+
+
+def test_service_prompt_override_undecodable_text_preserves_revision_for_resolver_and_reset(file_db):
+    definition_id = "chat.rag.answer"
+    revision = str(uuid.uuid4())
+    conn = file_db.get_connection()
+    conn.execute(
+        """
+        INSERT INTO ServicePromptOverrides (definition_id, parts_json, revision)
+        VALUES (?, CAST(X'80' AS TEXT), ?)
+        """,
+        (definition_id, revision),
+    )
+    conn.commit()
+
+    row = file_db.get_service_prompt_override(definition_id)
+
+    assert row is not None
+    assert row.definition_id == definition_id
+    assert row.parts_json == b"\x80"
+    assert row.revision == revision
+    with pytest.raises(ServicePromptCorruptOverride) as captured:
+        resolve_service_prompt(file_db, definition_id)
+    assert captured.value.revision == revision
+
+    assert file_db.reset_service_prompt_override(definition_id, row.revision) is None
+    file_db.close_connection()
+    assert file_db.get_service_prompt_override(definition_id) is None
 
 
 def test_service_prompt_override_failed_save_rolls_back_without_leaking_content(memory_db):
