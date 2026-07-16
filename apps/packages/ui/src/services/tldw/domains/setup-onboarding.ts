@@ -139,7 +139,11 @@ export const setupOnboardingMethods = {
       noAuth: true,
       body: payload,
     });
-    return redactApiKeyFields(response);
+    const redactedResponse = redactApiKeyFields(response);
+    if (redactedResponse.status === "saved" && typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("tldw:config-updated"));
+    }
+    return redactedResponse;
   },
 
   async validateSetupProvider(

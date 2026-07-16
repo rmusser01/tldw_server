@@ -1,9 +1,12 @@
 import React from "react"
+import fs from "node:fs"
+import path from "node:path"
 import { render, screen } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { describe, expect, it, vi } from "vitest"
 
 import QuickChatPopout from "../option-quick-chat-popout"
+import { fetchChatModels } from "@/services/tldw-server"
 
 vi.mock("antd", () => ({
   Select: ({
@@ -46,7 +49,14 @@ vi.mock("antd", () => ({
 }))
 
 vi.mock("@tanstack/react-query", () => ({
-  useQuery: ({ select }: { select?: (data: Array<{ model: string }>) => unknown }) => {
+  useQuery: ({
+    queryFn,
+    select,
+  }: {
+    queryFn: () => unknown
+    select?: (data: Array<{ model: string }>) => unknown
+  }) => {
+    void queryFn()
     const models = [{ model: "local:test-model" }]
     return {
       data: select ? select(models) : models,
@@ -132,5 +142,29 @@ describe("QuickChatPopout route identity", () => {
     expect(
       screen.getByText("Start a quick side chat to keep your main thread clean.")
     ).toBeInTheDocument()
+    expect(fetchChatModels).toHaveBeenCalledWith({ returnEmpty: true })
+  })
+
+  it("keeps the packaged extension on the shared route and model service", () => {
+    const extensionEntry = fs.readFileSync(
+      path.resolve(
+        __dirname,
+        "../../../../../extension/entrypoints/options/main.tsx"
+      ),
+      "utf8"
+    )
+    const legacyExtensionRoute = fs.readFileSync(
+      path.resolve(
+        __dirname,
+        "../../../../../tldw-frontend/extension/routes/option-quick-chat-popout.tsx"
+      ),
+      "utf8"
+    )
+
+    expect(extensionEntry).toContain('import "@tldw/ui/entries/options/main"')
+    expect(legacyExtensionRoute).toContain(
+      'import { fetchChatModels } from "@/services/tldw-server"'
+    )
+    expect(legacyExtensionRoute).not.toContain("getModels(")
   })
 })

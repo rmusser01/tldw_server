@@ -371,20 +371,20 @@ Correction TDD evidence: the focused RED run produced 9 expected failures and 77
 
 **Tests:** Shared frontend model/cache/route contract under both WebUI and extension Vitest configurations, plus all focused backend tests.
 
-**Status:** Not Started
+**Status:** In Progress
 
 ### Task 5.1: Write the backend-to-WebUI/extension regression
 
-- [ ] Feed `TldwModelsService` the exact enabled llama metadata object asserted by Stage 4 and prove the manual model is returned by the chat selector.
-- [ ] Feed the paired `egress_blocked` object and prove it is excluded.
-- [ ] Prove `saveSetupProvider` dispatches `tldw:config-updated` only when the redacted response has `status="saved"`; a `failed` response does not dispatch it.
-- [ ] Warm `TldwModels`' persistent cache and the outer `fetchChatModels` cache, perform a successful provider save, then prove the emitted event makes the next fetch reach the backend despite the 15-minute TTL and 30-second forced-refresh cooldown.
-- [ ] Use deferred promises to start pre-save fetch A, emit the saved-provider event, then start post-save fetch B. Resolve A first and assert it cannot write either cache, reset B's in-flight ownership, or persist stale timestamps; resolve B and assert subsequent reads return B.
-- [ ] Update `setup-onboarding.ts` to emit the existing event after a saved response; do not depend on the hook's setup-state refresh for model invalidation.
-- [ ] Add one monotonic invalidation generation to `TldwModelsService` and one to the outer chat-model cache. Every fetch captures its generation and commits cache/timestamps only if unchanged; every clear increments it; `finally` clears only its own promise.
-- [ ] Update `tldw-server.ts`'s existing config listener to call both generation-aware `clearChatModelsCache()` and `void tldwModels.clearCache()`; do not add another event or cache layer.
-- [ ] Assert the shared quick-chat route calls `fetchChatModels`, and confirm the packaged extension route continues to import that same shared service rather than duplicating discovery/cache logic.
-- [ ] Run the focused shared-package tests under the normal WebUI configuration and then the extension configuration:
+- [x] Feed `TldwModelsService` the exact enabled llama metadata object asserted by Stage 4 and prove the manual model is returned by the chat selector.
+- [x] Feed the paired `egress_blocked` object and prove it is excluded.
+- [x] Prove `saveSetupProvider` dispatches `tldw:config-updated` only when the redacted response has `status="saved"`; a `failed` response does not dispatch it.
+- [x] Warm `TldwModels`' persistent cache and the outer `fetchChatModels` cache, perform a successful provider save, then prove the emitted event makes the next fetch reach the backend despite the 15-minute TTL and 30-second forced-refresh cooldown.
+- [x] Use deferred promises to start pre-save fetch A, emit the saved-provider event, then start post-save fetch B. Resolve A first and assert it cannot write either cache, reset B's in-flight ownership, or persist stale timestamps; resolve B and assert subsequent reads return B.
+- [x] Update `setup-onboarding.ts` to emit the existing event after a saved response; do not depend on the hook's setup-state refresh for model invalidation.
+- [x] Add one monotonic invalidation generation to `TldwModelsService` and one to the outer chat-model cache. Every fetch captures its generation and commits cache/timestamps only if unchanged; every clear increments it; `finally` clears only its own promise.
+- [x] Update `tldw-server.ts`'s existing config listener to call both generation-aware `clearChatModelsCache()` and `void tldwModels.clearCache()`; do not add another event or cache layer.
+- [x] Assert the shared quick-chat route calls `fetchChatModels`, and confirm the packaged extension route continues to import that same shared service rather than duplicating discovery/cache logic.
+- [x] Run the focused shared-package tests under the normal WebUI configuration and then the extension configuration:
 
   ```bash
   cd apps/tldw-frontend
@@ -404,15 +404,15 @@ Correction TDD evidence: the focused RED run produced 9 expected failures and 77
 
 ### Task 5.2: Record the decision and migration
 
-- [ ] Create ADR-030 covering trusted provenance, exact-origin/address rules, structured errors, redirects/TLS pinning, direct callers, discovery caching, public custom-subclass non-goal, and rejected global relaxation.
-- [ ] Update `Config_Files/README.md` and the local LLM guide with LAN/Docker/Tailscale examples and troubleshooting for `egress_blocked`, `endpoint_unreachable`, `auth_failed`, `endpoint_error`, `model_discovery_unavailable`, and `no_models_reported`.
-- [ ] Advise restoring `block_private=true` only after checking unrelated integrations; do not rewrite user configuration automatically.
-- [ ] Create a follow-up Backlog task for central egress hardening of Novita/Poe/Together public custom-adapter subclasses if no existing task covers it.
+- [x] Create ADR-030 covering trusted provenance, exact-origin/address rules, structured errors, redirects/TLS pinning, direct callers, discovery caching, public custom-subclass non-goal, and rejected global relaxation.
+- [x] Update `Config_Files/README.md` and the local LLM guide with LAN/Docker/Tailscale examples and troubleshooting for `egress_blocked`, `endpoint_unreachable`, `auth_failed`, `endpoint_error`, `model_discovery_unavailable`, and `no_models_reported`.
+- [x] Advise restoring `block_private=true` only after checking unrelated integrations; do not rewrite user configuration automatically.
+- [x] Create a follow-up Backlog task for central egress hardening of Novita/Poe/Together public custom-adapter subclasses if no existing task covers it.
 
 ### Task 5.3: Run final verification and security scan
 
-- [ ] Run the union of every focused backend command from Stages 1–4 and the shared frontend suite under both WebUI and extension configurations from Task 5.1.
-- [ ] Run Bandit over every touched Python production path:
+- [x] Run the union of every focused backend command from Stages 1–4 and the shared frontend suite under both WebUI and extension configurations from Task 5.1.
+- [x] Run Bandit over every touched Python production path:
 
   ```bash
   source .venv/bin/activate
@@ -434,14 +434,18 @@ Correction TDD evidence: the focused RED run produced 9 expected failures and 77
     -f json -o /tmp/bandit_TASK_12972.json
   ```
 
-- [ ] Run `git diff --check` and inspect `git diff --stat` for unplanned scope.
-- [ ] Optional live UAT: bind the existing mock OpenAI server to `0.0.0.0`, configure a real non-loopback host address, verify model visibility, and complete one sync plus one streaming chat. Record an environment skip if no LAN route exists.
+- [x] Run `git diff --check` and inspect `git diff --stat` for unplanned scope.
+- [x] Optional live UAT: bind the existing mock OpenAI server to `0.0.0.0`, configure a real non-loopback host address, verify model visibility, and complete one sync plus one streaming chat. Record an environment skip if no LAN route exists.
 
 ### Task 5.4: Finalize task and commit
 
-- [ ] Update TASK-12972 through Backlog MCP/CLI with touched files, exact test/Bandit results, skips, ADR/docs, and final summary.
+- [x] Update TASK-12972 through Backlog MCP/CLI with touched files, exact test/Bandit results, skips, ADR/docs, and final summary.
 - [ ] Confirm every acceptance criterion and Definition of Done item before marking complete.
-- [ ] Commit frontend, docs, and task finalization with `docs(llm): document scoped local provider egress (TASK-12972)`.
+- [x] Commit frontend, docs, and task finalization with `docs(llm): document scoped local provider egress (TASK-12972)`.
+
+Stage 5 TDD evidence: the first focused RED run failed 4 tests with 36 passing for stale inner persistence, missing inner invalidation, stale outer repopulation, and the absent saved-provider event. A later self-review regression for invalidation during asynchronous config lookup failed 1/1 before the ownership guard. The final shared suites pass 43 tests under the WebUI configuration and the same 43 tests under `vitest.extension.config.ts`.
+
+Final implementation verification: the complete Stages 1–4 backend union passes 492 tests with 5 warnings. Bandit scanned 25,013 lines across every touched Python production path with 0 findings and 0 errors; Python compilation passed. Pinned ESLint reports 0 errors (baseline warnings only). The shared-package TypeScript check, run with the repository's 8 GB heap setting, retains unrelated repository baseline failures but reports no diagnostics in Stage 5 touched paths. Ruff reports only audited pre-existing rule codes on the full touched-file scan and passes when those baseline codes are excluded. `git diff --check` passes. Live LAN UAT was skipped because no safe external local-model server and route were available in the environment. TASK-12972.1 records the public Novita/Poe/Together transport follow-up. Stage 5 and TASK-12972 remain In Progress pending independent specification and quality reviews.
 
 ---
 

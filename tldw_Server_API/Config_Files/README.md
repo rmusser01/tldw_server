@@ -274,6 +274,25 @@ Local service backends (Kobold, LLaMA, Oobabooga, Tabby, vLLM, Ollama, Aphrodite
 - `<engine>_max_tokens` (int), `<engine>_api_timeout|_api_retry|_api_retry_delay`
 Common: `max_tokens`, `local_api_timeout`, `local_api_retries`, `local_api_retry_delay`, `streaming`, `temperature`, `top_p`, `min_p`.
 
+Configured local endpoints use an exact-origin egress scope. This permits the configured scheme, host, and port on loopback, LAN, Docker, or approved overlay addresses without disabling private-address protection or opening that port for unrelated outbound integrations. Examples:
+
+```ini
+[Local-API]
+# LAN-hosted llama.cpp
+llama_api_IP = http://192.168.1.50:8080/v1
+llama_model = local-model.gguf
+
+# Docker Compose service DNS (when the API container can resolve `llama`)
+vllm_api_IP = http://llama:8000/v1
+vllm_model = organization/model-name
+
+# Tailscale/overlay address or MagicDNS name
+ooba_api_IP = http://100.90.80.70:5000/v1
+ooba_model = local-model
+```
+
+The hostname must resolve from the `tldw_server` process or container. The scope does not authorize redirects to another scheme, hostname, or port, and it never permits metadata or other forbidden special-use targets.
+
 ## [STT-Settings]
 - `default_batch_transcription_model` (str): batch/offline default model id when requests omit `model` (default: `auto`; resolves to `parakeet-mlx` on macOS and `parakeet-tdt-0.6b-v3-onnx` on Linux/Windows; legacy alias `parakeet-onnx` is still accepted).
 - `default_streaming_transcription_model` (str): WebSocket streaming default model id when clients omit `model` (default: `auto`; resolves to `parakeet-mlx` on macOS and `parakeet-tdt-0.6b-v3-onnx` on Linux/Windows; legacy alias `parakeet-onnx` is still accepted).
@@ -594,7 +613,17 @@ async for evt in astream_sse(method="GET", url="https://host/stream"):
 Notes
 - The egress policy denies unsupported schemes, disallowed ports, denylisted hosts, and private/reserved IP ranges by default (when `block_private=true`).
 - HTTP helpers in `http_client.py` and workflows/webhook components consult this policy before network I/O and on each redirect hop.
-- Local LLM model discovery (e.g., Aphrodite/Oobabooga/VLLM/Ollama endpoints) also uses the same egress policy. If a local endpoint runs on non-default ports like `9099` or on `127.0.0.1`, discovery calls can be blocked unless the port is listed in `WORKFLOWS_EGRESS_ALLOWED_PORTS` and private IP blocking is disabled via `WORKFLOWS_EGRESS_BLOCK_PRIVATE=false`. To avoid discovery entirely, set the provider’s model explicitly in config (e.g., `aphrodite_model=...`).
+- Trusted configured local LLM discovery and runtime calls use the exact-origin scope described under `[Local-API]`. Do not disable `WORKFLOWS_EGRESS_BLOCK_PRIVATE` or add a global port merely to reach a configured local model.
+- If an older workaround set `block_private=false`, restore `block_private=true` only after auditing other integrations that may have come to depend on the broader setting. The server does not rewrite this configuration automatically.
+
+Local provider readiness troubleshooting codes:
+
+- `egress_blocked`: the configured origin or one of its resolved addresses is forbidden. Check for a scheme/host/port mismatch, metadata/link-local target, denylist entry, or mixed DNS answer.
+- `endpoint_unreachable`: DNS resolution, connection, or timeout failed. Verify the address from the API server/container, not only from the browser.
+- `auth_failed`: the endpoint rejected its configured credentials. Update the provider key or remove authentication if the local server does not require it.
+- `endpoint_error`: the endpoint returned a server or protocol error. Inspect the local server logs and its OpenAI-compatible path.
+- `model_discovery_unavailable`: the endpoint responded, but its model-list response could not be used. Set an explicit provider model if the server does not implement model discovery.
+- `no_models_reported`: discovery succeeded with no models. Load a model on the local server or configure the explicit model field.
 
 ## [Moderation]
 - `enabled` (bool)

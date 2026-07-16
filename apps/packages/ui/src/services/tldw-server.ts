@@ -1,4 +1,3 @@
-import { Storage } from "@plasmohq/storage"
 import { tldwClient, tldwModels } from "./tldw"
 import { setNoOfRetrievedDocs, setTotalFilePerKB } from "./app"
 import { createSafeStorage } from "@/utils/safe-storage"
@@ -178,9 +177,11 @@ const mapTldwModelToUi = (model: any) => ({
 const CHAT_MODELS_CACHE_TTL_MS = 60_000
 let chatModelsCache: { value: any[]; expiresAt: number } | null = null
 let chatModelsInFlight: Promise<any[]> | null = null
+let chatModelsCacheGeneration = 0
 
 type ChatModelsCacheListenerState = {
   clear: () => void
+  clearPersistent: () => void
   listenersAdded: boolean
 }
 
@@ -256,6 +257,7 @@ const dedupeChatModelsByModel = (models: any[]) => {
 }
 
 export const clearChatModelsCache = () => {
+  chatModelsCacheGeneration += 1
   chatModelsCache = null
   chatModelsInFlight = null
 }
@@ -270,6 +272,9 @@ const getChatModelsCacheListenerState = (): ChatModelsCacheListenerState => {
   }
   const created: ChatModelsCacheListenerState = {
     clear: clearChatModelsCache,
+    clearPersistent: () => {
+      void tldwModels.clearCache()
+    },
     listenersAdded: false
   }
   globalWindow[CHAT_MODELS_CACHE_LISTENER_KEY] = created
@@ -279,13 +284,18 @@ const getChatModelsCacheListenerState = (): ChatModelsCacheListenerState => {
 if (typeof window !== "undefined") {
   const listenerState = getChatModelsCacheListenerState()
   listenerState.clear = clearChatModelsCache
+  listenerState.clearPersistent = () => {
+    void tldwModels.clearCache()
+  }
   if (!listenerState.listenersAdded) {
     window.addEventListener("tldw:config-updated", () => {
       listenerState.clear()
+      listenerState.clearPersistent()
     })
     window.addEventListener("storage", (event) => {
       if (!event.key || event.key === "tldwConfig") {
         listenerState.clear()
+        listenerState.clearPersistent()
       }
     })
     listenerState.listenersAdded = true
@@ -324,6 +334,7 @@ export const fetchChatModels = async ({
   refreshOpenRouter?: boolean
   allowNetwork?: boolean
 } = {}) => {
+  const fetchGeneration = chatModelsCacheGeneration
   const now = Date.now()
   if (!forceRefresh && chatModelsCache && chatModelsCache.expiresAt > now) {
     return chatModelsCache.value
@@ -335,7 +346,10 @@ export const fetchChatModels = async ({
 
     const cachedChatModels = await tldwModels.getCachedChatModels()
     const resolved = dedupeChatModelsByModel(cachedChatModels.map(mapTldwModelToUi))
-    if (resolved.length > 0) {
+    if (
+      resolved.length > 0 &&
+      fetchGeneration === chatModelsCacheGeneration
+    ) {
       chatModelsCache = {
         value: resolved,
         expiresAt: Date.now() + CHAT_MODELS_CACHE_TTL_MS
@@ -347,8 +361,9 @@ export const fetchChatModels = async ({
     return await chatModelsInFlight
   }
 
+  let fetchPromise: Promise<any[]> | null = null
   try {
-    const fetchPromise = (async () => {
+    fetchPromise = (async () => {
       // Primary: tldw_server aggregated models
       const chatModels = await tldwModels.getChatModels(forceRefresh, {
         refreshOpenRouter: refreshOpenRouter || forceRefresh
@@ -366,7 +381,10 @@ export const fetchChatModels = async ({
       }
 
       const resolved = dedupeChatModelsByModel(combined)
-      if (resolved.length > 0) {
+      if (
+        resolved.length > 0 &&
+        fetchGeneration === chatModelsCacheGeneration
+      ) {
         chatModelsCache = {
           value: resolved,
           expiresAt: Date.now() + CHAT_MODELS_CACHE_TTL_MS
@@ -385,7 +403,9 @@ export const fetchChatModels = async ({
     if (returnEmpty) return []
     throw e
   } finally {
-    chatModelsInFlight = null
+    if (fetchPromise && chatModelsInFlight === fetchPromise) {
+      chatModelsInFlight = null
+    }
   }
 }
 

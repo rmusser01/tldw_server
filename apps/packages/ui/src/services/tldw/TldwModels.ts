@@ -1,4 +1,3 @@
-import { Storage } from "@plasmohq/storage"
 import { tldwClient, TldwModel, type TldwConfig } from "./TldwApiClient"
 import { createSafeStorage } from "@/utils/safe-storage"
 import { isPlaceholderApiKey } from "@/utils/api-key"
@@ -111,8 +110,10 @@ export class TldwModelsService {
   private storage = createSafeStorage({ area: "local" })
   private storageLoaded = false
   private storageInitPromise: Promise<void> | null = null
+  private storageWritePromise: Promise<void> = Promise.resolve()
   private inFlightFetch: Promise<ModelInfo[]> | null = null
   private cacheScopeKey: string | null = null
+  private invalidationGeneration = 0
 
   constructor() {
     this.getModels = this.getModels.bind(this)
@@ -125,6 +126,7 @@ export class TldwModelsService {
   private async ensureStorageLoaded() {
     if (this.storageLoaded) return
     if (!this.storageInitPromise) {
+      const loadGeneration = this.invalidationGeneration
       this.storageInitPromise = (async () => {
         try {
           const cached = (await this.storage.get<any>(this.CACHE_KEY)) || null
@@ -133,7 +135,8 @@ export class TldwModelsService {
           if (
             cacheVersion === this.CACHE_SCHEMA_VERSION &&
             cached?.models &&
-            Array.isArray(cached.models)
+            Array.isArray(cached.models) &&
+            loadGeneration === this.invalidationGeneration
           ) {
             this.cachedModels = cached.models as ModelInfo[]
             this.lastFetchTime = Number(cached.timestamp || 0)
@@ -150,17 +153,33 @@ export class TldwModelsService {
     await this.storageInitPromise
   }
 
-  private async persistCache() {
-    try {
-      await this.storage.set(this.CACHE_KEY, {
-        version: this.CACHE_SCHEMA_VERSION,
-        models: this.cachedModels,
-        timestamp: this.lastFetchTime,
-        scope: this.cacheScopeKey
-      })
-    } catch {
-      // Best-effort persistence; ignore errors
+  private async persistCache(expectedGeneration = this.invalidationGeneration) {
+    if (expectedGeneration !== this.invalidationGeneration) return
+    const value = {
+      version: this.CACHE_SCHEMA_VERSION,
+      models: this.cachedModels,
+      timestamp: this.lastFetchTime,
+      scope: this.cacheScopeKey
     }
+    const write = this.storageWritePromise.then(async () => {
+      if (expectedGeneration !== this.invalidationGeneration) return
+      try {
+        await this.storage.set(this.CACHE_KEY, value)
+      } catch {
+        // Best-effort persistence; ignore errors
+      }
+    })
+    this.storageWritePromise = write
+    await write
+  }
+
+  private invalidateCacheState() {
+    this.invalidationGeneration += 1
+    this.cachedModels = null
+    this.lastFetchTime = 0
+    this.lastForcedFetchTime = 0
+    this.inFlightFetch = null
+    this.cacheScopeKey = null
   }
 
   private isConfiguredForModels(config: TldwConfig | null): boolean {
@@ -196,14 +215,16 @@ export class TldwModelsService {
     options?: { refreshOpenRouter?: boolean }
   ): Promise<ModelInfo[]> {
     await this.ensureStorageLoaded()
+    let fetchGeneration = this.invalidationGeneration
     const config = await tldwClient.getConfig().catch(() => null)
     const scopeKey = this.buildCacheScope(config)
     if (this.cacheScopeKey && this.cacheScopeKey !== scopeKey) {
-      this.cachedModels = null
-      this.lastFetchTime = 0
-      this.lastForcedFetchTime = 0
+      this.invalidateCacheState()
+      fetchGeneration = this.invalidationGeneration
     }
-    this.cacheScopeKey = scopeKey
+    if (fetchGeneration === this.invalidationGeneration) {
+      this.cacheScopeKey = scopeKey
+    }
 
     const now = Date.now()
 
@@ -233,14 +254,17 @@ export class TldwModelsService {
       })
 
       // Transform tldw models to our format
-      this.cachedModels = models.map(model => this.transformModel(model))
-      this.lastFetchTime = Date.now()
-      if (forceRefresh) {
-        this.lastForcedFetchTime = this.lastFetchTime
+      const transformedModels = models.map(model => this.transformModel(model))
+      if (fetchGeneration === this.invalidationGeneration) {
+        this.cachedModels = transformedModels
+        this.lastFetchTime = Date.now()
+        if (forceRefresh) {
+          this.lastForcedFetchTime = this.lastFetchTime
+        }
+        await this.persistCache(fetchGeneration)
       }
-      await this.persistCache()
 
-      return this.cachedModels
+      return transformedModels
     }
 
     const fetchPromise = fetchFromServer().catch(async (error) => {
@@ -265,7 +289,9 @@ export class TldwModelsService {
       return []
     })
 
-    this.inFlightFetch = fetchPromise
+    if (fetchGeneration === this.invalidationGeneration) {
+      this.inFlightFetch = fetchPromise
+    }
     try {
       return await fetchPromise
     } finally {
@@ -472,12 +498,10 @@ export class TldwModelsService {
     if (model.isConfigured === false) return false
     if (model.providerIsConfigured === false) return false
     if (model.providerEnabled === false) return false
-    const availability = model.availability?.trim().toLowerCase()
+    const availability = normalizeAvailabilityStatus(model.availability)
     if (
       availability &&
-      ["disabled", "failed", "unavailable", "not-configured"].includes(
-        availability
-      )
+      UNSELECTABLE_CHAT_MODEL_AVAILABILITY.has(availability)
     ) {
       return false
     }
@@ -488,12 +512,8 @@ export class TldwModelsService {
    * Clear the model cache
    */
   async clearCache(): Promise<void> {
-    this.cachedModels = null
-    this.lastFetchTime = 0
-    this.lastForcedFetchTime = 0
-    this.inFlightFetch = null
-    this.cacheScopeKey = null
-    await this.persistCache()
+    this.invalidateCacheState()
+    await this.persistCache(this.invalidationGeneration)
   }
 
   /**

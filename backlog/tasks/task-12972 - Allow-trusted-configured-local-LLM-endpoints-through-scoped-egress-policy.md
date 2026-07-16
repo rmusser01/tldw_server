@@ -4,7 +4,7 @@ title: Allow trusted configured local LLM endpoints through scoped egress policy
 status: In Progress
 assignee: []
 created_date: '2026-07-15 19:34'
-updated_date: '2026-07-15 21:22'
+updated_date: '2026-07-16 00:41'
 labels:
   - browser-extension
 dependencies: []
@@ -15,6 +15,7 @@ references:
   - Docs/ADR/026-security-outbound-egress-and-ssrf-policy.md
 documentation:
   - Docs/superpowers/specs/2026-07-15-configured-local-llm-egress-design.md
+  - Docs/ADR/030-configured-local-llm-egress-policy.md
 priority: high
 ---
 
@@ -59,6 +60,10 @@ Docs/Plans/IMPLEMENTATION_PLAN_scoped_local_llm_egress_TASK_12972.md
 2026-07-15 final post-correction review: independent spec and implementation-plan reviewers approved the current artifacts with no blocking issues or advisory recommendations. TASK-12972 remains To Do and implementation remains gated on requester approval of this corrected design/plan.
 
 2026-07-15 requester approved implementation and clarified that the fix must apply to both the WebUI and browser extension. The implementation remains shared in apps/packages/ui, with explicit verification through both frontend test configurations.
+
+2026-07-15 Stage 5 implementation is ready for independent review but remains In Progress. Frontend TDD RED: 4 failures/36 passes for stale inner persistence, missing inner invalidation, stale outer repopulation, and missing saved event; an additional config-lookup ownership race failed 1/1 before its guard. GREEN: the shared WebUI suite and browser-extension config each pass 43/43. The Stages 1-4 backend union passes 492 tests with 5 warnings. Bandit scanned all touched Python production paths (25,013 LOC) with 0 findings and 0 errors; py_compile passed. Pinned ESLint reported 0 errors (baseline warnings only), and the 8 GB shared-package tsc run reported no diagnostics in touched paths while retaining unrelated repository baseline failures. Ruff passed after excluding only audited pre-existing rule codes. git diff --check passed. Live LAN UAT was skipped because no safe external local-model server/route was available. ADR-030 and LAN/Docker/Tailscale troubleshooting docs were added. TASK-12972.1 tracks the intentionally deferred Novita/Poe/Together checked-egress migration.
+
+Stage 5 touched paths: apps/packages/ui/src/services/tldw/TldwModels.ts; apps/packages/ui/src/services/tldw-server.ts; apps/packages/ui/src/services/tldw/domains/setup-onboarding.ts; their focused tests; apps/packages/ui/src/routes/__tests__/option-quick-chat-popout.test.tsx; Docs/ADR/030-configured-local-llm-egress-policy.md and Docs/ADR/README.md; tldw_Server_API/Config_Files/README.md; Docs/User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md; Docs/Plans/IMPLEMENTATION_PLAN_scoped_local_llm_egress_TASK_12972.md; and follow-up backlog task TASK-12972.1.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

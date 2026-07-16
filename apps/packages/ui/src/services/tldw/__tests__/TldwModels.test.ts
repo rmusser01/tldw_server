@@ -36,6 +36,14 @@ vi.mock("@/services/tldw/runtime-auth-override", () => ({
 
 const importService = async () => import("@/services/tldw/TldwModels")
 
+const deferred = <T>() => {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((next) => {
+    resolve = next
+  })
+  return { promise, resolve }
+}
+
 describe("TldwModelsService caching", () => {
   beforeEach(() => {
     vi.resetModules()
@@ -444,6 +452,140 @@ describe("TldwModelsService caching", () => {
         chatProvider: "ollama"
       })
     )
+  })
+
+  it("selects the exact enabled llama metadata record and excludes its blocked pair", async () => {
+    mocks.getModels.mockResolvedValue([
+      {
+        id: "manual-llama.gguf",
+        name: "manual-llama.gguf",
+        provider: "llama",
+        type: "chat",
+        is_configured: true,
+        provider_is_configured: true,
+        provider_enabled: true,
+        availability: "enabled",
+        chat_provider: "llama.cpp",
+        catalog_only: false
+      },
+      {
+        id: "blocked-llama.gguf",
+        name: "blocked-llama.gguf",
+        provider: "llama",
+        type: "chat",
+        is_configured: true,
+        provider_is_configured: true,
+        provider_enabled: false,
+        availability: "unavailable",
+        readiness_reason_code: "egress_blocked",
+        chat_provider: "llama.cpp",
+        catalog_only: false
+      }
+    ])
+
+    const { TldwModelsService } = await importService()
+    const service = new TldwModelsService()
+
+    const chatModels = await service.getChatModels(true)
+
+    expect(chatModels).toEqual([
+      expect.objectContaining({
+        id: "manual-llama.gguf",
+        provider: "llama",
+        providerEnabled: true,
+        availability: "enabled",
+        chatProvider: "llama.cpp"
+      })
+    ])
+  })
+
+  it("prevents a pre-clear fetch from repopulating cache or taking post-clear ownership", async () => {
+    const stale = deferred<Array<Record<string, unknown>>>()
+    const fresh = deferred<Array<Record<string, unknown>>>()
+    mocks.getModels
+      .mockImplementationOnce(() => stale.promise)
+      .mockImplementationOnce(() => fresh.promise)
+
+    const { TldwModelsService } = await importService()
+    const service = new TldwModelsService()
+
+    const preClear = service.getModels(true)
+    await vi.waitFor(() => expect(mocks.getModels).toHaveBeenCalledTimes(1))
+
+    await service.clearCache()
+    const postClear = service.getModels(true)
+    await vi.waitFor(() => expect(mocks.getModels).toHaveBeenCalledTimes(2))
+
+    stale.resolve([
+      { id: "stale-model", name: "Stale Model", provider: "llama", type: "chat" }
+    ])
+    await expect(preClear).resolves.toEqual([
+      expect.objectContaining({ id: "stale-model" })
+    ])
+
+    const postClearFollower = service.getModels(true)
+    expect(mocks.getModels).toHaveBeenCalledTimes(2)
+
+    fresh.resolve([
+      { id: "fresh-model", name: "Fresh Model", provider: "llama", type: "chat" }
+    ])
+    await expect(Promise.all([postClear, postClearFollower])).resolves.toEqual([
+      [expect.objectContaining({ id: "fresh-model" })],
+      [expect.objectContaining({ id: "fresh-model" })]
+    ])
+
+    await expect(service.getModels()).resolves.toEqual([
+      expect.objectContaining({ id: "fresh-model" })
+    ])
+    expect(mocks.getModels).toHaveBeenCalledTimes(2)
+    expect(
+      mocks.storageSet.mock.calls.some((call) =>
+        JSON.stringify((call as unknown[])[1]).includes("stale-model")
+      )
+    ).toBe(false)
+  })
+
+  it("does not let a fetch invalidated during config lookup own the next generation", async () => {
+    const config = {
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "single-user",
+      apiKey: "test-key"
+    }
+    const configGate = deferred<typeof config>()
+    const stale = deferred<Array<Record<string, unknown>>>()
+    const fresh = deferred<Array<Record<string, unknown>>>()
+    mocks.getConfig
+      .mockImplementationOnce(() => configGate.promise)
+      .mockResolvedValue(config)
+    mocks.getModels
+      .mockImplementationOnce(() => stale.promise)
+      .mockImplementationOnce(() => fresh.promise)
+
+    const { TldwModelsService } = await importService()
+    const service = new TldwModelsService()
+
+    const preClear = service.getModels(true)
+    await vi.waitFor(() => expect(mocks.getConfig).toHaveBeenCalledTimes(1))
+    await service.clearCache()
+
+    configGate.resolve(config)
+    await vi.waitFor(() => expect(mocks.getModels).toHaveBeenCalledTimes(1))
+    const postClear = service.getModels(true)
+    await vi.waitFor(() => expect(mocks.getModels).toHaveBeenCalledTimes(2))
+
+    stale.resolve([
+      { id: "stale-model", name: "Stale Model", provider: "llama", type: "chat" }
+    ])
+    fresh.resolve([
+      { id: "fresh-model", name: "Fresh Model", provider: "llama", type: "chat" }
+    ])
+
+    await expect(preClear).resolves.toEqual([
+      expect.objectContaining({ id: "stale-model" })
+    ])
+    await expect(postClear).resolves.toEqual([
+      expect.objectContaining({ id: "fresh-model" })
+    ])
   })
 
   it("keeps legacy chat models when provider availability metadata is absent", async () => {
