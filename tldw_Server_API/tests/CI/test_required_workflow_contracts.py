@@ -932,6 +932,7 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest*.py",
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_list_no_slash_redirect.py",
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_upload_failures.py",
+            "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_research_discovery_handoff.py",
         }
         assert shard_path_sets["media-ingestion-new-unit-mediawiki"] == {
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_mediawiki_*.py",
@@ -952,6 +953,7 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_video_*.py",
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_visual_ingestion.py",
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_xml_ingestion.py",
+            "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_yt_dlp_support.py",
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_youtube_audio_downloads.py",
         }
         assert shard_path_sets["media-ingestion-modification"] == {
@@ -1251,6 +1253,8 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
         auth_db_extra_files = {
             "tldw_Server_API/tests/Workspaces/test_workspace_assistant_defaults_api.py",
             "tldw_Server_API/tests/Workspaces/test_workspace_artifact_validation.py",
+            "tldw_Server_API/tests/Workspaces/test_workspace_context_api.py",
+            "tldw_Server_API/tests/Workspaces/test_workspace_source_saved_views_api.py",
         }
         auth_db_files = {
             str(path)

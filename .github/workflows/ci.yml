@@ -310,6 +310,7 @@ jobs:
               tldw_Server_API/tests/Config/test_module_yaml_integration.py
           - name: config-runtime-env
             paths: >-
+              tldw_Server_API/tests/Config/test_claims_verification_env.py
               tldw_Server_API/tests/Config/test_env_absent_defaults.py
               tldw_Server_API/tests/Config/test_env_file_selection.py
               tldw_Server_API/tests/Config/test_feature_flags.py
@@ -1115,6 +1116,7 @@ jobs:
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_list_no_slash_redirect.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_upload_failures.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_research_discovery_handoff.py
           - name: media-ingestion-new-unit-mediawiki
             paths: >-
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_mediawiki_*.py
@@ -1135,6 +1137,7 @@ jobs:
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_video_*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_visual_ingestion.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_xml_ingestion.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_yt_dlp_support.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_youtube_audio_downloads.py
           - name: media-ingestion-modification
             paths: >-
@@ -2534,6 +2537,7 @@ jobs:
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_list_no_slash_redirect.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_upload_failures.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_research_discovery_handoff.py
           - name: media-ingestion-new-unit-mediawiki
             paths: >-
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_mediawiki_*.py
@@ -2554,6 +2558,7 @@ jobs:
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_video_*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_visual_ingestion.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_xml_ingestion.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_yt_dlp_support.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_youtube_audio_downloads.py
           - name: media-ingestion-modification
             paths: >-
@@ -3824,6 +3829,7 @@ jobs:
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_list_no_slash_redirect.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_upload_failures.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_research_discovery_handoff.py
           - name: media-ingestion-new-unit-mediawiki
             paths: >-
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_mediawiki_*.py
@@ -3844,6 +3850,7 @@ jobs:
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_video_*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_visual_ingestion.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_xml_ingestion.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_yt_dlp_support.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_youtube_audio_downloads.py
           - name: media-ingestion-modification
             paths: >-
@@ -5038,6 +5045,7 @@ jobs:
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_list_no_slash_redirect.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_upload_failures.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_research_discovery_handoff.py
           - name: media-ingestion-new-unit-mediawiki
             paths: >-
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_mediawiki_*.py
@@ -5058,6 +5066,7 @@ jobs:
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_video_*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_visual_ingestion.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_xml_ingestion.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_yt_dlp_support.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_youtube_audio_downloads.py
           - name: media-ingestion-modification
             paths: >-
@@ -6253,6 +6262,7 @@ jobs:
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_list_no_slash_redirect.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_upload_failures.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_research_discovery_handoff.py
           - name: media-ingestion-new-unit-mediawiki
             paths: >-
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_mediawiki_*.py
@@ -6273,6 +6283,7 @@ jobs:
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_video_*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_visual_ingestion.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_xml_ingestion.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_yt_dlp_support.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_youtube_audio_downloads.py
           - name: media-ingestion-modification
             paths: >-
