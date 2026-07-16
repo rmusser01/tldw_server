@@ -13,6 +13,8 @@ references:
 - https://openrouter.ai/docs/guides/overview/models
 - commit:5e0c199931
 - commit:53fda5cd4f
+- commit:5b8d951c26
+- commit:13e3e3aceb
 documentation:
 - Docs/Design/TTS.md
 - Docs/superpowers/specs/2026-07-15-openrouter-tts-gateway-design.md
