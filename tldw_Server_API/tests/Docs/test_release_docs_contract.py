@@ -75,6 +75,14 @@ def test_docs_workflows_enforce_strict_build_and_boundary_paths() -> None:
     )
 
 
+def test_docs_site_guide_requires_strict_for_every_operator_build() -> None:
+    guide = (REPO_ROOT / "Docs/Code_Documentation/Docs_Site_Guide.md").read_text(encoding="utf-8")
+    build_lines = [line for line in guide.splitlines() if "mkdocs build" in line]
+
+    assert build_lines
+    assert all("mkdocs build --strict -f Docs/mkdocs.yml" in line for line in build_lines)
+
+
 def test_readme_release_references_update_to_target_version() -> None:
     target_version = read_current_version(REPO_ROOT / "pyproject.toml")
     readme_text = (

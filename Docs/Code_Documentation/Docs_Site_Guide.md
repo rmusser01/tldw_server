@@ -180,7 +180,7 @@ If an external deploy fails:
 - Confirm `Docs/mkdocs.yml` has `site_url: https://tldwproject.com/server/docs/`
 - Check the external host logs for copy/job failures
 - Check GitHub workflow logs for mirror build errors (usually missing files/links)
-- Re-run the refresh script locally and build with `mkdocs build -f Docs/mkdocs.yml` to reproduce
+- Re-run the refresh script locally and build with `mkdocs build --strict -f Docs/mkdocs.yml` to reproduce
 
 ## GitHub Pages Mirror
 
