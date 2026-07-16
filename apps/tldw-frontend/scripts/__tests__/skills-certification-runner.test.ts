@@ -447,7 +447,7 @@ describe('Skills certification runner', () => {
   it('maps present running WebUI results to workflow for both browser exits and continues extension evidence', async () => {
     for (const code of [0, 1]) {
       const test = harness();
-      test.files.set('/evidence/webui/result.json', result('running'));
+      test.files.set('/evidence/webui/result.json', { status: 'running' });
       test.operations.runChild = vi.fn(async (registry, command) => {
         const record = registry.spawn(command, '/log');
         return command.name === 'webui-playwright' ? { code, signal: null } : registry.wait(record);
@@ -515,7 +515,7 @@ describe('Skills certification runner', () => {
   it('maps present running extension results to workflow for both browser exits', async () => {
     for (const code of [0, 1]) {
       const test = harness();
-      test.files.set('/evidence/extension/result.json', result('running'));
+      test.files.set('/evidence/extension/result.json', { status: 'running' });
       test.operations.runChild = vi.fn(async (registry, command) => {
         const record = registry.spawn(command, '/log');
         return command.name === 'extension-playwright'
@@ -546,6 +546,104 @@ describe('Skills certification runner', () => {
       test.operations.buildCommands.mock.calls.filter(([value]) => value?.ports?.backend === 8100)
     ).toHaveLength(1);
     expect(test.registry.stop).toHaveBeenCalledTimes(2);
+  });
+
+  it('continues on the same backend after a frontend bind cleanup failure without reserving again', async () => {
+    let backendHealthCalls = 0;
+    const test = harness({
+      stopChild: vi.fn(async (_registry, record) => {
+        if (record.command.name === 'frontend') throw new Error('frontend stop failed');
+      }),
+      waitForHttpOk: vi.fn(async (url) => {
+        if (url.includes(':3100')) throw new Error('EADDRINUSE');
+        backendHealthCalls += 1;
+      }),
+    });
+    test.registry.teardown.mockRejectedValue(new Error('final teardown failed'));
+    await runSkillsCertification({ operations: test.operations });
+    const categories = test.operations.finalize.mock.calls[0][0].summaryInput.failures.map(
+      (failure) => failure.category
+    );
+    expect(test.operations.reservePorts).toHaveBeenCalledTimes(1);
+    expect(test.operations.stopChild.mock.calls.map(([, record]) => record.command.name)).toEqual([
+      'frontend',
+    ]);
+    expect(categories).toEqual(expect.arrayContaining(['cleanup', 'webui_startup']));
+    expect(categories).not.toContain('preflight');
+    expect(backendHealthCalls).toBeGreaterThanOrEqual(3);
+    expect(test.registry.spawn.mock.calls.map(([command]) => command.name)).toContain(
+      'extension-playwright'
+    );
+    expect(test.operations.finalize.mock.calls[0][0].teardownOutcome.status).toBe('rejected');
+  });
+
+  it('continues on the same backend after a backend bind cleanup failure without reserving again', async () => {
+    const test = harness({
+      stopChild: vi.fn(async (_registry, record) => {
+        if (record.command.name === 'backend') throw new Error('backend stop failed');
+      }),
+      waitForHttpOk: vi.fn(async (url) => {
+        if (url.includes(':3100')) throw new Error('EADDRINUSE');
+      }),
+    });
+    await runSkillsCertification({ operations: test.operations });
+    const categories = test.operations.finalize.mock.calls[0][0].summaryInput.failures.map(
+      (failure) => failure.category
+    );
+    expect(test.operations.reservePorts).toHaveBeenCalledTimes(1);
+    expect(test.operations.stopChild.mock.calls.map(([, record]) => record.command.name)).toEqual([
+      'frontend',
+      'backend',
+    ]);
+    expect(categories).toEqual(expect.arrayContaining(['cleanup', 'webui_startup']));
+    expect(categories).not.toContain('preflight');
+    expect(test.registry.spawn.mock.calls.map(([command]) => command.name)).toContain(
+      'extension-playwright'
+    );
+  });
+
+  it('blocks extension after a failed same-URL health decision following frontend cleanup failure', async () => {
+    let backendHealthCalls = 0;
+    const test = harness({
+      stopChild: vi.fn(async () => {
+        throw new Error('frontend stop failed');
+      }),
+      waitForHttpOk: vi.fn(async (url) => {
+        if (url.includes(':3100')) throw new Error('EADDRINUSE');
+        backendHealthCalls += 1;
+        if (backendHealthCalls === 2) throw new Error('backend unavailable');
+      }),
+    });
+    const summary = await runSkillsCertification({ operations: test.operations });
+    expect(test.operations.reservePorts).toHaveBeenCalledTimes(1);
+    expect(summary.surfaces.extension.state).toBe('not_run_infrastructure');
+    expect(test.registry.spawn.mock.calls.map(([command]) => command.name)).not.toContain(
+      'extension-playwright'
+    );
+  });
+
+  it('classifies backend-health bind cleanup failure without reserving again or using preflight', async () => {
+    let backendHealthCalls = 0;
+    const test = harness({
+      stopChild: vi.fn(async () => {
+        throw new Error('backend stop failed');
+      }),
+      waitForHttpOk: vi.fn(async (url) => {
+        if (!url.includes('/api/v1/health')) return;
+        backendHealthCalls += 1;
+        if (backendHealthCalls === 1) throw new Error('EADDRINUSE');
+      }),
+    });
+    await runSkillsCertification({ operations: test.operations });
+    const categories = test.operations.finalize.mock.calls[0][0].summaryInput.failures.map(
+      (failure) => failure.category
+    );
+    expect(test.operations.reservePorts).toHaveBeenCalledTimes(1);
+    expect(categories).toContain('cleanup');
+    expect(categories).not.toContain('preflight');
+    expect(test.registry.spawn.mock.calls.map(([command]) => command.name)).toContain(
+      'extension-playwright'
+    );
   });
 
   it('caps frontend bind retries at three fresh pairs', async () => {
@@ -733,5 +831,52 @@ describe('Skills certification runner', () => {
     const test = harness();
     await runSkillsCertification({ operations: test.operations });
     expect(test.operations.createProfile.mock.calls[0][0].temporaryBase).toBe(tmpdir());
+  });
+
+  it('finalizes evidence when disposable profile creation fails', async () => {
+    const test = harness({
+      createProfile: vi.fn(() => {
+        throw new Error('profile failed');
+      }),
+    });
+    await runSkillsCertification({ operations: test.operations });
+    expect(test.operations.finalize).toHaveBeenCalledWith(
+      expect.objectContaining({ evidence: test.evidence, runtime: undefined })
+    );
+  });
+
+  it('safely removes remaining roots after a finalizer rejection', async () => {
+    const test = harness({
+      finalize: vi.fn(async () => {
+        throw new Error('finalizer failed');
+      }),
+      removeEvidence: vi.fn(() => true),
+      removeRuntime: vi.fn(() => true),
+    });
+    const summary = await runSkillsCertification({ operations: test.operations });
+    expect(test.operations.removeRuntime).toHaveBeenCalledWith(
+      test.operations.createProfile.mock.results[0].value
+    );
+    expect(test.operations.removeEvidence).toHaveBeenCalledWith(test.evidence);
+    expect(summary.artifact_safety).toEqual({ passed: false });
+  });
+
+  it('reports artifact safety when marker-safe fallback removal rejects', async () => {
+    const test = harness({
+      finalize: vi.fn(async () => {
+        throw new Error('finalizer failed');
+      }),
+      removeEvidence: vi.fn(() => {
+        throw new Error('evidence marker mismatch');
+      }),
+      removeRuntime: vi.fn(() => {
+        throw new Error('runtime marker mismatch');
+      }),
+    });
+    const summary = await runSkillsCertification({ operations: test.operations });
+    expect(test.operations.removeRuntime).toHaveBeenCalledTimes(1);
+    expect(test.operations.removeEvidence).toHaveBeenCalledTimes(1);
+    expect(summary.artifact_safety).toEqual({ passed: false });
+    expect(summary.cleanup.runtime_deleted).toBe(false);
   });
 });

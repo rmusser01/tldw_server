@@ -238,20 +238,30 @@ function assertMarker(markerPath, root, markerName, markerContent, label) {
   }
 }
 
-function removeRuntimeRoot(runtime) {
+export function removeSkillsCertificationRuntime(runtime) {
+  if (!runtime) {
+    return true;
+  }
   const root = path.resolve(runtime.root);
   const baseRoot = path.resolve(runtime.baseRoot);
   if (path.dirname(root) !== baseRoot) {
     throw new Error(`Refusing to remove runtime root outside expected base: ${root}`);
+  }
+  if (path.resolve(runtime.markerPath) !== path.join(root, runtimeMarkerName)) {
+    throw new Error(`Refusing to remove runtime root without exact marker path: ${root}`);
+  }
+  if (!existsSync(root)) {
+    return true;
   }
   assertMarker(runtime.markerPath, root, runtimeMarkerName, runtimeMarkerContent, 'runtime');
   rmSync(root, { recursive: true });
   if (existsSync(root)) {
     throw new Error(`Runtime root still exists after removal: ${root}`);
   }
+  return true;
 }
 
-function removeEvidenceRoot(evidence) {
+export function removeSkillsCertificationEvidence(evidence) {
   const root = path.resolve(evidence.root);
   const expectedBaseRoot = path.join(
     path.resolve(evidence.frontendRoot),
@@ -264,11 +274,18 @@ function removeEvidenceRoot(evidence) {
   ) {
     throw new Error(`Refusing to remove evidence root outside expected base: ${root}`);
   }
+  if (path.resolve(evidence.markerPath) !== path.join(root, evidenceMarkerName)) {
+    throw new Error(`Refusing to remove evidence root without exact marker path: ${root}`);
+  }
+  if (!existsSync(root)) {
+    return true;
+  }
   assertMarker(evidence.markerPath, root, evidenceMarkerName, evidenceMarkerContent, 'evidence');
   rmSync(root, { recursive: true });
   if (existsSync(root)) {
     throw new Error(`Evidence root still exists after removal: ${root}`);
   }
+  return true;
 }
 
 function finalSummaryInput(summaryInput, evidence, childrenClosed, runtimeDeleted, artifactPassed) {
@@ -293,11 +310,11 @@ export async function finalizeSkillsCertificationEvidence({
   teardownOutcome,
 } = {}) {
   const childrenClosed = teardownOutcome?.status === 'fulfilled';
-  let runtimeDeleted = false;
+  let runtimeDeleted = !runtime;
   let artifactPassed = summaryInput.artifact_safety?.passed !== false;
 
   try {
-    removeRuntimeRoot(runtime);
+    removeSkillsCertificationRuntime(runtime);
     runtimeDeleted = true;
   } catch {
     runtimeDeleted = false;
@@ -336,7 +353,7 @@ export async function finalizeSkillsCertificationEvidence({
       // Evidence removal still takes precedence when the failed summary cannot be retained.
     }
     try {
-      removeEvidenceRoot(evidence);
+      removeSkillsCertificationEvidence(evidence);
     } catch {
       // The failing in-memory summary is returned without bypassing marker safety.
     }

@@ -20,6 +20,8 @@ const {
   buildCertificationSummary,
   createSkillsCertificationEvidence,
   finalizeSkillsCertificationEvidence,
+  removeSkillsCertificationEvidence,
+  removeSkillsCertificationRuntime,
   writeSanitizedJson,
 } = evidenceModule;
 
@@ -110,6 +112,8 @@ describe('Skills certification evidence paths and writes', () => {
       'buildCertificationSummary',
       'createSkillsCertificationEvidence',
       'finalizeSkillsCertificationEvidence',
+      'removeSkillsCertificationEvidence',
+      'removeSkillsCertificationRuntime',
       'writeSanitizedJson',
     ]);
   });
@@ -137,6 +141,22 @@ describe('Skills certification evidence paths and writes', () => {
     expect(existsSync(evidence.extensionDir)).toBe(true);
     expect(existsSync(evidence.summaryPath)).toBe(false);
     expect(existsSync(evidence.relayLedgerPath)).toBe(false);
+  });
+
+  it('safely removes marked roots idempotently and rejects a mismatched marker path', () => {
+    const fixture = createFixture('safe-removal');
+
+    expect(removeSkillsCertificationRuntime(fixture.runtime)).toBe(true);
+    expect(removeSkillsCertificationRuntime(fixture.runtime)).toBe(true);
+    expect(removeSkillsCertificationEvidence(fixture.evidence)).toBe(true);
+    expect(removeSkillsCertificationEvidence(fixture.evidence)).toBe(true);
+
+    expect(() =>
+      removeSkillsCertificationRuntime({
+        ...fixture.runtime,
+        markerPath: path.join(fixture.runtime.baseRoot, '.skills-certification-runtime'),
+      })
+    ).toThrow(/exact marker path/);
   });
 
   it('redacts retained JSON while keeping it complete and parseable', () => {
@@ -285,6 +305,25 @@ describe('Skills certification evidence finalization', () => {
       additionalSecrets: [SKILLS_CERT_API_KEY],
     });
     expect(summary.status).toBe('passed');
+  });
+
+  it('finalizes and scans evidence when profile creation retained no runtime', async () => {
+    const fixture = createFixture('no-runtime');
+    const scanArtifacts = vi.fn();
+
+    const summary = await finalizeSkillsCertificationEvidence({
+      evidence: fixture.evidence,
+      runtime: undefined,
+      scanArtifacts,
+      summaryInput: passingSummaryInput(fixture.evidence.runId),
+      teardownOutcome: { status: 'fulfilled', value: undefined },
+    });
+
+    expect(scanArtifacts).toHaveBeenCalledWith(fixture.evidence.root, {
+      additionalSecrets: [SKILLS_CERT_API_KEY],
+    });
+    expect(summary.cleanup.runtime_deleted).toBe(true);
+    expect(existsSync(fixture.evidence.summaryPath)).toBe(true);
   });
 
   it('deterministically compacts every retained log to bounded head and tail', async () => {

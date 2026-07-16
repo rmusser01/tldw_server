@@ -5,6 +5,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  rmSync,
   writeFileSync,
 } from 'node:fs';
 import path from 'node:path';
@@ -197,47 +198,56 @@ export function createSkillsCertificationProfile({ repoRoot, temporaryBase }) {
   mkdirSync(resolvedTemporaryBase, { recursive: true });
 
   const root = mkdtempSync(path.join(resolvedTemporaryBase, 'tldw-skills-certification-'));
-  const profile = {
-    baseRoot: resolvedTemporaryBase,
-    root,
-    markerPath: path.join(root, runtimeMarker),
-    configDir: path.join(root, 'Config_Files'),
-    configPath: path.join(root, 'Config_Files/config.txt'),
-    envPath: path.join(root, 'Config_Files/.env'),
-    databaseDir: path.join(root, 'Databases'),
-    usersDbPath: path.join(root, 'Databases/users.db'),
-    userDatabasesDir: path.join(root, 'Databases/user_databases'),
-    homeDir: path.join(root, 'home'),
-    tmpDir: path.join(root, 'tmp'),
-    extensionProfileDir: path.join(root, 'extension-profile'),
-  };
+  try {
+    const profile = {
+      baseRoot: resolvedTemporaryBase,
+      root,
+      markerPath: path.join(root, runtimeMarker),
+      configDir: path.join(root, 'Config_Files'),
+      configPath: path.join(root, 'Config_Files/config.txt'),
+      envPath: path.join(root, 'Config_Files/.env'),
+      databaseDir: path.join(root, 'Databases'),
+      usersDbPath: path.join(root, 'Databases/users.db'),
+      userDatabasesDir: path.join(root, 'Databases/user_databases'),
+      homeDir: path.join(root, 'home'),
+      tmpDir: path.join(root, 'tmp'),
+      extensionProfileDir: path.join(root, 'extension-profile'),
+    };
 
-  for (const directory of [
-    profile.configDir,
-    profile.databaseDir,
-    profile.userDatabasesDir,
-    profile.homeDir,
-    profile.tmpDir,
-    profile.extensionProfileDir,
-  ]) {
-    mkdirSync(directory, { recursive: true });
+    for (const directory of [
+      profile.configDir,
+      profile.databaseDir,
+      profile.userDatabasesDir,
+      profile.homeDir,
+      profile.tmpDir,
+      profile.extensionProfileDir,
+    ]) {
+      mkdirSync(directory, { recursive: true });
+    }
+    writeFileSync(profile.markerPath, 'tldw-skills-certification-runtime\n', {
+      encoding: 'utf8',
+      flag: 'wx',
+    });
+
+    const sourceConfigPath = path.join(resolvedRepoRoot, 'tldw_Server_API/Config_Files/config.txt');
+    copyFileSync(sourceConfigPath, profile.configPath);
+    let configText = scrubCredentialValues(readFileSync(profile.configPath, 'utf8'));
+    configText = patchIniValue(configText, 'Setup', 'enable_first_time_setup', 'true');
+    configText = patchIniValue(configText, 'Setup', 'setup_completed', 'true');
+    configText = patchIniValue(configText, 'AuthNZ', 'auth_mode', 'single_user');
+    configText = patchIniValue(configText, 'AuthNZ', 'single_user_api_key', SKILLS_CERT_API_KEY);
+    writeFileSync(profile.configPath, configText, 'utf8');
+    writeProfileEnv(profile);
+
+    return profile;
+  } catch (error) {
+    try {
+      rmSync(root, { force: true, recursive: true });
+    } catch (cleanupError) {
+      throw new AggregateError([error, cleanupError], 'Skills certification profile setup failed');
+    }
+    throw error;
   }
-  writeFileSync(profile.markerPath, 'tldw-skills-certification-runtime\n', {
-    encoding: 'utf8',
-    flag: 'wx',
-  });
-
-  const sourceConfigPath = path.join(resolvedRepoRoot, 'tldw_Server_API/Config_Files/config.txt');
-  copyFileSync(sourceConfigPath, profile.configPath);
-  let configText = scrubCredentialValues(readFileSync(profile.configPath, 'utf8'));
-  configText = patchIniValue(configText, 'Setup', 'enable_first_time_setup', 'true');
-  configText = patchIniValue(configText, 'Setup', 'setup_completed', 'true');
-  configText = patchIniValue(configText, 'AuthNZ', 'auth_mode', 'single_user');
-  configText = patchIniValue(configText, 'AuthNZ', 'single_user_api_key', SKILLS_CERT_API_KEY);
-  writeFileSync(profile.configPath, configText, 'utf8');
-  writeProfileEnv(profile);
-
-  return profile;
 }
 
 /**

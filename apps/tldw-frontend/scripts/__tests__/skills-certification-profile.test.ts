@@ -161,6 +161,14 @@ describe('Skills certification profile', () => {
     expect(path.dirname(profile.root)).toBe(profile.baseRoot);
   });
 
+  it('removes the newly created runtime root when profile setup fails after allocation', () => {
+    const fixture = createFixture();
+    rmSync(path.join(fixture.repoRoot, 'tldw_Server_API/Config_Files/config.txt'));
+
+    expect(() => createProfile(fixture)).toThrow();
+    expect(readdirSync(fixture.temporaryBase)).toEqual([]);
+  });
+
   it('scrubs copied credentials before setting completed single-user auth', () => {
     const fixture = createFixture();
     const profile = createProfile(fixture);

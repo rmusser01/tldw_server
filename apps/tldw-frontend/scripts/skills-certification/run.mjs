@@ -10,6 +10,8 @@ import {
   buildCertificationSummary,
   createSkillsCertificationEvidence,
   finalizeSkillsCertificationEvidence,
+  removeSkillsCertificationEvidence,
+  removeSkillsCertificationRuntime,
 } from './evidence.mjs';
 import { createProcessRegistry, installCertificationSignalHandlers } from './lifecycle.mjs';
 import {
@@ -112,6 +114,8 @@ export async function runSkillsCertification({ operations: suppliedOperations = 
     readJson: defaultReadJson,
     readText: defaultReadText,
     reservePorts,
+    removeEvidence: removeSkillsCertificationEvidence,
+    removeRuntime: removeSkillsCertificationRuntime,
     runChild: defaultRunChild,
     startChild: (registry, command, logPath) => registry.spawn(command, logPath),
     stopChild: (registry, record) => registry.stop(record),
@@ -270,11 +274,36 @@ export async function runSkillsCertification({ operations: suppliedOperations = 
           } catch (error) {
             const detail = `${error?.message ?? ''} ${operations.readText(logPath('frontend'))}`;
             if (operations.isBindConflict(detail) && attempt < 3 && !urlLocked) {
-              if (frontendRecord) await operations.stopChild(registry, frontendRecord);
-              if (backendRecord) await operations.stopChild(registry, backendRecord);
-              backendRecord = undefined;
-              backendUsable = false;
-              continue;
+              let retryCleanupFailed = false;
+              if (frontendRecord) {
+                try {
+                  await operations.stopChild(registry, frontendRecord);
+                } catch {
+                  retryCleanupFailed = true;
+                }
+              }
+              if (!retryCleanupFailed && backendRecord) {
+                try {
+                  await operations.stopChild(registry, backendRecord);
+                } catch {
+                  retryCleanupFailed = true;
+                }
+              }
+              if (!retryCleanupFailed) {
+                backendRecord = undefined;
+                backendUsable = false;
+                continue;
+              }
+              fail('cleanup', 'frontend retry cleanup failed');
+              fail('webui_startup', 'frontend startup failed', 'webui');
+              try {
+                await health();
+                backendUsable = true;
+              } catch {
+                backendUsable = false;
+                fail('backend_health', 'backend health failed');
+              }
+              break;
             }
             fail('webui_startup', 'frontend startup failed', 'webui');
             break;
@@ -285,7 +314,14 @@ export async function runSkillsCertification({ operations: suppliedOperations = 
             try {
               await operations.stopChild(registry, backendRecord);
             } catch {
-              fail('backend_health', 'backend health retry cleanup failed');
+              fail('cleanup', 'backend health retry cleanup failed');
+              try {
+                await health();
+                backendUsable = true;
+              } catch {
+                backendUsable = false;
+                fail('backend_health', 'backend health failed');
+              }
               break;
             }
             backendRecord = undefined;
@@ -471,7 +507,7 @@ export async function runSkillsCertification({ operations: suppliedOperations = 
     );
     if (teardownOutcome.status === 'rejected') fail('cleanup', 'process teardown failed');
     const summaryInput = { failures, surfaces };
-    if (evidence && profile) {
+    if (evidence) {
       try {
         finalSummary = await operations.finalize({
           evidence,
@@ -480,10 +516,24 @@ export async function runSkillsCertification({ operations: suppliedOperations = 
           teardownOutcome,
         });
       } catch {
+        let runtimeDeleted = !profile;
+        try {
+          runtimeDeleted = operations.removeRuntime(profile) === true;
+        } catch {
+          runtimeDeleted = false;
+        }
+        try {
+          operations.removeEvidence(evidence);
+        } catch {
+          // Artifact safety remains failed when marker-safe removal cannot complete.
+        }
         finalSummary = buildCertificationSummary({
           ...summaryInput,
           artifact_safety: { passed: false },
-          cleanup: { children_closed: false, runtime_deleted: false },
+          cleanup: {
+            children_closed: teardownOutcome.status === 'fulfilled',
+            runtime_deleted: runtimeDeleted,
+          },
         });
       }
     } else {
