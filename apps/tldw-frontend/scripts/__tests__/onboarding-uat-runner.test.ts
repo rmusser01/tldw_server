@@ -566,13 +566,14 @@ describe("onboarding UAT runner helpers", () => {
     const record = spawnLoggedProcess({
       name: "invalid-log-child",
       command: process.execPath,
-      args: ["-e", "console.log('one'); console.log('two'); setInterval(() => {}, 1000)"],
+      args: ["-e", "setTimeout(() => { console.log('one'); console.log('two') }, 20); setInterval(() => {}, 1000)"],
       cwd: frontendRoot,
       env: process.env,
       logPath: path.join(process.execPath, "skills-certification.log"),
     })
     try {
       expect(record.child.pid).toBeTruthy()
+      await new Promise<void>((resolve) => record.child.stdout?.once("data", () => resolve()))
       expect(record.loggingErrors.length).toBe(1)
       await stopProcessTree(record, { timeoutMs: 50 })
       expect(record.child.exitCode ?? record.child.signalCode).not.toBeNull()
@@ -683,6 +684,19 @@ describe("onboarding UAT runner helpers", () => {
       timeoutMs: 50,
     })
     expect(child.exitCode).toBe(0)
+  })
+
+  it("rejects when injected Windows taskkill fails", async () => {
+    class WindowsChild extends EventEmitter {
+      pid = 123459
+      exitCode: number | null = null
+      signalCode: string | null = null
+    }
+    await expect(stopProcessTree(new WindowsChild(), {
+      platform: "win32",
+      taskkill: async () => { throw new Error("taskkill failed") },
+      timeoutMs: 50,
+    })).rejects.toThrow("taskkill failed")
   })
 })
 

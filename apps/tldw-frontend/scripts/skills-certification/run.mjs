@@ -155,7 +155,7 @@ export async function runSkillsCertification({ operations: suppliedOperations = 
     } catch {
       // Logging diagnostics must not change the failing phase classification.
     }
-    const message = boundedDetail(error?.message ?? '').slice(0, 200);
+    const message = boundedDetail(error?.message ?? '').slice(0, 199);
     const tail = redactText(String(logText ?? '')).slice(-300);
     return boundedDetail(`${message} ${tail}`);
   };

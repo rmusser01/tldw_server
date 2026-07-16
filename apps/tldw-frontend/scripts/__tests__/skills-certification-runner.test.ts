@@ -183,7 +183,7 @@ describe('Skills certification runner', () => {
       ),
       startChild: vi.fn(async (registry, command) => {
         if (command.name === 'backend') {
-          if (attempt === 1) throw new Error('bind failed');
+          if (attempt === 1) throw new Error('x'.repeat(201));
           throw new Error('import failed');
         }
         return registry.spawn(command, '/log');
@@ -1075,5 +1075,30 @@ describe('Skills certification runner', () => {
     expect(test.operations.removeEvidence).toHaveBeenCalled();
     expect(summary.artifact_safety.passed).toBe(false);
     expect(summary.failures.map((failure) => failure.category)).toContain('interrupted');
+  });
+
+  it('uses safe fallback when handler-removal refresh finalization rejects', async () => {
+    let removals = 0;
+    const test = harness({
+      installHandlers: vi.fn(() => () => {
+        removals += 1;
+        if (removals === 1) throw new Error('partial removal');
+      }),
+    });
+    test.operations.removeRuntime = vi.fn(() => true);
+    test.operations.removeEvidence = vi.fn(() => true);
+    test.operations.finalize = vi
+      .fn()
+      .mockResolvedValueOnce({
+        artifact_safety: { passed: true },
+        cleanup: { children_closed: true, runtime_deleted: true },
+      })
+      .mockRejectedValueOnce(new Error('refresh failed'));
+    const summary = await runSkillsCertification({ operations: test.operations });
+    expect(removals).toBe(2);
+    expect(test.operations.removeRuntime).toHaveBeenCalled();
+    expect(test.operations.removeEvidence).toHaveBeenCalled();
+    expect(summary.artifact_safety.passed).toBe(false);
+    expect(summary.failures.map((failure) => failure.category)).toContain('cleanup');
   });
 });
