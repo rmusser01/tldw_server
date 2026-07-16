@@ -12,7 +12,12 @@ from pathlib import Path
 
 import pytest
 
+from tldw_Server_API.app.core import exceptions as core_exceptions
 from tldw_Server_API.app.core.Research.discovery import contracts as contracts_module
+from tldw_Server_API.app.core.Research.discovery import executor as executor_module
+from tldw_Server_API.app.core.Research.discovery import gateway as gateway_module
+from tldw_Server_API.app.core.Research.discovery import gateway_adapters as gateway_adapters_module
+from tldw_Server_API.app.core.Research.discovery import planner as planner_module
 from tldw_Server_API.app.core.Research.discovery.contracts import (
     AccessRoute,
     AttributionMatch,
@@ -64,6 +69,38 @@ from tldw_Server_API.app.core.Research.discovery.identity import (
 )
 
 pytestmark = pytest.mark.unit
+
+
+def test_discovery_exception_classes_are_centralized_with_compatible_aliases() -> None:
+    compatibility_exports = {
+        "DiscoveryGatewayError": (gateway_module, executor_module),
+        "DiscoveryExecutionError": (executor_module,),
+        "DiscoveryAdapterError": (executor_module, gateway_adapters_module),
+        "PlanningError": (planner_module,),
+        "_PayloadInvalid": (gateway_adapters_module,),
+        "_ParseLimitExceeded": (gateway_adapters_module,),
+        "_ParseDeadlineExceeded": (gateway_adapters_module,),
+    }
+
+    for name, modules in compatibility_exports.items():
+        centralized = getattr(core_exceptions, name)
+        assert centralized.__module__ == core_exceptions.__name__
+        assert all(getattr(module, name) is centralized for module in modules)
+
+    local_names_by_module = {
+        gateway_module: {"DiscoveryGatewayError"},
+        executor_module: {"DiscoveryExecutionError", "DiscoveryAdapterError"},
+        planner_module: {"PlanningError"},
+        gateway_adapters_module: {
+            "_PayloadInvalid",
+            "_ParseLimitExceeded",
+            "_ParseDeadlineExceeded",
+        },
+    }
+    for module, names in local_names_by_module.items():
+        source = ast.parse(Path(module.__file__).read_text(encoding="utf-8"))
+        local_class_names = {node.name for node in source.body if isinstance(node, ast.ClassDef)}
+        assert local_class_names.isdisjoint(names)
 
 
 def test_digest_bound_request_policy_contracts_are_public() -> None:

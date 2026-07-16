@@ -20,6 +20,12 @@ from urllib.parse import unquote, urlsplit
 from defusedxml.common import DefusedXmlException
 from defusedxml.ElementTree import DefusedXMLParser
 
+from tldw_Server_API.app.core.exceptions import (
+    _ParseDeadlineExceeded,
+    _ParseLimitExceeded,
+    _PayloadInvalid,
+)
+
 from .contracts import (
     MAX_PAGINATION_CURSOR,
     DeferredNumericCSVQueryBinding,
@@ -115,18 +121,6 @@ _PUBMED_BINDING_ID = "pubmed_esearch_ids"
 _NCBI_JSON_VERSION = "0.3"
 _MAX_PUBMED_AUTHORS_PER_RECORD = 1_024
 _MAX_PUBMED_ARTICLE_IDS_PER_RECORD = 64
-
-
-class _PayloadInvalid(Exception):
-    pass
-
-
-class _ParseLimitExceeded(Exception):
-    pass
-
-
-class _ParseDeadlineExceeded(Exception):
-    pass
 
 
 class _ParseGuard:

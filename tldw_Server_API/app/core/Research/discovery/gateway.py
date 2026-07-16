@@ -10,9 +10,15 @@ import unicodedata
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
 from datetime import date
-from typing import Literal, TypeAlias
+from typing import TypeAlias
 from urllib.parse import parse_qsl, quote_from_bytes, unquote_to_bytes, urljoin, urlsplit
 
+from tldw_Server_API.app.core.exceptions import (
+    DiscoveryGatewayError,
+)
+from tldw_Server_API.app.core.exceptions import (
+    DiscoveryGatewayErrorCode as GatewayErrorCode,
+)
 from tldw_Server_API.app.core.Research.discovery.contracts import (
     MAX_PAGINATION_CURSOR,
     AccessRoute,
@@ -41,21 +47,9 @@ from tldw_Server_API.app.core.Security.http_hop import (
     request_http_hop,
 )
 
-GatewayErrorCode = Literal[
-    "request_rejected",
-    "policy_inactive",
-    "hop_failed",
-    "invalid_hop_response",
-]
 OneHop: TypeAlias = Callable[[NormalizedHTTPHopRequest], Awaitable[HTTPHopResponse]]
 PolicyActivityCheck: TypeAlias = Callable[[str, str], bool]
 
-_ERROR_MESSAGES: dict[GatewayErrorCode, str] = {
-    "request_rejected": "Discovery gateway request rejected",
-    "policy_inactive": "Discovery gateway policy inactive",
-    "hop_failed": "Discovery gateway hop failed",
-    "invalid_hop_response": "Discovery gateway hop response rejected",
-}
 _TIMEOUT_HOP_ERROR_CODES = frozenset(
     {"dns_timeout", "connect_timeout", "read_timeout", "write_timeout", "total_timeout"}
 )
@@ -75,30 +69,6 @@ _DENIED_IPV6_TRANSITION_NETWORKS = (
     ipaddress.ip_network("2001::/32"),
     ipaddress.ip_network("2002::/16"),
 )
-
-
-class DiscoveryGatewayError(Exception):
-    """Stable failure without request, response, or provider detail."""
-
-    __slots__ = ("code", "retryable", "timed_out")
-
-    def __init__(
-        self,
-        code: GatewayErrorCode,
-        *,
-        retryable: bool = False,
-        timed_out: bool = False,
-    ) -> None:
-        if code not in _ERROR_MESSAGES:
-            raise ValueError("Unsupported discovery gateway error code")
-        if type(retryable) is not bool:
-            raise TypeError("retryable must be a boolean")
-        if type(timed_out) is not bool:
-            raise TypeError("timed_out must be a boolean")
-        self.code = code
-        self.retryable = retryable
-        self.timed_out = timed_out
-        super().__init__(_ERROR_MESSAGES[code])
 
 
 @dataclass(frozen=True, slots=True)

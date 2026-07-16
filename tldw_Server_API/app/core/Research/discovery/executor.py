@@ -10,17 +10,26 @@ from __future__ import annotations
 
 import asyncio
 import copy
-import email.utils
 import math
 import re
 import time
 import uuid
-import weakref
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, fields, is_dataclass, replace
 from enum import Enum
 from types import MappingProxyType
 from typing import Any, Protocol, cast
+
+from tldw_Server_API.app.core.exceptions import (
+    DiscoveryAdapterError,
+    DiscoveryExecutionError,
+)
+from tldw_Server_API.app.core.exceptions import (
+    _trusted_discovery_adapter_error as _trusted_adapter_error,
+)
+from tldw_Server_API.app.core.exceptions import (
+    _valid_discovery_retry_after as _valid_retry_after,
+)
 
 from .contracts import (
     CREDENTIALED_ROUTE_SKIP_REASON,
@@ -80,16 +89,6 @@ _EXECUTION_STOP_CODES = frozenset(
         "execution_clock_invalid",
     }
 )
-_ADAPTER_ERROR_CODES = frozenset(
-    {
-        "provider_rate_limited",
-        "provider_response_rejected",
-        "provider_payload_invalid",
-        "provider_parse_limit_exceeded",
-        "provider_parse_deadline_exceeded",
-    }
-)
-_DELTA_SECONDS_RE = re.compile(r"[0-9]+\Z")
 _CANONICAL_UNSIGNED_DECIMAL_RE = re.compile(r"(?:0|[1-9][0-9]*)\Z")
 _GATEWAY_CANCEL_DRAIN_SECONDS = 0.1
 _DETACHED_GATEWAY_TASKS: set[asyncio.Task[DiscoveryGatewayResponse]] = set()
@@ -113,18 +112,6 @@ PhysicalDispatchState = ExecutionState
 LogicalOutcomeState = ExecutionState
 
 
-class DiscoveryExecutionError(ValueError):
-    """Stable executor failure containing only a sanitized code."""
-
-    __slots__ = ("code",)
-
-    def __init__(self, code: str) -> None:
-        if type(code) is not str or not code:
-            raise TypeError("execution_error_code_must_be_nonempty_string")
-        self.code = code
-        super().__init__(code)
-
-
 def _consume_gateway_task_result(task: asyncio.Task[DiscoveryGatewayResponse]) -> None:
     """Consume one detached gateway result so late completion stays quiet."""
     _DETACHED_GATEWAY_TASKS.discard(task)
@@ -138,72 +125,6 @@ def _detach_gateway_task(task: asyncio.Task[DiscoveryGatewayResponse]) -> None:
     """Keep one cancellation-resistant child alive until its result is consumed."""
     _DETACHED_GATEWAY_TASKS.add(task)
     task.add_done_callback(_consume_gateway_task_result)
-
-
-def _valid_retry_after(value: object) -> bool:
-    """Return whether one value is delta-seconds or strict IMF-fixdate."""
-    if type(value) is not str:
-        return False
-    if _DELTA_SECONDS_RE.fullmatch(value) is not None:
-        return True
-    try:
-        parsed = email.utils.parsedate_to_datetime(value)
-        return email.utils.format_datetime(parsed, usegmt=True) == value
-    except (TypeError, ValueError):
-        return False
-
-
-class DiscoveryAdapterError(ValueError):
-    """Stable adapter failure containing only allowlisted metadata."""
-
-    __slots__ = (
-        "code",
-        "retry_after",
-        "__weakref__",
-    )
-
-    def __init__(self, code: str, *, retry_after: str | None = None) -> None:
-        if type(code) is not str:
-            raise TypeError("adapter_error_code_must_be_string")
-        if code not in _ADAPTER_ERROR_CODES:
-            raise ValueError("adapter_error_code_invalid")
-        if retry_after is not None:
-            if code != "provider_rate_limited":
-                raise ValueError("retry_after_requires_rate_limit")
-            if not _valid_retry_after(retry_after):
-                raise ValueError("retry_after_invalid")
-        self.code = code
-        self.retry_after = retry_after
-        super().__init__(code)
-        _ADAPTER_ERROR_SEALS[self] = (code, retry_after)
-
-
-_ADAPTER_ERROR_SEALS: weakref.WeakKeyDictionary[
-    DiscoveryAdapterError,
-    tuple[str, str | None],
-] = weakref.WeakKeyDictionary()
-
-
-def _trusted_adapter_error(error: BaseException) -> tuple[str, str | None] | None:
-    """Snapshot one exact, unmodified adapter failure."""
-    if type(error) is not DiscoveryAdapterError:
-        return None
-    try:
-        code = error.code
-        retry_after = error.retry_after
-        if (
-            type(code) is not str
-            or (retry_after is not None and type(retry_after) is not str)
-            or _ADAPTER_ERROR_SEALS.get(error) != (code, retry_after)
-            or error.args != (code,)
-            or code not in _ADAPTER_ERROR_CODES
-            or (retry_after is not None and not _valid_retry_after(retry_after))
-            or (code != "provider_rate_limited" and retry_after is not None)
-        ):
-            return None
-    except Exception:  # noqa: BLE001 - malformed adapter failures fail closed.
-        return None
-    return code, retry_after
 
 
 @dataclass(frozen=True, slots=True)
