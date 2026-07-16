@@ -3523,6 +3523,7 @@ async def _astream_bytes_httpx(
         for attempt in range(1, attempts + 1):
             yielded_any = False
             callback_error: BaseException | None = None
+            response_committed = False
             req_headers = _inject_trace_headers(headers)
             resp = None
             try:
@@ -3578,6 +3579,7 @@ async def _astream_bytes_httpx(
                         if on_response is not None:
                             try:
                                 await _invoke_response_callback(on_response, resp.status_code, resp.headers)
+                                response_committed = True
                             except Exception as exc:
                                 callback_error = exc
                                 raise
@@ -3594,6 +3596,7 @@ async def _astream_bytes_httpx(
                     if on_response is not None:
                         try:
                             await _invoke_response_callback(on_response, resp.status_code, resp.headers)
+                            response_committed = True
                         except Exception as exc:
                             callback_error = exc
                             raise
@@ -3621,6 +3624,8 @@ async def _astream_bytes_httpx(
                 if e is callback_error:
                     raise
                 network_exc = NetworkError(e.__class__.__name__)
+                if response_committed:
+                    raise network_exc from e
                 if yielded_any:
                     _log_outbound_request(
                         method=method,
@@ -3662,6 +3667,8 @@ async def _astream_bytes_httpx(
                 sleep_s = delay
             except NetworkError as e:
                 if e is callback_error:
+                    raise
+                if response_committed:
                     raise
                 if yielded_any:
                     _log_outbound_request(
@@ -3743,6 +3750,7 @@ async def _astream_bytes_aiohttp(
         for attempt in range(1, attempts + 1):
             yielded_any = False
             callback_error: BaseException | None = None
+            response_committed = False
             terminal_status_error = False
             resp = None
             req_headers = _inject_trace_headers(headers)
@@ -3806,6 +3814,7 @@ async def _astream_bytes_aiohttp(
                         if on_response is not None:
                             try:
                                 await _invoke_response_callback(on_response, resp.status, resp.headers)
+                                response_committed = True
                             except Exception as exc:
                                 callback_error = exc
                                 raise
@@ -3823,6 +3832,7 @@ async def _astream_bytes_aiohttp(
                     if on_response is not None:
                         try:
                             await _invoke_response_callback(on_response, resp.status, resp.headers)
+                            response_committed = True
                         except Exception as exc:
                             callback_error = exc
                             raise
@@ -3844,7 +3854,7 @@ async def _astream_bytes_aiohttp(
             except asyncio.CancelledError:
                 raise
             except NetworkError as e:
-                if e is callback_error or terminal_status_error:
+                if e is callback_error or terminal_status_error or response_committed:
                     raise
                 if yielded_any:
                     _log_outbound_request(
@@ -3889,6 +3899,8 @@ async def _astream_bytes_aiohttp(
                 if e is callback_error:
                     raise
                 network_exc = NetworkError(e.__class__.__name__)
+                if response_committed:
+                    raise network_exc from e
                 if yielded_any:
                     _log_outbound_request(
                         method=method,
