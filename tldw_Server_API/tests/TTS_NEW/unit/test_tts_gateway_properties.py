@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from itertools import permutations
+
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
@@ -70,7 +72,7 @@ def test_forbidden_relative_path_components_are_always_rejected(value):
         validate_relative_gateway_path(value, field_name="path")
 
 
-@given(st.permutations(("a", "b", "c", "d")))
+@pytest.mark.parametrize("targets", tuple(permutations(("a", "b", "c", "d"))))
 @pytest.mark.unit
 def test_fallback_target_count_is_bounded(targets):
     gateway = {
@@ -81,20 +83,10 @@ def test_fallback_target_count_is_bounded(targets):
         "default_model": "Model",
         "default_voice": "voice",
         "capability_defaults": {"formats": ["mp3"]},
-        "fallback": {
-            "targets": [
-                {"backend": f"gateway:{name}", "model": "Model"}
-                for name in targets
-            ]
-        },
+        "fallback": {"targets": [{"backend": f"gateway:{name}", "model": "Model"} for name in targets]},
     }
     definitions = {"primary": gateway}
-    definitions.update(
-        {
-            name: {**gateway, "fallback": {}}
-            for name in targets
-        }
-    )
+    definitions.update({name: {**gateway, "fallback": {}} for name in targets})
     with pytest.raises(ValueError, match="at most 3"):
         normalize_gateway_specs({}, definitions)
 
@@ -104,7 +96,5 @@ def test_fallback_target_count_is_bounded(targets):
 def test_json_pointer_unescaping_round_trips_tokens(tokens):
     pointer = ""
     if tokens:
-        pointer = "/" + "/".join(
-            token.replace("~", "~0").replace("/", "~1") for token in tokens
-        )
+        pointer = "/" + "/".join(token.replace("~", "~0").replace("/", "~1") for token in tokens)
     assert decode_json_pointer(pointer) == tuple(tokens)
