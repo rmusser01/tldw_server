@@ -339,6 +339,8 @@ def test_release_process_doc_is_authoritative_operator_path() -> None:
     assert "recover" in release_process_text.lower()
     assert "PyPI" in release_process_text
     assert "manual" in release_process_text.lower()
+    assert "`Docs/_site/`" in release_process_text
+    assert "`Docs/site/`" not in release_process_text
 
     assert canonical_release_notes_text == published_release_notes_text
     release_process_url = "https://github.com/rmusser01/tldw_server/blob/main/" "Docs/Development/Release_Process.md"

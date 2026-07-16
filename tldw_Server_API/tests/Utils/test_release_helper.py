@@ -20,10 +20,10 @@ from Helper_Scripts.release import (  # noqa: E402
     find_exact_duplicate_bullets,
     normalize_bullet_text,
     orchestrate_release,
-    read_current_version,
     promote_changelog_unreleased_section,
-    update_pyproject_version,
+    read_current_version,
     update_mkdocs_version_metadata,
+    update_pyproject_version,
     update_readme_release_references,
     update_release_notes_entry_point,
     validate_release_branch,
@@ -730,7 +730,11 @@ version = "0.1.30"
     assert "## [0.1.31] - " in runner._release_notes_body
     assert "Add release helper core docs and metadata" in runner._release_notes_body
     assert runner.get_metadata_warnings()
-    assert all("Docs/site" not in str(path) for path in runner._prepared_paths)
+    generated_site = repo_root / "Docs" / "_site"
+    assert all(
+        path != generated_site and generated_site not in path.parents
+        for path in runner._prepared_paths
+    )
     assert repo_root / "Docs" / "Site" / "RELEASE_NOTES.md" in runner._prepared_paths
     assert repo_root / "Docs" / "Published" in runner._prepared_paths
 
