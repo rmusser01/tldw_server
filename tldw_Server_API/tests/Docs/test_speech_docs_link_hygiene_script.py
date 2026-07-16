@@ -5,6 +5,10 @@ from types import ModuleType
 import pytest
 
 SCRIPT = Path("Helper_Scripts/docs/check_speech_docs_link_hygiene.py")
+QWEN3_ASR_URL = "https://github.com/rmusser01/tldw_server/blob/main/Docs/STT-TTS/QWEN3_ASR_SETUP.md"
+UNREVIEWED_STT_TTS_URL = (
+    "https://github.com/rmusser01/tldw_server/blob/main/Docs/STT-TTS/NOT_A_REVIEWED_OR_EXISTING_GUIDE.md"
+)
 
 
 def _load_hygiene_module() -> ModuleType:
@@ -20,30 +24,61 @@ def test_speech_docs_link_hygiene_script_passes() -> None:
     assert module.main() == 0
 
 
-def test_hygiene_allows_audited_stt_tts_blob_and_rejects_remaining_patterns(
+def _run_hygiene(
+    lines: tuple[str, ...],
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
-) -> None:
+) -> tuple[int, str]:
     readme = tmp_path / "README.md"
-    readme.write_text(
-        "\n".join(
-            (
-                "https://github.com/rmusser01/tldw_server/blob/main/Docs/STT-TTS/QWEN3_ASR_SETUP.md",
-                "https://github.com/rmusser01/tldw_server/blob/main/Docs/Getting-Started-STT_and_TTS.md",
-                "Docs/User_Guides/TTS_Getting_Started.md",
-                "Installation-Setup-Guide.md",
-            )
-        ),
-        encoding="utf-8",
-    )
+    readme.write_text("\n".join(lines), encoding="utf-8")
     module = _load_hygiene_module()
     module.PROJECT_ROOT = tmp_path
     module.MONITORED_ENTRYPOINTS = [Path("README.md")]
     module.MONITORED_DIRS = []
+    result = module.main()
+    return result, capsys.readouterr().out
 
-    assert module.main() == 1
-    output = capsys.readouterr().out
+
+def test_hygiene_allows_audited_qwen_stt_tts_blob(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    result, output = _run_hygiene(
+        (QWEN3_ASR_URL, f"{QWEN3_ASR_URL}#manual-model-download"),
+        tmp_path,
+        capsys,
+    )
+
+    assert result == 0
+    assert "Speech docs link hygiene check passed." in output
+
+
+def test_hygiene_rejects_unreviewed_stt_tts_blob(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    result, output = _run_hygiene((UNREVIEWED_STT_TTS_URL,), tmp_path, capsys)
+
+    assert result == 1
+    assert "unaudited_stt_tts_blob_target" in output
+    assert "NOT_A_REVIEWED_OR_EXISTING_GUIDE.md" in output
+
+
+def test_hygiene_rejects_remaining_legacy_patterns(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    result, output = _run_hygiene(
+        (
+            "https://github.com/rmusser01/tldw_server/blob/main/Docs/Getting-Started-STT_and_TTS.md",
+            "Docs/User_Guides/TTS_Getting_Started.md",
+            "Installation-Setup-Guide.md",
+        ),
+        tmp_path,
+        capsys,
+    )
+
+    assert result == 1
     assert "legacy_stt_tts_blob_link" in output
     assert "bad_tts_user_guide_path" in output
     assert "removed_installation_setup_guide" in output
-    assert "QWEN3_ASR_SETUP.md" not in output

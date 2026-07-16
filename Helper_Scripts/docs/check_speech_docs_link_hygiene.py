@@ -40,6 +40,13 @@ BLOCKED_PATTERNS: dict[str, re.Pattern[str]] = {
     "bad_tts_user_guide_path": re.compile(r"Docs/User_Guides/TTS_Getting_Started\.md"),
     "removed_installation_setup_guide": re.compile(r"Installation-Setup-Guide\.md"),
 }
+STT_TTS_BLOB_PREFIX = "https://github.com/rmusser01/tldw_server/blob/main/Docs/STT-TTS/"
+STT_TTS_BLOB_URL = re.compile(re.escape(STT_TTS_BLOB_PREFIX) + r"[A-Za-z0-9._~%/-]+(?:#[A-Za-z0-9._~%/-]+)?")
+AUDITED_STT_TTS_BLOB_TARGETS = frozenset(
+    {
+        f"{STT_TTS_BLOB_PREFIX}QWEN3_ASR_SETUP.md",
+    }
+)
 
 
 def iter_monitored_files() -> tuple[list[Path], list[Path]]:
@@ -76,6 +83,10 @@ def main() -> int:
             for name, pattern in BLOCKED_PATTERNS.items():
                 if pattern.search(line):
                     failures.append(f"{rel}:{line_no}: [{name}] {line.strip()}")
+            for match in STT_TTS_BLOB_URL.finditer(line):
+                target = match.group(0).split("#", maxsplit=1)[0]
+                if target not in AUDITED_STT_TTS_BLOB_TARGETS:
+                    failures.append(f"{rel}:{line_no}: [unaudited_stt_tts_blob_target] {target}")
 
     if failures:
         print("Speech docs link hygiene violations found:")
