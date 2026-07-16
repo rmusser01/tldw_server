@@ -126,3 +126,55 @@ async def test_get_adapter_async_does_not_cache_superseded_registration() -> Non
     second = await registry.get_adapter_async("async")
     assert isinstance(second, _SecondAdapter)
     assert registry.get_status("async") == ProviderStatus.ENABLED
+
+
+@pytest.mark.asyncio
+async def test_async_stale_materialization_disposer_failure_is_logged_once() -> None:
+    started = asyncio.Event()
+    release = asyncio.Event()
+    discarded: list[tuple[str, object]] = []
+    logged_messages: list[str] = []
+
+    class _FirstAdapter(_AsyncAdapter):
+        pass
+
+    class _SecondAdapter(_AsyncAdapter):
+        pass
+
+    async def _materialize(provider_name: str, spec: object) -> object:
+        if spec is _FirstAdapter:
+            started.set()
+            await release.wait()
+        assert isinstance(spec, type)
+        return spec()
+
+    async def _discard(provider_name: str, adapter: object) -> None:
+        discarded.append((provider_name, adapter))
+        raise RuntimeError("discard callback secret must not be logged")
+
+    registry: ProviderRegistryBase[object] = ProviderRegistryBase(
+        adapter_materializer_async=_materialize,
+        adapter_disposer_async=_discard,
+        adapter_validator=lambda adapter: isinstance(adapter, _AsyncAdapter),
+    )
+    registry.register_adapter("async", _FirstAdapter)
+    first_task = asyncio.create_task(registry.get_adapter_async("async"))
+    await started.wait()
+    registry.register_adapter("async", _SecondAdapter)
+    release.set()
+
+    sink_id = provider_registry_module.logger.add(
+        lambda message: logged_messages.append(message.record["message"]),
+        level="WARNING",
+    )
+    try:
+        assert await first_task is None
+    finally:
+        provider_registry_module.logger.remove(sink_id)
+
+    assert len(discarded) == 1
+    assert discarded[0][0] == "async"
+    assert isinstance(discarded[0][1], _FirstAdapter)
+    assert registry.get_cached_adapters() == {}
+    assert any("RuntimeError" in message for message in logged_messages)
+    assert all("discard callback secret" not in message for message in logged_messages)
