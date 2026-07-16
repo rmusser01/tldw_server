@@ -1,5 +1,6 @@
 import asyncio
 import socket
+from collections.abc import Mapping
 from contextlib import asynccontextmanager, contextmanager
 from contextvars import ContextVar
 from datetime import datetime, timedelta, timezone
@@ -1734,6 +1735,306 @@ async def test_httpx_sse_honors_retry_after(monkeypatch):
     assert calls == 2
     assert delays == [17.0]
     assert events == ["ok"]
+
+
+@requires_httpx
+@pytest.mark.asyncio
+async def test_stream_terminal_response_callback_httpx_skips_retryable_response(monkeypatch):
+    import httpx
+
+    from tldw_Server_API.app.core import http_client as hc
+
+    calls = 0
+    statuses: list[int] = []
+
+    @asynccontextmanager
+    async def fake_httpx_stream_io(**_kwargs):
+        nonlocal calls
+        calls += 1
+        request = httpx.Request("GET", "http://93.184.216.34/stream")
+        response = httpx.Response(503 if calls == 1 else 200, request=request)
+
+        async def body():
+            if calls == 2:
+                yield b"ok"
+
+        yield response, body()
+
+    async def no_sleep(_delay: float) -> None:
+        return None
+
+    def on_response(status: int, _headers: Mapping[str, str]) -> None:
+        statuses.append(status)
+
+    monkeypatch.setattr(hc, "_httpx_stream_io", fake_httpx_stream_io)
+    monkeypatch.setattr(hc.asyncio, "sleep", no_sleep)
+
+    chunks = [
+        chunk
+        async for chunk in hc._astream_bytes_httpx(
+            method="GET",
+            url="http://93.184.216.34/stream",
+            client=object(),
+            retry=hc.RetryPolicy(attempts=2),
+            on_response=on_response,
+        )
+    ]
+
+    assert chunks == [b"ok"]
+    assert statuses == [200]
+
+
+@requires_aiohttp
+@pytest.mark.asyncio
+async def test_stream_terminal_response_callback_aiohttp_skips_retryable_response(monkeypatch):
+    from tldw_Server_API.app.core import http_client as hc
+
+    calls = 0
+    statuses: list[int] = []
+
+    @asynccontextmanager
+    async def fake_aiohttp_stream_io(**_kwargs):
+        nonlocal calls
+        calls += 1
+
+        async def body():
+            if calls == 2:
+                yield b"ok"
+
+        yield AioStreamResponse(
+            "http://93.184.216.34/stream",
+            status=503 if calls == 1 else 200,
+        ), body()
+
+    async def no_sleep(_delay: float) -> None:
+        return None
+
+    async def on_response(status: int, _headers: Mapping[str, str]) -> None:
+        statuses.append(status)
+
+    monkeypatch.setattr(hc, "_aiohttp_stream_io", fake_aiohttp_stream_io)
+    monkeypatch.setattr(hc.asyncio, "sleep", no_sleep)
+
+    chunks = [
+        chunk
+        async for chunk in hc._astream_bytes_aiohttp(
+            method="GET",
+            url="http://93.184.216.34/stream",
+            client=object(),
+            retry=hc.RetryPolicy(attempts=2),
+            on_response=on_response,
+        )
+    ]
+
+    assert chunks == [b"ok"]
+    assert statuses == [200]
+
+
+@requires_httpx
+@pytest.mark.asyncio
+async def test_stream_terminal_response_callback_httpx_reports_exhausted_retry_once(monkeypatch):
+    import httpx
+
+    from tldw_Server_API.app.core import http_client as hc
+
+    events: list[str] = []
+    calls = 0
+
+    @asynccontextmanager
+    async def fake_httpx_stream_io(**_kwargs):
+        nonlocal calls
+        calls += 1
+        request = httpx.Request("GET", "http://93.184.216.34/stream")
+        response = httpx.Response(503, request=request)
+
+        async def body():
+            events.append("body")
+            yield b"error"
+
+        yield response, body()
+
+    def on_response(status: int, _headers: Mapping[str, str]) -> None:
+        events.append(f"callback:{status}")
+
+    async def no_sleep(_delay: float) -> None:
+        return None
+
+    monkeypatch.setattr(hc, "_httpx_stream_io", fake_httpx_stream_io)
+    monkeypatch.setattr(hc.asyncio, "sleep", no_sleep)
+
+    with pytest.raises(hc.NetworkError, match=r"^HTTP 503$"):
+        async for _ in hc._astream_bytes_httpx(
+            method="GET",
+            url="http://93.184.216.34/stream",
+            client=object(),
+            retry=hc.RetryPolicy(attempts=2),
+            on_response=on_response,
+        ):
+            pass
+
+    assert calls == 2
+    assert events == ["callback:503"]
+
+
+@requires_aiohttp
+@pytest.mark.asyncio
+async def test_stream_terminal_response_callback_aiohttp_reports_exhausted_retry_once(monkeypatch):
+    from tldw_Server_API.app.core import http_client as hc
+
+    events: list[str] = []
+    calls = 0
+
+    @asynccontextmanager
+    async def fake_aiohttp_stream_io(**_kwargs):
+        nonlocal calls
+        calls += 1
+
+        async def body():
+            events.append("body")
+            yield b"error"
+
+        yield AioStreamResponse("http://93.184.216.34/stream", status=503), body()
+
+    def on_response(status: int, _headers: Mapping[str, str]) -> None:
+        events.append(f"callback:{status}")
+
+    async def no_sleep(_delay: float) -> None:
+        return None
+
+    monkeypatch.setattr(hc, "_aiohttp_stream_io", fake_aiohttp_stream_io)
+    monkeypatch.setattr(hc.asyncio, "sleep", no_sleep)
+
+    with pytest.raises(hc.NetworkError, match=r"^HTTP 503$"):
+        async for _ in hc._astream_bytes_aiohttp(
+            method="GET",
+            url="http://93.184.216.34/stream",
+            client=object(),
+            retry=hc.RetryPolicy(attempts=2),
+            on_response=on_response,
+        ):
+            pass
+
+    assert calls == 2
+    assert events == ["callback:503"]
+
+
+@requires_aiohttp
+@pytest.mark.asyncio
+async def test_stream_terminal_response_callback_aiohttp_does_not_retry_non_retryable_status(monkeypatch):
+    from tldw_Server_API.app.core import http_client as hc
+
+    calls = 0
+    statuses: list[int] = []
+
+    @asynccontextmanager
+    async def fake_aiohttp_stream_io(**_kwargs):
+        nonlocal calls
+        calls += 1
+
+        async def body():
+            yield b"error"
+
+        yield AioStreamResponse("http://93.184.216.34/stream", status=400), body()
+
+    def on_response(status: int, _headers: Mapping[str, str]) -> None:
+        statuses.append(status)
+
+    monkeypatch.setattr(hc, "_aiohttp_stream_io", fake_aiohttp_stream_io)
+
+    with pytest.raises(hc.NetworkError, match=r"^HTTP 400$"):
+        async for _ in hc._astream_bytes_aiohttp(
+            method="GET",
+            url="http://93.184.216.34/stream",
+            client=object(),
+            retry=hc.RetryPolicy(attempts=3),
+            on_response=on_response,
+        ):
+            pass
+
+    assert calls == 1
+    assert statuses == [400]
+
+
+@requires_httpx
+@pytest.mark.asyncio
+async def test_stream_terminal_response_callback_httpx_reports_redirect_without_following(monkeypatch):
+    import httpx
+
+    from tldw_Server_API.app.core import http_client as hc
+
+    urls: list[str] = []
+    statuses: list[int] = []
+
+    @asynccontextmanager
+    async def fake_httpx_stream_io(**kwargs):
+        request_url = str(kwargs["url"])
+        urls.append(request_url)
+        request = httpx.Request("GET", request_url)
+        response = httpx.Response(302, request=request, headers={"Location": "/final"})
+
+        async def body():
+            yield b"redirect"
+
+        yield response, body()
+
+    def on_response(status: int, _headers: Mapping[str, str]) -> None:
+        statuses.append(status)
+
+    monkeypatch.setattr(hc, "_httpx_stream_io", fake_httpx_stream_io)
+
+    with pytest.raises(hc.NetworkError, match=r"^HTTP 302$"):
+        async for _ in hc._astream_bytes_httpx(
+            method="GET",
+            url="http://93.184.216.34/start",
+            client=object(),
+            on_response=on_response,
+        ):
+            pass
+
+    assert urls == ["http://93.184.216.34/start"]
+    assert statuses == [302]
+
+
+@requires_aiohttp
+@pytest.mark.asyncio
+async def test_stream_terminal_response_callback_aiohttp_reports_redirect_without_following(monkeypatch):
+    from tldw_Server_API.app.core import http_client as hc
+
+    urls: list[str] = []
+    statuses: list[int] = []
+
+    @asynccontextmanager
+    async def fake_aiohttp_stream_io(**kwargs):
+        request_url = str(kwargs["url"])
+        urls.append(request_url)
+
+        async def body():
+            yield b"redirect"
+
+        yield AioStreamResponse(
+            request_url,
+            status=302,
+            headers={"Location": "/final"},
+        ), body()
+
+    def on_response(status: int, _headers: Mapping[str, str]) -> None:
+        statuses.append(status)
+
+    monkeypatch.setattr(hc, "_aiohttp_stream_io", fake_aiohttp_stream_io)
+
+    chunks = [
+        chunk
+        async for chunk in hc._astream_bytes_aiohttp(
+            method="GET",
+            url="http://93.184.216.34/start",
+            client=object(),
+            on_response=on_response,
+        )
+    ]
+
+    assert urls == ["http://93.184.216.34/start"]
+    assert chunks == [b"redirect"]
+    assert statuses == [302]
 
 
 @requires_aiohttp

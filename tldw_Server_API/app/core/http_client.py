@@ -5074,10 +5074,17 @@ def fetch_json(
 # --------------------------------------------------------------------------------------
 
 class _CaseInsensitiveHeaders(Mapping[str, str]):
-    """Read-only response headers with case-insensitive lookup."""
+    """Read-only response headers with case-insensitive lookup.
+
+    Repeated fields are comma-joined in wire order for transport parity and to
+    keep ambiguous singleton headers, such as Content-Type, visible to callers.
+    """
 
     def __init__(self, headers: Mapping[str, Any]) -> None:
-        self._headers = {str(key).lower(): str(value) for key, value in headers.items()}
+        grouped: dict[str, list[str]] = {}
+        for key, value in _iter_response_header_items(headers):
+            grouped.setdefault(str(key).lower(), []).append(str(value))
+        self._headers = {key: ", ".join(values) for key, values in grouped.items()}
 
     def __getitem__(self, key: str) -> str:
         return self._headers[key.lower()]
@@ -5087,6 +5094,30 @@ class _CaseInsensitiveHeaders(Mapping[str, str]):
 
     def __len__(self) -> int:
         return len(self._headers)
+
+
+def _iter_response_header_items(headers: Mapping[str, Any]) -> Iterator[tuple[str, Any]]:
+    """Yield repeated header fields without transport-specific value loss."""
+    multi_items = getattr(headers, "multi_items", None)
+    if callable(multi_items):
+        yield from multi_items()
+        return
+
+    getall = getattr(headers, "getall", None)
+    get_list = getattr(headers, "get_list", None)
+    repeated_getter = getall if callable(getall) else get_list if callable(get_list) else None
+    if repeated_getter is not None:
+        seen: set[str] = set()
+        for key in headers:
+            normalized = str(key).lower()
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            for value in repeated_getter(key):
+                yield str(key), value
+        return
+
+    yield from headers.items()
 
 
 async def _invoke_response_callback(
@@ -5198,12 +5229,6 @@ async def _astream_bytes_httpx(
                         ),
                     )
                 ) as (resp, byte_iter):
-                    if on_response is not None:
-                        try:
-                            await _invoke_response_callback(on_response, resp.status_code, resp.headers)
-                        except Exception as exc:
-                            callback_error = exc
-                            raise
                     try:
                         resp.raise_for_status()
                     except httpx.HTTPStatusError:
@@ -5231,6 +5256,12 @@ async def _astream_bytes_httpx(
                             await asyncio.sleep(delay)
                             sleep_s = delay
                             continue
+                        if on_response is not None:
+                            try:
+                                await _invoke_response_callback(on_response, resp.status_code, resp.headers)
+                            except Exception as exc:
+                                callback_error = exc
+                                raise
                         _log_outbound_request(
                             method=method,
                             url=_observed_url(resp.request.url),
@@ -5241,6 +5272,12 @@ async def _astream_bytes_httpx(
                         )
                         raise _TerminalHTTPStatusError(resp.status_code) from None
 
+                    if on_response is not None:
+                        try:
+                            await _invoke_response_callback(on_response, resp.status_code, resp.headers)
+                        except Exception as exc:
+                            callback_error = exc
+                            raise
                     timed_iter = _iter_bytes_with_timeouts(byte_iter, timeout)
                     try:
                         async for chunk in timed_iter:
@@ -5418,6 +5455,7 @@ async def _astream_bytes_aiohttp(
             )
             yielded_any = False
             callback_error: BaseException | None = None
+            terminal_status_error = False
             resp = None
             req_headers = _inject_trace_headers(headers)
             try:
@@ -5468,12 +5506,6 @@ async def _astream_bytes_aiohttp(
                         ),
                     )
                 ) as (resp, byte_iter):
-                    if on_response is not None:
-                        try:
-                            await _invoke_response_callback(on_response, resp.status, resp.headers)
-                        except Exception as exc:
-                            callback_error = exc
-                            raise
                     if resp.status >= 400:
                         should, rsn = _should_retry(method, resp.status, None, retry)
                         if should and attempt < attempts:
@@ -5499,6 +5531,13 @@ async def _astream_bytes_aiohttp(
                             await asyncio.sleep(delay)
                             sleep_s = delay
                             continue
+                        terminal_status_error = True
+                        if on_response is not None:
+                            try:
+                                await _invoke_response_callback(on_response, resp.status, resp.headers)
+                            except Exception as exc:
+                                callback_error = exc
+                                raise
                         _log_outbound_request(
                             method=method,
                             url=_observed_url(str(getattr(resp, "url", url))),
@@ -5509,6 +5548,12 @@ async def _astream_bytes_aiohttp(
                         )
                         raise _TerminalHTTPStatusError(resp.status)
 
+                    if on_response is not None:
+                        try:
+                            await _invoke_response_callback(on_response, resp.status, resp.headers)
+                        except Exception as exc:
+                            callback_error = exc
+                            raise
                     timed_iter = _iter_bytes_with_timeouts(byte_iter, timeout)
                     try:
                         async for chunk in timed_iter:
@@ -5534,7 +5579,7 @@ async def _astream_bytes_aiohttp(
             except asyncio.CancelledError:
                 raise
             except NetworkError as e:
-                if e is callback_error:
+                if e is callback_error or terminal_status_error:
                     raise
                 if yielded_any:
                     _log_outbound_request(
