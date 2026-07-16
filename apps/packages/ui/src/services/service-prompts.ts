@@ -286,11 +286,14 @@ const legacySyncStorage = createSafeStorage({ area: "sync" })
 
 type SignalOptions = { signal?: AbortSignal }
 
-const throwIfAborted = (signal?: AbortSignal): void => {
-  if (!signal?.aborted) return
+const throwAbortError = (): never => {
   const error = new Error("Service Prompt request was aborted.")
   error.name = "AbortError"
   throw error
+}
+
+const throwIfAborted = (signal?: AbortSignal): void => {
+  if (signal?.aborted) throwAbortError()
 }
 
 const LEGACY_MIGRATION_MAP = Object.freeze([
@@ -466,11 +469,13 @@ const createInvocationSignal = (signal?: AbortSignal): {
 } => {
   const controller = new AbortController()
   const abort = () => controller.abort()
+  const storageWatch = { tldwConfig: abort }
   if (signal?.aborted) {
     abort()
   } else {
     signal?.addEventListener("abort", abort, { once: true })
   }
+  legacyLocalStorage.watch(storageWatch)
   if (typeof window !== "undefined") {
     window.addEventListener("tldw:config-updated", abort)
     window.addEventListener("tldw:auth-credentials-changed", abort)
@@ -479,6 +484,7 @@ const createInvocationSignal = (signal?: AbortSignal): {
     signal: controller.signal,
     cleanup: () => {
       signal?.removeEventListener("abort", abort)
+      legacyLocalStorage.unwatch(storageWatch)
       if (typeof window !== "undefined") {
         window.removeEventListener("tldw:config-updated", abort)
         window.removeEventListener("tldw:auth-credentials-changed", abort)
@@ -487,12 +493,23 @@ const createInvocationSignal = (signal?: AbortSignal): {
   }
 }
 
+const confirmServicePromptScope = async (
+  expectedScopeKey: string,
+  signal: AbortSignal
+): Promise<void> => {
+  const current = await resolveServicePromptScope({ signal })
+  throwIfAborted(signal)
+  if (current.scopeKey !== expectedScopeKey) throwAbortError()
+}
+
 export const loadServicePromptSnapshot = async (
   ids: readonly KnownServicePromptId[],
   options: { signal?: AbortSignal } = {}
 ): Promise<ServicePromptSnapshot> => {
   const invocation = createInvocationSignal(options.signal)
   try {
+    throwIfAborted(invocation.signal)
+    await tldwClient.initialize()
     throwIfAborted(invocation.signal)
     const scope = await resolveServicePromptScope({ signal: invocation.signal })
     throwIfAborted(invocation.signal)
@@ -507,6 +524,7 @@ export const loadServicePromptSnapshot = async (
           invocation.signal
         )
         throwIfAborted(invocation.signal)
+        await confirmServicePromptScope(scope.scopeKey, invocation.signal)
         return snapshot
       }
       throw error
@@ -521,6 +539,7 @@ export const loadServicePromptSnapshot = async (
       requested.includes(candidate.definitionId)
     )
     if (unresolved.length > 0) {
+      await confirmServicePromptScope(scope.scopeKey, invocation.signal)
       const error = new Error(
         "Review workflow prompts before continuing; browser-local values must be imported or discarded."
       ) as Error & { code: string; definitionIds: KnownServicePromptId[] }
@@ -545,6 +564,7 @@ export const loadServicePromptSnapshot = async (
     }
     const snapshot = freezeSnapshot(scope.scopeKey, "supported", definitions)
     throwIfAborted(invocation.signal)
+    await confirmServicePromptScope(scope.scopeKey, invocation.signal)
     return snapshot
   } finally {
     invocation.cleanup()

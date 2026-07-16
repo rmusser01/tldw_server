@@ -82,6 +82,23 @@ const isStringRecord = (value: unknown): value is Record<string, string> => {
   )
 }
 
+const hasExactKeys = (
+  record: Record<string, string>,
+  keys: readonly string[]
+): boolean => Object.keys(record).length === keys.length &&
+  keys.every((key) => Object.prototype.hasOwnProperty.call(record, key))
+
+const recordsEqual = (
+  left: Record<string, string>,
+  right: Record<string, string>
+): boolean => {
+  const keys = Object.keys(left)
+  return hasExactKeys(right, keys) && keys.every((key) => left[key] === right[key])
+}
+
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 const isServicePromptPart = (value: unknown): value is ServicePromptPart => {
   const record = asRecord(value)
   return record !== null &&
@@ -104,14 +121,20 @@ const isServicePromptCatalogItem = (
   value: unknown
 ): value is ServicePromptCatalogItem => {
   const record = asRecord(value)
-  return record !== null &&
-    typeof record.id === "string" &&
-    typeof record.label === "string" &&
-    typeof record.description === "string" &&
-    Array.isArray(record.parts) &&
-    record.parts.every(isServicePromptPart) &&
-    Array.isArray(record.affected_workflows) &&
-    record.affected_workflows.every(isServicePromptWorkflow)
+  if (record === null ||
+    typeof record.id !== "string" ||
+    typeof record.label !== "string" ||
+    typeof record.description !== "string" ||
+    !Array.isArray(record.parts) ||
+    !record.parts.every(isServicePromptPart) ||
+    !Array.isArray(record.affected_workflows) ||
+    !record.affected_workflows.every(isServicePromptWorkflow)
+  ) {
+    return false
+  }
+  const partKeys = record.parts.map((part) => part.key)
+  return partKeys.every((key) => key.length > 0) &&
+    new Set(partKeys).size === partKeys.length
 }
 
 const isServicePromptDetail = (
@@ -122,11 +145,34 @@ const isServicePromptDetail = (
     return false
   }
   const record = value as unknown as Record<string, unknown>
-  return isStringRecord(record.default_parts) &&
-    (record.saved_parts === null || isStringRecord(record.saved_parts)) &&
-    isStringRecord(record.effective_parts) &&
-    (record.source === "user" || record.source === "packaged") &&
-    (record.revision === null || typeof record.revision === "string")
+  const defaultParts = record.default_parts
+  const savedParts = record.saved_parts
+  const effectiveParts = record.effective_parts
+  if (!isStringRecord(defaultParts) || !isStringRecord(effectiveParts)) {
+    return false
+  }
+  if (savedParts !== null && !isStringRecord(savedParts)) {
+    return false
+  }
+  const validatedSavedParts = savedParts as Record<string, string> | null
+  const partKeys = value.parts.map((part) => part.key)
+  if (!hasExactKeys(defaultParts, partKeys) ||
+    !hasExactKeys(effectiveParts, partKeys) ||
+    (validatedSavedParts !== null &&
+      !hasExactKeys(validatedSavedParts, partKeys))
+  ) {
+    return false
+  }
+  if (record.source === "packaged") {
+    return validatedSavedParts === null &&
+      record.revision === null &&
+      recordsEqual(effectiveParts, defaultParts)
+  }
+  return record.source === "user" &&
+    validatedSavedParts !== null &&
+    typeof record.revision === "string" &&
+    UUID_PATTERN.test(record.revision) &&
+    recordsEqual(effectiveParts, validatedSavedParts)
 }
 
 export class ServicePromptApiError extends Error {
@@ -245,7 +291,12 @@ export const servicePromptMethods = {
       expectedStatuses: [404, 409, 422, 500],
       abortSignal: options?.signal
     })
-    if (!isServicePromptDetail(response, id)) {
+    if (!isServicePromptDetail(response, id) ||
+      response.source !== "user" ||
+      response.saved_parts === null ||
+      !recordsEqual(response.saved_parts, payload.parts) ||
+      !recordsEqual(response.effective_parts, payload.parts)
+    ) {
       throw invalidProtocolResponse()
     }
     return response
@@ -265,7 +316,7 @@ export const servicePromptMethods = {
       expectedStatuses: [404, 409, 422, 500],
       abortSignal: options?.signal
     })
-    if (!isServicePromptDetail(response, id)) {
+    if (!isServicePromptDetail(response, id) || response.source !== "packaged") {
       throw invalidProtocolResponse()
     }
     return response

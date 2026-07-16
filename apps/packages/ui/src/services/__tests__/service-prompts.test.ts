@@ -5,6 +5,9 @@ const mocks = vi.hoisted(() => ({
   syncGet: vi.fn(),
   localRemove: vi.fn(),
   syncRemove: vi.fn(),
+  localWatch: vi.fn(),
+  localUnwatch: vi.fn(),
+  initialize: vi.fn(),
   getConfig: vi.fn(),
   getCurrentUser: vi.fn(),
   listServicePrompts: vi.fn(),
@@ -13,7 +16,8 @@ const mocks = vi.hoisted(() => ({
   promptForRag: vi.fn(),
   getWebSearchPrompt: vi.fn(),
   buildScope: vi.fn(),
-  isHosted: vi.fn()
+  isHosted: vi.fn(),
+  bgRequest: vi.fn()
 }))
 
 vi.mock("@/utils/safe-storage", () => ({
@@ -21,12 +25,19 @@ vi.mock("@/utils/safe-storage", () => ({
     get: (...args: unknown[]) =>
       (area === "sync" ? mocks.syncGet : mocks.localGet)(...args),
     remove: (...args: unknown[]) =>
-      (area === "sync" ? mocks.syncRemove : mocks.localRemove)(...args)
+      (area === "sync" ? mocks.syncRemove : mocks.localRemove)(...args),
+    watch: (...args: unknown[]) => mocks.localWatch(...args),
+    unwatch: (...args: unknown[]) => mocks.localUnwatch(...args)
   })
+}))
+
+vi.mock("@/services/background-proxy", () => ({
+  bgRequest: (...args: unknown[]) => mocks.bgRequest(...args)
 }))
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
+    initialize: (...args: unknown[]) => mocks.initialize(...args),
     getConfig: (...args: unknown[]) => mocks.getConfig(...args),
     listServicePrompts: (...args: unknown[]) => mocks.listServicePrompts(...args),
     getServicePrompt: (...args: unknown[]) => mocks.getServicePrompt(...args),
@@ -77,6 +88,7 @@ import type {
   ServicePromptDetail
 } from "@/services/tldw/domains/service-prompts"
 import { ServicePromptApiError } from "@/services/tldw/domains/service-prompts"
+import { servicePromptMethods } from "@/services/tldw/domains/service-prompts"
 
 const definition = (
   id: KnownServicePromptId,
@@ -275,6 +287,8 @@ const config = {
   apiKey: "test-key"
 }
 
+const VALID_REVISION = "123e4567-e89b-42d3-a456-426614174000"
+
 const detailFor = (
   id: KnownServicePromptId,
   overrides: Partial<ServicePromptDetail> = {}
@@ -306,6 +320,7 @@ describe("Service Prompt migration and runtime snapshots", () => {
     mocks.syncGet.mockResolvedValue(undefined)
     mocks.localRemove.mockResolvedValue(undefined)
     mocks.syncRemove.mockResolvedValue(undefined)
+    mocks.initialize.mockResolvedValue(undefined)
     mocks.getConfig.mockResolvedValue(config)
     mocks.getCurrentUser.mockResolvedValue({ id: 42, username: "user" })
     mocks.buildScope.mockReturnValue("scope:server:user")
@@ -325,6 +340,7 @@ describe("Service Prompt migration and runtime snapshots", () => {
     mocks.getWebSearchPrompt.mockResolvedValue(
       fixture.defaults["chat.web_search.answer"].template
     )
+    mocks.bgRequest.mockReset()
   })
 
   it("raw-probes fixed legacy keys with local RAG precedence and local-only web search", async () => {
@@ -671,6 +687,138 @@ describe("Service Prompt migration and runtime snapshots", () => {
     expect(mocks.getServicePrompt).not.toHaveBeenCalled()
   })
 
+  it("aborts an active read when the cross-context config watcher fires", async () => {
+    let detailSignal: AbortSignal | undefined
+    mocks.getServicePrompt.mockImplementation(
+      async (_id: KnownServicePromptId, options: { signal?: AbortSignal }) => {
+        detailSignal = options.signal
+        return await new Promise<ServicePromptDetail>((_resolve, reject) => {
+          options.signal?.addEventListener("abort", () =>
+            reject(new DOMException("Aborted", "AbortError")))
+        })
+      }
+    )
+    const external = new AbortController()
+    const pending = loadServicePromptSnapshot(
+      ["chat.rag.answer"],
+      { signal: external.signal }
+    )
+    await vi.waitFor(() => expect(detailSignal).toBeDefined())
+
+    const watched = mocks.localWatch.mock.calls.at(-1)?.[0] as
+      | { tldwConfig?: (change: { newValue?: unknown }) => void }
+      | undefined
+    if (watched?.tldwConfig) {
+      watched.tldwConfig({ newValue: { ...config, serverUrl: "https://new.example" } })
+    } else {
+      external.abort()
+    }
+
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" })
+    expect(watched?.tldwConfig).toBeTypeOf("function")
+    expect(mocks.localUnwatch).toHaveBeenCalledWith(watched)
+  })
+
+  it("rehydrates client config at the start of every invocation", async () => {
+    const nextConfig = { ...config, serverUrl: "https://next.example" }
+    let liveConfig = config
+    mocks.getConfig.mockImplementation(async () => liveConfig)
+    mocks.initialize.mockImplementation(async () => {
+      if (mocks.initialize.mock.calls.length === 2) {
+        liveConfig = nextConfig
+      }
+    })
+    mocks.buildScope.mockImplementation((cfg: typeof config) =>
+      `scope:${cfg.serverUrl}`
+    )
+
+    const first = await loadServicePromptSnapshot(["chat.rag.answer"])
+    const second = await loadServicePromptSnapshot(["chat.rag.answer"])
+
+    expect(mocks.initialize).toHaveBeenCalledTimes(2)
+    expect(first.scopeKey).toBe("scope:https://server.example")
+    expect(second.scopeKey).toBe("scope:https://next.example")
+  })
+
+  it("treats an initialize-time config normalization write as scope cancellation", async () => {
+    mocks.initialize.mockImplementation(async () => {
+      const watched = mocks.localWatch.mock.calls.at(-1)?.[0] as
+        | { tldwConfig?: (change: { newValue?: unknown }) => void }
+        | undefined
+      watched?.tldwConfig?.({ newValue: config })
+    })
+
+    await expect(
+      loadServicePromptSnapshot(["chat.rag.answer"])
+    ).rejects.toMatchObject({ name: "AbortError" })
+    expect(mocks.getConfig).not.toHaveBeenCalled()
+  })
+
+  it("aborts when the hosted principal changes before a supported return", async () => {
+    mocks.isHosted.mockReturnValue(true)
+    mocks.getCurrentUser
+      .mockResolvedValueOnce({ id: 42, username: "first" })
+      .mockResolvedValueOnce({ id: 84, username: "second" })
+    mocks.buildScope.mockImplementation(
+      (_cfg: typeof config, options?: { userId?: number }) =>
+        `scope:user:${options?.userId}`
+    )
+
+    await expect(
+      loadServicePromptSnapshot(["chat.rag.answer"])
+    ).rejects.toMatchObject({ name: "AbortError" })
+    expect(mocks.getCurrentUser).toHaveBeenCalledTimes(2)
+  })
+
+  it("confirms hosted principal before legacy return and migration-required errors", async () => {
+    mocks.isHosted.mockReturnValue(true)
+    mocks.buildScope.mockImplementation(
+      (_cfg: typeof config, options?: { userId?: number }) =>
+        `scope:user:${options?.userId}`
+    )
+    mocks.listServicePrompts.mockRejectedValueOnce(
+      new ServicePromptApiError("Not found", { status: 404 })
+    )
+    mocks.getCurrentUser
+      .mockResolvedValueOnce({ id: 42, username: "first" })
+      .mockResolvedValueOnce({ id: 84, username: "second" })
+
+    await expect(
+      loadServicePromptSnapshot(["chat.rag.answer"])
+    ).rejects.toMatchObject({ name: "AbortError" })
+
+    vi.clearAllMocks()
+    mocks.initialize.mockResolvedValue(undefined)
+    mocks.isHosted.mockReturnValue(true)
+    mocks.getConfig.mockResolvedValue(config)
+    mocks.buildScope.mockImplementation(
+      (_cfg: typeof config, options?: { userId?: number }) =>
+        `scope:user:${options?.userId}`
+    )
+    mocks.listServicePrompts.mockResolvedValue(catalog)
+    mocks.localGet.mockImplementation(async (key: string) =>
+      key === "systemPromptForRag"
+        ? "legacy {context} {question}"
+        : undefined
+    )
+    mocks.syncGet.mockResolvedValue(undefined)
+    mocks.getCurrentUser
+      .mockResolvedValueOnce({ id: 42, username: "first" })
+      .mockResolvedValueOnce({ id: 84, username: "second" })
+
+    await expect(
+      loadServicePromptSnapshot(["chat.rag.answer"])
+    ).rejects.toMatchObject({ name: "AbortError" })
+  })
+
+  it("always removes the per-invocation config watcher", async () => {
+    await loadServicePromptSnapshot(["chat.rag.answer"])
+
+    const watched = mocks.localWatch.mock.calls[0]?.[0]
+    expect(watched).toBeDefined()
+    expect(mocks.localUnwatch).toHaveBeenCalledWith(watched)
+  })
+
   it("clears both raw areas only after each successful import", async () => {
     const candidates = [
       {
@@ -739,6 +887,36 @@ describe("Service Prompt migration and runtime snapshots", () => {
       partKey: "template" as const,
       storageKey: "systemPromptForRag" as const,
       value: "import {context} {question}"
+    }
+
+    await expect(importLegacyServicePromptCandidate(
+      candidate,
+      detailFor("chat.rag.answer")
+    )).rejects.toMatchObject({ code: "service_prompt_protocol_error" })
+    expect(mocks.localRemove).not.toHaveBeenCalled()
+    expect(mocks.syncRemove).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ["packaged PUT response", detailFor("chat.rag.answer")],
+    ["mismatched user PUT response", detailFor("chat.rag.answer", {
+      saved_parts: { template: "Different {context} {question}" },
+      effective_parts: { template: "Different {context} {question}" },
+      source: "user",
+      revision: VALID_REVISION
+    })]
+  ])("does not clear raw values after a %s", async (_name, response) => {
+    mocks.bgRequest.mockResolvedValueOnce(response)
+    mocks.saveServicePrompt.mockImplementation((
+      id: string,
+      payload: { parts: Record<string, string>; expected_revision: string | null },
+      options?: { signal?: AbortSignal }
+    ) => servicePromptMethods.saveServicePrompt(id, payload, options))
+    const candidate = {
+      definitionId: "chat.rag.answer" as const,
+      partKey: "template" as const,
+      storageKey: "systemPromptForRag" as const,
+      value: "Submitted {context} {question}"
     }
 
     await expect(importLegacyServicePromptCandidate(

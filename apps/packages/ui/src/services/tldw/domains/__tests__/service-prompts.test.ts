@@ -30,6 +30,20 @@ const detail = {
   revision: null
 }
 
+const VALID_REVISION = "123e4567-e89b-42d3-a456-426614174000"
+
+const userDetail = (
+  parts: Record<string, string>,
+  id = "chat.rag.answer"
+) => ({
+  ...detail,
+  id,
+  saved_parts: parts,
+  effective_parts: parts,
+  source: "user" as const,
+  revision: VALID_REVISION
+})
+
 describe("Service Prompt API methods", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -71,12 +85,12 @@ describe("Service Prompt API methods", () => {
   })
 
   it("puts the complete parts and compare-and-swap revision", async () => {
-    vi.mocked(bgRequest).mockResolvedValueOnce(detail)
     const controller = new AbortController()
     const request = {
       parts: { template: "Use {context}; answer {question}" },
       expected_revision: "revision-1"
     }
+    vi.mocked(bgRequest).mockResolvedValueOnce(userDetail(request.parts))
 
     await servicePromptMethods.saveServicePrompt(
       "chat.rag.answer",
@@ -257,6 +271,91 @@ describe("Service Prompt API methods", () => {
     await expect(servicePromptMethods.listServicePrompts()).resolves.toEqual([
       future
     ])
+  })
+
+  it.each([
+    ["empty", [{ ...detail.parts[0], key: "" }]],
+    ["duplicate", [detail.parts[0], { ...detail.parts[0] }]]
+  ])("rejects %s declared part keys", async (_name, parts) => {
+    vi.mocked(bgRequest).mockResolvedValueOnce([{ ...detail, parts }])
+
+    await expect(servicePromptMethods.listServicePrompts()).rejects.toMatchObject({
+      status: 0,
+      code: "service_prompt_protocol_error"
+    })
+  })
+
+  it.each([
+    ["default", { default_parts: {} }],
+    ["effective", { effective_parts: { template: detail.effective_parts.template, extra: "x" } }],
+    ["saved", {
+      ...userDetail({ template: "Saved {context} {question}" }),
+      saved_parts: {}
+    }]
+  ])("requires %s records to have exactly the declared keys", async (_name, change) => {
+    vi.mocked(bgRequest).mockResolvedValueOnce({ ...detail, ...change })
+
+    await expect(
+      servicePromptMethods.getServicePrompt("chat.rag.answer")
+    ).rejects.toMatchObject({ code: "service_prompt_protocol_error" })
+  })
+
+  it.each([
+    ["saved parts", { saved_parts: { template: detail.default_parts.template } }],
+    ["revision", { revision: VALID_REVISION }],
+    ["different effective parts", {
+      effective_parts: { template: "Different {context} {question}" }
+    }]
+  ])("rejects noncanonical packaged detail with %s", async (_name, change) => {
+    vi.mocked(bgRequest).mockResolvedValueOnce({ ...detail, ...change })
+
+    await expect(
+      servicePromptMethods.getServicePrompt("chat.rag.answer")
+    ).rejects.toMatchObject({ code: "service_prompt_protocol_error" })
+  })
+
+  it.each([
+    ["null saved parts", { saved_parts: null }],
+    ["null revision", { revision: null }],
+    ["invalid revision", { revision: "not-a-uuid" }],
+    ["different effective parts", {
+      effective_parts: { template: "Different {context} {question}" }
+    }]
+  ])("rejects noncanonical user detail with %s", async (_name, change) => {
+    const saved = { template: "Saved {context} {question}" }
+    vi.mocked(bgRequest).mockResolvedValueOnce({
+      ...userDetail(saved),
+      ...change
+    })
+
+    await expect(
+      servicePromptMethods.getServicePrompt("chat.rag.answer")
+    ).rejects.toMatchObject({ code: "service_prompt_protocol_error" })
+  })
+
+  it.each([
+    ["packaged response", detail],
+    ["different user parts", userDetail({
+      template: "Server changed {context} {question}"
+    })]
+  ])("rejects PUT success with %s", async (_name, response) => {
+    const parts = { template: "Submitted {context} {question}" }
+    vi.mocked(bgRequest).mockResolvedValueOnce(response)
+
+    await expect(servicePromptMethods.saveServicePrompt(
+      "chat.rag.answer",
+      { parts, expected_revision: null }
+    )).rejects.toMatchObject({ code: "service_prompt_protocol_error" })
+  })
+
+  it("rejects a DELETE success that is not canonical packaged state", async () => {
+    vi.mocked(bgRequest).mockResolvedValueOnce(userDetail({
+      template: "Still saved {context} {question}"
+    }))
+
+    await expect(
+      servicePromptMethods.resetServicePrompt("chat.rag.answer", VALID_REVISION)
+    ).rejects.toMatchObject({ code: "service_prompt_protocol_error" })
   })
 
   it("rejects malformed and mismatched successful detail responses", async () => {
