@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
+from fastapi import HTTPException
 
 from tldw_Server_API.app.api.v1.endpoints import translate as translate_module
 from tldw_Server_API.app.api.v1.schemas.translate_schemas import TranslateRequest
@@ -164,6 +165,61 @@ async def test_translation_real_analyzer_preserves_json_like_prompt_and_hides_it
     assert dispatch_calls[0][0][0] == expected_prompt
     assert secret not in "".join(captured_logs)
     assert output_secret not in "".join(captured_logs)
+
+
+@pytest.mark.asyncio
+async def test_translation_real_analyzer_does_not_log_error_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    secret = "ANALYZER-ERROR-RESULT-MUST-NOT-LEAK"
+    monkeypatch.setattr(
+        summarization_module,
+        "_dispatch_to_api",
+        lambda *_args, **_kwargs: f"Error: {secret}",
+    )
+    captured_logs: list[str] = []
+    sink_id = summarization_module.logging.add(captured_logs.append, format="{message}")
+    try:
+        with pytest.raises(HTTPException):
+            await translate_module.translate_text(
+                _request(),
+                current_user=SimpleNamespace(id=1),
+                db=_PromptDatabase(),
+            )
+    finally:
+        summarization_module.logging.remove(sink_id)
+
+    assert secret not in "".join(captured_logs)
+
+
+@pytest.mark.asyncio
+async def test_translation_real_adapter_exception_is_content_free(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    secret = "ANALYZER-ADAPTER-EXCEPTION-MUST-NOT-LEAK"
+
+    class ExplodingAdapter:
+        def chat(self, _request: object, *, timeout: float | None = None) -> object:
+            raise RuntimeError(secret)
+
+    class FakeRegistry:
+        def get_adapter(self, _provider: str) -> ExplodingAdapter:
+            return ExplodingAdapter()
+
+    monkeypatch.setattr(summarization_module, "get_registry", FakeRegistry)
+    captured_logs: list[str] = []
+    sink_id = summarization_module.logging.add(captured_logs.append, format="{message}")
+    try:
+        with pytest.raises(HTTPException):
+            await translate_module.translate_text(
+                _request(),
+                current_user=SimpleNamespace(id=1),
+                db=_PromptDatabase(),
+            )
+    finally:
+        summarization_module.logging.remove(sink_id)
+
+    assert secret not in "".join(captured_logs)
 
 
 @pytest.mark.asyncio
