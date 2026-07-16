@@ -70,8 +70,9 @@ References:
 - `TTSRequest.__post_init__` currently lowercases model names. Gateway model IDs
   may be case-sensitive; only lookup copies may be normalized.
 - The speech endpoint prefetches the first chunk before constructing its
-  `StreamingResponse`. This provides the correct boundary for pre-byte fallback
-  and response-header selection.
+  `StreamingResponse`. This provides the pre-commit fallback and response-header
+  boundary for native streaming only; non-streaming and converted responses have
+  later commit points because they are fully buffered.
 - The central HTTP client already performs egress and redirect validation. The
   gateway adapter must reuse it.
 - The current TTS service can append fallback output after a partial stream. The
@@ -363,8 +364,9 @@ Pointer entries in `allowed_request_options` are evaluated relative to that
 object and name allowed leaf values. Only the allowlisted leaves are copied into
 the upstream request body.
 
-Common fields such as `model`, `input`, `voice`, `response_format`, `speed`, and
-`language` are reserved and can never be overwritten through `extra_params`.
+Common fields such as `model`, `input`, `voice`, `response_format`, `speed`,
+`lang_code`, `language`, and `target_sample_rate` are reserved and can never be
+overwritten through `extra_params`.
 The object has conservative depth, leaf-count, string-length, and serialized
 byte limits. Arrays and objects must also respect those limits. Unknown,
 parent-only, or partially matching pointers are rejected rather than dropped.
@@ -485,6 +487,12 @@ information determines whether a valid model-specific voice or common-field
 default should apply; an explicitly supplied value is never mistaken for an
 omitted one.
 
+For an explicit gateway, the canonical language value is explicit `lang_code`,
+falling back to explicit `language` only when `lang_code` is absent. If both were
+explicitly supplied with different values, validation fails. The adapter emits
+the upstream field as `language` only when the effective model declares language
+support. Legacy-provider alias behavior remains unchanged.
+
 ### Discovery endpoints
 
 Existing shapes remain compatible:
@@ -580,8 +588,28 @@ removed gateway from remaining in the active BYOK allowlist.
 ### Streaming boundary
 
 Fallback and error replacement are legal only before the first audio byte is
-committed to the client. The speech endpoint's existing first-chunk prefetch is
-the commit boundary.
+committed to the client and only for configured, non-terminal failure
+categories. The concrete cutoff depends on the response path:
+
+- **Native streaming (`stream=true`):** the commit point is when the first
+  validated complete audio chunk is yielded to the ASGI response. The endpoint's
+  first-chunk prefetch keeps status, MIME/signature validation, and eligible
+  pre-yield failures before that point.
+- **Native non-streaming (`stream=false`):** the entire upstream iterator is
+  buffered and validated before a response is constructed. An eligible upstream
+  failure after partial upstream audio but before full success may discard that
+  attempt and use fallback because no client byte was committed.
+- **Buffered conversion (either public stream mode):** the native source is fully
+  collected and validated before conversion, and the converted result is fully
+  validated before response construction. Eligible upstream collection or
+  source-validation failures may discard the source and use fallback. Once local
+  conversion begins, conversion/size/resource failures remain terminal even
+  though no client byte has been committed.
+
+The latter two cases can incur more than one billed synthesis after partial
+upstream work. That behavior occurs only when the administrator explicitly
+allowlists the resulting failure category and the caller has not disabled
+fallback.
 
 After the first byte:
 
@@ -591,8 +619,19 @@ After the first byte:
 - No audio from a second provider is concatenated.
 
 Before the first byte, a failed attempt is discarded and may advance to the next
-configured fallback target. Buffered attempts are likewise discarded in full
-before fallback.
+configured fallback target according to the mode rules above. Buffered attempts
+and all partial upstream bytes are discarded in full before fallback.
+
+### Attempt resource ownership
+
+Every synthesis attempt owns its upstream iterator/response and its concurrency
+and circuit permits. Attempt execution uses `finally`-based cleanup so those
+resources are closed or released exactly once on success, configured fallback,
+client disconnect, task cancellation, response-size termination, validation
+failure, and any other terminal stream error. The endpoint also closes its
+top-level speech iterator when it stops consuming early. Cancellation is
+re-raised after cleanup and never converted into fallback or a public audio
+payload.
 
 ### Audio validation
 
@@ -756,6 +795,8 @@ URLs or credential availability sources.
   model casing, model-specific voice defaults, common-field capability flags,
   and gateway capability defaults.
 - JSON Pointer leaf allowlists, reserved-field protection, and payload bounds.
+- Gateway language alias precedence/conflict handling and reserved
+  `target_sample_rate` protection.
 - Flat fallback target validation, primary-policy ownership, synthesis-attempt
   counting, error eligibility, target skipping, and fresh per-attempt
   request/credential resolution.
@@ -789,10 +830,14 @@ service. Cover:
 - Upstream 401/402/404/429/5xx errors and sanitized public mappings.
 - MIME aliases, signatures, opt-in octet-stream, PCM metadata, content length,
   and streaming byte limits.
-- Fallback before the first byte and terminal failure after it.
+- Mode-specific fallback cutoffs for native streaming, native non-streaming, and
+  buffered conversion, including partial upstream audio before client commit.
 - Target capability preflight, incompatible-target skipping without a POST,
   original-error preservation when every target is skipped, and cancellation
   without fallback.
+- Upstream response/iterator closure and concurrency/circuit permit release on
+  success, fallback, disconnect, cancellation, size termination, validation
+  failure, and terminal stream errors.
 - Exactly one upstream POST for each primary or fallback synthesis attempt,
   including pre-yield network failure and conversion-source synthesis.
 - Proof that output from separate attempts is never concatenated.
