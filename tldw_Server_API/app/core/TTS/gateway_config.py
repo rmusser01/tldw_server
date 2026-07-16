@@ -10,6 +10,7 @@ import re
 import shutil
 from collections.abc import Mapping
 from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from types import MappingProxyType
 from typing import Any
 from urllib.parse import unquote, urlsplit
@@ -22,6 +23,19 @@ _ENV_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 _HEADER_NAME_RE = re.compile(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+\Z")
 _UNSET = object()
 _MAX_PATH_DECODE_PASSES = 8
+_FALLBACK_CATEGORIES = frozenset(
+    {
+        "timeout",
+        "network_error",
+        "upstream_5xx",
+        "circuit_open",
+        "rate_limited",
+        "quota_exceeded",
+        "authentication_failed",
+        "model_not_found",
+        "invalid_audio",
+    }
+)
 _RESERVED_BACKENDS = frozenset(
     {
         "alltalk",
@@ -77,7 +91,11 @@ _RESERVED_OPTION_TOKENS = frozenset(
 
 
 class _FrozenModel(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(
+        frozen=True,
+        extra="forbid",
+        hide_input_in_errors=True,
+    )
 
 
 class GatewayPCMCapabilities(_FrozenModel):
@@ -185,8 +203,22 @@ class GatewayFallbackTarget(_FrozenModel):
     """One server-configured fallback route."""
 
     backend: str
-    model: str | None = None
+    model: str
     voice: str | None = None
+
+    @field_validator("model")
+    @classmethod
+    def validate_model(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("fallback target model cannot be blank")
+        return value
+
+    @field_validator("voice")
+    @classmethod
+    def validate_voice(cls, value: str | None) -> str | None:
+        if value is not None and not value.strip():
+            raise ValueError("fallback target voice cannot be blank")
+        return value
 
 
 class GatewayFallbackPolicy(_FrozenModel):
@@ -195,6 +227,18 @@ class GatewayFallbackPolicy(_FrozenModel):
     on: tuple[str, ...] = ()
     max_attempts: int = Field(default=1, ge=1, le=4)
     targets: tuple[GatewayFallbackTarget, ...] = Field(default=(), max_length=3)
+
+    @field_validator("on")
+    @classmethod
+    def validate_categories(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if any(not category.strip() for category in value):
+            raise ValueError("fallback categories cannot be blank")
+        unknown = set(value) - _FALLBACK_CATEGORIES
+        if unknown:
+            raise ValueError("fallback contains an unknown category")
+        if len(set(value)) != len(value):
+            raise ValueError("fallback categories cannot contain duplicates")
+        return value
 
 
 class GatewayConfig(_FrozenModel):
@@ -207,7 +251,7 @@ class GatewayConfig(_FrozenModel):
     speech_path: str | None = None
     models_path: str | None = None
     headers: tuple[tuple[str, str], ...] = ()
-    api_key: str | None = None
+    api_key: str | None = Field(default=None, repr=False)
     allow_user_api_key: bool = False
     default_model: str | None = None
     default_voice: str | None = None
@@ -240,7 +284,7 @@ class GatewaySpec:
     models_path: str | None
     discovery_query: tuple[tuple[str, str], ...]
     headers: tuple[tuple[str, str], ...]
-    api_key: str | None
+    api_key: str | None = dataclass_field(repr=False)
     allow_user_api_key: bool
     default_model: str | None
     default_voice: str | None
@@ -536,9 +580,22 @@ def materialize_gateway_config(
         return config
 
     default_overlay = config.model_overrides.get(config.default_model or "")
-    effective_default_voice = config.default_voice or (
+    effective_overlay_voice = (
         default_overlay.default_voice if default_overlay else None
     )
+    blank_fields = [
+        name
+        for name, value in {
+            "default_model": config.default_model,
+            "default_voice": config.default_voice,
+            "api_key": config.api_key,
+            "model_overrides default_voice": effective_overlay_voice,
+        }.items()
+        if value is not None and not value.strip()
+    ]
+    if blank_fields:
+        raise ValueError(f"{path}: enabled gateway has blank {', '.join(blank_fields)}")
+    effective_default_voice = config.default_voice or effective_overlay_voice
     required_fields = {
         "base_url": config.base_url,
         "speech_path": config.speech_path,
@@ -595,9 +652,25 @@ def _normalize_one(
         config.speech_path or "audio/speech",
         field_name="speech_path",
     )
-    models_path = config.models_path or config.discovery.models_path
-    if models_path is not None:
-        models_path = validate_relative_gateway_path(models_path, field_name="models_path")
+    top_models_path = config.models_path
+    discovery_models_path = config.discovery.models_path
+    if top_models_path is not None:
+        top_models_path = validate_relative_gateway_path(
+            top_models_path,
+            field_name="models_path",
+        )
+    if discovery_models_path is not None:
+        discovery_models_path = validate_relative_gateway_path(
+            discovery_models_path,
+            field_name="discovery.models_path",
+        )
+    if (
+        top_models_path is not None
+        and discovery_models_path is not None
+        and top_models_path != discovery_models_path
+    ):
+        raise ValueError(f"{path}: conflicting models_path definitions")
+    models_path = top_models_path or discovery_models_path
 
     allowed_models_configured = config.allowed_models is not None
     allowed_models = frozenset(config.allowed_models or ())
@@ -618,6 +691,9 @@ def _normalize_one(
     discovery_query = tuple(
         sorted((str(key), str(value)) for key, value in config.discovery.query)
     )
+    discovery = config.discovery.model_copy(
+        update={"models_path": models_path, "query": discovery_query}
+    )
     headers = _validate_headers(config.headers)
     fallback = config.fallback.model_copy(
         update={
@@ -629,6 +705,8 @@ def _normalize_one(
             )
         }
     )
+    fallback_output = fallback.model_dump(mode="json")
+    fallback_output["on"] = sorted(fallback.on)
     output_fields = {
         "backend_id": backend_id,
         "display_name": config.display_name or backend_id,
@@ -650,8 +728,8 @@ def _normalize_one(
         },
         "capability_defaults": config.capability_defaults.model_dump(mode="json"),
         "allowed_request_options": sorted(request_options),
-        "fallback": fallback.model_dump(mode="json"),
-        "discovery": config.discovery.model_dump(mode="json"),
+        "fallback": fallback_output,
+        "discovery": discovery.model_dump(mode="json"),
         "conversion": conversion.model_dump(mode="json"),
     }
     return GatewaySpec(
@@ -674,7 +752,7 @@ def _normalize_one(
         capability_defaults=config.capability_defaults,
         allowed_request_options=request_options,
         fallback=fallback,
-        discovery=config.discovery,
+        discovery=discovery,
         conversion=conversion,
         config_generation=_config_generation(output_fields),
     )
@@ -692,25 +770,35 @@ def _validate_fallback_graph(specs: Mapping[str, GatewaySpec]) -> None:
                 raise ValueError(f"fallback for {backend_id} has unknown target")
             if canonical in targets:
                 raise ValueError(f"fallback for {backend_id} has duplicate target")
+            if target.voice is None and specs[canonical].default_voice_for_model(
+                target.model
+            ) is None:
+                raise ValueError(
+                    f"fallback for {backend_id} target {canonical} model "
+                    f"{target.model!r} has no configured default voice"
+                )
             targets.append(canonical)
         graph[backend_id] = tuple(targets)
 
-    visiting: set[str] = set()
-    visited: set[str] = set()
-
-    def visit(node: str) -> None:
-        if node in visiting:
-            raise ValueError("fallback graph contains a cycle")
-        if node in visited:
-            return
-        visiting.add(node)
-        for target in graph[node]:
-            visit(target)
-        visiting.remove(node)
-        visited.add(node)
-
+    state: dict[str, int] = {}
     for backend_id in graph:
-        visit(backend_id)
+        if state.get(backend_id) == 2:
+            continue
+        state[backend_id] = 1
+        stack = [(backend_id, iter(graph[backend_id]))]
+        while stack:
+            node, targets = stack[-1]
+            try:
+                target = next(targets)
+            except StopIteration:
+                state[node] = 2
+                stack.pop()
+                continue
+            if state.get(target) == 1:
+                raise ValueError("fallback graph contains a cycle")
+            if state.get(target, 0) == 0:
+                state[target] = 1
+                stack.append((target, iter(graph[target])))
 
 
 def normalize_gateway_specs(
