@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-import subprocess  # nosec B404 - fixed local Bash command executes a repository script
+# Fixed local Bash command executes the repository refresh script.
+import subprocess  # nosec B404
 from pathlib import Path
 
 import pytest

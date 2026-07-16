@@ -896,6 +896,15 @@ class ShellReleaseRunner:
 
         self._run_command(
             [
+                "/usr/bin/env",
+                "-u",
+                "TLDW_DOCS_SOURCE_DIR",
+                "-u",
+                "TLDW_DOCS_PUBLISHED_DIR",
+                "-u",
+                "TLDW_DOCS_TEST_FAIL_AFTER_BACKUP",
+                "-u",
+                "TLDW_DOCS_TEST_MODE",
                 "/bin/bash",
                 str(self.repo_root / "Helper_Scripts" / "refresh_docs_published.sh"),
             ]

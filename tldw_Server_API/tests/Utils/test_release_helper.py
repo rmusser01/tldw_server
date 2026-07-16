@@ -763,6 +763,15 @@ def test_shell_release_runner_refreshes_published_before_staging_and_commit(
     assert runner.create_release_commit("1.2.3") == "release-sha"
     assert commands == [
         [
+            "/usr/bin/env",
+            "-u",
+            "TLDW_DOCS_SOURCE_DIR",
+            "-u",
+            "TLDW_DOCS_PUBLISHED_DIR",
+            "-u",
+            "TLDW_DOCS_TEST_FAIL_AFTER_BACKUP",
+            "-u",
+            "TLDW_DOCS_TEST_MODE",
             "/bin/bash",
             str(tmp_path / "Helper_Scripts" / "refresh_docs_published.sh"),
         ],
@@ -799,6 +808,15 @@ def test_shell_release_runner_refresh_failure_blocks_staging_and_commit(
 
     assert commands == [
         [
+            "/usr/bin/env",
+            "-u",
+            "TLDW_DOCS_SOURCE_DIR",
+            "-u",
+            "TLDW_DOCS_PUBLISHED_DIR",
+            "-u",
+            "TLDW_DOCS_TEST_FAIL_AFTER_BACKUP",
+            "-u",
+            "TLDW_DOCS_TEST_MODE",
             "/bin/bash",
             str(tmp_path / "Helper_Scripts" / "refresh_docs_published.sh"),
         ]
