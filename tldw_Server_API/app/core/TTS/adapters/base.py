@@ -138,6 +138,7 @@ class TTSRequest:
     # Additive request aliases/state kept last to preserve positional compatibility.
     lang_code: Optional[str] = cast(Optional[str], _TTS_REQUEST_UNSET)
     supplied_fields: Optional[frozenset[str]] = None
+    supplied_field_values: Optional[dict[str, Any]] = None
 
     def __post_init__(self):
         if self.supplied_fields is None:
@@ -157,6 +158,18 @@ class TTSRequest:
         if self.lang_code is _TTS_REQUEST_UNSET:
             self.lang_code = None
         self.supplied_fields = frozenset(supplied_fields)
+        if self.supplied_field_values is None:
+            self.supplied_field_values = {
+                name: getattr(self, name)
+                for name in ("speed", "language", "lang_code")
+                if name in supplied_fields
+            }
+        else:
+            self.supplied_field_values = {
+                name: value
+                for name, value in dict(self.supplied_field_values).items()
+                if name in supplied_fields
+            }
 
         # Clamp speed into a broadly accepted range
         try:
