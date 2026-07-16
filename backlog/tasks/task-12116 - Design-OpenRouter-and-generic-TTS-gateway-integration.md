@@ -11,6 +11,8 @@ references:
 - https://openrouter.ai/docs/guides/overview/multimodal/tts
 - https://openrouter.ai/docs/api/api-reference/speech/create-audio-speech
 - https://openrouter.ai/docs/guides/overview/models
+- commit:5e0c199931
+- commit:53fda5cd4f
 documentation:
 - Docs/Design/TTS.md
 - Docs/superpowers/specs/2026-07-15-openrouter-tts-gateway-design.md
