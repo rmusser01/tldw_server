@@ -1,13 +1,13 @@
-import { chromium, type BrowserContext, type Page } from '@playwright/test'
-import fs from 'node:fs'
-import path from 'node:path'
+import { type BrowserContext, type Page, chromium } from "@playwright/test"
+import fs from "node:fs"
+import path from "node:path"
 
-import { resolveExtensionHeadlessMode } from './extension-common'
-import { resolveExtensionId } from './extension-id'
+import { resolveExtensionHeadlessMode } from "./extension-common"
+import { resolveExtensionId } from "./extension-id"
 import {
   prepareExtensionLaunchPath,
   prioritizeExtensionBuildCandidates
-} from './extension-paths'
+} from "./extension-paths"
 
 type LaunchOptions = {
   seedConfig?: Record<string, any>
@@ -15,7 +15,13 @@ type LaunchOptions = {
   seedLocalStorage?: Record<string, any>
   launchTimeoutMs?: number
   optionsTarget?: string
-  prepareOptionsPage?: ({ context, page }: { context: BrowserContext; page: Page }) => void | Promise<void>
+  prepareOptionsPage?: ({
+    context,
+    page
+  }: {
+    context: BrowserContext
+    page: Page
+  }) => void | Promise<void>
   profileRoot?: string
 }
 
@@ -109,11 +115,11 @@ async function waitForStorageSeed(page: any) {
   await page.waitForFunction(
     () =>
       new Promise<boolean>((resolve) => {
-        if (typeof chrome === 'undefined' || !chrome.storage?.local) {
+        if (typeof chrome === "undefined" || !chrome.storage?.local) {
           resolve(false)
           return
         }
-        chrome.storage.local.get('__e2eSeeded', (items) => {
+        chrome.storage.local.get("__e2eSeeded", (items) => {
           resolve(Boolean(items?.__e2eSeeded))
         })
       }),
@@ -123,42 +129,43 @@ async function waitForStorageSeed(page: any) {
 }
 
 function makeTempProfileDirs(profileRoot?: string) {
-  const root = profileRoot === undefined
-    ? path.resolve('tmp-playwright-profile')
-    : path.resolve(profileRoot)
+  const root =
+    profileRoot === undefined
+      ? path.resolve("tmp-playwright-profile")
+      : path.resolve(profileRoot)
   fs.mkdirSync(root, { recursive: true })
   if (profileRoot !== undefined) {
-    fs.mkdirSync(path.join(root, 'tmp'), { recursive: true })
-    fs.mkdirSync(path.join(root, 'crash-dumps'), { recursive: true })
-    fs.mkdirSync(path.join(root, 'appdata'), { recursive: true })
-    fs.mkdirSync(path.join(root, 'localappdata'), { recursive: true })
-    fs.mkdirSync(path.join(root, 'xdg-cache'), { recursive: true })
-    fs.mkdirSync(path.join(root, 'xdg-config'), { recursive: true })
+    fs.mkdirSync(path.join(root, "tmp"), { recursive: true })
+    fs.mkdirSync(path.join(root, "crash-dumps"), { recursive: true })
+    fs.mkdirSync(path.join(root, "appdata"), { recursive: true })
+    fs.mkdirSync(path.join(root, "localappdata"), { recursive: true })
+    fs.mkdirSync(path.join(root, "xdg-cache"), { recursive: true })
+    fs.mkdirSync(path.join(root, "xdg-config"), { recursive: true })
   }
-  const homeDir = fs.mkdtempSync(path.join(root, 'home-'))
-  const userDataDir = fs.mkdtempSync(path.join(root, 'user-data-'))
+  const homeDir = fs.mkdtempSync(path.join(root, "home-"))
+  const userDataDir = fs.mkdtempSync(path.join(root, "user-data-"))
   return { homeDir, userDataDir }
 }
 
 const STRICT_CHROMIUM_ENV_KEYS = [
-  'PATH',
-  'DISPLAY',
-  'WAYLAND_DISPLAY',
-  'XAUTHORITY',
-  'XDG_RUNTIME_DIR',
-  'DBUS_SESSION_BUS_ADDRESS',
-  'LANG',
-  'LC_ALL',
-  'LC_CTYPE',
-  'SYSTEMROOT',
-  'WINDIR',
-  'COMSPEC',
-  'PATHEXT',
-  'SSL_CERT_FILE',
-  'SSL_CERT_DIR',
-  'LD_LIBRARY_PATH',
-  'DYLD_LIBRARY_PATH',
-  'DYLD_FALLBACK_LIBRARY_PATH'
+  "PATH",
+  "DISPLAY",
+  "WAYLAND_DISPLAY",
+  "XAUTHORITY",
+  "XDG_RUNTIME_DIR",
+  "DBUS_SESSION_BUS_ADDRESS",
+  "LANG",
+  "LC_ALL",
+  "LC_CTYPE",
+  "SYSTEMROOT",
+  "WINDIR",
+  "COMSPEC",
+  "PATHEXT",
+  "SSL_CERT_FILE",
+  "SSL_CERT_DIR",
+  "LD_LIBRARY_PATH",
+  "DYLD_LIBRARY_PATH",
+  "DYLD_FALLBACK_LIBRARY_PATH"
 ] as const
 
 function makeChromiumEnv(
@@ -173,7 +180,7 @@ function makeChromiumEnv(
   for (const key of STRICT_CHROMIUM_ENV_KEYS) {
     if (process.env[key] !== undefined) env[key] = process.env[key]
   }
-  const tempDir = path.join(profileRoot, 'tmp')
+  const tempDir = path.join(profileRoot, "tmp")
   return {
     ...env,
     HOME: homeDir,
@@ -181,10 +188,10 @@ function makeChromiumEnv(
     TMPDIR: tempDir,
     TMP: tempDir,
     TEMP: tempDir,
-    APPDATA: path.join(profileRoot, 'appdata'),
-    LOCALAPPDATA: path.join(profileRoot, 'localappdata'),
-    XDG_CACHE_HOME: path.join(profileRoot, 'xdg-cache'),
-    XDG_CONFIG_HOME: path.join(profileRoot, 'xdg-config')
+    APPDATA: path.join(profileRoot, "appdata"),
+    LOCALAPPDATA: path.join(profileRoot, "localappdata"),
+    XDG_CACHE_HOME: path.join(profileRoot, "xdg-cache"),
+    XDG_CONFIG_HOME: path.join(profileRoot, "xdg-config")
   }
 }
 
@@ -193,18 +200,23 @@ function isExtensionBuildDir(dir: string): boolean {
     return false
   }
 
-  const manifestPath = path.join(dir, 'manifest.json')
+  const manifestPath = path.join(dir, "manifest.json")
   if (!fs.existsSync(manifestPath)) {
     return false
   }
 
-  const backgroundPath = path.join(dir, 'background.js')
-  const optionsPath = path.join(dir, 'options.html')
-  const sidepanelPath = path.join(dir, 'sidepanel.html')
-  return fs.existsSync(backgroundPath) && (fs.existsSync(optionsPath) || fs.existsSync(sidepanelPath))
+  const backgroundPath = path.join(dir, "background.js")
+  const optionsPath = path.join(dir, "options.html")
+  const sidepanelPath = path.join(dir, "sidepanel.html")
+  return (
+    fs.existsSync(backgroundPath) &&
+    (fs.existsSync(optionsPath) || fs.existsSync(sidepanelPath))
+  )
 }
 
-function resolveChromiumExecutablePath(explicitPath?: string): string | undefined {
+function resolveChromiumExecutablePath(
+  explicitPath?: string
+): string | undefined {
   const fromEnv = String(explicitPath || "").trim()
   if (fromEnv) {
     return fromEnv
@@ -215,7 +227,12 @@ function resolveChromiumExecutablePath(explicitPath?: string): string | undefine
     return undefined
   }
 
-  const playwrightCacheRoot = path.join(userHome, "Library", "Caches", "ms-playwright")
+  const playwrightCacheRoot = path.join(
+    userHome,
+    "Library",
+    "Caches",
+    "ms-playwright"
+  )
   if (!fs.existsSync(playwrightCacheRoot)) {
     return undefined
   }
@@ -224,7 +241,9 @@ function resolveChromiumExecutablePath(explicitPath?: string): string | undefine
   try {
     chromiumDirs = fs
       .readdirSync(playwrightCacheRoot, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory() && entry.name.startsWith("chromium-"))
+      .filter(
+        (entry) => entry.isDirectory() && entry.name.startsWith("chromium-")
+      )
       .map((entry) => entry.name)
       .sort((a, b) => {
         const aVersion = Number.parseInt(a.split("-")[1] || "0", 10)
@@ -267,7 +286,7 @@ function resolvePlaywrightChannel(): string | undefined {
   return process.env.CI ? "chromium" : undefined
 }
 
-const projectRoot = path.resolve(__dirname, '..', '..', '..')
+const projectRoot = path.resolve(__dirname, "..", "..", "..")
 
 const resolveExtensionPageUrl = (baseUrl: string, target?: string): string => {
   const normalized = String(target || "").trim()
@@ -278,34 +297,34 @@ const resolveExtensionPageUrl = (baseUrl: string, target?: string): string => {
   return `${baseUrl}#${normalized.startsWith("/") ? normalized : `/${normalized}`}`
 }
 
-export async function launchWithBuiltExtension(
-  {
-    seedConfig,
-    allowOffline,
-    seedLocalStorage,
-    launchTimeoutMs,
-    optionsTarget,
-    prepareOptionsPage,
-    profileRoot
-  }: LaunchOptions = {}
-) {
+export async function launchWithBuiltExtension({
+  seedConfig,
+  allowOffline,
+  seedLocalStorage,
+  launchTimeoutMs,
+  optionsTarget,
+  prepareOptionsPage,
+  profileRoot
+}: LaunchOptions = {}) {
   const normalizedSeed = normalizeBuiltExtensionSeedConfig(seedConfig)
   const seedStoragePayload = seedConfig ? normalizedSeed.storagePayload : null
   const seedConnectionConfig = normalizedSeed.connectionConfig
   const rawCandidates = prioritizeExtensionBuildCandidates([
-    path.resolve(projectRoot, 'build/chrome-mv3'),
-    path.resolve(projectRoot, '.output/chrome-mv3')
+    path.resolve(projectRoot, "build/chrome-mv3"),
+    path.resolve(projectRoot, ".output/chrome-mv3")
   ])
   const candidates = rawCandidates.filter(isExtensionBuildDir)
   const extensionPath = candidates[0]
   if (!extensionPath) {
-    const invalidCandidates = rawCandidates.filter((p) => fs.existsSync(p) && !candidates.includes(p))
+    const invalidCandidates = rawCandidates.filter(
+      (p) => fs.existsSync(p) && !candidates.includes(p)
+    )
     const invalidHint = invalidCandidates.length
-      ? `Ignored invalid extension directories (missing manifest or required assets): ${invalidCandidates.join(', ')}. `
-      : ''
+      ? `Ignored invalid extension directories (missing manifest or required assets): ${invalidCandidates.join(", ")}. `
+      : ""
     throw new Error(
-      `${invalidHint}No built extension found. Tried: ${rawCandidates.join(', ')}. ` +
-      `Run "npm run build:chrome" from apps/extension.`
+      `${invalidHint}No built extension found. Tried: ${rawCandidates.join(", ")}. ` +
+        `Run "npm run build:chrome" from apps/extension.`
     )
   }
   const configuredLaunchTimeout = Number.parseInt(
@@ -318,7 +337,8 @@ export async function launchWithBuiltExtension(
       ? configuredLaunchTimeout
       : 30000)
 
-  const resolvedProfileRoot = profileRoot === undefined ? undefined : path.resolve(profileRoot)
+  const resolvedProfileRoot =
+    profileRoot === undefined ? undefined : path.resolve(profileRoot)
   const { homeDir, userDataDir } = makeTempProfileDirs(resolvedProfileRoot)
   const executablePath = resolveChromiumExecutablePath(
     process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
@@ -335,147 +355,51 @@ export async function launchWithBuiltExtension(
     headless,
     channel,
     acceptDownloads: true,
-    ignoreDefaultArgs: ['--disable-extensions'],
+    ignoreDefaultArgs: ["--disable-extensions"],
     env: makeChromiumEnv(homeDir, resolvedProfileRoot),
     executablePath: executablePath || undefined,
     args: [
       `--disable-extensions-except=${launchExtensionPath}`,
       `--load-extension=${launchExtensionPath}`,
-      '--no-crashpad',
-      '--disable-crash-reporter',
-      `--crash-dumps-dir=${resolvedProfileRoot ? path.join(resolvedProfileRoot, 'crash-dumps') : '/tmp'}`
+      "--no-crashpad",
+      "--disable-crash-reporter",
+      `--crash-dumps-dir=${resolvedProfileRoot ? path.join(resolvedProfileRoot, "crash-dumps") : "/tmp"}`
     ]
   })
 
-  const configuredTargetWait = Number.parseInt(
-    String(process.env.TLDW_E2E_EXTENSION_TARGET_WAIT_MS || ""),
-    10
-  )
-  const targetWaitMs =
-    Number.isFinite(configuredTargetWait) && configuredTargetWait > 0
-      ? configuredTargetWait
-      : 30000
+  try {
+    const configuredTargetWait = Number.parseInt(
+      String(process.env.TLDW_E2E_EXTENSION_TARGET_WAIT_MS || ""),
+      10
+    )
+    const targetWaitMs =
+      Number.isFinite(configuredTargetWait) && configuredTargetWait > 0
+        ? configuredTargetWait
+        : 30000
 
-  // Enable E2E debug logs in extension pages.
-  await context.addInitScript(() => {
-    try {
-      ;(globalThis as any).__tldw_e2e_debug = true
-    } catch {
-      // ignore flag set failures
-    }
-  })
-
-  // Test-only: redirect sync storage writes to local to avoid sync quota limits.
-  await context.addInitScript(() => {
-    const patchStorage = (storage: any) => {
-      if (!storage?.sync || !storage?.local) return
-      const local = storage.local
-      const sync = storage.sync
-      const methods = ["get", "set", "remove", "clear", "getBytesInUse"]
-      for (const method of methods) {
-        if (typeof local?.[method] === "function") {
-          sync[method] = local[method].bind(local)
-        }
-      }
-    }
-    try {
-      if (typeof chrome !== "undefined") {
-        patchStorage(chrome.storage)
-      }
-      if (typeof browser !== "undefined") {
-        patchStorage((browser as any).storage)
-      }
-    } catch {
-      // ignore patch failures
-    }
-  })
-
-  // Seed storage before any extension pages load to bypass connection checks
-  await context.addInitScript(
-    (cfg, allowOfflineFlag) => {
+    // Enable E2E debug logs in extension pages.
+    await context.addInitScript(() => {
       try {
-        if (typeof chrome === 'undefined' || !chrome.storage?.local) return
-        const setLocal = (data: Record<string, any>, done?: () => void) => {
-          // @ts-ignore
-          const setter = chrome?.storage?.local?.set
-          if (typeof setter === 'function') {
-            setter(data, () => done?.())
-          } else {
-            done?.()
-          }
-        }
-        const setSync = (data: Record<string, any>, done?: () => void) => {
-          // @ts-ignore
-          const setter = chrome?.storage?.sync?.set
-          if (typeof setter === 'function') {
-            setter(data, () => done?.())
-          } else {
-            done?.()
-          }
-        }
-        const finalize = () => {
-          setLocal({ __e2eSeeded: true })
-          setSync({ __e2eSeeded: true })
-        }
-
-        chrome.storage.local.get('__e2eSeeded', (items) => {
-          if (items?.__e2eSeeded) return
-          let pending = 0
-          const done = () => {
-            pending -= 1
-            if (pending <= 0) finalize()
-          }
-
-          if (allowOfflineFlag) {
-            pending += 1
-            setLocal({ __tldw_allow_offline: true }, done)
-          }
-
-          if (cfg && typeof cfg === "object") {
-            pending += 1
-            setLocal(cfg, done)
-            pending += 1
-            setSync(cfg, done)
-          }
-
-          if (pending === 0) finalize()
-        })
+        ;(globalThis as any).__tldw_e2e_debug = true
       } catch {
-        // ignore storage write failures in isolated contexts
+        // ignore flag set failures
       }
-    },
-    seedStoragePayload,
-    allowOffline || false
-  )
+    })
 
-  // Wait for SW/background
-  const waitForTargets = async () => {
-    if (context.serviceWorkers().length || context.backgroundPages().length) return
-    await Promise.race([
-      context.waitForEvent('serviceworker').catch(() => null),
-      context.waitForEvent('backgroundpage').catch(() => null),
-      new Promise((r) => setTimeout(r, targetWaitMs))
-    ])
-  }
-  await waitForTargets()
-
-  // Seed storage via service worker before any extension pages load.
-  // This avoids a race where the options UI checks connection before storage is ready.
-  const sw = context.serviceWorkers()[0]
-  if (sw) {
-    await sw.evaluate(() => {
-      try {
-        const patchStorage = (storage: any) => {
-          if (!storage?.sync || !storage?.local) return
-          const local = storage.local
-          const sync = storage.sync
-          const methods = ["get", "set", "remove", "clear", "getBytesInUse"]
-          for (const method of methods) {
-            if (typeof local?.[method] === "function") {
-              sync[method] = local[method].bind(local)
-            }
+    // Test-only: redirect sync storage writes to local to avoid sync quota limits.
+    await context.addInitScript(() => {
+      const patchStorage = (storage: any) => {
+        if (!storage?.sync || !storage?.local) return
+        const local = storage.local
+        const sync = storage.sync
+        const methods = ["get", "set", "remove", "clear", "getBytesInUse"]
+        for (const method of methods) {
+          if (typeof local?.[method] === "function") {
+            sync[method] = local[method].bind(local)
           }
         }
+      }
+      try {
         if (typeof chrome !== "undefined") {
           patchStorage(chrome.storage)
         }
@@ -487,147 +411,268 @@ export async function launchWithBuiltExtension(
       }
     })
 
-    if (seedConfig) {
-      await sw.evaluate(({ cfg, allowOfflineFlag }) => {
-        return new Promise<void>((resolve) => {
+    // Seed storage before any extension pages load to bypass connection checks
+    await context.addInitScript(
+      (cfg, allowOfflineFlag) => {
+        try {
+          if (typeof chrome === "undefined" || !chrome.storage?.local) return
           const setLocal = (data: Record<string, any>, done?: () => void) => {
-            try {
-              chrome.storage.local.set(data, () => done?.())
-            } catch {
+            // @ts-ignore
+            const setter = chrome?.storage?.local?.set
+            if (typeof setter === "function") {
+              setter(data, () => done?.())
+            } else {
               done?.()
             }
           }
           const setSync = (data: Record<string, any>, done?: () => void) => {
-            try {
-              chrome.storage.sync.set(data, () => done?.())
-            } catch {
+            // @ts-ignore
+            const setter = chrome?.storage?.sync?.set
+            if (typeof setter === "function") {
+              setter(data, () => done?.())
+            } else {
               done?.()
             }
           }
-          chrome.storage.local.clear(() => {
-            chrome.storage.sync.clear(() => {
-              let pending = 0
-              const done = () => {
-                pending -= 1
-                if (pending <= 0) resolve()
-              }
-              if (allowOfflineFlag) {
-                pending += 1
-                setLocal({ __tldw_allow_offline: true }, done)
-              }
+          const finalize = () => {
+            setLocal({ __e2eSeeded: true })
+            setSync({ __e2eSeeded: true })
+          }
+
+          chrome.storage.local.get("__e2eSeeded", (items) => {
+            if (items?.__e2eSeeded) return
+            let pending = 0
+            const done = () => {
+              pending -= 1
+              if (pending <= 0) finalize()
+            }
+
+            if (allowOfflineFlag) {
               pending += 1
-              setSync(cfg, done)
+              setLocal({ __tldw_allow_offline: true }, done)
+            }
+
+            if (cfg && typeof cfg === "object") {
               pending += 1
               setLocal(cfg, done)
               pending += 1
-              setSync({ __e2eSeeded: true }, done)
-              pending += 1
-              setLocal({ __e2eSeeded: true }, done)
-            })
+              setSync(cfg, done)
+            }
+
+            if (pending === 0) finalize()
           })
-        })
-      }, { cfg: seedStoragePayload, allowOfflineFlag: allowOffline || false })
-    } else {
+        } catch {
+          // ignore storage write failures in isolated contexts
+        }
+      },
+      seedStoragePayload,
+      allowOffline || false
+    )
+
+    // Wait for SW/background
+    const waitForTargets = async () => {
+      if (context.serviceWorkers().length || context.backgroundPages().length)
+        return
+      await Promise.race([
+        context.waitForEvent("serviceworker").catch(() => null),
+        context.waitForEvent("backgroundpage").catch(() => null),
+        new Promise((r) => setTimeout(r, targetWaitMs))
+      ])
+    }
+    await waitForTargets()
+
+    // Seed storage via service worker before any extension pages load.
+    // This avoids a race where the options UI checks connection before storage is ready.
+    const sw = context.serviceWorkers()[0]
+    if (sw) {
       await sw.evaluate(() => {
-        return new Promise<void>((resolve) => {
-          chrome.storage.local.clear(() => {
-            chrome.storage.sync.clear(() => {
-              chrome.storage.local.set({ __e2eSeeded: true }, () => {
-                chrome.storage.sync.set({ __e2eSeeded: true }, () => {
-                  resolve()
+        try {
+          const patchStorage = (storage: any) => {
+            if (!storage?.sync || !storage?.local) return
+            const local = storage.local
+            const sync = storage.sync
+            const methods = ["get", "set", "remove", "clear", "getBytesInUse"]
+            for (const method of methods) {
+              if (typeof local?.[method] === "function") {
+                sync[method] = local[method].bind(local)
+              }
+            }
+          }
+          if (typeof chrome !== "undefined") {
+            patchStorage(chrome.storage)
+          }
+          if (typeof browser !== "undefined") {
+            patchStorage((browser as any).storage)
+          }
+        } catch {
+          // ignore patch failures
+        }
+      })
+
+      if (seedConfig) {
+        await sw.evaluate(
+          ({ cfg, allowOfflineFlag }) => {
+            return new Promise<void>((resolve) => {
+              const setLocal = (
+                data: Record<string, any>,
+                done?: () => void
+              ) => {
+                try {
+                  chrome.storage.local.set(data, () => done?.())
+                } catch {
+                  done?.()
+                }
+              }
+              const setSync = (
+                data: Record<string, any>,
+                done?: () => void
+              ) => {
+                try {
+                  chrome.storage.sync.set(data, () => done?.())
+                } catch {
+                  done?.()
+                }
+              }
+              chrome.storage.local.clear(() => {
+                chrome.storage.sync.clear(() => {
+                  let pending = 0
+                  const done = () => {
+                    pending -= 1
+                    if (pending <= 0) resolve()
+                  }
+                  if (allowOfflineFlag) {
+                    pending += 1
+                    setLocal({ __tldw_allow_offline: true }, done)
+                  }
+                  pending += 1
+                  setSync(cfg, done)
+                  pending += 1
+                  setLocal(cfg, done)
+                  pending += 1
+                  setSync({ __e2eSeeded: true }, done)
+                  pending += 1
+                  setLocal({ __e2eSeeded: true }, done)
+                })
+              })
+            })
+          },
+          { cfg: seedStoragePayload, allowOfflineFlag: allowOffline || false }
+        )
+      } else {
+        await sw.evaluate(() => {
+          return new Promise<void>((resolve) => {
+            chrome.storage.local.clear(() => {
+              chrome.storage.sync.clear(() => {
+                chrome.storage.local.set({ __e2eSeeded: true }, () => {
+                  chrome.storage.sync.set({ __e2eSeeded: true }, () => {
+                    resolve()
+                  })
                 })
               })
             })
           })
         })
-      })
-    }
-  }
-
-  // Seed localStorage for tutorials and other non-extension storage
-  if (seedLocalStorage) {
-    await context.addInitScript((localStorageData) => {
-      if (typeof localStorage === 'undefined') return
-      for (const [key, value] of Object.entries(localStorageData)) {
-        localStorage.setItem(key, typeof value === 'string' ? value : JSON.stringify(value))
       }
-    }, seedLocalStorage)
-  }
+    }
 
-  const extensionId = await resolveExtensionId(context, {
-    extensionPath: launchExtensionPath,
-    userDataDir
-  })
-  const optionsUrl = `chrome-extension://${extensionId}/options.html`
-  const sidepanelUrl = `chrome-extension://${extensionId}/sidepanel.html`
+    // Seed localStorage for tutorials and other non-extension storage
+    if (seedLocalStorage) {
+      await context.addInitScript((localStorageData) => {
+        if (typeof localStorage === "undefined") return
+        for (const [key, value] of Object.entries(localStorageData)) {
+          localStorage.setItem(
+            key,
+            typeof value === "string" ? value : JSON.stringify(value)
+          )
+        }
+      }, seedLocalStorage)
+    }
 
-  const page = await context.newPage()
-  try {
+    const extensionId = await resolveExtensionId(context, {
+      extensionPath: launchExtensionPath,
+      userDataDir
+    })
+    const optionsUrl = `chrome-extension://${extensionId}/options.html`
+    const sidepanelUrl = `chrome-extension://${extensionId}/sidepanel.html`
+
+    const page = await context.newPage()
     await prepareOptionsPage?.({ context, page })
     await page.goto(resolveExtensionPageUrl(optionsUrl, optionsTarget))
     await waitForStorageSeed(page)
+
+    // When seeding config, proactively hydrate the connection store so tests do
+    // not race first-run onboarding checks on initial mount.
+    if (seedConfig) {
+      await page
+        .waitForFunction(
+          () =>
+            typeof (window as any).__tldw_useConnectionStore?.getState ===
+            "function",
+          undefined,
+          { timeout: 15_000 }
+        )
+        .catch(() => undefined)
+
+      await page
+        .evaluate(async (cfg) => {
+          const store = (window as any).__tldw_useConnectionStore
+          if (!store?.getState) return
+          const actions = store.getState()
+
+          try {
+            if (
+              cfg &&
+              typeof cfg === "object" &&
+              typeof actions.setConfigPartial === "function"
+            ) {
+              await actions.setConfigPartial(cfg)
+            }
+          } catch {
+            // ignore config hydration failures in test contexts
+          }
+
+          try {
+            if (typeof actions.markFirstRunComplete === "function") {
+              await actions.markFirstRunComplete()
+            }
+          } catch {
+            // ignore flag write failures in test contexts
+          }
+
+          try {
+            if (typeof actions.checkOnce === "function") {
+              await actions.checkOnce()
+            }
+          } catch {
+            // ignore connection check failures in test contexts
+          }
+        }, seedConnectionConfig)
+        .catch(() => undefined)
+    }
+
+    async function openSidepanel(target?: string) {
+      const p = await context.newPage()
+      await p.goto(resolveExtensionPageUrl(sidepanelUrl, target))
+      return p
+    }
+
+    return {
+      context,
+      page,
+      openSidepanel,
+      extensionId,
+      optionsUrl,
+      sidepanelUrl
+    }
   } catch (error) {
     try {
       await context.close()
     } catch (cleanupError) {
-      if (error instanceof Error && error.cause === undefined) {
-        error.cause = cleanupError
-      }
+      throw new AggregateError(
+        [error, cleanupError],
+        "Extension launch failed and persistent context cleanup failed"
+      )
     }
     throw error
   }
-
-  // When seeding config, proactively hydrate the connection store so tests do
-  // not race first-run onboarding checks on initial mount.
-  if (seedConfig) {
-    await page
-      .waitForFunction(
-        () =>
-          typeof (window as any).__tldw_useConnectionStore?.getState ===
-          "function",
-        undefined,
-        { timeout: 15_000 }
-      )
-      .catch(() => undefined)
-
-    await page
-      .evaluate(async (cfg) => {
-        const store = (window as any).__tldw_useConnectionStore
-        if (!store?.getState) return
-        const actions = store.getState()
-
-        try {
-          if (cfg && typeof cfg === "object" && typeof actions.setConfigPartial === "function") {
-            await actions.setConfigPartial(cfg)
-          }
-        } catch {
-          // ignore config hydration failures in test contexts
-        }
-
-        try {
-          if (typeof actions.markFirstRunComplete === "function") {
-            await actions.markFirstRunComplete()
-          }
-        } catch {
-          // ignore flag write failures in test contexts
-        }
-
-        try {
-          if (typeof actions.checkOnce === "function") {
-            await actions.checkOnce()
-          }
-        } catch {
-          // ignore connection check failures in test contexts
-        }
-      }, seedConnectionConfig)
-      .catch(() => undefined)
-  }
-
-  async function openSidepanel(target?: string) {
-    const p = await context.newPage()
-    await p.goto(resolveExtensionPageUrl(sidepanelUrl, target))
-    return p
-  }
-
-  return { context, page, openSidepanel, extensionId, optionsUrl, sidepanelUrl }
 }

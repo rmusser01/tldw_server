@@ -1,21 +1,17 @@
-import {
-  expect,
-  test,
-  type BrowserContext,
-  type Page,
-} from "@playwright/test"
+import { type BrowserContext, type Page, expect, test } from "@playwright/test"
 
 import {
-  runSkillsLiveCertification,
   SKILLS_CERT_ARGUMENTS,
   SKILLS_CERT_RENDERED,
+  runSkillsLiveCertification
 } from "../../../tldw-frontend/e2e/utils/skills-live-certification"
 import { launchWithBuiltExtension } from "./utils/extension-build"
 import { createSkillsRelayObserver } from "./utils/skills-certification-relay"
 
 const requireEnv = (name: string): string => {
   const value = process.env[name]?.trim()
-  if (!value) throw new Error(`${name} is required for Skills extension certification`)
+  if (!value)
+    throw new Error(`${name} is required for Skills extension certification`)
   return value
 }
 
@@ -27,7 +23,9 @@ const resultPath = requireEnv("TLDW_SKILLS_CERT_EXTENSION_RESULT")
 const ledgerPath = requireEnv("TLDW_SKILLS_CERT_EXTENSION_LEDGER")
 
 if (skillName !== "skills-cert-extension") {
-  throw new Error("TLDW_SKILLS_CERT_SKILL_NAME must equal skills-cert-extension")
+  throw new Error(
+    "TLDW_SKILLS_CERT_SKILL_NAME must equal skills-cert-extension"
+  )
 }
 
 type Phase =
@@ -43,12 +41,12 @@ const boundedDetail = (
   categories: Set<Phase>,
   errors: unknown[],
   pageErrorCount: number,
-  relayEntryCount: number,
+  relayEntryCount: number
 ): Record<string, number | Phase[]> => ({
   error_count: errors.length,
   page_error_count: pageErrorCount,
   relay_entry_count: relayEntryCount,
-  categories: Array.from(categories).slice(0, 4),
+  categories: Array.from(categories).slice(0, 4)
 })
 
 test("certifies the complete live Skills extension lifecycle", async ({}, testInfo) => {
@@ -79,6 +77,16 @@ test("certifies the complete live Skills extension lifecycle", async ({}, testIn
     categories.add(phase)
     errors.push(error)
   }
+  const buildResultPayload = (status: "passed" | "failed") => ({
+    status,
+    categories: Array.from(categories),
+    detail: boundedDetail(
+      categories,
+      errors,
+      pageErrorCount,
+      relayObserver?.entries.length ?? 0
+    )
+  })
 
   try {
     const evidence = await import(
@@ -91,12 +99,15 @@ test("certifies the complete live Skills extension lifecycle", async ({}, testIn
       seedConfig: {
         serverUrl,
         authMode: "single-user",
-        apiKey,
+        apiKey
       },
       allowOffline: false,
       optionsTarget: "/skills",
       profileRoot,
-      prepareOptionsPage: async ({ context: preparedContext, page: preparedPage }) => {
+      prepareOptionsPage: async ({
+        context: preparedContext,
+        page: preparedPage
+      }) => {
         phase = "extension_worker"
         context = preparedContext
         page = preparedPage
@@ -109,17 +120,23 @@ test("certifies the complete live Skills extension lifecycle", async ({}, testIn
         }
 
         observedWorkerUrl = workers[0].url()
-        relayObserver = createSkillsRelayObserver(preparedContext, observedWorkerUrl)
+        relayObserver = createSkillsRelayObserver(
+          preparedContext,
+          observedWorkerUrl
+        )
         preparedPage.on("pageerror", onPageError)
-      },
+      }
     })
 
     context = launch.context
     page = launch.page
     if (
-      observedWorkerUrl !== `chrome-extension://${launch.extensionId}/background.js`
+      observedWorkerUrl !==
+      `chrome-extension://${launch.extensionId}/background.js`
     ) {
-      throw new Error("Observed worker does not belong to the launched extension")
+      throw new Error(
+        "Observed worker does not belong to the launched extension"
+      )
     }
 
     phase = "extension_workflow"
@@ -130,25 +147,35 @@ test("certifies the complete live Skills extension lifecycle", async ({}, testIn
       name: skillName,
       arguments: SKILLS_CERT_ARGUMENTS,
       expectedRenderedPrompt: SKILLS_CERT_RENDERED,
-      step: test.step,
+      step: test.step
     })
 
     if (pageErrorCount > 0) {
-      throw new Error("Extension page reported errors during the Skills workflow")
+      throw new Error(
+        "Extension page reported errors during the Skills workflow"
+      )
     }
   } catch (error) {
     retainOriginalError(error)
   } finally {
-    if (hasOriginalError && page && !page.isClosed()) {
+    if (pageErrorCount > 0 && !categories.has("extension_workflow")) {
+      phase = "extension_workflow"
+      retainFinalizationError(
+        new Error("Extension page reported errors during the Skills workflow")
+      )
+    }
+
+    if (errors.length > 0 && page && !page.isClosed()) {
       try {
         await page.screenshot({
-          path: testInfo.outputPath("skills-live-certification-failure.png"),
+          path: testInfo.outputPath("skills-live-certification-failure.png")
         })
       } catch (error) {
         retainFinalizationError(error)
       }
     }
 
+    phase = "extension_launch"
     if (context) {
       try {
         await context.close()
@@ -157,6 +184,7 @@ test("certifies the complete live Skills extension lifecycle", async ({}, testIn
       }
     }
 
+    phase = "extension_relay"
     if (page) {
       try {
         page.off("pageerror", onPageError)
@@ -173,7 +201,6 @@ test("certifies the complete live Skills extension lifecycle", async ({}, testIn
       }
     }
 
-    phase = "extension_relay"
     if (relayObserver) {
       try {
         relayObserver.assertValid()
@@ -182,29 +209,33 @@ test("certifies the complete live Skills extension lifecycle", async ({}, testIn
       }
     }
 
-    const relayEntries = relayObserver?.entries ?? []
     if (writeSanitizedJson) {
       try {
-        writeSanitizedJson(ledgerPath, relayEntries)
+        writeSanitizedJson(ledgerPath, relayObserver?.entries ?? [])
       } catch (error) {
         retainFinalizationError(error)
       }
 
       try {
-        writeSanitizedJson(resultPath, {
-          status: hasOriginalError || errors.length > 0 ? "failed" : "passed",
-          categories: Array.from(categories),
-          detail: boundedDetail(categories, errors, pageErrorCount, relayEntries.length),
-        })
+        writeSanitizedJson(
+          resultPath,
+          buildResultPayload(
+            hasOriginalError || errors.length > 0 ? "failed" : "passed"
+          )
+        )
       } catch (error) {
         retainFinalizationError(error)
+        try {
+          writeSanitizedJson(resultPath, buildResultPayload("failed"))
+        } catch (fallbackError) {
+          retainFinalizationError(fallbackError)
+        }
       }
     }
   }
 
-  if (hasOriginalError) throw originalError
   if (errors.length === 1) throw errors[0]
   if (errors.length > 1) {
-    throw new AggregateError(errors, "Skills extension certification finalization failed")
+    throw new AggregateError(errors, "Skills extension certification failed")
   }
 })
