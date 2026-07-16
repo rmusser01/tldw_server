@@ -169,6 +169,27 @@ describe('Skills certification profile', () => {
     expect(readdirSync(fixture.temporaryBase)).toEqual([]);
   });
 
+  it('retains the allocated runtime descriptor when rollback fails', () => {
+    const fixture = createFixture();
+    rmSync(path.join(fixture.repoRoot, 'tldw_Server_API/Config_Files/config.txt'));
+    const removeRoot = () => {
+      throw new Error('rollback failed');
+    };
+
+    try {
+      createSkillsCertificationProfile({
+        repoRoot: fixture.repoRoot,
+        temporaryBase: fixture.temporaryBase,
+        removeRoot,
+      });
+      throw new Error('expected profile setup to fail');
+    } catch (error) {
+      expect(error).toBeInstanceOf(AggregateError);
+      expect(error.runtime).toMatchObject({ baseRoot: fixture.temporaryBase });
+      expect(existsSync(error.runtime.root)).toBe(true);
+    }
+  });
+
   it('scrubs copied credentials before setting completed single-user auth', () => {
     const fixture = createFixture();
     const profile = createProfile(fixture);

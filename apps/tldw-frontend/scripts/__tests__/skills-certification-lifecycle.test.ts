@@ -104,6 +104,25 @@ describe('Skills certification process registry', () => {
     await expect(teardown).resolves.toBeUndefined();
   });
 
+  it('fails finite wait and teardown after a registered child reports logging errors', async () => {
+    const child = new FakeChild(4120);
+    const record = {
+      ...command('logging-error', child),
+      loggingErrors: [new Error('log sink failed')],
+      pid: child.pid,
+    };
+    const loggingRegistry = createProcessRegistry({
+      closeTimeoutMs: 50,
+      probeProcessTree: vi.fn(async () => false),
+      spawnLoggedProcess: vi.fn(() => record),
+      stopProcessTree: vi.fn(async (value) => value.child.emit('close', 0, null)),
+    });
+    const registered = loggingRegistry.spawn(command('logging-error', child), '/tmp/bad.log');
+    child.emit('close', 0, null);
+    await expect(loggingRegistry.wait(registered)).rejects.toThrow(/logging failed/i);
+    await expect(loggingRegistry.teardown()).rejects.toThrow(/logging failed/i);
+  });
+
   it('verifies a surviving process group after its parent has already closed', async () => {
     const child = new FakeChild(4112);
     const events: string[] = [];

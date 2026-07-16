@@ -80,7 +80,15 @@ export function createProcessRegistry({
     if (!state) {
       throw new Error('Cannot wait for an unregistered process record');
     }
-    return state.closePromise;
+    return state.closePromise.then((outcome) => {
+      if (record.loggingErrors?.length) {
+        throw new AggregateError(
+          record.loggingErrors,
+          'Skills certification process logging failed'
+        );
+      }
+      return outcome;
+    });
   }
 
   function stop(record) {
@@ -114,6 +122,11 @@ export function createProcessRegistry({
       await stopProcessTree(record, { timeoutMs: stopTimeoutMs });
     } catch (error) {
       errors.push(error);
+    }
+    if (record.loggingErrors?.length) {
+      errors.push(
+        new AggregateError(record.loggingErrors, 'Skills certification process logging failed')
+      );
     }
     try {
       await withTimeout(

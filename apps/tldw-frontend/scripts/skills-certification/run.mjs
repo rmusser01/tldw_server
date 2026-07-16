@@ -148,6 +148,15 @@ export async function runSkillsCertification({ operations: suppliedOperations = 
     failures.push(failure);
   };
   const logPath = (name) => path.join(evidence.logsDir, `${name}.log`);
+  const diagnostic = (error, filePath) => {
+    let logText = '';
+    try {
+      logText = operations.readText(filePath);
+    } catch {
+      // Logging diagnostics must not change the failing phase classification.
+    }
+    return boundedDetail(`${error?.message ?? ''} ${logText}`);
+  };
   const runFinite = async (command) =>
     operations.runChild(registry, command, logPath(command.name));
   const health = async () =>
@@ -217,7 +226,12 @@ export async function runSkillsCertification({ operations: suppliedOperations = 
       },
     });
     evidence = operations.createEvidence({ frontendRoot });
-    profile = operations.createProfile({ repoRoot, temporaryBase: tmpdir() });
+    try {
+      profile = operations.createProfile({ repoRoot, temporaryBase: tmpdir() });
+    } catch (error) {
+      profile = error?.runtime;
+      throw error;
+    }
 
     for (const key of ['webuiChromiumProbe', 'extensionChromiumProbe']) {
       const probeCommands = operations.buildCommands({
@@ -248,14 +262,12 @@ export async function runSkillsCertification({ operations: suppliedOperations = 
         backendUrl = `http://127.0.0.1:${ports.backend}`;
         commands = operations.buildCommands({ repoRoot, frontendRoot, profile, ports });
         let frontendRecord;
+        const backendLogPath = logPath(`backend-attempt-${attempt}`);
+        const frontendLogPath = logPath(`frontend-attempt-${attempt}`);
         try {
-          backendRecord = await operations.startChild(
-            registry,
-            commands.backend,
-            logPath('backend')
-          );
+          backendRecord = await operations.startChild(registry, commands.backend, backendLogPath);
         } catch (error) {
-          const detail = `${error?.message ?? ''} ${operations.readText(logPath('backend'))}`;
+          const detail = diagnostic(error, backendLogPath);
           if (operations.isBindConflict(detail) && attempt < 3 && !urlLocked) continue;
           fail('backend_startup', 'backend startup failed');
           break;
@@ -267,12 +279,12 @@ export async function runSkillsCertification({ operations: suppliedOperations = 
             frontendRecord = await operations.startChild(
               registry,
               commands.frontend,
-              logPath('frontend')
+              frontendLogPath
             );
             await operations.waitForHttpOk(`http://127.0.0.1:${ports.web}`);
             webReady = true;
           } catch (error) {
-            const detail = `${error?.message ?? ''} ${operations.readText(logPath('frontend'))}`;
+            const detail = diagnostic(error, frontendLogPath);
             if (operations.isBindConflict(detail) && attempt < 3 && !urlLocked) {
               let retryCleanupFailed = false;
               if (frontendRecord) {
@@ -309,7 +321,7 @@ export async function runSkillsCertification({ operations: suppliedOperations = 
             break;
           }
         } catch (error) {
-          const detail = `${error?.message ?? ''} ${operations.readText(logPath('backend'))}`;
+          const detail = diagnostic(error, backendLogPath);
           if (operations.isBindConflict(detail) && attempt < 3 && !urlLocked) {
             try {
               await operations.stopChild(registry, backendRecord);
@@ -495,16 +507,11 @@ export async function runSkillsCertification({ operations: suppliedOperations = 
   } catch (error) {
     fail('preflight', error?.message ?? error);
   } finally {
-    if (interrupted) fail('interrupted', 'signal received');
-    try {
-      removeSignalHandlers();
-    } catch {
-      fail('cleanup', 'signal handler cleanup failed');
-    }
     const teardownOutcome = await Promise.resolve(registry?.teardown?.()).then(
       (value) => ({ status: 'fulfilled', value }),
       (reason) => ({ status: 'rejected', reason })
     );
+    if (interrupted) fail('interrupted', 'signal received');
     if (teardownOutcome.status === 'rejected') fail('cleanup', 'process teardown failed');
     const summaryInput = { failures, surfaces };
     if (evidence) {
@@ -541,6 +548,43 @@ export async function runSkillsCertification({ operations: suppliedOperations = 
         ...summaryInput,
         artifact_safety: { passed: false },
         cleanup: { children_closed: false, runtime_deleted: false },
+      });
+    }
+    if (
+      interrupted &&
+      !finalSummary.failures?.some((failure) => failure.category === 'interrupted')
+    ) {
+      fail('interrupted', 'signal received');
+      if (evidence) {
+        try {
+          finalSummary = await operations.finalize({
+            evidence,
+            runtime: profile,
+            summaryInput: { failures, surfaces },
+            teardownOutcome,
+          });
+        } catch {
+          finalSummary = buildCertificationSummary({
+            failures,
+            surfaces,
+            artifact_safety: { passed: false },
+            cleanup: {
+              children_closed: teardownOutcome.status === 'fulfilled',
+              runtime_deleted: false,
+            },
+          });
+        }
+      }
+    }
+    try {
+      removeSignalHandlers();
+    } catch {
+      fail('cleanup', 'signal handler cleanup failed');
+      finalSummary = buildCertificationSummary({
+        failures,
+        surfaces,
+        artifact_safety: finalSummary?.artifact_safety,
+        cleanup: finalSummary?.cleanup,
       });
     }
   }

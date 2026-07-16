@@ -174,6 +174,48 @@ describe('Skills certification runner', () => {
     );
   });
 
+  it('uses attempt-local logs so a later non-bind backend failure does not retry', async () => {
+    let attempt = 0;
+    const test = harness({
+      reservePorts: vi.fn(async () => ({ backend: 8100 + attempt, web: 3100 + attempt++ })),
+      readText: vi.fn((filePath) => (filePath.endsWith('attempt-1.log') ? 'EADDRINUSE' : '')),
+      startChild: vi.fn(async (registry, command) => {
+        if (command.name === 'backend') {
+          if (attempt === 1) throw new Error('bind failed');
+          throw new Error('import failed');
+        }
+        return registry.spawn(command, '/log');
+      }),
+    });
+    const summary = await runSkillsCertification({ operations: test.operations });
+    expect(test.operations.reservePorts).toHaveBeenCalledTimes(2);
+    expect(summary.failures.map((failure) => failure.category)).toContain('backend_startup');
+    expect(summary.failures.map((failure) => failure.category)).not.toContain('preflight');
+  });
+
+  it('keeps startup and health failures out of preflight when diagnostics cannot be read', async () => {
+    for (const phase of ['startup', 'health']) {
+      const test = harness({
+        readText: vi.fn(() => {
+          throw new Error('unreadable');
+        }),
+      });
+      if (phase === 'startup') {
+        test.operations.startChild = vi.fn(async () => {
+          throw new Error('startup failed');
+        });
+      } else {
+        test.operations.waitForHttpOk = vi.fn(async (url) => {
+          if (url.includes('/api/v1/health')) throw new Error('health failed');
+        });
+      }
+      const summary = await runSkillsCertification({ operations: test.operations });
+      const categories = summary.failures.map((failure) => failure.category);
+      expect(categories).toContain(phase === 'startup' ? 'backend_startup' : 'backend_health');
+      expect(categories).not.toContain('preflight');
+    }
+  });
+
   it('stops a health-bind backend before reserving a fresh pair and does not continue when stop fails', async () => {
     const events: string[] = [];
     const test = harness({
@@ -845,6 +887,31 @@ describe('Skills certification runner', () => {
     );
   });
 
+  it('passes a rollback-failed runtime descriptor to finalization and reports failed retry cleanup', async () => {
+    const runtime = {
+      baseRoot: '/runtime',
+      markerPath: '/runtime/root/.marker',
+      root: '/runtime/root',
+    };
+    const error = new AggregateError([new Error('setup'), new Error('rollback')], 'profile failed');
+    error.runtime = runtime;
+    const test = harness({
+      createProfile: vi.fn(() => {
+        throw error;
+      }),
+      finalize: vi.fn(async () => {
+        throw new Error('finalizer failed');
+      }),
+      removeRuntime: vi.fn(() => {
+        throw new Error('retry failed');
+      }),
+    });
+    const summary = await runSkillsCertification({ operations: test.operations });
+    expect(test.operations.finalize).toHaveBeenCalledWith(expect.objectContaining({ runtime }));
+    expect(test.operations.removeRuntime).toHaveBeenCalledWith(runtime);
+    expect(summary.cleanup.runtime_deleted).toBe(false);
+  });
+
   it('safely removes remaining roots after a finalizer rejection', async () => {
     const test = harness({
       finalize: vi.fn(async () => {
@@ -878,5 +945,59 @@ describe('Skills certification runner', () => {
     expect(test.operations.removeEvidence).toHaveBeenCalledTimes(1);
     expect(summary.artifact_safety).toEqual({ passed: false });
     expect(summary.cleanup.runtime_deleted).toBe(false);
+  });
+
+  it('retains SIGINT through deferred teardown before removing handlers', async () => {
+    let onSignal: () => void;
+    let releaseTeardown: () => void;
+    const events: string[] = [];
+    const test = harness({
+      installHandlers: vi.fn(({ onSignal: captured }) => {
+        onSignal = captured;
+        return () => events.push('remove');
+      }),
+    });
+    test.operations.finalize = vi.fn(async ({ summaryInput }) => ({
+      ...summaryInput,
+      primary_category: summaryInput.failures[0]?.category ?? null,
+    }));
+    test.registry.teardown.mockImplementation(
+      () => new Promise<void>((resolve) => (releaseTeardown = resolve))
+    );
+    const run = runSkillsCertification({ operations: test.operations });
+    await vi.waitFor(() => expect(test.registry.teardown).toHaveBeenCalled());
+    onSignal();
+    expect(events).toEqual([]);
+    releaseTeardown();
+    const summary = await run;
+    expect(summary.primary_category).toBe('interrupted');
+    expect(events).toEqual(['remove']);
+  });
+
+  it('re-finalizes an interrupted summary when SIGTERM arrives during finalization', async () => {
+    let onSignal: () => void;
+    let releaseFinalizer: () => void;
+    const test = harness({
+      installHandlers: vi.fn(({ onSignal: captured }) => {
+        onSignal = captured;
+        return vi.fn();
+      }),
+    });
+    test.operations.finalize = vi
+      .fn()
+      .mockImplementationOnce(
+        () => new Promise((resolve) => (releaseFinalizer = () => resolve({ status: 'passed' })))
+      )
+      .mockImplementation(async ({ summaryInput }) => ({
+        ...summaryInput,
+        primary_category: 'interrupted',
+      }));
+    const run = runSkillsCertification({ operations: test.operations });
+    await vi.waitFor(() => expect(test.operations.finalize).toHaveBeenCalled());
+    onSignal();
+    releaseFinalizer();
+    const summary = await run;
+    expect(test.operations.finalize).toHaveBeenCalledTimes(2);
+    expect(summary.primary_category).toBe('interrupted');
   });
 });

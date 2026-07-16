@@ -184,7 +184,7 @@ function resolvePythonExecutable(repoRoot, baseEnv) {
 /**
  * Create a disposable single-user backend profile below a supplied temporary base.
  */
-export function createSkillsCertificationProfile({ repoRoot, temporaryBase }) {
+export function createSkillsCertificationProfile({ repoRoot, temporaryBase, removeRoot = rmSync }) {
   if (!repoRoot) {
     throw new Error('createSkillsCertificationProfile requires repoRoot');
   }
@@ -197,22 +197,21 @@ export function createSkillsCertificationProfile({ repoRoot, temporaryBase }) {
   mkdirSync(resolvedTemporaryBase, { recursive: true });
 
   const root = mkdtempSync(path.join(resolvedTemporaryBase, 'tldw-skills-certification-'));
+  const profile = {
+    baseRoot: resolvedTemporaryBase,
+    root,
+    markerPath: path.join(root, runtimeMarker),
+    configDir: path.join(root, 'Config_Files'),
+    configPath: path.join(root, 'Config_Files/config.txt'),
+    envPath: path.join(root, 'Config_Files/.env'),
+    databaseDir: path.join(root, 'Databases'),
+    usersDbPath: path.join(root, 'Databases/users.db'),
+    userDatabasesDir: path.join(root, 'Databases/user_databases'),
+    homeDir: path.join(root, 'home'),
+    tmpDir: path.join(root, 'tmp'),
+    extensionProfileDir: path.join(root, 'extension-profile'),
+  };
   try {
-    const profile = {
-      baseRoot: resolvedTemporaryBase,
-      root,
-      markerPath: path.join(root, runtimeMarker),
-      configDir: path.join(root, 'Config_Files'),
-      configPath: path.join(root, 'Config_Files/config.txt'),
-      envPath: path.join(root, 'Config_Files/.env'),
-      databaseDir: path.join(root, 'Databases'),
-      usersDbPath: path.join(root, 'Databases/users.db'),
-      userDatabasesDir: path.join(root, 'Databases/user_databases'),
-      homeDir: path.join(root, 'home'),
-      tmpDir: path.join(root, 'tmp'),
-      extensionProfileDir: path.join(root, 'extension-profile'),
-    };
-
     for (const directory of [
       profile.configDir,
       profile.databaseDir,
@@ -240,9 +239,14 @@ export function createSkillsCertificationProfile({ repoRoot, temporaryBase }) {
     return profile;
   } catch (error) {
     try {
-      rmSync(root, { force: true, recursive: true });
+      removeRoot(root, { force: true, recursive: true });
     } catch (cleanupError) {
-      throw new AggregateError([error, cleanupError], 'Skills certification profile setup failed');
+      const aggregate = new AggregateError(
+        [error, cleanupError],
+        'Skills certification profile setup failed'
+      );
+      aggregate.runtime = profile;
+      throw aggregate;
     }
     throw error;
   }

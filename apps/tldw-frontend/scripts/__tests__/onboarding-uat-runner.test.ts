@@ -562,6 +562,25 @@ describe("onboarding UAT runner helpers", () => {
     }
   })
 
+  it("returns an owned record when its log sink is invalid", async () => {
+    const record = spawnLoggedProcess({
+      name: "invalid-log-child",
+      command: process.execPath,
+      args: ["-e", "setInterval(() => {}, 1000)"],
+      cwd: frontendRoot,
+      env: process.env,
+      logPath: path.join(process.execPath, "skills-certification.log"),
+    })
+    try {
+      expect(record.child.pid).toBeTruthy()
+      expect(record.loggingErrors.length).toBeGreaterThan(0)
+      await stopProcessTree(record, { timeoutMs: 50 })
+      expect(record.child.exitCode ?? record.child.signalCode).not.toBeNull()
+    } finally {
+      await stopProcessTree(record, { timeoutMs: 50 })
+    }
+  })
+
   it("waits for one-shot child process stdio close before artifact cleanup", () => {
     const runnerSource = readText("scripts/onboarding-uat/run.mjs")
 
@@ -643,6 +662,25 @@ describe("onboarding UAT runner helpers", () => {
     await stopProcessTree(child, { timeoutMs: 0 })
 
     expect(child.signals).toEqual(["SIGTERM"])
+    expect(child.exitCode).toBe(0)
+  })
+
+  it("uses taskkill tree termination and verifies parent exit on Windows", async () => {
+    class WindowsChild extends EventEmitter {
+      pid = 123458
+      exitCode: number | null = null
+      signalCode: string | null = null
+    }
+    const child = new WindowsChild()
+    await stopProcessTree(child, {
+      platform: "win32",
+      taskkill: async (pid: number) => {
+        expect(pid).toBe(child.pid)
+        child.exitCode = 0
+        child.emit("exit", 0, null)
+      },
+      timeoutMs: 50,
+    })
     expect(child.exitCode).toBe(0)
   })
 })
