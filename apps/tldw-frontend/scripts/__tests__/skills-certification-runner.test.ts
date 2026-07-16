@@ -109,26 +109,32 @@ describe('Skills certification runner', () => {
       { library: 1, trash: 0 },
       { library: 0, trash: 1 },
     ]) {
+      const initialLibraryUrl = 'http://127.0.0.1:8100/api/v1/skills/?limit=1&offset=0';
+      const initialTrashUrl = 'http://127.0.0.1:8100/api/v1/skills/trash?limit=1&offset=0';
       const test = harness({
         fetch: vi.fn(async (url: string) => ({
-          json: async () => ({
-            total: url.includes('/trash') ? totals.trash : totals.library,
-            skills: [],
-          }),
-          status: 200,
+          json: async () => {
+            if (url === initialLibraryUrl) return { total: totals.library };
+            if (url === initialTrashUrl) return { total: totals.trash };
+            if (url.includes('/trash?limit=500&offset=0')) return { skills: [] };
+            return {};
+          },
+          status:
+            url.includes(`/skills/${webName}`) || url.includes(`/skills/${extensionName}`)
+              ? 404
+              : 200,
         })),
       });
       const summary = await runSkillsCertification({ operations: test.operations });
-      expect(summary.failures).toEqual(
-        expect.arrayContaining([expect.objectContaining({ category: 'postcondition' })])
-      );
-      expect(test.operations.fetch).toHaveBeenCalledWith(
-        expect.stringContaining('/api/v1/skills/'),
-        expect.anything()
-      );
-      expect(test.operations.fetch).toHaveBeenCalledWith(
-        expect.stringContaining('/api/v1/skills/trash'),
-        expect.anything()
+      const failedRoute =
+        totals.library === 1
+          ? '/api/v1/skills/?limit=1&offset=0'
+          : '/api/v1/skills/trash?limit=1&offset=0';
+      expect(summary.failures).toEqual([
+        { category: 'postcondition', detail: `${failedRoute} status/invariant` },
+      ]);
+      expect(test.operations.fetch.mock.calls.map(([url]) => url)).toEqual(
+        expect.arrayContaining([initialLibraryUrl, initialTrashUrl])
       );
     }
   });
@@ -438,6 +444,24 @@ describe('Skills certification runner', () => {
     );
   });
 
+  it('maps present running WebUI results to workflow for both browser exits and continues extension evidence', async () => {
+    for (const code of [0, 1]) {
+      const test = harness();
+      test.files.set('/evidence/webui/result.json', result('running'));
+      test.operations.runChild = vi.fn(async (registry, command) => {
+        const record = registry.spawn(command, '/log');
+        return command.name === 'webui-playwright' ? { code, signal: null } : registry.wait(record);
+      });
+      const summary = await runSkillsCertification({ operations: test.operations });
+      const categories = summary.failures.map((failure: { category: string }) => failure.category);
+      expect(categories).toContain('webui_workflow');
+      expect(categories).not.toContain('webui_launch');
+      expect(test.registry.spawn.mock.calls.map(([command]) => command.name)).toContain(
+        'extension-playwright'
+      );
+    }
+  });
+
   it('classifies thrown build and extension browser operations without reclassifying backend health', async () => {
     for (const target of ['extension-build', 'extension-playwright', 'extension-read']) {
       const test = harness();
@@ -486,6 +510,23 @@ describe('Skills certification runner', () => {
     expect(summary.failures.map((failure: { category: string }) => failure.category)).toEqual(
       expect.arrayContaining(categories)
     );
+  });
+
+  it('maps present running extension results to workflow for both browser exits', async () => {
+    for (const code of [0, 1]) {
+      const test = harness();
+      test.files.set('/evidence/extension/result.json', result('running'));
+      test.operations.runChild = vi.fn(async (registry, command) => {
+        const record = registry.spawn(command, '/log');
+        return command.name === 'extension-playwright'
+          ? { code, signal: null }
+          : registry.wait(record);
+      });
+      const summary = await runSkillsCertification({ operations: test.operations });
+      const categories = summary.failures.map((failure: { category: string }) => failure.category);
+      expect(categories).toContain('extension_workflow');
+      expect(categories).not.toContain('extension_launch');
+    }
   });
 
   it('retries a frontend-only bind conflict with fresh pairs and stops old attempt children', async () => {
@@ -622,6 +663,39 @@ describe('Skills certification runner', () => {
     expect(restartStop).toBeLessThan(backendStarts[1][1]);
     expect(events.filter((event) => event === 'reserve')).toHaveLength(1);
     expect(events.filter((event) => event === 'build:8100:3100')).toHaveLength(1);
+  });
+
+  it('uses the original backend URL through restart ceilings without a second restart', async () => {
+    for (const failureCall of [3, 4]) {
+      let backendHealthCalls = 0;
+      const healthUrls: string[] = [];
+      const test = harness({
+        buildCommands: vi.fn((input) => ({
+          ...test.commands,
+          backend: { ...test.commands.backend, args: [`--port=${input.ports.backend}`] },
+        })),
+        reservePorts: vi.fn(async () => ({ backend: 8100, web: 3100 })),
+        startChild: vi.fn((registry, command) => registry.spawn(command, '/log')),
+        waitForHttpOk: vi.fn(async (url) => {
+          if (!url.includes('/api/v1/health')) return;
+          healthUrls.push(url);
+          if (++backendHealthCalls === 2 || backendHealthCalls === failureCall)
+            throw new Error('backend crashed');
+        }),
+      });
+      const summary = await runSkillsCertification({ operations: test.operations });
+      expect(healthUrls).toEqual(healthUrls.map(() => 'http://127.0.0.1:8100/api/v1/health'));
+      expect(
+        test.registry.spawn.mock.calls
+          .map(([command]) => command.name)
+          .filter((name) => name === 'backend')
+      ).toHaveLength(2);
+      expect(test.operations.reservePorts).toHaveBeenCalledTimes(1);
+      expect(
+        test.operations.buildCommands.mock.calls.filter(([input]) => input.ports.backend === 8100)
+      ).toHaveLength(1);
+      expect(summary.surfaces.extension.state).toBe('not_run_infrastructure');
+    }
   });
 
   it('runs Trash exclusion even when a surface detail request throws', async () => {
