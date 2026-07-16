@@ -468,6 +468,88 @@ async def test_conflicting_api_language_sources_remain_distinct_at_gateway(
 
 
 @pytest.mark.unit
+@pytest.mark.asyncio
+async def test_regional_api_language_conflict_rejects_before_network(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(adapter_module, "astream_bytes", _stream_stub(calls))
+    converted = _convert_api_request(
+        model="chatterbox-multilingual",
+        lang_code="en-US",
+        language="en-GB",
+    )
+
+    assert converted.language == "en"
+    with pytest.raises(TTSValidationError, match="conflict"):
+        await OpenAICompatibleSpeechAdapter(
+            _adapter_config(model="chatterbox-multilingual")
+        ).generate(converted)
+
+    assert calls == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_explicit_regional_language_forwards_exact_value(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(adapter_module, "astream_bytes", _stream_stub(calls))
+    converted = _convert_api_request(
+        model="chatterbox-multilingual",
+        language="en-GB",
+    )
+
+    assert converted.language == "en"
+    await _collect(
+        await OpenAICompatibleSpeechAdapter(
+            _adapter_config(model="chatterbox-multilingual")
+        ).generate(converted)
+    )
+
+    assert calls[0]["json"]["language"] == "en-GB"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_explicit_regional_lang_code_forwards_exact_value(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(adapter_module, "astream_bytes", _stream_stub(calls))
+    converted = _convert_api_request(lang_code="pt-BR")
+
+    assert converted.language == "pt"
+    assert converted.lang_code == "pt"
+    await _collect(await OpenAICompatibleSpeechAdapter(_adapter_config()).generate(converted))
+
+    assert calls[0]["json"]["language"] == "pt-BR"
+
+
+@pytest.mark.unit
+def test_regional_language_raw_values_survive_dict_roundtrip() -> None:
+    converted = _convert_api_request(
+        model="chatterbox-multilingual",
+        lang_code="pt-BR",
+        language="en-GB",
+    )
+
+    restored = TTSRequest(**converted.dict())
+
+    assert restored.language == "pt"
+    assert restored.lang_code == "pt"
+    assert restored.supplied_fields & {"language", "lang_code"} == {
+        "language",
+        "lang_code",
+    }
+    assert restored.supplied_field_values == {
+        "language": "en-GB",
+        "lang_code": "pt-BR",
+    }
+
+
+@pytest.mark.unit
 def test_json_pointer_copy_supports_nested_and_escaped_tokens() -> None:
     supplied = {
         "provider": {
