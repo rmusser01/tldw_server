@@ -1,7 +1,7 @@
 ---
 id: TASK-530.13
 title: Implement Skills runtime metadata visibility
-status: In Progress
+status: Done
 assignee: []
 created_date: ''
 updated_date: '2026-06-30 02:13'
@@ -15,6 +15,11 @@ dependencies: []
 parent_task_id: TASK-530
 priority: high
 ordinal: 530.13
+references:
+- https://github.com/rmusser01/tldw_server/pull/2549
+documentation:
+- Docs/superpowers/specs/2026-06-29-skills-runtime-metadata-visibility-design.md
+- Docs/superpowers/plans/2026-06-29-skills-runtime-metadata-visibility.md
 ---
 
 ## Description
@@ -71,6 +76,8 @@ Review follow-up after PR #2549 rebase:
 - Added regression coverage for legacy null API fields, single-string tool declarations, context payload null context, and legacy UI list responses opening the test-run preview.
 - Addressed CodeRabbit follow-up by preserving explicit runtime.execution_mode values, separating fork/inline disclosure from model-call allowance in SkillPreview, using repo-relative verification commands, and removing a duplicate final-summary marker.
 - Verification: pytest tldw_Server_API/tests/Skills/integration/test_skills_api.py -q passed (74 tests); Vitest Manager/SkillPreview passed (46 tests); git diff --check passed; Bandit touched backend scope passed with zero findings.
+
+Closeout reconciliation: PR #2549 merged on 2026-06-30 as 5b618749816efc3c5967a4612789d23dda36e35f. Acceptance criteria and Definition of Done were already fully checked with backend/frontend verification and scoped Bandit evidence; this update corrects the stale In Progress status before archival.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

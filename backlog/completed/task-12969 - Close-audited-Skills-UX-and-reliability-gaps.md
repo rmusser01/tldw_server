@@ -1,7 +1,7 @@
 ---
 id: TASK-12969
 title: Close audited Skills UX and reliability gaps
-status: In Progress
+status: Done
 assignee: []
 created_date: ''
 updated_date: '2026-07-15 04:17'
@@ -51,11 +51,11 @@ Reopened after Qodo posted six review threads. Added sanitized contextual Trash 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented the audited Skills UX and reliability gap closure in PR #2732, including review follow-ups for scope-bound cancellation, modal lifecycle cleanup, draft version safety, bounded imports, and atomic bundle publication/recovery. Final recovery review added version-marked replacement backups, reversible rollback, fail-closed handling for ambiguous or malformed states, and marker reconciliation on every lock-held sync before debounce.
+Implemented and merged the audited Skills UX and reliability gap closure in PR #2732. The work covers beginner and power-user workflows, accessibility, URL-backed filtering, selection and bulk actions, durable Trash, cancellation-safe UI state, bounded imports, and crash-safe atomic bundle publication/recovery. Final recovery review added version-marked backups, reversible rollback, fail-closed ambiguous-state handling, and replacement-marker reconciliation before every lock-held sync debounce.
 
-Verification: 312 backend Skills tests passed; 173 focused frontend Skills/ICU/client tests passed; Playwright passed 13 deterministic scenarios with 3 documented optional live-backend skips; TypeScript, Python compile, locale JSON parsing, resource-governance tests, and git diff checks passed; Bandit reported 0 findings. Ruff is clean on the changed Skills Python scope, with unrelated pre-existing findings confined outside the modified lines of the shared ChaChaNotes DB module. ESLint introduced no new errors; its sole error is an unchanged origin/dev baseline regex. Independent re-review confirmed all findings resolved.
+Recorded verification: 312 backend Skills tests passed; 173 focused frontend Skills/ICU/client tests passed; Playwright passed 13 deterministic scenarios with 3 documented optional live-backend skips; TypeScript, Python compile, locale JSON parsing, resource-governance tests, and git diff checks passed; Bandit reported 0 findings. Ruff was clean on the changed Skills Python scope, and independent re-review confirmed all findings resolved.
 
-PR thread closure, the required human-authored Change summary, and merge are still pending.
+PR #2732 merged into dev as bb0c9d6bd565e669db0f00f7b248717c4ae5247f on 2026-07-15 with all inline review threads resolved. Known policy exception: the mandatory requester-authored Change summary placeholder was not replaced before merge.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
