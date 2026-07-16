@@ -1,9 +1,15 @@
 // Set theme class synchronously to prevent flash of white background
 (function() {
+  var theme = null;
   try {
-    var theme = localStorage.getItem('theme');
-    if (theme === 'dark' || (!theme && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
-      document.documentElement.classList.add('dark');
+    theme = localStorage.getItem('theme');
+  } catch (error) {
+    if (!error || error.name !== 'SecurityError') {
+      throw error;
     }
-  } catch (e) {}
+    // Storage may be blocked by browser policy; use the system preference instead.
+  }
+  if (theme === 'dark' || (!theme && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+    document.documentElement.classList.add('dark');
+  }
 })();

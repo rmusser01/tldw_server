@@ -1,6 +1,9 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 
-import { validateSkillsFixtureRequest } from "../../../tldw-frontend/e2e/utils/skills-fixtures"
+import {
+  mockPowerUserSkillsLibrary,
+  validateSkillsFixtureRequest,
+} from "../../../tldw-frontend/e2e/utils/skills-fixtures"
 
 type FixtureRequest = {
   method: () => string
@@ -52,6 +55,35 @@ describe("Skills fixture request contract", () => {
     )
   })
 
+  it("normalizes request and expected methods", () => {
+    const request = makeRequest({ method: "get", apiKey: contract.apiKey })
+
+    expect(() => validateSkillsFixtureRequest(request, "gEt", contract)).not.toThrow()
+  })
+
+  it("reports malformed request URLs with a bounded contract error", () => {
+    const malformedUrl = `not-a-url-${"x".repeat(20)}${"\0".repeat(500)}`
+    const request = makeRequest({
+      url: malformedUrl,
+      apiKey: contract.apiKey,
+    })
+
+    let thrown: unknown
+    try {
+      validateSkillsFixtureRequest(request, "GET", contract)
+    } catch (error) {
+      thrown = error
+    }
+    expect(thrown).toBeInstanceOf(Error)
+    const message = (thrown as Error).message
+    expect(message).toMatch(
+      /^Unable to validate Skills fixture request origin: malformed URL "not-a-url-x+/,
+    )
+    expect(message).toMatch(/\.\.\."$/)
+    expect(message.length).toBeLessThanOrEqual(200)
+    expect(message).not.toContain(malformedUrl)
+  })
+
   it("rejects a missing API key", () => {
     expect(() => validateSkillsFixtureRequest(makeRequest(), "GET", contract)).toThrow(
       "Expected x-api-key request header",
@@ -100,5 +132,25 @@ describe("Skills fixture request contract", () => {
     })
 
     expect(() => validateSkillsFixtureRequest(request, "GET")).not.toThrow()
+  })
+
+  it("registers only the dedicated route for the Skills context endpoint", async () => {
+    const routeMatchers: Array<string | RegExp> = []
+    const page = {
+      route: vi.fn(async (matcher: string | RegExp) => {
+        routeMatchers.push(matcher)
+      }),
+    }
+
+    await mockPowerUserSkillsLibrary(page as never)
+
+    const contextUrl = `${contract.origin}/api/v1/skills/context`
+    const detailUrl = `${contract.origin}/api/v1/skills/target-research-formatter`
+    const matchingRoutes = (url: string) => routeMatchers.filter(
+      (matcher) => matcher instanceof RegExp && matcher.test(url),
+    )
+
+    expect(matchingRoutes(contextUrl)).toHaveLength(1)
+    expect(matchingRoutes(detailUrl)).toHaveLength(1)
   })
 })

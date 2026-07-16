@@ -15,6 +15,7 @@ const themeBootstrapPath = path.resolve(
   "../packages/ui/src/public/theme-bootstrap.js",
 )
 const optionsHtml = readFileSync(optionsHtmlPath, "utf8")
+const themeBootstrap = readFileSync(themeBootstrapPath, "utf8")
 
 describe("options theme bootstrap", () => {
   it("loads a same-origin external classic script synchronously from the head", () => {
@@ -39,7 +40,6 @@ describe("options theme bootstrap", () => {
 
   it("applies the stored dark theme before application code runs", () => {
     const executionOrder: string[] = []
-    const themeBootstrap = readFileSync(themeBootstrapPath, "utf8")
 
     runInNewContext(`${themeBootstrap}\napplicationCode()`, {
       localStorage: {
@@ -59,5 +59,50 @@ describe("options theme bootstrap", () => {
     })
 
     expect(executionOrder).toEqual(["theme:dark", "application"])
+  })
+
+  it("falls back to the system theme when stored-theme access is blocked", () => {
+    const executionOrder: string[] = []
+
+    runInNewContext(`${themeBootstrap}\napplicationCode()`, {
+      localStorage: {
+        getItem: () => {
+          throw new DOMException("Blocked", "SecurityError")
+        },
+      },
+      window: {
+        matchMedia: () => ({ matches: true }),
+      },
+      document: {
+        documentElement: {
+          classList: {
+            add: (className: string) => executionOrder.push(`theme:${className}`),
+          },
+        },
+      },
+      applicationCode: () => executionOrder.push("application"),
+    })
+
+    expect(executionOrder).toEqual(["theme:dark", "application"])
+  })
+
+  it("surfaces unexpected stored-theme failures", () => {
+    expect(() => runInNewContext(themeBootstrap, {
+      localStorage: {
+        getItem: () => {
+          throw new Error("unexpected storage failure")
+        },
+      },
+      window: {
+        matchMedia: () => ({ matches: false }),
+      },
+      document: {
+        documentElement: {
+          classList: {
+            add: () => undefined,
+          },
+        },
+      },
+    })).toThrow("unexpected storage failure")
   })
 })

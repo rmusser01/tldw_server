@@ -26,6 +26,7 @@ const setupBuiltExtensionLaunchTest = async () => {
     waitForEvent: vi.fn(() => new Promise(() => {})),
     addInitScript: vi.fn().mockResolvedValue(undefined),
     newPage: vi.fn().mockResolvedValue(page),
+    close: vi.fn().mockResolvedValue(undefined),
   }
   const launchPersistentContext = vi.fn().mockResolvedValue(context)
 
@@ -206,6 +207,46 @@ describe("normalizeBuiltExtensionSeedConfig", () => {
       ])
       expect(preparedPage).toBe(page)
       expect(context.newPage).toHaveBeenCalledTimes(1)
+    } finally {
+      cleanup()
+    }
+  })
+
+  it("closes the persistent context when targeted page preparation fails", async () => {
+    const { cleanup, context, launchWithBuiltExtension, page } =
+      await setupBuiltExtensionLaunchTest()
+    const preparationError = new Error("options preparation failed")
+
+    try {
+      await expect(launchWithBuiltExtension({
+        prepareOptionsPage: () => {
+          throw preparationError
+        },
+      })).rejects.toBe(preparationError)
+
+      expect(context.close).toHaveBeenCalledTimes(1)
+      expect(page.goto).not.toHaveBeenCalled()
+    } finally {
+      cleanup()
+    }
+  })
+
+  it("preserves the preparation error when persistent context cleanup also fails", async () => {
+    const { cleanup, context, launchWithBuiltExtension } =
+      await setupBuiltExtensionLaunchTest()
+    const preparationError = new Error("options preparation failed")
+    const cleanupError = new Error("context cleanup failed")
+    context.close.mockRejectedValueOnce(cleanupError)
+
+    try {
+      await expect(launchWithBuiltExtension({
+        prepareOptionsPage: () => {
+          throw preparationError
+        },
+      })).rejects.toBe(preparationError)
+
+      expect(context.close).toHaveBeenCalledTimes(1)
+      expect(preparationError.cause).toBe(cleanupError)
     } finally {
       cleanup()
     }

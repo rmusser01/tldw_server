@@ -100,7 +100,7 @@ function captureDiagnostics(
   page.on("requestfailed", (request) => {
     diagnostics.requestFailures.push(
       boundDiagnostic(
-        `${request.failure()?.errorText || "request failed"} :: ${requestIdentifier(
+        `${request.failure()?.errorText ?? "request failed"} :: ${requestIdentifier(
           request.method(),
           request.url(),
         )}`,
@@ -132,19 +132,30 @@ async function installDirectRequestFallback(
 ): Promise<void> {
   await context.addInitScript(() => {
     const patchedRuntimes = new Set<unknown>()
-    const patchRuntime = (runtime: any) => {
+    type RuntimeWithSendMessage = {
+      sendMessage: (message: unknown, ...args: unknown[]) => unknown
+    }
+    const hasSendMessage = (runtime: unknown): runtime is RuntimeWithSendMessage => {
+      if (!runtime || typeof runtime !== "object") return false
+      return typeof (runtime as { sendMessage?: unknown }).sendMessage === "function"
+    }
+    const patchRuntime = (runtime: unknown) => {
       if (
-        !runtime
+        !hasSendMessage(runtime)
         || patchedRuntimes.has(runtime)
-        || typeof runtime.sendMessage !== "function"
       ) {
         return
       }
       patchedRuntimes.add(runtime)
 
       const originalSendMessage = runtime.sendMessage.bind(runtime)
-      const sendMessage = (message: any, ...args: any[]) => {
-        if (message?.type === "tldw:request") {
+      const sendMessage = (message: unknown, ...args: unknown[]) => {
+        if (
+          message
+          && typeof message === "object"
+          && "type" in message
+          && message.type === "tldw:request"
+        ) {
           throw new Error(
             "Could not establish connection. Receiving end does not exist.",
           )
@@ -173,7 +184,10 @@ async function installDirectRequestFallback(
       }
     }
 
-    const extensionGlobals = globalThis as any
+    const extensionGlobals = globalThis as unknown as {
+      browser?: { runtime?: unknown }
+      chrome?: { runtime?: unknown }
+    }
     patchRuntime(extensionGlobals.browser?.runtime)
     patchRuntime(extensionGlobals.chrome?.runtime)
   })
@@ -415,6 +429,9 @@ test.describe("Skills parity (extension)", () => {
       )
       expect(await download.failure()).toBeNull()
       const downloadStream = await download.createReadStream()
+      if (!downloadStream) {
+        throw new Error("Failed to create read stream for Skills export download")
+      }
       const downloadChunks: Buffer[] = []
       for await (const chunk of downloadStream) {
         downloadChunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
@@ -678,6 +695,32 @@ test.describe("Skills parity (extension)", () => {
       await expect(detailsDialog).toBeHidden()
       await expect(viewSkill).toBeFocused()
       expect(await hasNoHorizontalOverflow(page)).toBe(true)
+
+      await Promise.all([
+        page.waitForResponse((response) => {
+          const request = response.request()
+          return request.method() === "GET"
+            && new URL(response.url()).pathname === "/api/v1/skills/summarize"
+        }),
+        viewSkill.press("Enter"),
+      ])
+      await expect(detailsDialog).toBeVisible()
+      await detailsDialog.getByRole("button", {
+        name: "Test run",
+        exact: true,
+      }).press("Enter")
+      const detailsTestRunDialog = page.getByRole("dialog", {
+        name: "Test run: summarize",
+      })
+      await expect(detailsDialog).toBeHidden()
+      await expect(detailsTestRunDialog).toBeVisible()
+      await page.waitForTimeout(500)
+      expect(await detailsTestRunDialog.evaluate(
+        (dialog) => dialog.contains(document.activeElement),
+      )).toBe(true)
+      await detailsTestRunDialog.press("Escape")
+      await expect(detailsTestRunDialog).toBeHidden()
+      await expect(viewSkill).toBeFocused()
 
       await testRunSkill.focus()
       await testRunSkill.press("Enter")

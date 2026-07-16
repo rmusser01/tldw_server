@@ -503,9 +503,20 @@ export async function launchWithBuiltExtension(
   const sidepanelUrl = `chrome-extension://${extensionId}/sidepanel.html`
 
   const page = await context.newPage()
-  await prepareOptionsPage?.({ context, page })
-  await page.goto(resolveExtensionPageUrl(optionsUrl, optionsTarget))
-  await waitForStorageSeed(page)
+  try {
+    await prepareOptionsPage?.({ context, page })
+    await page.goto(resolveExtensionPageUrl(optionsUrl, optionsTarget))
+    await waitForStorageSeed(page)
+  } catch (error) {
+    try {
+      await context.close()
+    } catch (cleanupError) {
+      if (error instanceof Error && error.cause === undefined) {
+        error.cause = cleanupError
+      }
+    }
+    throw error
+  }
 
   // When seeding config, proactively hydrate the connection store so tests do
   // not race first-run onboarding checks on initial mount.

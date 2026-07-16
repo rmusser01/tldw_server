@@ -17,16 +17,31 @@ export function validateSkillsFixtureRequest(
   const expectedMethods = typeof expectedMethod === "string"
     ? [expectedMethod]
     : expectedMethod
-  const method = request.method()
+  const normalizedExpectedMethods = expectedMethods.map((method) => method.toUpperCase())
+  const method = request.method().toUpperCase()
 
-  if (!expectedMethods.includes(method)) {
+  if (!normalizedExpectedMethods.includes(method)) {
     throw new Error(
-      `Expected ${expectedMethods.join(" or ")} request, received ${method}`,
+      `Expected ${normalizedExpectedMethods.join(" or ")} request, received ${method}`,
     )
   }
   if (!contract) return
 
-  if (new URL(request.url()).origin !== contract.origin) {
+  const requestUrl = request.url()
+  let requestOrigin: string
+  try {
+    requestOrigin = new URL(requestUrl).origin
+  } catch {
+    const maxPreviewLength = 120
+    const serializedRequestUrl = JSON.stringify(requestUrl)
+    const requestUrlPreview = serializedRequestUrl.length > maxPreviewLength
+      ? `${serializedRequestUrl.slice(0, maxPreviewLength - 4)}..."`
+      : serializedRequestUrl
+    throw new Error(
+      `Unable to validate Skills fixture request origin: malformed URL ${requestUrlPreview}`,
+    )
+  }
+  if (requestOrigin !== contract.origin) {
     throw new Error(`Expected request origin ${contract.origin}`)
   }
   if (contract.apiKey === undefined) return
@@ -455,35 +470,38 @@ export async function mockPowerUserSkillsLibrary(
     })
   })
 
-  await page.route(/\/api\/v1\/skills\/([^/?]+)(?:\/)?(?:\?.*)?$/, async (route) => {
-    validateSkillsFixtureRequest(
-      route.request(),
-      ["GET", "DELETE"],
-      requestContract,
-    )
-    const segments = new URL(route.request().url()).pathname.split("/").filter(Boolean)
-    const name = decodeURIComponent(segments.pop() ?? "")
-    const skill = largeLibrarySkills.find((candidate) => candidate.name === name)
-    if (!skill) {
-      await fulfillJson(route, { detail: "Skill not found" }, 404)
-      return
-    }
-    if (route.request().method() === "DELETE") {
-      deleteRequests.push({ name })
-      await fulfillJson(route, { deleted: true, count: 1 })
-      return
-    }
-    await fulfillJson(route, {
-      ...skill,
-      id: `skill-${name}`,
-      content: `---\ndescription: ${skill.description}\n---\n\nUse ${name}.`,
-      raw_content: null,
-      supporting_files: null,
-      directory_path: `/mock/skills/${name}`,
-      created_at: "2026-06-01T00:00:00Z",
-      last_modified: "2026-06-01T00:00:00Z",
-    })
-  })
+  await page.route(
+    /\/api\/v1\/skills\/(?!context(?:\/|\?|$))([^/?]+)(?:\/)?(?:\?.*)?$/,
+    async (route) => {
+      validateSkillsFixtureRequest(
+        route.request(),
+        ["GET", "DELETE"],
+        requestContract,
+      )
+      const segments = new URL(route.request().url()).pathname.split("/").filter(Boolean)
+      const name = decodeURIComponent(segments.pop() ?? "")
+      const skill = largeLibrarySkills.find((candidate) => candidate.name === name)
+      if (!skill) {
+        await fulfillJson(route, { detail: "Skill not found" }, 404)
+        return
+      }
+      if (route.request().method() === "DELETE") {
+        deleteRequests.push({ name })
+        await fulfillJson(route, { deleted: true, count: 1 })
+        return
+      }
+      await fulfillJson(route, {
+        ...skill,
+        id: `skill-${name}`,
+        content: `---\ndescription: ${skill.description}\n---\n\nUse ${name}.`,
+        raw_content: null,
+        supporting_files: null,
+        directory_path: `/mock/skills/${name}`,
+        created_at: "2026-06-01T00:00:00Z",
+        last_modified: "2026-06-01T00:00:00Z",
+      })
+    },
+  )
 
   await page.route(/\/api\/v1\/skills\/([^/?]+)\/export(?:\?.*)?$/, async (route) => {
     validateSkillsFixtureRequest(route.request(), "GET", requestContract)
