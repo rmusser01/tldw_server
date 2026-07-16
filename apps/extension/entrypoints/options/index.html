@@ -7,17 +7,7 @@
     <meta name="manifest.browser_style" content="false" />
     <link href="~/assets/tailwind.css" rel="stylesheet" />
     <meta charset="utf-8" />
-    <script>
-      // Set theme class synchronously to prevent flash of white background
-      (function() {
-        try {
-          var theme = localStorage.getItem('theme');
-          if (theme === 'dark' || (!theme && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
-            document.documentElement.classList.add('dark');
-          }
-        } catch (e) {}
-      })();
-    </script>
+    <script src="/theme-bootstrap.js"></script>
   </head>
   <body class="bg-bg">
     <div id="root"></div>

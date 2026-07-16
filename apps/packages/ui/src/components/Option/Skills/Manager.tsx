@@ -504,6 +504,7 @@ export const SkillsManager: React.FC = () => {
   const managerRootRef = React.useRef<HTMLDivElement | null>(null)
   const drawerReturnFocusRef = React.useRef<FocusReturnTarget | null>(null)
   const previewReturnFocusRef = React.useRef<FocusReturnTarget | null>(null)
+  const detailsReturnFocusRef = React.useRef<FocusReturnTarget | null>(null)
   const importFileInputRef = React.useRef<HTMLInputElement | null>(null)
   const searchInputRef = React.useRef<InputRef | null>(null)
   const importTextDirtyRef = React.useRef(false)
@@ -606,6 +607,7 @@ export const SkillsManager: React.FC = () => {
       setEditingSkill(null)
       setDuplicateSkill(null)
       setPreviewSkill(null)
+      detailsReturnFocusRef.current = null
       setDetailsSkill(null)
       setSelectedSkillNames([])
       setSelectedSkillSnapshots(new Map())
@@ -792,6 +794,41 @@ export const SkillsManager: React.FC = () => {
     previewReturnFocusRef.current = null
     restoreFocus(returnTarget)
   }, [restoreFocus])
+
+  const openSkillDetails = React.useCallback(
+    (skillName: string, triggerElement?: HTMLElement | null) => {
+      const returnTarget = triggerElement ?? getActiveFocusTarget()
+      detailsReturnFocusRef.current = getFocusReturnTarget(returnTarget)
+      setDetailsSkill(skillName)
+    },
+    [getActiveFocusTarget, getFocusReturnTarget]
+  )
+
+  const closeSkillDetails = React.useCallback(() => {
+    setDetailsSkill(null)
+  }, [])
+
+  const restoreDetailsFocus = React.useCallback(() => {
+    const returnTarget = detailsReturnFocusRef.current
+    detailsReturnFocusRef.current = null
+    restoreFocus(returnTarget)
+  }, [restoreFocus])
+
+  React.useEffect(() => {
+    if (detailsSkill || !detailsReturnFocusRef.current) return
+
+    if (typeof window !== "undefined" && window.requestAnimationFrame) {
+      const animationFrame = window.requestAnimationFrame(() => {
+        restoreDetailsFocus()
+      })
+      return () => window.cancelAnimationFrame(animationFrame)
+    }
+
+    const timeout = globalThis.setTimeout(() => {
+      restoreDetailsFocus()
+    }, 0)
+    return () => globalThis.clearTimeout(timeout)
+  }, [detailsSkill, restoreDetailsFocus])
 
   const offset = (page - 1) * pageSize
   const searchQuery = debouncedSearch.trim()
@@ -1596,6 +1633,7 @@ export const SkillsManager: React.FC = () => {
       )
       setDuplicateSkill(null)
       setEditingSkill(skill)
+      detailsReturnFocusRef.current = null
       setDetailsSkill(null)
       setDrawerOpen(true)
     } catch (err: unknown) {
@@ -1616,6 +1654,7 @@ export const SkillsManager: React.FC = () => {
       )
       setEditingSkill(null)
       setDuplicateSkill(source)
+      detailsReturnFocusRef.current = null
       setDetailsSkill(null)
       setDrawerOpen(true)
     } catch (err: unknown) {
@@ -1630,6 +1669,7 @@ export const SkillsManager: React.FC = () => {
   }
 
   const handleUseInChat = React.useCallback((name: string) => {
+    detailsReturnFocusRef.current = null
     setSelectedQuickPrompt(buildSkillInvocation(name))
     navigate("/chat")
   }, [navigate, setSelectedQuickPrompt])
@@ -2138,7 +2178,7 @@ export const SkillsManager: React.FC = () => {
           icon={<Eye size={14} />}
           data-skill-action="view"
           data-skill-name={record.name}
-          onClick={() => setDetailsSkill(record.name)}
+          onClick={(event) => openSkillDetails(record.name, event.currentTarget)}
         />
       </Tooltip>
       <Tooltip title={t("option:skills.useInChat", { defaultValue: "Use in chat" })}>
@@ -3018,7 +3058,7 @@ export const SkillsManager: React.FC = () => {
                   icon={<Eye size={14} />}
                   data-skill-action="success-view"
                   data-skill-name={skillName}
-                  onClick={() => setDetailsSkill(skillName)}
+                  onClick={(event) => openSkillDetails(skillName, event.currentTarget)}
                 >
                   {successAction.viewLabel ??
                     t("option:skills.viewSkill", { defaultValue: "View skill" })}
@@ -3124,7 +3164,9 @@ export const SkillsManager: React.FC = () => {
                   <button
                     type="button"
                     className="inline-flex min-h-11 items-center break-all bg-transparent p-0 text-left font-mono text-sm font-medium text-text"
-                    onClick={() => setDetailsSkill(skill.name)}
+                    data-skill-action="mobile-view"
+                    data-skill-name={skill.name}
+                    onClick={(event) => openSkillDetails(skill.name, event.currentTarget)}
                   >
                     {skill.name}
                   </button>
@@ -3529,9 +3571,10 @@ export const SkillsManager: React.FC = () => {
       <SkillDetailsDrawer
         scopeKey={skillsQueryScope}
         skillName={detailsSkill}
-        onClose={() => setDetailsSkill(null)}
+        onClose={closeSkillDetails}
         onTest={(name) => {
           const returnTarget = getSkillActionElement("view", name)
+          detailsReturnFocusRef.current = null
           setDetailsSkill(null)
           openSkillPreview(name, returnTarget)
         }}

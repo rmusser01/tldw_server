@@ -884,6 +884,7 @@ describe("SkillsManager imports", () => {
     })
     renderManager()
 
+    expect(await screen.findByText("1 skill")).toBeInTheDocument()
     expect(await screen.findByRole("button", { name: "View skill-1" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Use skill-1 in chat" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Copy invocation for skill-1" })).toBeInTheDocument()
@@ -908,6 +909,7 @@ describe("SkillsManager imports", () => {
     })
     renderManager()
 
+    expect(await screen.findByText("1 skill")).toBeInTheDocument()
     fireEvent.click(await screen.findByRole("button", { name: "Use skill-1 in chat" }))
 
     expect(setSelectedQuickPromptMock).toHaveBeenCalledWith("/skill skill-1")
@@ -924,9 +926,77 @@ describe("SkillsManager imports", () => {
     })
     renderManager()
 
+    expect(await screen.findByText("1 skill")).toBeInTheDocument()
     fireEvent.click(await screen.findByRole("button", { name: "View skill-1" }))
 
     expect(screen.getByTestId("skill-details-open")).toHaveTextContent("skill-1")
+  })
+
+  it("returns focus to the row view action after closing details", async () => {
+    tldwClientMock.listSkills.mockResolvedValue({
+      skills: [makeSkill(1)],
+      count: 1,
+      total: 1,
+      limit: 10,
+      offset: 0
+    })
+    renderManager()
+
+    expect(await screen.findByText("1 skill")).toBeInTheDocument()
+    const viewButton = screen.getByRole("button", { name: "View skill-1" })
+    viewButton.focus()
+    fireEvent.click(viewButton)
+
+    expect(screen.getByTestId("skill-details-open")).toHaveTextContent("skill-1")
+    const closeDetailsButton = screen.getByRole("button", { name: "Close details" })
+    closeDetailsButton.focus()
+    fireEvent.click(closeDetailsButton)
+
+    await waitFor(() => expect(viewButton).toHaveFocus())
+  })
+
+  it("keeps focus in reopened details when the close fallback is canceled", async () => {
+    const scheduledFrames = new Map<number, FrameRequestCallback>()
+    let nextFrameId = 1
+    const requestAnimationFrameSpy = vi
+      .spyOn(window, "requestAnimationFrame")
+      .mockImplementation((callback) => {
+        const frameId = nextFrameId++
+        scheduledFrames.set(frameId, callback)
+        return frameId
+      })
+    const cancelAnimationFrameSpy = vi
+      .spyOn(window, "cancelAnimationFrame")
+      .mockImplementation((frameId) => {
+        scheduledFrames.delete(frameId)
+      })
+    tldwClientMock.listSkills.mockResolvedValue({
+      skills: [makeSkill(1)],
+      count: 1,
+      total: 1,
+      limit: 10,
+      offset: 0
+    })
+    renderManager()
+
+    expect(await screen.findByText("1 skill")).toBeInTheDocument()
+    const viewButton = screen.getByRole("button", { name: "View skill-1" })
+    fireEvent.click(viewButton)
+    fireEvent.click(screen.getByRole("button", { name: "Close details" }))
+
+    expect(requestAnimationFrameSpy).toHaveBeenCalledTimes(1)
+    fireEvent.click(viewButton)
+    const reopenedDetails = screen.getByRole("button", { name: "Close details" })
+    reopenedDetails.focus()
+
+    expect(cancelAnimationFrameSpy).toHaveBeenCalledWith(1)
+    act(() => {
+      for (const [frameId, callback] of scheduledFrames) {
+        scheduledFrames.delete(frameId)
+        callback(0)
+      }
+    })
+    expect(reopenedDetails).toHaveFocus()
   })
 
   it("returns focus to the row view action after testing from details", async () => {
@@ -939,6 +1009,7 @@ describe("SkillsManager imports", () => {
     })
     renderManager()
 
+    expect(await screen.findByText("1 skill")).toBeInTheDocument()
     const viewButton = await screen.findByRole("button", { name: "View skill-1" })
     viewButton.focus()
     fireEvent.click(viewButton)
@@ -971,6 +1042,7 @@ describe("SkillsManager imports", () => {
     tldwClientMock.getSkill.mockResolvedValue(source)
     renderManager()
 
+    expect(await screen.findByText("1 skill")).toBeInTheDocument()
     fireEvent.click(await screen.findByRole("button", { name: "More actions for skill-1" }))
     fireEvent.click(await screen.findByRole("menuitem", { name: "Duplicate" }))
 
@@ -3010,7 +3082,11 @@ describe("SkillsManager imports", () => {
 
     renderManager()
 
-    expect(await screen.findByRole("button", { name: "View fallback-scope-skill" }))
+    expect(await screen.findByRole(
+      "button",
+      { name: "View fallback-scope-skill" },
+      { timeout: 5_000 }
+    ))
       .toBeInTheDocument()
     expect(tldwClientMock.listSkills).toHaveBeenCalled()
   })

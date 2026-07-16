@@ -1,4 +1,59 @@
-import type { Page, Route } from "@playwright/test"
+import type { Page, Request, Route } from "@playwright/test"
+
+export type SkillsFixtureRequestContract = {
+  origin: string
+  apiKey?: string
+}
+
+export type SkillsFixtureOptions = {
+  requestContract?: SkillsFixtureRequestContract
+}
+
+export function validateSkillsFixtureRequest(
+  request: Pick<Request, "headers" | "method" | "url">,
+  expectedMethod: string | readonly string[],
+  contract?: SkillsFixtureRequestContract,
+): void {
+  const expectedMethods = typeof expectedMethod === "string"
+    ? [expectedMethod]
+    : expectedMethod
+  const normalizedExpectedMethods = expectedMethods.map((method) => method.toUpperCase())
+  const method = request.method().toUpperCase()
+
+  if (!normalizedExpectedMethods.includes(method)) {
+    throw new Error(
+      `Expected ${normalizedExpectedMethods.join(" or ")} request, received ${method}`,
+    )
+  }
+  if (!contract) return
+
+  const requestUrl = request.url()
+  let requestOrigin: string
+  try {
+    requestOrigin = new URL(requestUrl).origin
+  } catch {
+    const maxPreviewLength = 120
+    const serializedRequestUrl = JSON.stringify(requestUrl)
+    const requestUrlPreview = serializedRequestUrl.length > maxPreviewLength
+      ? `${serializedRequestUrl.slice(0, maxPreviewLength - 4)}..."`
+      : serializedRequestUrl
+    throw new Error(
+      `Unable to validate Skills fixture request origin: malformed URL ${requestUrlPreview}`,
+    )
+  }
+  if (requestOrigin !== contract.origin) {
+    throw new Error(`Expected request origin ${contract.origin}`)
+  }
+  if (contract.apiKey === undefined) return
+
+  const apiKey = request.headers()["x-api-key"]
+  if (!apiKey) {
+    throw new Error("Expected x-api-key request header")
+  }
+  if (apiKey !== contract.apiKey) {
+    throw new Error("Unexpected x-api-key request header")
+  }
+}
 
 type SkillFixtureSummary = typeof seededSkillSummary & {
   allowed_tools?: string[] | null
@@ -35,9 +90,14 @@ const seededSkillResponse = {
   version: 1,
 }
 
+type TldwConnectionRootStore = {
+  state: Record<string, unknown>
+  checkOnce: (options?: { force?: boolean }) => Promise<void>
+}
+
 type TldwConnectionStore = {
-  getState: () => { state: Record<string, unknown> }
-  setState: (value: { state: Record<string, unknown> }) => void
+  getState: () => TldwConnectionRootStore
+  setState: (value: Partial<TldwConnectionRootStore>) => void
 }
 
 type TldwConnectionStoreWindow = Window & {
@@ -52,12 +112,27 @@ const fulfillJson = async (route: Route, payload: unknown, status = 200) => {
   })
 }
 
-async function mockSkillsCapabilityRoutes(page: Page) {
+async function mockSkillsCapabilityRoutes(
+  page: Page,
+  requestContract?: SkillsFixtureRequestContract,
+) {
   await page.route(/\/api\/v1\/health(?:\?.*)?$/, async (route) => {
+    validateSkillsFixtureRequest(route.request(), "GET", requestContract)
+    await fulfillJson(route, { status: "healthy" })
+  })
+
+  await page.route(/\/api\/v1\/health\/live(?:\?.*)?$/, async (route) => {
+    validateSkillsFixtureRequest(route.request(), "GET", requestContract)
+    await fulfillJson(route, { status: "healthy" })
+  })
+
+  await page.route(/\/api\/v1\/rag\/health(?:\?.*)?$/, async (route) => {
+    validateSkillsFixtureRequest(route.request(), "GET", requestContract)
     await fulfillJson(route, { status: "healthy" })
   })
 
   await page.route(/\/openapi\.json(?:\?.*)?$/, async (route) => {
+    validateSkillsFixtureRequest(route.request(), "GET", requestContract)
     await fulfillJson(route, {
       openapi: "3.0.0",
       info: { title: "Mock tldw API", version: "test" },
@@ -80,18 +155,17 @@ async function mockSkillsCapabilityRoutes(page: Page) {
 
 export async function mockSkillsBeginnerApi(
   page: Page,
-  options: { seeded?: boolean } = {}
+  options: SkillsFixtureOptions & { seeded?: boolean } = {},
 ) {
   let seeded = Boolean(options.seeded)
+  const seedRequests: URL[] = []
   const executeRequests: Array<{ args?: string; dry_run?: boolean }> = []
+  const { requestContract } = options
 
-  await mockSkillsCapabilityRoutes(page)
+  await mockSkillsCapabilityRoutes(page, requestContract)
 
   await page.route(/\/api\/v1\/skills(?:\/)?(?:\?.*)?$/, async (route) => {
-    if (route.request().method() !== "GET") {
-      await fulfillJson(route, {}, 405)
-      return
-    }
+    validateSkillsFixtureRequest(route.request(), "GET", requestContract)
     const url = new URL(route.request().url())
     const query = (url.searchParams.get("q") ?? "").trim().toLowerCase()
     const skills = seeded
@@ -110,6 +184,7 @@ export async function mockSkillsBeginnerApi(
   })
 
   await page.route(/\/api\/v1\/skills\/context(?:\/)?(?:\?.*)?$/, async (route) => {
+    validateSkillsFixtureRequest(route.request(), "GET", requestContract)
     await fulfillJson(route, {
       available_skills: seeded ? [seededSkillSummary] : [],
       context_text: seeded ? "/skill summarize [text]" : "",
@@ -117,25 +192,21 @@ export async function mockSkillsBeginnerApi(
   })
 
   await page.route(/\/api\/v1\/skills\/seed(?:\/)?(?:\?.*)?$/, async (route) => {
-    if (route.request().method() !== "POST") {
-      await fulfillJson(route, {}, 405)
-      return
-    }
+    validateSkillsFixtureRequest(route.request(), "POST", requestContract)
+    seedRequests.push(new URL(route.request().url()))
     seeded = true
     await fulfillJson(route, { seeded: ["summarize"], count: 1 })
   })
 
   await page.route(/\/api\/v1\/skills\/summarize(?:\/)?(?:\?.*)?$/, async (route) => {
+    validateSkillsFixtureRequest(route.request(), "GET", requestContract)
     await fulfillJson(route, seededSkillResponse)
   })
 
   await page.route(
     /\/api\/v1\/skills\/summarize\/execute(?:\/)?(?:\?.*)?$/,
     async (route) => {
-      if (route.request().method() !== "POST") {
-        await fulfillJson(route, {}, 405)
-        return
-      }
+      validateSkillsFixtureRequest(route.request(), "POST", requestContract)
       const body = (route.request().postDataJSON() ?? {}) as {
         args?: string
         dry_run?: boolean
@@ -154,17 +225,22 @@ export async function mockSkillsBeginnerApi(
     }
   )
 
-  return { executeRequests }
+  return { executeRequests, seedRequests }
 }
 
-export async function mockSkillsTrashWorkflow(page: Page) {
+export async function mockSkillsTrashWorkflow(
+  page: Page,
+  options: SkillsFixtureOptions = {},
+) {
   let state: "active" | "trash" | "purged" = "active"
   let version = 1
   const operations: string[] = []
+  const { requestContract } = options
 
-  await mockSkillsCapabilityRoutes(page)
+  await mockSkillsCapabilityRoutes(page, requestContract)
 
   await page.route(/\/api\/v1\/skills(?:\/)?(?:\?.*)?$/, async (route) => {
+    validateSkillsFixtureRequest(route.request(), "GET", requestContract)
     const skills = state === "active"
       ? [{ ...seededSkillSummary, version }]
       : []
@@ -178,10 +254,7 @@ export async function mockSkillsTrashWorkflow(page: Page) {
   })
 
   await page.route(/\/api\/v1\/skills\/trash(?:\/)?(?:\?.*)?$/, async (route) => {
-    if (route.request().method() !== "GET") {
-      await fulfillJson(route, {}, 405)
-      return
-    }
+    validateSkillsFixtureRequest(route.request(), "GET", requestContract)
     const skills = state === "trash"
       ? [{
           ...seededSkillSummary,
@@ -203,6 +276,7 @@ export async function mockSkillsTrashWorkflow(page: Page) {
   })
 
   await page.route(/\/api\/v1\/skills\/context(?:\/)?(?:\?.*)?$/, async (route) => {
+    validateSkillsFixtureRequest(route.request(), "GET", requestContract)
     const availableSkills = state === "active"
       ? [{ ...seededSkillSummary, version }]
       : []
@@ -215,10 +289,7 @@ export async function mockSkillsTrashWorkflow(page: Page) {
   await page.route(
     /\/api\/v1\/skills\/summarize\/restore(?:\/)?(?:\?.*)?$/,
     async (route) => {
-      if (route.request().method() !== "POST") {
-        await fulfillJson(route, {}, 405)
-        return
-      }
+      validateSkillsFixtureRequest(route.request(), "POST", requestContract)
       if (state !== "trash") {
         await fulfillJson(
           route,
@@ -237,10 +308,7 @@ export async function mockSkillsTrashWorkflow(page: Page) {
   await page.route(
     /\/api\/v1\/skills\/summarize\/purge(?:\/)?(?:\?.*)?$/,
     async (route) => {
-      if (route.request().method() !== "DELETE") {
-        await fulfillJson(route, {}, 405)
-        return
-      }
+      validateSkillsFixtureRequest(route.request(), "DELETE", requestContract)
       if (state !== "trash") {
         await fulfillJson(
           route,
@@ -256,6 +324,11 @@ export async function mockSkillsTrashWorkflow(page: Page) {
   )
 
   await page.route(/\/api\/v1\/skills\/summarize(?:\/)?(?:\?.*)?$/, async (route) => {
+    validateSkillsFixtureRequest(
+      route.request(),
+      ["GET", "DELETE"],
+      requestContract,
+    )
     if (route.request().method() === "DELETE") {
       if (state !== "active") {
         await fulfillJson(route, { detail: "Skill not found" }, 404)
@@ -265,10 +338,6 @@ export async function mockSkillsTrashWorkflow(page: Page) {
       state = "trash"
       version += 1
       await fulfillJson(route, { deleted: true })
-      return
-    }
-    if (route.request().method() !== "GET") {
-      await fulfillJson(route, {}, 405)
       return
     }
     if (state !== "active") {
@@ -334,6 +403,7 @@ const filterLargeLibrarySkills = (url: URL) => {
   const query = (url.searchParams.get("q") ?? "").trim().toLowerCase()
   const context = url.searchParams.get("context")
   const hasTools = url.searchParams.get("has_tools")
+  const model = (url.searchParams.get("model") ?? "").trim().toLowerCase()
   const sort = url.searchParams.get("sort")
   const order = url.searchParams.get("order")
   const limit = Number(url.searchParams.get("limit") ?? 10)
@@ -350,6 +420,7 @@ const filterLargeLibrarySkills = (url: URL) => {
     if (context && skill.context !== context) return false
     if (hasTools === "true" && !(skill.allowed_tools?.length)) return false
     if (hasTools === "false" && skill.allowed_tools?.length) return false
+    if (model && (skill.model ?? "").trim().toLowerCase() !== model) return false
     return true
   })
 
@@ -366,17 +437,19 @@ const filterLargeLibrarySkills = (url: URL) => {
   }
 }
 
-export async function mockPowerUserSkillsLibrary(page: Page) {
+export async function mockPowerUserSkillsLibrary(
+  page: Page,
+  options: SkillsFixtureOptions = {},
+) {
   const listUrls: URL[] = []
   const deleteRequests: unknown[] = []
+  const exportRequests: Array<{ method: string; name: string }> = []
+  const { requestContract } = options
 
-  await mockSkillsCapabilityRoutes(page)
+  await mockSkillsCapabilityRoutes(page, requestContract)
 
   await page.route(/\/api\/v1\/skills(?:\/)?(?:\?.*)?$/, async (route) => {
-    if (route.request().method() !== "GET") {
-      await fulfillJson(route, {}, 405)
-      return
-    }
+    validateSkillsFixtureRequest(route.request(), "GET", requestContract)
     const url = new URL(route.request().url())
     listUrls.push(url)
     const result = filterLargeLibrarySkills(url)
@@ -390,40 +463,90 @@ export async function mockPowerUserSkillsLibrary(page: Page) {
   })
 
   await page.route(/\/api\/v1\/skills\/context(?:\/)?(?:\?.*)?$/, async (route) => {
+    validateSkillsFixtureRequest(route.request(), "GET", requestContract)
     await fulfillJson(route, {
       available_skills: largeLibrarySkills,
       context_text: "/skill target-research-formatter [source]",
     })
   })
 
-  await page.route(/\/api\/v1\/skills\/([^/?]+)(?:\/)?(?:\?.*)?$/, async (route) => {
+  await page.route(
+    /\/api\/v1\/skills\/(?!context(?:\/|\?|$))([^/?]+)(?:\/)?(?:\?.*)?$/,
+    async (route) => {
+      validateSkillsFixtureRequest(
+        route.request(),
+        ["GET", "DELETE"],
+        requestContract,
+      )
+      const segments = new URL(route.request().url()).pathname.split("/").filter(Boolean)
+      const name = decodeURIComponent(segments.pop() ?? "")
+      const skill = largeLibrarySkills.find((candidate) => candidate.name === name)
+      if (!skill) {
+        await fulfillJson(route, { detail: "Skill not found" }, 404)
+        return
+      }
+      if (route.request().method() === "DELETE") {
+        deleteRequests.push({ name })
+        await fulfillJson(route, { deleted: true, count: 1 })
+        return
+      }
+      await fulfillJson(route, {
+        ...skill,
+        id: `skill-${name}`,
+        content: `---\ndescription: ${skill.description}\n---\n\nUse ${name}.`,
+        raw_content: null,
+        supporting_files: null,
+        directory_path: `/mock/skills/${name}`,
+        created_at: "2026-06-01T00:00:00Z",
+        last_modified: "2026-06-01T00:00:00Z",
+      })
+    },
+  )
+
+  await page.route(/\/api\/v1\/skills\/([^/?]+)\/export(?:\?.*)?$/, async (route) => {
+    validateSkillsFixtureRequest(route.request(), "GET", requestContract)
     const segments = new URL(route.request().url()).pathname.split("/").filter(Boolean)
-    const name = decodeURIComponent(segments.pop() ?? "")
-    const skill = largeLibrarySkills.find((candidate) => candidate.name === name)
-    if (!skill) {
+    const rawName = segments.at(-2) ?? ""
+    let decodedName: string | undefined
+    try {
+      decodedName = decodeURIComponent(rawName)
+    } catch {
+      decodedName = undefined
+    }
+
+    const method = route.request().method()
+    exportRequests.push({ method, name: decodedName ?? rawName })
+    if (
+      decodedName === undefined
+      || !largeLibrarySkills.some((candidate) => candidate.name === decodedName)
+    ) {
       await fulfillJson(route, { detail: "Skill not found" }, 404)
       return
     }
-    if (route.request().method() === "DELETE") {
-      deleteRequests.push({ name })
-      await fulfillJson(route, { deleted: true, count: 1 })
-      return
-    }
-    await fulfillJson(route, {
-      ...skill,
-      id: `skill-${name}`,
-      content: `---\ndescription: ${skill.description}\n---\n\nUse ${name}.`,
-      raw_content: null,
-      supporting_files: null,
-      directory_path: `/mock/skills/${name}`,
-      created_at: "2026-06-01T00:00:00Z",
-      last_modified: "2026-06-01T00:00:00Z",
+
+    const name = decodedName
+    await route.fulfill({
+      status: 200,
+      headers: {
+        "content-type": "application/zip",
+        "content-disposition": `attachment; filename="${name}.zip"`,
+      },
+      body: Buffer.from([
+        0x50, 0x4b, 0x05, 0x06,
+        0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00,
+      ]),
     })
   })
 
   return {
     deleteRequests,
+    exportRequests,
     lastListUrl: () => listUrls.at(-1),
+    listRequestCount: () => listUrls.length,
   }
 }
 
@@ -586,7 +709,76 @@ export async function mockSkillsSlowList(page: Page) {
   }
 }
 
-export async function forceSkillsConnectionState(page: Page) {
+export async function mockSkillsListRecovery(
+  page: Page,
+  options: SkillsFixtureOptions = {},
+) {
+  let releaseFirst: () => void = () => {}
+  const firstRequestReleased = new Promise<void>((resolve) => {
+    releaseFirst = resolve
+  })
+  let listRequests = 0
+  const { requestContract } = options
+
+  await mockSkillsCapabilityRoutes(page, requestContract)
+
+  await page.route(/\/api\/v1\/skills(?:\/)?(?:\?.*)?$/, async (route) => {
+    validateSkillsFixtureRequest(route.request(), "GET", requestContract)
+
+    listRequests += 1
+    if (listRequests === 1) {
+      await firstRequestReleased
+    }
+
+    if (listRequests <= 2) {
+      const apiKey = route.request().headers()["x-api-key"]
+      if (!apiKey) {
+        throw new Error("Expected the Skills list request to include x-api-key")
+      }
+      await fulfillJson(
+        route,
+        {
+          detail:
+            `api_key=${apiKey} path=/Users/skills-parity/private-list.log\n`
+            + "RAW_SKILLS_LIST_503_BODY",
+        },
+        503,
+      )
+      return
+    }
+
+    if (listRequests === 3) {
+      await fulfillJson(route, {
+        skills: [seededSkillSummary],
+        count: 1,
+        total: 1,
+        limit: 10,
+        offset: 0,
+      })
+      return
+    }
+
+    await fulfillJson(route, { detail: "Unexpected Skills list request" }, 500)
+  })
+
+  await page.route(/\/api\/v1\/skills\/context(?:\/)?(?:\?.*)?$/, async (route) => {
+    validateSkillsFixtureRequest(route.request(), "GET", requestContract)
+    await fulfillJson(route, {
+      available_skills: [seededSkillSummary],
+      context_text: "/skill summarize [text]",
+    })
+  })
+
+  return {
+    releaseFirst,
+    listRequestCount: () => listRequests,
+  }
+}
+
+export async function forceSkillsConnectionState(
+  page: Page,
+  state: "connected" | "unreachable" = "connected",
+) {
   await page.waitForFunction(
     () =>
       typeof (window as TldwConnectionStoreWindow).__tldw_useConnectionStore
@@ -594,10 +786,26 @@ export async function forceSkillsConnectionState(page: Page) {
     null,
     { timeout: 15_000 }
   )
-  await page.evaluate(() => {
+  await page.evaluate((targetState) => {
     const store = (window as TldwConnectionStoreWindow).__tldw_useConnectionStore
     if (!store) throw new Error("Connection store is unavailable")
     const prev = store.getState().state
+
+    if (targetState === "unreachable") {
+      // Keep the active poller from reconnecting this disposable test context.
+      store.setState({ checkOnce: async () => {} })
+      store.setState({
+        state: {
+          ...prev,
+          phase: "error",
+          isConnected: false,
+          isChecking: false,
+          errorKind: "unreachable",
+        },
+      })
+      return
+    }
+
     const now = Date.now()
     store.setState({
       state: {
@@ -617,5 +825,5 @@ export async function forceSkillsConnectionState(page: Page) {
         hasCompletedFirstRun: true,
       },
     })
-  })
+  }, state)
 }
