@@ -166,9 +166,9 @@ Replace the example content with your own:
 ## 🚦 Next Steps
 
 **Ready for more?**
-- [Full User Guide](./User_Guides/Server/Evaluations_End_User_Guide.md) - Detailed explanations
-- [API Reference](./API-related/tldw_Evaluations_API_Reference.md) - All endpoints
-- [Best Practices](./User_Guides/Server/Evaluations_End_User_Guide.md#best-practices) - Pro tips
+- [Full User Guide](../User_Guides/Server/Evaluations_End_User_Guide.md) - Detailed explanations
+- [API Reference](../API-related/tldw_Evaluations_API_Reference.md) - All endpoints
+- [Best Practices](../User_Guides/Server/Evaluations_End_User_Guide.md#best-practices) - Pro tips
 
 **Common Tasks**:
 - Evaluate customer service responses

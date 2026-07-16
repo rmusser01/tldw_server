@@ -37,9 +37,6 @@ BLOCKED_PATTERNS: dict[str, re.Pattern[str]] = {
     "legacy_stt_tts_blob_link": re.compile(
         r"https://github\.com/rmusser01/tldw_server/blob/main/Docs/Getting-Started-STT_and_TTS\.md"
     ),
-    "legacy_stt_tts_runbook_blob_prefix": re.compile(
-        r"https://github\.com/rmusser01/tldw_server/blob/main/Docs/STT-TTS/"
-    ),
     "bad_tts_user_guide_path": re.compile(r"Docs/User_Guides/TTS_Getting_Started\.md"),
     "removed_installation_setup_guide": re.compile(r"Installation-Setup-Guide\.md"),
 }

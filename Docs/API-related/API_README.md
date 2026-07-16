@@ -60,7 +60,7 @@ Notes:
 
 For comprehensive documentation, see:
 - [RAG API Consumer Guide](RAG-API-Guide.md) - Complete API reference with examples
-- [RAG Developer Guide](../Development/RAG-Developer-Guide.md) - Architecture and implementation details
+- [RAG Developer Guide](../Code_Documentation/RAG-Developer-Guide.md) - Architecture and implementation details
 
 #### Text2SQL - `/api/v1/text2sql`
 

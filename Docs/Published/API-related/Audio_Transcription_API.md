@@ -9,7 +9,7 @@ The tldw_server provides a comprehensive audio transcription API that is fully c
 - [Getting Started — STT and TTS](../User_Guides/WebUI_Extension/Getting-Started-STT_and_TTS.md) — quickstart for first successful speech requests.
 - [TTS Providers Getting Started](../User_Guides/WebUI_Extension/TTS_Getting_Started.md) — provider selection and first successful synthesis.
 - [TTS Provider Setup Guide](../User_Guides/WebUI_Extension/TTS-SETUP-GUIDE.md) — runbook index for deep provider setup/tuning.
-- [Qwen3-ASR Setup Guide](../STT-TTS/QWEN3_ASR_SETUP.md) — Qwen3-ASR model setup details.
+- [Qwen3-ASR Setup Guide](https://github.com/rmusser01/tldw_server/blob/main/Docs/STT-TTS/QWEN3_ASR_SETUP.md) — Qwen3-ASR model setup details.
 
 ## Auth + Rate Limits
 - Single-user: `X-API-KEY: <key>`
@@ -83,7 +83,7 @@ The tldw_server provides a comprehensive audio transcription API that is fully c
 - **Languages**: 30 languages + 22 Chinese dialects (auto-detected)
 - **Best For**: Chinese transcription, high-accuracy multilingual content
 - **Special Features**: Optional word-level timestamps via Forced Aligner
-- **Note**: Requires manual model download. See [Qwen3-ASR Setup Guide](../STT-TTS/QWEN3_ASR_SETUP.md); for end-to-end first run, start with [Getting Started — STT and TTS](../User_Guides/WebUI_Extension/Getting-Started-STT_and_TTS.md).
+- **Note**: Requires manual model download. See [Qwen3-ASR Setup Guide](https://github.com/rmusser01/tldw_server/blob/main/Docs/STT-TTS/QWEN3_ASR_SETUP.md); for end-to-end first run, start with [Getting Started — STT and TTS](../User_Guides/WebUI_Extension/Getting-Started-STT_and_TTS.md).
 
 ### 6. VibeVoice-ASR
 - **Model**: `vibevoice-asr`, `vibevoice`
@@ -947,9 +947,9 @@ TTS
 ## Related Documentation
 
 - [API Overview](./API_README.md)
-- [Configuration Guide](../User_Guides/Configuration.md)
-- [Live Transcription Guide](../User_Guides/Live_Transcription.md)
-- [Model Selection Guide](../User_Guides/Model_Selection.md)
+- [Configuration Guide](../Getting_Started/README.md)
+- [Live Transcription Guide](../User_Guides/WebUI_Extension/Getting-Started-STT_and_TTS.md)
+- [Model Selection Guide](../User_Guides/WebUI_Extension/Getting-Started-STT_and_TTS.md)
 - For non-JSON responses (`text`, `srt`, `vtt`), `segment=true` is ignored and no `segmentation` is returned.
 - TreeSeg embeddings use the configured embedding service unless `seg_embeddings_provider`/`seg_embeddings_model` overrides are supplied.
 - If you have per-utterance segments from your STT provider, you can call the dedicated segmentation endpoint with those entries for better alignment.
