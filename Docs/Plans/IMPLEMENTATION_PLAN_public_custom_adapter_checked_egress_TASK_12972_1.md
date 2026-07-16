@@ -363,6 +363,8 @@ git commit -m "docs: finalize public adapter egress migration (TASK-12972.1)"
 
 **Status:** Complete
 
+Post-publication refresh: at requester direction, PR #2744 was rebased without conflicts onto `origin/dev` commit `571bbce834` after PR #2741 merged. The full affected adapter union passed again (143/143, 5 baseline warnings); scoped Ruff, Python compilation, the production seam search, `git diff --check`, and Bandit (373 lines, 0 findings/errors/skips) also passed before the force-with-lease update.
+
 ### Task 4.1: Push and create the pull request
 
 - [x] **Step 1: Verify branch state**
