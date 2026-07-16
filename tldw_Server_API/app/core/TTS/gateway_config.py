@@ -5,10 +5,12 @@ from __future__ import annotations
 import hashlib
 import ipaddress
 import json
+import math
 import os
 import re
 import shutil
 from collections.abc import Mapping
+from copy import deepcopy
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from types import MappingProxyType
@@ -67,10 +69,12 @@ _RESERVED_OPTION_TOKENS = frozenset(
     {
         "api-key",
         "api_key",
+        "access_token",
         "auth",
         "authorization",
         "base-url",
         "base_url",
+        "bearer",
         "credential",
         "credentials",
         "header",
@@ -80,14 +84,23 @@ _RESERVED_OPTION_TOKENS = frozenset(
         "language",
         "model",
         "models_path",
+        "password",
+        "path",
         "response_format",
+        "secret",
         "speech_path",
         "speed",
         "target_sample_rate",
+        "token",
         "url",
         "voice",
     }
 )
+
+_MAX_EXTRA_PARAM_DEPTH = 8
+_MAX_EXTRA_PARAM_SCALAR_LEAVES = 64
+_MAX_EXTRA_PARAM_STRING_LENGTH = 4096
+_MAX_EXTRA_PARAM_SERIALIZED_BYTES = 65536
 
 
 class _FrozenModel(BaseModel):
@@ -400,6 +413,103 @@ def decode_json_pointer(pointer: str) -> tuple[str, ...]:
             index += 2
         decoded.append("".join(chars))
     return tuple(decoded)
+
+
+def _pointer_value(document: Mapping[str, Any], tokens: tuple[str, ...]) -> Any:
+    current: Any = document
+    for token in tokens:
+        if not isinstance(current, Mapping) or token not in current:
+            return _UNSET
+        current = current[token]
+    return current
+
+
+def validate_gateway_extra_params(
+    extra_params: Mapping[str, Any],
+    allowed_pointers: frozenset[str] | set[str] | tuple[str, ...],
+) -> None:
+    """Validate bounded JSON options and require exact RFC 6901 leaf matches."""
+    if not isinstance(extra_params, Mapping):
+        raise ValueError("gateway extra_params must be a JSON object")
+
+    document = dict(extra_params)
+    authorization_leaves: set[tuple[str, ...]] = set()
+    scalar_leaves = 0
+
+    def walk(value: Any, path: tuple[str, ...], depth: int, *, authorize: bool) -> None:
+        nonlocal scalar_leaves
+        if depth > _MAX_EXTRA_PARAM_DEPTH:
+            raise ValueError("gateway extra_params exceeds maximum depth 8")
+        if isinstance(value, Mapping):
+            if not value and path and authorize:
+                raise ValueError("gateway extra_params contains an empty container leaf")
+            for key, child in value.items():
+                if not isinstance(key, str):
+                    raise ValueError("gateway extra_params object keys must be strings")
+                if len(key) > _MAX_EXTRA_PARAM_STRING_LENGTH:
+                    raise ValueError("gateway extra_params key exceeds 4096 characters")
+                if key.casefold() in _RESERVED_OPTION_TOKENS:
+                    raise ValueError("gateway extra_params contains a reserved field")
+                walk(child, (*path, key), depth + 1, authorize=authorize)
+            return
+        if isinstance(value, list):
+            if authorize:
+                authorization_leaves.add(path)
+            for index, child in enumerate(value):
+                walk(child, (*path, str(index)), depth + 1, authorize=False)
+            return
+        if isinstance(value, str):
+            if len(value) > _MAX_EXTRA_PARAM_STRING_LENGTH:
+                raise ValueError("gateway extra_params string exceeds 4096 characters")
+        elif isinstance(value, float):
+            if not math.isfinite(value):
+                raise ValueError("gateway extra_params numbers must be finite JSON values")
+        elif not isinstance(value, (int, bool)) and value is not None:
+            raise ValueError("gateway extra_params contains a non-JSON value")
+        scalar_leaves += 1
+        if scalar_leaves > _MAX_EXTRA_PARAM_SCALAR_LEAVES:
+            raise ValueError("gateway extra_params exceeds 64 scalar leaves")
+        if authorize:
+            authorization_leaves.add(path)
+
+    walk(document, (), 0, authorize=True)
+    try:
+        serialized = json.dumps(
+            document,
+            allow_nan=False,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise ValueError("gateway extra_params must contain JSON values") from exc
+    if len(serialized) > _MAX_EXTRA_PARAM_SERIALIZED_BYTES:
+        raise ValueError("gateway extra_params exceeds 65536 serialized bytes")
+
+    decoded_pointers: set[tuple[str, ...]] = set()
+    for pointer in allowed_pointers:
+        tokens = decode_json_pointer(pointer)
+        if not tokens:
+            raise ValueError("gateway extra_params cannot allow the whole document")
+        if any(token.casefold() in _RESERVED_OPTION_TOKENS for token in tokens):
+            raise ValueError("gateway extra_params allowlist contains a reserved field")
+        configured_value = _pointer_value(document, tokens)
+        if isinstance(configured_value, Mapping):
+            raise ValueError("gateway extra_params pointer identifies only a container")
+        decoded_pointers.add(tokens)
+
+    unknown = authorization_leaves - decoded_pointers
+    if unknown:
+        raise ValueError("gateway extra_params contains a leaf not in the allowlist")
+
+
+def copy_gateway_extra_params(
+    extra_params: Mapping[str, Any],
+    allowed_pointers: frozenset[str] | set[str] | tuple[str, ...],
+) -> dict[str, Any]:
+    """Return a detached copy after validating every supplied option leaf."""
+    validate_gateway_extra_params(extra_params, allowed_pointers)
+    return deepcopy(dict(extra_params))
 
 
 def _validate_request_options(pointers: tuple[str, ...]) -> frozenset[str]:

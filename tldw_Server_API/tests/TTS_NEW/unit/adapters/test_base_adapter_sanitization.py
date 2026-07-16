@@ -3,8 +3,8 @@ import pytest
 from tldw_Server_API.app.core.TTS.adapters import base as base_mod
 from tldw_Server_API.app.core.TTS.adapters.base import (
     AudioFormat,
-    TTSCapabilities,
     TTSAdapter,
+    TTSCapabilities,
     TTSRequest,
     TTSResponse,
 )
@@ -82,7 +82,7 @@ def test_request_provider_model_lowercase_log_sanitizes_exception_extra():
         lambda: TTSRequest(text="hello", provider=_BadLowerStr("Provider"))
     )
 
-    assert "TTS provider/model lowercase normalization failed" in log_output
+    assert "TTS provider lowercase normalization failed" in log_output
     assert "lowercase normalization leaked" not in log_output
     assert "token=secret" not in log_output
 
