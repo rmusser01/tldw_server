@@ -151,6 +151,49 @@ async def test_expired_fresh_entry_refreshes_without_sleep(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_zero_ttl_refreshes_sequential_calls_at_same_time(monkeypatch):
+    calls = 0
+
+    async def fake_fetch_json(**_kwargs: Any) -> Any:
+        nonlocal calls
+        calls += 1
+        return {"data": [{"id": f"Vendor/Call-{calls}"}]}
+
+    monkeypatch.setattr(catalog_module, "afetch_json", fake_fetch_json)
+    catalog = GatewayCatalog(max_entries=2, clock=FakeClock())
+    spec = _spec(ttl_seconds=0)
+
+    first = await catalog.get(spec, credential_scope_token="scope", api_key="key")
+    second = await catalog.get(spec, credential_scope_token="scope", api_key="key")
+
+    assert first.models[0] == "Vendor/Call-1"
+    assert second.models[0] == "Vendor/Call-2"
+    assert calls == 2
+
+
+@pytest.mark.asyncio
+async def test_positive_ttl_refreshes_at_exact_fresh_boundary(monkeypatch):
+    calls = 0
+
+    async def fake_fetch_json(**_kwargs: Any) -> Any:
+        nonlocal calls
+        calls += 1
+        return {"data": [{"id": f"Vendor/Call-{calls}"}]}
+
+    monkeypatch.setattr(catalog_module, "afetch_json", fake_fetch_json)
+    clock = FakeClock()
+    catalog = GatewayCatalog(max_entries=2, clock=clock)
+    spec = _spec(ttl_seconds=10)
+
+    await catalog.get(spec, credential_scope_token="scope", api_key="key")
+    clock.advance(10)
+    result = await catalog.get(spec, credential_scope_token="scope", api_key="key")
+
+    assert result.models[0] == "Vendor/Call-2"
+    assert calls == 2
+
+
+@pytest.mark.asyncio
 async def test_discovery_error_uses_stale_entry_only_inside_stale_window(monkeypatch):
     failing = False
 
@@ -168,13 +211,21 @@ async def test_discovery_error_uses_stale_entry_only_inside_stale_window(monkeyp
     failing = True
     clock.advance(11)
     stale = await catalog.get(spec, credential_scope_token="scope", api_key="key")
-    clock.advance(20)
+    clock.advance(19)
+    stale_at_boundary = await catalog.get(
+        spec,
+        credential_scope_token="scope",
+        api_key="key",
+    )
+    clock.advance(0.001)
     unavailable = await catalog.get(spec, credential_scope_token="scope", api_key="key")
 
     assert stale.models[0] == "Vendor/Cached"
     assert stale.discovery_status == "stale"
     assert stale.source == "stale_cache"
     assert stale.stale is True
+    assert stale_at_boundary.models[0] == "Vendor/Cached"
+    assert stale_at_boundary.discovery_status == "stale"
     assert unavailable.models == ("Configured/Default", "Configured/Overlay")
     assert unavailable.discovery_status == "unavailable"
     assert unavailable.source == "static"

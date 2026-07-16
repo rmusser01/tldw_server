@@ -109,7 +109,7 @@ class GatewayCatalog:
         now = self._clock()
         async with self._lock:
             entry = self._cache.get(key)
-            if entry is not None and now <= entry.fresh_until:
+            if entry is not None and now < entry.fresh_until:
                 self._cache.move_to_end(key)
                 return self._result(spec, entry, status="fresh")
 
