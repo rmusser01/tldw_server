@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from tldw_Server_API.app.core.Infrastructure import provider_registry as provider_registry_module
@@ -8,7 +10,6 @@ from tldw_Server_API.app.core.Infrastructure.provider_registry import (
     ProviderRegistryConfig,
     ProviderStatus,
 )
-
 
 pytestmark = pytest.mark.unit
 
@@ -89,3 +90,39 @@ async def test_get_adapter_async_falls_back_to_sync_materialization() -> None:
 
     assert isinstance(adapter, _AsyncAdapter)
     assert registry.get_status("sync-class") == ProviderStatus.ENABLED
+
+
+@pytest.mark.asyncio
+async def test_get_adapter_async_does_not_cache_superseded_registration() -> None:
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    class _FirstAdapter(_AsyncAdapter):
+        pass
+
+    class _SecondAdapter(_AsyncAdapter):
+        pass
+
+    async def _materialize(provider_name: str, spec: object) -> object:
+        if spec is _FirstAdapter:
+            started.set()
+            await release.wait()
+        assert isinstance(spec, type)
+        return spec()
+
+    registry: ProviderRegistryBase[object] = ProviderRegistryBase(
+        adapter_materializer_async=_materialize,
+        adapter_validator=lambda adapter: isinstance(adapter, _AsyncAdapter),
+    )
+    registry.register_adapter("async", _FirstAdapter)
+    first_task = asyncio.create_task(registry.get_adapter_async("async"))
+    await started.wait()
+
+    registry.register_adapter("async", _SecondAdapter)
+    release.set()
+
+    assert await first_task is None
+    assert registry.get_cached_adapters() == {}
+    second = await registry.get_adapter_async("async")
+    assert isinstance(second, _SecondAdapter)
+    assert registry.get_status("async") == ProviderStatus.ENABLED
