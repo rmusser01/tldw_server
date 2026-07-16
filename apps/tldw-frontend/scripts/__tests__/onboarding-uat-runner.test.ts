@@ -566,14 +566,14 @@ describe("onboarding UAT runner helpers", () => {
     const record = spawnLoggedProcess({
       name: "invalid-log-child",
       command: process.execPath,
-      args: ["-e", "setInterval(() => {}, 1000)"],
+      args: ["-e", "console.log('one'); console.log('two'); setInterval(() => {}, 1000)"],
       cwd: frontendRoot,
       env: process.env,
       logPath: path.join(process.execPath, "skills-certification.log"),
     })
     try {
       expect(record.child.pid).toBeTruthy()
-      expect(record.loggingErrors.length).toBeGreaterThan(0)
+      expect(record.loggingErrors.length).toBe(1)
       await stopProcessTree(record, { timeoutMs: 50 })
       expect(record.child.exitCode ?? record.child.signalCode).not.toBeNull()
     } finally {
@@ -674,8 +674,9 @@ describe("onboarding UAT runner helpers", () => {
     const child = new WindowsChild()
     await stopProcessTree(child, {
       platform: "win32",
-      taskkill: async (pid: number) => {
+      taskkill: async (pid: number, timeoutMs: number) => {
         expect(pid).toBe(child.pid)
+        expect(timeoutMs).toBe(50)
         child.exitCode = 0
         child.emit("exit", 0, null)
       },

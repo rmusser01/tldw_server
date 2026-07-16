@@ -178,7 +178,9 @@ describe('Skills certification runner', () => {
     let attempt = 0;
     const test = harness({
       reservePorts: vi.fn(async () => ({ backend: 8100 + attempt, web: 3100 + attempt++ })),
-      readText: vi.fn((filePath) => (filePath.endsWith('attempt-1.log') ? 'EADDRINUSE' : '')),
+      readText: vi.fn((filePath) =>
+        filePath.endsWith('attempt-1.log') ? `${'x'.repeat(600)} EADDRINUSE` : ''
+      ),
       startChild: vi.fn(async (registry, command) => {
         if (command.name === 'backend') {
           if (attempt === 1) throw new Error('bind failed');
@@ -986,7 +988,15 @@ describe('Skills certification runner', () => {
     test.operations.finalize = vi
       .fn()
       .mockImplementationOnce(
-        () => new Promise((resolve) => (releaseFinalizer = () => resolve({ status: 'passed' })))
+        () =>
+          new Promise((resolve) =>
+            (releaseFinalizer = () =>
+              resolve({
+                artifact_safety: { passed: true },
+                cleanup: { children_closed: true, runtime_deleted: true },
+                status: 'passed',
+              }))
+          )
       )
       .mockImplementation(async ({ summaryInput }) => ({
         ...summaryInput,
@@ -998,6 +1008,35 @@ describe('Skills certification runner', () => {
     releaseFinalizer();
     const summary = await run;
     expect(test.operations.finalize).toHaveBeenCalledTimes(2);
+    expect(summary.primary_category).toBe('interrupted');
+  });
+
+  it('does not re-finalize removed artifact-failing evidence after a signal', async () => {
+    let onSignal: () => void;
+    let release: () => void;
+    const test = harness({
+      installHandlers: vi.fn(({ onSignal: captured }) => {
+        onSignal = captured;
+        return vi.fn();
+      }),
+    });
+    test.operations.finalize = vi.fn(
+      () =>
+        new Promise(
+          (resolve) =>
+            (release = () =>
+              resolve({
+                artifact_safety: { passed: false },
+                cleanup: { children_closed: true, runtime_deleted: true },
+              }))
+        )
+    );
+    const run = runSkillsCertification({ operations: test.operations });
+    await vi.waitFor(() => expect(test.operations.finalize).toHaveBeenCalled());
+    onSignal();
+    release();
+    const summary = await run;
+    expect(test.operations.finalize).toHaveBeenCalledTimes(1);
     expect(summary.primary_category).toBe('interrupted');
   });
 });

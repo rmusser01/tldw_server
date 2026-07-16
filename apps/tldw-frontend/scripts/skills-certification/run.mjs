@@ -155,7 +155,9 @@ export async function runSkillsCertification({ operations: suppliedOperations = 
     } catch {
       // Logging diagnostics must not change the failing phase classification.
     }
-    return boundedDetail(`${error?.message ?? ''} ${logText}`);
+    const message = boundedDetail(error?.message ?? '').slice(0, 200);
+    const tail = redactText(String(logText ?? '')).slice(-300);
+    return boundedDetail(`${message} ${tail}`);
   };
   const runFinite = async (command) =>
     operations.runChild(registry, command, logPath(command.name));
@@ -555,7 +557,7 @@ export async function runSkillsCertification({ operations: suppliedOperations = 
       !finalSummary.failures?.some((failure) => failure.category === 'interrupted')
     ) {
       fail('interrupted', 'signal received');
-      if (evidence) {
+      if (evidence && finalSummary?.artifact_safety?.passed === true) {
         try {
           finalSummary = await operations.finalize({
             evidence,
@@ -567,25 +569,46 @@ export async function runSkillsCertification({ operations: suppliedOperations = 
           finalSummary = buildCertificationSummary({
             failures,
             surfaces,
-            artifact_safety: { passed: false },
-            cleanup: {
-              children_closed: teardownOutcome.status === 'fulfilled',
-              runtime_deleted: false,
-            },
+            artifact_safety: finalSummary.artifact_safety,
+            cleanup: finalSummary.cleanup,
           });
         }
+      } else {
+        finalSummary = buildCertificationSummary({
+          failures,
+          surfaces,
+          artifact_safety: finalSummary?.artifact_safety,
+          cleanup: finalSummary?.cleanup,
+        });
       }
     }
     try {
       removeSignalHandlers();
     } catch {
       fail('cleanup', 'signal handler cleanup failed');
-      finalSummary = buildCertificationSummary({
-        failures,
-        surfaces,
-        artifact_safety: finalSummary?.artifact_safety,
-        cleanup: finalSummary?.cleanup,
-      });
+      if (evidence && finalSummary?.artifact_safety?.passed === true) {
+        try {
+          finalSummary = await operations.finalize({
+            evidence,
+            runtime: profile,
+            summaryInput: { failures, surfaces },
+            teardownOutcome,
+          });
+        } catch {
+          finalSummary = buildCertificationSummary({
+            failures,
+            surfaces,
+            artifact_safety: finalSummary.artifact_safety,
+            cleanup: finalSummary.cleanup,
+          });
+        }
+      } else
+        finalSummary = buildCertificationSummary({
+          failures,
+          surfaces,
+          artifact_safety: finalSummary?.artifact_safety,
+          cleanup: finalSummary?.cleanup,
+        });
     }
   }
   return finalSummary;

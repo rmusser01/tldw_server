@@ -8,7 +8,7 @@ function appendRedacted(logPath, chunk, loggingErrors) {
     mkdirSync(path.dirname(logPath), { recursive: true })
     appendFileSync(logPath, redactText(chunk), "utf8")
   } catch (error) {
-    loggingErrors.push(error)
+    if (loggingErrors.length === 0) loggingErrors.push(error)
   }
 }
 
@@ -98,11 +98,22 @@ function signalChild(child, signal, platform = process.platform) {
   }
 }
 
-function defaultTaskkill(pid) {
+function defaultTaskkill(pid, timeoutMs) {
   return new Promise((resolve, reject) => {
     const taskkill = spawn("taskkill.exe", ["/PID", String(pid), "/T", "/F"], { stdio: "ignore", windowsHide: true })
-    taskkill.once("error", reject)
-    taskkill.once("close", (code) => code === 0 ? resolve() : reject(new Error(`taskkill.exe failed for PID ${pid} with exit code ${code}`)))
+    let settled = false
+    const finish = (error) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      taskkill.removeAllListeners("error")
+      taskkill.removeAllListeners("close")
+      if (error) reject(error)
+      else resolve()
+    }
+    const timer = setTimeout(() => { taskkill.kill(); finish(new Error(`taskkill.exe timed out for PID ${pid}`)) }, timeoutMs)
+    taskkill.once("error", finish)
+    taskkill.once("close", (code) => finish(code === 0 ? undefined : new Error(`taskkill.exe failed for PID ${pid} with exit code ${code}`)))
   })
 }
 
@@ -113,7 +124,7 @@ export async function stopProcessTree(childOrRecord, { timeoutMs = 5_000, platfo
   }
 
   if (platform === "win32") {
-    await taskkill(child.pid)
+    await taskkill(child.pid, timeoutMs)
     if (childHasExited(child)) return
     await new Promise((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error(`Timed out waiting for process ${child.pid} to exit`)), timeoutMs)

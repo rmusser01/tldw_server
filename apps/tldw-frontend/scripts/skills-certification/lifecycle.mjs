@@ -232,10 +232,10 @@ export function installCertificationSignalHandlers({
     if (removed) {
       return;
     }
-    removed = true;
     const remove =
       processObject.off?.bind(processObject) ?? processObject.removeListener.bind(processObject);
     remove('SIGINT', handleSigint);
     remove('SIGTERM', handleSigterm);
+    removed = true;
   };
 }
