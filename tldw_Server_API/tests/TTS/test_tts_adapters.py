@@ -325,7 +325,7 @@ class TestAdapterRegistry:
 
         # Register custom adapter
         registry.register_adapter(TTSProvider.OPENAI, CustomAdapter)
-        assert registry._adapter_specs[TTSProvider.OPENAI] == CustomAdapter
+        assert registry._adapter_specs[TTSProvider.OPENAI.value] == CustomAdapter
 
     async def test_get_adapter_with_config(self):
         """Test getting adapter with configuration"""
@@ -617,7 +617,7 @@ class TestTTSAdapterFactory:
                 await super().close()
 
         factory = TTSAdapterFactory({"providers": {"mock": {"enabled": True}}})
-        factory.registry._adapter_specs = {TTSProvider.MOCK: ClosingAdapter}
+        factory.registry._adapter_specs = {TTSProvider.MOCK.value: ClosingAdapter}
         factory.registry._base.register_adapter(TTSProvider.MOCK.value, ClosingAdapter)
 
         adapter = await factory.registry.get_adapter(TTSProvider.MOCK)
@@ -656,7 +656,7 @@ class TestTTSAdapterFactory:
                 raise RuntimeError("close failed")
 
         factory = TTSAdapterFactory({"providers": {"mock": {"enabled": True}}})
-        factory.registry._adapter_specs = {TTSProvider.MOCK: FailingCloseAdapter}
+        factory.registry._adapter_specs = {TTSProvider.MOCK.value: FailingCloseAdapter}
         factory.registry._base.register_adapter(TTSProvider.MOCK.value, FailingCloseAdapter)
 
         adapter = await factory.registry.get_adapter(TTSProvider.MOCK)

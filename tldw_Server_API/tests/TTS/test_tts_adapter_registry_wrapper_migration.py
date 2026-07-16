@@ -96,6 +96,160 @@ class _NonCriticalResourceManager:
     memory_monitor = _MemoryMonitor()
 
 
+def _gateway_config(*, company_enabled: bool = True) -> dict[str, Any]:
+    """Return two valid named gateway definitions for registry tests."""
+
+    def definition(*, enabled: bool, display_name: str) -> dict[str, Any]:
+        return {
+            "enabled": enabled,
+            "display_name": display_name,
+            "base_url": "https://speech.example.com/v1",
+            "speech_path": "audio/speech",
+            "api_key": "admin-secret",
+            "default_model": "Vendor/Expressive-TTS",
+            "default_voice": "narrator",
+            "allowed_models": ["Vendor/Expressive-TTS"],
+            "capability_defaults": {"formats": ["mp3"]},
+        }
+
+    return {
+        "gateways": {
+            "company-proxy": definition(
+                enabled=company_enabled,
+                display_name="Company Proxy",
+            ),
+            "backup-proxy": definition(
+                enabled=True,
+                display_name="Backup Proxy",
+            ),
+        }
+    }
+
+
+def test_registry_resolves_legacy_aliases_and_registered_dynamic_keys() -> None:
+    registry = TTSAdapterRegistry(config=_gateway_config(), include_defaults=False)
+
+    assert registry.resolve_provider("open-ai") is TTSProvider.OPENAI
+    assert registry.resolve_provider_key("open-ai") == "openai"
+    assert registry.resolve_provider_key(TTSProvider.OPENAI) == "openai"
+    assert registry.resolve_provider_key("gateway:company-proxy") is None
+
+    registry.register_adapter(
+        "gateway:company-proxy",
+        _MockAdapterV1,
+        config_override={"backend_id": "gateway:company-proxy"},
+    )
+
+    assert registry.resolve_provider("gateway:company-proxy") is None
+    assert registry.resolve_provider_key("gateway:company-proxy") == "gateway:company-proxy"
+    assert registry.resolve_provider_key("gateway:missing") is None
+    with pytest.raises(ValueError, match="Unknown provider"):
+        registry.register_adapter("gateway:missing", _MockAdapterV1)
+
+
+def test_registry_rejects_disabled_dynamic_gateway_registration() -> None:
+    registry = TTSAdapterRegistry(
+        config=_gateway_config(company_enabled=False),
+        include_defaults=False,
+    )
+
+    with pytest.raises(ValueError, match="disabled"):
+        registry.register_adapter(
+            "gateway:company-proxy",
+            _MockAdapterV1,
+            config_override={"backend_id": "gateway:company-proxy"},
+        )
+
+    assert registry.resolve_provider_key("gateway:company-proxy") is None
+
+
+@pytest.mark.asyncio
+async def test_registry_dynamic_backends_keep_config_and_cache_isolated() -> None:
+    registry = TTSAdapterRegistry(config=_gateway_config(), include_defaults=False)
+    company_config = {
+        "backend_id": "gateway:company-proxy",
+        "headers": {"X-Route": "company"},
+    }
+    backup_config = {
+        "backend_id": "gateway:backup-proxy",
+        "headers": {"X-Route": "backup"},
+    }
+    registry.register_adapter(
+        "gateway:company-proxy",
+        _MockAdapterV1,
+        config_override=company_config,
+    )
+    registry.register_adapter(
+        "gateway:backup-proxy",
+        _MockAdapterV1,
+        config_override=backup_config,
+    )
+
+    company_config["backend_id"] = "mutated"
+    backup_config["headers"]["X-Route"] = "mutated"
+    company = await registry.get_adapter("gateway:company-proxy")
+    company_again = await registry.get_adapter("gateway:company-proxy")
+    backup = await registry.get_adapter("gateway:backup-proxy")
+
+    assert company is company_again
+    assert company is not backup
+    assert company.config == {
+        "backend_id": "gateway:company-proxy",
+        "headers": {"X-Route": "company"},
+    }
+    assert backup.config == {
+        "backend_id": "gateway:backup-proxy",
+        "headers": {"X-Route": "backup"},
+    }
+
+
+@pytest.mark.asyncio
+async def test_registry_dynamic_reregistration_and_unload_clear_cached_adapter(
+    monkeypatch,
+) -> None:
+    registry = TTSAdapterRegistry(config=_gateway_config(), include_defaults=False)
+    registry.register_adapter(
+        "gateway:company-proxy",
+        _MockAdapterV1,
+        config_override={"backend_id": "gateway:company-proxy"},
+    )
+    first = await registry.get_adapter("gateway:company-proxy")
+
+    registry.register_adapter(
+        "gateway:company-proxy",
+        _MockAdapterV2,
+        config_override={"backend_id": "gateway:company-proxy", "revision": 2},
+    )
+    second = await registry.get_adapter("gateway:company-proxy")
+
+    assert isinstance(first, _MockAdapterV1)
+    assert isinstance(second, _MockAdapterV2)
+    assert second is not first
+    assert second.config == {
+        "backend_id": "gateway:company-proxy",
+        "revision": 2,
+    }
+
+    monkeypatch.setattr(adapter_registry, "get_existing_resource_manager", lambda: None)
+    result = await registry.unload_provider("gateway:company-proxy")
+    third = await registry.get_adapter("gateway:company-proxy")
+
+    assert result == {"provider": "gateway:company-proxy", "unloaded": True}
+    assert isinstance(third, _MockAdapterV2)
+    assert third is not second
+
+
+def test_tts_request_normalizes_provider_without_changing_model_case() -> None:
+    request = TTSRequest(
+        text="hello",
+        provider="OPEN-AI",
+        model="Vendor/Expressive-TTS",
+    )
+
+    assert request.provider == "open-ai"
+    assert request.model == "Vendor/Expressive-TTS"
+
+
 @pytest.mark.asyncio
 async def test_registry_uses_shared_base_for_caching() -> None:
     registry = TTSAdapterRegistry(config={"mock_enabled": True}, include_defaults=False)
@@ -307,8 +461,8 @@ async def test_registry_close_all_sanitizes_resource_manager_failure_logs(monkey
     registry = TTSAdapterRegistry(config={"mock_enabled": True}, include_defaults=False)
     adapter = _MockAdapterV1()
     adapter._status = ProviderStatus.AVAILABLE
-    registry._adapters[TTSProvider.MOCK] = adapter
-    registry._initialized_providers.add(TTSProvider.MOCK)
+    registry._adapters[TTSProvider.MOCK.value] = adapter
+    registry._initialized_providers.add(TTSProvider.MOCK.value)
 
     unregister_secret = "/Users/example/private/token-sk-tts-unregister"
     cleanup_secret = "/Users/example/private/token-sk-tts-cleanup"
