@@ -19,9 +19,7 @@ priority: high
 modified_files:
 - tldw_Server_API/app/core/Slides/slides_migrations.py
 - tldw_Server_API/app/core/Slides/slides_db.py
-- tldw_Server_API/app/core/DB_Management/db_path_utils.py
 - tldw_Server_API/tests/Slides/test_standalone_html_db_migration.py
-- tldw_Server_API/tests/Slides/test_standalone_html_domain.py
 - tldw_Server_API/tests/Slides/test_slides_db.py
 - backlog/tasks/task-12115 - Add-first-class-standalone-HTML-JS-presentation-generation.md
 ---
@@ -85,4 +83,10 @@ Final GREEN: schema/domain/database suite 36 passed, 5 warnings in 12.12s; exist
 Migration verification covers new/v0/v1/empty/multirow version state, normalization, idempotent reopen, injected rollback, concurrent connections, legacy backfill, per-statement execution, and FTS synchronization. The legacy failure was traced to a newly created external-content FTS index with 1 content row and 0 docsize rows; one transactional rebuild before backfill restored synchronization.
 
 Deferred for the mandated root spec gate, not hidden: unrelated pre-v2 compatibility check/ALTER helpers remain process-local before the v2 runner; future-version rejection follows base/unrelated initialization; normalized v2 reopen rewrites the single schema_version row. Task 1 did not expand these because the approved spec permits unrelated legacy helpers to remain and root review will adjudicate scope.
+
+2026-07-15 Task 1 schema-initialization review fixes: TDD RED proved future schema v3 was rejected only after structural mutation (1 failed, 5 warnings in 7.92s; PRAGMA schema_version changed 3→32) and normalized schema-v2 reopen attempted a write lock under a competing writer (1 failed, 5 warnings in 12.78s; database is locked). The migration runner now performs a nonmutating completeness/future-version probe before and after BEGIN IMMEDIATE, while SlidesDatabase probes the full base+v2 schema before locking and rechecks under the SQLite lock before any DDL or compatibility helper runs. Base DDL is executed one complete statement at a time so trigger bodies remain intact.
+
+Fresh GREEN after final edits: schema/domain/database suite 38 passed, 5 warnings in 7.65s; Slides API regression 76 passed, 5 warnings in 10.48s. Bandit exited 0 over slides_migrations.py, slides_db.py, and db_path_utils.py with only existing nosec notices; git diff --check passed. Regression coverage confirms future-version rejection is structurally read-only, normalized v2 reopen succeeds without a write lock or data-version change, and all three FTS triggers exist.
+
+The prior compatibility-helper concern is no longer deferred: the process-local schema cache/lock was removed, and compatibility helpers are serialized inside BEGIN IMMEDIATE with a second completeness/future-version check before mutation.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->

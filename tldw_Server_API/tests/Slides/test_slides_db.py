@@ -322,8 +322,6 @@ def test_slides_db_schema_initialization_serializes_column_migrations(tmp_path, 
             )
             """
         )
-    SlidesDatabase._schema_init_paths.discard(str(db_path.resolve()))
-
     def _slow_marp_theme_migration(conn):
         columns = conn.execute("PRAGMA table_info(presentations)").fetchall()
         if any(col["name"] == "marp_theme" for col in columns):
