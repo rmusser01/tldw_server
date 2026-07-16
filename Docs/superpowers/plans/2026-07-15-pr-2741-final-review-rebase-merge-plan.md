@@ -97,7 +97,7 @@
 
   Dispatch a correctness/spec reviewer and a code-quality/minimality reviewer against `origin/dev...HEAD`. Fix every valid Critical or Important finding and re-run affected gates.
 
-- [ ] **Step 4: Publish safely and close GitHub review**
+- [x] **Step 4: Publish safely and close GitHub review**
 
   Push the rebased branch with `--force-with-lease`. Reply to roots `3592094302`, `3592094308`, and `3592094311` with exact fixes/evidence, resolve their threads, and re-query for new roots or unresolved threads.
 
