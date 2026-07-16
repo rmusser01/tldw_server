@@ -345,7 +345,7 @@ def canonicalize_gateway_id(value: str, *, builtin: bool = False) -> str:
 
 def validate_relative_gateway_path(value: str, *, field_name: str) -> str:
     """Validate an administrator path without permitting authority replacement."""
-    if not isinstance(value, str) or not value:
+    if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{field_name} must be a non-empty relative path")
     candidate = value
     for _ in range(_MAX_PATH_DECODE_PASSES):
