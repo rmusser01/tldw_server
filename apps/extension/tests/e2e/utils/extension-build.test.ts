@@ -1,6 +1,7 @@
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
+
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { normalizeBuiltExtensionSeedConfig } from "./extension-build"
@@ -17,7 +18,7 @@ const setupBuiltExtensionLaunchTest = async () => {
     waitForTimeout: vi.fn().mockResolvedValue(undefined),
     goto: vi.fn().mockResolvedValue(undefined),
     waitForFunction: vi.fn().mockResolvedValue(undefined),
-    evaluate: vi.fn().mockResolvedValue(undefined)
+    evaluate: vi.fn().mockResolvedValue(undefined),
   }
   const context = {
     serviceWorkers: vi.fn(() => []),
@@ -25,59 +26,38 @@ const setupBuiltExtensionLaunchTest = async () => {
     waitForEvent: vi.fn(() => new Promise(() => {})),
     addInitScript: vi.fn().mockResolvedValue(undefined),
     newPage: vi.fn().mockResolvedValue(page),
-    close: vi.fn().mockResolvedValue(undefined)
+    close: vi.fn().mockResolvedValue(undefined),
   }
   const launchPersistentContext = vi.fn().mockResolvedValue(context)
 
   vi.doMock("@playwright/test", () => ({
     chromium: {
-      launchPersistentContext
-    }
+      launchPersistentContext,
+    },
   }))
   vi.doMock("./extension-id", () => ({ resolveExtensionId }))
 
-  const tempRoot = fs.mkdtempSync(
-    path.join(os.tmpdir(), "tldw-built-extension-launch-")
-  )
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "tldw-built-extension-launch-"))
   const extensionDir = path.join(tempRoot, "chrome-mv3")
   fs.mkdirSync(extensionDir, { recursive: true })
   fs.writeFileSync(
     path.join(extensionDir, "manifest.json"),
-    JSON.stringify({
-      manifest_version: 3,
-      name: "Built Test Extension",
-      version: "1.0.0"
-    }),
-    "utf8"
+    JSON.stringify({ manifest_version: 3, name: "Built Test Extension", version: "1.0.0" }),
+    "utf8",
   )
-  fs.writeFileSync(
-    path.join(extensionDir, "background.js"),
-    "// background",
-    "utf8"
-  )
-  fs.writeFileSync(
-    path.join(extensionDir, "options.html"),
-    "<html></html>",
-    "utf8"
-  )
-  fs.writeFileSync(
-    path.join(extensionDir, "sidepanel.html"),
-    "<html></html>",
-    "utf8"
-  )
+  fs.writeFileSync(path.join(extensionDir, "background.js"), "// background", "utf8")
+  fs.writeFileSync(path.join(extensionDir, "options.html"), "<html></html>", "utf8")
+  fs.writeFileSync(path.join(extensionDir, "sidepanel.html"), "<html></html>", "utf8")
 
   const prepareExtensionLaunchPath = vi.fn(
-    (
-      extensionPath: string,
-      options: { deterministicManifestKey?: boolean; rootDir: string }
-    ) =>
+    (extensionPath: string, options: { deterministicManifestKey?: boolean; rootDir: string }) =>
       options.deterministicManifestKey
         ? path.join(options.rootDir, "staged-extension")
         : extensionPath
   )
   vi.doMock("./extension-paths", () => ({
     prepareExtensionLaunchPath,
-    prioritizeExtensionBuildCandidates: () => [extensionDir]
+    prioritizeExtensionBuildCandidates: () => [extensionDir],
   }))
 
   const { launchWithBuiltExtension } = await import("./extension-build")
@@ -90,7 +70,7 @@ const setupBuiltExtensionLaunchTest = async () => {
     launchWithBuiltExtension,
     page,
     prepareExtensionLaunchPath,
-    resolveExtensionId
+    resolveExtensionId,
   }
 }
 
@@ -151,9 +131,7 @@ describe("normalizeBuiltExtensionSeedConfig", () => {
         apiKey: "test-key"
       }
     })
-    expect(normalized.storagePayload.tldwConfig).not.toHaveProperty(
-      "tldwConfig"
-    )
+    expect(normalized.storagePayload.tldwConfig).not.toHaveProperty("tldwConfig")
   })
 
   it("launches built extensions with crashpad-disabled Chromium options", async () => {
@@ -165,7 +143,7 @@ describe("normalizeBuiltExtensionSeedConfig", () => {
       launchWithBuiltExtension,
       page,
       prepareExtensionLaunchPath,
-      resolveExtensionId
+      resolveExtensionId,
     } = await setupBuiltExtensionLaunchTest()
     process.env.LEGACY_INHERITED_VALUE = "preserved"
 
@@ -173,24 +151,22 @@ describe("normalizeBuiltExtensionSeedConfig", () => {
       await launchWithBuiltExtension()
 
       expect(page.goto).toHaveBeenCalledWith(
-        `chrome-extension://${"e".repeat(32)}/options.html`
+        `chrome-extension://${"e".repeat(32)}/options.html`,
       )
       expect(prepareExtensionLaunchPath).toHaveBeenCalledWith(
         extensionDir,
         expect.objectContaining({
           preserveDefaultLocaleCatalog: false,
           rootDir: expect.stringContaining("tmp-playwright-profile/user-data-"),
-          deterministicManifestKey: false
-        })
+          deterministicManifestKey: false,
+        }),
       )
       expect(resolveExtensionId).toHaveBeenCalledWith(
         context,
         expect.objectContaining({
           extensionPath: extensionDir,
-          userDataDir: expect.stringContaining(
-            "tmp-playwright-profile/user-data-"
-          )
-        })
+          userDataDir: expect.stringContaining("tmp-playwright-profile/user-data-"),
+        }),
       )
       expect(launchPersistentContext).toHaveBeenCalledWith(
         expect.stringContaining("tmp-playwright-profile/user-data-"),
@@ -200,16 +176,16 @@ describe("normalizeBuiltExtensionSeedConfig", () => {
           acceptDownloads: true,
           ignoreDefaultArgs: ["--disable-extensions"],
           env: expect.objectContaining({
-            LEGACY_INHERITED_VALUE: "preserved"
+            LEGACY_INHERITED_VALUE: "preserved",
           }),
           args: expect.arrayContaining([
             `--disable-extensions-except=${extensionDir}`,
             `--load-extension=${extensionDir}`,
             "--no-crashpad",
             "--disable-crash-reporter",
-            "--crash-dumps-dir=/tmp"
-          ])
-        })
+            "--crash-dumps-dir=/tmp",
+          ]),
+        }),
       )
     } finally {
       cleanup()
@@ -223,7 +199,7 @@ describe("normalizeBuiltExtensionSeedConfig", () => {
       launchPersistentContext,
       launchWithBuiltExtension,
       prepareExtensionLaunchPath,
-      resolveExtensionId
+      resolveExtensionId,
     } = await setupBuiltExtensionLaunchTest()
     const profileRoot = fs.mkdtempSync(
       path.join(os.tmpdir(), "tldw-strict-profile-")
@@ -289,18 +265,18 @@ describe("normalizeBuiltExtensionSeedConfig", () => {
         extensionDir,
         expect.objectContaining({
           rootDir: path.join(userDataDir, "extension-launch"),
-          deterministicManifestKey: true
-        })
+          deterministicManifestKey: true,
+        }),
       )
       expect(launchOptions.args).toEqual(
         expect.arrayContaining([
           `--disable-extensions-except=${strictLaunchPath}`,
-          `--load-extension=${strictLaunchPath}`
+          `--load-extension=${strictLaunchPath}`,
         ])
       )
       expect(resolveExtensionId).toHaveBeenCalledWith(
         expect.anything(),
-        expect.objectContaining({ extensionPath: strictLaunchPath })
+        expect.objectContaining({ extensionPath: strictLaunchPath }),
       )
       expect(path.relative(strictRoot, strictLaunchPath)).not.toMatch(/^\.\./)
     } finally {
@@ -325,12 +301,12 @@ describe("normalizeBuiltExtensionSeedConfig", () => {
           await Promise.resolve()
           preparedPage = pageToPrepare
           events.push("prepare")
-        }
+        },
       })
 
       expect(events).toEqual([
         "prepare",
-        `goto:chrome-extension://${"e".repeat(32)}/options.html#/skills`
+        `goto:chrome-extension://${"e".repeat(32)}/options.html#/skills`,
       ])
       expect(preparedPage).toBe(page)
       expect(context.newPage).toHaveBeenCalledTimes(1)
@@ -361,13 +337,11 @@ describe("normalizeBuiltExtensionSeedConfig", () => {
     const preparationError = new Error("options preparation failed")
 
     try {
-      await expect(
-        launchWithBuiltExtension({
-          prepareOptionsPage: () => {
-            throw preparationError
-          }
-        })
-      ).rejects.toBe(preparationError)
+      await expect(launchWithBuiltExtension({
+        prepareOptionsPage: () => {
+          throw preparationError
+        },
+      })).rejects.toBe(preparationError)
 
       expect(context.close).toHaveBeenCalledTimes(1)
       expect(page.goto).not.toHaveBeenCalled()
@@ -384,17 +358,15 @@ describe("normalizeBuiltExtensionSeedConfig", () => {
     context.close.mockRejectedValueOnce(cleanupError)
 
     try {
-      await expect(
-        launchWithBuiltExtension({
-          prepareOptionsPage: () => {
-            throw preparationError
-          }
-        })
-      ).rejects.toSatisfy((error: unknown) => {
+      await expect(launchWithBuiltExtension({
+        prepareOptionsPage: () => {
+          throw preparationError
+        },
+      })).rejects.toSatisfy((error: unknown) => {
         expect(error).toBeInstanceOf(AggregateError)
         expect((error as AggregateError).errors).toEqual([
           preparationError,
-          cleanupError
+          cleanupError,
         ])
         return true
       })

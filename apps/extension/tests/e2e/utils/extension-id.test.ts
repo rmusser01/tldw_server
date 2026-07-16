@@ -1,6 +1,7 @@
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
+
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { resolveExtensionId } from "./extension-id"
@@ -47,11 +48,11 @@ describe("resolveExtensionId", () => {
           targetInfos: [
             {
               type: "service_worker",
-              url: `chrome-extension://${TEST_EXTENSION_ID}/background.js`
-            }
-          ]
-        })
-      })
+              url: `chrome-extension://${TEST_EXTENSION_ID}/background.js`,
+            },
+          ],
+        }),
+      }),
     } as any
 
     await expect(resolveExtensionId(context)).resolves.toBe(TEST_EXTENSION_ID)
@@ -61,9 +62,7 @@ describe("resolveExtensionId", () => {
   })
 
   it("falls back to a staged manifest key when no extension target is active", async () => {
-    const tempRoot = fs.mkdtempSync(
-      path.join(os.tmpdir(), "tldw-extension-id-")
-    )
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "tldw-extension-id-"))
     tempRoots.push(tempRoot)
     const extensionDir = path.join(tempRoot, "chrome-mv3")
     fs.mkdirSync(extensionDir, { recursive: true })
