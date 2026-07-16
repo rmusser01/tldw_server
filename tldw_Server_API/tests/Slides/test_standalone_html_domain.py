@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import importlib.util
 import json
@@ -9,6 +10,9 @@ from tldw_Server_API.app.core.Slides.slides_db import (
     ConflictError,
     InputError,
     SlidesDatabase,
+)
+from tldw_Server_API.app.core.Slides.standalone_html_validator import (
+    validate_standalone_html,
 )
 
 
@@ -41,13 +45,28 @@ def _provenance() -> dict:
     }
 
 
-def _service(db: SlidesDatabase):
+class _InlineValidationPool:
+    def __init__(self, db: SlidesDatabase) -> None:
+        self.db = db
+        self.calls: list[str | bytes] = []
+
+    async def validate(self, document: str | bytes):
+        assert not self.db.get_connection().in_transaction
+        self.calls.append(document)
+        return validate_standalone_html(document)
+
+
+def _run(awaitable):
+    return asyncio.run(awaitable)
+
+
+def _service(db: SlidesDatabase, pool: _InlineValidationPool | None = None):
     assert (
         importlib.util.find_spec("tldw_Server_API.app.core.Slides.presentation_service") is not None
     ), "Task 3 requires the shared presentation_service seam"
     from tldw_Server_API.app.core.Slides.presentation_service import PresentationService
 
-    return PresentationService(db)
+    return PresentationService(db, validation_pool=pool or _InlineValidationPool(db))
 
 
 def _structured_slides() -> str:
@@ -417,6 +436,7 @@ def test_shared_service_derives_html_metadata_and_fts_without_hidden_text(tmp_pa
     row = service.create_standalone_for_worker(
         presentation_id="html",
         html_document=document,
+        validation_result=validate_standalone_html(document),
         generation_job_uuid="job-html",
         generation_provenance=_provenance(),
     )
@@ -457,27 +477,34 @@ def test_html_source_save_is_noop_for_exact_source_and_snapshots_changed_source(
     created = service.create_standalone_for_worker(
         presentation_id="html",
         html_document=original,
+        validation_result=validate_standalone_html(original),
         generation_job_uuid="job-html",
         generation_provenance=_provenance(),
     )
 
-    same = service.save_html_source(
-        presentation_id=created.id,
-        html_document=original,
-        expected_version=created.version,
+    same = _run(
+        service.save_html_source(
+            presentation_id=created.id,
+            html_document=original,
+            expected_version=created.version,
+        )
     )
     assert same.version == created.version
     assert db.list_presentation_version_metadata(presentation_id=created.id, limit=10, offset=0)[1] == 1
 
-    changed = service.save_html_source(
-        presentation_id=created.id,
-        html_document=_valid_html(title="Deux", body_text="second"),
-        expected_version=created.version,
+    changed = _run(
+        service.save_html_source(
+            presentation_id=created.id,
+            html_document=_valid_html(title="Deux", body_text="second"),
+            expected_version=created.version,
+        )
     )
-    latest = service.save_html_source(
-        presentation_id=created.id,
-        html_document=_valid_html(title="三", body_text="third"),
-        expected_version=changed.version,
+    latest = _run(
+        service.save_html_source(
+            presentation_id=created.id,
+            html_document=_valid_html(title="三", body_text="third"),
+            expected_version=changed.version,
+        )
     )
     versions, total = db.list_presentation_version_metadata(presentation_id=created.id, limit=10, offset=0)
     assert latest.version == 3
@@ -493,6 +520,50 @@ def test_html_source_save_is_noop_for_exact_source_and_snapshots_changed_source(
     assert "slides" not in payload
     assert "\\u4e09" not in json.dumps(payload, ensure_ascii=False)
     assert len(json.dumps(payload, ensure_ascii=False).encode("utf-8")) <= (2 * 1_048_576 + 65_536)
+    db.close_connection()
+
+
+def test_exact_source_save_repairs_corrupt_derived_metadata_in_new_version(tmp_path):
+    db = SlidesDatabase(db_path=tmp_path / "Slides.db", client_id="tester")
+    service = _service(db)
+    document = _valid_html(title="Canonical", body_text="searchable")
+    created = service.create_standalone_for_worker(
+        presentation_id="html",
+        html_document=document,
+        validation_result=validate_standalone_html(document),
+        generation_job_uuid="job-html",
+        generation_provenance=_provenance(),
+    )
+    with db.transaction(immediate=True) as conn:
+        conn.execute(
+            "UPDATE presentations SET title = ?, html_sha256 = ?, html_bytes = ?, "
+            "html_slide_count = ?, slides_text = ? WHERE id = ?",
+            ("Forged", "0" * 64, 1, 30, "forged", created.id),
+        )
+
+    repaired = _run(
+        service.save_html_source(
+            presentation_id=created.id,
+            html_document=document,
+            expected_version=created.version,
+        )
+    )
+    derived = validate_standalone_html(document)
+
+    assert repaired.version == created.version + 1
+    assert (
+        repaired.title,
+        repaired.html_sha256,
+        repaired.html_bytes,
+        repaired.html_slide_count,
+        repaired.slides_text,
+    ) == (
+        derived.title,
+        derived.html_sha256,
+        derived.html_bytes,
+        derived.slide_count,
+        derived.indexable_text,
+    )
     db.close_connection()
 
 
@@ -526,6 +597,74 @@ def test_generic_mutation_cannot_change_html_kind_or_generation_identity(tmp_pat
     db.close_connection()
 
 
+@pytest.mark.parametrize(
+    "update_fields",
+    [
+        {"title": "Forged title"},
+        {"slides_text": "forged index text"},
+        {"html_sha256": "0" * 64},
+        {"html_document": _valid_html(title="Forged source")},
+        {"deleted": 1},
+    ],
+)
+def test_generic_mutation_rejects_all_standalone_content_changes(tmp_path, update_fields):
+    db = SlidesDatabase(db_path=tmp_path / "Slides.db", client_id="tester")
+    row = _create_standalone(db)
+
+    with pytest.raises(InputError, match="operation_not_supported_for_content_kind"):
+        db.update_presentation(
+            presentation_id=row.id,
+            update_fields=update_fields,
+            expected_version=row.version,
+        )
+
+    assert db.get_presentation_by_id(row.id) == row
+    db.close_connection()
+
+
+def test_generic_mutation_keeps_only_standalone_delete_restore_transition(tmp_path):
+    db = SlidesDatabase(db_path=tmp_path / "Slides.db", client_id="tester")
+    row = _create_standalone(db)
+
+    deleted = db.soft_delete_presentation(row.id, row.version)
+    restored = db.restore_presentation(row.id, deleted.version)
+
+    assert deleted.deleted == 1
+    assert restored.deleted == 0
+    assert restored.version == row.version + 2
+    db.close_connection()
+
+
+def test_operation_error_preserves_bounded_actual_future_kind(tmp_path):
+    db = SlidesDatabase(db_path=tmp_path / "Slides.db", client_id="tester")
+    service = _service(db)
+
+    error = service.operation_not_supported("future_kind", "read")
+
+    assert error.code == "operation_not_supported_for_content_kind"
+    assert error.operation == "read"
+    assert error.content_kind == "future_kind"
+    db.close_connection()
+
+
+def test_validated_source_result_must_match_before_atomic_save(tmp_path):
+    db = SlidesDatabase(db_path=tmp_path / "Slides.db", client_id="tester")
+    row = _create_standalone(db)
+    source = _valid_html(title="Candidate")
+    wrong_result = validate_standalone_html(_valid_html(title="Different"))
+
+    with pytest.raises(InputError, match="standalone_html_validation_result_mismatch"):
+        db.save_standalone_html_source(
+            presentation_id=row.id,
+            html_document=source,
+            validation_result=wrong_result,
+            expected_version=row.version,
+        )
+
+    assert db.get_presentation_by_id(row.id) == row
+    db.close_connection()
+
+
 def test_generation_job_uuid_conflict_is_not_confused_with_primary_key_conflict(tmp_path):
     db = SlidesDatabase(db_path=tmp_path / "Slides.db", client_id="tester")
     _create_standalone(db, presentation_id="first", generation_job_uuid="job-one")
@@ -543,23 +682,28 @@ def test_restore_html_snapshot_is_same_kind_atomic_and_preserves_generation_iden
     service = _service(db)
     created = service.create_standalone_for_worker(
         presentation_id="html",
-        html_document=_valid_html(title="Original", body_text="first"),
+        html_document=(original := _valid_html(title="Original", body_text="first")),
+        validation_result=validate_standalone_html(original),
         generation_job_uuid="job-html",
         generation_provenance=_provenance(),
     )
-    changed = service.save_html_source(
-        presentation_id=created.id,
-        html_document=_valid_html(title="Changed", body_text="second"),
-        expected_version=created.version,
+    changed = _run(
+        service.save_html_source(
+            presentation_id=created.id,
+            html_document=_valid_html(title="Changed", body_text="second"),
+            expected_version=created.version,
+        )
     )
     db.close_connection()
     db = SlidesDatabase(db_path=db_path, client_id="restoring-client")
     service = _service(db)
 
-    restored = service.restore_version(
-        presentation_id=created.id,
-        version=1,
-        expected_version=changed.version,
+    restored = _run(
+        service.restore_version(
+            presentation_id=created.id,
+            version=1,
+            expected_version=changed.version,
+        )
     )
 
     assert restored.title == "Original"
@@ -580,12 +724,162 @@ def test_restore_html_snapshot_is_same_kind_atomic_and_preserves_generation_iden
             (json.dumps(corrupt), created.id, 2),
         )
     with pytest.raises(InputError, match="version_content_kind_mismatch"):
-        service.restore_version(
-            presentation_id=created.id,
-            version=2,
-            expected_version=restored.version,
+        _run(
+            service.restore_version(
+                presentation_id=created.id,
+                version=2,
+                expected_version=restored.version,
+            )
         )
     assert db.get_presentation_by_id(created.id).version == restored.version
+    db.close_connection()
+
+
+def test_restore_rechecks_exact_snapshot_after_out_of_transaction_validation(tmp_path):
+    db = SlidesDatabase(db_path=tmp_path / "Slides.db", client_id="tester")
+    setup_service = _service(db)
+    original = _valid_html(title="Original", body_text="first")
+    created = setup_service.create_standalone_for_worker(
+        presentation_id="html",
+        html_document=original,
+        validation_result=validate_standalone_html(original),
+        generation_job_uuid="job-html",
+        generation_provenance=_provenance(),
+    )
+    changed = _run(
+        setup_service.save_html_source(
+            presentation_id=created.id,
+            html_document=_valid_html(title="Changed", body_text="second"),
+            expected_version=created.version,
+        )
+    )
+
+    class _SnapshotChangingPool(_InlineValidationPool):
+        async def validate(self, document: str | bytes):
+            result = await super().validate(document)
+            with self.db.transaction(immediate=True) as conn:
+                conn.execute(
+                    "UPDATE presentations_versions SET payload_json = payload_json || ' ' "
+                    "WHERE presentation_id = ? AND version = 1",
+                    (created.id,),
+                )
+            return result
+
+    service = _service(db, _SnapshotChangingPool(db))
+    with pytest.raises(InputError, match="version_payload_invalid"):
+        _run(
+            service.restore_version(
+                presentation_id=created.id,
+                version=1,
+                expected_version=changed.version,
+            )
+        )
+
+    assert db.get_presentation_by_id(created.id).version == changed.version
+    db.close_connection()
+
+
+def test_malformed_snapshot_failure_retains_no_source_exception_context(tmp_path):
+    db = SlidesDatabase(db_path=tmp_path / "Slides.db", client_id="tester")
+    service = _service(db)
+    document = _valid_html()
+    created = service.create_standalone_for_worker(
+        presentation_id="html",
+        html_document=document,
+        validation_result=validate_standalone_html(document),
+        generation_job_uuid="job-html",
+        generation_provenance=_provenance(),
+    )
+    sentinel = "SECRET-SNAPSHOT-SOURCE"
+    with db.transaction(immediate=True) as conn:
+        conn.execute(
+            "UPDATE presentations_versions SET payload_json = ? " "WHERE presentation_id = ? AND version = 1",
+            ('{"html_document":"' + sentinel, created.id),
+        )
+
+    with pytest.raises(InputError, match="version_payload_invalid") as exc_info:
+        _run(
+            service.restore_version(
+                presentation_id=created.id,
+                version=1,
+                expected_version=created.version,
+            )
+        )
+
+    chain = [exc_info.value]
+    while chain[-1].__cause__ is not None or chain[-1].__context__ is not None:
+        chain.append(chain[-1].__cause__ or chain[-1].__context__)
+    assert not any(isinstance(exc, json.JSONDecodeError) for exc in chain)
+    assert sentinel not in " ".join(repr(exc) for exc in chain)
+    db.close_connection()
+
+
+def test_default_standalone_snapshot_retention_is_25(tmp_path):
+    db = SlidesDatabase(db_path=tmp_path / "Slides.db", client_id="tester")
+    service = _service(db)
+    document = _valid_html(title="Version 1")
+    row = service.create_standalone_for_worker(
+        presentation_id="html",
+        html_document=document,
+        validation_result=validate_standalone_html(document),
+        generation_job_uuid="job-html",
+        generation_provenance=_provenance(),
+    )
+
+    for version in range(2, 27):
+        row = _run(
+            service.save_html_source(
+                presentation_id=row.id,
+                html_document=_valid_html(title=f"Version {version}"),
+                expected_version=row.version,
+            )
+        )
+
+    versions, total = db.list_presentation_version_metadata(
+        presentation_id=row.id,
+        limit=30,
+        offset=0,
+    )
+    assert total == 25
+    assert [item.version for item in versions] == list(range(26, 1, -1))
+    db.close_connection()
+
+
+def test_snapshot_ceiling_failure_rolls_back_source_update(tmp_path, monkeypatch):
+    from tldw_Server_API.app.core.Slides import slides_db as slides_db_module
+
+    db = SlidesDatabase(db_path=tmp_path / "Slides.db", client_id="tester")
+    service = _service(db)
+    original = _valid_html(title="Original")
+    created = service.create_standalone_for_worker(
+        presentation_id="html",
+        html_document=original,
+        validation_result=validate_standalone_html(original),
+        generation_job_uuid="job-html",
+        generation_provenance=_provenance(),
+    )
+    monkeypatch.setattr(slides_db_module, "_STANDALONE_HTML_SNAPSHOT_MAX_BYTES", 128)
+
+    with pytest.raises(InputError, match="standalone_html_storage_limit"):
+        _run(
+            service.save_html_source(
+                presentation_id=created.id,
+                html_document=_valid_html(title="Changed"),
+                expected_version=created.version,
+            )
+        )
+
+    current = db.get_presentation_by_id(created.id)
+    assert current.html_document == original
+    assert current.version == created.version
+    assert (
+        db.list_presentation_version_metadata(
+            presentation_id=created.id,
+            limit=10,
+            offset=0,
+        )[1]
+        == 1
+    )
     db.close_connection()
 
 
@@ -594,7 +888,8 @@ def test_html_delete_returns_metadata_tombstone_and_preserves_snapshot_semantics
     service = _service(db)
     created = service.create_standalone_for_worker(
         presentation_id="html",
-        html_document=_valid_html(),
+        html_document=(document := _valid_html()),
+        validation_result=validate_standalone_html(document),
         generation_job_uuid="job-html",
         generation_provenance=_provenance(),
     )

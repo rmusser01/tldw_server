@@ -7,7 +7,7 @@ import json
 import sqlite3
 import threading
 import uuid
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Iterable, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -21,6 +21,9 @@ from tldw_Server_API.app.core.Slides.slides_migrations import (
     SLIDES_SCHEMA_VERSION,
     migrate_slides_schema,
     slides_schema_v2_is_complete,
+)
+from tldw_Server_API.app.core.Slides.standalone_html_contracts import (
+    StandaloneHtmlValidationResult,
 )
 
 
@@ -49,6 +52,50 @@ _STANDALONE_HTML_MAX_DOCUMENT_BYTES = 1_048_576
 _STANDALONE_HTML_SNAPSHOT_MAX_BYTES = 2 * _STANDALONE_HTML_MAX_DOCUMENT_BYTES + 65_536
 _STANDALONE_HTML_MAX_VERSION_RETENTION = 25
 _SNAPSHOT_SCHEMA_VERSION = 1
+
+
+def decode_presentation_version_payload(payload_json: str) -> dict[str, Any]:
+    """Decode a snapshot without retaining source-bearing JSON exceptions."""
+    payload: Any = None
+    try:
+        payload = json.loads(payload_json)
+    except (TypeError, json.JSONDecodeError):
+        pass
+    if not isinstance(payload, dict):
+        raise InputError("version_payload_invalid")
+    return payload
+
+
+def bind_validated_standalone_source(
+    html_document: str | bytes,
+    validation_result: StandaloneHtmlValidationResult,
+) -> str:
+    """Bind one immutable validator result to the exact source bytes."""
+    if not isinstance(validation_result, StandaloneHtmlValidationResult):
+        raise InputError("standalone_html_validation_result_mismatch")
+    source: str | None = None
+    if isinstance(html_document, str):
+        source = html_document
+    elif isinstance(html_document, bytes):
+        try:
+            source = html_document.decode("utf-8", "strict")
+        except UnicodeDecodeError:
+            pass
+    if source is None:
+        raise InputError("standalone_html_unsupported_encoding")
+    encoded: bytes | None = None
+    try:
+        encoded = source.encode("utf-8", "strict")
+    except UnicodeEncodeError:
+        pass
+    if encoded is None:
+        raise InputError("standalone_html_unsupported_encoding")
+    if (
+        validation_result.html_bytes != len(encoded)
+        or validation_result.html_sha256 != hashlib.sha256(encoded).hexdigest()
+    ):
+        raise InputError("standalone_html_validation_result_mismatch")
+    return source
 
 
 @dataclass
@@ -1301,6 +1348,11 @@ class SlidesDatabase:
             for field, error_code in immutable_errors.items():
                 if field in valid_updates and valid_updates[field] != getattr(current, field):
                     raise InputError(error_code)
+            if current.content_kind == "standalone_html":
+                delete_transition = operation == "delete" and current.deleted == 0 and valid_updates == {"deleted": 1}
+                restore_transition = operation == "restore" and current.deleted == 1 and valid_updates == {"deleted": 0}
+                if not delete_transition and not restore_transition:
+                    raise InputError("operation_not_supported_for_content_kind")
             candidate = vars(current).copy()
             candidate.update(valid_updates)
             self._validate_presentation_candidate(candidate)
@@ -1326,10 +1378,11 @@ class SlidesDatabase:
         *,
         presentation_id: str,
         html_document: str | bytes,
+        validation_result: StandaloneHtmlValidationResult,
         expected_version: int,
-        validator: Callable[..., Any],
     ) -> PresentationRow:
-        """Validate and atomically replace one standalone source document."""
+        """Atomically store one source already accepted by the shared pool."""
+        source = bind_validated_standalone_source(html_document, validation_result)
         with self.transaction(immediate=True) as conn:
             current = self._fetch_presentation_by_id(conn, presentation_id, include_deleted=False)
             if current.content_kind != "standalone_html":
@@ -1340,12 +1393,22 @@ class SlidesDatabase:
                     entity="presentations",
                     identifier=presentation_id,
                 )
-            derived = validator(html_document)
-            if isinstance(html_document, bytes):
-                source = html_document.decode("utf-8", "strict")
-            else:
-                source = html_document
-            if current.html_document == source and current.title == derived.title:
+            derived = validation_result
+            if (
+                current.html_document,
+                current.title,
+                current.html_sha256,
+                current.html_bytes,
+                current.html_slide_count,
+                current.slides_text,
+            ) == (
+                source,
+                derived.title,
+                derived.html_sha256,
+                derived.html_bytes,
+                derived.slide_count,
+                derived.indexable_text,
+            ):
                 return current
 
             next_version = expected_version + 1
@@ -1408,9 +1471,12 @@ class SlidesDatabase:
         presentation_id: str,
         version: int,
         expected_version: int,
-        validator: Callable[..., Any],
+        html_document: str,
+        validation_result: StandaloneHtmlValidationResult,
+        expected_payload_json: str,
     ) -> PresentationRow:
-        """Restore one standalone document from a validated same-kind snapshot."""
+        """Restore an exact snapshot already accepted by the shared pool."""
+        source = bind_validated_standalone_source(html_document, validation_result)
         with self.transaction(immediate=True) as conn:
             current = self._fetch_presentation_by_id(conn, presentation_id, include_deleted=True)
             if current.content_kind != "standalone_html":
@@ -1431,22 +1497,18 @@ class SlidesDatabase:
             ).fetchone()
             if not version_row:
                 raise KeyError("presentation_version_not_found")
-            try:
-                payload = json.loads(version_row["payload_json"])
-            except (TypeError, json.JSONDecodeError) as exc:
-                raise InputError("version_payload_invalid") from exc
-            if not isinstance(payload, dict):
+            if version_row["payload_json"] != expected_payload_json:
                 raise InputError("version_payload_invalid")
+            payload = decode_presentation_version_payload(version_row["payload_json"])
             if payload.get("content_kind") != "standalone_html":
                 raise InputError("version_content_kind_mismatch")
             if payload.get("generation_job_uuid", current.generation_job_uuid) != current.generation_job_uuid:
                 raise InputError("generation_job_uuid_immutable")
             if payload.get("generation_provenance_json") != current.generation_provenance_json:
                 raise InputError("generation_provenance_immutable")
-            source = payload.get("html_document")
-            if not isinstance(source, str):
+            if payload.get("html_document") != source:
                 raise InputError("version_payload_invalid")
-            derived = validator(source)
+            derived = validation_result
             expected_metadata = (
                 payload.get("html_sha256"),
                 payload.get("html_bytes"),

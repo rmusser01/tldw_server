@@ -9,6 +9,7 @@ import json
 import os
 import re
 import time
+from collections.abc import AsyncIterator, Awaitable, Callable
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -16,8 +17,10 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
 from fastapi.encoders import jsonable_encoder
+from fastapi.routing import APIRoute
 from loguru import logger
 from pydantic import ValidationError
+from starlette.responses import JSONResponse
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequirePermission, User, get_request_user, rbac_rate_limit
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user, get_chacha_db_for_user_id
@@ -93,7 +96,13 @@ from tldw_Server_API.app.core.Slides.slides_assets import (
     MAX_RESOLVED_SLIDE_ASSET_BYTES,
     resolve_slide_asset,
 )
-from tldw_Server_API.app.core.Slides.slides_db import ConflictError, InputError, SlidesDatabase, VisualStyleRow
+from tldw_Server_API.app.core.Slides.slides_db import (
+    ConflictError,
+    InputError,
+    SlidesDatabase,
+    VisualStyleRow,
+    decode_presentation_version_payload,
+)
 from tldw_Server_API.app.core.Slides.slides_export import (
     SlidesAssetsMissingError,
     SlidesExportError,
@@ -125,6 +134,9 @@ from tldw_Server_API.app.core.Slides.slides_templates import (
 from tldw_Server_API.app.core.Slides.standalone_html_contracts import (
     StandaloneHtmlValidationError,
 )
+from tldw_Server_API.app.core.Slides.standalone_html_validation_pool import (
+    StandaloneHtmlValidationPool,
+)
 from tldw_Server_API.app.core.Slides.visual_style_resolver import (
     ResolvedBuiltinVisualStyle,
     resolve_builtin_visual_style,
@@ -135,7 +147,75 @@ from tldw_Server_API.app.core.Slides.visual_styles import (
 )
 from tldw_Server_API.app.core.testing import is_test_mode, is_truthy
 
-router = APIRouter(prefix="/slides", tags=["slides"])
+_VALIDATION_POOL_ATTR = "standalone_html_validation_pool"
+_VALIDATION_POOL_LOCK_ATTR = "standalone_html_validation_pool_lock"
+
+
+class _SlidesRoute(APIRoute):
+    """Preserve content-kind cache variation through downstream HTTP errors."""
+
+    def get_route_handler(self) -> Callable[[Request], Awaitable[Response]]:
+        original = super().get_route_handler()
+        negotiated = any(
+            str(field.alias).lower() == CONTENT_KIND_HEADER.lower() for field in self.dependant.header_params
+        )
+
+        async def route_handler(request: Request) -> Response:
+            try:
+                response = await original(request)
+            except HTTPException as exc:
+                headers = dict(exc.headers or {})
+                if negotiated:
+                    merge_vary_header(headers)
+                detail = exc.detail
+                if (
+                    isinstance(detail, dict)
+                    and detail.get("code") == "operation_not_supported_for_content_kind"
+                    and set(detail) == {"code", "operation", "content_kind"}
+                ):
+                    return JSONResponse(
+                        status_code=exc.status_code,
+                        content={
+                            "detail": detail["code"],
+                            "operation": detail["operation"],
+                            "content_kind": detail["content_kind"],
+                        },
+                        headers=headers,
+                    )
+                exc.headers = headers or None
+                raise
+            if negotiated:
+                merge_vary_header(response.headers)
+            return response
+
+        return route_handler
+
+
+@contextlib.asynccontextmanager
+async def _slides_lifespan(app: Any) -> AsyncIterator[None]:
+    """Own the single validator pool shared by Slides requests and workers."""
+    if getattr(app.state, _VALIDATION_POOL_LOCK_ATTR, None) is None:
+        setattr(app.state, _VALIDATION_POOL_LOCK_ATTR, asyncio.Lock())
+    try:
+        yield
+    finally:
+        pool = getattr(app.state, _VALIDATION_POOL_ATTR, None)
+        try:
+            if pool is not None:
+                await pool.close()
+        finally:
+            with contextlib.suppress(AttributeError):
+                delattr(app.state, _VALIDATION_POOL_ATTR)
+            with contextlib.suppress(AttributeError):
+                delattr(app.state, _VALIDATION_POOL_LOCK_ATTR)
+
+
+router = APIRouter(
+    prefix="/slides",
+    tags=["slides"],
+    lifespan=_slides_lifespan,
+    route_class=_SlidesRoute,
+)
 
 _ALLOWED_THEMES = {
     "black",
@@ -240,11 +320,32 @@ def _accepted_content_kinds(
     return accepted
 
 
-def _map_presentation_service_error(exc: PresentationServiceError) -> HTTPException:
+def _map_standalone_validation_error(exc: StandaloneHtmlValidationError) -> HTTPException:
+    headers: dict[str, str] = {}
+    if exc.retry_after is not None:
+        headers["Retry-After"] = str(exc.retry_after)
     return HTTPException(
         status_code=exc.status_code,
         detail=exc.code,
-        headers={"Vary": CONTENT_KIND_HEADER},
+        headers=headers or None,
+    )
+
+
+def _map_presentation_service_error(exc: PresentationServiceError) -> HTTPException:
+    detail: str | dict[str, str] = exc.code
+    if (
+        exc.code == "operation_not_supported_for_content_kind"
+        and exc.operation is not None
+        and exc.content_kind is not None
+    ):
+        detail = {
+            "code": exc.code,
+            "operation": exc.operation,
+            "content_kind": exc.content_kind,
+        }
+    return HTTPException(
+        status_code=exc.status_code,
+        detail=detail,
     )
 
 
@@ -254,6 +355,24 @@ def _map_precondition_conflict(exc: ConflictError) -> HTTPException:
         conflict_status_code=status.HTTP_412_PRECONDITION_FAILED,
         conflict_detail="precondition_failed",
     )
+
+
+async def _get_standalone_html_validation_pool(request: Request) -> StandaloneHtmlValidationPool:
+    """Return the app-owned pool shared with the Task 8 generation worker."""
+    state = request.app.state
+    pool = getattr(state, _VALIDATION_POOL_ATTR, None)
+    if pool is not None:
+        return pool
+    lock = getattr(state, _VALIDATION_POOL_LOCK_ATTR, None)
+    if lock is None:
+        lock = asyncio.Lock()
+        setattr(state, _VALIDATION_POOL_LOCK_ATTR, lock)
+    async with lock:
+        pool = getattr(state, _VALIDATION_POOL_ATTR, None)
+        if pool is None:
+            pool = StandaloneHtmlValidationPool()
+            setattr(state, _VALIDATION_POOL_ATTR, pool)
+        return pool
 
 
 def _slides_jobs_manager() -> JobManager:
@@ -939,11 +1058,12 @@ def _normalize_template_slides(slides_payload: list[Any]) -> list[Slide]:
 
 
 def _load_version_payload(payload_json: str) -> dict[str, Any]:
+    payload: dict[str, Any] | None = None
     try:
-        payload = json.loads(payload_json)
-    except json.JSONDecodeError as exc:
-        raise HTTPException(status_code=500, detail="version_payload_invalid") from exc
-    if not isinstance(payload, dict):
+        payload = decode_presentation_version_payload(payload_json)
+    except InputError:
+        pass
+    if payload is None:
         raise HTTPException(status_code=500, detail="version_payload_invalid")
     return payload
 
@@ -1297,7 +1417,7 @@ async def create_presentation(
                 "generation_provenance",
             )
         ):
-            raise PresentationServiceError("operation_not_supported_for_content_kind", status_code=409)
+            raise service.operation_not_supported(request.content_kind, "create")
     except PresentationServiceError as exc:
         raise _map_presentation_service_error(exc) from exc
     title = request.title.strip()
@@ -1477,10 +1597,10 @@ async def save_standalone_html_source(
     content_type: str | None = Header(None, alias="Content-Type"),
     accept_content_kinds: str | None = Header(None, alias=CONTENT_KIND_HEADER),
     db: SlidesDatabase = Depends(get_slides_db_for_user),
+    validation_pool: StandaloneHtmlValidationPool = Depends(_get_standalone_html_validation_pool),
 ) -> PresentationResponse:
-    expected_version = _parse_etag(if_match)
     accepted = _accepted_content_kinds(accept_content_kinds, response)
-    service = PresentationService(db)
+    service = PresentationService(db, validation_pool=validation_pool)
     try:
         kind = service.guard_target(presentation_id, accepted)
         service.require_operation(kind.content_kind, "html_source")
@@ -1490,23 +1610,24 @@ async def save_standalone_html_source(
         raise _map_presentation_service_error(exc) from exc
     if (content_type or "").split(";", 1)[0].strip().lower() != "application/octet-stream":
         raise HTTPException(status_code=415, detail="unsupported_media_type")
+    expected_version = _parse_etag(if_match)
     source = await request.body()
     try:
-        row = service.save_html_source(
+        row = await service.save_html_source(
             presentation_id=presentation_id,
             html_document=source,
             expected_version=expected_version,
         )
     except StandaloneHtmlValidationError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.code) from exc
-    except UnicodeDecodeError as exc:
-        raise HTTPException(status_code=422, detail="standalone_html_unsupported_encoding") from exc
+        raise _map_standalone_validation_error(exc) from exc
     except KeyError:
         raise HTTPException(status_code=404, detail="presentation_not_found") from None
     except InputError as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to save standalone HTML") from exc
     except ConflictError as exc:
         raise _map_precondition_conflict(exc) from exc
+    except PresentationServiceError as exc:
+        raise _map_presentation_service_error(exc) from exc
     response.headers["ETag"] = _format_etag(row.version, row.content_kind)
     response.headers["Last-Modified"] = row.last_modified
     response.headers["Cache-Control"] = "private, no-store"
@@ -1528,7 +1649,6 @@ async def update_presentation(
     accept_content_kinds: str | None = Header(None, alias=CONTENT_KIND_HEADER),
     db: SlidesDatabase = Depends(get_slides_db_for_user),
 ) -> PresentationResponse:
-    expected_version = _parse_etag(if_match)
     accepted = _accepted_content_kinds(accept_content_kinds, response)
     service = PresentationService(db)
     try:
@@ -1547,11 +1667,12 @@ async def update_presentation(
                 "generation_provenance",
             )
         ):
-            raise PresentationServiceError("operation_not_supported_for_content_kind", status_code=409)
+            raise service.operation_not_supported(kind.content_kind, "update")
     except KeyError:
         raise HTTPException(status_code=404, detail="presentation_not_found") from None
     except PresentationServiceError as exc:
         raise _map_presentation_service_error(exc) from exc
+    expected_version = _parse_etag(if_match)
     title = request.title.strip()
     if not title:
         raise HTTPException(status_code=422, detail="title_required")
@@ -1624,7 +1745,6 @@ async def patch_presentation(
     accept_content_kinds: str | None = Header(None, alias=CONTENT_KIND_HEADER),
     db: SlidesDatabase = Depends(get_slides_db_for_user),
 ) -> PresentationResponse:
-    expected_version = _parse_etag(if_match)
     accepted = _accepted_content_kinds(accept_content_kinds, response)
     service = PresentationService(db)
     try:
@@ -1643,11 +1763,12 @@ async def patch_presentation(
                 "generation_provenance",
             )
         ):
-            raise PresentationServiceError("operation_not_supported_for_content_kind", status_code=409)
+            raise service.operation_not_supported(kind.content_kind, "update")
     except KeyError:
         raise HTTPException(status_code=404, detail="presentation_not_found") from None
     except PresentationServiceError as exc:
         raise _map_presentation_service_error(exc) from exc
+    expected_version = _parse_etag(if_match)
     update_fields: dict[str, Any] = {}
     builtin_appearance_defaults: dict[str, Any] | None = None
     theme_was_set = _field_was_set(request, "theme")
@@ -1756,7 +1877,6 @@ async def reorder_presentation(
     accept_content_kinds: str | None = Header(None, alias=CONTENT_KIND_HEADER),
     db: SlidesDatabase = Depends(get_slides_db_for_user),
 ) -> PresentationResponse:
-    expected_version = _parse_etag(if_match)
     accepted = _accepted_content_kinds(accept_content_kinds, response)
     service = PresentationService(db)
     try:
@@ -1767,6 +1887,7 @@ async def reorder_presentation(
         raise HTTPException(status_code=404, detail="presentation_not_found") from None
     except PresentationServiceError as exc:
         raise _map_presentation_service_error(exc) from exc
+    expected_version = _parse_etag(if_match)
 
     slides_raw = json.loads(row.slides)
     slides = _normalize_slides([_slide_from_obj(item) for item in slides_raw])
@@ -1816,12 +1937,12 @@ async def delete_presentation(
     accept_content_kinds: str | None = Header(None, alias=CONTENT_KIND_HEADER),
     db: SlidesDatabase = Depends(get_slides_db_for_user),
 ) -> PresentationDeleteResponse:
-    expected_version = _parse_etag(if_match)
     accepted = _accepted_content_kinds(accept_content_kinds, response)
     service = PresentationService(db)
     try:
         kind = service.guard_target(presentation_id, accepted)
         service.require_operation(kind.content_kind, "delete")
+        expected_version = _parse_etag(if_match)
         result = service.delete_presentation(
             presentation_id=presentation_id,
             expected_version=expected_version,
@@ -1854,12 +1975,12 @@ async def restore_presentation(
     accept_content_kinds: str | None = Header(None, alias=CONTENT_KIND_HEADER),
     db: SlidesDatabase = Depends(get_slides_db_for_user),
 ) -> PresentationResponse:
-    expected_version = _parse_etag(if_match)
     accepted = _accepted_content_kinds(accept_content_kinds, response)
     service = PresentationService(db)
     try:
         kind = service.guard_target(presentation_id, accepted, include_deleted=True)
         service.require_operation(kind.content_kind, "restore")
+        expected_version = _parse_etag(if_match)
         row = db.restore_presentation(presentation_id, expected_version)
     except KeyError:
         raise HTTPException(status_code=404, detail="presentation_not_found") from None
@@ -2196,14 +2317,15 @@ async def restore_presentation_version(
     if_match: str | None = Header(None, alias="If-Match"),
     accept_content_kinds: str | None = Header(None, alias=CONTENT_KIND_HEADER),
     db: SlidesDatabase = Depends(get_slides_db_for_user),
+    validation_pool: StandaloneHtmlValidationPool = Depends(_get_standalone_html_validation_pool),
 ) -> PresentationResponse:
-    expected_version = _parse_etag(if_match)
     accepted = _accepted_content_kinds(accept_content_kinds, response)
-    service = PresentationService(db)
+    service = PresentationService(db, validation_pool=validation_pool)
     try:
         kind = service.guard_target(presentation_id, accepted, include_deleted=True)
         service.require_operation(kind.content_kind, "restore")
-        row = service.restore_version(
+        expected_version = _parse_etag(if_match)
+        row = await service.restore_version(
             presentation_id=presentation_id,
             version=version,
             expected_version=expected_version,
@@ -2221,7 +2343,7 @@ async def restore_presentation_version(
     except ConflictError as exc:
         raise _map_precondition_conflict(exc) from exc
     except StandaloneHtmlValidationError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.code) from exc
+        raise _map_standalone_validation_error(exc) from exc
     except PresentationServiceError as exc:
         raise _map_presentation_service_error(exc) from exc
     response.headers["ETag"] = _format_etag(row.version, row.content_kind)
@@ -2608,9 +2730,10 @@ async def export_presentation(
     accept_content_kinds: str | None = Header(None, alias=CONTENT_KIND_HEADER),
     db: SlidesDatabase = Depends(get_slides_db_for_user),
     collections_db: CollectionsDatabase = Depends(get_collections_db_for_user),
+    validation_pool: StandaloneHtmlValidationPool = Depends(_get_standalone_html_validation_pool),
 ) -> Response:
     accepted = _accepted_content_kinds(accept_content_kinds)
-    service = PresentationService(db)
+    service = PresentationService(db, validation_pool=validation_pool)
     try:
         kind = service.guard_target(presentation_id, accepted)
         service.require_operation(
@@ -2619,12 +2742,27 @@ async def export_presentation(
             export_format=str(format.value),
         )
         if format == ExportFormat.HTML:
-            raise PresentationServiceError("operation_not_supported_for_content_kind", status_code=409)
+            raise service.operation_not_supported(kind.content_kind, "export")
         row = db.get_presentation_by_id(presentation_id, include_deleted=False)
+        if row.content_kind == STANDALONE_HTML and format == ExportFormat.JSON:
+            await service.validate_saved_standalone(row)
     except KeyError:
         raise HTTPException(status_code=404, detail="presentation_not_found") from None
+    except StandaloneHtmlValidationError as exc:
+        raise _map_standalone_validation_error(exc) from exc
     except PresentationServiceError as exc:
         raise _map_presentation_service_error(exc) from exc
+
+    if row.content_kind == STANDALONE_HTML:
+        payload = jsonable_encoder(_build_presentation_response(row, additive=True))
+        body = export_presentation_json(payload).encode("utf-8")
+        headers = {
+            "Content-Disposition": f'attachment; filename="presentation_{presentation_id}.json"',
+            "Cache-Control": "private, no-store",
+            "X-Content-Type-Options": "nosniff",
+        }
+        merge_vary_header(headers)
+        return Response(content=body, media_type="application/json", headers=headers)
 
     slides_raw = json.loads(row.slides)
     slides = [_slide_from_obj(item) for item in slides_raw]
