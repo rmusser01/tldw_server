@@ -373,6 +373,7 @@ async def test_gateway_byok_endpoints_sqlite(tmp_path, monkeypatch):
         loads_envelope,
     )
     from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
+    from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
     from tldw_Server_API.app.main import app
 
     specs = {
@@ -389,7 +390,11 @@ async def test_gateway_byok_endpoints_sqlite(tmp_path, monkeypatch):
         raising=False,
     )
 
+    gateway_probe_calls: list[tuple[str, str]] = []
+    generic_test_calls: list[dict[str, object]] = []
+
     async def _fake_probe(*, spec, api_key):
+        gateway_probe_calls.append((spec.backend_id, api_key))
         if spec.backend_id == "gateway:rejected" or api_key.startswith("reject-"):
             return "rejected"
         if spec.backend_id == "gateway:unverified" or api_key.startswith("unverified-"):
@@ -401,6 +406,35 @@ async def test_gateway_byok_endpoints_sqlite(tmp_path, monkeypatch):
         "probe_gateway_credentials",
         _fake_probe,
         raising=False,
+    )
+
+    async def _fake_generic_test(
+        *,
+        provider,
+        api_key,
+        credential_fields=None,
+        model=None,
+    ):
+        generic_test_calls.append(
+            {
+                "provider": provider,
+                "api_key": api_key,
+                "credential_fields": credential_fields,
+                "model": model,
+            }
+        )
+        if api_key == "openrouter-upstream-5xx" or model == "openrouter/5xx":
+            raise ChatAPIError(
+                "OpenRouter unavailable",
+                status_code=503,
+                provider="openrouter",
+            )
+        return model or "openrouter/default-model"
+
+    monkeypatch.setattr(
+        user_keys_endpoints,
+        "test_provider_credentials",
+        _fake_generic_test,
     )
 
     users_db = UsersDB(state["pool"])
@@ -437,9 +471,15 @@ async def test_gateway_byok_endpoints_sqlite(tmp_path, monkeypatch):
             assert response.status_code == 400
 
             for forbidden_metadata in (
-                {"headers": {"Authorization": "attacker"}},
-                {"connection": {"url": "https://attacker.example/v1"}},
-                {"authentication": {"scheme": "basic"}},
+                {"nested": [{"URL": "https://attacker.example/v1"}]},
+                {"nested": {"baseURI": "https://attacker.example/v1"}},
+                {"nested": {"endpoint": "https://attacker.example/v1"}},
+                {"nested": {"headers": {"Authorization": "attacker"}}},
+                {"nested": {"authorization": "Bearer attacker"}},
+                {"nested": {"authScheme": "basic"}},
+                {"nested": {"apiBaseUrl": "https://attacker.example/v1"}},
+                {"nested": {"httpHeaders": {"X-Attacker": "yes"}}},
+                {"nested": {"API-BASE_URL": "https://attacker.example/v1"}},
             ):
                 response = client.post(
                     "/api/v1/users/keys",
@@ -451,6 +491,26 @@ async def test_gateway_byok_endpoints_sqlite(tmp_path, monkeypatch):
                     headers=headers,
                 )
                 assert response.status_code == 400
+
+        benign_metadata = {
+            "url_count": 2,
+            "base_url_verified": True,
+            "endpoint_latency_ms": 15,
+            "authorization_note": "managed by the server",
+            "authSchemeDescription": "informational only",
+            "apiBaseUrlStatus": "healthy",
+            "httpHeadersObserved": 4,
+        }
+        benign = client.post(
+            "/api/v1/users/keys",
+            json={
+                "provider": "gateway:voice-lab",
+                "api_key": "benign-metadata-key",
+                "metadata": benign_metadata,
+            },
+            headers=user_headers,
+        )
+        assert benign.status_code == 200, benign.text
 
         rejected = client.post(
             "/api/v1/users/keys",
@@ -523,6 +583,7 @@ async def test_gateway_byok_endpoints_sqlite(tmp_path, monkeypatch):
         )
         assert rotated_resolved.credential_scope_token != first_scope
 
+        probe_count_before_openrouter = len(gateway_probe_calls)
         openrouter_first = client.post(
             "/api/v1/users/keys",
             json={
@@ -540,6 +601,17 @@ async def test_gateway_byok_endpoints_sqlite(tmp_path, monkeypatch):
             headers=user_headers,
         )
         assert openrouter_first.status_code == 200, openrouter_first.text
+        assert openrouter_first.json()["verification_status"] is None
+        assert generic_test_calls[-1] == {
+            "provider": "openrouter",
+            "api_key": "openrouter-first",
+            "credential_fields": {
+                "org_id": "general-org",
+                "project_id": "general-project",
+            },
+            "model": None,
+        }
+        assert len(gateway_probe_calls) == probe_count_before_openrouter
 
         openrouter_second = client.post(
             "/api/v1/users/keys",
@@ -547,9 +619,39 @@ async def test_gateway_byok_endpoints_sqlite(tmp_path, monkeypatch):
             headers=user_headers,
         )
         assert openrouter_second.status_code == 200, openrouter_second.text
+        assert generic_test_calls[-1]["provider"] == "openrouter"
+        assert len(gateway_probe_calls) == probe_count_before_openrouter
+
+        openrouter_test = client.post(
+            "/api/v1/users/keys/test",
+            json={"provider": "openrouter", "model": "openrouter/requested-model"},
+            headers=user_headers,
+        )
+        assert openrouter_test.status_code == 200, openrouter_test.text
+        assert openrouter_test.json()["model"] == "openrouter/requested-model"
+        assert openrouter_test.json()["verification_status"] is None
+        assert generic_test_calls[-1]["model"] == "openrouter/requested-model"
+        assert len(gateway_probe_calls) == probe_count_before_openrouter
+
+        failed_openrouter_rotation = client.post(
+            "/api/v1/users/keys",
+            json={"provider": "openrouter", "api_key": "openrouter-upstream-5xx"},
+            headers=user_headers,
+        )
+        assert failed_openrouter_rotation.status_code == 503
+
+        failed_openrouter_test = client.post(
+            "/api/v1/users/keys/test",
+            json={"provider": "openrouter", "model": "openrouter/5xx"},
+            headers=user_headers,
+        )
+        assert failed_openrouter_test.status_code == 503
+        assert len(gateway_probe_calls) == probe_count_before_openrouter
+
         openrouter_row = await repo.fetch_secret_for_user(user_id, "openrouter")
         assert openrouter_row is not None
         openrouter_payload = decrypt_byok_payload(loads_envelope(openrouter_row["encrypted_blob"]))
+        assert openrouter_payload["api_key"] == "unverified-openrouter-rotated"
         assert openrouter_payload["credential_fields"] == {
             "org_id": "general-org",
             "project_id": "general-project",
@@ -557,6 +659,7 @@ async def test_gateway_byok_endpoints_sqlite(tmp_path, monkeypatch):
         openrouter_metadata = json.loads(openrouter_row["metadata"])
         assert openrouter_metadata["verification_status"] == "general-verified"
         assert openrouter_metadata["scope"] == "general-llm"
+        assert "tts_gateway_verification_status" not in openrouter_metadata
 
         del specs["gateway:voice-lab"]
         orphan_listing = client.get("/api/v1/users/keys", headers=user_headers)
