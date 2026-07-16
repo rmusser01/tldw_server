@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 from typing import Any
+from unittest.mock import Mock
 
 import pytest
 
@@ -226,11 +227,30 @@ def test_invalid_context_integrity_mode_setting_blocks_startup(
     monkeypatch: pytest.MonkeyPatch,
     mode: str,
 ) -> None:
-    from tldw_Server_API.app.services.startup_context_integrity import (
-        produce_context_integrity_startup_warnings,
-    )
+    from tldw_Server_API.app.core.Context_Integrity.inventory import InventoryResult
+    from tldw_Server_API.app.services import startup_context_integrity
     from tldw_Server_API.app.services.startup_warning_registry import (
         StartupWarningRegistry,
+    )
+
+    empty_inventory = InventoryResult(assets=(), findings=())
+    prompt_inventory = Mock(return_value=empty_inventory)
+    env_override_inventory = Mock(return_value=empty_inventory)
+    user_skill_inventory = Mock(return_value=empty_inventory)
+    monkeypatch.setattr(
+        startup_context_integrity,
+        "inventory_prompt_files_with_findings",
+        prompt_inventory,
+    )
+    monkeypatch.setattr(
+        startup_context_integrity,
+        "inventory_env_prompt_overrides_with_findings",
+        env_override_inventory,
+    )
+    monkeypatch.setattr(
+        startup_context_integrity,
+        "inventory_user_skills_with_findings",
+        user_skill_inventory,
     )
 
     prompts = tmp_path / "Prompts"
@@ -241,13 +261,17 @@ def test_invalid_context_integrity_mode_setting_blocks_startup(
         ValueError,
         match=r"Invalid CONTEXT_INTEGRITY_MODE.*Expected one of",
     ):
-        produce_context_integrity_startup_warnings(
+        startup_context_integrity.produce_context_integrity_startup_warnings(
             app_state=_state(),
             registry=StartupWarningRegistry(startup_id="boot-invalid-setting"),
             prompts_dir=prompts,
-            user_skill_roots=[],
+            user_skill_roots=[(42, tmp_path / "skills")],
             approved_entries=[],
         )
+
+    prompt_inventory.assert_not_called()
+    env_override_inventory.assert_not_called()
+    user_skill_inventory.assert_not_called()
 
 
 def test_env_manifest_happy_path_populates_boot_state(
