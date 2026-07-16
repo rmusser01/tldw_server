@@ -18510,10 +18510,15 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 )
                 if current is None:
                     raise WorkspaceSourceSavedViewNotFoundError
-                if int(current["version"]) != stored_expected_version:
+                current_version = int(current["version"])
+                if current_version != stored_expected_version:
                     raise WorkspaceSourceSavedViewConflictError(
                         SOURCE_VIEW_VERSION_CONFLICT,
-                        {"view_id": view_id, "current_version": int(current["version"])},
+                        {"view_id": view_id, "current_version": current_version},
+                    )
+                if current_version >= SOURCE_VIEW_MAX_INTEGER:
+                    raise InputError(  # noqa: TRY003
+                        "Saved view version has reached the maximum supported value."
                     )
                 if name_key is not None:
                     conflict = self._find_workspace_source_saved_view_name_with_conn(

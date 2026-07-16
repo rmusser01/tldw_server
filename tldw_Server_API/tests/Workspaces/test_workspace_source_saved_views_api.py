@@ -185,6 +185,35 @@ def test_create_list_patch_delete_and_canonicalize(client: TestClient, db: Chara
     assert client.delete(f"/api/v1/workspaces/ws-1/source-views/{created['id']}").status_code == 404
 
 
+def test_routes_delegate_workspace_access_checks_to_transactional_crud(
+    client: TestClient,
+    db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    existing = db.create_workspace_source_saved_view(
+        "1",
+        "ws-1",
+        name="Existing",
+        schema_version=1,
+        state_json="{}",
+    )
+
+    def _forbid_route_precheck(*_args: Any, **_kwargs: Any) -> None:
+        raise AssertionError("saved-view routes must not call get_workspace outside CRUD transactions")
+
+    monkeypatch.setattr(db, "get_workspace", _forbid_route_precheck)
+
+    assert client.get("/api/v1/workspaces/ws-1/source-views").status_code == 200
+    assert _post(client, _create_payload(name="Created")).status_code == 201
+    assert client.patch(
+        f"/api/v1/workspaces/ws-1/source-views/{existing['id']}",
+        json={"version": 1, "name": "Updated"},
+    ).status_code == 200
+    assert client.delete(
+        f"/api/v1/workspaces/ws-1/source-views/{existing['id']}"
+    ).status_code == 204
+
+
 def test_v1_accepts_exact_enums_and_canonicalizes_in_declaration_order(client: TestClient) -> None:
     types = ["pdf", "video", "audio", "website", "document", "text"]
     statuses = ["processing", "ready", "error"]

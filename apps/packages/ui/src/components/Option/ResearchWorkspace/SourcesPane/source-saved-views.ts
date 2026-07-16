@@ -15,6 +15,9 @@ import {
 export const SOURCE_SAVED_VIEW_SCHEMA_VERSION = 1
 export const LARGE_SOURCE_FILE_BYTES = 50 * 1024 * 1024
 
+export const getSourceSavedViewNameLength = (name: string): number =>
+  Array.from(name).length
+
 const WIRE_FIELDS = [
   "type_filters",
   "status_filters",

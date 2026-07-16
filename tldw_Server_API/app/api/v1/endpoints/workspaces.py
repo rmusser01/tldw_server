@@ -724,17 +724,6 @@ def _request_user_id(current_user: User) -> str:
     return str(current_user.id)
 
 
-def _require_source_saved_view_workspace(
-    db: CharactersRAGDB,
-    workspace_id: str,
-    owner_user_id: str,
-) -> None:
-    """Require an active workspace owned by the authenticated principal."""
-    workspace = db.get_workspace(workspace_id)
-    if workspace is None or str(workspace.get("client_id")) != owner_user_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source view not found")
-
-
 def _serialize_source_saved_view_state(state_model: WorkspaceSourceSavedViewStateV1) -> str:
     """Return the deterministic UTF-8 JSON persisted for a canonical V1 state."""
     return json.dumps(
@@ -1881,10 +1870,7 @@ def list_source_saved_views(
     """List the current user's source views for one active owned workspace."""
     owner_user_id = _request_user_id(current_user)
     try:
-        _require_source_saved_view_workspace(db, workspace_id, owner_user_id)
         rows = db.list_workspace_source_saved_views(owner_user_id, workspace_id)
-    except HTTPException:
-        raise
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
         raise _source_saved_view_error(
             exc, default_detail="Failed to fetch workspace source saved views"
@@ -1914,7 +1900,6 @@ def create_source_saved_view(
     """Create one canonical V1 source view."""
     owner_user_id = _request_user_id(current_user)
     try:
-        _require_source_saved_view_workspace(db, workspace_id, owner_user_id)
         row = db.create_workspace_source_saved_view(
             owner_user_id,
             workspace_id,
@@ -1922,8 +1907,6 @@ def create_source_saved_view(
             schema_version=body.schema_version,
             state_json=_serialize_source_saved_view_state(body.state),
         )
-    except HTTPException:
-        raise
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
         raise _source_saved_view_error(
             exc, default_detail="Failed to create workspace source saved view"
@@ -1953,7 +1936,6 @@ def update_source_saved_view(
     patch = body.root
     state_model = getattr(patch, "state", None)
     try:
-        _require_source_saved_view_workspace(db, workspace_id, owner_user_id)
         row = db.update_workspace_source_saved_view(
             owner_user_id,
             workspace_id,
@@ -1965,8 +1947,6 @@ def update_source_saved_view(
                 _serialize_source_saved_view_state(state_model) if state_model is not None else None
             ),
         )
-    except HTTPException:
-        raise
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
         raise _source_saved_view_error(
             exc, default_detail="Failed to update workspace source saved view"
@@ -1990,10 +1970,7 @@ def delete_source_saved_view(
     """Unconditionally delete one owned source view."""
     owner_user_id = _request_user_id(current_user)
     try:
-        _require_source_saved_view_workspace(db, workspace_id, owner_user_id)
         db.delete_workspace_source_saved_view(owner_user_id, workspace_id, view_id)
-    except HTTPException:
-        raise
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
         raise _source_saved_view_error(
             exc, default_detail="Failed to delete workspace source saved view"

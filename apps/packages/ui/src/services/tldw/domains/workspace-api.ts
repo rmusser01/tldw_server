@@ -1692,7 +1692,9 @@ export const workspaceApiMethods = {
   ): Promise<WorkspaceSourceSavedViewListResponse> {
     return await bgRequest<WorkspaceSourceSavedViewListResponse>({
       path: workspacePath(workspaceId, "/source-views"),
-      method: "GET"
+      method: "GET",
+      // Reconciliation must not join an older in-flight list request.
+      abortSignal: new AbortController().signal
     })
   },
 
@@ -1720,7 +1722,7 @@ export const workspaceApiMethods = {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: data,
-      expectedStatuses: [409]
+      expectedStatuses: [404, 409]
     })
   },
 
@@ -1731,7 +1733,8 @@ export const workspaceApiMethods = {
     const encodedViewId = encodeWorkspacePathSegment(viewId, "viewId")
     await bgRequest<unknown>({
       path: workspacePath(workspaceId, `/source-views/${encodedViewId}`),
-      method: "DELETE"
+      method: "DELETE",
+      expectedStatuses: [404]
     })
   },
 

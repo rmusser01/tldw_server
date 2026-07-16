@@ -338,6 +338,45 @@ def test_saved_view_integer_validators_accept_postgres_integer_max(
     assert db._validate_workspace_source_saved_view_expected_version(maximum) == maximum
 
 
+def test_update_rejects_maximum_stored_version_without_mutating_row(
+    db: CharactersRAGDB,
+) -> None:
+    maximum = 2_147_483_647
+    created = _create(db, name="Maximum version")
+    db.execute_query(
+        "UPDATE workspace_source_saved_views SET version = ? WHERE id = ?",
+        (maximum, created["id"]),
+        commit=True,
+    )
+
+    with pytest.raises(CharactersRAGDBError) as stale_exc:
+        db.update_workspace_source_saved_view(
+            OWNER_A,
+            WORKSPACE_A,
+            created["id"],
+            expected_version=maximum - 1,
+            name="Stale change",
+        )
+    _assert_saved_view_error(
+        stale_exc,
+        "source_view_version_conflict",
+        {"view_id": created["id"], "current_version": maximum},
+    )
+
+    with pytest.raises(InputError, match="maximum"):
+        db.update_workspace_source_saved_view(
+            OWNER_A,
+            WORKSPACE_A,
+            created["id"],
+            expected_version=maximum,
+            name="Overflowing change",
+        )
+
+    current = db.get_workspace_source_saved_view(OWNER_A, WORKSPACE_A, created["id"])
+    assert current["version"] == maximum
+    assert current["name"] == "Maximum version"
+
+
 def test_stale_update_reports_only_view_id_and_current_version(db: CharactersRAGDB) -> None:
     created = _create(db, state_json="private raw state")
     current = db.update_workspace_source_saved_view(

@@ -15,6 +15,7 @@ import {
   applySavedSourceViewState,
   deserializeSourceViewState,
   getSourceListViewStateSignature,
+  getSourceSavedViewNameLength,
   getSourceViewStateSignature,
   serializeSourceListViewState,
   type SourceViewStateValidationIssue,
@@ -190,7 +191,8 @@ const requestError = (error: unknown): SourceSavedViewRequestError => ({
 
 const validResponse = (
   response: WorkspaceSourceSavedViewResponse,
-): response is WorkspaceSourceSavedViewValidResponse => response.valid;
+): response is WorkspaceSourceSavedViewValidResponse =>
+  response.valid && deserializeSourceViewState(response.state) !== null;
 
 const upsertView = (
   views: WorkspaceSourceSavedViewResponse[],
@@ -647,7 +649,7 @@ export const useSourceSavedViews = (
       }
       const name = rawName.trim();
       const issues: SourceViewStateValidationIssue[] = [];
-      if (!name || name.length > 120) {
+      if (!name || getSourceSavedViewNameLength(name) > 120) {
         issues.push({
           field: "name",
           message: "Name must contain between 1 and 120 characters.",

@@ -486,6 +486,63 @@ describe("useSourceSavedViews", () => {
     expect(result.current.announcement).toBeNull();
   });
 
+  it("accepts 120 Unicode code points and rejects 121", async () => {
+    const astralCharacter = "\u{1F4C4}";
+    const maximumName = astralCharacter.repeat(120);
+    const tooLongName = astralCharacter.repeat(121);
+    api.createWorkspaceSourceView.mockResolvedValue(
+      validView({ name: maximumName, state: wireState() }),
+    );
+    const { result } = setup();
+    await waitFor(() =>
+      expect(api.listWorkspaceSourceViews).toHaveBeenCalled(),
+    );
+
+    await act(async () => result.current.createView(maximumName));
+
+    expect(api.createWorkspaceSourceView).toHaveBeenCalledWith(
+      "ws-a",
+      expect.objectContaining({ name: maximumName }),
+    );
+
+    await act(async () => result.current.createView(tooLongName));
+
+    expect(api.createWorkspaceSourceView).toHaveBeenCalledTimes(1);
+    expect(result.current.serializationIssues).toEqual(
+      expect.arrayContaining([
+        {
+          field: "name",
+          message: "Name must contain between 1 and 120 characters.",
+        },
+      ]),
+    );
+  });
+
+  it("rejects a malformed valid create response atomically", async () => {
+    api.createWorkspaceSourceView.mockResolvedValue(
+      validView({ id: "malformed-create", state: { unknown_field: true } }),
+    );
+    const onApply = vi.fn();
+    const { result } = setup("ws-a", localState(), onApply);
+    await waitFor(() =>
+      expect(api.listWorkspaceSourceViews).toHaveBeenCalled(),
+    );
+
+    await act(async () => result.current.createView("Malformed"));
+
+    expect(result.current.views).toEqual([]);
+    expect(result.current.activeViewId).toBeNull();
+    expect(result.current.activeSnapshot).toBeNull();
+    expect(onApply).not.toHaveBeenCalled();
+    expect(result.current.announcement).toBeNull();
+    expect(result.current.busy).toBe(false);
+    expect(result.current.mutation).toBeNull();
+    expect(result.current.mutationError?.message).toBe(
+      "The server returned an invalid saved view.",
+    );
+    expect(result.current.canRetryMutation).toBe(true);
+  });
+
   it("blocks invalid local state with field issues", async () => {
     const { result, rerender } = setup(
       "ws-a",
@@ -988,6 +1045,38 @@ describe("useSourceSavedViews", () => {
     expect(result.current.activeSnapshot).toEqual(updated.state);
     expect(result.current.modified).toBe(false);
     expect(result.current.announcement).toBe("Saved view replaced.");
+  });
+
+  it("rejects a malformed valid patch response atomically", async () => {
+    const row = validView();
+    api.listWorkspaceSourceViews.mockResolvedValue({ items: [row] });
+    api.updateWorkspaceSourceView.mockResolvedValue(
+      validView({ version: 3, state: { sort: "unsupported" } }),
+    );
+    const onApply = vi.fn();
+    const { result } = setup(
+      "ws-a",
+      localState({ typeFilters: ["pdf"] }),
+      onApply,
+    );
+    await waitFor(() => expect(result.current.views).toHaveLength(1));
+    act(() => result.current.applyView(result.current.views[0]!));
+    onApply.mockClear();
+    const activeSnapshot = result.current.activeSnapshot;
+
+    await act(async () => result.current.replaceView(result.current.views[0]!));
+
+    expect(result.current.views).toEqual([row]);
+    expect(result.current.activeViewId).toBe(row.id);
+    expect(result.current.activeSnapshot).toEqual(activeSnapshot);
+    expect(onApply).not.toHaveBeenCalled();
+    expect(result.current.announcement).toBeNull();
+    expect(result.current.busy).toBe(false);
+    expect(result.current.mutation).toBeNull();
+    expect(result.current.mutationError?.message).toBe(
+      "The server returned an invalid saved view.",
+    );
+    expect(result.current.canRetryMutation).toBe(true);
   });
 
   it("preserves a concurrent server rename across an ordinary replace retry", async () => {

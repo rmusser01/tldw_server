@@ -869,7 +869,8 @@ describe("workspace API domain contract", () => {
     expect(response.items[0]?.invalid_reason).toBe("unsupported_schema_version")
     expect(mocks.bgRequest).toHaveBeenCalledWith({
       path: "/api/v1/workspaces/workspace%20with%20spaces/source-views",
-      method: "GET"
+      method: "GET",
+      abortSignal: expect.any(AbortSignal)
     })
   })
 
@@ -942,7 +943,7 @@ describe("workspace API domain contract", () => {
         schema_version: 1,
         state
       },
-      expectedStatuses: [409]
+      expectedStatuses: [404, 409]
     })
   })
 
@@ -956,7 +957,8 @@ describe("workspace API domain contract", () => {
 
     expect(mocks.bgRequest).toHaveBeenCalledWith({
       path: "/api/v1/workspaces/workspace%20with%20spaces/source-views/view%20with%20spaces",
-      method: "DELETE"
+      method: "DELETE",
+      expectedStatuses: [404]
     })
   })
 

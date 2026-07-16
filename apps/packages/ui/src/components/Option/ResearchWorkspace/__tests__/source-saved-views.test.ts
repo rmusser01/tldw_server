@@ -11,6 +11,7 @@ import {
   applySavedSourceViewState,
   areSourceViewStatesEqual,
   deserializeSourceViewState,
+  getSourceSavedViewNameLength,
   getSourceListViewStateSignature,
   getSourceViewStateSignature,
   isSourceListViewStateModified,
@@ -50,6 +51,13 @@ const defaultV1: WorkspaceSourceSavedViewStateV1 = {
 }
 
 describe("source saved view V1 contract", () => {
+  it("counts saved-view names by Unicode code point", () => {
+    const astralCharacter = "\u{1F4C4}"
+
+    expect(getSourceSavedViewNameLength(astralCharacter.repeat(120))).toBe(120)
+    expect(getSourceSavedViewNameLength(astralCharacter.repeat(121))).toBe(121)
+  })
+
   it("pins schema version, invalid reasons, and the exact sort enum", () => {
     expect(SOURCE_SAVED_VIEW_SCHEMA_VERSION).toBe(1)
     expect(WORKSPACE_SOURCE_SAVED_VIEW_INVALID_REASONS).toEqual([

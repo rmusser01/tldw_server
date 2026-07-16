@@ -5,11 +5,14 @@ from __future__ import annotations
 import threading
 from collections.abc import Callable
 from dataclasses import replace
+from types import SimpleNamespace
 from typing import Any
 from uuid import uuid4
 
 import pytest
+from fastapi import HTTPException
 
+from tldw_Server_API.app.api.v1.endpoints import workspaces as workspaces_endpoint
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig, DatabaseError
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.backends.pg_rls_policies import ensure_chacha_rls
@@ -87,6 +90,29 @@ def _assert_forced_active_workspace_policy(backend: Any) -> None:
         assert "workspace_source_saved_views.workspace_id" in expression
         assert "w.client_id" in expression
         assert "NOT w.deleted" in expression or "w.deleted = false" in expression
+
+
+def test_postgres_missing_workspace_route_leaves_connection_idle(
+    pg_database_config: DatabaseConfig,
+) -> None:
+    backend, db = _database(pg_database_config, owner="1")
+    try:
+        connection = db.get_connection()
+        connection.rollback()
+        assert connection.info.transaction_status.name == "IDLE"
+
+        with pytest.raises(HTTPException) as exc_info:
+            workspaces_endpoint.list_source_saved_views(
+                "missing-workspace",
+                db=db,
+                current_user=SimpleNamespace(id=1),
+            )
+
+        assert exc_info.value.status_code == 404
+        assert connection.info.transaction_status.name == "IDLE"
+    finally:
+        db.close_all_connections()
+        backend.get_pool().close_all()
 
 
 def test_postgres_fresh_schema_named_unique_crud_order_and_owner_predicates(
@@ -573,6 +599,52 @@ def test_postgres_saved_view_integer_boundaries_are_driver_independent(
                     expected_version=value,  # type: ignore[arg-type]
                     name="Updated",
                 )
+    finally:
+        db.close_all_connections()
+        backend.get_pool().close_all()
+
+
+def test_postgres_update_rejects_maximum_stored_version_without_mutating_row(
+    pg_database_config: DatabaseConfig,
+) -> None:
+    maximum = 2_147_483_647
+    backend, db = _database(pg_database_config)
+    workspace_id = "ws-maximum-saved-view-version"
+    try:
+        db.upsert_workspace(workspace_id, "Maximum saved view version")
+        created = _create(db, workspace_id, name="Maximum version")
+        db.execute_query(
+            "UPDATE workspace_source_saved_views SET version = ? WHERE id = ?",
+            (maximum, created["id"]),
+            commit=True,
+        )
+
+        with pytest.raises(CharactersRAGDBError) as stale_exc:
+            db.update_workspace_source_saved_view(
+                OWNER_A,
+                workspace_id,
+                created["id"],
+                expected_version=maximum - 1,
+                name="Stale change",
+            )
+        assert stale_exc.value.code == "source_view_version_conflict"
+        assert stale_exc.value.metadata == {
+            "view_id": created["id"],
+            "current_version": maximum,
+        }
+
+        with pytest.raises(InputError, match="maximum"):
+            db.update_workspace_source_saved_view(
+                OWNER_A,
+                workspace_id,
+                created["id"],
+                expected_version=maximum,
+                name="Overflowing change",
+            )
+
+        current = db.get_workspace_source_saved_view(OWNER_A, workspace_id, created["id"])
+        assert current["version"] == maximum
+        assert current["name"] == "Maximum version"
     finally:
         db.close_all_connections()
         backend.get_pool().close_all()

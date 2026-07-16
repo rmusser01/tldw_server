@@ -391,6 +391,291 @@ describe("SourceViewControls", () => {
     )
   })
 
+  it("validates the full saved-view name by Unicode code point", async () => {
+    const createView = vi.fn().mockResolvedValue(undefined)
+    render(<Harness model={controller({ createView })} />)
+    fireEvent.click(screen.getByRole("button", { name: "Save source view" }))
+    const dialog = await screen.findByRole("dialog", { name: "Save source view" })
+    const input = within(dialog).getByRole("textbox", { name: "View name" })
+    const save = within(dialog).getByRole("button", { name: "Save" })
+    const astralCharacter = "\u{1F4C4}"
+    const maximumName = astralCharacter.repeat(120)
+
+    expect(input).not.toHaveAttribute("maxlength")
+    fireEvent.change(input, { target: { value: maximumName } })
+    expect(input).toHaveValue(maximumName)
+    expect(save).toBeEnabled()
+    fireEvent.click(save)
+    await waitFor(() => expect(createView).toHaveBeenCalledWith(maximumName))
+
+    fireEvent.change(input, {
+      target: { value: astralCharacter.repeat(121) }
+    })
+    expect(within(dialog).getByRole("alert")).toHaveTextContent(
+      "Name must contain between 1 and 120 characters."
+    )
+    expect(input).toHaveAccessibleDescription(
+      "Name must contain between 1 and 120 characters."
+    )
+    expect(save).toBeDisabled()
+  })
+
+  it("keeps direct Replace version recovery inside its confirmation dialog", async () => {
+    const user = userEvent.setup()
+    const replaceView = vi.fn().mockResolvedValue(undefined)
+    const retryVersionConflict = vi.fn().mockResolvedValue(undefined)
+    const { rerender } = render(
+      <Harness model={controller({ replaceView, retryVersionConflict })} />
+    )
+    await user.click(screen.getByRole("button", { name: "Source views" }))
+    await openSavedViewCommands(user, "My PDFs")
+    activateMenuItemByKeyboard(
+      screen.getByRole("menuitem", { name: "Replace saved view My PDFs" })
+    )
+    let dialog = await screen.findByRole("dialog", { name: "Replace saved view?" })
+    const replace = within(dialog).getByRole("button", { name: "Replace" })
+    replace.focus()
+    await user.keyboard("{Enter}")
+    expect(replaceView).toHaveBeenCalledWith(validView())
+
+    rerender(
+      <Harness
+        model={controller({
+          replaceView,
+          retryVersionConflict,
+          versionConflict: {
+            viewId: "view-1",
+            currentVersion: 5,
+            retryable: true
+          },
+          canRetryVersion: true
+        })}
+      />
+    )
+    dialog = await screen.findByRole("dialog", { name: "Replace saved view?" })
+    expect(within(dialog).getByRole("alert")).toHaveTextContent(
+      "This saved view changed on the server."
+    )
+    const retry = within(dialog).getByRole("button", {
+      name: "Retry with latest version"
+    })
+    expect(screen.getAllByRole("button", { name: "Retry with latest version" })).toHaveLength(1)
+    retry.focus()
+    expect(dialog).toContainElement(document.activeElement)
+    await user.keyboard("{Enter}")
+    expect(retryVersionConflict).toHaveBeenCalledTimes(1)
+    expect(replaceView).toHaveBeenCalledTimes(1)
+  })
+
+  it("keeps invalid Reset version recovery inside its confirmation dialog", async () => {
+    const user = userEvent.setup()
+    const resetView = vi.fn().mockResolvedValue(undefined)
+    const retryVersionConflict = vi.fn().mockResolvedValue(undefined)
+    const { rerender } = render(
+      <Harness model={controller({ resetView, retryVersionConflict })} />
+    )
+    await user.click(screen.getByRole("button", { name: "Source views" }))
+    await openSavedViewCommands(user, "Old view")
+    activateMenuItemByKeyboard(
+      screen.getByRole("menuitem", { name: "Reset saved view Old view" })
+    )
+    let dialog = await screen.findByRole("dialog", { name: "Reset saved view?" })
+    const reset = within(dialog).getByRole("button", { name: "Reset" })
+    reset.focus()
+    await user.keyboard("{Enter}")
+    expect(resetView).toHaveBeenCalledWith(invalidView())
+
+    rerender(
+      <Harness
+        model={controller({
+          resetView,
+          retryVersionConflict,
+          versionConflict: {
+            viewId: "view-invalid",
+            currentVersion: 6,
+            retryable: true
+          },
+          canRetryVersion: true
+        })}
+      />
+    )
+    dialog = await screen.findByRole("dialog", { name: "Reset saved view?" })
+    expect(within(dialog).getByRole("alert")).toHaveTextContent(
+      "This saved view changed on the server."
+    )
+    const retry = within(dialog).getByRole("button", {
+      name: "Retry with latest version"
+    })
+    retry.focus()
+    await user.keyboard("{Enter}")
+    expect(retryVersionConflict).toHaveBeenCalledTimes(1)
+    expect(resetView).toHaveBeenCalledTimes(1)
+  })
+
+  it("keeps duplicate replacement version recovery inside the Save dialog", async () => {
+    const user = userEvent.setup()
+    const createView = vi.fn().mockResolvedValue(undefined)
+    const confirmReplace = vi.fn().mockResolvedValue(undefined)
+    const retryVersionConflict = vi.fn().mockResolvedValue(undefined)
+    const duplicate = {
+      viewId: "view-1",
+      version: 2,
+      name: "My PDFs",
+      state: validView().state
+    }
+    const { rerender } = render(
+      <Harness
+        model={controller({ createView, confirmReplace, retryVersionConflict })}
+      />
+    )
+    const saveTrigger = screen.getByRole("button", { name: "Save source view" })
+    saveTrigger.focus()
+    await user.keyboard("{Enter}")
+    let dialog = await screen.findByRole("dialog", { name: "Save source view" })
+    await user.type(within(dialog).getByRole("textbox", { name: "View name" }), "My PDFs")
+    const save = within(dialog).getByRole("button", { name: "Save" })
+    save.focus()
+    await user.keyboard("{Enter}")
+    expect(createView).toHaveBeenCalledWith("My PDFs")
+
+    rerender(
+      <Harness
+        model={controller({
+          createView,
+          confirmReplace,
+          retryVersionConflict,
+          duplicateConflict: duplicate
+        })}
+      />
+    )
+    dialog = await screen.findByRole("dialog", { name: "Replace saved view?" })
+    const replace = within(dialog).getByRole("button", { name: "Replace" })
+    replace.focus()
+    await user.keyboard("{Enter}")
+    expect(confirmReplace).toHaveBeenCalledTimes(1)
+
+    rerender(
+      <Harness
+        model={controller({
+          createView,
+          confirmReplace,
+          retryVersionConflict,
+          duplicateConflict: { ...duplicate, version: 5 },
+          versionConflict: {
+            viewId: "view-1",
+            currentVersion: 5,
+            retryable: true
+          },
+          canRetryVersion: true
+        })}
+      />
+    )
+    dialog = await screen.findByRole("dialog", { name: "Replace saved view?" })
+    expect(within(dialog).getByRole("alert")).toHaveTextContent(
+      "This saved view changed on the server."
+    )
+    const retry = within(dialog).getByRole("button", {
+      name: "Retry with latest version"
+    })
+    retry.focus()
+    await user.keyboard("{Enter}")
+    expect(retryVersionConflict).toHaveBeenCalledTimes(1)
+    expect(confirmReplace).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([
+    {
+      label: "Replace",
+      viewName: "My PDFs",
+      actionName: "Replace saved view My PDFs",
+      dialogName: "Replace saved view?",
+      method: "replaceView" as const
+    },
+    {
+      label: "Reset",
+      viewName: "Old view",
+      actionName: "Reset saved view Old view",
+      dialogName: "Reset saved view?",
+      method: "resetView" as const
+    }
+  ])("closes a $label dialog after PATCH reports the row missing", async (testCase) => {
+    const user = userEvent.setup()
+    const mutation = vi.fn().mockResolvedValue(undefined)
+    const initial = controller({ [testCase.method]: mutation })
+    const { rerender } = render(<Harness model={initial} />)
+    const focusFallback = screen.getByRole("button", { name: "Source views" })
+    await user.click(focusFallback)
+    await openSavedViewCommands(user, testCase.viewName)
+    await user.click(screen.getByRole("menuitem", { name: testCase.actionName }))
+    const dialog = await screen.findByRole("dialog", {
+      name: testCase.dialogName
+    })
+    await user.click(within(dialog).getByRole("button", { name: testCase.label }))
+    expect(mutation).toHaveBeenCalledTimes(1)
+
+    rerender(
+      <Harness
+        model={controller({
+          [testCase.method]: mutation,
+          announcement: "Saved view no longer exists."
+        })}
+      />
+    )
+
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: testCase.dialogName })).not.toBeInTheDocument()
+    )
+    await waitFor(() => expect(focusFallback).toHaveFocus())
+  })
+
+  it("closes a duplicate replacement dialog when PATCH reports the row missing", async () => {
+    const user = userEvent.setup()
+    const createView = vi.fn().mockResolvedValue(undefined)
+    const confirmReplace = vi.fn().mockResolvedValue(undefined)
+    const duplicate = {
+      viewId: "view-1",
+      version: 2,
+      name: "My PDFs",
+      state: validView().state
+    }
+    const { rerender } = render(
+      <Harness model={controller({ createView, confirmReplace })} />
+    )
+    const focusTarget = screen.getByRole("button", { name: "Save source view" })
+    await user.click(focusTarget)
+    let dialog = await screen.findByRole("dialog", { name: "Save source view" })
+    await user.type(within(dialog).getByRole("textbox", { name: "View name" }), "My PDFs")
+    await user.click(within(dialog).getByRole("button", { name: "Save" }))
+
+    rerender(
+      <Harness
+        model={controller({
+          createView,
+          confirmReplace,
+          duplicateConflict: duplicate
+        })}
+      />
+    )
+    dialog = await screen.findByRole("dialog", { name: "Replace saved view?" })
+    await user.click(within(dialog).getByRole("button", { name: "Replace" }))
+    expect(confirmReplace).toHaveBeenCalledTimes(1)
+
+    rerender(
+      <Harness
+        model={controller({
+          createView,
+          confirmReplace,
+          announcement: "Saved view no longer exists."
+        })}
+      />
+    )
+
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Replace saved view?" })).not.toBeInTheDocument()
+    )
+    await waitFor(() => expect(focusTarget).toHaveFocus())
+  })
+
   it("renders field-specific local validation and nonretryable limit guidance", async () => {
     const model = controller({
       serializationIssues: [

@@ -16,6 +16,7 @@ import type { SourceListViewState } from "./source-list-view"
 import {
   SOURCE_VIEW_PRESETS,
   applySavedSourceViewState,
+  getSourceSavedViewNameLength,
   serializeSourceListViewState
 } from "./source-saved-views"
 import type { SourceViewStateValidationIssue } from "./source-saved-views"
@@ -386,6 +387,7 @@ export const SourceViewOverlayHost: React.FC<SourceViewOverlayHostProps> = ({
     React.useState<SourceViewOverlayRequest | null>(null)
   const [name, setName] = React.useState("")
   const [nameTouched, setNameTouched] = React.useState(false)
+  const nameErrorId = React.useId()
   const inputRef = React.useRef<React.ComponentRef<typeof Input>>(null)
   const handledRequestIdRef = React.useRef<number | null>(null)
   const announcementAtOpenRef = React.useRef<string | null>(null)
@@ -470,7 +472,13 @@ export const SourceViewOverlayHost: React.FC<SourceViewOverlayHostProps> = ({
       mutationCycleObservedRef.current = true
       return
     }
+    const missingViewCompleted =
+      (activeRequest.kind === "save" ||
+        activeRequest.kind === "replace" ||
+        activeRequest.kind === "reset") &&
+      controller.announcement === "Saved view no longer exists."
     const completed =
+      missingViewCompleted ||
       (activeRequest.kind === "save" &&
         ["Saved view created.", "Saved view replaced."].includes(
           controller.announcement
@@ -499,11 +507,20 @@ export const SourceViewOverlayHost: React.FC<SourceViewOverlayHostProps> = ({
   )
 
   const trimmedName = name.trim()
-  const nameInvalid = trimmedName.length === 0 || trimmedName.length > 120
+  const nameLength = getSourceSavedViewNameLength(trimmedName)
+  const nameInvalid = nameLength === 0 || nameLength > 120
   const saveInvalid = nameInvalid || controller.serializationIssues.length > 0
   const duplicate =
     activeRequest?.kind === "save" ? controller.duplicateConflict : null
   const view = activeRequest?.view
+  const conflictTargetViewId = duplicate?.viewId ?? view?.id ?? null
+  const dialogVersionConflict =
+    conflictTargetViewId !== null &&
+    controller.versionConflict?.viewId === conflictTargetViewId
+      ? controller.versionConflict
+      : null
+  const hasGlobalVersionConflict =
+    controller.versionConflict !== null && dialogVersionConflict === null
   const replacementIssues =
     activeRequest?.kind === "replace"
       ? [
@@ -530,6 +547,12 @@ export const SourceViewOverlayHost: React.FC<SourceViewOverlayHostProps> = ({
 
   const submit = async () => {
     if (!isRequestCurrent() || !activeRequest) return
+    if (dialogVersionConflict) {
+      if (controller.canRetryVersion) {
+        await controller.retryVersionConflict()
+      }
+      return
+    }
     if (duplicate) {
       await controller.confirmReplace()
       return
@@ -559,15 +582,17 @@ export const SourceViewOverlayHost: React.FC<SourceViewOverlayHostProps> = ({
           ? "Reset saved view?"
           : "Delete saved view?"
 
-  const primaryLabel = duplicate
-    ? "Replace"
-    : activeRequest?.kind === "save"
-      ? "Save"
-      : activeRequest?.kind === "replace"
-        ? "Replace"
-        : activeRequest?.kind === "reset"
-          ? "Reset"
-          : "Delete"
+  const primaryLabel = dialogVersionConflict
+    ? "Retry with latest version"
+    : duplicate
+      ? "Replace"
+      : activeRequest?.kind === "save"
+        ? "Save"
+        : activeRequest?.kind === "replace"
+          ? "Replace"
+          : activeRequest?.kind === "reset"
+            ? "Reset"
+            : "Delete"
 
   return (
     <>
@@ -583,7 +608,7 @@ export const SourceViewOverlayHost: React.FC<SourceViewOverlayHostProps> = ({
       {(controller.listError ||
         controller.mutationError ||
         controller.limitState ||
-        controller.versionConflict) && (
+        hasGlobalVersionConflict) && (
         <div className="fixed bottom-12 left-1/2 z-[1100] w-[min(24rem,calc(100vw-2rem))] -translate-x-1/2 space-y-2">
           {controller.listError && (
             <div
@@ -623,7 +648,7 @@ export const SourceViewOverlayHost: React.FC<SourceViewOverlayHostProps> = ({
               {controller.limitState.guidance}
             </div>
           )}
-          {controller.versionConflict && (
+          {hasGlobalVersionConflict && (
             <div
               role="alert"
               className="flex items-center justify-between gap-3 rounded-md border border-warning/30 bg-surface px-3 py-2 text-xs text-text shadow-card"
@@ -671,8 +696,10 @@ export const SourceViewOverlayHost: React.FC<SourceViewOverlayHostProps> = ({
                   disabled={
                     controller.busy ||
                     !isRequestCurrent() ||
-                    (activeRequest.kind === "save" && !duplicate && saveInvalid) ||
-                    (activeRequest.kind === "replace" && replaceInvalid)
+                    (dialogVersionConflict
+                      ? !controller.canRetryVersion
+                      : (activeRequest.kind === "save" && !duplicate && saveInvalid) ||
+                        (activeRequest.kind === "replace" && replaceInvalid))
                   }
                   onClick={() => void submit()}
                 >
@@ -682,6 +709,14 @@ export const SourceViewOverlayHost: React.FC<SourceViewOverlayHostProps> = ({
             : null
         }
       >
+        {dialogVersionConflict && (
+          <div
+            role="alert"
+            className="mb-3 rounded-md border border-warning/30 px-3 py-2 text-sm text-text"
+          >
+            This saved view changed on the server.
+          </div>
+        )}
         {activeRequest?.kind === "save" && !duplicate ? (
           <div className="space-y-3">
             <label className="block text-sm font-medium text-text" htmlFor="source-view-name">
@@ -692,7 +727,7 @@ export const SourceViewOverlayHost: React.FC<SourceViewOverlayHostProps> = ({
               id="source-view-name"
               aria-label="View name"
               aria-invalid={nameTouched && nameInvalid}
-              maxLength={121}
+              aria-describedby={nameTouched && nameInvalid ? nameErrorId : undefined}
               value={name}
               onBlur={() => setNameTouched(true)}
               onChange={(event) => {
@@ -702,7 +737,7 @@ export const SourceViewOverlayHost: React.FC<SourceViewOverlayHostProps> = ({
               onPressEnter={() => void submit()}
             />
             {nameTouched && nameInvalid && (
-              <p role="alert" className="text-xs text-error">
+              <p id={nameErrorId} role="alert" className="text-xs text-error">
                 Name must contain between 1 and 120 characters.
               </p>
             )}

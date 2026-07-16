@@ -189,7 +189,7 @@ Normal workspace deletion is soft deletion. Saved-view rows are retained for pos
 - View-count and payload-size limits.
 - Corrupt JSON and unsupported versions remain listable and resettable.
 - Valid JSON with invalid V1 fields remains listable and resettable.
-- PostgreSQL fresh creation and V52 migration install forced RLS immediately, with owner-and-workspace-scoped `USING` and `WITH CHECK` clauses.
+- PostgreSQL fresh creation and V53 migration install forced RLS immediately, with owner-and-workspace-scoped `USING` and `WITH CHECK` clauses.
 - Concurrent create and rename-to-duplicate races return safe duplicate metadata after rollback.
 
 ### API Tests
