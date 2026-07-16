@@ -562,6 +562,18 @@ class TestTTSAdapterFactory:
         adapter = await factory.get_adapter_by_model("unknown-model")
         assert adapter is None
 
+    def test_legacy_model_provider_lookup_is_case_insensitive_without_mutation(self):
+        factory = TTSAdapterFactory({"openai_enabled": False})
+
+        assert factory.get_provider_for_model("TTS-1") is TTSProvider.OPENAI
+        assert (
+            factory.get_provider_for_model("ELEVEN_MULTILINGUAL_V2")
+            is TTSProvider.ELEVENLABS
+        )
+
+        request = TTSRequest(text="hello", model="Vendor/Expressive-TTS")
+        assert request.model == "Vendor/Expressive-TTS"
+
     def test_get_provider_for_model_alias(self):
         """Factory should resolve provider aliases when model mapping is absent."""
         factory = TTSAdapterFactory({})

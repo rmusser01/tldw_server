@@ -556,6 +556,12 @@ class OpenAITTSAdapter(OpenAIAdapter):
     def supported_voices(self) -> list:
         return list(self.VOICES.keys())
 
+    @classmethod
+    def _canonical_model_id(cls, model: str) -> str:
+        """Return a known legacy model key without mutating the request."""
+        lookup_key = model.lower()
+        return lookup_key if lookup_key in cls.SUPPORTED_MODELS else model
+
     # --- Convenience API ---
     async def validate_request(self, request: TTSRequest) -> None:
         """Raise on invalid requests (new-test-friendly behavior)."""
@@ -568,7 +574,10 @@ class OpenAITTSAdapter(OpenAIAdapter):
             raise TTSTextTooLongError("Text exceeds maximum for OpenAI", provider=self._provider_simple)
 
         # Model validity (when provided)
-        if request.model and request.model not in self.SUPPORTED_MODELS:
+        if (
+            request.model
+            and self._canonical_model_id(request.model) not in self.SUPPORTED_MODELS
+        ):
             raise TTSValidationError("Invalid model for OpenAI", provider=self._provider_simple, details={"model": request.model})
 
         # Voice validity
@@ -589,7 +598,7 @@ class OpenAITTSAdapter(OpenAIAdapter):
         if request.model:
             # Prefer request-specific model by temporarily overriding self.model
             old_model = getattr(self, "model", None)
-            self.model = request.model
+            self.model = self._canonical_model_id(request.model)
         else:
             old_model = None
 
@@ -612,7 +621,11 @@ class OpenAITTSAdapter(OpenAIAdapter):
 
         # Ensure test-expected fields/metadata
         resp.provider = self._provider_simple
-        resp.model = request.model or getattr(self, "model", None)
+        resp.model = (
+            self._canonical_model_id(request.model)
+            if request.model
+            else getattr(self, "model", None)
+        )
         if request.text:
             resp.metadata["characters"] = len(request.text)
         # audio_content is synchronized in TTSResponse __post_init__
@@ -621,7 +634,11 @@ class OpenAITTSAdapter(OpenAIAdapter):
     async def generate_stream(self, request: TTSRequest) -> AsyncGenerator[bytes, None]:
         # Basic validation; allow streaming in tests
         await self.validate_request(request)
-        model = request.model or getattr(self, "model", "tts-1")
+        model = (
+            self._canonical_model_id(request.model)
+            if request.model
+            else getattr(self, "model", "tts-1")
+        )
         voice = self.map_voice(request.voice or "alloy")
         headers = {
             "Authorization": f"Bearer {self.api_key}",

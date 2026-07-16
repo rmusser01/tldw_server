@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 import pytest
@@ -9,13 +10,12 @@ from tldw_Server_API.app.core.TTS.adapter_registry import TTSAdapterRegistry, TT
 from tldw_Server_API.app.core.TTS.adapters.base import (
     AudioFormat,
     ProviderStatus,
-    TTSCapabilities,
     TTSAdapter,
+    TTSCapabilities,
     TTSRequest,
     TTSResponse,
 )
 from tldw_Server_API.app.core.TTS.tts_exceptions import TTSError
-
 
 pytestmark = pytest.mark.unit
 
@@ -85,6 +85,34 @@ class _FailingTTSInitializationAdapter(_MockAdapterV1):
             "tts init leaked /Users/example/private/token-sk-tts-error",
             provider="mock",
         )
+
+
+class _BlockingAdapter(_MockAdapterV1):
+    started: Any = None
+    release: Any = None
+    instances: list[_BlockingAdapter] = []
+
+    def __init__(self, config: dict[str, Any] | None = None) -> None:
+        super().__init__(config)
+        self.closed = False
+        self.__class__.instances.append(self)
+
+    async def initialize(self) -> bool:
+        self.__class__.started.set()
+        await self.__class__.release.wait()
+        return True
+
+    async def close(self) -> None:
+        self.closed = True
+        await super().close()
+
+
+class _CloseTrackingAdapter(_MockAdapterV1):
+    close_calls = 0
+
+    async def close(self) -> None:
+        self.__class__.close_calls += 1
+        await super().close()
 
 
 class _NonCriticalResourceManager:
@@ -204,16 +232,33 @@ async def test_registry_dynamic_backends_keep_config_and_cache_isolated() -> Non
 
 
 @pytest.mark.asyncio
-async def test_registry_dynamic_reregistration_and_unload_clear_cached_adapter(
+async def test_registry_loaded_adapter_requires_unload_before_replacement(
     monkeypatch,
 ) -> None:
     registry = TTSAdapterRegistry(config=_gateway_config(), include_defaults=False)
+    _CloseTrackingAdapter.close_calls = 0
     registry.register_adapter(
         "gateway:company-proxy",
-        _MockAdapterV1,
+        _CloseTrackingAdapter,
         config_override={"backend_id": "gateway:company-proxy"},
     )
     first = await registry.get_adapter("gateway:company-proxy")
+
+    with pytest.raises(RuntimeError, match="unload"):
+        registry.register_adapter(
+            "gateway:company-proxy",
+            _MockAdapterV2,
+            config_override={"backend_id": "gateway:company-proxy", "revision": 2},
+        )
+
+    assert await registry.get_adapter("gateway:company-proxy") is first
+    assert _CloseTrackingAdapter.close_calls == 0
+
+    monkeypatch.setattr(adapter_registry, "get_existing_resource_manager", lambda: None)
+    result = await registry.unload_provider("gateway:company-proxy")
+
+    assert result == {"provider": "gateway:company-proxy", "unloaded": True}
+    assert _CloseTrackingAdapter.close_calls == 1
 
     registry.register_adapter(
         "gateway:company-proxy",
@@ -222,21 +267,102 @@ async def test_registry_dynamic_reregistration_and_unload_clear_cached_adapter(
     )
     second = await registry.get_adapter("gateway:company-proxy")
 
-    assert isinstance(first, _MockAdapterV1)
     assert isinstance(second, _MockAdapterV2)
     assert second is not first
-    assert second.config == {
-        "backend_id": "gateway:company-proxy",
-        "revision": 2,
-    }
 
+
+@pytest.mark.asyncio
+async def test_registry_reregister_during_initialization_closes_stale_adapter() -> None:
+    registry = TTSAdapterRegistry(config=_gateway_config(), include_defaults=False)
+    _BlockingAdapter.started = asyncio.Event()
+    _BlockingAdapter.release = asyncio.Event()
+    _BlockingAdapter.instances = []
+    registry.register_adapter(
+        "gateway:company-proxy",
+        _BlockingAdapter,
+        config_override={"backend_id": "gateway:company-proxy", "revision": 1},
+    )
+    first_task = asyncio.create_task(registry.get_adapter("gateway:company-proxy"))
+    await _BlockingAdapter.started.wait()
+
+    registry.register_adapter(
+        "gateway:company-proxy",
+        _MockAdapterV2,
+        config_override={"backend_id": "gateway:company-proxy", "revision": 2},
+    )
+    _BlockingAdapter.release.set()
+
+    assert await first_task is None
+    assert len(_BlockingAdapter.instances) == 1
+    assert _BlockingAdapter.instances[0].closed is True
+    assert registry._base.get_cached_adapters() == {}
+    replacement = await registry.get_adapter("gateway:company-proxy")
+    assert isinstance(replacement, _MockAdapterV2)
+
+
+@pytest.mark.asyncio
+async def test_registry_unload_during_initialization_closes_stale_adapter(
+    monkeypatch,
+) -> None:
+    registry = TTSAdapterRegistry(config=_gateway_config(), include_defaults=False)
+    _BlockingAdapter.started = asyncio.Event()
+    _BlockingAdapter.release = asyncio.Event()
+    _BlockingAdapter.instances = []
+    registry.register_adapter(
+        "gateway:company-proxy",
+        _BlockingAdapter,
+        config_override={"backend_id": "gateway:company-proxy"},
+    )
+    first_task = asyncio.create_task(registry.get_adapter("gateway:company-proxy"))
+    await _BlockingAdapter.started.wait()
     monkeypatch.setattr(adapter_registry, "get_existing_resource_manager", lambda: None)
-    result = await registry.unload_provider("gateway:company-proxy")
-    third = await registry.get_adapter("gateway:company-proxy")
 
-    assert result == {"provider": "gateway:company-proxy", "unloaded": True}
-    assert isinstance(third, _MockAdapterV2)
-    assert third is not second
+    result = await registry.unload_provider("gateway:company-proxy")
+    _BlockingAdapter.release.set()
+
+    assert result == {"provider": "gateway:company-proxy", "unloaded": False}
+    assert await first_task is None
+    assert len(_BlockingAdapter.instances) == 1
+    assert _BlockingAdapter.instances[0].closed is True
+    assert registry._base.get_cached_adapters() == {}
+
+
+@pytest.mark.asyncio
+async def test_registry_get_all_capabilities_includes_dynamic_gateway() -> None:
+    registry = TTSAdapterRegistry(config=_gateway_config(), include_defaults=False)
+    registry.register_adapter(
+        "gateway:company-proxy",
+        _MockAdapterV1,
+        config_override={"backend_id": "gateway:company-proxy"},
+    )
+    await registry.get_adapter("gateway:company-proxy")
+
+    capabilities = await registry.get_all_capabilities()
+
+    assert capabilities["gateway:company-proxy"].provider_name == "mock"
+
+
+@pytest.mark.asyncio
+async def test_registry_status_summary_includes_dynamic_gateway() -> None:
+    registry = TTSAdapterRegistry(config=_gateway_config(), include_defaults=False)
+    registry.register_adapter(
+        "gateway:company-proxy",
+        _MockAdapterV1,
+        config_override={"backend_id": "gateway:company-proxy"},
+    )
+    await registry.get_adapter("gateway:company-proxy")
+
+    summary = registry.get_status_summary()
+
+    assert summary["total_providers"] == len(TTSProvider) + 1
+    assert summary["providers"]["gateway:company-proxy"] == {
+        "status": "available",
+        "initialized": True,
+        "failed": False,
+        "supports_streaming": False,
+        "supported_formats": ["mp3"],
+        "sample_rate": 24000,
+    }
 
 
 def test_tts_request_normalizes_provider_without_changing_model_case() -> None:
@@ -263,18 +389,17 @@ async def test_registry_uses_shared_base_for_caching() -> None:
 
 
 @pytest.mark.asyncio
-async def test_registry_reregister_invalidates_cached_adapter() -> None:
+async def test_registry_reregister_rejects_loaded_adapter() -> None:
     registry = TTSAdapterRegistry(config={"mock_enabled": True}, include_defaults=False)
     registry.register_adapter(TTSProvider.MOCK, _MockAdapterV1)
 
     first = await registry.get_adapter(TTSProvider.MOCK)
     assert isinstance(first, _MockAdapterV1)
 
-    registry.register_adapter(TTSProvider.MOCK, _MockAdapterV2)
-    second = await registry.get_adapter(TTSProvider.MOCK)
+    with pytest.raises(RuntimeError, match="unload"):
+        registry.register_adapter(TTSProvider.MOCK, _MockAdapterV2)
 
-    assert isinstance(second, _MockAdapterV2)
-    assert second is not first
+    assert await registry.get_adapter(TTSProvider.MOCK) is first
 
 
 @pytest.mark.asyncio

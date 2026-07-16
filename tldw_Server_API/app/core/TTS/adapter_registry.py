@@ -395,6 +395,10 @@ class TTSAdapterRegistry:
             else {}
         )
         self._adapter_config_overrides: dict[str, dict[str, Any]] = {}
+        self._adapter_generations: dict[str, int] = dict.fromkeys(
+            self._adapter_specs,
+            0,
+        )
         self._initialized_providers: set[str] = set()
 
         def _extract_retry_seconds(raw_cfg: Any) -> Optional[float]:
@@ -517,8 +521,19 @@ class TTSAdapterRegistry:
             if not gateway_spec.enabled:
                 raise ValueError(f"Gateway provider '{provider_key}' is disabled")
 
+        cached_key = self._base.resolve_provider_name(provider_key)
+        if (
+            provider_key in self._adapters
+            or cached_key in self._base.get_cached_adapters()
+        ):
+            raise RuntimeError(
+                f"Provider '{provider_key}' is loaded; unload it before replacement"
+            )
+
+        self._adapter_generations[provider_key] = (
+            self._adapter_generations.get(provider_key, 0) + 1
+        )
         self._adapter_specs[provider_key] = adapter
-        self._adapters.pop(provider_key, None)
         self._initialized_providers.discard(provider_key)
         if config_override is None:
             self._adapter_config_overrides.pop(provider_key, None)
@@ -558,12 +573,12 @@ class TTSAdapterRegistry:
                 provider=str(provider_key),
             )
 
-        # Reuse already initialized adapter if available.
-        existing = self._adapters.get(resolved_provider_key)
-        if existing and existing.status == ProviderStatus.AVAILABLE:
-            return existing
-
-        success = await self._initialize_adapter(resolved_provider_key)
+        generation = self._adapter_generations.get(resolved_provider_key, 0)
+        success = await self._initialize_adapter(
+            resolved_provider_key,
+            adapter_spec=spec,
+            expected_generation=generation,
+        )
         if not success:
             raise RuntimeError(f"Failed to initialize {resolved_provider_key} adapter")
 
@@ -670,7 +685,13 @@ class TTSAdapterRegistry:
             return None
         return adapter
 
-    async def _initialize_adapter(self, provider: Union[TTSProvider, str]) -> bool:
+    async def _initialize_adapter(
+        self,
+        provider: Union[TTSProvider, str],
+        *,
+        adapter_spec: Any = None,
+        expected_generation: Optional[int] = None,
+    ) -> bool:
         """
         Initialize an adapter for a provider.
 
@@ -693,8 +714,12 @@ class TTSAdapterRegistry:
         legacy_provider = self.resolve_provider(provider_key)
         try:
             # Get adapter class (lazily resolve to avoid heavy imports during module import)
-            adapter_spec = self._adapter_specs[provider_key]
-            adapter_class = self._resolve_adapter_class(adapter_spec)
+            effective_adapter_spec = (
+                self._adapter_specs[provider_key]
+                if adapter_spec is None
+                else adapter_spec
+            )
+            adapter_class = self._resolve_adapter_class(effective_adapter_spec)
 
             # Get provider-specific config
             provider_config = self._get_provider_config(provider_key)
@@ -773,6 +798,20 @@ class TTSAdapterRegistry:
             success = await adapter.ensure_initialized()
 
             if success:
+                if (
+                    expected_generation is not None
+                    and self._adapter_generations.get(provider_key, 0)
+                    != expected_generation
+                ):
+                    try:
+                        await adapter.close()
+                    except _TTS_REGISTRY_NONCRITICAL_EXCEPTIONS as close_error:
+                        logger.warning(
+                            "Error closing superseded {} adapter ({})",
+                            provider_key,
+                            close_error.__class__.__name__,
+                        )
+                    return False
                 self._adapters[provider_key] = adapter
                 self._initialized_providers.add(provider_key)
                 logger.info(f"Successfully initialized {provider_key} adapter")
@@ -860,7 +899,9 @@ class TTSAdapterRegistry:
 
         return _apply_provider_aliases(provider_key, provider_config)
 
-    async def get_all_capabilities(self) -> dict[TTSProvider, TTSCapabilities]:
+    async def get_all_capabilities(
+        self,
+    ) -> dict[Union[TTSProvider, str], TTSCapabilities]:
         """
         Get capabilities of all available adapters.
 
@@ -879,12 +920,14 @@ class TTSAdapterRegistry:
                 return self._get_dict_provider_enabled_flag(provider)
             return None
 
-        for provider in TTSProvider:
-            provider_key = provider.value
-            if provider_key not in self._adapter_specs:
+        for registered_name in self._base.list_providers(include_disabled=False):
+            provider_key = self.resolve_provider_key(registered_name)
+            if provider_key is None or provider_key not in self._adapter_specs:
                 continue
+            provider = self.resolve_provider(provider_key)
+            result_key: Union[TTSProvider, str] = provider or provider_key
 
-            enabled_flag = _get_enabled_flag(provider)
+            enabled_flag = _get_enabled_flag(provider) if provider is not None else True
             if enabled_flag is False:
                 continue
 
@@ -902,36 +945,39 @@ class TTSAdapterRegistry:
                 if adapter_spec is not None:
                     adapter_class = self._resolve_adapter_class(adapter_spec)
                     if getattr(adapter_class, "STATIC_CAPABILITY_DISCOVERY", False):
-                        static_adapter = adapter_class(config=self._get_provider_config(provider))
+                        static_adapter = adapter_class(config=self._get_provider_config(provider_key))
                         caps = await static_adapter.get_capabilities()
                         if caps:
-                            capabilities[provider] = caps
+                            capabilities[result_key] = caps
                             continue
 
                 # Skip providers currently marked as failed by registry backoff
                 # only when static capability discovery is unavailable.
-                status = self._base.get_status(provider.value)
+                status = self._base.get_status(registered_name)
                 if status == RegistryProviderStatus.FAILED:
                     continue
 
                 # Try to get adapter with a timeout to avoid hanging
-                adapter = await asyncio.wait_for(self.get_adapter(provider), timeout=5.0)
+                adapter = await asyncio.wait_for(
+                    self.get_adapter(provider_key),
+                    timeout=5.0,
+                )
                 if adapter:
                     caps = adapter.capabilities
                     if caps:
-                        capabilities[provider] = caps
+                        capabilities[result_key] = caps
             except asyncio.TimeoutError:
-                logger.warning(f"Timeout getting capabilities for {provider.value}")
+                logger.warning(f"Timeout getting capabilities for {provider_key}")
                 if self._failure_retry_seconds is not None:
-                    self._schedule_retry(provider)
+                    self._schedule_retry(provider_key)
             except _TTS_REGISTRY_ADAPTER_EXCEPTIONS as e:
                 logger.debug(
                     "Error getting capabilities for {} ({})",
-                    provider.value,
+                    provider_key,
                     e.__class__.__name__,
                 )
                 if self._failure_retry_seconds is not None:
-                    self._schedule_retry(provider)
+                    self._schedule_retry(provider_key)
 
         return capabilities
 
@@ -1124,6 +1170,10 @@ class TTSAdapterRegistry:
                 provider=str(provider),
             )
 
+        self._adapter_generations[resolved_provider_key] = (
+            self._adapter_generations.get(resolved_provider_key, 0) + 1
+        )
+        self._base.invalidate_provider(resolved_provider_key)
         provider_key = self._base.resolve_provider_name(resolved_provider_key)
         cached_by_name = self._base.get_cached_adapters()
         adapter = self._adapters.pop(resolved_provider_key, None)
@@ -1144,11 +1194,6 @@ class TTSAdapterRegistry:
                 error_type=type(e).__name__,
             ).opt(exception=e).warning("Error closing TTS adapter during unload; clearing cached state anyway")
         finally:
-            with self._base._lock:  # noqa: SLF001 - wrapper needs single-provider cache invalidation.
-                if provider_key:
-                    self._base._invalidate_provider_state_locked(provider_key)  # noqa: SLF001
-                self._base._invalidate_provider_state_locked(resolved_provider_key)  # noqa: SLF001
-
             self._initialized_providers.discard(resolved_provider_key)
 
         resource_manager = get_existing_resource_manager()
@@ -1182,8 +1227,16 @@ class TTSAdapterRegistry:
                 self._adapters[provider_key] = adapter
         self._initialized_providers = set(self._adapters.keys())
 
+        dynamic_provider_keys = sorted(
+            {
+                provider_key
+                for registered_name in self._base.list_providers(include_disabled=True)
+                if (provider_key := self.resolve_provider_key(registered_name)) is not None
+                and self.resolve_provider(provider_key) is None
+            }
+        )
         summary = {
-            "total_providers": len(TTSProvider),
+            "total_providers": len(TTSProvider) + len(dynamic_provider_keys),
             "initialized": len(self._initialized_providers),
             "available": 0,
             "providers": {}
@@ -1216,6 +1269,37 @@ class TTSAdapterRegistry:
                     "failed": self._base.get_status(provider.value) == RegistryProviderStatus.FAILED,
                 }
             summary["providers"][provider.value] = provider_info
+
+        for provider_key in dynamic_provider_keys:
+            adapter = self._adapters.get(provider_key)
+            if adapter:
+                provider_info = {
+                    "status": adapter.status.value,
+                    "initialized": bool(getattr(adapter, "_initialized", False)),
+                    "failed": self._base.get_status(provider_key)
+                    == RegistryProviderStatus.FAILED,
+                }
+                if adapter.status == ProviderStatus.AVAILABLE:
+                    summary["available"] += 1
+                try:
+                    if adapter.capabilities:
+                        provider_info["supports_streaming"] = (
+                            adapter.capabilities.supports_streaming
+                        )
+                        provider_info["supported_formats"] = sorted(
+                            fmt.value for fmt in adapter.capabilities.supported_formats
+                        )
+                        provider_info["sample_rate"] = adapter.capabilities.sample_rate
+                except _TTS_REGISTRY_NONCRITICAL_EXCEPTIONS:
+                    pass
+            else:
+                provider_info = {
+                    "status": "not_initialized",
+                    "initialized": False,
+                    "failed": self._base.get_status(provider_key)
+                    == RegistryProviderStatus.FAILED,
+                }
+            summary["providers"][provider_key] = provider_info
 
         return summary
 
