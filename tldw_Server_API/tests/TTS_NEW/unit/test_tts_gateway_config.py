@@ -191,6 +191,46 @@ def test_openrouter_is_normalized_as_ordinary_spec_data(monkeypatch):
 
 
 @pytest.mark.unit
+def test_discovery_models_path_is_single_validated_effective_value():
+    same = normalize_gateway_specs(
+        {},
+        {
+            "company": _gateway(
+                models_path="models",
+                discovery={"enabled": True, "models_path": "models"},
+            )
+        },
+    )["gateway:company"]
+    assert same.models_path == "models"
+    assert same.discovery.models_path == "models"
+
+    with pytest.raises(ValueError, match="conflicting.*models_path"):
+        normalize_gateway_specs(
+            {},
+            {
+                "company": _gateway(
+                    models_path="models-a",
+                    discovery={"enabled": True, "models_path": "models-b"},
+                )
+            },
+        )
+
+    with pytest.raises(ValueError, match="models_path"):
+        normalize_gateway_specs(
+            {},
+            {
+                "company": _gateway(
+                    models_path="models",
+                    discovery={
+                        "enabled": True,
+                        "models_path": "safe/%252e%252e/escape",
+                    },
+                )
+            },
+        )
+
+
+@pytest.mark.unit
 def test_model_authorization_capability_and_voice_overlay_precedence():
     spec = normalize_gateway_specs(
         {},
@@ -317,23 +357,51 @@ def test_request_option_allows_empty_leaf_name_but_rejects_whole_document():
     [
         ({"max_attempts": 0}, "max_attempts"),
         ({"max_attempts": 5}, "max_attempts"),
-        ({"targets": [{"backend": "gateway:primary"}]}, "itself"),
         (
-            {"targets": [{"backend": "gateway:secondary"}] * 2},
+            {
+                "targets": [
+                    {
+                        "backend": "gateway:primary",
+                        "model": "Vendor/Expressive-TTS",
+                    }
+                ]
+            },
+            "itself",
+        ),
+        (
+            {
+                "targets": [
+                    {
+                        "backend": "gateway:secondary",
+                        "model": "Vendor/Expressive-TTS",
+                    }
+                ]
+                * 2
+            },
             "duplicate",
         ),
         (
             {
                 "targets": [
-                    {"backend": "gateway:a"},
-                    {"backend": "gateway:b"},
-                    {"backend": "gateway:c"},
-                    {"backend": "gateway:d"},
+                    {"backend": "gateway:a", "model": "Vendor/Expressive-TTS"},
+                    {"backend": "gateway:b", "model": "Vendor/Expressive-TTS"},
+                    {"backend": "gateway:c", "model": "Vendor/Expressive-TTS"},
+                    {"backend": "gateway:d", "model": "Vendor/Expressive-TTS"},
                 ]
             },
             "at most 3",
         ),
-        ({"targets": [{"backend": "gateway:missing"}]}, "unknown"),
+        (
+            {
+                "targets": [
+                    {
+                        "backend": "gateway:missing",
+                        "model": "Vendor/Expressive-TTS",
+                    }
+                ]
+            },
+            "unknown",
+        ),
     ],
 )
 def test_fallback_policy_bounds_and_targets(fallback, match):
@@ -355,10 +423,149 @@ def test_fallback_cycle_is_rejected():
         normalize_gateway_specs(
             {},
             {
-                "a": _gateway(fallback={"targets": [{"backend": "gateway:b"}]}),
-                "b": _gateway(fallback={"targets": [{"backend": "gateway:a"}]}),
+                "a": _gateway(
+                    fallback={
+                        "targets": [
+                            {
+                                "backend": "gateway:b",
+                                "model": "Vendor/Expressive-TTS",
+                            }
+                        ]
+                    }
+                ),
+                "b": _gateway(
+                    fallback={
+                        "targets": [
+                            {
+                                "backend": "gateway:a",
+                                "model": "Vendor/Expressive-TTS",
+                            }
+                        ]
+                    }
+                ),
             },
         )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "categories",
+    [
+        [""],
+        ["unknown_error"],
+        ["timeout", "timeout"],
+    ],
+)
+def test_fallback_categories_reject_blank_unknown_and_duplicates(categories):
+    with pytest.raises(ValueError, match="fallback|categor|duplicate"):
+        normalize_gateway_specs(
+            {}, {"company": _gateway(fallback={"on": categories})}
+        )
+
+
+@pytest.mark.unit
+def test_fallback_accepts_every_stable_category():
+    categories = [
+        "timeout",
+        "network_error",
+        "upstream_5xx",
+        "circuit_open",
+        "rate_limited",
+        "quota_exceeded",
+        "authentication_failed",
+        "model_not_found",
+        "invalid_audio",
+    ]
+    spec = normalize_gateway_specs(
+        {}, {"company": _gateway(fallback={"on": categories})}
+    )["gateway:company"]
+    assert spec.fallback.on == tuple(categories)
+
+
+@pytest.mark.unit
+def test_fallback_target_requires_model():
+    with pytest.raises(ValueError, match="model"):
+        normalize_gateway_specs(
+            {},
+            {
+                "primary": _gateway(
+                    fallback={"targets": [{"backend": "gateway:secondary"}]}
+                ),
+                "secondary": _gateway(),
+            },
+        )
+
+
+@pytest.mark.unit
+def test_fallback_target_without_voice_requires_effective_model_default():
+    target = _gateway(
+        allowed_models=["Vendor/Expressive-TTS", "Vendor/NoDefaultVoice"]
+    )
+    with pytest.raises(ValueError, match="default voice"):
+        normalize_gateway_specs(
+            {},
+            {
+                "primary": _gateway(
+                    fallback={
+                        "targets": [
+                            {
+                                "backend": "gateway:secondary",
+                                "model": "Vendor/NoDefaultVoice",
+                            }
+                        ]
+                    }
+                ),
+                "secondary": target,
+            },
+        )
+
+    specs = normalize_gateway_specs(
+        {},
+        {
+            "primary": _gateway(
+                fallback={
+                    "targets": [
+                        {
+                            "backend": "gateway:secondary",
+                            "model": "Vendor/NoDefaultVoice",
+                        }
+                    ]
+                }
+            ),
+            "secondary": _gateway(
+                allowed_models=[
+                    "Vendor/Expressive-TTS",
+                    "Vendor/NoDefaultVoice",
+                ],
+                model_overrides={
+                    "Vendor/NoDefaultVoice": {"default_voice": "guide"}
+                },
+            ),
+        },
+    )
+    assert specs["gateway:primary"].fallback.targets[0].voice is None
+
+
+@pytest.mark.unit
+def test_long_acyclic_fallback_graph_does_not_recurse():
+    definitions = {}
+    length = 1100
+    for index in range(length):
+        fallback = {}
+        if index + 1 < length:
+            fallback = {
+                "targets": [
+                    {
+                        "backend": f"gateway:g{index + 1}",
+                        "model": "Vendor/Expressive-TTS",
+                    }
+                ]
+            }
+        definitions[f"g{index}"] = _gateway(fallback=fallback)
+
+    specs = normalize_gateway_specs({}, definitions)
+
+    assert len(specs) == length
 
 
 @pytest.mark.unit
@@ -535,6 +742,7 @@ def test_gateway_spec_is_deeply_immutable_and_generation_is_secret_free():
 
     assert isinstance(first, GatewaySpec)
     assert isinstance(first.model_overrides, MappingProxyType)
+    assert "first-secret" not in repr(first)
     assert first.model_overrides["Vendor/Expressive-TTS"].voices == ("narrator",)
     assert first.config_generation == second.config_generation
     with pytest.raises(FrozenInstanceError):
@@ -553,6 +761,123 @@ def test_display_name_changes_config_generation():
     )["gateway:company"]
 
     assert first.config_generation != second.config_generation
+
+
+@pytest.mark.unit
+def test_config_generation_canonicalizes_query_and_fallback_category_order():
+    first = normalize_gateway_specs(
+        {},
+        {
+            "primary": _gateway(
+                discovery={"query": {"b": "2", "a": "1"}},
+                fallback={
+                    "on": ["timeout", "network_error"],
+                    "targets": [
+                        {
+                            "backend": "gateway:secondary",
+                            "model": "Vendor/Expressive-TTS",
+                        },
+                        {
+                            "backend": "gateway:tertiary",
+                            "model": "Vendor/Expressive-TTS",
+                        },
+                    ],
+                },
+            ),
+            "secondary": _gateway(),
+            "tertiary": _gateway(),
+        },
+    )["gateway:primary"]
+    second = normalize_gateway_specs(
+        {},
+        {
+            "primary": _gateway(
+                discovery={"query": {"a": "1", "b": "2"}},
+                fallback={
+                    "on": ["network_error", "timeout"],
+                    "targets": [
+                        {
+                            "backend": "gateway:secondary",
+                            "model": "Vendor/Expressive-TTS",
+                        },
+                        {
+                            "backend": "gateway:tertiary",
+                            "model": "Vendor/Expressive-TTS",
+                        },
+                    ],
+                },
+            ),
+            "secondary": _gateway(),
+            "tertiary": _gateway(),
+        },
+    )["gateway:primary"]
+    changed_target_order = normalize_gateway_specs(
+        {},
+        {
+            "primary": _gateway(
+                discovery={"query": {"a": "1", "b": "2"}},
+                fallback={
+                    "on": ["network_error", "timeout"],
+                    "targets": [
+                        {
+                            "backend": "gateway:tertiary",
+                            "model": "Vendor/Expressive-TTS",
+                        },
+                        {
+                            "backend": "gateway:secondary",
+                            "model": "Vendor/Expressive-TTS",
+                        },
+                    ],
+                },
+            ),
+            "secondary": _gateway(),
+            "tertiary": _gateway(),
+        },
+    )["gateway:primary"]
+
+    assert first.config_generation == second.config_generation
+    assert first.config_generation != changed_target_order.config_generation
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"default_model": "   ", "allowed_models": None},
+        {"default_voice": "\t"},
+        {"api_key": "   ", "allow_user_api_key": True},
+        {
+            "default_voice": None,
+            "model_overrides": {
+                "Vendor/Expressive-TTS": {"default_voice": "   "}
+            },
+        },
+    ],
+)
+def test_enabled_gateway_rejects_blank_required_values(overrides):
+    with pytest.raises(ValueError, match="blank|requires"):
+        normalize_gateway_specs({}, {"company": _gateway(**overrides)})
+
+
+@pytest.mark.unit
+def test_required_model_voice_and_key_preserve_nonblank_exact_spacing():
+    model = " Vendor/Model "
+    voice = " narrator "
+    spec = normalize_gateway_specs(
+        {},
+        {
+            "company": _gateway(
+                api_key=" secret ",
+                default_model=model,
+                default_voice=voice,
+                allowed_models=[model],
+            )
+        },
+    )["gateway:company"]
+
+    assert spec.default_model == model
+    assert spec.default_voice == voice
+    assert spec.api_key == " secret "
 
 
 @pytest.mark.unit

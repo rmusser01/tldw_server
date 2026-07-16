@@ -12,7 +12,7 @@ import yaml
 #
 # Third-party Imports
 from loguru import logger
-from pydantic import BaseModel, Field, SerializeAsAny
+from pydantic import BaseModel, ConfigDict, Field, SerializeAsAny
 
 try:
     from pydantic import field_validator
@@ -155,6 +155,8 @@ class LoggingConfig(BaseModel):
 
 class TTSConfig(BaseModel):
     """Complete TTS configuration"""
+    model_config = ConfigDict(hide_input_in_errors=True)
+
     provider_priority: list[str] = Field(default_factory=lambda: ["openai", "kokoro"])
     providers: dict[str, SerializeAsAny[ProviderConfig | GatewayConfig]] = Field(default_factory=dict)
     gateways: dict[str, GatewayConfig] = Field(default_factory=dict)
@@ -253,8 +255,7 @@ class TTSConfigManager:
         """Reload configuration from all sources"""
         yaml_override = str(self.yaml_path) if self.yaml_path else None
         yaml_config, yaml_path = load_module_yaml("tts", filename_override=yaml_override)
-        if self.yaml_path is None:
-            self.yaml_path = yaml_path
+        resolved_yaml_path = self.yaml_path or yaml_path
 
         cfg_txt = self._load_config_txt()
         cfg_env = self._load_env_overrides()
@@ -267,14 +268,17 @@ class TTSConfigManager:
             ]
         )
 
-        self._config = TTSConfig(**merged)
-        self._gateway_specs = normalize_gateway_specs(
-            self._config.providers,
-            self._config.gateways,
+        config = TTSConfig(**merged)
+        gateway_specs = normalize_gateway_specs(
+            config.providers,
+            config.gateways,
         )
-        sources = apply_default_sources(model_dump_compat(self._config), sources)
+        sources = apply_default_sources(config.model_dump(mode="json"), sources)
+        self.yaml_path = resolved_yaml_path
+        self._config = config
+        self._gateway_specs = gateway_specs
         self._sources = sources
-        logger.info(f"TTS configuration loaded with {len(self._config.providers)} providers")
+        logger.info(f"TTS configuration loaded with {len(config.providers)} providers")
         logger.debug(f"TTS config sources: {sources}")
 
     @staticmethod
@@ -581,7 +585,7 @@ class TTSConfigManager:
     def to_dict(self, *, include_secrets: bool = False) -> dict[str, Any]:
         """Convert configuration to dictionary"""
         cfg = self.get_config()
-        config_dict = model_dump_compat(cfg)
+        config_dict = cfg.model_dump(mode="json")
         if not include_secrets:
             config_dict = self._redact_provider_secrets(config_dict)
         return config_dict
@@ -607,15 +611,13 @@ class TTSConfigManager:
 
         config_dict = self.to_dict(include_secrets=include_secrets)
 
-        # Convert ProviderConfig objects to dicts
-        if 'providers' in config_dict:
-            for provider_name in config_dict['providers']:
-                if isinstance(config_dict['providers'][provider_name], ProviderConfig):
-                    cfg = config_dict['providers'][provider_name]
-                    config_dict['providers'][provider_name] = model_dump_compat(cfg)
-
-        with open(target_path, 'w') as f:
-            yaml.dump(config_dict, f, default_flow_style=False, sort_keys=False)
+        with open(target_path, "w", encoding="utf-8") as file:
+            yaml.safe_dump(
+                config_dict,
+                file,
+                default_flow_style=False,
+                sort_keys=False,
+            )
 
         logger.info(f"Saved TTS configuration to {target_path}")
 
