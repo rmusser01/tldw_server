@@ -20,4 +20,4 @@ Published release notes entry point.
   fixes, and release CI stabilization.
 
 For release process details, see `Docs/Development/Release_Process.md`.
-Use [Release Process](../Development/Release_Process.md) as the authoritative operator path and [Release Checklist](../Release_Checklist.md) as the broad readiness checklist.
+Use [Release Process](https://github.com/rmusser01/tldw_server/blob/main/Docs/Development/Release_Process.md) as the authoritative operator path and [Release Checklist](https://github.com/rmusser01/tldw_server/blob/main/Docs/Release_Checklist.md) as the broad readiness checklist.

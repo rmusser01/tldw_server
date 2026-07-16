@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 pytestmark = pytest.mark.unit
 
@@ -19,6 +20,59 @@ from Helper_Scripts.release import (  # noqa: E402
     update_readme_release_references,
     update_release_notes_entry_point,
 )
+
+
+def _workflow(relative_path: str) -> dict[str, object]:
+    # BaseLoader reads trusted local workflow text without constructing Python objects.
+    loaded = yaml.load(  # nosec B506
+        (REPO_ROOT / relative_path).read_text(encoding="utf-8"),
+        Loader=yaml.BaseLoader,
+    )
+    assert isinstance(loaded, dict)
+    return loaded
+
+
+def test_docs_workflows_enforce_strict_build_and_boundary_paths() -> None:
+    deploy = _workflow(".github/workflows/mkdocs.yml")
+    gate = _workflow(".github/workflows/onboarding-docs-gate.yml")
+    strict = "mkdocs build --strict -f Docs/mkdocs.yml"
+
+    gate_on = gate["on"]
+    assert isinstance(gate_on, dict)
+    for event in ("pull_request", "push"):
+        paths = gate_on[event]["paths"]
+        assert "Helper_Scripts/refresh_docs_published.sh" in paths
+        assert ".github/workflows/mkdocs.yml" in paths
+
+    gate_steps = gate["jobs"]["onboarding-docs-gate"]["steps"]
+    deploy_steps = deploy["jobs"]["build"]["steps"]
+    gate_by_name = {step["name"]: step for step in gate_steps}
+    deploy_by_name = {step["name"]: step for step in deploy_steps}
+
+    assert strict in gate_by_name["MkDocs build"]["run"].splitlines()
+    assert strict in deploy_by_name["Build site"]["run"].splitlines()
+    assert "continue-on-error" not in gate_by_name["MkDocs build"]
+    assert "continue-on-error" not in deploy_by_name["Build site"]
+    assert (
+        "python Helper_Scripts/docs/check_public_private_boundary.py"
+        in gate_by_name["Check public/private docs boundary"]["run"].splitlines()
+    )
+
+    gate_names = [step["name"] for step in gate_steps]
+    assert (
+        gate_names.index("Refresh curated docs")
+        < gate_names.index("Check public/private docs boundary")
+        < gate_names.index("Onboarding command boundary check")
+        < gate_names.index("Onboarding endpoint drift check")
+        < gate_names.index("Docs test suite")
+        < gate_names.index("MkDocs build")
+    )
+    deploy_names = [step["name"] for step in deploy_steps]
+    assert (
+        deploy_names.index("Refresh curated docs")
+        < deploy_names.index("Check public/private docs boundary")
+        < deploy_names.index("Build site")
+    )
 
 
 def test_readme_release_references_update_to_target_version() -> None:
@@ -39,13 +93,8 @@ def test_readme_release_references_update_to_target_version() -> None:
     updated_text = update_readme_release_references(readme_text, target_version)
 
     assert f"`{target_version}` Beta status. Expect rough edges and please report issues." in updated_text
-    assert (
-        f"The `dev` branch currently contains additional unreleased work beyond `{target_version}`;"
-        in updated_text
-    )
-    assert (
-        f"Currently landing on `dev` (post-`{target_version}` branch work):" in updated_text
-    )
+    assert f"The `dev` branch currently contains additional unreleased work beyond `{target_version}`;" in updated_text
+    assert f"Currently landing on `dev` (post-`{target_version}` branch work):" in updated_text
 
 
 def test_mkdocs_version_metadata_updates_coherently() -> None:
@@ -59,13 +108,13 @@ def test_mkdocs_version_metadata_updates_coherently() -> None:
         "      link: https://github.com/rmusser01/tldw_server\n"
         "      name: GitHub\n"
         "copyright: |\n"
-        "  © 2024-2025 tldw_Server - v0.1.19 - <a href=\"https://github.com/rmusser01/tldw_server\">GitHub</a>\n"
+        '  © 2024-2025 tldw_Server - v0.1.19 - <a href="https://github.com/rmusser01/tldw_server">GitHub</a>\n'
     )
 
     updated_text = update_mkdocs_version_metadata(mkdocs_text, target_version)
 
     assert f"version: v{target_version}" in updated_text
-    assert f"v{target_version} - <a href=\"https://github.com/rmusser01/tldw_server\">GitHub</a>" in updated_text
+    assert f'v{target_version} - <a href="https://github.com/rmusser01/tldw_server">GitHub</a>' in updated_text
     assert "© 2024-2025 tldw_Server" in updated_text
 
 
@@ -75,13 +124,13 @@ def test_mkdocs_version_metadata_does_not_depend_on_copyright_url() -> None:
         "  generator: false\n"
         "  version: v0.1.19\n"
         "copyright: |\n"
-        "  © 2024-2025 tldw_Server - v0.1.19 - <a href=\"https://example.com/project\">Project</a>\n"
+        '  © 2024-2025 tldw_Server - v0.1.19 - <a href="https://example.com/project">Project</a>\n'
     )
 
     updated_text = update_mkdocs_version_metadata(mkdocs_text, "0.1.31")
 
     assert "version: v0.1.31" in updated_text
-    assert "v0.1.31 - <a href=\"https://example.com/project\">Project</a>" in updated_text
+    assert 'v0.1.31 - <a href="https://example.com/project">Project</a>' in updated_text
 
 
 def test_mkdocs_version_metadata_updates_version_inside_multiline_copyright() -> None:
@@ -92,7 +141,7 @@ def test_mkdocs_version_metadata_updates_version_inside_multiline_copyright() ->
         "copyright: |\n"
         "  Maintained by tldw_Server contributors.\n"
         "  Release train: v0.1.19\n"
-        "  <a href=\"https://example.com/project\">Project</a>\n"
+        '  <a href="https://example.com/project">Project</a>\n'
     )
 
     updated_text = update_mkdocs_version_metadata(mkdocs_text, "0.1.31")
@@ -212,13 +261,17 @@ def test_release_process_doc_is_authoritative_operator_path() -> None:
     assert "manual" in release_process_text.lower()
 
     assert canonical_release_notes_text == published_release_notes_text
+    release_process_url = "https://github.com/rmusser01/tldw_server/blob/main/" "Docs/Development/Release_Process.md"
+    release_checklist_url = "https://github.com/rmusser01/tldw_server/blob/main/Docs/Release_Checklist.md"
     for release_notes_text in (
         canonical_release_notes_text,
         published_release_notes_text,
     ):
         assert "Docs/Development/Release_Process.md" in release_notes_text
-        assert "](../Development/Release_Process.md)" in release_notes_text
-        assert "](../Release_Checklist.md)" in release_notes_text
+        assert f"]({release_process_url})" in release_notes_text
+        assert f"]({release_checklist_url})" in release_notes_text
+        assert "](../Development/Release_Process.md)" not in release_notes_text
+        assert "](../Release_Checklist.md)" not in release_notes_text
 
     assert "Docs/Development/Release_Process.md" in release_checklist_text
     assert "broad readiness checklist" in release_checklist_text.lower()

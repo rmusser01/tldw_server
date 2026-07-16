@@ -23,7 +23,7 @@ These wiki pages are MkDocs landing pages in this repository, not the separate G
 
 ## What Gets Published
 
-Only these folders are included on the public site:
+The refresh script publishes this explicit directory manifest:
 
 - `Docs/Wiki`
 - `Docs/API-related`
@@ -31,14 +31,24 @@ Only these folders are included on the public site:
 - `Docs/Code_Documentation`
 - `Docs/Deployment` (excluding its nested `Monitoring`)
 - `Docs/Deployment/Monitoring` (published as top-level `Monitoring`)
-- `Docs/Evals`
+- `Docs/Evaluations`, with `Docs/Evals` as the current compatibility fallback
+- `Docs/Getting_Started`
 - `Docs/User_Guides`
 
-These root-level files are also included when present:
+It also publishes these individual files and assets:
 
+- `Docs/Site/index.md` as `Docs/Published/index.md`
+- `Docs/Site/RELEASE_NOTES.md` as `Docs/Published/RELEASE_NOTES.md`
 - `Docs/Architecture.md`
+- `Docs/Operations/Env_Vars.md` as `Docs/Published/Env_Vars.md`
+- `Docs/Overview/Feature_Status.md`
+- `Docs/Logo.png` as both `Docs/Published/assets/logo.png` and
+  `Docs/Published/assets/favicon.png`
 
-The curated content is synced into `Docs/Published/`. Do not manually edit files in `Docs/Published/` - they can be overwritten by the refresh script or CI.
+Files under `Docs/`, including the special `Docs/Site` sources above, are
+canonical. The corresponding `Docs/Published/` files are deterministic,
+checked-in generated output. Never edit `Docs/Published/` directly; update the
+canonical source and refresh it.
 
 Hosted/commercial docs are excluded from this curated set even when they live under similarly named source areas. If a page exists mainly to run, sell, support, or differentiate the hosted SaaS service, keep it in the private repo rather than adding it to the public docs tree.
 
@@ -46,14 +56,14 @@ Hosted/commercial docs are excluded from this curated set even when they live un
 
 - Script: `Helper_Scripts/refresh_docs_published.sh`
 - What it does:
-  - Copies the approved folders from `Docs/` to `Docs/Published/`
-  - Copies the audience wiki landing pages from `Docs/Wiki`
-  - Copies architecture decision records from `Docs/ADR`
-  - Copies `Docs/Architecture.md` when present
-  - Promotes `Docs/Deployment/Monitoring` to top-level `Docs/Published/Monitoring`
-  - Removes the nested `Monitoring` under `Deployment` to avoid duplication
-  - Preserves each section's `index.md` landing page
-  - Copies `Docs/Logo.png` into `Docs/Published/assets/` as `logo.png` and `favicon.png`
+  - Builds the complete manifest above in a fresh staging directory
+  - Promotes `Docs/Deployment/Monitoring` to top-level
+    `Docs/Published/Monitoring`
+  - Removes nested `README.md` files when a sibling `index.md` is canonical
+  - Atomically swaps the complete staged tree into `Docs/Published/`
+  - Removes stale generated files by replacing, rather than overlaying, the
+    previous tree
+  - Restores the prior complete tree if the swap fails
 
 If you are working on hosted SaaS runbooks, billing/customer-surface guides, or other commercial operating material, use the private repo instead of expanding this public refresh flow.
 
@@ -64,6 +74,10 @@ bash Helper_Scripts/refresh_docs_published.sh
 ```
 
 CI also runs this script automatically before building the site.
+
+After changing any canonical published source, run the refresh and stage the
+resulting `Docs/Published/` changes with the source change. A second refresh
+must produce no diff.
 
 ## Local Preview and Build
 
@@ -79,11 +93,15 @@ Serve locally (auto-reloads on file changes):
 mkdocs serve -f Docs/mkdocs.yml
 ```
 
-Build static site (outputs to `Docs/site/`):
+Build static site with the required zero-warning check (outputs to
+`Docs/site/`):
 
 ```
-mkdocs build -f Docs/mkdocs.yml
+mkdocs build --strict -f Docs/mkdocs.yml
 ```
+
+Any warning is a failed build and must be fixed in the canonical source,
+navigation, or publication manifest before merging.
 
 ## "Last updated" Dates
 
@@ -122,10 +140,14 @@ Tip: keep titles short and parallel (e.g., "Guide", "Reference", "Checklist").
 ## Adding or Updating Docs
 
 1. Edit or add Markdown files under the appropriate source folder in `Docs/`
-2. Run `bash Helper_Scripts/refresh_docs_published.sh` to re-sync curated content
-3. If the new page should appear in the sidebar, update `Docs/mkdocs.yml` `nav:` accordingly
-4. Preview with `mkdocs serve -f Docs/mkdocs.yml`
-5. Commit and push; CI will refresh, build, and deploy the GitHub Pages mirror
+2. Run `bash Helper_Scripts/refresh_docs_published.sh` to regenerate the
+   complete curated tree
+3. If the new page should appear in the sidebar, update `Docs/mkdocs.yml`
+   `nav:` accordingly
+4. Run `mkdocs build --strict -f Docs/mkdocs.yml`
+5. Run the refresh again and confirm it produces no diff
+6. Stage the canonical and generated changes together, then commit and push;
+   CI repeats the refresh and strict build before deployment
 
 Notes:
 - Put audience chooser pages in `Docs/Wiki/`
@@ -144,7 +166,7 @@ The production docs live on the external tldwproject.com host at `/server/docs/`
 Manual external deploy:
 
 1. Run `bash Helper_Scripts/refresh_docs_published.sh`
-2. Run `mkdocs build -f Docs/mkdocs.yml`
+2. Run `mkdocs build --strict -f Docs/mkdocs.yml`
 3. Copy the generated static site output to the external host under `/server/docs/`
 
 Optional site-side automation:
@@ -164,21 +186,24 @@ If an external deploy fails:
 
 - Workflow file: `.github/workflows/mkdocs.yml`
 - Triggers: pushes to `main` and `PG-Backend`, and manual runs
-- Steps: checkout -> install -> refresh curated docs -> build -> deploy to GitHub Pages
+- Steps: checkout -> install -> refresh curated docs -> boundary check -> strict
+  zero-warning build -> deploy to GitHub Pages
 - Repository Settings -> Pages: set Source = GitHub Actions
 
 The GitHub Pages site is a mirror. It intentionally builds from the same MkDocs source while using canonical links from `site_url`, so generated canonical URLs point to `https://tldwproject.com/server/docs/`.
 
 ## Advanced (Optional)
 
-- Strict builds: enable `--strict` in the workflow once all links remain within the curated set
 - Extra plugins: consider `mkdocs-material[imaging]` for image optimizations
 - Custom features: adjust `theme.features` and `markdown_extensions` in `mkdocs.yml`
 
 ## Summary
 
-- Author docs in `Docs/` (not `Docs/Published/`)
-- Use the refresh script to curate and sync
+- Author docs in their canonical `Docs/` source (never directly in
+  `Docs/Published/`)
+- Use the refresh script to atomically regenerate and stage the complete
+  checked-in curated tree
+- Require a zero-warning `mkdocs build --strict -f Docs/mkdocs.yml`
 - Keep `mkdocs.yml` `nav:` updated for sidebar visibility and order
 - Deploy the built site to `https://tldwproject.com/server/docs/`
 - CI builds and deploys a GitHub Pages mirror

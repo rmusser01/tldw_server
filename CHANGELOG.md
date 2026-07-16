@@ -49,6 +49,9 @@ and this project adheres to Some kind of Versioning
   guards, and stale-session recovery after WebUI relaunch.
 - **Local Provider Egress Policy** — Centralized checked outbound access for
   configured local providers and public custom OpenAI-compatible adapters.
+- **Published Documentation** — Made the curated public documentation refresh
+  deterministic, repaired the inherited broken-link baseline, and restored
+  zero-warning strict MkDocs validation in pull-request and deployment CI.
 
 ### Fixed
 
