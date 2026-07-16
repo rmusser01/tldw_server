@@ -1,7 +1,7 @@
 # Skills Live Integration Certification Design
 
 Date: 2026-07-15
-Status: Ready for user written-spec review
+Status: Approved for implementation planning
 Backlog: TASK-530.15
 
 ## Summary
@@ -344,10 +344,12 @@ earlier workflow failure.
 - `backend_startup`;
 - `backend_health`;
 - `webui_startup`;
+- `webui_launch`;
 - `webui_workflow`;
 - `extension_build`;
 - `extension_launch`;
 - `extension_worker`;
+- `extension_workflow`;
 - `extension_relay`;
 - `postcondition`;
 - `artifact_safety`;
