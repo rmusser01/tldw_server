@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import multiprocessing
 import sys
+import unicodedata
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -16,7 +18,13 @@ from .standalone_html_contracts import (
     StandaloneHtmlValidationError,
     StandaloneHtmlValidationResult,
 )
-from .standalone_html_validator import DeliveryStyle, validate_standalone_html
+from .standalone_html_validator import (
+    _BIDI_FORMATTING,
+    DeliveryStyle,
+    _collapse_html_whitespace,
+    _is_forbidden_control,
+    validate_standalone_html,
+)
 
 _IPC_VERSION = 1
 _INTERACTIVE_CAPACITY = 24
@@ -25,6 +33,7 @@ _INTERACTIVE_WEIGHT = 3
 _MAX_WORKERS = 4
 _RETRY_AFTER_SECONDS = 1
 _READY_TIMEOUT_SECONDS = 10.0
+_IPC_JOIN_TIMEOUT_SECONDS = 1.0
 _HEAVY_SLIDES_MODULES = frozenset(
     {
         "tldw_Server_API.app.core.Slides.slides_db",
@@ -97,6 +106,28 @@ _SAFE_REASONS = frozenset(
         "title_length",
     }
 )
+_BUDGET_REASONS = frozenset(
+    {
+        "css_bytes",
+        "css_declarations",
+        "css_depth",
+        "css_errors",
+        "css_stylesheets",
+        "css_token_bytes",
+        "css_tokens",
+        "document_bytes",
+        "html_attributes",
+        "html_comment_token",
+        "html_depth",
+        "html_doctype_token",
+        "html_elements",
+        "html_raw_text_token",
+        "html_tag_token",
+        "html_text_token",
+        "html_tokens",
+    }
+)
+_INVALID_REASONS = _SAFE_REASONS - _BUDGET_REASONS
 
 
 def _validator_worker_main(
@@ -122,19 +153,31 @@ def _validator_worker_main(
             version, operation, epoch, request_id, document, delivery_style = message
             if version != _IPC_VERSION or operation != "validate":
                 return
+            safe_error = (
+                _IPC_VERSION,
+                "error",
+                epoch,
+                request_id,
+                "validator_unavailable",
+                503,
+                None,
+                None,
+                None,
+                None,
+            )
             try:
-                result = validator(document, delivery_style=delivery_style)
-            except StandaloneHtmlValidationError as exc:
-                code = exc.code if exc.code in _SAFE_CODES else "validator_unavailable"
-                status = exc.status_code if exc.status_code in {422, 503} else 503
-                retry_after = (
-                    exc.retry_after if isinstance(exc.retry_after, int) and 1 <= exc.retry_after <= 5 else None
-                )
-                reason = exc.reason if exc.reason in _SAFE_REASONS else None
-                line = exc.line if isinstance(exc.line, int) and 1 <= exc.line <= 1_000_000 else None
-                column = exc.column if isinstance(exc.column, int) and 1 <= exc.column <= 1_000_000 else None
-                connection.send(
-                    (
+                try:
+                    result = validator(document, delivery_style=delivery_style)
+                except StandaloneHtmlValidationError as exc:
+                    code = exc.code if exc.code in _SAFE_CODES else "validator_unavailable"
+                    status = exc.status_code if exc.status_code in {422, 503} else 503
+                    retry_after = (
+                        exc.retry_after if isinstance(exc.retry_after, int) and 1 <= exc.retry_after <= 5 else None
+                    )
+                    reason = exc.reason if exc.reason in _SAFE_REASONS else None
+                    line = exc.line if isinstance(exc.line, int) and 1 <= exc.line <= 1_000_000 else None
+                    column = exc.column if isinstance(exc.column, int) and 1 <= exc.column <= 1_000_000 else None
+                    response = (
                         _IPC_VERSION,
                         "error",
                         epoch,
@@ -146,25 +189,10 @@ def _validator_worker_main(
                         line,
                         column,
                     )
-                )
-            except BaseException:  # noqa: BLE001 - isolate validator termination
-                connection.send(
-                    (
-                        _IPC_VERSION,
-                        "error",
-                        epoch,
-                        request_id,
-                        "validator_unavailable",
-                        503,
-                        None,
-                        None,
-                        None,
-                        None,
-                    )
-                )
-            else:
-                connection.send(
-                    (
+                except BaseException:  # noqa: BLE001 - isolate validator termination
+                    response = safe_error
+                else:
+                    response = (
                         _IPC_VERSION,
                         "result",
                         epoch,
@@ -175,11 +203,21 @@ def _validator_worker_main(
                         result.html_sha256,
                         result.indexable_text,
                     )
-                )
-    except (BrokenPipeError, EOFError, OSError):
+            except BaseException:  # noqa: BLE001 - projection must not escape child stderr
+                response = safe_error
+            try:
+                connection.send(response)
+            except BaseException:  # noqa: BLE001 - serialization may carry attacker-controlled exceptions
+                if response is safe_error:
+                    return
+                try:
+                    connection.send(safe_error)
+                except BaseException:  # noqa: BLE001 - corrupt IPC exits silently
+                    return
+    except BaseException:  # noqa: BLE001 - worker must never print source-bearing tracebacks
         return
     finally:
-        with contextlib.suppress(OSError):
+        with contextlib.suppress(BaseException):  # noqa: BLE001 - closed child exits silently
             connection.close()
 
 
@@ -265,6 +303,7 @@ class StandaloneHtmlValidationPool:
         self._worker_locks = [asyncio.Lock() for _ in range(max_workers)]
         self._tasks: list[asyncio.Task[None]] = []
         self._maintenance_tasks: set[asyncio.Task[Any]] = set()
+        self._close_task: asyncio.Task[None] | None = None
         self._reservations: set[GenerationValidationReservation] = set()
         self._request_counter = 0
         self._generation_slots_in_use = 0
@@ -455,49 +494,74 @@ class StandaloneHtmlValidationPool:
                 self._slots[worker_index] = None
             return retired
 
+    async def _close_impl(self) -> None:
+        async with self._condition:
+            queued = [*self._interactive, *self._generation]
+            self._interactive.clear()
+            self._generation.clear()
+            for job in queued:
+                self._release_job_slot_locked(job)
+                if not job.future.done():
+                    job.future.set_exception(self._unavailable_error())
+            for job in self._active.values():
+                self._release_job_slot_locked(job)
+                if not job.future.done():
+                    job.future.set_exception(self._unavailable_error())
+            for reservation in tuple(self._reservations):
+                if reservation._state == "reserved":
+                    reservation._state = "released"
+                    self._generation_slots_in_use -= 1
+                    self._reservations.discard(reservation)
+            self._condition.notify_all()
+
+        retired = await asyncio.gather(
+            *(self._stop_worker(index) for index in range(len(self._slots))),
+            return_exceptions=False,
+        )
+        if not all(retired):
+            raise self._unavailable_error()
+        for task in self._tasks:
+            task.cancel()
+        await asyncio.gather(*self._tasks, return_exceptions=True)
+        if self._maintenance_tasks:
+            await asyncio.gather(*tuple(self._maintenance_tasks), return_exceptions=True)
+        self._tasks.clear()
+        self._slots.clear()
+        self._active.clear()
+        self._generation_slots_in_use = 0
+        self._started = False
+        self._closed = True
+        self._closing = False
+
     async def close(self) -> None:
-        """Reject queued work and terminate/reap every worker."""
+        """Run terminal cleanup to completion even when the caller is cancelled."""
         async with self._lifecycle_lock:
             if self._closed:
                 return
-            self._closing = True
-            async with self._condition:
-                queued = [*self._interactive, *self._generation]
-                self._interactive.clear()
-                self._generation.clear()
-                for job in queued:
-                    self._release_job_slot_locked(job)
-                    if not job.future.done():
-                        job.future.set_exception(self._unavailable_error())
-                for job in self._active.values():
-                    self._release_job_slot_locked(job)
-                    if not job.future.done():
-                        job.future.set_exception(self._unavailable_error())
-                for reservation in tuple(self._reservations):
-                    if reservation._state == "reserved":
-                        reservation._state = "released"
-                        self._generation_slots_in_use -= 1
-                        self._reservations.discard(reservation)
-                self._condition.notify_all()
+            if self._close_task is None:
+                self._closing = True
+                self._close_task = asyncio.create_task(
+                    self._close_impl(),
+                    name="standalone-html-validator-close",
+                )
+            close_task = self._close_task
 
-            retired = await asyncio.gather(
-                *(self._stop_worker(index) for index in range(len(self._slots))),
-                return_exceptions=False,
-            )
-            if not all(retired):
-                raise self._unavailable_error()
-            for task in self._tasks:
-                task.cancel()
-            await asyncio.gather(*self._tasks, return_exceptions=True)
-            if self._maintenance_tasks:
-                await asyncio.gather(*tuple(self._maintenance_tasks), return_exceptions=True)
-            self._tasks.clear()
-            self._slots.clear()
-            self._active.clear()
-            self._generation_slots_in_use = 0
-            self._started = False
-            self._closed = True
-            self._closing = False
+        cancelled = False
+        while not close_task.done():
+            try:
+                await asyncio.wait({close_task})
+            except asyncio.CancelledError:
+                cancelled = True
+
+        try:
+            close_task.result()
+        except Exception:
+            async with self._lifecycle_lock:
+                if self._close_task is close_task:
+                    self._close_task = None
+            raise
+        if cancelled:
+            raise asyncio.CancelledError
 
     def _new_job(
         self,
@@ -674,6 +738,7 @@ class StandaloneHtmlValidationPool:
         job: _ValidationJob,
         watchdog_seconds: float,
     ) -> tuple[Any, ...] | None:
+        del watchdog_seconds
         try:
             slot.connection.send(
                 (
@@ -685,12 +750,56 @@ class StandaloneHtmlValidationPool:
                     job.delivery_style,
                 )
             )
-            if not slot.connection.poll(watchdog_seconds):
-                return None
             response = slot.connection.recv()
             return response if isinstance(response, tuple) else ()
-        except (BrokenPipeError, EOFError, OSError):
+        except (BrokenPipeError, EOFError, OSError, ValueError):
             return ()
+
+    async def _rpc_with_watchdog(
+        self,
+        worker_index: int,
+        slot: _WorkerSlot,
+        job: _ValidationJob,
+    ) -> tuple[Any, ...] | None:
+        rpc_task = asyncio.create_task(
+            asyncio.to_thread(
+                self._rpc_sync,
+                slot,
+                job,
+                self._watchdog_seconds,
+            ),
+            name=f"standalone-html-validator-ipc-{worker_index + 1}",
+        )
+        try:
+            return await asyncio.wait_for(
+                asyncio.shield(rpc_task),
+                self._watchdog_seconds,
+            )
+        except asyncio.TimeoutError:
+            await self._replace_worker(worker_index, slot.epoch)
+            try:
+                await asyncio.wait_for(
+                    asyncio.shield(rpc_task),
+                    _IPC_JOIN_TIMEOUT_SECONDS,
+                )
+            except asyncio.TimeoutError as exc:
+                raise RuntimeError("validator IPC did not terminate") from exc
+            except (BrokenPipeError, EOFError, OSError, RuntimeError, TypeError, ValueError):
+                pass
+            return None
+        except asyncio.CancelledError:
+            if not rpc_task.done():
+                await self._replace_worker(worker_index, slot.epoch)
+                try:
+                    await asyncio.wait_for(
+                        asyncio.shield(rpc_task),
+                        _IPC_JOIN_TIMEOUT_SECONDS,
+                    )
+                except asyncio.TimeoutError as exc:
+                    raise RuntimeError("validator IPC did not terminate") from exc
+                except (BrokenPipeError, EOFError, OSError, RuntimeError, TypeError, ValueError):
+                    pass
+            raise
 
     async def _replace_worker(
         self,
@@ -776,6 +885,7 @@ class StandaloneHtmlValidationPool:
         *,
         epoch: int,
         request_id: int,
+        document: str | bytes,
     ) -> StandaloneHtmlValidationResult | StandaloneHtmlValidationError | None:
         try:
             if len(response) < 4:
@@ -794,17 +904,23 @@ class StandaloneHtmlValidationPool:
                     html_sha256,
                     indexable_text,
                 ) = response
+                document_bytes = document if isinstance(document, bytes) else document.encode("utf-8", "strict")
                 if not (
                     isinstance(title, str)
+                    and title
+                    and unicodedata.normalize("NFC", title) == title
+                    and _collapse_html_whitespace(title) == title
+                    and not any(
+                        _is_forbidden_control(character) or character in _BIDI_FORMATTING for character in title
+                    )
                     and len(title) <= 200
                     and len(title.encode("utf-8", "strict")) <= 512
                     and type(slide_count) is int
                     and 1 <= slide_count <= 30
                     and type(html_bytes) is int
-                    and 0 <= html_bytes <= 1_048_576
+                    and html_bytes == len(document_bytes)
                     and isinstance(html_sha256, str)
-                    and len(html_sha256) == 64
-                    and all(character in "0123456789abcdef" for character in html_sha256)
+                    and html_sha256 == hashlib.sha256(document_bytes).hexdigest()
                     and isinstance(indexable_text, str)
                     and len(indexable_text) <= 250_000
                     and len(indexable_text.encode("utf-8", "strict")) <= 1_000_000
@@ -832,11 +948,17 @@ class StandaloneHtmlValidationPool:
                     line,
                     column,
                 ) = response
-                if code not in _SAFE_CODES or status_code not in {422, 503}:
+                if retry_after is not None:
                     return None
-                if retry_after is not None and not (type(retry_after) is int and 1 <= retry_after <= 5):
-                    return None
-                if reason is not None and reason not in _SAFE_REASONS:
+                if code == "standalone_html_invalid_document":
+                    valid_policy = status_code == 422 and reason in _INVALID_REASONS
+                elif code == "standalone_html_validation_budget_exceeded":
+                    valid_policy = status_code == 422 and reason in _BUDGET_REASONS and line is None and column is None
+                elif code == "validator_unavailable":
+                    valid_policy = status_code == 503 and reason is None and line is None and column is None
+                else:
+                    valid_policy = False
+                if not valid_policy:
                     return None
                 if line is not None and not (type(line) is int and 1 <= line <= 1_000_000):
                     return None
@@ -885,14 +1007,12 @@ class StandaloneHtmlValidationPool:
                 else:
                     epoch = slot.epoch
                     job.worker_epoch = epoch
-                    response = await asyncio.to_thread(
-                        self._rpc_sync,
+                    response = await self._rpc_with_watchdog(
+                        worker_index,
                         slot,
                         job,
-                        self._watchdog_seconds,
                     )
                     if response is None:
-                        await self._replace_worker(worker_index, epoch)
                         outcome = self._timeout_error()
                     elif not response:
                         await self._replace_worker(worker_index, epoch)
@@ -901,6 +1021,7 @@ class StandaloneHtmlValidationPool:
                             response,
                             epoch=epoch,
                             request_id=job.request_id,
+                            document=job.document,
                         )
                         if decoded is None:
                             await self._replace_worker(worker_index, epoch)
