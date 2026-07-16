@@ -45,10 +45,15 @@ MAX_CSS_TOKEN_BYTES = 65_536
 MAX_CSS_DEPTH = 64
 MAX_CSS_ERRORS = 100
 MAX_INDEXABLE_TEXT = 250_000
+_UTF8_MEASUREMENT_CHARS = 16_384
 
 _HTML_NAMESPACE = "http://www.w3.org/1999/xhtml"
 _XMLNS_NAMESPACE = "http://www.w3.org/2000/xmlns/"
 _HTML_WHITESPACE = " \t\n\r\f"
+_ASCII_LOWER_TRANSLATION = str.maketrans(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+    "abcdefghijklmnopqrstuvwxyz",
+)
 _VOID_ELEMENTS = frozenset(
     {
         "area",
@@ -216,6 +221,12 @@ _BIDI_FORMATTING = frozenset(
         "\u2067",
         "\u2068",
         "\u2069",
+        "\u206a",
+        "\u206b",
+        "\u206c",
+        "\u206d",
+        "\u206e",
+        "\u206f",
     }
 )
 _SCRIPT_SINK_TOKEN_PATTERNS = (
@@ -348,6 +359,53 @@ def _fail_unavailable() -> None:
     raise StandaloneHtmlValidationError("validator_unavailable", status_code=503)
 
 
+def _ascii_lower(value: str) -> str:
+    """Fold ASCII A-Z without changing source length or Unicode code points."""
+    return str.translate(value, _ASCII_LOWER_TRANSLATION)
+
+
+def _preflight_document_input(document: str | bytes) -> int:
+    """Validate type, UTF-8, and byte size before full copies or IPC."""
+    if isinstance(document, bytes):
+        document_bytes = bytes.__len__(document)
+        if document_bytes > MAX_DOCUMENT_BYTES:
+            _fail_budget("document_bytes")
+        encoding_failed = False
+        try:
+            bytes.decode(document, "utf-8", "strict")
+        except UnicodeDecodeError:
+            encoding_failed = True
+        if encoding_failed:
+            _fail_invalid("document_encoding")
+        return document_bytes
+
+    if not isinstance(document, str):
+        _fail_invalid("document_type")
+
+    character_count = str.__len__(document)
+    if character_count > MAX_DOCUMENT_BYTES:
+        _fail_budget("document_bytes")
+
+    document_bytes = 0
+    encoding_failed = False
+    for start in range(0, character_count, _UTF8_MEASUREMENT_CHARS):
+        chunk = str.__getitem__(
+            document,
+            slice(start, min(start + _UTF8_MEASUREMENT_CHARS, character_count)),
+        )
+        try:
+            encoded = str.encode(chunk, "utf-8", "strict")
+        except UnicodeEncodeError:
+            encoding_failed = True
+            break
+        document_bytes += bytes.__len__(encoded)
+        if document_bytes > MAX_DOCUMENT_BYTES:
+            _fail_budget("document_bytes")
+    if encoding_failed:
+        _fail_invalid("document_encoding")
+    return document_bytes
+
+
 def _local_name(name: Any) -> str:
     value = str(name)
     if "}" in value:
@@ -457,6 +515,12 @@ def _script_tokens(source: str) -> list[str]:
     tokens: list[str] = []
     index = 0
     contexts: list[list[Any]] = [["expression", 0, True]]
+
+    def append_tokens(*values: str) -> None:
+        tokens.extend(values)
+        if len(tokens) > MAX_HTML_TOKENS:
+            raise _BudgetExceeded("html_tokens")
+
     expression_prefixes = frozenset(
         {
             "await",
@@ -473,7 +537,7 @@ def _script_tokens(source: str) -> list[str]:
             "yield",
         }
     )
-    while index < len(source) and len(tokens) <= MAX_HTML_TOKENS:
+    while index < len(source):
         context = contexts[-1]
         character = source[index]
         if context[0] == "template":
@@ -559,7 +623,7 @@ def _script_tokens(source: str) -> list[str]:
                 and property_name.isascii()
                 and all(candidate.isalnum() or candidate in {"_", "$"} for candidate in property_name)
             ):
-                tokens.extend((".", property_name.lower()))
+                append_tokens(".", property_name.lower())
             context[2] = False
             continue
         if character == "`":
@@ -593,11 +657,11 @@ def _script_tokens(source: str) -> list[str]:
                     break
                 index += 1
             token = source[start:index].lower()
-            tokens.append(token)
+            append_tokens(token)
             context[2] = token in expression_prefixes
             continue
         if character in {".", "(", "="}:
-            tokens.append(character)
+            append_tokens(character)
         if character in {
             "(",
             "=",
@@ -773,7 +837,7 @@ def _count_attributes(tag_source: str, name_end: int) -> int:
 
 
 def _preflight_html(source: str) -> _HtmlPreflight:
-    lower_source = source.lower()
+    lower_source = _ascii_lower(source)
     token_count = 0
     start_tag_count = 0
     attribute_count = 0
@@ -824,7 +888,7 @@ def _preflight_html(source: str) -> _HtmlPreflight:
         if lower_source.startswith("<!doctype", index):
             end = _scan_tag_end(source, index + 2)
             add_token(index, end, "html_doctype_token")
-            if source[index:end].strip().lower() != "<!doctype html>":
+            if _ascii_lower(source[index:end].strip()) != "<!doctype html>":
                 _fail_invalid("html_doctype")
             doctype_positions.append(index)
             index = end
@@ -841,7 +905,7 @@ def _preflight_html(source: str) -> _HtmlPreflight:
             name_end += 1
         if name_end == name_start:
             _fail_invalid("html_tag_name")
-        name = source[name_start:name_end].lower()
+        name = _ascii_lower(source[name_start:name_end])
         end = _scan_tag_end(source, name_end)
         add_token(
             index,
@@ -1622,25 +1686,15 @@ def validate_standalone_html(
     """
     if html5lib is None or tinycss2 is None:
         _fail_unavailable()
-    source = ""
-    source_bytes = b""
-    encoding_failed = False
-    try:
-        if isinstance(document, bytes):
-            source_bytes = bytes(document)
-            source = source_bytes.decode("utf-8", "strict")
-        elif isinstance(document, str):
-            source = document
-            source_bytes = source.encode("utf-8", "strict")
-        else:
-            _fail_invalid("document_type")
-    except (UnicodeDecodeError, UnicodeEncodeError):
-        encoding_failed = True
-    if encoding_failed:
+    expected_bytes = _preflight_document_input(document)
+    if isinstance(document, bytes):
+        source_bytes = bytes.__getitem__(document, slice(None))
+        source = bytes.decode(source_bytes, "utf-8", "strict")
+    else:
+        source = str.__getitem__(document, slice(None))
+        source_bytes = str.encode(source, "utf-8", "strict")
+    if bytes.__len__(source_bytes) != expected_bytes:  # pragma: no cover - immutable input invariant
         _fail_invalid("document_encoding")
-
-    if len(source_bytes) > MAX_DOCUMENT_BYTES:
-        _fail_budget("document_bytes")
     if any(_is_forbidden_control(character) for character in source):
         _fail_invalid("document_controls")
 

@@ -12,6 +12,7 @@ import sys
 import textwrap
 import threading
 import time
+import traceback
 
 import pytest
 
@@ -36,6 +37,40 @@ def _document(title: str = "Deck") -> str:
         '<body><section class="slide"><h1>Ready</h1></section>'
         "<script>document.addEventListener('keydown',()=>{});</script></body></html>"
     )
+
+
+_INPUT_PREFLIGHT_SECRET = "TOP-SECRET-POOL-PREFLIGHT"
+
+
+class _ExplodingOversizedText(str):
+    def encode(self, *_args: object, **_kwargs: object) -> bytes:
+        raise AssertionError(_INPUT_PREFLIGHT_SECRET)
+
+    def __reduce_ex__(self, _protocol: int) -> object:
+        raise AssertionError(_INPUT_PREFLIGHT_SECRET)
+
+
+class _ExplodingOversizedBytes(bytes):
+    def __bytes__(self) -> bytes:
+        raise AssertionError(_INPUT_PREFLIGHT_SECRET)
+
+    def decode(self, *_args: object, **_kwargs: object) -> str:
+        raise AssertionError(_INPUT_PREFLIGHT_SECRET)
+
+    def __reduce_ex__(self, _protocol: int) -> object:
+        raise AssertionError(_INPUT_PREFLIGHT_SECRET)
+
+
+def _rejected_pool_document(kind: str) -> str | bytes:
+    if kind == "oversized-text":
+        return _ExplodingOversizedText(_INPUT_PREFLIGHT_SECRET + ("x" * MAX_DOCUMENT_BYTES))
+    if kind == "oversized-bytes":
+        return _ExplodingOversizedBytes((_INPUT_PREFLIGHT_SECRET + ("x" * MAX_DOCUMENT_BYTES)).encode("ascii"))
+    if kind == "lone-surrogate":
+        return _document(f"{_INPUT_PREFLIGHT_SECRET}\ud800")
+    if kind == "invalid-utf8":
+        return _INPUT_PREFLIGHT_SECRET.encode("ascii") + b"\xff"
+    raise AssertionError("unknown rejected document fixture")
 
 
 def _slow_validate(document: str | bytes, *, delivery_style: str | None = None):
@@ -183,6 +218,116 @@ def test_legacy_slides_package_exports_resolve_lazily_to_original_objects() -> N
     )
     assert completed.returncode == 0, completed.stderr[-2_000:]
     assert json.loads(completed.stdout.splitlines()[-1]) == {"ok": True}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("kind", "expected_code", "expected_reason"),
+    [
+        ("oversized-text", "standalone_html_validation_budget_exceeded", "document_bytes"),
+        ("oversized-bytes", "standalone_html_validation_budget_exceeded", "document_bytes"),
+        ("lone-surrogate", "standalone_html_invalid_document", "document_encoding"),
+        ("invalid-utf8", "standalone_html_invalid_document", "document_encoding"),
+    ],
+)
+async def test_rejected_input_never_starts_pool_or_enters_ipc(
+    kind: str,
+    expected_code: str,
+    expected_reason: str,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    pool = StandaloneHtmlValidationPool(max_workers=1, mp_start_method="fork")
+    calls: list[str] = []
+
+    def forbidden_spawn(*_args: object, **_kwargs: object) -> object:
+        calls.append("spawn")
+        raise AssertionError(_INPUT_PREFLIGHT_SECRET)
+
+    def forbidden_rpc(*_args: object, **_kwargs: object) -> object:
+        calls.append("rpc")
+        raise AssertionError(_INPUT_PREFLIGHT_SECRET)
+
+    monkeypatch.setattr(pool, "_spawn_slot", forbidden_spawn)
+    monkeypatch.setattr(pool, "_rpc_sync", forbidden_rpc)
+    try:
+        with pytest.raises(StandaloneHtmlValidationError) as caught:
+            await pool.validate(_rejected_pool_document(kind))
+
+        assert caught.value.code == expected_code
+        assert caught.value.reason == expected_reason
+        assert caught.value.__context__ is None
+        assert calls == []
+        assert pool.worker_pids == ()
+        assert pool._started is False
+        assert pool._request_counter == 0
+        assert pool.interactive_waiting == 0
+        assert pool.generation_slots_in_use == 0
+        assert pool.active_count == 0
+        rendered = "".join(traceback.format_exception(caught.value))
+        assert _INPUT_PREFLIGHT_SECRET not in rendered
+    finally:
+        await pool.close()
+
+    captured = capfd.readouterr()
+    assert _INPUT_PREFLIGHT_SECRET not in captured.out
+    assert _INPUT_PREFLIGHT_SECRET not in captured.err
+
+
+@pytest.mark.asyncio
+async def test_reserved_rejected_input_preserves_capacity_and_never_enters_ipc(
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    pool = StandaloneHtmlValidationPool(max_workers=1, mp_start_method="fork")
+    reservation = await pool.acquire_generation_reservation()
+    original_pids = pool.worker_pids
+    rpc_calls: list[int] = []
+    original_rpc = pool._rpc_sync
+
+    def forbidden_rpc(slot, job, watchdog_seconds):
+        del watchdog_seconds
+        rpc_calls.append(job.request_id)
+        return (
+            pool_module._IPC_VERSION,
+            "error",
+            slot.epoch,
+            job.request_id,
+            "standalone_html_validation_budget_exceeded",
+            422,
+            None,
+            "document_bytes",
+            None,
+            None,
+        )
+
+    monkeypatch.setattr(pool, "_rpc_sync", forbidden_rpc)
+    try:
+        with pytest.raises(StandaloneHtmlValidationError) as caught:
+            await asyncio.wait_for(
+                reservation.validate(_rejected_pool_document("oversized-text")),
+                2,
+            )
+
+        assert caught.value.code == "standalone_html_validation_budget_exceeded"
+        assert caught.value.reason == "document_bytes"
+        assert caught.value.__context__ is None
+        assert rpc_calls == []
+        assert reservation.consumed is False
+        assert pool.generation_slots_in_use == 1
+        assert pool.interactive_waiting == 0
+        assert pool.active_count == 0
+        assert pool.worker_pids == original_pids
+        rendered = "".join(traceback.format_exception(caught.value))
+        assert _INPUT_PREFLIGHT_SECRET not in rendered
+    finally:
+        monkeypatch.setattr(pool, "_rpc_sync", original_rpc)
+        await reservation.release()
+        await pool.close()
+
+    captured = capfd.readouterr()
+    assert _INPUT_PREFLIGHT_SECRET not in captured.out
+    assert _INPUT_PREFLIGHT_SECRET not in captured.err
 
 
 @pytest.mark.asyncio
@@ -909,7 +1054,6 @@ def _malformed_response(kind: str, slot, job) -> tuple[object, ...]:
         "budget_reason",
         "unavailable_status",
         "unavailable_reason",
-        "oversized_document",
         "non_parser_location",
         "parser_line_only",
         "parser_column_only",
@@ -932,7 +1076,7 @@ async def test_semantically_malformed_worker_tuples_replace_worker_and_release_c
 
     monkeypatch.setattr(pool, "_rpc_sync", malformed_rpc)
     try:
-        document = "x" * (MAX_DOCUMENT_BYTES + 1) if kind == "oversized_document" else _document("Malformed semantics")
+        document = _document("Malformed semantics")
         with pytest.raises(StandaloneHtmlValidationError) as caught:
             await asyncio.wait_for(pool.validate(document), 2)
         assert caught.value.code == "validator_unavailable"

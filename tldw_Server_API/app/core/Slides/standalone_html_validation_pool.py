@@ -24,6 +24,7 @@ from .standalone_html_validator import (
     DeliveryStyle,
     _collapse_html_whitespace,
     _is_forbidden_control,
+    _preflight_document_input,
     validate_standalone_html,
 )
 
@@ -589,6 +590,7 @@ class StandaloneHtmlValidationPool:
         delivery_style: DeliveryStyle | None = None,
     ) -> StandaloneHtmlValidationResult:
         """Submit authenticated save/restore/export work to the priority queue."""
+        _preflight_document_input(document)
         await self.start()
         async with self._condition:
             if self._closing or self._closed:
@@ -623,6 +625,7 @@ class StandaloneHtmlValidationPool:
         document: str | bytes,
         delivery_style: DeliveryStyle | None,
     ) -> StandaloneHtmlValidationResult:
+        _preflight_document_input(document)
         await self.start()
         async with self._condition:
             if reservation._pool is not self or reservation._state != "reserved":
