@@ -612,10 +612,33 @@ def _raw_css_token(kind: str, size: int) -> str:
         return ("f" * (size - 1)) + "()"
     if kind == "url":
         return "url(" + ("/" * (size - 5)) + ")"
+    if kind == "at_keyword":
+        return "@" + ("a" * (size - 1)) + "{}"
+    if kind == "hash":
+        return "#" + ("a" * (size - 1)) + "{}"
+    if kind == "signed_number":
+        return "+" + ("1" * (size - 6)) + ".0e+1"
+    if kind == "percentage":
+        return "+" + ("1" * (size - 2)) + "%"
+    if kind == "dimension":
+        return "+1.0e-2" + ("a" * (size - 7))
     raise AssertionError("unknown CSS token fixture")
 
 
-@pytest.mark.parametrize("kind", ["comment", "string", "function", "url"])
+@pytest.mark.parametrize(
+    "kind",
+    [
+        "comment",
+        "string",
+        "function",
+        "url",
+        "at_keyword",
+        "hash",
+        "signed_number",
+        "percentage",
+        "dimension",
+    ],
+)
 def test_css_raw_lexical_token_byte_boundaries(kind: str) -> None:
     for size in (validator_module.MAX_CSS_TOKEN_BYTES - 1, validator_module.MAX_CSS_TOKEN_BYTES):
         validator_module._preflight_css([_raw_css_token(kind, size)])
@@ -623,6 +646,55 @@ def test_css_raw_lexical_token_byte_boundaries(kind: str) -> None:
     with pytest.raises(validator_module._BudgetExceeded) as caught:
         validator_module._preflight_css([_raw_css_token(kind, validator_module.MAX_CSS_TOKEN_BYTES + 1)])
     assert caught.value.reason == "css_token_bytes"
+
+
+def _css_name_with_exact_bytes(kind: str, size: int) -> str:
+    if kind == "non_ascii":
+        name = ("😀" * (size // 4)) + ("a" * (size % 4))
+    elif kind == "escaped":
+        name = ("\\61 " * (size // 4)) + ("a" * (size % 4))
+    else:
+        raise AssertionError("unknown CSS name fixture")
+    assert len(name.encode("utf-8")) == size
+    return name + "{}"
+
+
+@pytest.mark.parametrize("kind", ["non_ascii", "escaped"])
+def test_css_identifier_byte_boundaries_group_non_ascii_and_escaped_names(kind: str) -> None:
+    for size in (validator_module.MAX_CSS_TOKEN_BYTES - 1, validator_module.MAX_CSS_TOKEN_BYTES):
+        validator_module._preflight_css([_css_name_with_exact_bytes(kind, size)])
+
+    with pytest.raises(validator_module._BudgetExceeded) as caught:
+        validator_module._preflight_css([_css_name_with_exact_bytes(kind, validator_module.MAX_CSS_TOKEN_BYTES + 1)])
+    assert caught.value.reason == "css_token_bytes"
+
+
+def test_css_terminal_backslash_scanner_always_makes_progress(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(validator_module, "MAX_CSS_TOKENS", 2)
+    validator_module._preflight_css(["\\"])
+
+
+def test_css_large_declaration_block_is_not_treated_as_one_raw_token() -> None:
+    source = "a{" + ("color:#0;" * 8_000) + "}"
+    assert len(source.encode("utf-8")) > validator_module.MAX_CSS_TOKEN_BYTES
+    validator_module._preflight_css([source])
+
+
+def test_quoted_url_function_and_string_are_distinct_raw_tokens() -> None:
+    string_token = '"' + ("x" * (validator_module.MAX_CSS_TOKEN_BYTES - 2)) + '"'
+    validator_module._preflight_css([f"url({string_token})"])
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "." + ("a" * validator_module.MAX_CSS_TOKEN_BYTES) + "{}",
+        ("a" * 40_000) + "#" + ("b" * 40_000) + "{}",
+        "@media{a{color:#123abc;width:+1.25e-7px}}",
+    ],
+)
+def test_css_lexical_families_stop_at_real_delimiters(source: str) -> None:
+    validator_module._preflight_css([source])
 
 
 @pytest.mark.parametrize(
@@ -664,15 +736,61 @@ def test_slides_inside_ordinary_wrappers_remain_discoverable() -> None:
 
 
 @pytest.mark.parametrize(
+    "chrome_class",
+    ["deck-header", "deck-footer", "slide-number", "progress", "navigation", "nav"],
+)
+def test_root_level_chrome_slides_do_not_form_a_deck(chrome_class: str) -> None:
+    slides = f'<section class="slide {chrome_class}"><h1>Hidden Chrome</h1></section>'
+    error = _error(_document(slides=slides))
+    assert error.reason == "slide_count"
+
+
+def test_root_level_chrome_slide_is_excluded_beside_a_real_slide() -> None:
+    slides = (
+        '<section class="slide"><h1>Visible</h1></section>'
+        '<section class="slide deck-header"><h1>Hidden Chrome</h1></section>'
+    )
+    result = validate_standalone_html(_document(slides=slides))
+    assert result.slide_count == 1
+    assert result.indexable_text == "Visible"
+
+
+@pytest.mark.parametrize(
+    "slides",
+    [
+        '<section class="slide"><h1>Visible</h1>'
+        + ('<section class="slide"><h1>Nested</h1></section>' * 31)
+        + "</section>",
+        '<section class="slide"><h1>Visible</h1></section><template>'
+        + ('<section class="slide"><h1>Hidden</h1></section>' * 30)
+        + "</template>",
+    ],
+)
+def test_total_slide_element_limit_counts_nested_and_hidden_slides(slides: str) -> None:
+    error = _error(_document(slides=slides))
+    assert error.reason == "slide_count"
+
+
+@pytest.mark.parametrize(
     "script",
     [
         'new window.Worker("worker.js")',
         'new globalThis.WebSocket("wss://example.invalid")',
         'window.fetch("/data")',
         'globalThis.fetch("/data")',
+        'globalThis.open("/popup")',
+        'self.open("/popup")',
         'const request = fetch; request("/data")',
         'let Socket = globalThis.WebSocket; new Socket("wss://example.invalid")',
         'var request = window.fetch; request("/data")',
+        'const popup = window.open; popup("/popup")',
+        'const go = location.assign; go("/next")',
+        'const replace = location.replace; replace("/next")',
+        'const beacon = navigator.sendBeacon; beacon("/collect")',
+        'const push = history.pushState; push({}, "", "/next")',
+        'const replaceState = history.replaceState; replaceState({}, "", "/next")',
+        'const openCache = caches.open; openCache("deck")',
+        'const register = navigator.serviceWorker.register; register("sw.js")',
     ],
 )
 def test_qualified_and_simply_aliased_script_sinks_are_rejected(script: str) -> None:
@@ -685,6 +803,10 @@ def test_qualified_and_simply_aliased_script_sinks_are_rejected(script: str) -> 
         "const request = safeRequest; request();",
         "const request = () => 1; request();",
         "const workerName = 'Worker'; console.log(workerName);",
+        "const popup = safe.open; popup();",
+        "const go = location.current; go();",
+        "const beacon = navigator.sendMessage; beacon();",
+        "const popup = window.open; console.log(popup);",
     ],
 )
 def test_non_sink_aliases_remain_allowed(script: str) -> None:
@@ -693,7 +815,7 @@ def test_non_sink_aliases_remain_allowed(script: str) -> None:
 
 def test_aliased_script_sink_error_remains_source_redacted() -> None:
     secret = "TOP-SECRET-ALIASED-SCRIPT-SOURCE"
-    error = _error(_document(script=f'const request = fetch; request("{secret}")'))
+    error = _error(_document(script=f'const go = location.assign; go("{secret}")'))
     rendered = "".join(traceback.format_exception(error))
     assert secret not in rendered
     assert secret not in str(error)

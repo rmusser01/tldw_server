@@ -20,6 +20,7 @@ from .standalone_html_contracts import (
 )
 from .standalone_html_validator import (
     _BIDI_FORMATTING,
+    MAX_DOCUMENT_BYTES,
     DeliveryStyle,
     _collapse_html_whitespace,
     _is_forbidden_control,
@@ -128,6 +129,7 @@ _BUDGET_REASONS = frozenset(
     }
 )
 _INVALID_REASONS = _SAFE_REASONS - _BUDGET_REASONS
+_LOCATION_REASONS = frozenset({"css_parse_error", "html_parse_error"})
 
 
 def _validator_worker_main(
@@ -905,6 +907,8 @@ class StandaloneHtmlValidationPool:
                     indexable_text,
                 ) = response
                 document_bytes = document if isinstance(document, bytes) else document.encode("utf-8", "strict")
+                if len(document_bytes) > MAX_DOCUMENT_BYTES:
+                    return None
                 if not (
                     isinstance(title, str)
                     and title
@@ -919,6 +923,7 @@ class StandaloneHtmlValidationPool:
                     and 1 <= slide_count <= 30
                     and type(html_bytes) is int
                     and html_bytes == len(document_bytes)
+                    and html_bytes <= MAX_DOCUMENT_BYTES
                     and isinstance(html_sha256, str)
                     and html_sha256 == hashlib.sha256(document_bytes).hexdigest()
                     and isinstance(indexable_text, str)
@@ -960,9 +965,15 @@ class StandaloneHtmlValidationPool:
                     valid_policy = False
                 if not valid_policy:
                     return None
-                if line is not None and not (type(line) is int and 1 <= line <= 1_000_000):
-                    return None
-                if column is not None and not (type(column) is int and 1 <= column <= 1_000_000):
+                if reason in _LOCATION_REASONS:
+                    if not (
+                        type(line) is int
+                        and 1 <= line <= 1_000_000
+                        and type(column) is int
+                        and 1 <= column <= 1_000_000
+                    ):
+                        return None
+                elif line is not None or column is not None:
                     return None
                 return StandaloneHtmlValidationError(
                     code,
