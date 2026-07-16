@@ -12,6 +12,9 @@ from tldw_Server_API.app.core.DB_Management.Prompts_DB import (
     DatabaseError,
     ServicePromptOverrideRow,
 )
+from tldw_Server_API.app.core.LLM_Calls import (
+    Summarization_General_Lib as summarization_module,
+)
 from tldw_Server_API.app.core.Prompt_Management.service_prompts import (
     ServicePromptCorruptOverride,
 )
@@ -84,6 +87,7 @@ async def test_translation_without_override_is_byte_identical_and_keeps_provider
             "temp": 0.3,
             "streaming": False,
             "model_override": "gpt-test",
+            "input_is_literal_text": True,
         }
     ]
     assert response.translated_text == "Bonjour"
@@ -100,6 +104,7 @@ async def test_translation_uses_saved_system_and_template_together_on_next_call(
         "system": "CUSTOM SYSTEM",
         "user_template": "Language={target_language}\nPayload={text}",
     }
+    db = _PromptDatabase()
     analyze_calls: list[dict[str, object]] = []
     monkeypatch.setattr(
         translate_module,
@@ -110,13 +115,55 @@ async def test_translation_uses_saved_system_and_template_together_on_next_call(
     await translate_module.translate_text(
         _request(),
         current_user=SimpleNamespace(id=1),
-        db=_PromptDatabase(parts),
+        db=db,
+    )
+    db.parts = parts
+    await translate_module.translate_text(
+        _request(),
+        current_user=SimpleNamespace(id=1),
+        db=db,
     )
 
-    assert analyze_calls[0]["system_message"] == "CUSTOM SYSTEM"
-    assert analyze_calls[0]["input_data"] == (
+    assert analyze_calls[0]["system_message"] == PACKAGED_SYSTEM
+    assert analyze_calls[0]["input_data"] == PACKAGED_USER
+    assert analyze_calls[1]["system_message"] == "CUSTOM SYSTEM"
+    assert analyze_calls[1]["input_data"] == (
         "Language=French\nPayload=Hello {target_language} and $&"
     )
+
+
+@pytest.mark.asyncio
+async def test_translation_real_analyzer_preserves_json_like_prompt_and_hides_it_from_logs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    secret = "ANALYZER-BODY-MUST-NOT-LEAK"
+    output_secret = "ANALYZER-OUTPUT-MUST-NOT-LEAK"
+    parts = {
+        "system": "CUSTOM SYSTEM",
+        "user_template": '{{"title":"{text}","description":"{target_language}"}}',
+    }
+    dispatch_calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    def capture_dispatch(*args: object, **kwargs: object) -> str:
+        dispatch_calls.append((args, kwargs))
+        return output_secret
+
+    monkeypatch.setattr(summarization_module, "_dispatch_to_api", capture_dispatch)
+    captured_logs: list[str] = []
+    sink_id = summarization_module.logging.add(captured_logs.append, format="{message}")
+    try:
+        await translate_module.translate_text(
+            _request(text=secret),
+            current_user=SimpleNamespace(id=1),
+            db=_PromptDatabase(parts),
+        )
+    finally:
+        summarization_module.logging.remove(sink_id)
+
+    expected_prompt = f'{{"title":"{secret}","description":"French"}}'
+    assert dispatch_calls[0][0][0] == expected_prompt
+    assert secret not in "".join(captured_logs)
+    assert output_secret not in "".join(captured_logs)
 
 
 @pytest.mark.asyncio

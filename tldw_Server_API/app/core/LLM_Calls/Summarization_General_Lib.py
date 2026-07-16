@@ -593,6 +593,7 @@ def analyze(
     chunked_summarization: bool = False, # Summarize chunks separately & combine
     chunk_options: Optional[dict] = None,
     model_override: Optional[str] = None,
+    input_is_literal_text: bool = False,
     *,
     app_config: Optional[dict[str, Any]] = None,
     credentials_resolved: bool = False,
@@ -618,6 +619,7 @@ def analyze(
                                Mutually exclusive with recursive_summarization.
         chunk_options: Dictionary of options for the chunking process (passed to improved_chunking_process).
                        Defaults: {'method': 'words', 'max_size': 1000, 'overlap': 100}.
+        input_is_literal_text: Treat string input as literal text instead of interpreting JSON-like content.
 
     Returns:
         - A string containing the final summary.
@@ -652,12 +654,17 @@ def analyze(
 
     try:
         # 1. Extract text content from input_data
-        text_content = extract_text_from_input(input_data)
+        if input_is_literal_text:
+            if not isinstance(input_data, str):
+                logging.error("Literal text analysis input must be a string.")
+                return "Error: Literal text analysis input must be a string."
+            text_content = input_data
+        else:
+            text_content = extract_text_from_input(input_data)
         if not text_content:
             logging.error("Could not extract text content from input data.")
             return "Error: Could not extract text content."
         logging.info(f"Extracted text content length: {len(text_content)} characters.")
-        logging.debug(f"Extracted text content (first 500 chars): {text_content[:500]}...")
 
         # --- Define helper to consume potential generators ---
         def consume_generator(gen):
@@ -807,7 +814,6 @@ def analyze(
                 return final_string_summary
             elif isinstance(final_string_summary, str):
                 logging.info(f"Summarization completed successfully. Final Length: {len(final_string_summary)}")
-                logging.debug(f"Final Summary (first 500 chars): {final_string_summary[:500]}...")
                 return final_string_summary
             else:
                 # This case should ideally not be reached if consume_generator works correctly

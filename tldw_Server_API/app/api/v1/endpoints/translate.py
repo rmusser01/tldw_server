@@ -16,7 +16,6 @@ from tldw_Server_API.app.core.config import load_and_log_configs
 from tldw_Server_API.app.core.DB_Management.Prompts_DB import PromptsDatabase
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
 from tldw_Server_API.app.core.Prompt_Management.service_prompts import (
-    get_service_prompt_definition,
     render_service_prompt_part,
     resolve_service_prompt,
 )
@@ -88,10 +87,9 @@ async def translate_text(
     provider = request.provider or _get_default_provider()
     model = request.model  # None means use provider default
 
-    definition = get_service_prompt_definition("media.text.translation")
-    resolved = resolve_service_prompt(db, definition.id)
+    resolved = resolve_service_prompt(db, "media.text.translation")
     prompt = render_service_prompt_part(
-        definition,
+        resolved.definition,
         "user_template",
         resolved.parts["user_template"],
         {"target_language": request.target_language, "text": request.text},
@@ -108,6 +106,7 @@ async def translate_text(
             temp=0.3,  # Low temperature for consistent translation
             streaming=False,
             model_override=model,
+            input_is_literal_text=True,
         )
 
         # Check for error response

@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
-from typing import NoReturn
+from collections.abc import Callable, Coroutine
+from typing import Any, NoReturn
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from fastapi.exceptions import RequestValidationError
+from fastapi.routing import APIRoute
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import require_api_key_scope
 from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import get_prompts_db_for_user
@@ -31,7 +34,31 @@ from tldw_Server_API.app.core.Prompt_Management.service_prompts import (
     validate_service_prompt_parts,
 )
 
-router = APIRouter()
+
+class _ServicePromptRoute(APIRoute):
+    """Keep FastAPI validation errors useful without echoing authored prompts."""
+
+    def get_route_handler(self) -> Callable[[Request], Coroutine[Any, Any, Response]]:
+        original_route_handler = super().get_route_handler()
+
+        async def sanitized_route_handler(request: Request) -> Response:
+            try:
+                return await original_route_handler(request)
+            except RequestValidationError as exc:
+                safe_errors = [
+                    {key: error[key] for key in ("type", "loc", "msg") if key in error}
+                    for error in exc.errors()
+                ]
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=safe_errors,
+                    headers={"Cache-Control": "no-store"},
+                ) from exc
+
+        return sanitized_route_handler
+
+
+router = APIRouter(route_class=_ServicePromptRoute)
 
 
 def _catalog_item(definition: ServicePromptDefinition) -> ServicePromptCatalogItemResponse:

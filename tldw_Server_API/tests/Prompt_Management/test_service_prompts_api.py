@@ -391,6 +391,24 @@ def test_service_prompt_structural_validation_stays_fastapi_native(
     assert isinstance(response.json()["detail"], list)
 
 
+def test_service_prompt_structural_validation_hides_authored_parts(api_context) -> None:
+    secret = "STRUCTURAL-BODY-MUST-NOT-LEAK"
+    response = api_context.client.put(
+        TRANSLATION_PATH,
+        json={
+            "parts": {
+                "system": secret,
+                "user_template": "Translate {text} into {target_language}.",
+            }
+        },
+    )
+
+    assert response.status_code == 422
+    assert isinstance(response.json()["detail"], list)
+    assert secret not in response.text
+    assert response.headers["cache-control"] == "no-store"
+
+
 def test_service_prompt_store_failure_is_content_free(api_context) -> None:
     class FailingDatabase:
         def get_service_prompt_override(self, _definition_id: str):
