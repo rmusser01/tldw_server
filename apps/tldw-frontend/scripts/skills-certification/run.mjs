@@ -516,6 +516,28 @@ export async function runSkillsCertification({ operations: suppliedOperations = 
     if (interrupted) fail('interrupted', 'signal received');
     if (teardownOutcome.status === 'rejected') fail('cleanup', 'process teardown failed');
     const summaryInput = { failures, surfaces };
+    const finalizerFailure = () => {
+      let runtimeDeleted = !profile;
+      try {
+        runtimeDeleted = operations.removeRuntime(profile) === true;
+      } catch {
+        runtimeDeleted = false;
+      }
+      try {
+        operations.removeEvidence(evidence);
+      } catch {
+        // Marker-safe removal failure remains artifact unsafe.
+      }
+      return buildCertificationSummary({
+        failures,
+        surfaces,
+        artifact_safety: { passed: false },
+        cleanup: {
+          children_closed: teardownOutcome.status === 'fulfilled',
+          runtime_deleted: runtimeDeleted,
+        },
+      });
+    };
     if (evidence) {
       try {
         finalSummary = await operations.finalize({
@@ -525,25 +547,7 @@ export async function runSkillsCertification({ operations: suppliedOperations = 
           teardownOutcome,
         });
       } catch {
-        let runtimeDeleted = !profile;
-        try {
-          runtimeDeleted = operations.removeRuntime(profile) === true;
-        } catch {
-          runtimeDeleted = false;
-        }
-        try {
-          operations.removeEvidence(evidence);
-        } catch {
-          // Artifact safety remains failed when marker-safe removal cannot complete.
-        }
-        finalSummary = buildCertificationSummary({
-          ...summaryInput,
-          artifact_safety: { passed: false },
-          cleanup: {
-            children_closed: teardownOutcome.status === 'fulfilled',
-            runtime_deleted: runtimeDeleted,
-          },
-        });
+        finalSummary = finalizerFailure();
       }
     } else {
       finalSummary = buildCertificationSummary({
@@ -566,12 +570,7 @@ export async function runSkillsCertification({ operations: suppliedOperations = 
             teardownOutcome,
           });
         } catch {
-          finalSummary = buildCertificationSummary({
-            failures,
-            surfaces,
-            artifact_safety: finalSummary.artifact_safety,
-            cleanup: finalSummary.cleanup,
-          });
+          finalSummary = finalizerFailure();
         }
       } else {
         finalSummary = buildCertificationSummary({
@@ -595,12 +594,7 @@ export async function runSkillsCertification({ operations: suppliedOperations = 
             teardownOutcome,
           });
         } catch {
-          finalSummary = buildCertificationSummary({
-            failures,
-            surfaces,
-            artifact_safety: finalSummary.artifact_safety,
-            cleanup: finalSummary.cleanup,
-          });
+          finalSummary = finalizerFailure();
         }
       } else
         finalSummary = buildCertificationSummary({
@@ -609,6 +603,11 @@ export async function runSkillsCertification({ operations: suppliedOperations = 
           artifact_safety: finalSummary?.artifact_safety,
           cleanup: finalSummary?.cleanup,
         });
+      try {
+        removeSignalHandlers();
+      } catch {
+        // A single retry handles a partially removed listener pair without looping.
+      }
     }
   }
   return finalSummary;

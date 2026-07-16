@@ -227,15 +227,21 @@ export function installCertificationSignalHandlers({
   processObject.on('SIGINT', handleSigint);
   processObject.on('SIGTERM', handleSigterm);
 
-  let removed = false;
+  let sigintRemoved = false;
+  let sigtermRemoved = false;
   return () => {
-    if (removed) {
+    if (sigintRemoved && sigtermRemoved) {
       return;
     }
     const remove =
       processObject.off?.bind(processObject) ?? processObject.removeListener.bind(processObject);
-    remove('SIGINT', handleSigint);
-    remove('SIGTERM', handleSigterm);
-    removed = true;
+    if (!sigintRemoved) {
+      remove('SIGINT', handleSigint);
+      sigintRemoved = true;
+    }
+    if (!sigtermRemoved) {
+      remove('SIGTERM', handleSigterm);
+      sigtermRemoved = true;
+    }
   };
 }

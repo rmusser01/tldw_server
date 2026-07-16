@@ -106,12 +106,10 @@ function defaultTaskkill(pid, timeoutMs) {
       if (settled) return
       settled = true
       clearTimeout(timer)
-      taskkill.removeAllListeners("error")
-      taskkill.removeAllListeners("close")
       if (error) reject(error)
       else resolve()
     }
-    const timer = setTimeout(() => { taskkill.kill(); finish(new Error(`taskkill.exe timed out for PID ${pid}`)) }, timeoutMs)
+    const timer = setTimeout(() => { try { taskkill.kill() } catch {} ; finish(new Error(`taskkill.exe timed out for PID ${pid}`)) }, timeoutMs)
     taskkill.once("error", finish)
     taskkill.once("close", (code) => finish(code === 0 ? undefined : new Error(`taskkill.exe failed for PID ${pid} with exit code ${code}`)))
   })

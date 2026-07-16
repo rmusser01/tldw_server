@@ -989,13 +989,14 @@ describe('Skills certification runner', () => {
       .fn()
       .mockImplementationOnce(
         () =>
-          new Promise((resolve) =>
-            (releaseFinalizer = () =>
-              resolve({
-                artifact_safety: { passed: true },
-                cleanup: { children_closed: true, runtime_deleted: true },
-                status: 'passed',
-              }))
+          new Promise(
+            (resolve) =>
+              (releaseFinalizer = () =>
+                resolve({
+                  artifact_safety: { passed: true },
+                  cleanup: { children_closed: true, runtime_deleted: true },
+                  status: 'passed',
+                }))
           )
       )
       .mockImplementation(async ({ summaryInput }) => ({
@@ -1038,5 +1039,41 @@ describe('Skills certification runner', () => {
     const summary = await run;
     expect(test.operations.finalize).toHaveBeenCalledTimes(1);
     expect(summary.primary_category).toBe('interrupted');
+  });
+
+  it('uses marker-safe cleanup when an interrupted refresh finalizer rejects', async () => {
+    let onSignal: () => void;
+    let release: () => void;
+    const test = harness({
+      installHandlers: vi.fn(({ onSignal: captured }) => {
+        onSignal = captured;
+        return vi.fn();
+      }),
+    });
+    test.operations.removeRuntime = vi.fn(() => true);
+    test.operations.removeEvidence = vi.fn(() => true);
+    test.operations.finalize = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise(
+            (resolve) =>
+              (release = () =>
+                resolve({
+                  artifact_safety: { passed: true },
+                  cleanup: { children_closed: true, runtime_deleted: true },
+                }))
+          )
+      )
+      .mockRejectedValueOnce(new Error('refresh failed'));
+    const summaryPromise = runSkillsCertification({ operations: test.operations });
+    await vi.waitFor(() => expect(test.operations.finalize).toHaveBeenCalled());
+    onSignal();
+    release();
+    const summary = await summaryPromise;
+    expect(test.operations.removeRuntime).toHaveBeenCalled();
+    expect(test.operations.removeEvidence).toHaveBeenCalled();
+    expect(summary.artifact_safety.passed).toBe(false);
+    expect(summary.failures.map((failure) => failure.category)).toContain('interrupted');
   });
 });
