@@ -28,8 +28,8 @@ class _FakeResponse:
         return self._json
 
     def iter_lines(self):
-        for l in self._lines:
-            yield l
+        for line in self._lines:
+            yield line
 
     def close(self):
         return None
@@ -44,24 +44,6 @@ class _FakeStreamCtx:
 
     def __exit__(self, exc_type, exc, tb):
         return False
-
-
-class _FakeClient:
-    def __init__(self, *args, **kwargs):
-        pass
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc, tb):
-        return False
-
-    def post(self, url: str, json: Dict[str, Any], headers: Dict[str, str]):
-        assert "chat/completions" in url
-        return _FakeResponse(200)
-
-    def stream(self, method: str, url: str, json: Dict[str, Any], headers: Dict[str, str]):
-        return _FakeStreamCtx(_FakeResponse(200))
 
 
 @pytest.fixture(autouse=True)
@@ -305,21 +287,60 @@ def test_configured_custom_byok_app_config_is_used_then_stripped_before_validati
 
 
 @pytest.mark.parametrize("adapter_name", ["novita", "poe", "together"])
-def test_public_custom_subclasses_never_use_configured_local_transport(
+def test_public_custom_subclasses_use_checked_ordinary_egress_and_strip_context(
     monkeypatch: pytest.MonkeyPatch,
     adapter_name: str,
 ):
     from tldw_Server_API.app.core.LLM_Calls.adapter_registry import ChatProviderRegistry
     from tldw_Server_API.app.core.LLM_Calls.providers import custom_openai_adapter
 
-    monkeypatch.setattr(custom_openai_adapter, "http_client_factory", _FakeClient)
+    validated: list[dict[str, Any]] = []
+    captured: dict[str, Any] = {}
+
+    def _validate(_provider: str, request: dict[str, Any]) -> dict[str, Any]:
+        validated.append(dict(request))
+        return request
+
+    def _fetch(**kwargs: Any) -> _FakeResponse:
+        captured.update(kwargs)
+        return _FakeResponse(200)
+
+    monkeypatch.setattr(custom_openai_adapter, "validate_payload", _validate)
+    monkeypatch.setattr(
+        custom_openai_adapter,
+        "http_client_factory",
+        lambda **_kwargs: pytest.fail("public provider used legacy client factory"),
+        raising=False,
+    )
 
     adapter = ChatProviderRegistry().get_adapter(adapter_name)
     assert adapter is not None
-    adapter.http_fetcher = lambda **_kwargs: pytest.fail("public provider used configured fetcher")
-    result = adapter.chat({"messages": [{"role": "user", "content": "hi"}], "model": "model"})
+    adapter.http_fetcher = _fetch
+    reserved = {
+        "configured_endpoint",
+        "configured_endpoint_base_url",
+        "configured_endpoint_scope",
+        "http_client_factory",
+        "http_fetcher",
+        "http_streamer",
+    }
+    result = adapter.chat(
+        {
+            "messages": [{"role": "user", "content": "hi"}],
+            "model": "model",
+            "configured_endpoint": object(),
+            "configured_endpoint_base_url": "http://attacker.invalid/v1",
+            "configured_endpoint_scope": object(),
+            "http_client_factory": object(),
+            "http_fetcher": object(),
+            "http_streamer": object(),
+        }
+    )
 
     assert result["choices"][0]["message"]["content"] == "ok"
+    assert captured["configured_endpoint"] is None
+    assert reserved.isdisjoint(validated[0])
+    assert reserved.isdisjoint(captured["json"])
 
 
 def test_public_custom_subclass_does_not_accept_configured_custom_endpoint_alias(
@@ -338,6 +359,58 @@ def test_public_custom_subclass_does_not_accept_configured_custom_endpoint_alias
                 "novita_base_url": "http://attacker.invalid/v1",
             }
         )
+
+
+@pytest.mark.parametrize("reason_code", ["origin_mismatch", "tls_pin_mismatch", "dns_unresolved"])
+def test_public_custom_preserves_egress_policy_error_sync_and_async(
+    monkeypatch: pytest.MonkeyPatch,
+    reason_code: str,
+):
+    import asyncio
+    from contextlib import contextmanager
+
+    from tldw_Server_API.app.core.LLM_Calls.providers import custom_openai_adapter
+
+    error = EgressPolicyError("sanitized", reason_code=reason_code)
+
+    def _fetch(**_kwargs):
+        raise error
+
+    @contextmanager
+    def _stream(**_kwargs):
+        raise error
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(
+        custom_openai_adapter,
+        "http_client_factory",
+        lambda **_kwargs: pytest.fail("public provider used legacy client factory"),
+        raising=False,
+    )
+    adapter = custom_openai_adapter.NovitaAdapter()
+    adapter.http_fetcher = _fetch
+    adapter.http_streamer = _stream
+    request = {"messages": [{"role": "user", "content": "hi"}], "model": "model"}
+
+    with pytest.raises(EgressPolicyError) as sync_exc:
+        adapter.chat(request)
+    assert sync_exc.value.reason_code == reason_code
+
+    with pytest.raises(EgressPolicyError) as stream_exc:
+        list(adapter.stream(request))
+    assert stream_exc.value.reason_code == reason_code
+
+    with pytest.raises(EgressPolicyError) as async_exc:
+        asyncio.run(adapter.achat(request))
+    assert async_exc.value.reason_code == reason_code
+
+    async def _consume() -> None:
+        async for _item in adapter.astream(request):
+            pass
+
+    with pytest.raises(EgressPolicyError) as astream_exc:
+        asyncio.run(_consume())
+    assert astream_exc.value.reason_code == reason_code
 
 
 @pytest.mark.parametrize("reason_code", ["origin_mismatch", "tls_pin_mismatch", "dns_unresolved"])

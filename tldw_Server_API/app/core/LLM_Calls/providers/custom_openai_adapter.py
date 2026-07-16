@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import os
 from collections.abc import AsyncIterator, Iterable
-from contextlib import ExitStack
 from typing import Any
 
 from tldw_Server_API.app.core.custom_openai_providers import (
@@ -12,7 +11,6 @@ from tldw_Server_API.app.core.custom_openai_providers import (
     custom_openai_section_name,
 )
 from tldw_Server_API.app.core.exceptions import EgressPolicyError
-from tldw_Server_API.app.core.http_client import create_client
 from tldw_Server_API.app.core.http_client import fetch as _hc_fetch
 from tldw_Server_API.app.core.http_client import stream_response as _hc_stream_response
 from tldw_Server_API.app.core.LLM_Calls.capability_registry import validate_payload
@@ -31,8 +29,6 @@ from tldw_Server_API.app.core.LLM_Calls.streaming import wrap_sync_stream
 from tldw_Server_API.app.core.testing import is_truthy
 
 from .base import ChatProvider
-
-http_client_factory = create_client
 
 
 class CustomOpenAIAdapter(ChatProvider):
@@ -252,11 +248,9 @@ class CustomOpenAIAdapter(ChatProvider):
             payload = merge_extra_body(payload, request)
             headers = merge_extra_headers(headers, request)
             try:
-                if not self._is_configured_custom():
-                    with http_client_factory(timeout=timeout or 120.0) as client:
-                        resp = client.post(url, headers=headers, json=payload)
-                        resp.raise_for_status()
-                        return self._normalize_response(resp.json())
+                redirect_options = (
+                    {} if self._is_configured_custom() else {"allow_redirects": False}
+                )
                 resp = self.http_fetcher(
                     method="POST",
                     url=url,
@@ -264,6 +258,7 @@ class CustomOpenAIAdapter(ChatProvider):
                     headers=headers,
                     json=payload,
                     timeout=timeout or 120.0,
+                    **redirect_options,
                 )
                 try:
                     resp.raise_for_status()
@@ -289,25 +284,14 @@ class CustomOpenAIAdapter(ChatProvider):
             payload = merge_extra_body(payload, request)
             headers = merge_extra_headers(headers, request)
             try:
-                with ExitStack() as stack:
-                    if self._is_configured_custom():
-                        response_context = self.http_streamer(
-                            method="POST",
-                            url=url,
-                            configured_endpoint=endpoint.scope if endpoint else None,
-                            headers=headers,
-                            json=payload,
-                            timeout=timeout or 120.0,
-                        )
-                    else:
-                        client = stack.enter_context(http_client_factory(timeout=timeout or 120.0))
-                        response_context = client.stream(
-                            "POST",
-                            url,
-                            headers=headers,
-                            json=payload,
-                        )
-                    resp = stack.enter_context(response_context)
+                with self.http_streamer(
+                    method="POST",
+                    url=url,
+                    configured_endpoint=endpoint.scope if endpoint else None,
+                    headers=headers,
+                    json=payload,
+                    timeout=timeout or 120.0,
+                ) as resp:
                     resp.raise_for_status()
                     seen_done = False
                     for raw in resp.iter_lines():
