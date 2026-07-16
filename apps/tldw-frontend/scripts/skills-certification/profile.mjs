@@ -1,7 +1,6 @@
 import {
   accessSync,
   constants,
-  copyFileSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -230,8 +229,7 @@ export function createSkillsCertificationProfile({ repoRoot, temporaryBase }) {
     });
 
     const sourceConfigPath = path.join(resolvedRepoRoot, 'tldw_Server_API/Config_Files/config.txt');
-    copyFileSync(sourceConfigPath, profile.configPath);
-    let configText = scrubCredentialValues(readFileSync(profile.configPath, 'utf8'));
+    let configText = scrubCredentialValues(readFileSync(sourceConfigPath, 'utf8'));
     configText = patchIniValue(configText, 'Setup', 'enable_first_time_setup', 'true');
     configText = patchIniValue(configText, 'Setup', 'setup_completed', 'true');
     configText = patchIniValue(configText, 'AuthNZ', 'auth_mode', 'single_user');
