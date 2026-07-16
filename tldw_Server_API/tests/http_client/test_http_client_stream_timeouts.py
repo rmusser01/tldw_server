@@ -2079,3 +2079,197 @@ async def test_aiohttp_sse_honors_retry_after(monkeypatch):
     assert calls == 2
     assert delays == [17.0]
     assert events == ["ok"]
+@requires_httpx
+@pytest.mark.asyncio
+async def test_stream_committed_response_httpx_does_not_retry_first_byte_failure(monkeypatch):
+    import httpx
+
+    from tldw_Server_API.app.core import http_client as hc
+
+    attempts = 0
+    closes = 0
+    statuses: list[int] = []
+    error = hc.NetworkError("first byte failed")
+
+    @asynccontextmanager
+    async def fake_httpx_stream_io(**_kwargs):
+        nonlocal attempts, closes
+        attempts += 1
+        request = httpx.Request("GET", "http://93.184.216.34/stream")
+        response = httpx.Response(200, request=request)
+
+        async def body():
+            raise error
+            yield b""  # pragma: no cover
+
+        try:
+            yield response, body()
+        finally:
+            closes += 1
+
+    async def no_sleep(_delay: float) -> None:
+        return None
+
+    def on_response(status: int, _headers: Mapping[str, str]) -> None:
+        statuses.append(status)
+
+    monkeypatch.setattr(hc, "_httpx_stream_io", fake_httpx_stream_io)
+    monkeypatch.setattr(hc.asyncio, "sleep", no_sleep)
+
+    with pytest.raises(hc.NetworkError) as exc_info:
+        async for _ in hc._astream_bytes_httpx(
+            method="GET",
+            url="http://93.184.216.34/stream",
+            client=object(),
+            retry=hc.RetryPolicy(attempts=2),
+            on_response=on_response,
+        ):
+            pass
+
+    assert exc_info.value is error
+    assert attempts == 1
+    assert statuses == [200]
+    assert closes == 1
+
+
+@requires_aiohttp
+@pytest.mark.asyncio
+async def test_stream_committed_response_aiohttp_does_not_retry_first_byte_failure(monkeypatch):
+    from tldw_Server_API.app.core import http_client as hc
+
+    attempts = 0
+    closes = 0
+    statuses: list[int] = []
+    error = hc.NetworkError("first byte failed")
+
+    @asynccontextmanager
+    async def fake_aiohttp_stream_io(**_kwargs):
+        nonlocal attempts, closes
+        attempts += 1
+
+        async def body():
+            raise error
+            yield b""  # pragma: no cover
+
+        try:
+            yield AioStreamResponse("http://93.184.216.34/stream"), body()
+        finally:
+            closes += 1
+
+    async def no_sleep(_delay: float) -> None:
+        return None
+
+    async def on_response(status: int, _headers: Mapping[str, str]) -> None:
+        statuses.append(status)
+
+    monkeypatch.setattr(hc, "_aiohttp_stream_io", fake_aiohttp_stream_io)
+    monkeypatch.setattr(hc.asyncio, "sleep", no_sleep)
+
+    with pytest.raises(hc.NetworkError) as exc_info:
+        async for _ in hc._astream_bytes_aiohttp(
+            method="GET",
+            url="http://93.184.216.34/stream",
+            client=object(),
+            retry=hc.RetryPolicy(attempts=2),
+            on_response=on_response,
+        ):
+            pass
+
+    assert exc_info.value is error
+    assert attempts == 1
+    assert statuses == [200]
+    assert closes == 1
+
+
+@requires_httpx
+@pytest.mark.asyncio
+async def test_stream_uncommitted_response_httpx_retries_first_byte_failure(monkeypatch):
+    import httpx
+
+    from tldw_Server_API.app.core import http_client as hc
+
+    attempts = 0
+    closes = 0
+
+    @asynccontextmanager
+    async def fake_httpx_stream_io(**_kwargs):
+        nonlocal attempts, closes
+        attempts += 1
+        current_attempt = attempts
+        request = httpx.Request("GET", "http://93.184.216.34/stream")
+        response = httpx.Response(200, request=request)
+
+        async def body():
+            if current_attempt == 1:
+                raise hc.NetworkError("first byte failed")
+            yield b"ok"
+
+        try:
+            yield response, body()
+        finally:
+            closes += 1
+
+    async def no_sleep(_delay: float) -> None:
+        return None
+
+    monkeypatch.setattr(hc, "_httpx_stream_io", fake_httpx_stream_io)
+    monkeypatch.setattr(hc.asyncio, "sleep", no_sleep)
+
+    chunks = [
+        chunk
+        async for chunk in hc._astream_bytes_httpx(
+            method="GET",
+            url="http://93.184.216.34/stream",
+            client=object(),
+            retry=hc.RetryPolicy(attempts=2),
+        )
+    ]
+
+    assert chunks == [b"ok"]
+    assert attempts == 2
+    assert closes == 2
+
+
+@requires_aiohttp
+@pytest.mark.asyncio
+async def test_stream_uncommitted_response_aiohttp_retries_first_byte_failure(monkeypatch):
+    from tldw_Server_API.app.core import http_client as hc
+
+    attempts = 0
+    closes = 0
+
+    @asynccontextmanager
+    async def fake_aiohttp_stream_io(**_kwargs):
+        nonlocal attempts, closes
+        attempts += 1
+        current_attempt = attempts
+
+        async def body():
+            if current_attempt == 1:
+                raise hc.NetworkError("first byte failed")
+            yield b"ok"
+
+        try:
+            yield AioStreamResponse("http://93.184.216.34/stream"), body()
+        finally:
+            closes += 1
+
+    async def no_sleep(_delay: float) -> None:
+        return None
+
+    monkeypatch.setattr(hc, "_aiohttp_stream_io", fake_aiohttp_stream_io)
+    monkeypatch.setattr(hc.asyncio, "sleep", no_sleep)
+
+    chunks = [
+        chunk
+        async for chunk in hc._astream_bytes_aiohttp(
+            method="GET",
+            url="http://93.184.216.34/stream",
+            client=object(),
+            retry=hc.RetryPolicy(attempts=2),
+        )
+    ]
+
+    assert chunks == [b"ok"]
+    assert attempts == 2
+    assert closes == 2
