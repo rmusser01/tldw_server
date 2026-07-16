@@ -265,6 +265,47 @@ async def test_async_json_max_bytes_guard_uses_actual_body_despite_short_content
 
 @requires_httpx
 @pytest.mark.asyncio
+async def test_async_json_response_callback_can_classify_status_before_parsing():
+    import httpx
+
+    from tldw_Server_API.app.core.http_client import (
+        RetryPolicy,
+        afetch_json,
+        create_async_client,
+    )
+
+    class RejectedCredential(Exception):
+        pass
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            401,
+            request=request,
+            json={"error": "sensitive upstream detail"},
+        )
+
+    async def on_response(status: int, headers: Mapping[str, str]) -> None:
+        assert status == 401
+        assert "application/json" in headers["content-type"]
+        raise RejectedCredential
+
+    transport = httpx.MockTransport(handler)
+    client = create_async_client(transport=transport)
+    try:
+        with pytest.raises(RejectedCredential):
+            await afetch_json(
+                method="GET",
+                url="http://93.184.216.34/models",
+                client=client,
+                retry=RetryPolicy(attempts=1),
+                on_response=on_response,
+            )
+    finally:
+        await client.aclose()
+
+
+@requires_httpx
+@pytest.mark.asyncio
 async def test_stream_cancellation_propagates():
     import httpx
     from tldw_Server_API.app.core.http_client import astream_bytes, create_async_client

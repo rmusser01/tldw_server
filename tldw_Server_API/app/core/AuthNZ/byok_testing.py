@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-from typing import Any
+from typing import Any, Literal
 
 from tldw_Server_API.app.core.AuthNZ.byok_config import build_app_config_overrides
 from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import normalize_provider_name
@@ -14,12 +14,27 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import (
 )
 from tldw_Server_API.app.core.Chat.chat_orchestrator import chat_api_call
 from tldw_Server_API.app.core.config import load_comprehensive_config
+from tldw_Server_API.app.core.http_client import RetryPolicy, afetch_json
 from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import normalize_provider
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import list_registered_providers
 from tldw_Server_API.app.core.testing import is_test_mode
+from tldw_Server_API.app.core.TTS.gateway_catalog import (
+    MAX_DISCOVERY_BYTES,
+    _parse_discovered_models,
+)
+from tldw_Server_API.app.core.TTS.gateway_config import build_gateway_url
 
 _INVALID_TEST_KEY_PREFIXES = ("invalid-", "test-invalid-", "bad-key-", "dummy-invalid-")
+GatewayVerificationStatus = Literal["verified", "stored-unverified", "rejected"]
+
+
+class _GatewayCredentialRejected(Exception):
+    pass
+
+
+class _GatewayProbeUnavailable(Exception):
+    pass
 
 
 def _is_test_mode() -> bool:
@@ -76,6 +91,48 @@ def resolve_default_model_for_provider(provider: str) -> str | None:
 
 def build_app_config_for_provider(provider: str, credential_fields: dict[str, Any] | None) -> dict[str, Any]:
     return build_app_config_overrides(provider, credential_fields)
+
+
+async def probe_gateway_credentials(
+    *,
+    spec: Any,
+    api_key: str,
+) -> GatewayVerificationStatus:
+    """Probe configured model discovery without issuing a synthesis request."""
+    if (
+        not bool(getattr(spec, "enabled", False))
+        or not bool(getattr(getattr(spec, "discovery", None), "enabled", False))
+        or not getattr(spec, "models_path", None)
+    ):
+        return "stored-unverified"
+
+    async def _classify_status(status: int, _headers: Any) -> None:
+        if status in {401, 403}:
+            raise _GatewayCredentialRejected
+        if status < 200 or status >= 300:
+            raise _GatewayProbeUnavailable
+
+    headers = dict(getattr(spec, "headers", ()) or ())
+    headers["Authorization"] = f"Bearer {api_key}"
+    try:
+        payload = await afetch_json(
+            method="GET",
+            url=str(build_gateway_url(spec.base_url, spec.models_path)),
+            params=dict(getattr(spec, "discovery_query", ()) or ()),
+            headers=headers,
+            timeout=spec.discovery.timeout_seconds,
+            retry=RetryPolicy(attempts=1),
+            require_json_ct=True,
+            max_bytes=MAX_DISCOVERY_BYTES,
+            allow_redirects=False,
+            on_response=_classify_status,
+        )
+        _parse_discovered_models(payload)
+    except _GatewayCredentialRejected:
+        return "rejected"
+    except Exception:
+        return "stored-unverified"
+    return "verified"
 
 
 async def test_provider_credentials(

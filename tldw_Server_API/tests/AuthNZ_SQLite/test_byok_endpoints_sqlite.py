@@ -4,6 +4,7 @@ import sys
 import types
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.parse import parse_qs, urlparse
 
 import pytest
@@ -333,6 +334,254 @@ async def test_byok_endpoints_sqlite(tmp_path, monkeypatch):
         listing = client.get("/api/v1/users/keys", headers=user_headers)
         items = {item["provider"]: item for item in listing.json()["items"]}
         assert items["openai"]["source"] != "user"
+
+
+def _gateway_endpoint_spec(
+    backend_id: str,
+    *,
+    enabled: bool = True,
+    allow_user_api_key: bool = True,
+    api_key: str | None = None,
+    config_generation: str = "gateway-config-v1",
+):
+    return SimpleNamespace(
+        backend_id=backend_id,
+        enabled=enabled,
+        allow_user_api_key=allow_user_api_key,
+        api_key=api_key,
+        config_generation=config_generation,
+        base_url="https://gateway.example/v1/",
+        models_path="models",
+        headers=(),
+        discovery_query=(),
+        discovery=SimpleNamespace(enabled=True, timeout_seconds=1.0),
+    )
+
+
+@pytest.mark.asyncio
+async def test_gateway_byok_endpoints_sqlite(tmp_path, monkeypatch):
+    state = await _setup_byok_sqlite(tmp_path, monkeypatch)
+    user_id = int(state["user"]["id"])
+
+    from tldw_Server_API.app.api.v1.endpoints import user_keys as user_keys_endpoints
+    from tldw_Server_API.app.core.AuthNZ import byok_helpers, byok_runtime
+    from tldw_Server_API.app.core.AuthNZ.repos.user_provider_secrets_repo import (
+        AuthnzUserProviderSecretsRepo,
+    )
+    from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
+        decrypt_byok_payload,
+        loads_envelope,
+    )
+    from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
+    from tldw_Server_API.app.main import app
+
+    specs = {
+        "gateway:voice-lab": _gateway_endpoint_spec("gateway:voice-lab"),
+        "gateway:unverified": _gateway_endpoint_spec("gateway:unverified"),
+        "gateway:rejected": _gateway_endpoint_spec("gateway:rejected"),
+        "openrouter": _gateway_endpoint_spec("openrouter"),
+    }
+    monkeypatch.setattr(byok_helpers, "get_byok_gateway_specs", lambda: specs)
+    monkeypatch.setattr(
+        user_keys_endpoints,
+        "get_byok_gateway_spec",
+        lambda provider: specs.get(provider),
+        raising=False,
+    )
+
+    async def _fake_probe(*, spec, api_key):
+        if spec.backend_id == "gateway:rejected" or api_key.startswith("reject-"):
+            return "rejected"
+        if spec.backend_id == "gateway:unverified" or api_key.startswith("unverified-"):
+            return "stored-unverified"
+        return "verified"
+
+    monkeypatch.setattr(
+        user_keys_endpoints,
+        "probe_gateway_credentials",
+        _fake_probe,
+        raising=False,
+    )
+
+    users_db = UsersDB(state["pool"])
+    await users_db.initialize()
+    second_user = await users_db.create_user(
+        username="byok-gateway-user-two",
+        email="byok-gateway-user-two@example.com",
+        password_hash="hashed-user-two",
+        role="user",
+        is_active=True,
+        is_verified=True,
+        is_superuser=False,
+        storage_quota_mb=5120,
+        uuid_value=uuid.uuid4(),
+    )
+    second_user_id = int(second_user["id"])
+
+    user_headers = _auth_headers(await _issue_access_token(state["user"]))
+    second_headers = _auth_headers(await _issue_access_token(second_user))
+    admin_headers = _auth_headers(await _issue_access_token(state["admin"]))
+    repo = AuthnzUserProviderSecretsRepo(state["pool"])
+
+    with TestClient(app) as client:
+        for headers in (user_headers, admin_headers):
+            response = client.post(
+                "/api/v1/users/keys",
+                json={
+                    "provider": "gateway:voice-lab",
+                    "api_key": "authority-key",
+                    "credential_fields": {"base_url": "https://attacker.example/v1"},
+                },
+                headers=headers,
+            )
+            assert response.status_code == 400
+
+            for forbidden_metadata in (
+                {"headers": {"Authorization": "attacker"}},
+                {"connection": {"url": "https://attacker.example/v1"}},
+                {"authentication": {"scheme": "basic"}},
+            ):
+                response = client.post(
+                    "/api/v1/users/keys",
+                    json={
+                        "provider": "gateway:voice-lab",
+                        "api_key": "authority-key",
+                        "metadata": forbidden_metadata,
+                    },
+                    headers=headers,
+                )
+                assert response.status_code == 400
+
+        rejected = client.post(
+            "/api/v1/users/keys",
+            json={"provider": "gateway:rejected", "api_key": "reject-key"},
+            headers=user_headers,
+        )
+        assert rejected.status_code == 401
+        assert await repo.fetch_secret_for_user(user_id, "gateway:rejected") is None
+
+        unverified = client.post(
+            "/api/v1/users/keys",
+            json={"provider": "gateway:unverified", "api_key": "unverified-key"},
+            headers=user_headers,
+        )
+        assert unverified.status_code == 200, unverified.text
+        assert unverified.json()["status"] == "stored"
+        assert unverified.json()["verification_status"] == "stored-unverified"
+
+        created = client.post(
+            "/api/v1/users/keys",
+            json={"provider": "gateway:voice-lab", "api_key": "first-user-key"},
+            headers=user_headers,
+        )
+        assert created.status_code == 200, created.text
+        assert created.json()["status"] == "stored"
+        assert created.json()["verification_status"] == "verified"
+        assert "credential_scope_token" not in created.text
+        assert "first-user-key" not in created.text
+
+        second_created = client.post(
+            "/api/v1/users/keys",
+            json={"provider": "gateway:voice-lab", "api_key": "second-user-key"},
+            headers=second_headers,
+        )
+        assert second_created.status_code == 200, second_created.text
+
+        first_resolved = await byok_runtime.resolve_gateway_byok_credentials(
+            "gateway:voice-lab",
+            user_id=user_id,
+            gateway_spec=specs["gateway:voice-lab"],
+        )
+        second_resolved = await byok_runtime.resolve_gateway_byok_credentials(
+            "gateway:voice-lab",
+            user_id=second_user_id,
+            gateway_spec=specs["gateway:voice-lab"],
+        )
+        assert first_resolved.credential_scope_token
+        assert second_resolved.credential_scope_token
+        assert first_resolved.credential_scope_token != second_resolved.credential_scope_token
+
+        listing = client.get("/api/v1/users/keys", headers=user_headers)
+        assert listing.status_code == 200
+        items = {item["provider"]: item for item in listing.json()["items"]}
+        assert items["gateway:voice-lab"]["source"] == "user"
+        assert items["gateway:voice-lab"]["verification_status"] == "verified"
+        assert "credential_scope_token" not in listing.text
+
+        first_scope = first_resolved.credential_scope_token
+        rotated = client.post(
+            "/api/v1/users/keys",
+            json={"provider": "gateway:voice-lab", "api_key": "unverified-rotated-key"},
+            headers=user_headers,
+        )
+        assert rotated.status_code == 200, rotated.text
+        assert rotated.json()["verification_status"] == "stored-unverified"
+        rotated_resolved = await byok_runtime.resolve_gateway_byok_credentials(
+            "gateway:voice-lab",
+            user_id=user_id,
+            gateway_spec=specs["gateway:voice-lab"],
+        )
+        assert rotated_resolved.credential_scope_token != first_scope
+
+        openrouter_first = client.post(
+            "/api/v1/users/keys",
+            json={
+                "provider": "openrouter",
+                "api_key": "openrouter-first",
+                "credential_fields": {
+                    "org_id": "general-org",
+                    "project_id": "general-project",
+                },
+                "metadata": {
+                    "verification_status": "general-verified",
+                    "scope": "general-llm",
+                },
+            },
+            headers=user_headers,
+        )
+        assert openrouter_first.status_code == 200, openrouter_first.text
+
+        openrouter_second = client.post(
+            "/api/v1/users/keys",
+            json={"provider": "openrouter", "api_key": "unverified-openrouter-rotated"},
+            headers=user_headers,
+        )
+        assert openrouter_second.status_code == 200, openrouter_second.text
+        openrouter_row = await repo.fetch_secret_for_user(user_id, "openrouter")
+        assert openrouter_row is not None
+        openrouter_payload = decrypt_byok_payload(loads_envelope(openrouter_row["encrypted_blob"]))
+        assert openrouter_payload["credential_fields"] == {
+            "org_id": "general-org",
+            "project_id": "general-project",
+        }
+        openrouter_metadata = json.loads(openrouter_row["metadata"])
+        assert openrouter_metadata["verification_status"] == "general-verified"
+        assert openrouter_metadata["scope"] == "general-llm"
+
+        del specs["gateway:voice-lab"]
+        orphan_listing = client.get("/api/v1/users/keys", headers=user_headers)
+        orphan_items = {
+            item["provider"]: item for item in orphan_listing.json()["items"]
+        }
+        assert orphan_items["gateway:voice-lab"]["source"] == "disabled"
+
+        orphan_replace = client.post(
+            "/api/v1/users/keys",
+            json={"provider": "gateway:voice-lab", "api_key": "must-not-store"},
+            headers=user_headers,
+        )
+        assert orphan_replace.status_code == 403
+        orphan_test = client.post(
+            "/api/v1/users/keys/test",
+            json={"provider": "gateway:voice-lab"},
+            headers=user_headers,
+        )
+        assert orphan_test.status_code == 403
+        orphan_delete = client.delete(
+            "/api/v1/users/keys/gateway:voice-lab",
+            headers=user_headers,
+        )
+        assert orphan_delete.status_code == 204
 
 
 @pytest.mark.asyncio

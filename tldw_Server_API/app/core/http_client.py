@@ -3366,9 +3366,23 @@ async def afetch_json(
     client: httpx.AsyncClient | None = None,
     require_json_ct: bool = True,
     max_bytes: int | None = None,
+    on_response: ResponseHeadersCallback | None = None,
     **kwargs: Any,
 ) -> Any:
     r = await afetch(method=method, url=url, client=client, **kwargs)
+    if on_response is not None:
+        try:
+            await _invoke_response_callback(
+                on_response,
+                int(getattr(r, "status_code", getattr(r, "status", 0)) or 0),
+                getattr(r, "headers", {}) or {},
+            )
+        except asyncio.CancelledError:
+            await r.aclose()
+            raise
+        except Exception:
+            await r.aclose()
+            raise
     ctype = r.headers.get("content-type", "").lower()
     if require_json_ct and "application/json" not in ctype:
         await r.aclose()

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from typing import Any
 
 from tldw_Server_API.app.core.AuthNZ.principal_model import (
@@ -86,11 +87,40 @@ def is_byok_enabled() -> bool:
     return bool(settings.BYOK_ENCRYPTION_KEY)
 
 
+def get_byok_gateway_specs() -> Mapping[str, Any]:
+    """Return locally normalized gateway specs without discovery or network I/O."""
+    from tldw_Server_API.app.core.TTS.tts_config import get_tts_config_manager
+
+    return get_tts_config_manager().get_gateway_specs()
+
+
+def get_byok_gateway_spec(provider: str) -> Any | None:
+    """Return an enabled configured gateway for one canonical provider ID."""
+    from tldw_Server_API.app.core.TTS.gateway_config import canonicalize_gateway_id
+
+    try:
+        backend_id = canonicalize_gateway_id(normalize_provider_name(provider))
+    except ValueError:
+        return None
+    spec = get_byok_gateway_specs().get(backend_id)
+    return spec if spec is not None and bool(spec.enabled) else None
+
+
 def resolve_byok_allowlist() -> set[str]:
     settings = get_settings()
     raw = getattr(settings, "BYOK_ALLOWED_PROVIDERS", []) or []
     allowed = {normalize_provider_name(p) for p in raw if str(p).strip()}
-    return allowed or set(DEFAULT_BYOK_ALLOWED_PROVIDERS)
+    resolved = {
+        provider
+        for provider in (allowed or set(DEFAULT_BYOK_ALLOWED_PROVIDERS))
+        if not provider.startswith("gateway:")
+    }
+    resolved.update(
+        backend_id
+        for backend_id, spec in get_byok_gateway_specs().items()
+        if bool(spec.enabled) and bool(spec.allow_user_api_key)
+    )
+    return resolved
 
 
 def is_provider_allowlisted(provider: str) -> bool:
@@ -110,8 +140,21 @@ def validate_credential_fields(
         raise ValueError("credential_fields must be an object")
 
     provider_norm = normalize_provider_name(provider)
-    allowed_keys, required_keys = get_byok_credential_policy(provider_norm)
-    if allow_base_url and provider_norm in resolve_byok_base_url_allowlist():
+    gateway_spec = (
+        get_byok_gateway_spec(provider_norm)
+        if provider_norm.startswith("gateway:")
+        else None
+    )
+    is_named_gateway = provider_norm.startswith("gateway:") and gateway_spec is not None
+    if is_named_gateway:
+        allowed_keys, required_keys = set(), set()
+    else:
+        allowed_keys, required_keys = get_byok_credential_policy(provider_norm)
+    if (
+        not is_named_gateway
+        and allow_base_url
+        and provider_norm in resolve_byok_base_url_allowlist()
+    ):
         allowed_keys.add("base_url")
     cleaned: dict[str, Any] = {}
     for key, value in credential_fields.items():
@@ -153,10 +196,7 @@ def is_trusted_base_url_request(
     if is_trusted_base_url_principal(principal):
         return True
 
-    if _legacy_user_has_platform_admin_claims(user):
-        return True
-
-    return False
+    return bool(_legacy_user_has_platform_admin_claims(user))
 
 
 def validate_base_url_override(base_url: Any) -> str:
