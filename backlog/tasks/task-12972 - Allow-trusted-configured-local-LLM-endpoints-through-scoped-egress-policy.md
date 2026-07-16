@@ -4,7 +4,7 @@ title: Allow trusted configured local LLM endpoints through scoped egress policy
 status: Done
 assignee: []
 created_date: '2026-07-15 19:34'
-updated_date: '2026-07-16 02:01'
+updated_date: '2026-07-16 02:18'
 labels:
   - browser-extension
 dependencies: []
@@ -74,6 +74,8 @@ Stage 5 touched paths: apps/packages/ui/src/services/tldw/TldwModels.ts; apps/pa
 2026-07-15 final Stage 5 cache-race correction: strict focused RED failed 3 tests with 34 passing under both WebUI and extension configurations. A delayed clear-A echo after clear B replayed A and invalidated B ownership; clear-before-first-hydration returned a seeded stale record without reaching backend; and the outer cache independently accepted A/B/A replay. Inner seen tokens, locally pending tokens, and outer seen tokens now use bounded 64-entry insertion-order histories while lastAppliedInvalidationToken remains the active tombstone guard. A clear before hydration starts consumes the initial hydration slot; in-flight hydration retains the generation guard. Focused GREEN passed 37/37 in both configs. The exact planned four-file suites passed 52/52 WebUI and 52/52 extension. Full frontend TypeScript passed; pinned ESLint passed with 0 errors and 11 pre-existing warnings. Backend remains unchanged, so prior 492-test and zero-finding Bandit evidence remains valid. TASK-12972 and Stage 5 remain In Progress pending re-review.
 
 2026-07-15 final completion verification on committed implementation HEAD 61b46c7075: backend focused union 492/492 passed with 4 warnings; exact planned WebUI suite 52/52 passed; exact browser-extension suite 52/52 passed; full frontend TypeScript passed; pinned ESLint reported 0 errors and 11 pre-existing warnings; Bandit scanned 25,013 production Python LOC with 0 findings and 0 errors; git diff --check passed. Independent final specification, quality, and whole-branch reviews approved with no remaining findings. Live LAN UAT was skipped because no safe external local-model server/route was available. Follow-up TASK-12972.1 retains the deferred Novita/Poe/Together central-egress work.
+
+2026-07-15 post-completion live smoke: the requester supplied a llama.cpp server at 127.0.0.1:9099. GET /v1/models discovered Qwen3.6-27B-Uncensored-HauhauCS-Aggressive-Q8_K_P.gguf. The new checked exact-origin transport completed a non-streaming chat with HTTP 200 and choices present, then a streaming chat with HTTP 200, seven events, and a [DONE] terminator. This validates live loopback discovery and checked sync/stream transport. The original non-loopback/LAN case remains covered by automated tests rather than live UAT because the supplied server is bound to loopback.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
