@@ -6286,5 +6286,8 @@
   },
   "servicePrompts_migration_prepareFailed": {
     "message": "Unable to prepare this import. The browser-local values were preserved."
+  },
+  "servicePrompts_corrupt_rebound": {
+    "message": "The saved customization changed. The latest revision was loaded. Retry reset."
   }
 }

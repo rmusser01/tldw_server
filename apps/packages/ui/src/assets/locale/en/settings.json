@@ -96,7 +96,8 @@
     "corrupt": {
       "title": "Saved customization is unavailable",
       "description": "The saved value cannot be read safely. Reset it to restore the server default.",
-      "resetAction": "Reset corrupt customization"
+      "resetAction": "Reset corrupt customization",
+      "rebound": "The saved customization changed. The latest revision was loaded. Retry reset."
     },
     "conflict": {
       "title": "This prompt changed on the server.",

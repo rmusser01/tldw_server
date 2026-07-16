@@ -197,6 +197,7 @@ export const ServicePromptsSettings = () => {
   const selectedIdRef = React.useRef<string | null>(selectedId)
   const dirtyRef = React.useRef(false)
   const historyIndexRef = React.useRef(0)
+  const historyInitializedRef = React.useRef(false)
   const historyFocusRef = React.useRef<{
     element: HTMLElement | null
     id: string | null
@@ -220,7 +221,6 @@ export const ServicePromptsSettings = () => {
     scopeKey: string,
     definitionId?: string
   ): ActiveOperation => {
-    activeOperationRef.current?.controller.abort()
     const operation = {
       controller: new AbortController(),
       definitionId,
@@ -252,8 +252,6 @@ export const ServicePromptsSettings = () => {
   const activeKind = activeOperation?.kind ?? null
   const isSaving = activeKind === "save"
   const isResetting = activeKind === "reset"
-  const migrationLoading = activeKind === "migration-import" ||
-    activeKind === "migration-discard"
 
   React.useEffect(() => {
     scopeRef.current = scope
@@ -270,8 +268,11 @@ export const ServicePromptsSettings = () => {
   React.useEffect(() => {
     if (typeof window === "undefined") return
     const existing = window.history.state ?? {}
-    const existingIndex = getHistoryIndex(existing)
-    if (existingIndex !== null) historyIndexRef.current = existingIndex
+    if (!historyInitializedRef.current) {
+      const existingIndex = getHistoryIndex(existing)
+      if (existingIndex !== null) historyIndexRef.current = existingIndex
+      historyInitializedRef.current = true
+    }
     window.history.replaceState(
       { ...existing, servicePromptHistoryIndex: historyIndexRef.current },
       "",
@@ -490,6 +491,8 @@ export const ServicePromptsSettings = () => {
     const popstate = (event: PopStateEvent) => {
       if (suppressPopstateRef.current) {
         suppressPopstateRef.current = false
+        const index = getHistoryIndex(event.state)
+        if (index !== null) historyIndexRef.current = index
         const focusTarget = historyFocusRef.current
         const restored = focusTarget?.id
           ? document.getElementById(focusTarget.id)
@@ -583,6 +586,7 @@ export const ServicePromptsSettings = () => {
     setOperationError(null)
     const next = new URLSearchParams(searchParams)
     next.set("prompt", id)
+    historyIndexRef.current += 1
     setSearchParams(next)
   }
 
@@ -835,6 +839,13 @@ export const ServicePromptsSettings = () => {
               setOperationError(t("servicePrompts.errors.resetFailed", {
                 defaultValue: "Unable to reset this workflow prompt."
               }))
+            } else {
+              const message = t("servicePrompts.corrupt.rebound", {
+                defaultValue:
+                  "The saved customization changed. The latest revision was loaded. Retry reset."
+              })
+              setOperationError(message)
+              setOperationAnnouncement(message)
             }
           }
         } else {
@@ -857,7 +868,7 @@ export const ServicePromptsSettings = () => {
     })
 
   const importMigration = async () => {
-    if (!scope || migrationItems.length === 0 || migrationLoading) return
+    if (!scope || migrationItems.length === 0 || activeKind !== null) return
     const operationScope = scope.scopeKey
     const operation = startOperation("migration-import", operationScope)
     setOperationAnnouncement("")
@@ -971,7 +982,7 @@ export const ServicePromptsSettings = () => {
   }
 
   const discardMigration = async () => {
-    if (!scope || migrationItems.length === 0 || migrationLoading) return
+    if (!scope || migrationItems.length === 0 || activeKind !== null) return
     let confirmed = false
     try {
       confirmed = await confirmDanger({
@@ -1250,9 +1261,8 @@ export const ServicePromptsSettings = () => {
               <div className="mt-3 flex flex-wrap gap-2">
                 <Button
                   type="primary"
-                  loading={migrationLoading}
-                  disabled={activeKind !== null && activeKind !== "save" &&
-                    activeKind !== "migration-import"}
+                  loading={activeKind === "migration-import"}
+                  disabled={activeKind !== null}
                   onClick={() => void importMigration()}
                 >
                   {t("servicePrompts.migration.importAction", {
@@ -1261,6 +1271,7 @@ export const ServicePromptsSettings = () => {
                 </Button>
                 <Button
                   danger
+                  loading={activeKind === "migration-discard"}
                   disabled={activeKind !== null}
                   onClick={() => void discardMigration()}
                 >
@@ -1354,7 +1365,7 @@ export const ServicePromptsSettings = () => {
                   }),
                   onClick: () => void resetPrompt(corruptRevision, true),
                   loading: isResetting,
-                  disabled: activeKind !== null && activeKind !== "reset"
+                  disabled: activeKind !== null
                 }}
               >
                 {operationError ? (
@@ -1444,7 +1455,7 @@ export const ServicePromptsSettings = () => {
                       }),
                       onClick: () => void reloadServerValue(),
                       loading: activeKind === "reload",
-                      disabled: activeKind !== null && activeKind !== "reload"
+                      disabled: activeKind !== null
                     }}
                   >
                     {t("servicePrompts.conflict.description", {
@@ -1549,8 +1560,7 @@ export const ServicePromptsSettings = () => {
                       danger
                       loading={isResetting}
                       disabled={detailQuery.data.source !== "user" || !draftIsCurrent ||
-                        (activeKind !== null && activeKind !== "save" &&
-                          activeKind !== "reset")}
+                        activeKind !== null}
                       onClick={() => void resetPrompt(draft.revision)}
                     >
                       {t("servicePrompts.actions.reset", {
