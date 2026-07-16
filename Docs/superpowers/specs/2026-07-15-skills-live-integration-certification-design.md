@@ -72,10 +72,12 @@ This is preferred over the alternatives:
 
 ## Architecture
 
-The runner lives under `apps/tldw-frontend/scripts/skills-certification/` and is
-exposed through one package command:
+The runner lives under `apps/tldw-frontend/scripts/skills-certification/`. The
+command is owned by `apps/tldw-frontend/package.json` and is invoked from that
+package directory:
 
-```text
+```sh
+cd apps/tldw-frontend
 bun run e2e:skills:certify
 ```
 
@@ -312,11 +314,13 @@ Each surface has one of three recorded states:
 
 `not_run_infrastructure` is a failure, never a skip.
 
-The runner attempts the extension after a WebUI behavior failure. Before each
-surface it checks backend health. If the backend crashed during the WebUI run,
-the runner may restart it once on the same port with the same runtime profile
-solely to collect extension evidence. The top-level result remains failed even
-if that restart succeeds and the extension passes.
+The runner attempts the extension after any WebUI-specific failure when the
+shared backend remains usable. This includes WebUI startup, browser launch, and
+workflow failures; the extension does not depend on the WebUI frontend process.
+Before each surface the runner checks backend health. If the backend crashed
+during the WebUI phase, the runner may restart it once on the same port with the
+same runtime profile solely to collect extension evidence. The top-level result
+remains failed even if that restart succeeds and the extension passes.
 
 If the backend cannot be restored on the same URL, the extension is recorded as
 `not_run_infrastructure`. Once browser execution begins, no fresh-port restart
@@ -386,8 +390,9 @@ Finalization order is fixed:
 
 If the scan finds a credential, the evidence root is removed and only a generic
 artifact-safety failure is written to stderr. Passing certification requires
-successful runtime deletion. An explicit diagnostic preserve mode may retain
-the runtime for debugging, but the summary must mark that run as non-certifying.
+successful runtime deletion. This task does not add a runtime-preservation
+mode; developers can run the underlying focused specs separately when they need
+interactive debugging.
 
 The command exits zero only when both surfaces pass, all postconditions pass,
 relay ownership is proven, evidence is safe, and cleanup succeeds.
