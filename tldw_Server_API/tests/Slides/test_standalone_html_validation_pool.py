@@ -1,0 +1,558 @@
+from __future__ import annotations
+
+import asyncio
+import json
+import multiprocessing
+import os
+import signal
+import subprocess
+import sys
+import textwrap
+import threading
+import time
+
+import pytest
+
+from tldw_Server_API.app.core.Slides import standalone_html_validation_pool as pool_module
+from tldw_Server_API.app.core.Slides.standalone_html_contracts import (
+    StandaloneHtmlValidationError,
+    StandaloneHtmlValidationResult,
+)
+from tldw_Server_API.app.core.Slides.standalone_html_validation_pool import (
+    StandaloneHtmlValidationPool,
+)
+from tldw_Server_API.app.core.Slides.standalone_html_validator import (
+    validate_standalone_html,
+)
+
+
+def _document(title: str = "Deck") -> str:
+    return (
+        "<!doctype html><html><head><meta charset=utf-8>"
+        f"<title>{title}</title><style>body{{color:#111}}</style></head>"
+        '<body><section class="slide"><h1>Ready</h1></section>'
+        "<script>document.addEventListener('keydown',()=>{});</script></body></html>"
+    )
+
+
+def _slow_validate(document: str | bytes, *, delivery_style: str | None = None):
+    time.sleep(0.25)
+    return validate_standalone_html(document, delivery_style=delivery_style)
+
+
+def _very_slow_validate(document: str | bytes, *, delivery_style: str | None = None):
+    time.sleep(2)
+    return validate_standalone_html(document, delivery_style=delivery_style)
+
+
+def _hang_on_marker(document: str | bytes, *, delivery_style: str | None = None):
+    source = document.decode("utf-8") if isinstance(document, bytes) else document
+    if "HANG-VALIDATOR" in source:
+        time.sleep(60)
+    return validate_standalone_html(document, delivery_style=delivery_style)
+
+
+def _malformed_title_on_marker(
+    document: str | bytes,
+    *,
+    delivery_style: str | None = None,
+) -> StandaloneHtmlValidationResult:
+    source = document.decode("utf-8") if isinstance(document, bytes) else document
+    if "MALFORMED-RESULT" in source:
+        return StandaloneHtmlValidationResult(
+            title="\ud800",
+            slide_count=1,
+            html_bytes=1,
+            html_sha256="0" * 64,
+            indexable_text="safe",
+        )
+    return validate_standalone_html(document, delivery_style=delivery_style)
+
+
+def _diagnostic_error(
+    _document_source: str | bytes,
+    *,
+    delivery_style: str | None = None,
+) -> StandaloneHtmlValidationResult:
+    del delivery_style
+    raise StandaloneHtmlValidationError(
+        "standalone_html_invalid_document",
+        status_code=422,
+        reason="html_parse_error",
+        line=7,
+        column=11,
+    )
+
+
+def test_spawn_worker_ready_handshake_has_no_eager_slides_imports() -> None:
+    context = multiprocessing.get_context("spawn")
+    parent_connection, child_connection = context.Pipe(duplex=True)
+    process = context.Process(
+        target=pool_module._validator_worker_main,
+        args=(child_connection, validate_standalone_html, True),
+    )
+    process.start()
+    child_connection.close()
+    try:
+        assert parent_connection.poll(10), "spawned validator never became ready"
+        assert parent_connection.recv() == (pool_module._IPC_VERSION, "ready", True)
+        parent_connection.send((pool_module._IPC_VERSION, "close"))
+        process.join(5)
+        assert not process.is_alive()
+    finally:
+        parent_connection.close()
+        if process.is_alive():
+            process.terminate()
+            process.join(2)
+        if process.is_alive():
+            process.kill()
+            process.join(2)
+
+
+def test_legacy_slides_package_exports_resolve_lazily_to_original_objects() -> None:
+    exports = {
+        "ConflictError": ("slides_db", "ConflictError"),
+        "InputError": ("slides_db", "InputError"),
+        "SchemaError": ("slides_db", "SchemaError"),
+        "SlidesDatabase": ("slides_db", "SlidesDatabase"),
+        "SlidesDatabaseError": ("slides_db", "SlidesDatabaseError"),
+        "SlidesGenerator": ("slides_generator", "SlidesGenerator"),
+        "export_presentation_bundle": ("slides_export", "export_presentation_bundle"),
+        "export_presentation_json": ("slides_export", "export_presentation_json"),
+        "export_presentation_markdown": ("slides_export", "export_presentation_markdown"),
+        "export_presentation_pdf": ("slides_export", "export_presentation_pdf"),
+    }
+    probe = textwrap.dedent(
+        f"""
+        import importlib
+        import json
+        import sys
+
+        package_name = "tldw_Server_API.app.core.Slides"
+        exports = {exports!r}
+        package = importlib.import_module(package_name)
+        heavy_modules = {{f"{{package_name}}.{{module}}" for module, _ in exports.values()}}
+        assert not (heavy_modules & sys.modules.keys())
+        assert package.__all__ == {list(exports)!r}
+        for name, (module, attribute) in exports.items():
+            actual = getattr(package, name)
+            expected = getattr(importlib.import_module(f"{{package_name}}.{{module}}"), attribute)
+            assert actual is expected
+        print(json.dumps({{"ok": True}}))
+        """
+    )
+    completed = subprocess.run(
+        [sys.executable, "-c", probe],
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr[-2_000:]
+    assert json.loads(completed.stdout.splitlines()[-1]) == {"ok": True}
+
+
+@pytest.mark.asyncio
+async def test_pool_starts_no_more_than_four_killable_subprocesses() -> None:
+    with pytest.raises(ValueError, match="four"):
+        StandaloneHtmlValidationPool(max_workers=5)
+
+    pool = StandaloneHtmlValidationPool(max_workers=4, mp_start_method="fork")
+    await pool.start()
+    pids = pool.worker_pids
+    try:
+        assert len(pids) == 4
+        assert len(set(pids)) == 4
+        assert all(pid > 0 for pid in pids)
+        assert all(name.startswith("standalone-html-validator-") for name in pool.worker_names)
+    finally:
+        await pool.close()
+
+
+@pytest.mark.asyncio
+async def test_interactive_queue_capacity_is_24_and_saturation_is_redacted_503() -> None:
+    pool = StandaloneHtmlValidationPool(
+        max_workers=1,
+        watchdog_seconds=5,
+        validator=_very_slow_validate,
+        mp_start_method="fork",
+    )
+    await pool.start()
+    blocker = asyncio.create_task(pool.validate(_document("active")))
+    for _ in range(100):
+        if pool.active_count == 1:
+            break
+        await asyncio.sleep(0.005)
+    tasks = [blocker]
+    tasks.extend(asyncio.create_task(pool.validate(_document(f"Deck {index}"))) for index in range(24))
+    try:
+        for _ in range(100):
+            if pool.interactive_waiting == 24:
+                break
+            await asyncio.sleep(0.005)
+        with pytest.raises(StandaloneHtmlValidationError) as caught:
+            await pool.validate(_document("never queued"))
+        assert caught.value.code == "standalone_html_validator_busy"
+        assert caught.value.status_code == 503
+        assert 1 <= (caught.value.retry_after or 0) <= 5
+    finally:
+        for task in tasks:
+            task.cancel()
+        _done, pending = await asyncio.wait(tasks, timeout=3)
+        assert not pending, [
+            (task.get_coro().__qualname__, [frame.f_code.co_name for frame in task.get_stack()]) for task in pending
+        ]
+        await pool.close()
+
+
+@pytest.mark.asyncio
+async def test_generation_queue_has_eight_reserved_slots_before_provider_dispatch() -> None:
+    pool = StandaloneHtmlValidationPool(max_workers=1, mp_start_method="fork")
+    reservations = [await pool.acquire_generation_reservation() for _ in range(8)]
+    try:
+        assert pool.generation_slots_in_use == 8
+        assert all(not reservation.consumed for reservation in reservations)
+        with pytest.raises(StandaloneHtmlValidationError) as caught:
+            await pool.acquire_generation_reservation()
+        assert caught.value.code == "standalone_html_validator_busy"
+        assert caught.value.status_code == 503
+    finally:
+        await asyncio.gather(*(reservation.release() for reservation in reservations))
+        await pool.close()
+
+
+@pytest.mark.asyncio
+async def test_generation_reservation_is_consumed_when_returned_document_is_queued() -> None:
+    pool = StandaloneHtmlValidationPool(max_workers=1, mp_start_method="fork")
+    reservation = await pool.acquire_generation_reservation()
+
+    result = await reservation.validate(_document("Generated"))
+
+    assert result.title == "Generated"
+    assert reservation.consumed is True
+    assert pool.generation_slots_in_use == 0
+    with pytest.raises(RuntimeError, match="consumed"):
+        await reservation.validate(_document("Twice"))
+    await pool.close()
+
+
+@pytest.mark.asyncio
+async def test_weighted_scheduling_serves_both_queues_without_starvation() -> None:
+    pool = StandaloneHtmlValidationPool(
+        max_workers=1,
+        watchdog_seconds=5,
+        validator=_slow_validate,
+        mp_start_method="fork",
+    )
+    blocker = asyncio.create_task(pool.validate(_document("Blocker")))
+    for _ in range(100):
+        if pool.active_count == 1:
+            break
+        await asyncio.sleep(0.005)
+
+    reservations = [await pool.acquire_generation_reservation() for _ in range(2)]
+    completed: list[str] = []
+
+    async def interactive(index: int) -> None:
+        await pool.validate(_document(f"I{index}"))
+        completed.append(f"I{index}")
+
+    async def generated(index: int) -> None:
+        await reservations[index].validate(_document(f"G{index}"))
+        completed.append(f"G{index}")
+
+    tasks = [asyncio.create_task(interactive(index)) for index in range(6)]
+    tasks += [asyncio.create_task(generated(index)) for index in range(2)]
+    try:
+        await blocker
+        await asyncio.gather(*tasks)
+        assert any(item.startswith("G") for item in completed[:4])
+        assert any(item.startswith("I") for item in completed[:4])
+        assert sorted(completed) == ["G0", "G1", "I0", "I1", "I2", "I3", "I4", "I5"]
+    finally:
+        await pool.close()
+
+
+@pytest.mark.asyncio
+async def test_watchdog_terminates_reaps_and_replaces_hung_worker() -> None:
+    pool = StandaloneHtmlValidationPool(
+        max_workers=1,
+        watchdog_seconds=0.05,
+        validator=_hang_on_marker,
+        mp_start_method="fork",
+    )
+    await pool.start()
+    old_pid = pool.worker_pids[0]
+
+    with pytest.raises(StandaloneHtmlValidationError) as caught:
+        await pool.validate(_document("HANG-VALIDATOR"))
+
+    assert caught.value.code == "standalone_html_validator_timeout"
+    assert caught.value.status_code == 503
+    assert pool.worker_pids[0] != old_pid
+    validate = await pool.validate(_document("Recovered"))
+    assert validate.title == "Recovered"
+    with pytest.raises(ProcessLookupError):
+        os.kill(old_pid, 0)
+    await pool.close()
+
+
+@pytest.mark.asyncio
+async def test_caller_cancellation_discards_work_and_replaces_active_worker() -> None:
+    pool = StandaloneHtmlValidationPool(
+        max_workers=1,
+        watchdog_seconds=5,
+        validator=_hang_on_marker,
+        mp_start_method="fork",
+    )
+    await pool.start()
+    old_pid = pool.worker_pids[0]
+    task = asyncio.create_task(pool.validate(_document("HANG-VALIDATOR")))
+    for _ in range(100):
+        if pool.active_count == 1:
+            break
+        await asyncio.sleep(0.005)
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    for _ in range(100):
+        if pool.worker_pids[0] != old_pid:
+            break
+        await asyncio.sleep(0.005)
+    assert pool.worker_pids[0] != old_pid
+    assert (await pool.validate(_document("After cancellation"))).title == "After cancellation"
+    await pool.close()
+
+
+@pytest.mark.asyncio
+async def test_source_never_appears_in_public_errors_logs_or_process_metadata(capsys) -> None:
+    secret = "TOP-SECRET-POOL-SOURCE"
+    pool = StandaloneHtmlValidationPool(max_workers=1, mp_start_method="fork")
+
+    with pytest.raises(StandaloneHtmlValidationError) as caught:
+        await pool.validate(_document(secret).replace("<h1>", '<h1 onclick="bad()">'))
+
+    captured = capsys.readouterr()
+    public = " ".join(
+        [
+            str(caught.value),
+            repr(caught.value),
+            captured.out,
+            captured.err,
+            repr(pool.worker_names),
+        ]
+    )
+    assert secret not in public
+    assert caught.value.code == "standalone_html_invalid_document"
+    await pool.close()
+
+
+@pytest.mark.asyncio
+async def test_close_terminates_and_reaps_every_worker() -> None:
+    pool = StandaloneHtmlValidationPool(max_workers=2, mp_start_method="fork")
+    await pool.start()
+    pids = pool.worker_pids
+
+    await pool.close()
+
+    assert pool.worker_pids == ()
+    for pid in pids:
+        with pytest.raises(ProcessLookupError):
+            os.kill(pid, 0)
+
+
+@pytest.mark.asyncio
+async def test_malformed_worker_response_fails_closed_without_stranding_capacity() -> None:
+    pool = StandaloneHtmlValidationPool(
+        max_workers=1,
+        validator=_malformed_title_on_marker,
+        mp_start_method="fork",
+    )
+    try:
+        with pytest.raises(StandaloneHtmlValidationError) as caught:
+            await asyncio.wait_for(pool.validate(_document("MALFORMED-RESULT")), 2)
+        assert caught.value.code == "validator_unavailable"
+        assert pool.active_count == 0
+        assert (await asyncio.wait_for(pool.validate(_document("Recovered")), 2)).title == "Recovered"
+    finally:
+        await pool.close()
+
+
+@pytest.mark.asyncio
+async def test_worker_error_diagnostics_survive_closed_ipc() -> None:
+    pool = StandaloneHtmlValidationPool(
+        max_workers=1,
+        validator=_diagnostic_error,
+        mp_start_method="fork",
+    )
+    try:
+        with pytest.raises(StandaloneHtmlValidationError) as caught:
+            await pool.validate(_document())
+        assert (caught.value.line, caught.value.column) == (7, 11)
+    finally:
+        await pool.close()
+
+
+@pytest.mark.asyncio
+async def test_generation_admission_repairs_a_dead_worker_before_provider_dispatch() -> None:
+    pool = StandaloneHtmlValidationPool(max_workers=1, mp_start_method="fork")
+    await pool.start()
+    old_pid = pool.worker_pids[0]
+    slot = pool._slots[0]
+    assert slot is not None
+    os.kill(old_pid, signal.SIGKILL)
+    slot.process.join(2)
+    assert pool.worker_pids == ()
+    try:
+        reservation = await asyncio.wait_for(pool.acquire_generation_reservation(), 2)
+        assert len(pool.worker_pids) == 1
+        assert pool.worker_pids[0] != old_pid
+        await reservation.release()
+    finally:
+        await pool.close()
+
+
+@pytest.mark.asyncio
+async def test_close_releases_unused_generation_reservations_and_process_handles() -> None:
+    pool = StandaloneHtmlValidationPool(max_workers=1, mp_start_method="fork")
+    reservation = await pool.acquire_generation_reservation()
+    slot = pool._slots[0]
+    assert slot is not None
+    process = slot.process
+
+    await pool.close()
+
+    assert pool.generation_slots_in_use == 0
+    assert reservation._state == "released"
+    await reservation.release()
+    with pytest.raises(ValueError):
+        _ = process.pid
+
+
+@pytest.mark.asyncio
+async def test_double_cancellation_racing_close_finishes_and_reaps() -> None:
+    pool = StandaloneHtmlValidationPool(
+        max_workers=1,
+        watchdog_seconds=5,
+        validator=_hang_on_marker,
+        mp_start_method="fork",
+    )
+    await pool.start()
+    pid = pool.worker_pids[0]
+    task = asyncio.create_task(pool.validate(_document("HANG-VALIDATOR")))
+    for _ in range(100):
+        if pool.active_count:
+            break
+        await asyncio.sleep(0.005)
+
+    task.cancel()
+    await asyncio.sleep(0)
+    task.cancel()
+    close_task = asyncio.create_task(pool.close())
+    results = await asyncio.wait_for(
+        asyncio.gather(task, close_task, return_exceptions=True),
+        3,
+    )
+
+    assert isinstance(results[0], asyncio.CancelledError)
+    assert pool.active_count == 0
+    assert pool.worker_pids == ()
+    with pytest.raises(ProcessLookupError):
+        os.kill(pid, 0)
+
+
+@pytest.mark.asyncio
+async def test_default_spawn_pool_recovers_from_dead_worker_and_closes_cleanly() -> None:
+    pool = StandaloneHtmlValidationPool(max_workers=1, watchdog_seconds=2)
+    await pool.start()
+    old_pid = pool.worker_pids[0]
+    assert (await asyncio.wait_for(pool.validate(_document("Spawned")), 5)).title == "Spawned"
+    slot = pool._slots[0]
+    assert slot is not None
+    os.kill(old_pid, signal.SIGKILL)
+    slot.process.join(2)
+
+    try:
+        with pytest.raises(StandaloneHtmlValidationError) as caught:
+            await asyncio.wait_for(pool.validate(_document("Repair")), 5)
+        assert caught.value.code == "validator_unavailable"
+        assert (await asyncio.wait_for(pool.validate(_document("After repair")), 5)).title == "After repair"
+        assert pool.worker_pids[0] != old_pid
+    finally:
+        await asyncio.wait_for(pool.close(), 5)
+    with pytest.raises(ProcessLookupError):
+        os.kill(old_pid, 0)
+
+
+@pytest.mark.asyncio
+async def test_cancelling_replacement_readiness_reaps_unadmitted_child(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pool = StandaloneHtmlValidationPool(max_workers=1, mp_start_method="fork")
+    await pool.start()
+    original_spawn = pool._spawn_slot
+    original_ready = pool._await_ready_sync
+    replacement_slots = []
+    replacement_pids: list[int] = []
+    ready_started = threading.Event()
+
+    def record_spawn(index: int, epoch: int):
+        slot = original_spawn(index, epoch)
+        replacement_slots.append(slot)
+        assert slot.process.pid is not None
+        replacement_pids.append(slot.process.pid)
+        return slot
+
+    def delayed_ready(slot, require_isolated_imports: bool) -> bool:
+        ready_started.set()
+        time.sleep(0.25)
+        return original_ready(slot, require_isolated_imports)
+
+    monkeypatch.setattr(pool, "_spawn_slot", record_spawn)
+    monkeypatch.setattr(pool, "_await_ready_sync", delayed_ready)
+    replacement = asyncio.create_task(pool._replace_worker(0))
+    try:
+        assert await asyncio.to_thread(ready_started.wait, 2)
+        replacement.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await replacement
+        assert replacement_slots
+        child = replacement_slots[-1].process
+        with pytest.raises(ValueError):
+            child.is_alive()
+        with pytest.raises(ProcessLookupError):
+            os.kill(replacement_pids[-1], 0)
+    finally:
+        monkeypatch.setattr(pool, "_spawn_slot", original_spawn)
+        monkeypatch.setattr(pool, "_await_ready_sync", original_ready)
+        for slot in replacement_slots:
+            try:
+                pool._terminate_slot_sync(slot)
+            except ValueError:
+                pass
+        await pool.close()
+
+
+@pytest.mark.asyncio
+async def test_close_fails_closed_when_worker_cannot_be_confirmed_reaped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pool = StandaloneHtmlValidationPool(max_workers=1, mp_start_method="fork")
+    await pool.start()
+    pid = pool.worker_pids[0]
+    original_terminate = pool._terminate_slot_sync
+    monkeypatch.setattr(pool, "_terminate_slot_sync", lambda _slot: False)
+
+    with pytest.raises(StandaloneHtmlValidationError) as caught:
+        await pool.close()
+
+    assert caught.value.code == "validator_unavailable"
+    assert pool.worker_pids == (pid,)
+    monkeypatch.setattr(pool, "_terminate_slot_sync", original_terminate)
+    await pool.close()
+    assert pool._closed is True
+    assert pool._closing is False
+    with pytest.raises(ProcessLookupError):
+        os.kill(pid, 0)
