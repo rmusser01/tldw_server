@@ -16,10 +16,10 @@
 **Goal**: Validate the rebased and reviewed branch as one unit.
 **Success Criteria**: Focused and complete Research suites, inventory validators, lint/format, compatibility parsing, diff hygiene, and Bandit pass for touched scope.
 **Tests**: Commands and exact outcomes recorded in `TASK-12968.8`.
-**Status**: In Progress
+**Status**: Complete
 
 ## Stage 4: Publish and close review
 **Goal**: Publish the rewritten branch safely and close every addressed review thread.
 **Success Criteria**: One `--force-with-lease` push succeeds; replies identify fixes or verified non-actions; threads are resolved; PR mergeability and CI state are rechecked.
 **Tests**: GitHub PR head/base/mergeability, unresolved-thread count, and check-rollup queries.
-**Status**: Not Started
+**Status**: In Progress
