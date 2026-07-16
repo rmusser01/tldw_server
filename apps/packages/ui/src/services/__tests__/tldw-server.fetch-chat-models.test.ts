@@ -5,6 +5,9 @@ const mocks = vi.hoisted(() => ({
   getChatModels: vi.fn(),
   getCachedChatModels: vi.fn(),
   clearModelsCache: vi.fn(),
+  subscribeInvalidation: vi.fn(),
+  invalidationListener: null as ((token: string) => void) | null,
+  invalidationSequence: 0,
   bgRequest: vi.fn()
 }))
 
@@ -19,7 +22,9 @@ vi.mock("@/services/tldw", () => ({
     getCachedChatModels: (...args: unknown[]) =>
       (mocks.getCachedChatModels as (...args: unknown[]) => unknown)(...args),
     clearCache: (...args: unknown[]) =>
-      (mocks.clearModelsCache as (...args: unknown[]) => unknown)(...args)
+      (mocks.clearModelsCache as (...args: unknown[]) => unknown)(...args),
+    subscribeInvalidation: (listener: (token: string) => void) =>
+      mocks.subscribeInvalidation(listener)
   }
 }))
 
@@ -52,11 +57,15 @@ const deferred = <T>() => {
 
 describe("fetchChatModels", () => {
   beforeEach(() => {
+    vi.unstubAllGlobals()
     vi.resetModules()
     mocks.getConfig.mockReset()
     mocks.getChatModels.mockReset()
     mocks.getCachedChatModels.mockReset()
     mocks.clearModelsCache.mockReset()
+    mocks.subscribeInvalidation.mockReset()
+    mocks.invalidationListener = null
+    mocks.invalidationSequence = 0
     mocks.bgRequest.mockReset()
 
     mocks.getConfig.mockResolvedValue({
@@ -65,7 +74,16 @@ describe("fetchChatModels", () => {
       apiKey: "test-key"
     })
     mocks.getCachedChatModels.mockResolvedValue([])
-    mocks.clearModelsCache.mockResolvedValue(undefined)
+    mocks.subscribeInvalidation.mockImplementation(
+      (listener: (token: string) => void) => {
+        mocks.invalidationListener = listener
+        return () => undefined
+      }
+    )
+    mocks.clearModelsCache.mockImplementation(async () => {
+      mocks.invalidationSequence += 1
+      mocks.invalidationListener?.(`test-token-${mocks.invalidationSequence}`)
+    })
   })
 
   it("does not cache an empty startup result over later configured models", async () => {
@@ -94,6 +112,65 @@ describe("fetchChatModels", () => {
         provider: "openai"
       })
     ])
+  })
+
+  it("applies each inner invalidation token to the outer cache once", async () => {
+    mocks.getChatModels
+      .mockResolvedValueOnce([
+        { id: "llama/old", name: "Old", provider: "llama", type: "chat" }
+      ])
+      .mockResolvedValueOnce([
+        { id: "llama/fresh", name: "Fresh", provider: "llama", type: "chat" }
+      ])
+      .mockResolvedValueOnce([
+        { id: "llama/newer", name: "Newer", provider: "llama", type: "chat" }
+      ])
+
+    const { fetchChatModels } = await importService()
+    expect(mocks.subscribeInvalidation).toHaveBeenCalledTimes(1)
+
+    await fetchChatModels({ returnEmpty: true })
+    mocks.invalidationListener?.("shared-token")
+    await expect(fetchChatModels({ returnEmpty: true })).resolves.toEqual([
+      expect.objectContaining({ model: "tldw:llama/fresh" })
+    ])
+
+    mocks.invalidationListener?.("shared-token")
+    await expect(fetchChatModels({ returnEmpty: true })).resolves.toEqual([
+      expect.objectContaining({ model: "tldw:llama/fresh" })
+    ])
+    expect(mocks.getChatModels).toHaveBeenCalledTimes(2)
+
+    mocks.invalidationListener?.("next-token")
+    await expect(fetchChatModels({ returnEmpty: true })).resolves.toEqual([
+      expect.objectContaining({ model: "tldw:llama/newer" })
+    ])
+    expect(mocks.getChatModels).toHaveBeenCalledTimes(3)
+  })
+
+  it("subscribes to invalidations in an extension-like background context", async () => {
+    mocks.getChatModels
+      .mockResolvedValueOnce([
+        { id: "llama/old", name: "Old", provider: "llama", type: "chat" }
+      ])
+      .mockResolvedValueOnce([
+        { id: "llama/fresh", name: "Fresh", provider: "llama", type: "chat" }
+      ])
+
+    const currentWindow = window
+    vi.stubGlobal("window", undefined)
+    try {
+      const { fetchChatModels } = await importService()
+      expect(mocks.subscribeInvalidation).toHaveBeenCalledTimes(1)
+
+      await fetchChatModels({ returnEmpty: true })
+      mocks.invalidationListener?.("background-token")
+      await expect(fetchChatModels({ returnEmpty: true })).resolves.toEqual([
+        expect.objectContaining({ model: "tldw:llama/fresh" })
+      ])
+    } finally {
+      vi.stubGlobal("window", currentWindow)
+    }
   })
 
   it("clears cached chat models when tldw settings update", async () => {

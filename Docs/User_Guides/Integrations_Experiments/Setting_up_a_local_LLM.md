@@ -23,7 +23,7 @@ ooba_model = local-model
 
 Use the base path expected by the provider, commonly `/v1` for OpenAI-compatible servers. The configured scheme, hostname, and effective port form one exact trusted origin. tldw permits that origin on loopback, private LAN, Docker, or approved overlay addresses while keeping the global SSRF policy intact. Redirects cannot change the configured origin, DNS changes fail closed, and metadata/link-local targets remain blocked.
 
-The shared model catalog powers both the WebUI and browser extension. After setup reports `status="saved"`, both clients invalidate their model caches and the next selector request reads current backend metadata.
+The shared model catalog powers both the WebUI and browser extension. After setup reports `status="saved"`, the saving context writes a unique invalidation marker to the existing shared model-cache record. Open WebUI tabs and extension sidepanel/background contexts observe that marker, clear both model-cache layers once, and fetch current backend metadata on their next selector request. The saving context ignores its own storage echo, and later model records remain local cache data rather than cross-context update messages.
 
 ### Troubleshooting readiness
 

@@ -4,7 +4,7 @@ title: Allow trusted configured local LLM endpoints through scoped egress policy
 status: In Progress
 assignee: []
 created_date: '2026-07-15 19:34'
-updated_date: '2026-07-16 00:53'
+updated_date: '2026-07-16 01:17'
 labels:
   - browser-extension
 dependencies: []
@@ -66,6 +66,8 @@ Docs/Plans/IMPLEMENTATION_PLAN_scoped_local_llm_egress_TASK_12972.md
 Stage 5 touched paths: apps/packages/ui/src/services/tldw/TldwModels.ts; apps/packages/ui/src/services/tldw-server.ts; apps/packages/ui/src/services/tldw/domains/setup-onboarding.ts; their focused tests; apps/packages/ui/src/routes/__tests__/option-quick-chat-popout.test.tsx; Docs/ADR/030-configured-local-llm-egress-policy.md and Docs/ADR/README.md; tldw_Server_API/Config_Files/README.md; Docs/User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md; Docs/Plans/IMPLEMENTATION_PLAN_scoped_local_llm_egress_TASK_12972.md; and follow-up backlog task TASK-12972.1.
 
 2026-07-15 Stage 5 post-review correction: distinct OLD/NEW scope regressions failed 2/2 before the fix. Stale getModels request A could invalidate newer in-flight request B after old getConfig resolved, and stale getCachedChatModels scope reconciliation could clear B. A single generation-aware scope helper now prevents stale generations from mutating or adopting current scope while allowing a current-generation scope change to own its resulting invalidation generation. Focused GREEN passed 2/2; complete shared WebUI and extension suites each pass 45/45. Pinned ESLint has 0 errors (2 existing warnings in the correction file), and the 8 GB package tsc run reports no TldwModels diagnostics while retaining unrelated baseline failures. The backend remains unchanged; prior 492-test backend and zero-finding Bandit evidence remains valid. TASK-12972 and Stage 5 remain In Progress pending re-review.
+
+2026-07-15 Stage 5 cross-context cache correction: strict RED failed 5 tests with 30 passing under both WebUI and extension Vitest configurations. The existing tldwModelsCache record now carries a unique tombstone token; source, other WebUI tabs, extension sidepanel, and no-window/background contexts apply each token once through the existing Plasmo storage watch, invalidate the inner cache, and notify the outer cache subscription. Source applies synchronously and ignores its watch echo. Serialized writes preserve a fresh post-clear model record after the tombstone; startup tombstones never hydrate models. Window config events and stored-config changes now request this single tokenized path. Focused GREEN passed 35/35; complete shared suites passed 51/51 in both configs. Pinned ESLint passed with 0 errors and 11 pre-existing warnings; full frontend TypeScript passed with incremental output disabled. Backend is unchanged, so prior 492-test and zero-finding Bandit evidence remains valid. Stage 5 and TASK-12972 remain In Progress pending re-review.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

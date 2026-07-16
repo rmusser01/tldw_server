@@ -6,7 +6,11 @@ const mocks = vi.hoisted(() => ({
   getModels: vi.fn(),
   getRuntimeSingleUserApiKeyOverride: vi.fn(),
   storageGet: vi.fn(async () => null),
-  storageSet: vi.fn(async () => undefined)
+  storageSet: vi.fn(async () => undefined),
+  storageValue: null as unknown,
+  storageWatchers: new Set<
+    (change: { oldValue?: unknown; newValue?: unknown }) => void
+  >()
 }))
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
@@ -25,7 +29,18 @@ vi.mock("@/utils/safe-storage", () => ({
     get: (...args: unknown[]) =>
       (mocks.storageGet as (...args: unknown[]) => unknown)(...args),
     set: (...args: unknown[]) =>
-      (mocks.storageSet as (...args: unknown[]) => unknown)(...args)
+      (mocks.storageSet as (...args: unknown[]) => unknown)(...args),
+    watch: (
+      callbacks: Record<
+        string,
+        (change: { oldValue?: unknown; newValue?: unknown }) => void
+      >
+    ) => {
+      const callback = callbacks.tldwModelsCache
+      if (!callback) return () => undefined
+      mocks.storageWatchers.add(callback)
+      return () => mocks.storageWatchers.delete(callback)
+    }
   })
 }))
 
@@ -46,6 +61,7 @@ const deferred = <T>() => {
 
 describe("TldwModelsService caching", () => {
   beforeEach(() => {
+    vi.unstubAllGlobals()
     vi.resetModules()
     mocks.getConfig.mockReset()
     mocks.initialize.mockReset()
@@ -53,6 +69,8 @@ describe("TldwModelsService caching", () => {
     mocks.getRuntimeSingleUserApiKeyOverride.mockReset()
     mocks.storageGet.mockReset()
     mocks.storageSet.mockReset()
+    mocks.storageValue = null
+    mocks.storageWatchers.clear()
 
     mocks.getConfig.mockResolvedValue({
       serverUrl: "http://127.0.0.1:8000",
@@ -61,8 +79,14 @@ describe("TldwModelsService caching", () => {
     })
     mocks.initialize.mockResolvedValue(undefined)
     mocks.getRuntimeSingleUserApiKeyOverride.mockReturnValue(null)
-    mocks.storageGet.mockResolvedValue(null)
-    mocks.storageSet.mockResolvedValue(undefined)
+    mocks.storageGet.mockImplementation(async () => mocks.storageValue)
+    mocks.storageSet.mockImplementation(async (_key, value) => {
+      const oldValue = mocks.storageValue
+      mocks.storageValue = value
+      mocks.storageWatchers.forEach((callback) =>
+        callback({ oldValue, newValue: value })
+      )
+    })
   })
 
   it("fetches models when single-user auth is provided by the WebUI runtime", async () => {
@@ -497,6 +521,170 @@ describe("TldwModelsService caching", () => {
         chatProvider: "llama.cpp"
       })
     ])
+  })
+
+  it("invalidates model and subscriber caches once across watched storage contexts", async () => {
+    const sourceFresh = deferred<Array<Record<string, unknown>>>()
+    const tombstoneWrite = deferred<void>()
+    mocks.getModels
+      .mockResolvedValueOnce([
+        { id: "source-old", name: "Source Old", provider: "llama", type: "chat" }
+      ])
+      .mockResolvedValueOnce([
+        { id: "remote-old", name: "Remote Old", provider: "llama", type: "chat" }
+      ])
+      .mockImplementationOnce(() => sourceFresh.promise)
+      .mockResolvedValueOnce([
+        { id: "remote-fresh", name: "Remote Fresh", provider: "llama", type: "chat" }
+      ])
+
+    const { TldwModelsService } = await importService()
+    const source = new TldwModelsService()
+    const remote = new TldwModelsService()
+    const sourceInvalidations: string[] = []
+    const remoteInvalidations: string[] = []
+    source.subscribeInvalidation((token) => sourceInvalidations.push(token))
+    remote.subscribeInvalidation((token) => remoteInvalidations.push(token))
+
+    await source.getModels(true)
+    await remote.getModels(true)
+
+    mocks.storageSet.mockImplementation(async (_key, value) => {
+      const record = value as {
+        models?: unknown
+        invalidationToken?: unknown
+      }
+      if (
+        record.models === null &&
+        typeof record.invalidationToken === "string"
+      ) {
+        await tombstoneWrite.promise
+      }
+      const oldValue = mocks.storageValue
+      mocks.storageValue = value
+      mocks.storageWatchers.forEach((callback) =>
+        callback({ oldValue, newValue: value })
+      )
+    })
+
+    const clear = source.clearCache()
+    expect(sourceInvalidations).toHaveLength(1)
+
+    const sourceRequest = source.getModels(true)
+    await vi.waitFor(() => expect(mocks.getModels).toHaveBeenCalledTimes(3))
+    const sourceFollower = source.getModels(true)
+    expect(mocks.getModels).toHaveBeenCalledTimes(3)
+
+    tombstoneWrite.resolve(undefined)
+    await clear
+
+    expect(remoteInvalidations).toEqual(sourceInvalidations)
+    expect(sourceInvalidations).toHaveLength(1)
+    await expect(source.getCachedChatModels()).resolves.toEqual([])
+    await expect(remote.getCachedChatModels()).resolves.toEqual([])
+
+    sourceFresh.resolve([
+      { id: "source-fresh", name: "Source Fresh", provider: "llama", type: "chat" }
+    ])
+    await expect(Promise.all([sourceRequest, sourceFollower])).resolves.toEqual([
+      [expect.objectContaining({ id: "source-fresh" })],
+      [expect.objectContaining({ id: "source-fresh" })]
+    ])
+
+    const writes = mocks.storageSet.mock.calls.map((call) => call[1])
+    const tombstoneIndex = writes.findIndex((value) => {
+      const record = value as {
+        models?: unknown
+        invalidationToken?: unknown
+      }
+      return (
+        record.models === null &&
+        typeof record.invalidationToken === "string"
+      )
+    })
+    const freshIndex = writes.findIndex((value) => {
+      const record = value as { models?: unknown }
+      return (
+        Array.isArray(record.models) &&
+        record.models.some(
+          (model) =>
+            typeof model === "object" &&
+            model !== null &&
+            "id" in model &&
+            model.id === "source-fresh"
+        )
+      )
+    })
+    expect(tombstoneIndex).toBeGreaterThanOrEqual(0)
+    expect(freshIndex).toBeGreaterThan(tombstoneIndex)
+
+    await expect(remote.getModels(true)).resolves.toEqual([
+      expect.objectContaining({ id: "remote-fresh" })
+    ])
+    expect(sourceInvalidations).toHaveLength(1)
+    expect(remoteInvalidations).toHaveLength(1)
+  })
+
+  it("invalidates an extension-like background context without window access", async () => {
+    mocks.getModels
+      .mockResolvedValueOnce([
+        { id: "webui-old", name: "WebUI Old", provider: "llama", type: "chat" }
+      ])
+      .mockResolvedValueOnce([
+        { id: "extension-old", name: "Extension Old", provider: "llama", type: "chat" }
+      ])
+      .mockResolvedValueOnce([
+        { id: "extension-fresh", name: "Extension Fresh", provider: "llama", type: "chat" }
+      ])
+
+    const { TldwModelsService } = await importService()
+    const source = new TldwModelsService()
+    await source.getModels(true)
+
+    const currentWindow = window
+    vi.stubGlobal("window", undefined)
+    try {
+      const background = new TldwModelsService()
+      const backgroundInvalidations: string[] = []
+      background.subscribeInvalidation((token) =>
+        backgroundInvalidations.push(token)
+      )
+
+      await background.getModels(true)
+      await source.clearCache()
+
+      expect(backgroundInvalidations).toHaveLength(1)
+      await expect(background.getCachedChatModels()).resolves.toEqual([])
+      await expect(background.getModels(true)).resolves.toEqual([
+        expect.objectContaining({ id: "extension-fresh" })
+      ])
+    } finally {
+      vi.stubGlobal("window", currentWindow)
+    }
+  })
+
+  it("applies a startup tombstone without hydrating stale models", async () => {
+    mocks.storageValue = {
+      version: 4,
+      models: null,
+      timestamp: 0,
+      scope: null,
+      invalidationToken: "startup-token"
+    }
+    mocks.getModels.mockResolvedValueOnce([
+      { id: "startup-fresh", name: "Startup Fresh", provider: "llama", type: "chat" }
+    ])
+
+    const { TldwModelsService } = await importService()
+    const service = new TldwModelsService()
+    const invalidations: string[] = []
+    service.subscribeInvalidation((token) => invalidations.push(token))
+
+    await expect(service.getModels()).resolves.toEqual([
+      expect.objectContaining({ id: "startup-fresh" })
+    ])
+    expect(invalidations).toEqual(["startup-token"])
+    expect(mocks.getModels).toHaveBeenCalledTimes(1)
   })
 
   it("prevents a pre-clear fetch from repopulating cache or taking post-clear ownership", async () => {

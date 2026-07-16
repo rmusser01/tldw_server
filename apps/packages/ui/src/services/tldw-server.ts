@@ -93,7 +93,7 @@ export const getTldwServerURL = async () => {
 export const setTldwServerURL = async (url: string) => {
   await storage.set("tldwServerUrl", url)
   await tldwClient.updateConfig({ serverUrl: url })
-  clearChatModelsCache()
+  await tldwModels.clearCache()
 }
 
 export const isTldwServerRunning = async () => {
@@ -180,8 +180,7 @@ let chatModelsInFlight: Promise<any[]> | null = null
 let chatModelsCacheGeneration = 0
 
 type ChatModelsCacheListenerState = {
-  clear: () => void
-  clearPersistent: () => void
+  requestInvalidation: () => void
   listenersAdded: boolean
 }
 
@@ -262,6 +261,13 @@ export const clearChatModelsCache = () => {
   chatModelsInFlight = null
 }
 
+let chatModelsLastInvalidationToken: string | null = null
+tldwModels.subscribeInvalidation?.((token) => {
+  if (!token || token === chatModelsLastInvalidationToken) return
+  chatModelsLastInvalidationToken = token
+  clearChatModelsCache()
+})
+
 const getChatModelsCacheListenerState = (): ChatModelsCacheListenerState => {
   const globalWindow = window as typeof window & {
     [CHAT_MODELS_CACHE_LISTENER_KEY]?: ChatModelsCacheListenerState
@@ -271,8 +277,7 @@ const getChatModelsCacheListenerState = (): ChatModelsCacheListenerState => {
     return existing
   }
   const created: ChatModelsCacheListenerState = {
-    clear: clearChatModelsCache,
-    clearPersistent: () => {
+    requestInvalidation: () => {
       void tldwModels.clearCache()
     },
     listenersAdded: false
@@ -283,19 +288,16 @@ const getChatModelsCacheListenerState = (): ChatModelsCacheListenerState => {
 
 if (typeof window !== "undefined") {
   const listenerState = getChatModelsCacheListenerState()
-  listenerState.clear = clearChatModelsCache
-  listenerState.clearPersistent = () => {
+  listenerState.requestInvalidation = () => {
     void tldwModels.clearCache()
   }
   if (!listenerState.listenersAdded) {
     window.addEventListener("tldw:config-updated", () => {
-      listenerState.clear()
-      listenerState.clearPersistent()
+      listenerState.requestInvalidation()
     })
     window.addEventListener("storage", (event) => {
       if (!event.key || event.key === "tldwConfig") {
-        listenerState.clear()
-        listenerState.clearPersistent()
+        listenerState.requestInvalidation()
       }
     })
     listenerState.listenersAdded = true

@@ -99,6 +99,16 @@ export interface ModelInfo {
   }
 }
 
+type ModelCacheRecord = {
+  version: number
+  models: ModelInfo[] | null
+  timestamp: number
+  scope: string | null
+  invalidationToken?: string
+}
+
+type InvalidationListener = (token: string) => void
+
 export class TldwModelsService {
   private cachedModels: ModelInfo[] | null = null
   private lastFetchTime: number = 0
@@ -114,6 +124,8 @@ export class TldwModelsService {
   private inFlightFetch: Promise<ModelInfo[]> | null = null
   private cacheScopeKey: string | null = null
   private invalidationGeneration = 0
+  private lastAppliedInvalidationToken: string | null = null
+  private invalidationListeners = new Set<InvalidationListener>()
 
   constructor() {
     this.getModels = this.getModels.bind(this)
@@ -121,6 +133,11 @@ export class TldwModelsService {
     this.getCachedChatModels = this.getCachedChatModels.bind(this)
     this.getEmbeddingModels = this.getEmbeddingModels.bind(this)
     this.getImageModels = this.getImageModels.bind(this)
+    this.storage.watch?.({
+      [this.CACHE_KEY]: (change) => {
+        this.applyInvalidationRecord(change.newValue)
+      }
+    })
   }
 
   private async ensureStorageLoaded() {
@@ -129,9 +146,13 @@ export class TldwModelsService {
       const loadGeneration = this.invalidationGeneration
       this.storageInitPromise = (async () => {
         try {
-          const cached = (await this.storage.get<any>(this.CACHE_KEY)) || null
+          const cached =
+            (await this.storage.get<ModelCacheRecord>(this.CACHE_KEY)) || null
           const cacheVersion =
             typeof cached?.version === "number" ? cached.version : 0
+          if (this.applyInvalidationRecord(cached)) {
+            return
+          }
           if (
             cacheVersion === this.CACHE_SCHEMA_VERSION &&
             cached?.models &&
@@ -173,6 +194,34 @@ export class TldwModelsService {
     await write
   }
 
+  private async persistInvalidationTombstone(
+    token: string,
+    expectedGeneration: number
+  ): Promise<void> {
+    const value: ModelCacheRecord = {
+      version: this.CACHE_SCHEMA_VERSION,
+      models: null,
+      timestamp: 0,
+      scope: null,
+      invalidationToken: token
+    }
+    const write = this.storageWritePromise.then(async () => {
+      if (
+        expectedGeneration !== this.invalidationGeneration ||
+        token !== this.lastAppliedInvalidationToken
+      ) {
+        return
+      }
+      try {
+        await this.storage.set(this.CACHE_KEY, value)
+      } catch {
+        // Best-effort persistence; ignore errors
+      }
+    })
+    this.storageWritePromise = write
+    await write
+  }
+
   private invalidateCacheState() {
     this.invalidationGeneration += 1
     this.cachedModels = null
@@ -180,6 +229,39 @@ export class TldwModelsService {
     this.lastForcedFetchTime = 0
     this.inFlightFetch = null
     this.cacheScopeKey = null
+  }
+
+  private applyInvalidationRecord(value: unknown): boolean {
+    const record = value as Partial<ModelCacheRecord> | null
+    if (
+      record?.version !== this.CACHE_SCHEMA_VERSION ||
+      record.models !== null ||
+      typeof record.invalidationToken !== "string"
+    ) {
+      return false
+    }
+    return this.applyInvalidationToken(record.invalidationToken)
+  }
+
+  private applyInvalidationToken(token: string): boolean {
+    const normalizedToken = token.trim()
+    if (
+      !normalizedToken ||
+      normalizedToken === this.lastAppliedInvalidationToken
+    ) {
+      return false
+    }
+    this.lastAppliedInvalidationToken = normalizedToken
+    this.invalidateCacheState()
+    this.invalidationListeners.forEach((listener) => listener(normalizedToken))
+    return true
+  }
+
+  private createInvalidationToken(): string {
+    if (typeof globalThis.crypto?.randomUUID === "function") {
+      return globalThis.crypto.randomUUID()
+    }
+    return `${Date.now()}-${Math.random().toString(36).slice(2)}`
   }
 
   private reconcileCacheScope(
@@ -517,8 +599,17 @@ export class TldwModelsService {
    * Clear the model cache
    */
   async clearCache(): Promise<void> {
-    this.invalidateCacheState()
-    await this.persistCache(this.invalidationGeneration)
+    const token = this.createInvalidationToken()
+    this.applyInvalidationToken(token)
+    await this.persistInvalidationTombstone(
+      token,
+      this.invalidationGeneration
+    )
+  }
+
+  subscribeInvalidation(listener: InvalidationListener): () => void {
+    this.invalidationListeners.add(listener)
+    return () => this.invalidationListeners.delete(listener)
   }
 
   /**
