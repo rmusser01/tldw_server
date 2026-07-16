@@ -99,6 +99,44 @@ def test_request_voice_settings_coercion_log_sanitizes_exception_extra():
     assert "unexpected token=secret" not in log_output
 
 
+def test_request_tracks_explicit_common_fields_without_changing_defaults():
+    omitted = TTSRequest(text="hello", model="Vendor/MiXeD-Case")
+    explicit = TTSRequest(
+        text="hello",
+        model="Vendor/MiXeD-Case",
+        speed=1.0,
+        language="en",
+        lang_code=None,
+    )
+
+    assert omitted.speed == explicit.speed == 1.0
+    assert omitted.language == explicit.language == "en"
+    assert omitted.lang_code is explicit.lang_code is None
+    assert omitted.model == explicit.model == "Vendor/MiXeD-Case"
+    assert omitted.supplied_fields.isdisjoint({"speed", "language", "lang_code"})
+    assert {"speed", "language", "lang_code"}.issubset(explicit.supplied_fields)
+
+
+@pytest.mark.parametrize(
+    "tts_request",
+    [
+        TTSRequest(text="hello", model="Vendor/MiXeD-Case"),
+        TTSRequest(
+            text="hello",
+            model="Vendor/MiXeD-Case",
+            speed=1.0,
+            language="en",
+            lang_code="en",
+        ),
+    ],
+)
+def test_request_common_field_explicitness_survives_dict_roundtrip(tts_request):
+    restored = TTSRequest(**tts_request.dict())
+
+    assert restored.dict() == tts_request.dict()
+    assert restored.supplied_fields == tts_request.supplied_fields
+
+
 @pytest.mark.asyncio
 async def test_ensure_initialized_failure_log_sanitizes_exception_text():
     logged_messages: list[str] = []

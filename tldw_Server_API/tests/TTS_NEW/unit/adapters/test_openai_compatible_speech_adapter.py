@@ -44,6 +44,8 @@ MP3 = b"ID3\x04\x00\x00\x00\x00\x00\x00" + b"\x01" * 32
 WAV = b"RIFF\x24\x00\x00\x00WAVEfmt " + b"\x00" * 24
 FLAC = b"fLaC" + b"\x00" * 32
 OGG = b"OggS" + b"\x00" * 32
+OPUS = b"OggS" + b"\x00" * 24 + b"OpusHead" + b"\x01" * 24
+_OMIT = object()
 
 
 def _adapter_config(
@@ -114,7 +116,11 @@ def _request(**overrides: Any) -> TTSRequest:
         "provider": "gateway:company",
         "model": "Vendor/Expressive-TTS",
     }
-    values.update(overrides)
+    for key, value in overrides.items():
+        if value is _OMIT:
+            values.pop(key, None)
+        else:
+            values[key] = value
     return TTSRequest(**values)
 
 
@@ -215,8 +221,7 @@ async def test_lang_code_wins_and_equal_aliases_are_allowed(
 ) -> None:
     calls: list[dict[str, Any]] = []
     monkeypatch.setattr(adapter_module, "astream_bytes", _stream_stub(calls))
-    request = _request(language="fr-FR")
-    request.lang_code = "fr-FR"
+    request = _request(language="fr-FR", lang_code="fr-FR")
 
     await _collect(await OpenAICompatibleSpeechAdapter(_adapter_config()).generate(request))
 
@@ -230,8 +235,7 @@ async def test_conflicting_language_aliases_fail_before_network(
 ) -> None:
     calls: list[dict[str, Any]] = []
     monkeypatch.setattr(adapter_module, "astream_bytes", _stream_stub(calls))
-    request = _request(language="en-US")
-    request.lang_code = "fr-FR"
+    request = _request(language="en-US", lang_code="fr-FR")
 
     with pytest.raises(TTSValidationError, match="language"):
         await OpenAICompatibleSpeechAdapter(_adapter_config()).generate(request)
@@ -241,7 +245,7 @@ async def test_conflicting_language_aliases_fail_before_network(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_unsupported_common_fields_are_not_injected(
+async def test_omitted_unsupported_common_field_defaults_are_not_injected(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[dict[str, Any]] = []
@@ -256,11 +260,8 @@ async def test_unsupported_common_fields_are_not_injected(
         )
     )
 
-    with pytest.raises(TTSValidationError, match="target_sample_rate"):
-        await adapter.generate(_request(speed=1.0, target_sample_rate=44100))
-
     response = await adapter.generate(
-        _request(speed=1.0, language=None, target_sample_rate=None)
+        _request(speed=_OMIT, language=_OMIT, target_sample_rate=None)
     )
     await _collect(response)
     assert calls[0]["json"] == {
@@ -269,6 +270,61 @@ async def test_unsupported_common_fields_are_not_injected(
         "voice": "GuideVoice",
         "response_format": "mp3",
     }
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("speed", 1.0),
+        ("speed", 1.5),
+        ("language", "en"),
+        ("lang_code", "fr-FR"),
+    ],
+)
+async def test_explicit_unsupported_common_field_fails_before_network(
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+    value: Any,
+) -> None:
+    calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(adapter_module, "astream_bytes", _stream_stub(calls))
+    adapter = OpenAICompatibleSpeechAdapter(
+        _adapter_config(
+            capability_overrides={
+                "supports_speed": False,
+                "supports_language": False,
+                "supports_target_sample_rate": False,
+            }
+        )
+    )
+    overrides = {"speed": _OMIT, "language": _OMIT, "target_sample_rate": None}
+    overrides[field] = value
+
+    with pytest.raises(TTSValidationError, match=field):
+        await adapter.generate(_request(**overrides))
+
+    assert calls == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_explicit_unsupported_target_sample_rate_still_fails_before_network(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(adapter_module, "astream_bytes", _stream_stub(calls))
+    adapter = OpenAICompatibleSpeechAdapter(
+        _adapter_config(
+            capability_overrides={"supports_target_sample_rate": False}
+        )
+    )
+
+    with pytest.raises(TTSValidationError, match="target_sample_rate"):
+        await adapter.generate(_request(target_sample_rate=44100))
+
+    assert calls == []
 
 
 @pytest.mark.unit
@@ -490,7 +546,7 @@ async def test_transport_taxonomy_is_typed_and_sanitized(
         ("wav", "audio/x-wav", WAV),
         ("flac", "audio/x-flac", FLAC),
         ("ogg", "application/ogg", OGG),
-        ("opus", "audio/opus", OGG),
+        ("opus", "audio/opus", OPUS),
     ],
 )
 async def test_mime_aliases_and_signatures_are_validated(
@@ -508,6 +564,66 @@ async def test_mime_aliases_and_signatures_are_validated(
     adapter = OpenAICompatibleSpeechAdapter(_adapter_config(source_format=source_format))
 
     assert await _collect(await adapter.generate(_request())) == audio
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "audio",
+    [
+        OGG,
+        b"OggS" + b"\x00" * 24 + b"\x01vorbis" + b"\x00" * 24,
+        b"OggS" + b"\x00" * 128,
+        b"\x00" * 128,
+        b"OggS" + b"\x00" * 65532 + b"OpusHead",
+    ],
+)
+async def test_opus_requires_ogg_container_and_bounded_opus_head(
+    monkeypatch: pytest.MonkeyPatch,
+    audio: bytes,
+) -> None:
+    calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        adapter_module,
+        "astream_bytes",
+        _stream_stub(
+            calls,
+            chunks=(audio,),
+            headers={"Content-Type": "audio/opus"},
+        ),
+    )
+    response = await OpenAICompatibleSpeechAdapter(
+        _adapter_config(
+            source_format="opus",
+            capability_overrides={"max_response_bytes": 70000},
+        )
+    ).generate(_request())
+
+    with pytest.raises(TTSAudioQualityError, match="signature"):
+        await _collect(response)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_opus_head_may_span_chunks_before_first_validated_yield(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        adapter_module,
+        "astream_bytes",
+        _stream_stub(
+            calls,
+            chunks=(OPUS[:29], OPUS[29:33], OPUS[33:]),
+            headers={"Content-Type": "audio/opus"},
+        ),
+    )
+
+    assert await _collect(
+        await OpenAICompatibleSpeechAdapter(
+            _adapter_config(source_format="opus")
+        ).generate(_request())
+    ) == OPUS
 
 
 @pytest.mark.unit
