@@ -12,6 +12,13 @@ documentation:
 - Docs/superpowers/specs/2026-06-30-skills-uat-quality-gates-design.md
 - Docs/superpowers/plans/2026-07-04-skills-uat-quality-gates.md
 - Docs/Reviews/skills-page-uat.md
+- Docs/Design/2026-07-14-skills-ux-gap-closure-design.md
+- Docs/Design/2026-07-15-skills-extension-parity-design.md
+references:
+- https://github.com/rmusser01/tldw_server/pull/2629
+- https://github.com/rmusser01/tldw_server/pull/2554
+- https://github.com/rmusser01/tldw_server/pull/2732
+- https://github.com/rmusser01/tldw_server/pull/2740
 ---
 
 ## Description
@@ -42,19 +49,13 @@ Docs/superpowers/plans/2026-07-04-skills-uat-quality-gates.md
 - 2026-07-04: Added deterministic Playwright UAT coverage for beginner seed/copy/test-run workflows, power-user large-library search/filter/sort/bulk-delete confirmation, and representative import/execution/delete/loading failure states.
 - 2026-07-04: Unsupported Skills capability remains covered by `apps/packages/ui/src/components/Option/Skills/__tests__/SkillsWorkspace.test.tsx`; E2E coverage was kept to deterministic page states because the browser capability layer can fall back to the bundled OpenAPI spec.
 - 2026-07-12: Rebased PR #2629 onto current `dev` and added regression coverage for missing execute payloads plus body-less DELETE requests with trailing slashes.
-
+Closeout reconciliation: PR #2629 merged the deterministic WebUI Skills UAT quality gates and manual checklist on 2026-07-13. PR #2554 supplied the associated accessibility-state polish; PR #2732 closed the remaining confirmed UX/reliability gaps; PR #2740 certified six strict packaged-extension workflows. All specified design, plan, checklist, metrics, and automated-scope artifacts are present on dev. Merged verification records report 13 deterministic mocked WebUI workflows and 6 strict packaged-extension workflows with zero skips in the extension gate. Three optional live-backend WebUI scenarios remain environment-gated and are explicitly carried forward as the next integration-certification opportunity. This closeout changes Backlog Markdown only, so Bandit is not applicable.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented `/skills` UAT quality gates with shared E2E Skills fixtures, workflow-level beginner and power-user Playwright coverage, representative failure-state coverage, and a manual QA checklist with success metrics.
-
-Verification:
-- `cd apps/tldw-frontend && npx playwright test e2e/workflows/tier-5-specialized/skills.spec.ts --project=tier-5 --reporter=line` passed: 9 tests; 3 live-server tests skipped as designed when no server is available.
-- Vitest skipped: no Skills component files changed.
-- Bandit skipped: frontend E2E and docs-only task; no Python files changed.
-
+Completed the Skills UAT quality-gates bundle. The repository now contains the reviewed design and implementation plan, deterministic beginner/power-user/trust-risk WebUI workflows, scenario-level fixtures, a manual accessibility/responsive/failure checklist, documented success metrics, comprehensive UX/reliability remediation, and strict packaged-extension parity coverage. The remaining evidence gap is deliberately narrow: three live-backend WebUI scenarios and an actual MV3 background-relay live smoke are not part of the deterministic release gate and should be handled by a separate verify-first integration task.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
