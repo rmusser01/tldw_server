@@ -87,6 +87,41 @@ class _FailingTTSInitializationAdapter(_MockAdapterV1):
         )
 
 
+class _AbandonedRuntimeInitializationAdapter(_MockAdapterV1):
+    instances: list[_AbandonedRuntimeInitializationAdapter] = []
+
+    def __init__(self, config: dict[str, Any] | None = None) -> None:
+        super().__init__(config)
+        self.close_calls = 0
+        self.__class__.instances.append(self)
+
+    async def ensure_initialized(self) -> bool:
+        raise RuntimeError("initialization failed")
+
+    async def close(self) -> None:
+        self.close_calls += 1
+        await super().close()
+
+
+class _CancelledInitializationAdapter(_MockAdapterV1):
+    started: Any = None
+    instances: list[_CancelledInitializationAdapter] = []
+
+    def __init__(self, config: dict[str, Any] | None = None) -> None:
+        super().__init__(config)
+        self.close_calls = 0
+        self.__class__.instances.append(self)
+
+    async def ensure_initialized(self) -> bool:
+        self.__class__.started.set()
+        await asyncio.Event().wait()
+        return True
+
+    async def close(self) -> None:
+        self.close_calls += 1
+        await super().close()
+
+
 class _BlockingAdapter(_MockAdapterV1):
     started: Any = None
     release: Any = None
@@ -95,6 +130,7 @@ class _BlockingAdapter(_MockAdapterV1):
     def __init__(self, config: dict[str, Any] | None = None) -> None:
         super().__init__(config)
         self.closed = False
+        self.close_calls = 0
         self.__class__.instances.append(self)
 
     async def initialize(self) -> bool:
@@ -103,6 +139,7 @@ class _BlockingAdapter(_MockAdapterV1):
         return True
 
     async def close(self) -> None:
+        self.close_calls += 1
         self.closed = True
         await super().close()
 
@@ -295,6 +332,7 @@ async def test_registry_reregister_during_initialization_closes_stale_adapter() 
     assert await first_task is None
     assert len(_BlockingAdapter.instances) == 1
     assert _BlockingAdapter.instances[0].closed is True
+    assert _BlockingAdapter.instances[0].close_calls == 1
     assert registry._base.get_cached_adapters() == {}
     replacement = await registry.get_adapter("gateway:company-proxy")
     assert isinstance(replacement, _MockAdapterV2)
@@ -324,6 +362,51 @@ async def test_registry_unload_during_initialization_closes_stale_adapter(
     assert await first_task is None
     assert len(_BlockingAdapter.instances) == 1
     assert _BlockingAdapter.instances[0].closed is True
+    assert _BlockingAdapter.instances[0].close_calls == 1
+    assert registry._base.get_cached_adapters() == {}
+
+
+@pytest.mark.asyncio
+async def test_registry_closes_adapter_when_initialization_raises(monkeypatch) -> None:
+    registry = TTSAdapterRegistry(config={"mock_enabled": True}, include_defaults=False)
+    _AbandonedRuntimeInitializationAdapter.instances = []
+    registry.register_adapter(TTSProvider.MOCK, _AbandonedRuntimeInitializationAdapter)
+
+    async def _get_resource_manager() -> _NonCriticalResourceManager:
+        return _NonCriticalResourceManager()
+
+    monkeypatch.setattr(adapter_registry, "get_resource_manager", _get_resource_manager)
+
+    assert await registry.get_adapter(TTSProvider.MOCK) is None
+    assert len(_AbandonedRuntimeInitializationAdapter.instances) == 1
+    assert _AbandonedRuntimeInitializationAdapter.instances[0].close_calls == 1
+    assert registry._adapters == {}
+    assert registry._base.get_cached_adapters() == {}
+
+
+@pytest.mark.asyncio
+async def test_registry_closes_adapter_and_reraises_initialization_cancellation(
+    monkeypatch,
+) -> None:
+    registry = TTSAdapterRegistry(config={"mock_enabled": True}, include_defaults=False)
+    _CancelledInitializationAdapter.started = asyncio.Event()
+    _CancelledInitializationAdapter.instances = []
+    registry.register_adapter(TTSProvider.MOCK, _CancelledInitializationAdapter)
+
+    async def _get_resource_manager() -> _NonCriticalResourceManager:
+        return _NonCriticalResourceManager()
+
+    monkeypatch.setattr(adapter_registry, "get_resource_manager", _get_resource_manager)
+    task = asyncio.create_task(registry.get_adapter(TTSProvider.MOCK))
+    await _CancelledInitializationAdapter.started.wait()
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert len(_CancelledInitializationAdapter.instances) == 1
+    assert _CancelledInitializationAdapter.instances[0].close_calls == 1
+    assert registry._adapters == {}
     assert registry._base.get_cached_adapters() == {}
 
 

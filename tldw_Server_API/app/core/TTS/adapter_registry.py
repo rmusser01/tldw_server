@@ -741,6 +741,8 @@ class TTSAdapterRegistry:
         if provider_key is None:
             return False
         legacy_provider = self.resolve_provider(provider_key)
+        adapter: Optional[TTSAdapter] = None
+        committed = False
         try:
             # Get adapter class (lazily resolve to avoid heavy imports during module import)
             effective_adapter_spec = (
@@ -832,17 +834,10 @@ class TTSAdapterRegistry:
                     and self._adapter_generations.get(provider_key, 0)
                     != expected_generation
                 ):
-                    try:
-                        await adapter.close()
-                    except _TTS_REGISTRY_NONCRITICAL_EXCEPTIONS as close_error:
-                        logger.warning(
-                            "Error closing superseded {} adapter ({})",
-                            provider_key,
-                            close_error.__class__.__name__,
-                        )
                     return False
                 self._adapters[provider_key] = adapter
                 self._initialized_providers.add(provider_key)
+                committed = True
                 logger.info(f"Successfully initialized {provider_key} adapter")
                 return True
             else:
@@ -866,6 +861,16 @@ class TTSAdapterRegistry:
             )
             # Don't store failed adapter - it will be retried next time
             return False
+        finally:
+            if adapter is not None and not committed:
+                try:
+                    await adapter.close()
+                except Exception as close_error:  # noqa: BLE001 - preserve the primary init result.
+                    logger.warning(
+                        "Error closing abandoned {} adapter ({})",
+                        provider_key,
+                        close_error.__class__.__name__,
+                    )
 
     def _get_provider_config(
         self,
