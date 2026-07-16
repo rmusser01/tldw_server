@@ -76,6 +76,9 @@ def test_slides_db_create_and_get(tmp_path):
     assert fetched.title == "Deck"
     assert fetched.marp_theme == "gaia"
     assert json.loads(fetched.studio_data) == json.loads(_sample_studio_data())
+    assert fetched.content_kind == "structured_slides"
+    assert fetched.html_document is None
+    assert fetched.generation_job_uuid is None
     db.close_connection()
 
 
