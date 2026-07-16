@@ -4,7 +4,7 @@ title: Add first-class standalone HTML-JS presentation generation
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-07-15 23:52'
+updated_date: '2026-07-16 01:50'
 labels:
   - slides
   - presentation-studio
@@ -41,7 +41,7 @@ Design and implement a hardened standalone HTML+JavaScript presentation mode sha
 <!-- AC:BEGIN -->
 - [ ] #1 An approved design spec and implementation plan document the architecture, no-execution security boundary, compatibility behavior, and deferred scope.
 - [ ] #2 The Slides backend supports structured_slides and standalone_html as explicit, validated content kinds without permitting split-brain records.
-- [ ] #3 Standalone HTML generation uses one shared mode-aware service across supported source kinds, submission-time immutable source snapshots, and one administrator-configured allowlisted default provider/model pair.
+- [ ] #3 Standalone HTML generation uses one shared mode-aware service across supported source kinds, submission-time immutable source snapshots, and one administrator-configured concrete allowlisted provider/model/adapter/endpoint target.
 - [ ] #4 Presentation Studio exposes a form-first HTML+JavaScript generation flow and a dedicated code, text-only safe-outline, save, conflict, recovery, and attachment-download experience.
 - [ ] #5 Generated HTML/JavaScript is never rendered or executed by a tldw server, WebUI, extension, worker, MCP path, or renderer; source is never served as text/html.
 - [ ] #6 Legacy presentations and clients remain structured by default, schema-v2 and version migrations are covered, and capabilities fail closed without blocking existing HTML read/edit/export.
@@ -51,9 +51,9 @@ Design and implement a hardened standalone HTML+JavaScript presentation mode sha
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-2026-07-15 requester-approved V1 design: standalone HTML+JavaScript is generated, stored, edited, versioned, and downloaded as opaque source; Presentation Studio shows only a trusted text safe outline, and every tldw execution/fidelity-render path is prohibited. The shared backend snapshots sources in the per-user Slides database, passes only receipt references/digests through Jobs, uses queue=default with numeric public IDs/internal UUID correlation, and resolves one server-selected allowlisted default model. The spec includes schema-v2 migration, terminal idempotency receipts, immutable bounded provenance, exact MIME/no-store protections, explicit save/conflict/recovery, a minimal paginated index, and extension metadata-only handoff. Independent product, backend, and security/consistency reviews approve the written design. Implementation remains gated on requester review and a separate implementation plan.
+2026-07-15 requester-approved V1 direction: standalone HTML+JavaScript is generated, stored, edited, versioned, and downloaded as opaque source. Presentation Studio exposes the form first and shows only a trusted text safe outline. Every tldw execution or fidelity-render path remains prohibited in V1.
 
-2026-07-15 design verification: targeted git diff check passed; Markdown fences are balanced; capability JSON parses and contains no execution-preview capability; stale Validate-and-run/runtime contracts are absent; the related PRD link resolves; and the task parses through the official Backlog CLI. This revision is documentation/task metadata only, so Python tests, frontend builds, and Bandit are not applicable at this stage. No implementation code has started.
+2026-07-15 final design hardening: the shared backend binds each accepted generation to an owner-scoped public generation UUID, an immutable internal Jobs UUID, domain-separated HMAC receipts, an immutable source snapshot, and one server-selected concrete allowlisted provider/model/adapter/endpoint target. The design also specifies retrieval-only owner-local RAG, bounded source adapters and provider reads, killable validation and outline workers, raw octet-stream save and draft attachment paths, explicit content-kind negotiation for compatibility, crash recovery, and an emergency standalone-HTML egress kill.
+
+2026-07-15 fresh re-review: backend, security, and product reviewers all returned APPROVED with no remaining P0-P3 or blocking design findings. Four embedded JSON contracts parse, Markdown fences are balanced, the related link resolves, heading hierarchy is valid, required hardened contracts are present, and stale superseded contracts are absent. This revision changes only documentation and Backlog metadata, so Python tests, frontend builds, and Bandit are not applicable. Implementation has not started; the next step is the task-specific implementation plan.
 <!-- SECTION:NOTES:END -->
-
-<!-- SECTION:FINAL_SUMMARY:END -->
