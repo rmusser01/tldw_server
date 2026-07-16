@@ -44,6 +44,7 @@ from tldw_Server_API.app.core.DB_Management.Prompts_DB import (
 # Functions:
 
 TEST_CLIENT_ID = "test_db_client"
+SENSITIVE_SQLITE_ERROR = "PROMPT_BODY_MUST_NOT_APPEAR /private/DB_PATH_MUST_NOT_APPEAR.db"
 
 
 @pytest.fixture
@@ -101,6 +102,21 @@ class _CommitFailingConnection:
 
     def commit(self):
         raise sqlite3.OperationalError("PROMPT_BODY_MUST_NOT_APPEAR")
+
+
+class _BeginFailingConnection:
+    """Fail transaction entry before any transaction body operation."""
+
+    def __init__(self, conn: sqlite3.Connection):
+        self._conn = conn
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+    def execute(self, sql, parameters=()):
+        if sql.strip().upper() == "BEGIN IMMEDIATE":
+            raise sqlite3.OperationalError(SENSITIVE_SQLITE_ERROR)
+        return self._conn.execute(sql, parameters)
 
 
 # --- Test PromptsDatabase Class ---
@@ -468,15 +484,72 @@ def test_service_prompt_override_failed_save_rolls_back_without_leaking_content(
     )
     conn.commit()
 
-    with pytest.raises(DatabaseError) as captured:
-        memory_db.save_service_prompt_override(
-            definition_id,
-            {"template": "Rejected PROMPT_BODY_MUST_NOT_APPEAR"},
-            original.revision,
-        )
+    log_messages = []
+    sink_id = logger.add(log_messages.append, format="{message}")
+    try:
+        with pytest.raises(DatabaseError) as captured:
+            memory_db.save_service_prompt_override(
+                definition_id,
+                {"template": "Rejected PROMPT_BODY_MUST_NOT_APPEAR"},
+                original.revision,
+            )
+    finally:
+        logger.remove(sink_id)
 
     assert str(captured.value) == "Failed to save Service Prompt override."
     assert "PROMPT_BODY_MUST_NOT_APPEAR" not in str(captured.value)
+    rendered_logs = "".join(str(message) for message in log_messages)
+    assert "PROMPT_BODY_MUST_NOT_APPEAR" not in rendered_logs
+    assert "Transaction failed, rolling back: IntegrityError" in rendered_logs
+    assert "Rollback successful." in rendered_logs
+    assert memory_db.get_service_prompt_override(definition_id) == original
+
+
+@pytest.mark.parametrize(
+    ("operation", "safe_message"),
+    [
+        ("save", "Failed to save Service Prompt override."),
+        ("reset", "Failed to reset Service Prompt override."),
+    ],
+)
+def test_service_prompt_override_begin_immediate_failure_is_wrapped_without_mutation_or_sensitive_logs(
+    memory_db,
+    monkeypatch,
+    operation,
+    safe_message,
+):
+    definition_id = "chat.rag.answer"
+    original = memory_db.save_service_prompt_override(
+        definition_id,
+        {"template": "Original {context} {question}"},
+        None,
+    )
+    failing_conn = _BeginFailingConnection(memory_db.get_connection())
+    monkeypatch.setattr(memory_db, "get_connection", lambda: failing_conn)
+
+    log_messages = []
+    sink_id = logger.add(log_messages.append, format="{message}")
+    try:
+        with pytest.raises(DatabaseError) as captured:
+            if operation == "save":
+                memory_db.save_service_prompt_override(
+                    definition_id,
+                    {"template": "Rejected {context} {question}"},
+                    original.revision,
+                )
+            else:
+                memory_db.reset_service_prompt_override(definition_id, original.revision)
+    finally:
+        logger.remove(sink_id)
+
+    assert type(captured.value) is DatabaseError
+    assert str(captured.value) == safe_message
+    rendered_logs = "".join(str(message) for message in log_messages)
+    for sentinel in ("PROMPT_BODY_MUST_NOT_APPEAR", "DB_PATH_MUST_NOT_APPEAR"):
+        assert sentinel not in str(captured.value)
+        assert sentinel not in rendered_logs
+    assert "Transaction failed, rolling back: OperationalError" in rendered_logs
+    assert "Rollback successful." in rendered_logs
     assert memory_db.get_service_prompt_override(definition_id) == original
 
 
