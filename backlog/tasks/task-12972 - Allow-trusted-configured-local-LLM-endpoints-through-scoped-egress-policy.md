@@ -1,10 +1,10 @@
 ---
 id: TASK-12972
 title: Allow trusted configured local LLM endpoints through scoped egress policy
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-07-15 19:34'
-updated_date: '2026-07-16 03:18'
+updated_date: '2026-07-16 03:20'
 labels:
   - browser-extension
 dependencies: []
@@ -82,6 +82,8 @@ Stage 5 touched paths: apps/packages/ui/src/services/tldw/TldwModels.ts; apps/pa
 2026-07-15 PR #2743 review audit reopened the task. Collected 13 findings across Qodo and CodeRabbit. Verified fix candidates: unexpected setup-validation exceptions need operator logging; malformed configured URLs need controlled handling; invalidation listeners need per-listener isolation; endpoint provenance must distinguish key ownership from endpoint ownership; all HEAD-to-GET fallbacks need fresh policy/TLS validation; checked transports and TLS-pin sockets must connect to vetted DNS answers; setup must reject 429/5xx manual fallback; fallback tests and scanner-sensitive patch lines need correction; stale outer-cache generations must return current data; native Kobold must raise HTTP status and close responses. Two findings will receive evidence-based pushback: first-run scope creation already runs after localhost-or-remote-admin setup authorization, and the endpoint-only discovery routine has no second consumer warranting a new core abstraction.
 
 2026-07-15 PR #2743 review fixes verified locally. Implemented 11 actionable Qodo/CodeRabbit findings plus two small inherited chat endpoint lint defects; retained two evidence-based pushbacks where extraction had no second consumer and the requested LAN-only restriction contradicted the authorized exact-origin design. Final backend affected matrix passed 519/519 with 5 warnings. Scoped Ruff correctness checks passed. Bandit scanned 12,668 production Python LOC with 0 findings and 0 errors. The prior shared WebUI and browser-extension suites each passed 53/53 and full frontend TypeScript passed. Live llama.cpp UAT at 127.0.0.1:9099 passed checked synchronous chat (HTTP 200, choices present) and checked streaming chat (HTTP 200, 22 events, [DONE]); logical request URLs remained intact. PR is ready, not draft. Task remains In Progress until the review replies are posted, threads resolved, and refreshed CI is checked.
+
+2026-07-15 PR #2743 review completion: pushed ae78b864f9, replied to all 11 inline Qodo/CodeRabbit threads, resolved all 11 threads, and posted the two fixed outside-diff findings with verification evidence. CodeRabbit confirmed the addressed fixes and reports success. The PR remains ready (`isDraft=false`). Refreshed GitHub Actions checks are queued on the pushed head; no unresolved review thread remains at task finalization.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
