@@ -16,6 +16,7 @@ Implements:
 import asyncio  # noqa: E402
 import contextvars  # noqa: E402
 import hashlib  # noqa: E402
+import inspect  # noqa: E402
 import json  # noqa: E402
 import logging  # noqa: E402
 import os  # noqa: E402
@@ -25,7 +26,7 @@ import socket  # noqa: E402
 import ssl  # noqa: E402
 import threading  # noqa: E402
 import time  # noqa: E402
-from collections.abc import AsyncIterator, Callable, Iterable, Iterator  # noqa: E402
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Iterator, Mapping  # noqa: E402
 from contextlib import asynccontextmanager, contextmanager, nullcontext, suppress  # noqa: E402
 from dataclasses import dataclass  # noqa: E402
 from datetime import datetime, timezone  # noqa: E402
@@ -109,7 +110,6 @@ from tldw_Server_API.app.core.testing import (
     is_truthy,
 )
 
-
 class _TerminalHTTPStatusError(Exception):
     """Carry an already-classified terminal HTTP status past transport retry logic."""
 
@@ -123,6 +123,8 @@ def _terminal_status_network_error(error: _TerminalHTTPStatusError) -> NetworkEr
     status_code = error.status_code if 100 <= error.status_code <= 599 else None
     return NetworkError(str(error), status_code=status_code)
 
+
+ResponseHeadersCallback = Callable[[int, Mapping[str, str]], Awaitable[None] | None]
 
 _HTTPCLIENT_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     AttributeError,
@@ -880,6 +882,7 @@ class TransportAdapter(Protocol):
         chunk_size: int = 65536,
         cert_pinning: dict[str, set[str]] | None = None,
         sensitive_observability: bool = False,
+        on_response: ResponseHeadersCallback | None = None,
     ) -> AsyncIterator[bytes]: ...
 
     async def stream_sse(
@@ -1004,6 +1007,7 @@ class HttpxAdapter:
         chunk_size: int = 65536,
         cert_pinning: dict[str, set[str]] | None = None,
         sensitive_observability: bool = False,
+        on_response: ResponseHeadersCallback | None = None,
     ) -> AsyncIterator[bytes]:
         stream = _astream_bytes_httpx(
             method=method,
@@ -1020,6 +1024,7 @@ class HttpxAdapter:
             chunk_size=chunk_size,
             cert_pinning=cert_pinning,
             sensitive_observability=sensitive_observability,
+            on_response=on_response,
         )
         scoped_stream = _iterate_sensitive_http_items(
             stream,
@@ -1139,6 +1144,7 @@ class AiohttpAdapter:
         chunk_size: int = 65536,
         cert_pinning: dict[str, set[str]] | None = None,
         sensitive_observability: bool = False,
+        on_response: ResponseHeadersCallback | None = None,
     ) -> AsyncIterator[bytes]:
         stream = _astream_bytes_aiohttp(
             method=method,
@@ -1155,6 +1161,7 @@ class AiohttpAdapter:
             chunk_size=chunk_size,
             cert_pinning=cert_pinning,
             sensitive_observability=sensitive_observability,
+            on_response=on_response,
         )
         scoped_stream = _iterate_sensitive_http_items(
             stream,
@@ -5066,6 +5073,34 @@ def fetch_json(
 # Streaming helpers
 # --------------------------------------------------------------------------------------
 
+class _CaseInsensitiveHeaders(Mapping[str, str]):
+    """Read-only response headers with case-insensitive lookup."""
+
+    def __init__(self, headers: Mapping[str, Any]) -> None:
+        self._headers = {str(key).lower(): str(value) for key, value in headers.items()}
+
+    def __getitem__(self, key: str) -> str:
+        return self._headers[key.lower()]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._headers)
+
+    def __len__(self) -> int:
+        return len(self._headers)
+
+
+async def _invoke_response_callback(
+    callback: ResponseHeadersCallback | None,
+    status: int,
+    headers: Mapping[str, Any],
+) -> None:
+    if callback is None:
+        return
+    result = callback(int(status), _CaseInsensitiveHeaders(headers))
+    if inspect.isawaitable(result):
+        await result
+
+
 async def _astream_bytes_httpx(
     *,
     method: str,
@@ -5082,6 +5117,7 @@ async def _astream_bytes_httpx(
     chunk_size: int = 65536,
     cert_pinning: dict[str, set[str]] | None = None,
     sensitive_observability: bool = False,
+    on_response: ResponseHeadersCallback | None = None,
 ) -> AsyncIterator[bytes]:
     if httpx is None:  # pragma: no cover
         raise RuntimeError("httpx is not available")  # noqa: TRY003
@@ -5119,6 +5155,7 @@ async def _astream_bytes_httpx(
                 sensitive_observability=sensitive_observability,
             )
             yielded_any = False
+            callback_error: BaseException | None = None
             req_headers = _inject_trace_headers(headers)
             resp = None
             try:
@@ -5161,6 +5198,12 @@ async def _astream_bytes_httpx(
                         ),
                     )
                 ) as (resp, byte_iter):
+                    if on_response is not None:
+                        try:
+                            await _invoke_response_callback(on_response, resp.status_code, resp.headers)
+                        except Exception as exc:
+                            callback_error = exc
+                            raise
                     try:
                         resp.raise_for_status()
                     except httpx.HTTPStatusError:
@@ -5221,7 +5264,13 @@ async def _astream_bytes_httpx(
                 )
             except asyncio.CancelledError:
                 raise
+            except httpx.HTTPStatusError as e:
+                if e is callback_error:
+                    raise
+                raise
             except httpx.HTTPError as e:
+                if e is callback_error:
+                    raise
                 network_exc = NetworkError(e.__class__.__name__)
                 if yielded_any:
                     _log_outbound_request(
@@ -5268,6 +5317,8 @@ async def _astream_bytes_httpx(
                 await asyncio.sleep(delay)
                 sleep_s = delay
             except NetworkError as e:
+                if e is callback_error:
+                    raise
                 if yielded_any:
                     _log_outbound_request(
                         method=method,
@@ -5333,6 +5384,7 @@ async def _astream_bytes_aiohttp(
     chunk_size: int = 65536,
     cert_pinning: dict[str, set[str]] | None = None,
     sensitive_observability: bool = False,
+    on_response: ResponseHeadersCallback | None = None,
 ) -> AsyncIterator[bytes]:
     if aiohttp is None:  # pragma: no cover
         raise RuntimeError("aiohttp is not available")  # noqa: TRY003
@@ -5365,6 +5417,7 @@ async def _astream_bytes_aiohttp(
                 sensitive_observability=sensitive_observability,
             )
             yielded_any = False
+            callback_error: BaseException | None = None
             resp = None
             req_headers = _inject_trace_headers(headers)
             try:
@@ -5415,6 +5468,12 @@ async def _astream_bytes_aiohttp(
                         ),
                     )
                 ) as (resp, byte_iter):
+                    if on_response is not None:
+                        try:
+                            await _invoke_response_callback(on_response, resp.status, resp.headers)
+                        except Exception as exc:
+                            callback_error = exc
+                            raise
                     if resp.status >= 400:
                         should, rsn = _should_retry(method, resp.status, None, retry)
                         if should and attempt < attempts:
@@ -5475,6 +5534,8 @@ async def _astream_bytes_aiohttp(
             except asyncio.CancelledError:
                 raise
             except NetworkError as e:
+                if e is callback_error:
+                    raise
                 if yielded_any:
                     _log_outbound_request(
                         method=method,
@@ -5516,6 +5577,8 @@ async def _astream_bytes_aiohttp(
                 await asyncio.sleep(delay)
                 sleep_s = delay
             except _HTTPCLIENT_REQUEST_EXCEPTIONS as e:
+                if e is callback_error:
+                    raise
                 network_exc = NetworkError(e.__class__.__name__)
                 if yielded_any:
                     _log_outbound_request(
@@ -5581,6 +5644,7 @@ async def astream_bytes(
     chunk_size: int = 65536,
     cert_pinning: dict[str, set[str]] | None = None,
     sensitive_observability: bool = False,
+    on_response: ResponseHeadersCallback | None = None,
 ) -> AsyncIterator[bytes]:
     sensitive_observability = _effective_sensitive_observability(
         sensitive_observability
@@ -5605,6 +5669,7 @@ async def astream_bytes(
         chunk_size=chunk_size,
         cert_pinning=cert_pinning,
         sensitive_observability=sensitive_observability,
+        on_response=on_response,
     )
 
     try:
@@ -6374,6 +6439,7 @@ async def adownload(
 
 __all__ = [
     "HttpResponse",
+    "ResponseHeadersCallback",
     "RetryPolicy",
     "SSEEvent",
     "build_limits",

@@ -1,5 +1,7 @@
 import asyncio
 import types
+from collections.abc import Mapping
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import pytest
@@ -1203,3 +1205,406 @@ async def test_retry_on_unsafe_true_does_retry():
         assert calls["n"] == 2
     finally:
         await client.aclose()
+
+
+@requires_httpx
+@pytest.mark.asyncio
+async def test_stream_response_callback_httpx_runs_once_before_body_with_case_insensitive_read_only_headers(monkeypatch):
+    import httpx
+
+    from tldw_Server_API.app.core import http_client as hc
+
+    events: list[str] = []
+    seen_headers: Mapping[str, str] | None = None
+
+    @asynccontextmanager
+    async def fake_httpx_stream_io(**_kwargs):
+        request = httpx.Request("GET", "http://93.184.216.34/stream")
+        response = httpx.Response(200, request=request, headers={"X-Request-ID": "request-1"})
+
+        async def body():
+            events.append("body")
+            yield b"audio"
+
+        try:
+            yield response, body()
+        finally:
+            events.append("close")
+
+    async def on_response(status: int, headers: Mapping[str, str]) -> None:
+        nonlocal seen_headers
+        await asyncio.sleep(0)
+        events.append(f"callback:{status}")
+        seen_headers = headers
+        assert headers.get("x-request-id") == "request-1"
+        assert headers.get("X-REQUEST-ID") == "request-1"
+        with pytest.raises(TypeError):
+            headers["new-header"] = "not-allowed"  # type: ignore[index]
+
+    monkeypatch.setattr(hc, "_httpx_stream_io", fake_httpx_stream_io)
+
+    chunks = [
+        chunk
+        async for chunk in hc._astream_bytes_httpx(
+            method="GET",
+            url="http://93.184.216.34/stream",
+            client=object(),
+            on_response=on_response,
+        )
+    ]
+
+    assert chunks == [b"audio"]
+    assert events == ["callback:200", "body", "close"]
+    assert isinstance(seen_headers, Mapping)
+
+
+@pytest.mark.asyncio
+async def test_stream_response_callback_aiohttp_sync_runs_once_before_body_with_case_insensitive_headers(monkeypatch):
+    from tldw_Server_API.app.core import http_client as hc
+
+    events: list[str] = []
+
+    class Response:
+        status = 200
+        url = "http://93.184.216.34/stream"
+        headers = {"Content-TYPE": "audio/mpeg"}
+
+    @asynccontextmanager
+    async def fake_aiohttp_stream_io(**_kwargs):
+        async def body():
+            events.append("body")
+            yield b"audio"
+
+        try:
+            yield Response(), body()
+        finally:
+            events.append("close")
+
+    def on_response(status: int, headers: Mapping[str, str]) -> None:
+        events.append(f"callback:{status}:{headers.get('CONTENT-type')}")
+
+    monkeypatch.setattr(hc, "_aiohttp_stream_io", fake_aiohttp_stream_io)
+
+    chunks = [
+        chunk
+        async for chunk in hc._astream_bytes_aiohttp(
+            method="GET",
+            url="http://93.184.216.34/stream",
+            client=object(),
+            on_response=on_response,
+        )
+    ]
+
+    assert chunks == [b"audio"]
+    assert events == ["callback:200:audio/mpeg", "body", "close"]
+
+
+@requires_httpx
+@pytest.mark.asyncio
+async def test_stream_response_callback_httpx_runs_before_non_success_classification(monkeypatch):
+    import httpx
+
+    from tldw_Server_API.app.core import http_client as hc
+
+    events: list[str] = []
+
+    @asynccontextmanager
+    async def fake_httpx_stream_io(**_kwargs):
+        request = httpx.Request("GET", "http://93.184.216.34/missing")
+        response = httpx.Response(404, request=request, headers={"X-Error": "missing"})
+
+        async def body():
+            events.append("body")
+            yield b"error"
+
+        try:
+            yield response, body()
+        finally:
+            events.append("close")
+
+    def on_response(status: int, headers: Mapping[str, str]) -> None:
+        events.append(f"callback:{status}:{headers.get('x-error')}")
+
+    monkeypatch.setattr(hc, "_httpx_stream_io", fake_httpx_stream_io)
+
+    with pytest.raises(httpx.HTTPStatusError):
+        async for _ in hc._astream_bytes_httpx(
+            method="GET",
+            url="http://93.184.216.34/missing",
+            client=object(),
+            retry=hc.RetryPolicy(attempts=1),
+            on_response=on_response,
+        ):
+            pass
+
+    assert events == ["callback:404:missing", "close"]
+
+
+@pytest.mark.asyncio
+async def test_stream_response_callback_aiohttp_runs_before_non_success_body_read(monkeypatch):
+    from tldw_Server_API.app.core import http_client as hc
+
+    events: list[str] = []
+
+    class Response:
+        status = 400
+        url = "http://93.184.216.34/bad"
+        headers = {"X-Error": "bad-request"}
+
+        async def read(self) -> bytes:
+            events.append("read")
+            return b"error"
+
+    @asynccontextmanager
+    async def fake_aiohttp_stream_io(**_kwargs):
+        async def body():
+            events.append("body")
+            yield b"error"
+
+        try:
+            yield Response(), body()
+        finally:
+            events.append("close")
+
+    async def on_response(status: int, headers: Mapping[str, str]) -> None:
+        events.append(f"callback:{status}:{headers.get('X-ERROR')}")
+
+    monkeypatch.setattr(hc, "_aiohttp_stream_io", fake_aiohttp_stream_io)
+
+    with pytest.raises(hc.NetworkError, match="HTTP 400"):
+        async for _ in hc._astream_bytes_aiohttp(
+            method="GET",
+            url="http://93.184.216.34/bad",
+            client=object(),
+            retry=hc.RetryPolicy(attempts=1),
+            on_response=on_response,
+        ):
+            pass
+
+    assert events == ["callback:400:bad-request", "read", "close"]
+
+
+@requires_httpx
+@pytest.mark.asyncio
+async def test_stream_response_callback_httpx_exception_is_unchanged_and_closes_once(monkeypatch):
+    import httpx
+
+    from tldw_Server_API.app.core import http_client as hc
+
+    events: list[str] = []
+    error = httpx.ReadError("callback failed")
+
+    @asynccontextmanager
+    async def fake_httpx_stream_io(**_kwargs):
+        request = httpx.Request("GET", "http://93.184.216.34/stream")
+        response = httpx.Response(200, request=request)
+
+        async def body():
+            events.append("body")
+            yield b"audio"
+
+        try:
+            yield response, body()
+        finally:
+            events.append("close")
+
+    def on_response(_status: int, _headers: Mapping[str, str]) -> None:
+        raise error
+
+    monkeypatch.setattr(hc, "_httpx_stream_io", fake_httpx_stream_io)
+
+    with pytest.raises(httpx.ReadError) as exc_info:
+        async for _ in hc._astream_bytes_httpx(
+            method="GET",
+            url="http://93.184.216.34/stream",
+            client=object(),
+            on_response=on_response,
+        ):
+            pass
+
+    assert exc_info.value is error
+    assert events == ["close"]
+
+
+@pytest.mark.asyncio
+async def test_stream_response_callback_aiohttp_exception_is_unchanged_and_closes_once(monkeypatch):
+    from tldw_Server_API.app.core import http_client as hc
+
+    events: list[str] = []
+    error = ValueError("callback failed")
+
+    class Response:
+        status = 200
+        url = "http://93.184.216.34/stream"
+        headers: dict[str, str] = {}
+
+    @asynccontextmanager
+    async def fake_aiohttp_stream_io(**_kwargs):
+        async def body():
+            events.append("body")
+            yield b"audio"
+
+        try:
+            yield Response(), body()
+        finally:
+            events.append("close")
+
+    async def on_response(_status: int, _headers: Mapping[str, str]) -> None:
+        raise error
+
+    monkeypatch.setattr(hc, "_aiohttp_stream_io", fake_aiohttp_stream_io)
+
+    with pytest.raises(ValueError) as exc_info:
+        async for _ in hc._astream_bytes_aiohttp(
+            method="GET",
+            url="http://93.184.216.34/stream",
+            client=object(),
+            on_response=on_response,
+        ):
+            pass
+
+    assert exc_info.value is error
+    assert events == ["close"]
+
+
+@requires_httpx
+@pytest.mark.asyncio
+async def test_stream_response_callback_httpx_cancellation_propagates_and_closes_once(monkeypatch):
+    import httpx
+
+    from tldw_Server_API.app.core import http_client as hc
+
+    events: list[str] = []
+
+    @asynccontextmanager
+    async def fake_httpx_stream_io(**_kwargs):
+        request = httpx.Request("GET", "http://93.184.216.34/stream")
+        response = httpx.Response(200, request=request)
+
+        async def body():
+            events.append("body")
+            yield b"audio"
+
+        try:
+            yield response, body()
+        finally:
+            events.append("close")
+
+    def on_response(_status: int, _headers: Mapping[str, str]) -> None:
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(hc, "_httpx_stream_io", fake_httpx_stream_io)
+
+    with pytest.raises(asyncio.CancelledError):
+        async for _ in hc._astream_bytes_httpx(
+            method="GET",
+            url="http://93.184.216.34/stream",
+            client=object(),
+            on_response=on_response,
+        ):
+            pass
+
+    assert events == ["close"]
+
+
+@pytest.mark.asyncio
+async def test_stream_response_callback_aiohttp_cancellation_propagates_and_closes_once(monkeypatch):
+    from tldw_Server_API.app.core import http_client as hc
+
+    events: list[str] = []
+
+    class Response:
+        status = 200
+        url = "http://93.184.216.34/stream"
+        headers: dict[str, str] = {}
+
+    @asynccontextmanager
+    async def fake_aiohttp_stream_io(**_kwargs):
+        async def body():
+            events.append("body")
+            yield b"audio"
+
+        try:
+            yield Response(), body()
+        finally:
+            events.append("close")
+
+    async def on_response(_status: int, _headers: Mapping[str, str]) -> None:
+        await asyncio.sleep(0)
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(hc, "_aiohttp_stream_io", fake_aiohttp_stream_io)
+
+    with pytest.raises(asyncio.CancelledError):
+        async for _ in hc._astream_bytes_aiohttp(
+            method="GET",
+            url="http://93.184.216.34/stream",
+            client=object(),
+            on_response=on_response,
+        ):
+            pass
+
+    assert events == ["close"]
+
+
+@requires_httpx
+@pytest.mark.asyncio
+async def test_stream_response_no_callback_preserves_httpx_body_iteration(monkeypatch):
+    import httpx
+
+    from tldw_Server_API.app.core import http_client as hc
+
+    @asynccontextmanager
+    async def fake_httpx_stream_io(**_kwargs):
+        request = httpx.Request("GET", "http://93.184.216.34/stream")
+        response = httpx.Response(200, request=request)
+
+        async def body():
+            yield b"one"
+            yield b"two"
+
+        yield response, body()
+
+    monkeypatch.setattr(hc, "_httpx_stream_io", fake_httpx_stream_io)
+
+    chunks = [
+        chunk
+        async for chunk in hc._astream_bytes_httpx(
+            method="GET",
+            url="http://93.184.216.34/stream",
+            client=object(),
+        )
+    ]
+
+    assert chunks == [b"one", b"two"]
+
+
+@pytest.mark.asyncio
+async def test_stream_response_no_callback_preserves_aiohttp_body_iteration(monkeypatch):
+    from tldw_Server_API.app.core import http_client as hc
+
+    class Response:
+        status = 200
+        url = "http://93.184.216.34/stream"
+        headers: dict[str, str] = {}
+
+    @asynccontextmanager
+    async def fake_aiohttp_stream_io(**_kwargs):
+        async def body():
+            yield b"one"
+            yield b"two"
+
+        yield Response(), body()
+
+    monkeypatch.setattr(hc, "_aiohttp_stream_io", fake_aiohttp_stream_io)
+
+    chunks = [
+        chunk
+        async for chunk in hc._astream_bytes_aiohttp(
+            method="GET",
+            url="http://93.184.216.34/stream",
+            client=object(),
+        )
+    ]
+
+    assert chunks == [b"one", b"two"]
