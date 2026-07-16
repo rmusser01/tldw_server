@@ -527,7 +527,7 @@ async def create_speech_job(
     request_id = ensure_request_id(request)
     _resolve_tts_backend_mirror(request_data, request)
     provider_hint = _audio_shim_attr("_sanitize_speech_request")(request_data, request_id=request_id)
-    speech_request_payload = model_dump_compat(request_data)
+    speech_request_payload = model_dump_compat(request_data, exclude_unset=True)
     if contains_tts_credential_fields(speech_request_payload):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
