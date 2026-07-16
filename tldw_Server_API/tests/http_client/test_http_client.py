@@ -935,3 +935,98 @@ async def test_stream_response_no_callback_preserves_aiohttp_body_iteration(monk
     ]
 
     assert chunks == [b"one", b"two"]
+
+
+@requires_httpx
+@pytest.mark.asyncio
+async def test_stream_response_duplicate_headers_httpx_are_comma_joined(monkeypatch):
+    import httpx
+
+    from tldw_Server_API.app.core import http_client as hc
+
+    seen: dict[str, str | None] = {}
+
+    @asynccontextmanager
+    async def fake_httpx_stream_io(**_kwargs):
+        request = httpx.Request("GET", "http://93.184.216.34/stream")
+        response = httpx.Response(
+            200,
+            request=request,
+            headers=[
+                ("Content-Type", "audio/mpeg"),
+                ("content-type", "audio/wav"),
+                ("X-Trace", "one"),
+                ("x-trace", "two"),
+            ],
+        )
+
+        async def body():
+            yield b"audio"
+
+        yield response, body()
+
+    def on_response(_status: int, headers: Mapping[str, str]) -> None:
+        seen["content-type"] = headers.get("CONTENT-TYPE")
+        seen["x-trace"] = headers.get("x-trace")
+
+    monkeypatch.setattr(hc, "_httpx_stream_io", fake_httpx_stream_io)
+
+    chunks = [
+        chunk
+        async for chunk in hc._astream_bytes_httpx(
+            method="GET",
+            url="http://93.184.216.34/stream",
+            client=object(),
+            on_response=on_response,
+        )
+    ]
+
+    assert chunks == [b"audio"]
+    assert seen == {"content-type": "audio/mpeg, audio/wav", "x-trace": "one, two"}
+
+
+@pytest.mark.asyncio
+async def test_stream_response_duplicate_headers_aiohttp_are_comma_joined(monkeypatch):
+    from multidict import CIMultiDict
+
+    from tldw_Server_API.app.core import http_client as hc
+
+    seen: dict[str, str | None] = {}
+
+    class Response:
+        status = 200
+        url = "http://93.184.216.34/stream"
+        headers = CIMultiDict(
+            [
+                ("Content-Type", "audio/mpeg"),
+                ("content-type", "audio/wav"),
+                ("X-Trace", "one"),
+                ("x-trace", "two"),
+            ]
+        )
+
+    @asynccontextmanager
+    async def fake_aiohttp_stream_io(**_kwargs):
+        async def body():
+            yield b"audio"
+
+        yield Response(), body()
+
+    def on_response(_status: int, headers: Mapping[str, str]) -> None:
+        seen["content-type"] = headers.get("CONTENT-TYPE")
+        seen["x-trace"] = headers.get("x-trace")
+
+    monkeypatch.setattr(hc, "_aiohttp_stream_io", fake_aiohttp_stream_io)
+
+    chunks = [
+        chunk
+        async for chunk in hc._astream_bytes_aiohttp(
+            method="GET",
+            url="http://93.184.216.34/stream",
+            client=object(),
+            on_response=on_response,
+        )
+    ]
+
+    assert chunks == [b"audio"]
+    assert seen == {"content-type": "audio/mpeg, audio/wav", "x-trace": "one, two"}
