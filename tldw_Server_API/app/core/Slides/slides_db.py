@@ -179,6 +179,8 @@ class PresentationVersionMetadataRow:
     version: int
     created_at: str
     client_id: str
+    title: str | None
+    deleted: int | None
 
 
 @dataclass
@@ -439,7 +441,9 @@ class SlidesDatabase:
                         version INTEGER NOT NULL,
                         payload_json TEXT NOT NULL,
                         created_at DATETIME NOT NULL,
-                        client_id TEXT NOT NULL
+                        client_id TEXT NOT NULL,
+                        title TEXT NULL,
+                        deleted INTEGER NULL
                     );
 
                     CREATE UNIQUE INDEX IF NOT EXISTS idx_presentations_versions_unique
@@ -791,8 +795,9 @@ class SlidesDatabase:
         conn.execute(
             """
             INSERT INTO presentations_versions (
-                presentation_id, version, payload_json, created_at, client_id
-            ) VALUES (?, ?, ?, ?, ?)
+                presentation_id, version, payload_json, created_at, client_id,
+                title, deleted
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 row.id,
@@ -800,6 +805,8 @@ class SlidesDatabase:
                 payload_json,
                 row.last_modified,
                 row.client_id,
+                row.title,
+                int(row.deleted or 0),
             ),
         )
         if row.content_kind == "standalone_html":
@@ -1580,6 +1587,97 @@ class SlidesDatabase:
             )
             return row
 
+    def restore_validated_standalone_presentation(
+        self,
+        *,
+        presentation_id: str,
+        html_document: str,
+        validation_result: StandaloneHtmlValidationResult,
+        expected_version: int,
+    ) -> PresentationRow:
+        """Atomically undelete one exact standalone source accepted by the pool."""
+        source = bind_validated_standalone_source(html_document, validation_result)
+        with self.transaction(immediate=True) as conn:
+            current = self._fetch_presentation_by_id(
+                conn,
+                presentation_id,
+                include_deleted=True,
+            )
+            if current.content_kind != "standalone_html":
+                raise InputError("operation_not_supported_for_content_kind")
+            if current.version != expected_version:
+                raise ConflictError(
+                    "version_conflict",
+                    entity="presentations",
+                    identifier=presentation_id,
+                )
+            if current.deleted != 1:
+                raise InputError("operation_not_supported_for_content_kind")
+            derived = validation_result
+            if (
+                current.html_document,
+                current.title,
+                current.html_sha256,
+                current.html_bytes,
+                current.html_slide_count,
+                current.slides_text,
+            ) != (
+                source,
+                derived.title,
+                derived.html_sha256,
+                derived.html_bytes,
+                derived.slide_count,
+                derived.indexable_text,
+            ):
+                raise InputError("standalone_html_response_invalid")
+
+            next_version = expected_version + 1
+            modified = self._utcnow_iso()
+            candidate = vars(current).copy()
+            candidate.update(
+                {
+                    "deleted": 0,
+                    "last_modified": modified,
+                    "version": next_version,
+                    "client_id": self.client_id,
+                }
+            )
+            self._validate_presentation_candidate(candidate)
+            cur = conn.execute(
+                """
+                UPDATE presentations
+                SET deleted = 0, last_modified = ?, version = ?, client_id = ?
+                WHERE id = ? AND version = ? AND deleted = 1
+                """,
+                (
+                    modified,
+                    next_version,
+                    self.client_id,
+                    presentation_id,
+                    expected_version,
+                ),
+            )
+            if cur.rowcount != 1:  # pragma: no cover - held write transaction
+                raise ConflictError(
+                    "version_conflict",
+                    entity="presentations",
+                    identifier=presentation_id,
+                )
+            row = self._fetch_presentation_by_id(
+                conn,
+                presentation_id,
+                include_deleted=True,
+            )
+            self._insert_version_snapshot(conn, row)
+            self._insert_sync_log(
+                conn,
+                entity_uuid=presentation_id,
+                operation="restore",
+                version=next_version,
+                payload={"fields": ["deleted"]},
+            )
+            return row
+
     def list_presentation_versions(
         self,
         *,
@@ -1620,7 +1718,7 @@ class SlidesDatabase:
         conn = self.get_connection()
         rows = conn.execute(
             """
-            SELECT presentation_id, version, created_at, client_id
+            SELECT presentation_id, version, created_at, client_id, title, deleted
             FROM presentations_versions
             WHERE presentation_id = ?
             ORDER BY version DESC

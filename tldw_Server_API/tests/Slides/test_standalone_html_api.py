@@ -4,7 +4,7 @@ import hashlib
 import json
 
 import pytest
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
@@ -20,7 +20,10 @@ from tldw_Server_API.app.api.v1.endpoints.slides import (
 from tldw_Server_API.app.api.v1.endpoints.slides import (
     router as slides_router,
 )
-from tldw_Server_API.app.api.v1.schemas.slides_schemas import ExportFormat
+from tldw_Server_API.app.api.v1.schemas.slides_schemas import (
+    ExportFormat,
+    PresentationPatchRequest,
+)
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.Slides.slides_db import SlidesDatabase
@@ -243,6 +246,51 @@ def test_malformed_or_unknown_only_negotiation_is_fixed_400(html_client, value):
     assert _ACCEPT.lower() in response.headers["Vary"].lower()
 
 
+def test_slides_lifespan_without_html_pool_shuts_down_cleanly():
+    app = FastAPI()
+    app.include_router(slides_router, prefix="/api/v1")
+
+    with TestClient(app):
+        assert getattr(app.state, "standalone_html_validation_pool", None) is None
+
+    assert getattr(app.state, "standalone_html_validation_pool", None) is None
+    assert getattr(app.state, "standalone_html_validation_pool_lock", None) is None
+
+
+def test_negotiated_validation_errors_match_fastapi_body_and_add_vary(html_client):
+    client, _db, structured, _html = html_client
+    baseline_app = FastAPI()
+
+    @baseline_app.get("/presentations")
+    async def baseline_list(limit: int = Query(50, ge=1, le=200)):
+        return {"limit": limit}
+
+    @baseline_app.patch("/presentations/{presentation_id}")
+    async def baseline_patch(
+        presentation_id: str,
+        request: PresentationPatchRequest,
+    ):
+        return {"id": presentation_id, "request": request.model_dump()}
+
+    with TestClient(baseline_app) as baseline:
+        baseline_query = baseline.get("/presentations?limit=0")
+        baseline_body = baseline.patch("/presentations/structured", json={"title": []})
+
+    query = client.get("/api/v1/slides/presentations?limit=0")
+    body = client.patch(
+        f"/api/v1/slides/presentations/{structured.id}",
+        json={"title": []},
+        headers={"If-Match": 'W/"v1"'},
+    )
+
+    assert query.status_code == baseline_query.status_code == 422
+    assert body.status_code == baseline_body.status_code == 422
+    assert query.json() == baseline_query.json()
+    assert body.json() == baseline_body.json()
+    assert _ACCEPT.lower() in query.headers["Vary"].lower()
+    assert _ACCEPT.lower() in body.headers["Vary"].lower()
+
+
 def _html_mutation_requests(html_id: str):
     return [
         (
@@ -332,6 +380,25 @@ def test_list_negotiation_filters_before_pagination_and_returns_source_free_unio
     assert len(dual.json()["presentations"]) == 1
     for response in (legacy, structured_only, html_only, dual):
         assert _ACCEPT.lower() in {item.strip().lower() for item in response.headers["Vary"].split(",")}
+
+
+def test_structured_version_list_preserves_legacy_title_and_deleted_values(html_client):
+    client, db, structured, _html = html_client
+    renamed = db.update_presentation(
+        presentation_id=structured.id,
+        update_fields={"title": "Renamed Structured Deck"},
+        expected_version=structured.version,
+    )
+    deleted = db.soft_delete_presentation(structured.id, renamed.version)
+
+    response = client.get(f"/api/v1/slides/presentations/{structured.id}/versions")
+
+    assert response.status_code == 200, response.text
+    assert [(version["version"], version["title"], version["deleted"]) for version in response.json()["versions"]] == [
+        (deleted.version, "Renamed Structured Deck", True),
+        (renamed.version, "Renamed Structured Deck", False),
+        (structured.version, "Structured Deck", False),
+    ]
 
 
 def test_targeted_html_requires_opt_in_before_source_projection(html_client):
@@ -728,6 +795,62 @@ def test_html_version_restore_uses_interactive_pool_before_atomic_write(html_cli
     assert restored.status_code == 200, restored.text
     assert restored.json()["html_document"] == _document()
     assert validation_pool.calls == [_document()]
+
+
+def test_html_soft_restore_revalidates_cross_field_consistent_stored_source(html_client):
+    client, db, _structured, html = html_client
+    deleted = client.delete(
+        f"/api/v1/slides/presentations/{html.id}",
+        headers={**_BOTH, "If-Match": '"v1"'},
+    )
+    assert deleted.status_code == 200, deleted.text
+    corrupt = _document().replace(
+        "document.addEventListener('keydown', () => {});",
+        "fetch('/private-data');",
+    )
+    encoded = corrupt.encode("utf-8")
+    with db.transaction(immediate=True) as conn:
+        conn.execute(
+            """
+            UPDATE presentations
+            SET html_document = ?, html_sha256 = ?, html_bytes = ?
+            WHERE id = ?
+            """,
+            (corrupt, hashlib.sha256(encoded).hexdigest(), len(encoded), html.id),
+        )
+    validation_pool = client.app.state.standalone_html_validation_pool
+    validation_pool.calls.clear()
+
+    restored = client.post(
+        f"/api/v1/slides/presentations/{html.id}/restore",
+        headers={**_BOTH, "If-Match": '"v2"'},
+    )
+
+    assert restored.status_code == 422, restored.text
+    assert validation_pool.calls == [corrupt]
+    current = db.get_presentation_by_id(html.id, include_deleted=True)
+    assert current.deleted == 1
+    assert current.version == 2
+
+
+def test_structured_soft_restore_keeps_legacy_path_without_pool_validation(html_client):
+    client, _db, structured, _html = html_client
+    validation_pool = client.app.state.standalone_html_validation_pool
+    validation_pool.calls.clear()
+    deleted = client.delete(
+        f"/api/v1/slides/presentations/{structured.id}",
+        headers={"If-Match": 'W/"v1"'},
+    )
+    assert deleted.status_code == 200, deleted.text
+
+    restored = client.post(
+        f"/api/v1/slides/presentations/{structured.id}/restore",
+        headers={"If-Match": 'W/"v2"'},
+    )
+
+    assert restored.status_code == 200, restored.text
+    assert restored.json()["deleted"] is False
+    assert validation_pool.calls == []
 
 
 def test_endpoint_snapshot_decoder_retains_no_source_exception_context():

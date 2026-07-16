@@ -292,6 +292,8 @@ def test_source_free_projection_queries_do_not_load_html_or_version_payload(tmp_
     assert type(search_rows[0]).__name__ == "PresentationSummaryRow"
     assert type(kind).__name__ == "PresentationKindRow"
     assert type(versions[0]).__name__ == "PresentationVersionMetadataRow"
+    assert versions[0].title == "Standalone"
+    assert versions[0].deleted == 0
     assert not hasattr(summaries[0], "html_document")
     select_sql = "\n".join(
         statement for statement in statements if statement.lstrip().upper().startswith("SELECT")
@@ -632,6 +634,119 @@ def test_generic_mutation_keeps_only_standalone_delete_restore_transition(tmp_pa
     assert deleted.deleted == 1
     assert restored.deleted == 0
     assert restored.version == row.version + 2
+    db.close_connection()
+
+
+def test_soft_restore_rechecks_exact_source_after_pool_validation(tmp_path):
+    db = SlidesDatabase(db_path=tmp_path / "Slides.db", client_id="tester")
+    original = _valid_html(title="Original", body_text="original")
+    created = _service(db).create_standalone_for_worker(
+        presentation_id="standalone",
+        html_document=original,
+        validation_result=validate_standalone_html(original),
+        generation_job_uuid="job-uuid-1",
+        generation_provenance=_provenance(),
+    )
+    deleted = db.soft_delete_presentation(created.id, created.version)
+    replacement = _valid_html(title="Replacement", body_text="replacement")
+    replacement_result = validate_standalone_html(replacement)
+
+    class _StoredSourceChangingPool(_InlineValidationPool):
+        async def validate(self, document: str | bytes):
+            result = await super().validate(document)
+            with self.db.transaction(immediate=True) as conn:
+                conn.execute(
+                    """
+                    UPDATE presentations
+                    SET title = ?, html_document = ?, html_sha256 = ?,
+                        html_bytes = ?, html_slide_count = ?, slides_text = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        replacement_result.title,
+                        replacement,
+                        replacement_result.html_sha256,
+                        replacement_result.html_bytes,
+                        replacement_result.slide_count,
+                        replacement_result.indexable_text,
+                        created.id,
+                    ),
+                )
+            return result
+
+    service = _service(db, _StoredSourceChangingPool(db))
+
+    with pytest.raises(InputError, match="standalone_html_response_invalid"):
+        _run(
+            service.restore_presentation(
+                presentation_id=created.id,
+                expected_version=deleted.version,
+            )
+        )
+
+    current = db.get_presentation_by_id(created.id, include_deleted=True)
+    assert current.html_document == replacement
+    assert current.deleted == 1
+    assert current.version == deleted.version
+    db.close_connection()
+
+
+def test_soft_restore_keeps_fts_snapshot_and_sync_behavior(tmp_path):
+    db = SlidesDatabase(db_path=tmp_path / "Slides.db", client_id="tester")
+    pool = _InlineValidationPool(db)
+    service = _service(db, pool)
+    source = _valid_html(title="Restorable", body_text="restorable phrase")
+    created = service.create_standalone_for_worker(
+        presentation_id="standalone",
+        html_document=source,
+        validation_result=validate_standalone_html(source),
+        generation_job_uuid="job-uuid-1",
+        generation_provenance=_provenance(),
+    )
+    deleted = service.delete_presentation(
+        presentation_id=created.id,
+        expected_version=created.version,
+    )
+
+    restored = _run(
+        service.restore_presentation(
+            presentation_id=created.id,
+            expected_version=2,
+        )
+    )
+
+    assert isinstance(deleted, dict)
+    assert restored.deleted == 0
+    assert restored.version == 3
+    assert pool.calls == [source]
+    found, total = db.search_presentation_summaries(
+        query="restorable",
+        limit=10,
+        offset=0,
+        include_deleted=False,
+    )
+    assert total == 1
+    assert found[0].id == created.id
+    snapshot = json.loads(
+        db.get_presentation_version(
+            presentation_id=created.id,
+            version=restored.version,
+        ).payload_json
+    )
+    assert snapshot["title"] == "Restorable"
+    assert snapshot["deleted"] == 0
+    latest_sync = (
+        db.get_connection()
+        .execute(
+            """
+        SELECT operation, version FROM sync_log
+        WHERE entity_uuid = ? ORDER BY change_id DESC LIMIT 1
+        """,
+            (created.id,),
+        )
+        .fetchone()
+    )
+    assert tuple(latest_sync) == ("restore", restored.version)
     db.close_connection()
 
 

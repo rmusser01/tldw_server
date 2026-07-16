@@ -6,7 +6,6 @@ import sqlite3
 from collections.abc import Sequence
 from typing import Any
 
-
 SLIDES_SCHEMA_VERSION = 2
 
 
@@ -17,8 +16,7 @@ class SlidesMigrationError(RuntimeError):
 _PRESENTATION_V2_COLUMNS: tuple[tuple[str, str], ...] = (
     (
         "content_kind",
-        "TEXT NOT NULL DEFAULT 'structured_slides' "
-        "CHECK(content_kind IN ('structured_slides', 'standalone_html'))",
+        "TEXT NOT NULL DEFAULT 'structured_slides' " "CHECK(content_kind IN ('structured_slides', 'standalone_html'))",
     ),
     ("html_document", "TEXT NULL"),
     ("html_sha256", "TEXT NULL"),
@@ -27,6 +25,39 @@ _PRESENTATION_V2_COLUMNS: tuple[tuple[str, str], ...] = (
     ("generation_job_uuid", "TEXT NULL"),
     ("generation_provenance_json", "TEXT NULL"),
 )
+
+_PRESENTATION_VERSION_V2_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("title", "TEXT NULL"),
+    ("deleted", "INTEGER NULL"),
+)
+
+_PRESENTATION_VERSION_BACKFILL_SQL = {
+    "title": """
+        UPDATE presentations_versions
+        SET title = CASE
+            WHEN json_valid(payload_json)
+            THEN CASE
+                WHEN json_type(payload_json, '$.title') = 'text'
+                THEN json_extract(payload_json, '$.title')
+                ELSE NULL
+            END
+            ELSE NULL
+        END
+    """,
+    "deleted": """
+        UPDATE presentations_versions
+        SET deleted = CASE
+            WHEN json_valid(payload_json)
+            THEN CASE
+                WHEN json_type(payload_json, '$.deleted') = 'integer'
+                     AND json_extract(payload_json, '$.deleted') IN (0, 1)
+                THEN json_extract(payload_json, '$.deleted')
+                ELSE NULL
+            END
+            ELSE NULL
+        END
+    """,
+}
 
 
 _RECEIPTS_TABLE_SQL = """
@@ -131,20 +162,13 @@ def _read_schema_versions(conn: sqlite3.Connection) -> list[int] | None:
     ).fetchone()
     if version_table is None:
         return None
-    return [
-        int(row[0])
-        for row in conn.execute(
-            "SELECT version FROM schema_version ORDER BY version"
-        ).fetchall()
-    ]
+    return [int(row[0]) for row in conn.execute("SELECT version FROM schema_version ORDER BY version").fetchall()]
 
 
 def _reject_unsupported_versions(versions: Sequence[int]) -> None:
     """Reject invalid or future schema versions before any mutation."""
     if any(version < 0 or version > SLIDES_SCHEMA_VERSION for version in versions):
-        raise SlidesMigrationError(
-            f"Unsupported Slides schema versions: {list(versions)!r}"
-        )
+        raise SlidesMigrationError(f"Unsupported Slides schema versions: {list(versions)!r}")
 
 
 def slides_schema_v2_is_complete(conn: sqlite3.Connection) -> bool:
@@ -168,11 +192,16 @@ def slides_schema_v2_is_complete(conn: sqlite3.Connection) -> bool:
     if not {name for name, _ddl in _PRESENTATION_V2_COLUMNS}.issubset(columns):
         return False
 
+    version_columns = {
+        str(row["name"] if isinstance(row, sqlite3.Row) else row[1])
+        for row in conn.execute("PRAGMA table_info(presentations_versions)").fetchall()
+    }
+    if not {name for name, _ddl in _PRESENTATION_VERSION_V2_COLUMNS}.issubset(version_columns):
+        return False
+
     objects = {
         (str(row[0]), str(row[1]))
-        for row in conn.execute(
-            "SELECT type, name FROM sqlite_master WHERE type IN ('table', 'index')"
-        ).fetchall()
+        for row in conn.execute("SELECT type, name FROM sqlite_master WHERE type IN ('table', 'index')").fetchall()
     }
     return all(("table", name) in objects for name in _V2_TABLES) and all(
         ("index", name) in objects for name in _V2_INDEXES
@@ -194,8 +223,7 @@ def migrate_slides_schema(conn: sqlite3.Connection) -> None:
             return
         _execute_migration_statement(
             conn,
-            "CREATE TABLE IF NOT EXISTS schema_version "
-            "(version INTEGER PRIMARY KEY NOT NULL)",
+            "CREATE TABLE IF NOT EXISTS schema_version " "(version INTEGER PRIMARY KEY NOT NULL)",
         )
         versions = _read_schema_versions(conn) or []
         _reject_unsupported_versions(versions)
@@ -217,17 +245,38 @@ def migrate_slides_schema(conn: sqlite3.Connection) -> None:
                     f"ALTER TABLE presentations ADD COLUMN {column_name} {column_ddl}",
                 )
 
+        version_table = conn.execute(
+            "SELECT 1 FROM sqlite_master " "WHERE type = 'table' AND name = 'presentations_versions'"
+        ).fetchone()
+        if version_table is None:
+            raise SlidesMigrationError("presentations_versions table is missing")
+        version_columns = {
+            str(row["name"] if isinstance(row, sqlite3.Row) else row[1])
+            for row in conn.execute("PRAGMA table_info(presentations_versions)").fetchall()
+        }
+        added_version_columns: list[str] = []
+        for column_name, column_ddl in _PRESENTATION_VERSION_V2_COLUMNS:
+            if column_name not in version_columns:
+                _execute_migration_statement(
+                    conn,
+                    f"ALTER TABLE presentations_versions ADD COLUMN {column_name} {column_ddl}",
+                )
+                added_version_columns.append(column_name)
+        for column_name in added_version_columns:
+            _execute_migration_statement(
+                conn,
+                _PRESENTATION_VERSION_BACKFILL_SQL[column_name],
+            )
+
         legacy_schema = not versions or max(versions) < SLIDES_SCHEMA_VERSION
         if legacy_schema:
             fts_table = conn.execute(
-                "SELECT 1 FROM sqlite_master "
-                "WHERE type = 'table' AND name = 'presentations_fts'"
+                "SELECT 1 FROM sqlite_master " "WHERE type = 'table' AND name = 'presentations_fts'"
             ).fetchone()
             if fts_table is not None:
                 _execute_migration_statement(
                     conn,
-                    "INSERT INTO presentations_fts(presentations_fts) "
-                    "VALUES ('rebuild')",
+                    "INSERT INTO presentations_fts(presentations_fts) " "VALUES ('rebuild')",
                 )
             _execute_migration_statement(
                 conn,
@@ -253,9 +302,7 @@ def migrate_slides_schema(conn: sqlite3.Connection) -> None:
             (SLIDES_SCHEMA_VERSION,),
         )
 
-        normalized = conn.execute(
-            "SELECT version FROM schema_version"
-        ).fetchall()
+        normalized = conn.execute("SELECT version FROM schema_version").fetchall()
         if len(normalized) != 1 or int(normalized[0][0]) != SLIDES_SCHEMA_VERSION:
             raise SlidesMigrationError("Failed to normalize Slides schema version")
         conn.commit()

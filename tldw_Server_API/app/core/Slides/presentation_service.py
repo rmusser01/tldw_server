@@ -452,6 +452,41 @@ class PresentationService:
             raise PresentationServiceError("standalone_html_response_invalid", status_code=500)
         return derived
 
+    async def restore_presentation(
+        self,
+        *,
+        presentation_id: str,
+        expected_version: int,
+    ) -> PresentationRow:
+        """Undelete structured content directly or validated standalone source."""
+        kind = self.db.get_presentation_kind(presentation_id, include_deleted=True)
+        if kind.content_kind == STRUCTURED_SLIDES:
+            return self.db.restore_presentation(presentation_id, expected_version)
+        if kind.content_kind != STANDALONE_HTML:
+            raise self.operation_not_supported(kind.content_kind, "restore")
+        if kind.version != expected_version:
+            raise ConflictError(
+                "version_conflict",
+                entity="presentations",
+                identifier=presentation_id,
+            )
+        row = self.db.get_presentation_by_id(presentation_id, include_deleted=True)
+        if row.version != expected_version:
+            raise ConflictError(
+                "version_conflict",
+                entity="presentations",
+                identifier=presentation_id,
+            )
+        if row.deleted != 1:
+            raise InputError("operation_not_supported_for_content_kind")
+        derived = await self.validate_saved_standalone(row)
+        return self.db.restore_validated_standalone_presentation(
+            presentation_id=presentation_id,
+            html_document=row.html_document,
+            validation_result=derived,
+            expected_version=expected_version,
+        )
+
     def delete_presentation(
         self,
         *,

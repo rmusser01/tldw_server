@@ -1,3 +1,4 @@
+import json
 import sqlite3
 import threading
 
@@ -49,6 +50,18 @@ def _create_legacy_database(
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE presentations_versions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                presentation_id TEXT NOT NULL,
+                version INTEGER NOT NULL,
+                payload_json TEXT NOT NULL,
+                created_at DATETIME NOT NULL,
+                client_id TEXT NOT NULL
+            )
+            """
+        )
         if with_presentation:
             conn.execute(
                 """
@@ -65,18 +78,8 @@ def _schema_snapshot(db_path) -> tuple[list[int], set[str], set[str], set[str]]:
     with sqlite3.connect(db_path) as conn:
         versions = [row[0] for row in conn.execute("SELECT version FROM schema_version")]
         columns = {row[1] for row in conn.execute("PRAGMA table_info(presentations)")}
-        tables = {
-            row[0]
-            for row in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type = 'table'"
-            )
-        }
-        indexes = {
-            row[0]
-            for row in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type = 'index'"
-            )
-        }
+        tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+        indexes = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'index'")}
     return versions, columns, tables, indexes
 
 
@@ -93,11 +96,44 @@ def _structural_snapshot(db_path) -> tuple[int, tuple[tuple, ...], tuple[int, ..
                 """
             )
         )
-        versions = tuple(
-            row[0]
-            for row in conn.execute("SELECT version FROM schema_version ORDER BY version")
-        )
+        versions = tuple(row[0] for row in conn.execute("SELECT version FROM schema_version ORDER BY version"))
     return schema_version, objects, versions
+
+
+def _version_columns(db_path) -> set[str]:
+    with sqlite3.connect(db_path) as conn:
+        return {row[1] for row in conn.execute("PRAGMA table_info(presentations_versions)")}
+
+
+def _create_incomplete_v2_version_metadata_database(db_path) -> None:
+    db = SlidesDatabase(db_path=db_path, client_id="legacy-v2")
+    created = db.create_presentation(
+        presentation_id="legacy-v2",
+        title="Original title",
+        description=None,
+        theme="black",
+        marp_theme=None,
+        settings=None,
+        studio_data=None,
+        slides="[]",
+        slides_text="",
+        source_type="manual",
+        source_ref=None,
+        source_query=None,
+        custom_css=None,
+    )
+    renamed = db.update_presentation(
+        presentation_id=created.id,
+        update_fields={"title": "Renamed title"},
+        expected_version=created.version,
+    )
+    db.soft_delete_presentation(created.id, renamed.version)
+    db.close_connection()
+    with sqlite3.connect(db_path) as conn:
+        existing = {row[1] for row in conn.execute("PRAGMA table_info(presentations_versions)")}
+        for column in ("title", "deleted"):
+            if column in existing:
+                conn.execute(f"ALTER TABLE presentations_versions DROP COLUMN {column}")
 
 
 def test_new_database_is_created_at_schema_v2(tmp_path):
@@ -119,16 +155,10 @@ def test_new_database_is_created_at_schema_v2(tmp_path):
     }.issubset(columns)
     assert {"slides_generation_receipts", "slides_generation_inputs"}.issubset(tables)
     assert "idx_presentations_generation_job_uuid" in indexes
+    assert {"title", "deleted"}.issubset(_version_columns(db_path))
     with sqlite3.connect(db_path) as conn:
-        triggers = {
-            row[0]
-            for row in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type = 'trigger'"
-            )
-        }
-    assert {"presentations_ai", "presentations_ad", "presentations_au"}.issubset(
-        triggers
-    )
+        triggers = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'trigger'")}
+    assert {"presentations_ai", "presentations_ad", "presentations_au"}.issubset(triggers)
 
 
 def test_future_schema_is_rejected_without_structural_mutation(tmp_path):
@@ -205,6 +235,130 @@ def test_schema_v2_reopen_is_idempotent(tmp_path):
     assert versions == [2]
     assert len(columns) == len(set(columns))
     assert {"slides_generation_receipts", "slides_generation_inputs"}.issubset(tables)
+    assert {"title", "deleted"}.issubset(_version_columns(db_path))
+
+
+def test_incomplete_v2_backfills_version_title_and_deleted_idempotently(tmp_path):
+    db_path = tmp_path / "Slides.db"
+    _create_incomplete_v2_version_metadata_database(db_path)
+
+    migrated = SlidesDatabase(db_path=db_path, client_id="migrated")
+    first_rows, first_total = migrated.list_presentation_version_metadata(
+        presentation_id="legacy-v2",
+        limit=10,
+        offset=0,
+    )
+    migrated.close_connection()
+    reopened = SlidesDatabase(db_path=db_path, client_id="reopened")
+    second_rows, second_total = reopened.list_presentation_version_metadata(
+        presentation_id="legacy-v2",
+        limit=10,
+        offset=0,
+    )
+    reopened.close_connection()
+
+    expected = [
+        (3, "Renamed title", 1),
+        (2, "Renamed title", 0),
+        (1, "Original title", 0),
+    ]
+    assert first_total == second_total == 3
+    assert [(row.version, row.title, row.deleted) for row in first_rows] == expected
+    assert [(row.version, row.title, row.deleted) for row in second_rows] == expected
+    assert {"title", "deleted"}.issubset(_version_columns(db_path))
+
+
+def test_incomplete_v2_malformed_snapshot_backfills_null_safe_metadata(tmp_path):
+    db_path = tmp_path / "Slides.db"
+    _create_incomplete_v2_version_metadata_database(db_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "UPDATE presentations_versions SET payload_json = '{' "
+            "WHERE presentation_id = 'legacy-v2' AND version = 1"
+        )
+        conn.execute(
+            "UPDATE presentations_versions SET payload_json = ? " "WHERE presentation_id = 'legacy-v2' AND version = 2",
+            (
+                json.dumps(
+                    {
+                        "title": {"html_document": "SECRET-NESTED-SOURCE"},
+                        "deleted": 2,
+                    }
+                ),
+            ),
+        )
+        conn.execute(
+            "UPDATE presentations_versions SET payload_json = ? " "WHERE presentation_id = 'legacy-v2' AND version = 3",
+            (json.dumps({"title": ["SECRET-ARRAY"], "deleted": "0"}),),
+        )
+
+    db = SlidesDatabase(db_path=db_path, client_id="migrated")
+    rows, total = db.list_presentation_version_metadata(
+        presentation_id="legacy-v2",
+        limit=10,
+        offset=0,
+    )
+    db.close_connection()
+
+    assert total == 3
+    assert {row.version: (row.title, row.deleted) for row in rows} == {
+        1: (None, None),
+        2: (None, None),
+        3: (None, None),
+    }
+
+
+def test_incomplete_v2_version_metadata_migration_rolls_back_atomically(
+    tmp_path,
+    monkeypatch,
+):
+    db_path = tmp_path / "Slides.db"
+    _create_incomplete_v2_version_metadata_database(db_path)
+    original_execute = slides_migrations._execute_migration_statement
+
+    def fail_on_deleted_column(conn, statement, parameters=()):
+        if "presentations_versions add column deleted" in statement.lower():
+            raise sqlite3.OperationalError("injected version metadata failure")
+        return original_execute(conn, statement, parameters)
+
+    monkeypatch.setattr(
+        slides_migrations,
+        "_execute_migration_statement",
+        fail_on_deleted_column,
+    )
+
+    with pytest.raises(SchemaError, match="injected version metadata failure"):
+        SlidesDatabase(db_path=db_path, client_id="migrated")
+
+    assert not {"title", "deleted"}.intersection(_version_columns(db_path))
+
+
+def test_concurrent_connections_complete_incomplete_v2_version_metadata(tmp_path):
+    db_path = tmp_path / "Slides.db"
+    _create_incomplete_v2_version_metadata_database(db_path)
+    barrier = threading.Barrier(2)
+    errors: list[BaseException] = []
+
+    def migrate() -> None:
+        conn = sqlite3.connect(db_path, timeout=5)
+        conn.row_factory = sqlite3.Row
+        try:
+            barrier.wait(timeout=5)
+            slides_migrations.migrate_slides_schema(conn)
+        except Exception as exc:  # noqa: BLE001  # pragma: no cover - thread reports failures
+            errors.append(exc)
+        finally:
+            conn.close()
+
+    threads = [threading.Thread(target=migrate) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=10)
+
+    assert all(not thread.is_alive() for thread in threads)
+    assert errors == []
+    assert {"title", "deleted"}.issubset(_version_columns(db_path))
 
 
 def test_complete_v2_reopen_is_read_only_under_competing_writer(tmp_path):
@@ -273,7 +427,7 @@ def test_concurrent_connections_can_migrate_the_same_database(tmp_path):
         try:
             barrier.wait(timeout=5)
             slides_migrations.migrate_slides_schema(conn)
-        except BaseException as exc:  # pragma: no cover - assertion reports details
+        except Exception as exc:  # noqa: BLE001  # pragma: no cover - thread reports failures
             errors.append(exc)
         finally:
             conn.close()
