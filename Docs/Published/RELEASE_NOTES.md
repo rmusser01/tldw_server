@@ -2,7 +2,7 @@
 
 Published release notes entry point.
 
-## 0.1.41 - 2026-07-15
+## 0.1.41 - 2026-07-16
 
 - See the repository `CHANGELOG.md` for the full `0.1.41` rollup from the
   frozen `dev` snapshot through PR #2744 into `main`.

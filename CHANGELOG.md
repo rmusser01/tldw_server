@@ -17,7 +17,7 @@ and this project adheres to Some kind of Versioning
 ### Removed
 
 
-## [0.1.41] - 2026-07-15
+## [0.1.41] - 2026-07-16
 
 > Rollup coverage: this entry covers the frozen `dev` release train after
 > `0.1.40` through PR #2744. It includes PRs #2600, #2609, #2611, #2626,

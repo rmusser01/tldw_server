@@ -6,7 +6,7 @@ This page is the release notes index placeholder for published versions.
 
 No published changes yet.
 
-## 0.1.41 - 2026-07-15
+## 0.1.41 - 2026-07-16
 
 ### Research and source-grounded learning
 
