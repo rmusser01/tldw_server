@@ -17,6 +17,8 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
 from fastapi.encoders import jsonable_encoder
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.routing import APIRoute
 from loguru import logger
 from pydantic import ValidationError
@@ -157,6 +159,11 @@ class _SlidesRoute(APIRoute):
         async def route_handler(request: Request) -> Response:
             try:
                 response = await original(request)
+            except RequestValidationError as exc:
+                response = await request_validation_exception_handler(request, exc)
+                if negotiated:
+                    merge_vary_header(response.headers)
+                return response
             except HTTPException as exc:
                 headers = dict(exc.headers or {})
                 if negotiated:
@@ -198,9 +205,9 @@ async def _slides_lifespan(app: Any) -> AsyncIterator[None]:
             if pool is not None:
                 await pool.close()
         finally:
-            with contextlib.suppress(AttributeError):
+            with contextlib.suppress(AttributeError, KeyError):
                 delattr(app.state, _VALIDATION_POOL_ATTR)
-            with contextlib.suppress(AttributeError):
+            with contextlib.suppress(AttributeError, KeyError):
                 delattr(app.state, _VALIDATION_POOL_LOCK_ATTR)
 
 
@@ -1845,20 +1852,26 @@ async def restore_presentation(
     if_match: str | None = Header(None, alias="If-Match"),
     accept_content_kinds: str | None = Header(None, alias=CONTENT_KIND_HEADER),
     db: SlidesDatabase = Depends(get_slides_db_for_user),
+    validation_pool: StandaloneHtmlValidationPool = Depends(_get_standalone_html_validation_pool),
 ) -> PresentationResponse:
     accepted = _accepted_content_kinds(accept_content_kinds, response)
-    service = PresentationService(db)
+    service = PresentationService(db, validation_pool=validation_pool)
     try:
         kind = service.guard_target(presentation_id, accepted, include_deleted=True)
         service.require_operation(kind.content_kind, "restore")
         expected_version = _parse_etag(if_match)
-        row = db.restore_presentation(presentation_id, expected_version)
+        row = await service.restore_presentation(
+            presentation_id=presentation_id,
+            expected_version=expected_version,
+        )
     except KeyError:
         raise HTTPException(status_code=404, detail="presentation_not_found") from None
     except InputError as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to restore presentation") from exc
     except ConflictError as exc:
         raise _map_precondition_conflict(exc) from exc
+    except StandaloneHtmlValidationError as exc:
+        raise _map_standalone_validation_error(exc) from exc
     except PresentationServiceError as exc:
         raise _map_presentation_service_error(exc) from exc
     response.headers["ETag"] = _format_etag(row.version, row.content_kind)
@@ -2123,8 +2136,8 @@ async def list_presentation_versions(
             "presentation_id": row.presentation_id,
             "version": row.version,
             "created_at": row.created_at,
-            "title": None,
-            "deleted": None,
+            "title": row.title,
+            "deleted": None if row.deleted is None else bool(row.deleted),
         }
         if additive:
             summary["content_kind"] = kind.content_kind
