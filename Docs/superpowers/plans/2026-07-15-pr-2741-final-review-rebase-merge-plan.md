@@ -20,27 +20,27 @@
 - Modify: `tldw_Server_API/app/core/Research/discovery/executor.py`
 - Modify: `tldw_Server_API/app/core/Research/discovery/planner.py`
 
-- [ ] **Step 1: Add a failing centralization and compatibility regression**
+- [x] **Step 1: Add a failing centralization and compatibility regression**
 
   Assert that `DiscoveryGatewayError`, `DiscoveryExecutionError`, `DiscoveryAdapterError`, and `PlanningError` are defined in `app.core.exceptions` and are the identical objects re-exported by their existing discovery modules. Assert that the three parser sentinels are imported aliases rather than locally declared exception subclasses.
 
-- [ ] **Step 2: Run the regression and verify RED**
+- [x] **Step 2: Run the regression and verify RED**
 
   Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Research/test_research_discovery_contracts.py -k centralized -vv`
 
   Expected: FAIL because the seven exception classes are still defined in discovery modules and the core exception exports do not exist.
 
-- [ ] **Step 3: Move the seven class definitions with no behavior drift**
+- [x] **Step 3: Move the seven class definitions with no behavior drift**
 
   Move the public gateway, executor, adapter, and planner error classes plus the three private parser sentinels into `app/core/exceptions.py`. Keep gateway codes/messages, adapter allowlisting, retry-after validation, and mutation seals intact. Import/re-export the same class identities from the original modules; alias the centralized parser sentinels to the existing private names.
 
-- [ ] **Step 4: Run focused tests and verify GREEN**
+- [x] **Step 4: Run focused tests and verify GREEN**
 
   Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Research/test_research_discovery_contracts.py tldw_Server_API/tests/Research/test_research_discovery_gateway.py tldw_Server_API/tests/Research/test_research_discovery_executor.py tldw_Server_API/tests/Research/test_research_discovery_planner.py -q`
 
   Expected: PASS with existing exception behavior and import compatibility preserved.
 
-- [ ] **Step 5: Commit the exception remediation**
+- [x] **Step 5: Commit the exception remediation**
 
   Commit: `fix(research): centralize discovery exceptions`
 
@@ -51,31 +51,31 @@
 - Modify: `tldw_Server_API/app/main.py`
 - Modify: `tldw_Server_API/app/core/Research/discovery/executor.py`
 
-- [ ] **Step 1: Add a failing stricter-logging regression**
+- [x] **Step 1: Add a failing stricter-logging regression**
 
   Add coverage proving `harden_httpcore_logging()` does not lower explicit or effective `WARNING`/`ERROR` thresholds. Retain existing coverage proving an effective DEBUG threshold is raised to INFO and wire secrets remain suppressed.
 
-- [ ] **Step 2: Run the regression and verify RED**
+- [x] **Step 2: Run the regression and verify RED**
 
   Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Security/test_http_hop_transport.py -k 'log_hardening or log_levels' -vv`
 
   Expected: FAIL because the helper currently overwrites stricter logger levels with INFO.
 
-- [ ] **Step 3: Implement the minimum effective-level floor**
+- [x] **Step 3: Implement the minimum effective-level floor**
 
   For each HTTPcore logger, call `setLevel(logging.INFO)` only when `getEffectiveLevel() < logging.INFO`. Do not add configuration, dependencies, or per-request logging mutation.
 
-- [ ] **Step 4: Clarify both symmetric teardown branches**
+- [x] **Step 4: Clarify both symmetric teardown branches**
 
   Replace each bare cancellation/BaseException validation `pass` with a concise inline explanation that journal validation is best effort and must not mask the original `BaseException`. Do not log or change exception flow.
 
-- [ ] **Step 5: Run focused tests and verify GREEN**
+- [x] **Step 5: Run focused tests and verify GREEN**
 
   Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Security/test_http_hop_transport.py tldw_Server_API/tests/Research/test_research_discovery_executor.py -q`
 
   Expected: PASS.
 
-- [ ] **Step 6: Commit the logging and teardown remediation**
+- [x] **Step 6: Commit the logging and teardown remediation**
 
   Commit: `fix(research): preserve logging and cancellation policy`
 
