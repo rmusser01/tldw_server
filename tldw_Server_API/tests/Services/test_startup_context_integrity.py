@@ -196,6 +196,37 @@ def test_context_integrity_mode_uses_supported_deployment_setting(
     assert app_state.context_integrity_boot_state.mode == mode
 
 
+@pytest.mark.parametrize("deployment_mode", ["audit_only", "permissive"])
+def test_explicit_context_integrity_mode_overrides_deployment_setting(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    deployment_mode: str,
+) -> None:
+    from tldw_Server_API.app.services.startup_context_integrity import (
+        produce_context_integrity_startup_warnings,
+    )
+    from tldw_Server_API.app.services.startup_warning_registry import (
+        StartupWarningRegistry,
+    )
+
+    prompts = tmp_path / "Prompts"
+    prompts.mkdir()
+    app_state = _state()
+    monkeypatch.setenv("CONTEXT_INTEGRITY_MODE", deployment_mode)
+
+    produce_context_integrity_startup_warnings(
+        app_state=app_state,
+        registry=StartupWarningRegistry(startup_id="boot-explicit-mode"),
+        prompts_dir=prompts,
+        user_skill_roots=[],
+        approved_entries=[],
+        manifest_loaded=True,
+        mode="enforce",
+    )
+
+    assert app_state.context_integrity_boot_state.mode == "enforce"
+
+
 def test_context_integrity_mode_defaults_to_enforce_when_setting_is_unset(
     tmp_path: Path,
 ) -> None:
