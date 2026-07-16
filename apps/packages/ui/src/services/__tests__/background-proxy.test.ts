@@ -384,6 +384,41 @@ describe("background proxy fallback safety", () => {
     )
   })
 
+  it("preserves Service Prompt reset metadata while redacting proxy errors", async () => {
+    mocks.sendMessage.mockResolvedValue({
+      ok: false,
+      status: 500,
+      error: "Saved override is corrupt.",
+      data: {
+        detail: {
+          code: "service_prompt_corrupt_override",
+          revision: "revision-corrupt",
+          current_revision: "revision-current",
+          can_reset: true,
+          internal_path: "/private/prompts.db"
+        }
+      }
+    })
+
+    const { bgRequest } = await importProxy()
+
+    const rejection = await bgRequest({
+      path: "/api/v1/service-prompts/chat.rag.answer",
+      method: "GET",
+      expectedStatuses: [500]
+    }).catch((error) => error)
+
+    expect(rejection.details).toEqual({
+      detail: {
+        code: "service_prompt_corrupt_override",
+        revision: "revision-corrupt",
+        current_revision: "revision-current",
+        can_reset: true,
+        internal_path: "[REDACTED]"
+      }
+    })
+  })
+
   it("keeps auth enabled for same-origin absolute URLs in background requests", async () => {
     mocks.sendMessage.mockResolvedValue({ ok: true, status: 200, data: { ok: true } })
     mocks.storageGet.mockImplementation(async (key: string) => {

@@ -19,3 +19,7 @@ export {
   visualIdentityMethods,
   type VisualIdentityMethods
 } from "./visual-identities"
+export {
+  servicePromptMethods,
+  type ServicePromptMethods
+} from "./service-prompts"

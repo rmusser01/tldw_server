@@ -106,6 +106,8 @@ export type ClientPath =
   | "/api/v1/notes/conversations/{conversation_id}/keywords/{keyword_id}"
   | "/api/v1/notes/conversations/keyword-links"
   | "/api/v1/prompts"
+  | "/api/v1/service-prompts"
+  | "/api/v1/service-prompts/{definition_id}"
   | "/api/v1/prompts/search"
   | "/api/v1/prompts/export"
   | "/api/v1/prompts/collections"
