@@ -1,0 +1,500 @@
+from __future__ import annotations
+
+from pathlib import Path
+from types import SimpleNamespace
+from uuid import UUID, uuid4
+
+import pytest
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.testclient import TestClient
+from loguru import logger
+
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
+from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import get_prompts_db_for_user
+from tldw_Server_API.app.api.v1.endpoints import service_prompts as service_prompts_module
+from tldw_Server_API.app.api.v1.schemas.service_prompt_schemas import (
+    ServicePromptCatalogItemResponse,
+    ServicePromptDetailResponse,
+    ServicePromptUpdateRequest,
+)
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.core.DB_Management.Prompts_DB import (
+    DatabaseError,
+    PromptsDatabase,
+)
+
+TRANSLATION_ID = "media.text.translation"
+TRANSLATION_PATH = f"/api/v1/service-prompts/{TRANSLATION_ID}"
+CUSTOM_PARTS = {
+    "system": "Translate faithfully.",
+    "user_template": "Translate {text} into {target_language}.",
+}
+
+
+def _principal(*, api_key_id: int | None = None) -> AuthPrincipal:
+    return AuthPrincipal(
+        kind="api_key" if api_key_id is not None else "user",
+        user_id=1,
+        api_key_id=api_key_id,
+        username="service-prompt-test",
+        subject="user:1",
+        token_type="api_key" if api_key_id is not None else "access",
+    )
+
+
+@pytest.fixture
+def api_context(tmp_path: Path):
+    db = PromptsDatabase(tmp_path / "service-prompts.sqlite", "service-prompts-test")
+    app = FastAPI()
+    app.state.db = db
+    app.state.principal = _principal()
+    app.state.api_key_scope = None
+
+    async def override_principal(request: Request) -> AuthPrincipal:
+        if app.state.api_key_scope is not None:
+            request.state._api_key_scope = app.state.api_key_scope
+        return app.state.principal
+
+    def override_db() -> PromptsDatabase:
+        return app.state.db
+
+    app.dependency_overrides[get_auth_principal] = override_principal
+    app.dependency_overrides[get_prompts_db_for_user] = override_db
+    app.include_router(service_prompts_module.router, prefix="/api/v1")
+    with TestClient(app) as local_client:
+        yield SimpleNamespace(app=app, client=local_client, db=db)
+    db.close_connection()
+
+
+def test_service_prompt_catalog_returns_exact_metadata_without_prompt_bodies(
+    client: TestClient,
+) -> None:
+    response = client.get("/api/v1/service-prompts")
+
+    assert response.status_code == 200, response.text
+    assert response.headers["cache-control"] == "no-store"
+    assert response.json() == [
+        {
+            "id": "chat.rag.answer",
+            "label": "RAG answer",
+            "description": (
+                "Controls how retrieved context and the current question are "
+                "presented to the model."
+            ),
+            "parts": [
+                {
+                    "key": "template",
+                    "label": "Template",
+                    "mode": "template",
+                    "required_variables": ["context", "question"],
+                }
+            ],
+            "affected_workflows": [
+                {"id": "chat.main.rag", "label": "Main chat RAG"},
+                {"id": "chat.tab.rag", "label": "Tab chat RAG"},
+                {"id": "chat.document.rag", "label": "Document chat RAG"},
+                {"id": "chat.sidepanel.rag", "label": "Sidepanel RAG"},
+            ],
+        },
+        {
+            "id": "chat.rag.question_rewrite",
+            "label": "RAG follow-up rewrite",
+            "description": (
+                "Controls how a conversational follow-up is rewritten into a "
+                "standalone retrieval query."
+            ),
+            "parts": [
+                {
+                    "key": "template",
+                    "label": "Template",
+                    "mode": "template",
+                    "required_variables": ["chat_history", "question"],
+                }
+            ],
+            "affected_workflows": [
+                {"id": "chat.main.rag", "label": "Main chat RAG"},
+                {"id": "chat.document.rag", "label": "Document chat RAG"},
+                {"id": "chat.sidepanel.rag", "label": "Sidepanel RAG"},
+            ],
+        },
+        {
+            "id": "chat.web_search.answer",
+            "label": "Web-search answer",
+            "description": (
+                "Controls how normalized web-search results are presented for the "
+                "final answer."
+            ),
+            "parts": [
+                {
+                    "key": "template",
+                    "label": "Template",
+                    "mode": "template",
+                    "required_variables": ["current_date_time", "search_results"],
+                }
+            ],
+            "affected_workflows": [
+                {"id": "chat.main.web_search", "label": "Main chat web search"},
+                {"id": "chat.compare.web_search", "label": "Compare web search"},
+            ],
+        },
+        {
+            "id": "media.text.translation",
+            "label": "Text translation",
+            "description": (
+                "Controls the visible instructions used by synchronous text translation."
+            ),
+            "parts": [
+                {
+                    "key": "system",
+                    "label": "System instructions",
+                    "mode": "literal",
+                    "required_variables": [],
+                },
+                {
+                    "key": "user_template",
+                    "label": "User template",
+                    "mode": "template",
+                    "required_variables": ["target_language", "text"],
+                },
+            ],
+            "affected_workflows": [
+                {"id": "media.text.translation", "label": "Text translation"}
+            ],
+        },
+    ]
+    assert "You are a helpful AI assistant" not in response.text
+
+
+def test_service_prompt_detail_returns_packaged_state_without_caching(api_context) -> None:
+    response = api_context.client.get(TRANSLATION_PATH)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert response.headers["cache-control"] == "no-store"
+    assert body["source"] == "packaged"
+    assert body["revision"] is None
+    assert body["saved_parts"] is None
+    assert body["effective_parts"] == body["default_parts"]
+    assert set(body["default_parts"]) == {"system", "user_template"}
+
+
+def test_service_prompt_put_activates_immediately_and_identical_retry_keeps_revision(
+    api_context,
+) -> None:
+    first = api_context.client.put(
+        TRANSLATION_PATH,
+        json={"parts": CUSTOM_PARTS, "expected_revision": None},
+    )
+
+    assert first.status_code == 200, first.text
+    first_body = first.json()
+    UUID(first_body["revision"])
+    assert first.headers["cache-control"] == "no-store"
+    assert first_body["source"] == "user"
+    assert first_body["saved_parts"] == CUSTOM_PARTS
+    assert first_body["effective_parts"] == CUSTOM_PARTS
+    assert api_context.client.get(TRANSLATION_PATH).json()["effective_parts"] == CUSTOM_PARTS
+
+    retry = api_context.client.put(
+        TRANSLATION_PATH,
+        json={"parts": CUSTOM_PARTS, "expected_revision": None},
+    )
+
+    assert retry.status_code == 200
+    assert retry.json()["revision"] == first_body["revision"]
+
+
+def test_service_prompt_delete_resets_and_is_idempotent(api_context) -> None:
+    saved = api_context.client.put(
+        TRANSLATION_PATH,
+        json={"parts": CUSTOM_PARTS, "expected_revision": None},
+    ).json()
+
+    reset = api_context.client.delete(
+        TRANSLATION_PATH,
+        params={"expected_revision": saved["revision"]},
+    )
+    repeated = api_context.client.delete(TRANSLATION_PATH)
+
+    assert reset.status_code == 200
+    assert reset.headers["cache-control"] == "no-store"
+    assert reset.json()["source"] == "packaged"
+    assert reset.json()["saved_parts"] is None
+    assert reset.json()["revision"] is None
+    assert repeated.status_code == 200
+    assert repeated.json() == reset.json()
+
+
+def test_service_prompt_stale_put_and_delete_return_current_revision(api_context) -> None:
+    saved = api_context.client.put(
+        TRANSLATION_PATH,
+        json={"parts": CUSTOM_PARTS, "expected_revision": None},
+    ).json()
+    stale_revision = str(uuid4())
+    changed_parts = {**CUSTOM_PARTS, "system": "Different instructions."}
+
+    put_response = api_context.client.put(
+        TRANSLATION_PATH,
+        json={"parts": changed_parts, "expected_revision": stale_revision},
+    )
+    delete_response = api_context.client.delete(
+        TRANSLATION_PATH,
+        params={"expected_revision": stale_revision},
+    )
+
+    expected = {
+        "detail": {
+            "code": "service_prompt_revision_conflict",
+            "message": "Service Prompt override changed since it was loaded.",
+            "current_revision": saved["revision"],
+        }
+    }
+    assert put_response.status_code == 409
+    assert put_response.json() == expected
+    assert delete_response.status_code == 409
+    assert delete_response.json() == expected
+
+
+def test_service_prompt_delete_can_reset_corrupt_override(api_context) -> None:
+    revision = str(uuid4())
+    connection = api_context.db.get_connection()
+    connection.execute(
+        "INSERT INTO ServicePromptOverrides (definition_id, parts_json, revision) VALUES (?, ?, ?)",
+        (TRANSLATION_ID, "not-json", revision),
+    )
+    connection.commit()
+
+    corrupt = api_context.client.get(TRANSLATION_PATH)
+    reset = api_context.client.delete(
+        TRANSLATION_PATH,
+        params={"expected_revision": revision},
+    )
+
+    assert corrupt.status_code == 500
+    assert corrupt.json() == {
+        "detail": {
+            "code": "service_prompt_corrupt_override",
+            "message": "The saved Service Prompt override is corrupt and can be reset.",
+            "revision": revision,
+            "can_reset": True,
+        }
+    }
+    assert reset.status_code == 200
+    assert reset.json()["source"] == "packaged"
+
+
+def test_service_prompt_delete_returns_packaged_detail_without_rereading_parts(
+    api_context,
+) -> None:
+    class ResetOnlyDatabase:
+        def reset_service_prompt_override(
+            self,
+            definition_id: str,
+            expected_revision: str | None,
+        ) -> None:
+            assert definition_id == TRANSLATION_ID
+            assert expected_revision is None
+
+        def get_service_prompt_override(self, _definition_id: str):
+            pytest.fail("DELETE must not reread stored prompt content after reset")
+
+    api_context.app.state.db = ResetOnlyDatabase()
+    response = api_context.client.delete(TRANSLATION_PATH)
+
+    assert response.status_code == 200
+    assert response.json()["source"] == "packaged"
+    assert response.json()["saved_parts"] is None
+
+
+def test_service_prompt_unknown_definition_uses_locked_domain_envelope(api_context) -> None:
+    response = api_context.client.get("/api/v1/service-prompts/not.registered")
+
+    assert response.status_code == 404
+    assert response.headers["cache-control"] == "no-store"
+    assert response.json() == {
+        "detail": {
+            "code": "service_prompt_unknown_definition",
+            "message": "Service Prompt definition was not found.",
+        }
+    }
+
+
+def test_service_prompt_semantic_validation_is_safe_and_field_keyed(api_context) -> None:
+    secret = "BODY-MUST-NOT-LEAK"
+    captured_logs: list[str] = []
+    sink_id = logger.add(captured_logs.append, format="{message}")
+    try:
+        response = api_context.client.put(
+            TRANSLATION_PATH,
+            json={
+                "parts": {
+                    "system": secret,
+                    "user_template": "Translate {unknown} into {target_language}.",
+                },
+                "expected_revision": None,
+            },
+        )
+    finally:
+        logger.remove(sink_id)
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "detail": {
+            "code": "service_prompt_validation_failed",
+            "message": "Service Prompt validation failed.",
+            "field_errors": {
+                "user_template": "Template variables must match the registered variables exactly once."
+            },
+        }
+    }
+    assert secret not in response.text
+    assert secret not in "".join(captured_logs)
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "kwargs"),
+    [
+        ("put", TRANSLATION_PATH, {"json": {"parts": CUSTOM_PARTS}}),
+        (
+            "put",
+            TRANSLATION_PATH,
+            {
+                "json": {
+                    "parts": CUSTOM_PARTS,
+                    "expected_revision": "not-a-uuid",
+                }
+            },
+        ),
+        (
+            "put",
+            TRANSLATION_PATH,
+            {
+                "json": {
+                    "parts": CUSTOM_PARTS,
+                    "expected_revision": None,
+                    "database_path": "/private/forbidden",
+                }
+            },
+        ),
+        ("delete", f"{TRANSLATION_PATH}?expected_revision=not-a-uuid", {}),
+    ],
+)
+def test_service_prompt_structural_validation_stays_fastapi_native(
+    api_context,
+    method: str,
+    path: str,
+    kwargs: dict[str, object],
+) -> None:
+    response = getattr(api_context.client, method)(path, **kwargs)
+
+    assert response.status_code == 422
+    assert isinstance(response.json()["detail"], list)
+
+
+def test_service_prompt_store_failure_is_content_free(api_context) -> None:
+    class FailingDatabase:
+        def get_service_prompt_override(self, _definition_id: str):
+            raise DatabaseError("BODY-MUST-NOT-LEAK")
+
+    api_context.app.state.db = FailingDatabase()
+    response = api_context.client.get(TRANSLATION_PATH)
+
+    assert response.status_code == 500
+    assert response.json() == {
+        "detail": {
+            "code": "service_prompt_store_failed",
+            "message": "Service Prompt storage operation failed.",
+        }
+    }
+    assert "BODY-MUST-NOT-LEAK" not in response.text
+
+
+def test_service_prompt_dependency_and_auth_errors_keep_native_shapes(api_context) -> None:
+    def unavailable_db():
+        raise HTTPException(status_code=503, detail="dependency unavailable")
+
+    api_context.app.dependency_overrides[get_prompts_db_for_user] = unavailable_db
+    dependency_response = api_context.client.get(TRANSLATION_PATH)
+
+    async def rejected_principal(_request: Request):
+        raise HTTPException(status_code=401, detail="authentication required")
+
+    api_context.app.dependency_overrides[get_auth_principal] = rejected_principal
+    auth_response = api_context.client.get("/api/v1/service-prompts")
+
+    assert dependency_response.status_code == 503
+    assert dependency_response.json() == {"detail": "dependency unavailable"}
+    assert auth_response.status_code == 401
+    assert auth_response.json() == {"detail": "authentication required"}
+
+
+def test_service_prompt_api_key_scopes_and_jwt_bypass(api_context) -> None:
+    api_context.app.state.principal = _principal(api_key_id=10)
+    api_context.app.state.api_key_scope = "read"
+
+    read_response = api_context.client.get(TRANSLATION_PATH)
+    denied_put = api_context.client.put(
+        TRANSLATION_PATH,
+        json={"parts": CUSTOM_PARTS, "expected_revision": None},
+    )
+    denied_delete = api_context.client.delete(TRANSLATION_PATH)
+
+    assert read_response.status_code == 200
+    assert denied_put.status_code == 403
+    assert denied_delete.status_code == 403
+
+    api_context.app.state.api_key_scope = "write"
+    saved = api_context.client.put(
+        TRANSLATION_PATH,
+        json={"parts": CUSTOM_PARTS, "expected_revision": None},
+    )
+    assert saved.status_code == 200
+    assert api_context.client.delete(
+        TRANSLATION_PATH,
+        params={"expected_revision": saved.json()["revision"]},
+    ).status_code == 200
+
+    api_context.app.state.principal = _principal()
+    api_context.app.state.api_key_scope = None
+    jwt_save = api_context.client.put(
+        TRANSLATION_PATH,
+        json={"parts": CUSTOM_PARTS, "expected_revision": None},
+    )
+    assert jwt_save.status_code == 200
+
+
+def test_service_prompt_databases_are_isolated_by_dependency(api_context, tmp_path: Path) -> None:
+    second_db = PromptsDatabase(tmp_path / "other-user.sqlite", "other-user")
+    try:
+        saved = api_context.client.put(
+            TRANSLATION_PATH,
+            json={"parts": CUSTOM_PARTS, "expected_revision": None},
+        ).json()
+
+        api_context.app.state.db = second_db
+        other_detail = api_context.client.get(TRANSLATION_PATH)
+        other_reset = api_context.client.delete(
+            TRANSLATION_PATH,
+            params={"expected_revision": saved["revision"]},
+        )
+
+        assert other_detail.json()["source"] == "packaged"
+        assert other_reset.status_code == 409
+        assert other_reset.json()["detail"]["current_revision"] is None
+
+        api_context.app.state.db = api_context.db
+        assert api_context.client.get(TRANSLATION_PATH).json()["revision"] == saved["revision"]
+    finally:
+        second_db.close_connection()
+
+
+def test_service_prompt_wire_schemas_never_accept_user_or_database_targeting() -> None:
+    schema_models = (
+        ServicePromptCatalogItemResponse,
+        ServicePromptDetailResponse,
+        ServicePromptUpdateRequest,
+    )
+
+    for model in schema_models:
+        assert "user_id" not in model.model_fields
+        assert "database_path" not in model.model_fields

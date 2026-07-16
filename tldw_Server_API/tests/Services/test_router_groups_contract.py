@@ -435,6 +435,11 @@ def _install_minimal_required_router_modules(monkeypatch: pytest.MonkeyPatch) ->
         "tldw_Server_API.app.api.v1.endpoints.workspaces",
         path="/workspaces",
     )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.service_prompts",
+        path="/service-prompts",
+    )
 
 
 def test_install_fake_router_module_does_not_mutate_existing_real_module(
@@ -4273,6 +4278,9 @@ def test_iter_minimal_test_router_specs_populates_expected_specs(monkeypatch: py
     assert by_first_path["/workspaces"].prefix == "/api/v1/workspaces"
     assert by_first_path["/workspaces"].tags == ("workspaces",)
     assert by_first_path["/workspaces"].route_key == "workspaces"
+    assert by_first_path["/service-prompts"].prefix == "/api/v1"
+    assert by_first_path["/service-prompts"].tags == ("service-prompts",)
+    assert by_first_path["/service-prompts"].route_key == ""
 
 
 def test_iter_minimal_test_router_specs_includes_health_and_auth(
@@ -4324,6 +4332,7 @@ def test_iter_minimal_test_router_specs_defers_endpoint_imports(
         "tldw_Server_API.app.api.v1.endpoints.research",
         "tldw_Server_API.app.api.v1.endpoints.research_workspace",
         "tldw_Server_API.app.api.v1.endpoints.research_runs",
+        "tldw_Server_API.app.api.v1.endpoints.service_prompts",
         "tldw_Server_API.app.api.v1.endpoints.vn_play",
         "tldw_Server_API.app.api.v1.endpoints.workspace_migrations",
         "tldw_Server_API.app.api.v1.endpoints.workspaces",
@@ -4378,7 +4387,7 @@ def test_minimal_test_router_specs_participate_in_route_policy(
     actual_counts = Counter(route_policy_calls)
     expected_counts = Counter(expected_policy_calls)
 
-    assert registered_count == 0
+    assert registered_count == sum(not spec.route_key for spec in specs)
     assert expected_counts - actual_counts == Counter()
     assert set(actual_counts) - set(expected_counts) == set()
 
@@ -10907,6 +10916,11 @@ def test_iter_content_router_specs_populates_expected_specs(monkeypatch: pytest.
     )
     _install_fake_router_module(
         monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.service_prompts",
+        path="/service-prompts",
+    )
+    _install_fake_router_module(
+        monkeypatch,
         "tldw_Server_API.app.api.v1.endpoints.outputs",
         path="/list",
     )
@@ -11336,6 +11350,9 @@ def test_iter_content_router_specs_populates_expected_specs(monkeypatch: pytest.
     assert by_key["rag-health"].tags == ("rag-health",)
     assert by_key["prompts"].prefix == "/api/v1/prompts"
     assert by_key["prompts"].tags == ("prompts",)
+    assert by_first_path["/service-prompts"].prefix == "/api/v1"
+    assert by_first_path["/service-prompts"].tags == ("service-prompts",)
+    assert by_first_path["/service-prompts"].route_key == ""
     assert by_key["outputs"].prefix == "/api/v1"
     assert by_key["outputs"].tags == ("outputs",)
     assert by_key["claims"].prefix == "/api/v1"
