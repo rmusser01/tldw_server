@@ -69,7 +69,6 @@ def __getattr__(name: str) -> object:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
     from tldw_Server_API.app.core.exceptions import PlanningError
 
-    globals()[name] = PlanningError
     return PlanningError
 
 
