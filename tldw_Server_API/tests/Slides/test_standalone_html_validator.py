@@ -800,6 +800,94 @@ def test_qualified_and_simply_aliased_script_sinks_are_rejected(script: str) -> 
 @pytest.mark.parametrize(
     "script",
     [
+        'open("/popup")',
+        "history.go(-1)",
+        "history.back()",
+        "history.forward()",
+        "location.reload()",
+        'navigation.navigate("/next")',
+        "navigation.reload()",
+        'navigation.traverseTo("entry-key")',
+        "navigation.back()",
+        "navigation.forward()",
+    ],
+)
+def test_direct_popup_and_navigation_sinks_are_rejected(script: str) -> None:
+    assert _error(_document(script=script)).reason == "script_policy"
+
+
+@pytest.mark.parametrize(
+    "script",
+    [
+        'window.open("/popup")',
+        'self.open("/popup")',
+        'globalThis.open("/popup")',
+        "window.location.reload()",
+        "self.location.reload()",
+        "globalThis.location.reload()",
+        "top.location.reload()",
+        "parent.location.reload()",
+        "document.location.reload()",
+        "window.document.location.reload()",
+        "top.document.location.reload()",
+        "parent.document.location.reload()",
+        'document.location.assign("/next")',
+        'document.location.replace("/next")',
+        'document.location = "/next"',
+        'document.location.href = "/next"',
+        'window.navigation.navigate("/next")',
+        "self.navigation.reload()",
+        'globalThis.navigation.traverseTo("entry-key")',
+    ],
+)
+def test_qualified_popup_and_navigation_sinks_are_rejected(script: str) -> None:
+    assert _error(_document(script=script)).reason == "script_policy"
+
+
+@pytest.mark.parametrize(
+    "script",
+    [
+        'const popup = window.open; popup("/popup")',
+        "const go = history.go; go(-1)",
+        "const back = window.history.back; back()",
+        "const forward = self.history.forward; forward()",
+        "const reload = location.reload; reload()",
+        "const parentReload = parent.location.reload; parentReload()",
+        "const documentReload = document.location.reload; documentReload()",
+        'const assign = document.location.assign; assign("/next")',
+        'const replace = document.location.replace; replace("/next")',
+        'const navigate = globalThis.navigation.navigate; navigate("/next")',
+        "const navReload = window.navigation.reload; navReload()",
+        'const traverse = navigation.traverseTo; traverse("entry-key")',
+        "const navBack = navigation.back; navBack()",
+        "const navForward = navigation.forward; navForward()",
+    ],
+)
+def test_simply_aliased_popup_and_navigation_sinks_are_rejected(script: str) -> None:
+    assert _error(_document(script=script)).reason == "script_policy"
+
+
+@pytest.mark.parametrize(
+    "script",
+    [
+        'const text = "open(\\"/popup\\") history.go(-1) location.reload()"; console.log(text);',
+        "/* navigation.navigate('/next'); history.back(); */ console.log('safe');",
+        'popup.open("/local")',
+        "router.history.go(-1)",
+        "preview.location.reload()",
+        'app.navigation.navigate("/local")',
+        "const go = router.history.go; go(-1)",
+        "const reload = preview.location.reload; reload()",
+        'const navigate = app.navigation.navigate; navigate("/local")',
+    ],
+)
+def test_navigation_words_in_inert_or_unrelated_contexts_remain_allowed(script: str) -> None:
+    assert validate_standalone_html(_document(script=script)).slide_count == 1
+
+
+@pytest.mark.parametrize(
+    "script",
+    [
         "const request = safeRequest; request();",
         "const request = () => 1; request();",
         "const workerName = 'Worker'; console.log(workerName);",
@@ -815,7 +903,7 @@ def test_non_sink_aliases_remain_allowed(script: str) -> None:
 
 def test_aliased_script_sink_error_remains_source_redacted() -> None:
     secret = "TOP-SECRET-ALIASED-SCRIPT-SOURCE"
-    error = _error(_document(script=f'const go = location.assign; go("{secret}")'))
+    error = _error(_document(script=f'const navigate = window.navigation.navigate; navigate("{secret}")'))
     rendered = "".join(traceback.format_exception(error))
     assert secret not in rendered
     assert secret not in str(error)

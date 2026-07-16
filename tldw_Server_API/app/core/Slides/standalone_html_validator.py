@@ -221,6 +221,7 @@ _BIDI_FORMATTING = frozenset(
 _SCRIPT_SINK_TOKEN_PATTERNS = (
     ("fetch", "("),
     ("import", "("),
+    ("open", "("),
     ("new", "eventsource", "("),
     ("new", "sharedworker", "("),
     ("new", "websocket", "("),
@@ -229,23 +230,33 @@ _SCRIPT_SINK_TOKEN_PATTERNS = (
     ("new", "xmlhttprequest", "("),
     ("navigator", ".", "sendbeacon", "("),
     ("navigator", ".", "serviceworker", ".", "register", "("),
-    ("globalthis", ".", "open", "("),
-    ("self", ".", "open", "("),
-    ("window", ".", "open", "("),
-    ("window", ".", "location", "="),
+    ("document", ".", "location", "="),
+    ("document", ".", "location", ".", "href"),
+    ("document", ".", "location", ".", "assign", "("),
+    ("document", ".", "location", ".", "replace", "("),
+    ("document", ".", "location", ".", "reload", "("),
     ("location", "="),
     ("location", ".", "href"),
     ("location", ".", "assign", "("),
     ("location", ".", "replace", "("),
+    ("location", ".", "reload", "("),
+    ("history", ".", "back", "("),
+    ("history", ".", "forward", "("),
+    ("history", ".", "go", "("),
     ("history", ".", "pushstate", "("),
     ("history", ".", "replacestate", "("),
+    ("navigation", ".", "back", "("),
+    ("navigation", ".", "forward", "("),
+    ("navigation", ".", "navigate", "("),
+    ("navigation", ".", "reload", "("),
+    ("navigation", ".", "traverseto", "("),
     ("document", ".", "cookie"),
     ("caches", ".", "open", "("),
     ("localstorage",),
     ("sessionstorage",),
     ("indexeddb",),
 )
-_SCRIPT_GLOBAL_QUALIFIERS = frozenset({"globalthis", "self", "window"})
+_SCRIPT_GLOBAL_QUALIFIERS = frozenset({"globalthis", "parent", "self", "top", "window"})
 _SCRIPT_GLOBAL_NAMES = frozenset(
     {
         "caches",
@@ -257,6 +268,8 @@ _SCRIPT_GLOBAL_NAMES = frozenset(
         "localstorage",
         "location",
         "navigator",
+        "navigation",
+        "open",
         "sessionstorage",
         "sharedworker",
         "websocket",
@@ -271,15 +284,25 @@ _SCRIPT_ALIASABLE_SINK_PATTERNS = (
     ("websocket",),
     ("worker",),
     ("xmlhttprequest",),
-    ("globalthis", ".", "open"),
-    ("self", ".", "open"),
-    ("window", ".", "open"),
+    ("open",),
+    ("document", ".", "location", ".", "assign"),
+    ("document", ".", "location", ".", "replace"),
+    ("document", ".", "location", ".", "reload"),
     ("location", ".", "assign"),
     ("location", ".", "replace"),
+    ("location", ".", "reload"),
     ("navigator", ".", "sendbeacon"),
     ("navigator", ".", "serviceworker", ".", "register"),
+    ("history", ".", "back"),
+    ("history", ".", "forward"),
+    ("history", ".", "go"),
     ("history", ".", "pushstate"),
     ("history", ".", "replacestate"),
+    ("navigation", ".", "back"),
+    ("navigation", ".", "forward"),
+    ("navigation", ".", "navigate"),
+    ("navigation", ".", "reload"),
+    ("navigation", ".", "traverseto"),
     ("caches", ".", "open"),
 )
 
@@ -608,7 +631,10 @@ def _contains_token_pattern(tokens: list[str], pattern: tuple[str, ...]) -> bool
     if len(pattern) > len(tokens):
         return False
     width = len(pattern)
-    return any(tuple(tokens[index : index + width]) == pattern for index in range(len(tokens) - width + 1))
+    return any(
+        tuple(tokens[index : index + width]) == pattern and (index == 0 or tokens[index - 1] != ".")
+        for index in range(len(tokens) - width + 1)
+    )
 
 
 def _normalize_script_global_qualifiers(tokens: list[str]) -> list[str]:
