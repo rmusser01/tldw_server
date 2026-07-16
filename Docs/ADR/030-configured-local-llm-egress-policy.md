@@ -44,9 +44,8 @@ Local LLM endpoints on LAN, Docker networks, and approved overlay addresses can 
 
 Adding a configured-local adapter requires registering its server configuration aliases with the trusted resolver and routing its request modes through the checked transport. UI consumers should continue to use the shared `TldwModelsService`/`fetchChatModels` path instead of creating another discovery or cache layer.
 
-Novita, Poe, Together, and other public custom-adapter subclasses do not receive configured-local scope. Migrating those public providers from the legacy client-factory seam to checked central egress is tracked by TASK-12972.1.
+Novita, Poe, and Together now use checked central egress under ordinary policy and do not receive configured-local scope. TASK-12972.1 completed the migration from their legacy client-factory seam.
 
 ## Follow-up
 
-- TASK-12972.1: route Novita, Poe, and Together through checked central egress without granting configured-local scope.
 - Keep the WebUI and browser-extension test configurations on the same shared model/cache contract.

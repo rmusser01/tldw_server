@@ -29,7 +29,7 @@
 
 **Tests:** Focused public-provider tests fail because current production code still calls `http_client_factory`.
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Task 1.1: Write failing sync and streaming transport tests
 
@@ -150,7 +150,9 @@ Do not commit the failing tests; repository commits must stay green.
 
 **Tests:** Stage 1 tests turn green and configured-custom regressions remain green.
 
-**Status:** Not Started
+**Status:** Complete
+
+Execution evidence: the public contract RED run produced 9 expected failures and 1 pass; the security-boundary RED run produced 6 expected failures and 1 pass. Pre-commit review added a configured-custom injection-compatibility regression that failed 1/1 before the redirect keyword was restricted to public providers. Final focused GREEN passed 40/40 with 2 warnings, and adjacent payload/timeout/role/error-mapping GREEN passed 34/34 with 4 warnings. Scoped Ruff correctness and `git diff --check` passed before commit `5532d7f097`.
 
 ### Task 2.1: Implement the minimal shared path
 
@@ -249,7 +251,9 @@ git commit -m "fix(llm): check public custom adapter egress (TASK-12972.1)"
 
 **Tests:** Complete prior Stage 3 adapter union plus static/security checks.
 
-**Status:** Not Started
+**Status:** In Progress
+
+Pre-rebase verification evidence: the complete affected adapter union passed 143/143 with 5 warnings. Scoped Ruff correctness, Python compilation, the production seam search, and `git diff --check` passed. Bandit scanned 373 production lines with 0 findings and 0 errors. Whole-branch self-review against base `28a305eefc` found no critical, important, or minor code issues; independent delegated review was unavailable under the current no-delegation policy. Final verification remains pending after rebasing onto current `origin/dev`.
 
 ### Task 3.1: Update the ADR and plan status
 
