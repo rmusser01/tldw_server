@@ -12,7 +12,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any
 
 from tldw_Server_API.app.core.DB_Management.sqlite_policy import (
     configure_sqlite_connection,
@@ -20,6 +20,7 @@ from tldw_Server_API.app.core.DB_Management.sqlite_policy import (
 from tldw_Server_API.app.core.Slides.slides_migrations import (
     SLIDES_SCHEMA_VERSION,
     migrate_slides_schema,
+    slides_schema_v2_is_complete,
 )
 
 
@@ -270,11 +271,31 @@ _INPUT_PROJECTION = """
     input_expires_at, created_at
 """
 
+_REQUIRED_BASE_SCHEMA_OBJECTS = {
+    ("table", "schema_version"),
+    ("table", "presentations"),
+    ("table", "presentations_versions"),
+    ("table", "presentations_fts"),
+    ("table", "sync_log"),
+    ("table", "visual_styles"),
+    ("index", "idx_presentations_deleted"),
+    ("index", "idx_presentations_created"),
+    ("index", "idx_presentations_versions_unique"),
+    ("index", "idx_presentations_versions_pid"),
+    ("index", "idx_presentations_versions_created"),
+    ("index", "idx_sync_log_ts"),
+    ("index", "idx_sync_log_entity_uuid"),
+    ("index", "idx_sync_log_client_id"),
+    ("index", "idx_visual_styles_scope"),
+    ("index", "idx_visual_styles_name"),
+    ("trigger", "presentations_ai"),
+    ("trigger", "presentations_ad"),
+    ("trigger", "presentations_au"),
+}
+
 
 class SlidesDatabase:
     _SCHEMA_VERSION = SLIDES_SCHEMA_VERSION
-    _schema_init_paths: ClassVar[set[str]] = set()
-    _schema_init_lock: ClassVar[threading.Lock] = threading.Lock()
 
     def __init__(self, db_path: str | Path, client_id: str) -> None:
         if not client_id:
@@ -289,13 +310,51 @@ class SlidesDatabase:
         self._local = threading.local()
         self._ensure_schema()
 
+    @staticmethod
+    def _schema_is_complete(conn: sqlite3.Connection) -> bool:
+        """Return whether every base and v2 schema object is present."""
+        if not slides_schema_v2_is_complete(conn):
+            return False
+        objects = {
+            (str(row[0]), str(row[1]))
+            for row in conn.execute(
+                "SELECT type, name FROM sqlite_master "
+                "WHERE type IN ('table', 'index', 'trigger')"
+            ).fetchall()
+        }
+        if not _REQUIRED_BASE_SCHEMA_OBJECTS.issubset(objects):
+            return False
+        columns = {
+            str(row["name"] if isinstance(row, sqlite3.Row) else row[1])
+            for row in conn.execute("PRAGMA table_info(presentations)").fetchall()
+        }
+        return set(_PRESENTATION_DETAIL_COLUMNS).issubset(columns)
+
+    @staticmethod
+    def _execute_schema_statements(conn: sqlite3.Connection, script: str) -> None:
+        """Execute a DDL script one complete statement at a time."""
+        pending: list[str] = []
+        for line in script.splitlines():
+            pending.append(line)
+            statement = "\n".join(pending).strip()
+            if statement and sqlite3.complete_statement(statement):
+                conn.execute(statement)
+                pending.clear()
+        if any(line.strip() for line in pending):
+            raise SchemaError("Slides base schema contains an incomplete statement")
+
     def _ensure_schema(self) -> None:
-        cache_schema_path = self._db_path_str != ":memory:"
-        with self._schema_init_lock:
-            conn = self.get_connection()
-            try:
-                conn.executescript(
-                    """
+        conn = self.get_connection()
+        try:
+            if self._schema_is_complete(conn):
+                return
+            conn.execute("BEGIN IMMEDIATE")
+            if self._schema_is_complete(conn):
+                conn.rollback()
+                return
+            self._execute_schema_statements(
+                conn,
+                """
                     CREATE TABLE IF NOT EXISTS schema_version (
                         version INTEGER PRIMARY KEY NOT NULL
                     );
@@ -396,20 +455,22 @@ class SlidesDatabase:
 
                     CREATE INDEX IF NOT EXISTS idx_visual_styles_scope ON visual_styles(scope);
                     CREATE INDEX IF NOT EXISTS idx_visual_styles_name ON visual_styles(name);
-                    """
-                )
-                self._ensure_marp_theme_column(conn)
-                self._ensure_template_id_column(conn)
-                self._ensure_presentation_visual_style_columns(conn)
-                self._ensure_studio_data_column(conn)
-                self._ensure_visual_styles_table(conn)
-                conn.commit()
-                migrate_slides_schema(conn)
-                if cache_schema_path:
-                    self._schema_init_paths.add(self._db_path_str)
-            except Exception as exc:
-                conn.rollback()
-                raise SchemaError(f"Failed to initialize Slides DB schema: {exc}") from exc
+                """,
+            )
+            self._ensure_marp_theme_column(conn)
+            self._ensure_template_id_column(conn)
+            self._ensure_presentation_visual_style_columns(conn)
+            self._ensure_studio_data_column(conn)
+            self._ensure_visual_styles_table(conn)
+            conn.commit()
+            migrate_slides_schema(conn)
+            if not self._schema_is_complete(conn):
+                raise SchemaError("Slides schema initialization did not reach version 2")
+        except Exception as exc:
+            conn.rollback()
+            if isinstance(exc, SchemaError):
+                raise
+            raise SchemaError(f"Failed to initialize Slides DB schema: {exc}") from exc
 
     def get_connection(self) -> sqlite3.Connection:
         conn = getattr(self._local, "connection", None)

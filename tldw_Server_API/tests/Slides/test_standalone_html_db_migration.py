@@ -80,6 +80,26 @@ def _schema_snapshot(db_path) -> tuple[list[int], set[str], set[str], set[str]]:
     return versions, columns, tables, indexes
 
 
+def _structural_snapshot(db_path) -> tuple[int, tuple[tuple, ...], tuple[int, ...]]:
+    with sqlite3.connect(db_path) as conn:
+        schema_version = int(conn.execute("PRAGMA schema_version").fetchone()[0])
+        objects = tuple(
+            conn.execute(
+                """
+                SELECT type, name, tbl_name, COALESCE(sql, '')
+                FROM sqlite_master
+                WHERE name NOT LIKE 'sqlite_%'
+                ORDER BY type, name
+                """
+            )
+        )
+        versions = tuple(
+            row[0]
+            for row in conn.execute("SELECT version FROM schema_version ORDER BY version")
+        )
+    return schema_version, objects, versions
+
+
 def test_new_database_is_created_at_schema_v2(tmp_path):
     db_path = tmp_path / "Slides.db"
     db = SlidesDatabase(db_path=db_path, client_id="tester")
@@ -99,6 +119,41 @@ def test_new_database_is_created_at_schema_v2(tmp_path):
     }.issubset(columns)
     assert {"slides_generation_receipts", "slides_generation_inputs"}.issubset(tables)
     assert "idx_presentations_generation_job_uuid" in indexes
+    with sqlite3.connect(db_path) as conn:
+        triggers = {
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'trigger'"
+            )
+        }
+    assert {"presentations_ai", "presentations_ad", "presentations_au"}.issubset(
+        triggers
+    )
+
+
+def test_future_schema_is_rejected_without_structural_mutation(tmp_path):
+    db_path = tmp_path / "Slides.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("CREATE TABLE schema_version (version INTEGER PRIMARY KEY NOT NULL)")
+        conn.execute("INSERT INTO schema_version (version) VALUES (3)")
+        conn.execute(
+            """
+            CREATE TABLE presentations (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                slides_text TEXT NOT NULL,
+                deleted INTEGER NOT NULL DEFAULT 0,
+                created_at DATETIME NOT NULL
+            )
+            """
+        )
+        conn.execute("CREATE TABLE future_only (sentinel TEXT NOT NULL)")
+    before = _structural_snapshot(db_path)
+
+    with pytest.raises(SchemaError, match="Unsupported Slides schema versions"):
+        SlidesDatabase(db_path=db_path, client_id="tester")
+
+    assert _structural_snapshot(db_path) == before
 
 
 @pytest.mark.parametrize("schema_version", [0, 1])
@@ -142,7 +197,6 @@ def test_schema_v2_reopen_is_idempotent(tmp_path):
     db_path = tmp_path / "Slides.db"
     first = SlidesDatabase(db_path=db_path, client_id="first")
     first.close_connection()
-    SlidesDatabase._schema_init_paths.discard(str(db_path.resolve()))
 
     second = SlidesDatabase(db_path=db_path, client_id="second")
     second.close_connection()
@@ -151,6 +205,30 @@ def test_schema_v2_reopen_is_idempotent(tmp_path):
     assert versions == [2]
     assert len(columns) == len(set(columns))
     assert {"slides_generation_receipts", "slides_generation_inputs"}.issubset(tables)
+
+
+def test_complete_v2_reopen_is_read_only_under_competing_writer(tmp_path):
+    db_path = tmp_path / "Slides.db"
+    first = SlidesDatabase(db_path=db_path, client_id="first")
+    first.close_connection()
+
+    observer = sqlite3.connect(db_path)
+    writer = sqlite3.connect(db_path)
+    before_data_version = int(observer.execute("PRAGMA data_version").fetchone()[0])
+    writer.execute("BEGIN IMMEDIATE")
+    try:
+        try:
+            reopened = SlidesDatabase(db_path=db_path, client_id="second")
+        except SchemaError as exc:
+            pytest.fail(f"normalized v2 reopen attempted a write lock: {exc}")
+        reopened.close_connection()
+        after_data_version = int(observer.execute("PRAGMA data_version").fetchone()[0])
+    finally:
+        writer.rollback()
+        writer.close()
+        observer.close()
+
+    assert after_data_version == before_data_version
 
 
 def test_statement_failure_rolls_back_entire_v2_migration(tmp_path, monkeypatch):

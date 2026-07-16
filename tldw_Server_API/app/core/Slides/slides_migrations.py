@@ -111,6 +111,9 @@ ON presentations(generation_job_uuid)
 WHERE generation_job_uuid IS NOT NULL
 """
 
+_V2_TABLES = {"slides_generation_receipts", "slides_generation_inputs"}
+_V2_INDEXES = {"idx_presentations_generation_job_uuid"}
+
 
 def _execute_migration_statement(
     conn: sqlite3.Connection,
@@ -121,26 +124,81 @@ def _execute_migration_statement(
     return conn.execute(statement, parameters)
 
 
+def _read_schema_versions(conn: sqlite3.Connection) -> list[int] | None:
+    """Read authoritative version rows without creating the version table."""
+    version_table = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_version'"
+    ).fetchone()
+    if version_table is None:
+        return None
+    return [
+        int(row[0])
+        for row in conn.execute(
+            "SELECT version FROM schema_version ORDER BY version"
+        ).fetchall()
+    ]
+
+
+def _reject_unsupported_versions(versions: Sequence[int]) -> None:
+    """Reject invalid or future schema versions before any mutation."""
+    if any(version < 0 or version > SLIDES_SCHEMA_VERSION for version in versions):
+        raise SlidesMigrationError(
+            f"Unsupported Slides schema versions: {list(versions)!r}"
+        )
+
+
+def slides_schema_v2_is_complete(conn: sqlite3.Connection) -> bool:
+    """Probe schema-v2 completeness without mutating or taking a write lock."""
+    versions = _read_schema_versions(conn)
+    if versions is None:
+        return False
+    _reject_unsupported_versions(versions)
+    if versions != [SLIDES_SCHEMA_VERSION]:
+        return False
+
+    presentation_table = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'presentations'"
+    ).fetchone()
+    if presentation_table is None:
+        return False
+    columns = {
+        str(row["name"] if isinstance(row, sqlite3.Row) else row[1])
+        for row in conn.execute("PRAGMA table_info(presentations)").fetchall()
+    }
+    if not {name for name, _ddl in _PRESENTATION_V2_COLUMNS}.issubset(columns):
+        return False
+
+    objects = {
+        (str(row[0]), str(row[1]))
+        for row in conn.execute(
+            "SELECT type, name FROM sqlite_master WHERE type IN ('table', 'index')"
+        ).fetchall()
+    }
+    return all(("table", name) in objects for name in _V2_TABLES) and all(
+        ("index", name) in objects for name in _V2_INDEXES
+    )
+
+
 def migrate_slides_schema(conn: sqlite3.Connection) -> None:
     """Migrate an initialized Slides database to schema v2 atomically."""
     if conn.in_transaction:
         raise SlidesMigrationError("Slides migration requires an idle connection")
 
+    if slides_schema_v2_is_complete(conn):
+        return
+
     conn.execute("BEGIN IMMEDIATE")
     try:
+        if slides_schema_v2_is_complete(conn):
+            conn.rollback()
+            return
         _execute_migration_statement(
             conn,
             "CREATE TABLE IF NOT EXISTS schema_version "
             "(version INTEGER PRIMARY KEY NOT NULL)",
         )
-        version_rows = conn.execute(
-            "SELECT version FROM schema_version ORDER BY version"
-        ).fetchall()
-        versions = [int(row[0]) for row in version_rows]
-        if any(version < 0 or version > SLIDES_SCHEMA_VERSION for version in versions):
-            raise SlidesMigrationError(
-                f"Unsupported Slides schema versions: {versions!r}"
-            )
+        versions = _read_schema_versions(conn) or []
+        _reject_unsupported_versions(versions)
 
         table_row = conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'presentations'"
