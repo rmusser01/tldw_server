@@ -19,9 +19,19 @@ priority: high
 modified_files:
 - tldw_Server_API/app/core/Slides/slides_migrations.py
 - tldw_Server_API/app/core/Slides/slides_db.py
+- tldw_Server_API/app/core/DB_Management/db_path_utils.py
+- tldw_Server_API/app/core/Slides/standalone_html_contracts.py
+- tldw_Server_API/app/core/Slides/standalone_html_validator.py
+- tldw_Server_API/app/core/Slides/standalone_html_validation_pool.py
 - tldw_Server_API/tests/Slides/test_standalone_html_db_migration.py
+- tldw_Server_API/tests/Slides/test_standalone_html_domain.py
 - tldw_Server_API/tests/Slides/test_slides_db.py
+- tldw_Server_API/tests/Slides/test_standalone_html_validator.py
+- tldw_Server_API/tests/Slides/test_standalone_html_validation_pool.py
+- tldw_Server_API/tests/Slides/test_standalone_html_dependency_smoke.py
+- pyproject.toml
 - backlog/tasks/task-12115 - Add-first-class-standalone-HTML-JS-presentation-generation.md
+- tldw_Server_API/app/core/Slides/__init__.py
 ---
 
 ## Description
@@ -89,4 +99,15 @@ Deferred for the mandated root spec gate, not hidden: unrelated pre-v2 compatibi
 Fresh GREEN after final edits: schema/domain/database suite 38 passed, 5 warnings in 7.65s; Slides API regression 76 passed, 5 warnings in 10.48s. Bandit exited 0 over slides_migrations.py, slides_db.py, and db_path_utils.py with only existing nosec notices; git diff --check passed. Regression coverage confirms future-version rejection is structurally read-only, normalized v2 reopen succeeds without a write lock or data-version change, and all three FTS triggers exist.
 
 The prior compatibility-helper concern is no longer deferred: the process-local schema cache/lock was removed, and compatibility helpers are serialized inside BEGIN IMMEDIATE with a second completeness/future-version check before mutation.
+
+2026-07-15 Task 1 closure: commits 285480902033bff715ba45e1eac18404f4385b2a and 73318e36ed8196d3bed82e4702b158d5e8bd881f. Fresh specification review returned ✅ Spec compliant. The quality re-review found no Critical or Important findings and explicitly approved proceeding to Task 2. Two nonblocking cleanup notes remain for a later relevant persistence touchpoint: refine generation-job uniqueness error translation before worker persistence and optionally consolidate duplicated summary SQL.
+
+2026-07-15 Task 2 started: building the authoritative no-execution html5lib/tinycss2 validator and the bounded killable subprocess pool under assertion-level TDD.
+
+2026-07-16 Task 2 validator/pool implementation evidence: initial assertion-level RED was 86 collected, 22 failed, 64 passed, 5 warnings. Security-review RED tranches then proved character-reference and semicolonless-CSS preflight gaps, semantic adjacency loss, malformed-attribute nontermination, namespace/script/style bypasses, template interpolation and bracket/regex sink gaps, worker diagnostic loss, malformed IPC capacity stranding, dead-worker provider admission, unused-reservation leakage, and readiness/reap races before each fix.
+
+Implementation now provides a parser-only, source-redacted html5lib/tinycss2 validator with explicit byte/token/tree/CSS/text budgets, namespace-aware active/resource rejection, bounded diagnostic JavaScript sink lexing, and frozen derived metadata. A supervised maximum-four-worker process pool provides a bounded 24-item interactive queue, eight pre-provider generation reservations, weighted 3:1 scheduling, watchdog/cancellation replacement, confirmed reap-before-replace, closed bounded IPC, tracked reservation cleanup, total malformed-response handling, and a spawn readiness handshake. Slides package exports are a backward-compatible PEP 562 lazy facade so spawn imports do not initialize Slides DB/export/generator services. Direct dependencies are exactly pinned and installed: html5lib==1.1 and tinycss2==1.4.0.
+
+Final verification: combined validator/pool/dependency smoke 140 passed, 3 warnings, exit 0 in 30.78s; isolated validator+smoke 121 passed; isolated pool 19 passed. Bounded existing Slides DB/generator/export regression coverage had 40 passes; two custom.css export assertions fail identically in the unchanged Task 1/base eager-import worktree, so they are recorded baseline/environment failures rather than Task 2 regressions. Production-only Bandit exited 0 with 0 findings across all four touched production Python files; the all-touched-Python Bandit run had 0 medium/high findings and only test-idiom LOW findings. Black and Ruff pass; git diff --check passes. pip check is honestly nonzero in the shared pre-existing venv for five unrelated dependency drifts: faster-whisper 1.2.0 vs >=1.2.1, sentence-transformers 5.2.3 vs >=5.4.0, torch 2.3.0 vs >=2.11.0, transformers 4.57.6 vs >=5.5.3, and typer 0.16.1 vs typer-slim's >=0.24.0 requirement. The two new exact dependencies themselves are installed at the required versions.
+2026-07-16 Task 2 final audit closure: the URL-policy follow-up first ran RED with 14 selected validator cases (10 expected failures, 4 passes), proving missing RDFa about/resource/vocab/prefix coverage, SVG color-profile URL coverage, and generic unmistakable URL markers in arbitrary attributes. After the narrow fail-closed fix, the same tranche passed 14/14 while preserving normal SVG xmlns, hex colors, and benign #label or /label values in non-resource attributes. The independent URL-policy re-review returned APPROVED with no Critical or Important findings. Final focused validator/pool/dependency-smoke verification passed 154/154 with 3 existing warnings in 30.69s. Black completed and Ruff reported all checks passed. Production-only Bandit exited 0 with 0 findings, 0 skipped tests, and 2,191 LOC scanned across Slides/__init__.py, standalone_html_contracts.py, standalone_html_validator.py, and standalone_html_validation_pool.py. Tracked git diff --check exited 0, and every untracked Task 2 file had empty no-index whitespace diagnostics. Exact html5lib==1.1 and tinycss2==1.4.0 dependency pins remain installed. Task 2 is ready for its authorized commit; overall TASK-12115 remains In Progress for later implementation stages.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
