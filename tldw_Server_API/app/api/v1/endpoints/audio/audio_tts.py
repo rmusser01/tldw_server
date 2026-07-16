@@ -390,7 +390,7 @@ async def create_speech_job(
     )
 
     payload = {
-        "speech_request": model_dump_compat(request_data),
+        "speech_request": model_dump_compat(request_data, exclude_unset=True),
         "provider_hint": provider_hint,
         "provider_overrides": tts_overrides,
         "user_id": user_id_int,

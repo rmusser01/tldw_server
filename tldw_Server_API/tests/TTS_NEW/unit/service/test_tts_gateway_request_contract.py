@@ -32,6 +32,45 @@ def _convert(**values) -> TTSRequest:
     return TTSServiceV2(MagicMock())._convert_request(OpenAISpeechRequest(**payload))
 
 
+class _CapturingJobManager:
+    def __init__(self) -> None:
+        self.payload = None
+
+    def create_job(self, **kwargs):
+        self.payload = kwargs["payload"]
+        return {"id": 41, "status": "queued"}
+
+
+async def _submit_job_and_convert(
+    monkeypatch: pytest.MonkeyPatch,
+    request_data: OpenAISpeechRequest,
+    *,
+    header_backend: str | None = None,
+) -> tuple[dict, OpenAISpeechRequest, TTSRequest]:
+    async def _resolve_tts_byok(**_kwargs):
+        return 1, {}, None
+
+    shim_map = {
+        "_sanitize_speech_request": lambda *_args, **_kwargs: None,
+        "_resolve_tts_byok": _resolve_tts_byok,
+    }
+    monkeypatch.setattr(audio_tts, "_audio_shim_attr", shim_map.__getitem__)
+    job_manager = _CapturingJobManager()
+
+    await audio_tts.create_speech_job(
+        request_data=request_data,
+        request=_http_request(header_backend),
+        current_user=SimpleNamespace(id="1"),
+        jm=job_manager,
+    )
+
+    assert job_manager.payload is not None
+    queued = job_manager.payload["speech_request"]
+    reconstructed = OpenAISpeechRequest(**queued)
+    converted = TTSServiceV2(MagicMock())._convert_request(reconstructed)
+    return queued, reconstructed, converted
+
+
 def test_speech_schema_keeps_model_required() -> None:
     with pytest.raises(ValidationError):
         OpenAISpeechRequest(input="Missing model")
@@ -125,6 +164,126 @@ async def test_malformed_backend_header_fails_before_sanitization_or_credentials
         )
 
     assert exc_info.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_speech_job_minimal_gateway_payload_preserves_omitted_fields(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    queued, reconstructed, converted = await _submit_job_and_convert(
+        monkeypatch,
+        OpenAISpeechRequest(
+            backend="gateway:company-proxy",
+            model="Vendor/Expressive-TTS",
+            input="Hello",
+        ),
+    )
+
+    assert queued == {
+        "backend": "gateway:company-proxy",
+        "model": "Vendor/Expressive-TTS",
+        "input": "Hello",
+        "stream": False,
+    }
+    assert reconstructed.model_fields_set == {"backend", "model", "input", "stream"}
+    assert converted.supplied_fields.isdisjoint(
+        {"voice", "speed", "language", "lang_code", "target_sample_rate", "format", "extra_params"}
+    )
+    assert converted.voice == "af_heart"
+    assert converted.speed == 1.0
+    assert converted.format is AudioFormat.MP3
+
+
+@pytest.mark.asyncio
+async def test_speech_job_header_backend_becomes_explicit_worker_field(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    queued, reconstructed, converted = await _submit_job_and_convert(
+        monkeypatch,
+        OpenAISpeechRequest(model="Vendor/Expressive-TTS", input="Hello"),
+        header_backend="gateway:company-proxy",
+    )
+
+    assert queued["backend"] == "gateway:company-proxy"
+    assert "backend" in reconstructed.model_fields_set
+    assert converted.backend == "gateway:company-proxy"
+
+
+@pytest.mark.asyncio
+async def test_speech_job_explicit_defaults_and_fallback_survive_worker_roundtrip(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    queued, reconstructed, converted = await _submit_job_and_convert(
+        monkeypatch,
+        OpenAISpeechRequest(
+            backend="openrouter",
+            model="Vendor/Expressive-TTS",
+            input="Hello",
+            voice="af_heart",
+            speed=1.0,
+            language=None,
+            lang_code=None,
+            target_sample_rate=None,
+            response_format="mp3",
+            extra_params={"style": "warm"},
+            allow_fallback=False,
+        ),
+    )
+
+    assert queued == {
+        "backend": "openrouter",
+        "model": "Vendor/Expressive-TTS",
+        "input": "Hello",
+        "voice": "af_heart",
+        "response_format": "mp3",
+        "speed": 1.0,
+        "stream": False,
+        "allow_fallback": False,
+        "target_sample_rate": None,
+        "lang_code": None,
+        "language": None,
+        "extra_params": {"style": "warm"},
+    }
+    assert reconstructed.model_fields_set == set(queued)
+    assert converted.allow_fallback is False
+    assert converted.extra_params == {"style": "warm"}
+    assert converted.supplied_fields == {
+        "voice",
+        "speed",
+        "language",
+        "lang_code",
+        "target_sample_rate",
+        "format",
+        "extra_params",
+    }
+    assert converted.supplied_field_values == {
+        "voice": "af_heart",
+        "speed": 1.0,
+        "language": None,
+        "lang_code": None,
+        "target_sample_rate": None,
+        "format": "mp3",
+        "extra_params": {"style": "warm"},
+    }
+
+
+@pytest.mark.asyncio
+async def test_speech_job_legacy_payload_keeps_backend_absent_and_default_parity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    queued, reconstructed, converted = await _submit_job_and_convert(
+        monkeypatch,
+        OpenAISpeechRequest(model="tts-1", input="Hello"),
+    )
+
+    direct = TTSServiceV2(MagicMock())._convert_request(
+        OpenAISpeechRequest(model="tts-1", input="Hello", stream=False)
+    )
+    assert queued == {"model": "tts-1", "input": "Hello", "stream": False}
+    assert "backend" not in reconstructed.model_fields_set
+    assert converted.backend is None
+    assert converted.allow_fallback is True
+    assert converted.dict() == direct.dict()
 
 
 def test_gateway_conversion_tracks_all_explicit_common_fields_and_raw_values() -> None:
