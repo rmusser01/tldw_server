@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import importlib.util
 import json
+import sqlite3
 
 import pytest
 
@@ -10,6 +11,8 @@ from tldw_Server_API.app.core.Slides.slides_db import (
     ConflictError,
     InputError,
     SlidesDatabase,
+    SlidesDatabaseError,
+    decode_presentation_version_payload,
 )
 from tldw_Server_API.app.core.Slides.standalone_html_validator import (
     validate_standalone_html,
@@ -300,6 +303,44 @@ def test_source_free_projection_queries_do_not_load_html_or_version_payload(tmp_
     ).lower()
     assert "html_document" not in select_sql
     assert "payload_json" not in select_sql
+    db.close_connection()
+
+
+def test_health_probe_executes_only_a_source_free_existence_query(tmp_path):
+    db = SlidesDatabase(db_path=tmp_path / "Slides.db", client_id="tester")
+    _create_standalone(db)
+    statements: list[str] = []
+    db.get_connection().set_trace_callback(statements.append)
+
+    db.probe_health()
+
+    select_sql = [statement.lower() for statement in statements if statement.lstrip().upper().startswith("SELECT")]
+    assert select_sql == ["select 1 from presentations limit 1"]
+    assert "html_document" not in select_sql[0]
+    assert "slides" not in select_sql[0]
+    db.close_connection()
+
+
+def test_health_probe_normalizes_sqlite_failure_without_sensitive_exception_chain(
+    tmp_path,
+    monkeypatch,
+):
+    db = SlidesDatabase(db_path=tmp_path / "Slides.db", client_id="tester")
+    sentinel = "SECRET-/private/slides-health.db"
+
+    class _FailingConnection:
+        def execute(self, _query: str):
+            raise sqlite3.OperationalError(sentinel)
+
+    monkeypatch.setattr(db, "get_connection", lambda: _FailingConnection())
+
+    with pytest.raises(SlidesDatabaseError, match="^slides_health_probe_failed$") as exc_info:
+        db.probe_health()
+
+    chain = [exc_info.value]
+    while chain[-1].__cause__ is not None or chain[-1].__context__ is not None:
+        chain.append(chain[-1].__cause__ or chain[-1].__context__)
+    assert sentinel not in " ".join(repr(exc) for exc in chain)
     db.close_connection()
 
 
@@ -791,6 +832,61 @@ def test_generation_job_uuid_conflict_is_not_confused_with_primary_key_conflict(
     db.close_connection()
 
 
+def test_saved_standalone_invariant_failure_is_fixed_source_free_and_skips_pool(tmp_path):
+    from tldw_Server_API.app.core.Slides.presentation_service import (
+        PresentationServiceError,
+    )
+
+    db = SlidesDatabase(db_path=tmp_path / "Slides.db", client_id="tester")
+    created = _create_standalone(db)
+    sentinel = "SECRET-MALFORMED-PROVENANCE"
+    with db.transaction(immediate=True) as conn:
+        conn.execute(
+            "UPDATE presentations SET generation_provenance_json = ? WHERE id = ?",
+            ('{"private":"' + sentinel, created.id),
+        )
+    pool = _InlineValidationPool(db)
+    service = _service(db, pool)
+
+    with pytest.raises(PresentationServiceError) as exc_info:
+        _run(service.validate_saved_standalone(db.get_presentation_by_id(created.id)))
+
+    error = exc_info.value
+    assert getattr(error, "code", None) == "standalone_html_response_invalid"
+    assert getattr(error, "status_code", None) == 500
+    chain = [error]
+    while chain[-1].__cause__ is not None or chain[-1].__context__ is not None:
+        chain.append(chain[-1].__cause__ or chain[-1].__context__)
+    assert sentinel not in " ".join(repr(exc) for exc in chain)
+    assert pool.calls == []
+    db.close_connection()
+
+
+def test_saved_invariant_rejects_oversize_provenance_before_json_decode(tmp_path, monkeypatch):
+    from tldw_Server_API.app.core.Slides import slides_db as slides_db_module
+
+    db = SlidesDatabase(db_path=tmp_path / "Slides.db", client_id="tester")
+    created = _create_standalone(db)
+    oversized = json.dumps({"private": "x" * 4096})
+    with db.transaction(immediate=True) as conn:
+        conn.execute(
+            "UPDATE presentations SET generation_provenance_json = ? WHERE id = ?",
+            (oversized, created.id),
+        )
+    row = db.get_presentation_by_id(created.id)
+    real_loads = json.loads
+
+    def _guarded_loads(value):
+        if value == oversized:
+            raise AssertionError("oversize provenance reached JSON decoder")
+        return real_loads(value)
+
+    monkeypatch.setattr(slides_db_module.json, "loads", _guarded_loads)
+
+    assert db.presentation_row_invariant_holds(row) is False
+    db.close_connection()
+
+
 def test_restore_html_snapshot_is_same_kind_atomic_and_preserves_generation_identity(tmp_path):
     db_path = tmp_path / "Slides.db"
     db = SlidesDatabase(db_path=db_path, client_id="owner-client")
@@ -927,6 +1023,21 @@ def test_malformed_snapshot_failure_retains_no_source_exception_context(tmp_path
     assert not any(isinstance(exc, json.JSONDecodeError) for exc in chain)
     assert sentinel not in " ".join(repr(exc) for exc in chain)
     db.close_connection()
+
+
+def test_recursive_snapshot_decoder_uses_fixed_source_free_error():
+    sentinel = "SECRET-RECURSIVE-SNAPSHOT"
+    payload_json = '{"html_document":"' + sentinel + '","nested":' + "[" * 1100 + "0" + "]" * 1100 + "}"
+    assert len(payload_json.encode("utf-8")) < 4096
+
+    with pytest.raises(InputError, match="^version_payload_invalid$") as exc_info:
+        decode_presentation_version_payload(payload_json)
+
+    chain = [exc_info.value]
+    while chain[-1].__cause__ is not None or chain[-1].__context__ is not None:
+        chain.append(chain[-1].__cause__ or chain[-1].__context__)
+    assert not any(isinstance(exc, RecursionError) for exc in chain)
+    assert sentinel not in " ".join(repr(exc) for exc in chain)
 
 
 def test_default_standalone_snapshot_retention_is_25(tmp_path):

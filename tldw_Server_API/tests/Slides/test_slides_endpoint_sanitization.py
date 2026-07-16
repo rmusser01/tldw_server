@@ -5,8 +5,8 @@ from fastapi import HTTPException
 from starlette.responses import Response
 
 from tldw_Server_API.app.api.v1.endpoints import slides as slides_ep
+from tldw_Server_API.app.core.Slides.slides_db import SlidesDatabaseError
 from tldw_Server_API.app.core.Slides.slides_generator import SlidesGenerationError
-
 
 pytestmark = pytest.mark.unit
 
@@ -129,6 +129,7 @@ def test_generate_presentation_latency_metric_log_is_sanitized(monkeypatch):
                 deleted=0,
                 client_id="1",
                 version=1,
+                content_kind="structured_slides",
             )
 
     logger_stub = _LoggerStub()
@@ -147,7 +148,7 @@ def test_generate_presentation_latency_metric_log_is_sanitized(monkeypatch):
         source_query=None,
     )
 
-    assert response.id == "presentation-1"
+    assert response["id"] == "presentation-1"
     assert logger_stub.debugs == [("Failed to record slides generation latency metric", (), {})]
     rendered = " ".join([logger_stub.debugs[0][0], *(str(arg) for arg in logger_stub.debugs[0][1])])
     assert "/private/slides-latency.db" not in rendered
@@ -180,8 +181,8 @@ def test_resolve_media_source_text_document_fallback_log_is_sanitized(monkeypatc
 
 async def test_slides_health_backend_failure_log_is_sanitized(monkeypatch):
     class _RaisingSlidesDB:
-        def list_presentations(self, **_kwargs):
-            raise RuntimeError("slides db exploded at /private/slides-health.db")
+        def probe_health(self):
+            raise SlidesDatabaseError("slides db exploded at /private/slides-health.db")
 
     logger_stub = _LoggerStub()
     monkeypatch.setattr(slides_ep, "logger", logger_stub)
@@ -195,3 +196,23 @@ async def test_slides_health_backend_failure_log_is_sanitized(monkeypatch):
     rendered = " ".join([logger_stub.warnings[0][0], *(str(arg) for arg in logger_stub.warnings[0][1])])
     assert "/private/slides-health.db" not in rendered
     assert "exploded" not in rendered
+
+
+async def test_slides_health_uses_source_free_database_probe():
+    class _SlidesDB:
+        def __init__(self) -> None:
+            self.probe_calls = 0
+
+        def probe_health(self) -> None:
+            self.probe_calls += 1
+
+        def list_presentations(self, **_kwargs):
+            raise AssertionError("health must not load presentation detail rows")
+
+    db = _SlidesDB()
+
+    response = await slides_ep.slides_health(db=db)
+
+    assert response.service == "slides"
+    assert response.status == "ok"
+    assert db.probe_calls == 1

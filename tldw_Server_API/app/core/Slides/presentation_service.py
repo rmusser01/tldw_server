@@ -433,9 +433,14 @@ class PresentationService:
 
     async def validate_saved_standalone(self, row: PresentationRow) -> StandaloneHtmlValidationResult:
         """Revalidate an exact persisted source before standalone export."""
-        if row.content_kind != STANDALONE_HTML or not isinstance(row.html_document, str):
+        source = row.html_document
+        if (
+            row.content_kind != STANDALONE_HTML
+            or not isinstance(source, str)
+            or not self.db.presentation_row_invariant_holds(row)
+        ):
             raise PresentationServiceError("standalone_html_response_invalid", status_code=500)
-        derived = await self._require_validation_pool().validate(row.html_document)
+        derived = await self._require_validation_pool().validate(source)
         if (
             row.title,
             row.html_sha256,

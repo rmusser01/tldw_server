@@ -739,22 +739,55 @@ def test_json_export_rejects_corrupt_stored_derived_metadata_after_pool_validati
     assert client.app.state.standalone_html_validation_pool.calls == [_document()]
 
 
-def test_json_export_never_parses_irrelevant_structured_payload_for_html(html_client):
+@pytest.mark.parametrize(
+    ("column", "corrupt_value"),
+    [
+        pytest.param("slides", "not-json", id="slides-invalid-json"),
+        pytest.param("slides", "{}", id="slides-nonlist"),
+        pytest.param("slides", '[{"title":"forged"}]', id="slides-nonempty"),
+        pytest.param("slides", "[" + " " * 8192 + "]", id="slides-oversize-empty"),
+        pytest.param("generation_job_uuid", None, id="job-uuid-missing"),
+        pytest.param("generation_job_uuid", "   ", id="job-uuid-blank"),
+        pytest.param("generation_provenance_json", None, id="provenance-missing"),
+        pytest.param(
+            "generation_provenance_json",
+            '{"private":"SECRET-MALFORMED-PROVENANCE"',
+            id="provenance-malformed",
+        ),
+        pytest.param("generation_provenance_json", "[]", id="provenance-nonobject"),
+        pytest.param("generation_provenance_json", "{}", id="provenance-empty-object"),
+        pytest.param(
+            "generation_provenance_json",
+            "[" * 1100 + "0" + "]" * 1100,
+            id="provenance-recursive",
+        ),
+        pytest.param(
+            "generation_provenance_json",
+            json.dumps({"private": "SECRET-OVERSIZE-PROVENANCE" + "x" * 4096}),
+            id="provenance-oversize",
+        ),
+    ],
+)
+def test_json_export_rejects_corrupt_complete_row_invariant_before_pool_validation(
+    html_client,
+    column,
+    corrupt_value,
+):
     client, db, _structured, html = html_client
     with db.transaction(immediate=True) as conn:
-        conn.execute(
-            "UPDATE presentations SET slides = ? WHERE id = ?",
-            ("not-json", html.id),
-        )
+        conn.execute(f"UPDATE presentations SET {column} = ? WHERE id = ?", (corrupt_value, html.id))
+    validation_pool = client.app.state.standalone_html_validation_pool
+    validation_pool.calls.clear()
 
     response = client.get(
         f"/api/v1/slides/presentations/{html.id}/export?format=json",
         headers=_BOTH,
     )
 
-    assert response.status_code == 200, response.text
-    assert response.json()["content_kind"] == "standalone_html"
-    assert response.json()["html_document"] == _document()
+    assert response.status_code == 500
+    assert response.json() == {"detail": "standalone_html_response_invalid"}
+    assert "SECRET-" not in response.text
+    assert validation_pool.calls == []
 
 
 def test_negotiated_downstream_http_error_keeps_vary(html_client):
@@ -833,6 +866,26 @@ def test_html_soft_restore_revalidates_cross_field_consistent_stored_source(html
     assert current.version == 2
 
 
+def test_html_soft_restore_source_response_sets_private_no_store_headers(html_client):
+    client, _db, _structured, html = html_client
+    deleted = client.delete(
+        f"/api/v1/slides/presentations/{html.id}",
+        headers={**_BOTH, "If-Match": '"v1"'},
+    )
+    assert deleted.status_code == 200, deleted.text
+
+    restored = client.post(
+        f"/api/v1/slides/presentations/{html.id}/restore",
+        headers={**_BOTH, "If-Match": '"v2"'},
+    )
+
+    assert restored.status_code == 200, restored.text
+    assert restored.json()["content_kind"] == "standalone_html"
+    assert restored.json()["html_document"] == _document()
+    assert restored.headers["Cache-Control"] == "private, no-store"
+    assert restored.headers["X-Content-Type-Options"] == "nosniff"
+
+
 def test_structured_soft_restore_keeps_legacy_path_without_pool_validation(html_client):
     client, _db, structured, _html = html_client
     validation_pool = client.app.state.standalone_html_validation_pool
@@ -850,6 +903,8 @@ def test_structured_soft_restore_keeps_legacy_path_without_pool_validation(html_
 
     assert restored.status_code == 200, restored.text
     assert restored.json()["deleted"] is False
+    assert "Cache-Control" not in restored.headers
+    assert "X-Content-Type-Options" not in restored.headers
     assert validation_pool.calls == []
 
 
@@ -864,6 +919,44 @@ def test_endpoint_snapshot_decoder_retains_no_source_exception_context():
         chain.append(chain[-1].__cause__ or chain[-1].__context__)
     assert not any(isinstance(exc, json.JSONDecodeError) for exc in chain)
     assert sentinel not in " ".join(repr(exc) for exc in chain)
+
+
+@pytest.mark.parametrize(
+    ("method", "suffix", "extra_headers"),
+    [
+        pytest.param("GET", "", {}, id="get"),
+        pytest.param("POST", "/restore", {"If-Match": '"v1"'}, id="restore"),
+    ],
+)
+def test_recursive_snapshot_matches_fixed_malformed_payload_mapping(
+    html_client,
+    method,
+    suffix,
+    extra_headers,
+):
+    client, db, _structured, html = html_client
+    path = f"/api/v1/slides/presentations/{html.id}/versions/1{suffix}"
+
+    def _replace_snapshot(payload_json: str) -> None:
+        with db.transaction(immediate=True) as conn:
+            conn.execute(
+                "UPDATE presentations_versions SET payload_json = ? " "WHERE presentation_id = ? AND version = 1",
+                (payload_json, html.id),
+            )
+
+    _replace_snapshot('{"html_document":"malformed')
+    baseline = client.request(method, path, headers={**_BOTH, **extra_headers})
+
+    sentinel = "SECRET-RECURSIVE-SNAPSHOT"
+    recursive = '{"html_document":"' + sentinel + '","nested":' + "[" * 1100 + "0" + "]" * 1100 + "}"
+    assert len(recursive.encode("utf-8")) < 4096
+    _replace_snapshot(recursive)
+
+    response = client.request(method, path, headers={**_BOTH, **extra_headers})
+
+    assert baseline.json() == response.json() == {"detail": "version_payload_invalid"}
+    assert response.status_code == baseline.status_code
+    assert sentinel not in response.text
 
 
 def test_structured_restore_recomputes_legacy_slide_text_with_image_alt(html_client):
