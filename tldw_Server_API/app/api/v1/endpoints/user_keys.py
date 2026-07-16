@@ -43,6 +43,7 @@ from tldw_Server_API.app.core.Audit.unified_audit_service import (
 )
 from tldw_Server_API.app.core.AuthNZ.byok_helpers import (
     derive_trusted_credential_scope,
+    get_byok_gateway_spec,
     is_byok_enabled,
     is_provider_allowlisted,
     is_trusted_base_url_request,
@@ -57,6 +58,7 @@ from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
     openai_oauth_refresh_state_generation,
 )
 from tldw_Server_API.app.core.AuthNZ.byok_testing import (
+    probe_gateway_credentials,
     provider_validation_public_error,
     test_provider_credentials,
 )
@@ -94,6 +96,27 @@ _OPENAI_SOURCE_API_KEY = "api_key"
 _OPENAI_SOURCE_OAUTH = "oauth"
 _OPENAI_CREDENTIAL_VERSION = 2
 _OPENAI_DEFAULT_OAUTH_STATE_TTL_MINUTES = 10
+_TTS_GATEWAY_VERIFICATION_METADATA_KEY = "tts_gateway_verification_status"
+_TTS_GATEWAY_FORBIDDEN_METADATA_KEYS = frozenset(
+    {
+        "api_key",
+        "auth",
+        "auth_scheme",
+        "authentication",
+        "authorization",
+        "base_url",
+        "bearer",
+        "credential",
+        "credentials",
+        "endpoint",
+        "headers",
+        "host",
+        "password",
+        "secret",
+        "token",
+        "url",
+    }
+)
 
 
 def _raise_provider_validation_http_error(exc: ChatAPIError) -> NoReturn:
@@ -347,6 +370,50 @@ def _row_metadata(row: dict[str, Any] | None) -> dict[str, Any] | None:
     if not row:
         return None
     return _parse_metadata_value(row.get("metadata"))
+
+
+def _metadata_contains_gateway_authority(value: Any) -> bool:
+    if isinstance(value, dict):
+        for key, child in value.items():
+            normalized_key = str(key).strip().casefold().replace("-", "_")
+            if normalized_key in _TTS_GATEWAY_FORBIDDEN_METADATA_KEYS:
+                return True
+            if _metadata_contains_gateway_authority(child):
+                return True
+    elif isinstance(value, (list, tuple)):
+        return any(_metadata_contains_gateway_authority(item) for item in value)
+    return False
+
+
+def _validate_gateway_metadata(provider: str, metadata: dict[str, Any] | None) -> None:
+    if (
+        provider.startswith("gateway:")
+        and metadata is not None
+        and _metadata_contains_gateway_authority(metadata)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Gateway metadata cannot override endpoint or authentication authority",
+        )
+
+
+def _gateway_verification_from_row(row: dict[str, Any] | None) -> str | None:
+    metadata = _row_metadata(row)
+    if not metadata:
+        return None
+    value = metadata.get(_TTS_GATEWAY_VERIFICATION_METADATA_KEY)
+    return value if value in {"verified", "stored-unverified"} else None
+
+
+def _with_gateway_verification(
+    metadata: dict[str, Any] | None,
+    verification_status: str | None,
+) -> dict[str, Any] | None:
+    if verification_status not in {"verified", "stored-unverified"}:
+        return metadata
+    merged = dict(metadata or {})
+    merged[_TTS_GATEWAY_VERIFICATION_METADATA_KEY] = verification_status
+    return merged
 
 
 def _extract_payload_from_row(row: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -799,6 +866,8 @@ async def upsert_user_provider_key(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Provider not allowed for BYOK",
         )
+    gateway_spec = get_byok_gateway_spec(provider_norm)
+    _validate_gateway_metadata(provider_norm, payload.metadata)
 
     api_key = (payload.api_key or "").strip()
     if not api_key:
@@ -832,31 +901,43 @@ async def upsert_user_provider_key(
             )
         )
 
-    try:
-        await test_provider_credentials(
-            provider=provider_norm,
+    verification_status: str | None = None
+    if gateway_spec is not None and bool(gateway_spec.allow_user_api_key):
+        verification_status = await probe_gateway_credentials(
+            spec=gateway_spec,
             api_key=api_key,
-            credential_fields=credential_fields,
-            model=None,
         )
-    except ValueError as exc:
-        del exc
-        raise_detached_error(
-            HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Provider credential validation failed",
+        if verification_status == "rejected":
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Gateway rejected supplied credentials",
             )
-        )
-    except ChatAPIError as exc:
-        _raise_provider_validation_http_error(exc)
-    except Exception as exc:
-        del exc
-        raise_detached_error(
-            HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail="Provider test call failed",
+    else:
+        try:
+            await test_provider_credentials(
+                provider=provider_norm,
+                api_key=api_key,
+                credential_fields=credential_fields,
+                model=None,
             )
-        )
+        except ValueError as exc:
+            del exc
+            raise_detached_error(
+                HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Provider credential validation failed",
+                )
+            )
+        except ChatAPIError as exc:
+            _raise_provider_validation_http_error(exc)
+        except Exception as exc:
+            del exc
+            raise_detached_error(
+                HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail="Provider test call failed",
+                )
+            )
 
     user_id = _principal_user_id(principal)
     repo = await _get_user_repo()
@@ -907,10 +988,24 @@ async def upsert_user_provider_key(
     else:
         now = datetime.now(timezone.utc)
         existing_row = await repo.fetch_secret_for_user(user_id, provider_norm)
+        existing_payload = _extract_payload_from_row(existing_row)
         metadata_to_store = payload.metadata
         if metadata_to_store is None:
             metadata_to_store = _row_metadata(existing_row)
-        secret_payload = build_secret_payload(api_key, credential_fields or None)
+        metadata_to_store = _with_gateway_verification(
+            metadata_to_store,
+            verification_status,
+        )
+        fields_to_store = credential_fields
+        if provider_norm == "openrouter" and payload.credential_fields is None:
+            existing_fields = (
+                existing_payload.get("credential_fields")
+                if isinstance(existing_payload, dict)
+                else None
+            )
+            if isinstance(existing_fields, dict):
+                fields_to_store = existing_fields
+        secret_payload = build_secret_payload(api_key, fields_to_store or None)
         key_hint = key_hint_for_api_key(api_key)
         try:
             envelope = encrypt_byok_payload(secret_payload)
@@ -936,6 +1031,7 @@ async def upsert_user_provider_key(
         provider=provider_norm,
         key_hint=row.get("key_hint") or key_hint,
         updated_at=row.get("updated_at") or now,
+        verification_status=verification_status,
     )
 
 
@@ -1039,6 +1135,7 @@ async def list_user_provider_keys(
                     key_hint=user_row.get("key_hint") if user_row else None,
                     auth_source=auth_source,
                     last_used_at=(user_row or shared_row or {}).get("last_used_at"),
+                    verification_status=_gateway_verification_from_row(user_row),
                 )
             )
             continue
@@ -1052,6 +1149,7 @@ async def list_user_provider_keys(
                     key_hint=user_row.get("key_hint"),
                     auth_source=auth_source,
                     last_used_at=user_row.get("last_used_at"),
+                    verification_status=_gateway_verification_from_row(user_row),
                 )
             )
             continue
@@ -1102,6 +1200,7 @@ async def test_user_provider_key(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Provider not allowed for BYOK",
         )
+    gateway_spec = get_byok_gateway_spec(provider_norm)
 
     user_id = _principal_user_id(principal)
     repo = await _get_user_repo()
@@ -1117,54 +1216,73 @@ async def test_user_provider_key(
     if not api_key:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Key not found")
 
-    allow_base_url = is_trusted_base_url_request(request, principal=principal)
-    credential_fields_raw = stored_payload.get("credential_fields") or {}
-    if isinstance(credential_fields_raw, dict) and "base_url" in credential_fields_raw and not allow_base_url:
-        credential_fields_raw = dict(credential_fields_raw)
-        credential_fields_raw.pop("base_url", None)
-
-    try:
-        credential_fields = validate_credential_fields(
-            provider_norm,
-            credential_fields_raw,
-            allow_base_url=allow_base_url,
-        )
-        if "base_url" in credential_fields:
-            credential_fields["base_url"] = validate_base_url_override(credential_fields["base_url"])
-    except ValueError as exc:
-        del exc
-        raise_detached_error(
-            HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid provider credential fields",
-            )
-        )
-
-    try:
-        model_used = await test_provider_credentials(
-            provider=provider_norm,
+    verification_status: str | None = None
+    if gateway_spec is not None and bool(gateway_spec.allow_user_api_key):
+        verification_status = await probe_gateway_credentials(
+            spec=gateway_spec,
             api_key=api_key,
-            credential_fields=credential_fields,
-            model=payload.model,
         )
-    except ValueError as exc:
-        del exc
-        raise_detached_error(
-            HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Provider credential validation failed",
+        if verification_status == "rejected":
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Gateway rejected stored credentials",
             )
-        )
-    except ChatAPIError as exc:
-        _raise_provider_validation_http_error(exc)
-    except Exception as exc:
-        del exc
-        raise_detached_error(
-            HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail="Provider test call failed",
+        model_used = None
+    else:
+        allow_base_url = is_trusted_base_url_request(request, principal=principal)
+        credential_fields_raw = stored_payload.get("credential_fields") or {}
+        if (
+            isinstance(credential_fields_raw, dict)
+            and "base_url" in credential_fields_raw
+            and not allow_base_url
+        ):
+            credential_fields_raw = dict(credential_fields_raw)
+            credential_fields_raw.pop("base_url", None)
+
+        try:
+            credential_fields = validate_credential_fields(
+                provider_norm,
+                credential_fields_raw,
+                allow_base_url=allow_base_url,
             )
-        )
+            if "base_url" in credential_fields:
+                credential_fields["base_url"] = validate_base_url_override(
+                    credential_fields["base_url"]
+                )
+        except ValueError as exc:
+            del exc
+            raise_detached_error(
+                HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid provider credential fields",
+                )
+            )
+
+        try:
+            model_used = await test_provider_credentials(
+                provider=provider_norm,
+                api_key=api_key,
+                credential_fields=credential_fields,
+                model=payload.model,
+            )
+        except ValueError as exc:
+            del exc
+            raise_detached_error(
+                HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Provider credential validation failed",
+                )
+            )
+        except ChatAPIError as exc:
+            _raise_provider_validation_http_error(exc)
+        except Exception as exc:
+            del exc
+            raise_detached_error(
+                HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail="Provider test call failed",
+                )
+            )
 
     await _touch_user_last_used_if_match(
         repo,
@@ -1173,7 +1291,12 @@ async def test_user_provider_key(
         api_key=api_key,
     )
 
-    return ProviderKeyTestResponse(provider=provider_norm, status="valid", model=model_used)
+    return ProviderKeyTestResponse(
+        provider=provider_norm,
+        status="valid",
+        model=model_used,
+        verification_status=verification_status,
+    )
 
 
 @router.post(

@@ -42,6 +42,7 @@ class UserProviderKeyResponse(BaseModel):
     status: Literal["stored"] = "stored"
     key_hint: str
     updated_at: datetime
+    verification_status: Literal["verified", "stored-unverified"] | None = None
 
 
 class UserProviderKeyStatusItem(BaseModel):
@@ -51,6 +52,7 @@ class UserProviderKeyStatusItem(BaseModel):
     key_hint: str | None = None
     auth_source: Literal["api_key", "oauth"] | None = None
     last_used_at: datetime | None = None
+    verification_status: Literal["verified", "stored-unverified"] | None = None
 
 
 class UserProviderKeysResponse(BaseModel):
@@ -61,6 +63,7 @@ class ProviderKeyTestResponse(BaseModel):
     provider: str
     status: Literal["valid"] = "valid"
     model: str | None = None
+    verification_status: Literal["verified", "stored-unverified"] | None = None
 
 
 class SharedProviderKeyUpsertRequest(BaseModel):
