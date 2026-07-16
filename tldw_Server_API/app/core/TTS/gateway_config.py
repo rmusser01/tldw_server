@@ -21,6 +21,7 @@ _SLUG_RE = re.compile(r"[a-z0-9][a-z0-9-]{0,62}\Z")
 _ENV_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 _HEADER_NAME_RE = re.compile(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+\Z")
 _UNSET = object()
+_MAX_PATH_DECODE_PASSES = 8
 _RESERVED_BACKENDS = frozenset(
     {
         "alltalk",
@@ -125,10 +126,11 @@ class ModelOverlay(_FrozenModel):
     pcm: GatewayPCMCapabilities | None = None
 
     def apply(self, defaults: GatewayCapabilities) -> GatewayCapabilities:
-        changes = self.model_dump(
-            exclude_none=True,
-            exclude={"default_voice", "voices"},
-        )
+        changes = {
+            field_name: value
+            for field_name in GatewayCapabilities.model_fields
+            if (value := getattr(self, field_name)) is not None
+        }
         return defaults.model_copy(update=changes)
 
 
@@ -301,15 +303,22 @@ def validate_relative_gateway_path(value: str, *, field_name: str) -> str:
     """Validate an administrator path without permitting authority replacement."""
     if not isinstance(value, str) or not value:
         raise ValueError(f"{field_name} must be a non-empty relative path")
-    decoded_value = unquote(value)
-    if value.startswith("/") or "\\" in value or "\\" in decoded_value:
-        raise ValueError(f"{field_name} must be a strict relative path")
-    parsed = httpx.URL(value)
-    if parsed.scheme or parsed.host or parsed.query or parsed.fragment:
-        raise ValueError(f"{field_name} must not contain scheme, authority, query, or fragment")
-    if any(segment in {".", "..", ""} for segment in decoded_value.split("/")):
-        raise ValueError(f"{field_name} must not contain empty or dot segments")
-    return value
+    candidate = value
+    for _ in range(_MAX_PATH_DECODE_PASSES):
+        if candidate.startswith("/") or "\\" in candidate:
+            raise ValueError(f"{field_name} must be a strict relative path")
+        parsed = httpx.URL(candidate)
+        if parsed.scheme or parsed.host or parsed.query or parsed.fragment:
+            raise ValueError(
+                f"{field_name} must not contain scheme, authority, query, or fragment"
+            )
+        if any(segment in {".", "..", ""} for segment in candidate.split("/")):
+            raise ValueError(f"{field_name} must not contain empty or dot segments")
+        decoded = unquote(candidate)
+        if decoded == candidate:
+            return value
+        candidate = decoded
+    raise ValueError(f"{field_name} contains too many encoding layers")
 
 
 def build_gateway_url(base_url: str, relative_path: str) -> httpx.URL:
@@ -486,8 +495,62 @@ def _openrouter_defaults(raw: dict[str, Any]) -> dict[str, Any]:
     if site_name:
         headers.setdefault("X-Title", site_name)
     result["headers"] = headers
-    result.setdefault("display_name", "OpenRouter")
+    if result.get("display_name") is None:
+        result["display_name"] = "OpenRouter"
     return result
+
+
+def materialize_gateway_config(
+    value: Any,
+    *,
+    path: str,
+    openrouter: bool = False,
+) -> GatewayConfig:
+    """Resolve gateway environment values before nested Pydantic validation."""
+    raw = _as_mapping(value)
+    if openrouter:
+        raw = _openrouter_defaults(raw)
+    missing_paths: set[str] = set()
+    resolved = _resolve_environment(raw, path=path, missing_paths=missing_paths)
+    config = GatewayConfig.model_validate(resolved)
+
+    if config.allowed_models is not None and config.allow_discovered_models:
+        raise ValueError(
+            f"{path}: allowed_models and allow_discovered_models cannot both be set"
+        )
+    if not config.enabled:
+        return config
+
+    default_overlay = config.model_overrides.get(config.default_model or "")
+    effective_default_voice = config.default_voice or (
+        default_overlay.default_voice if default_overlay else None
+    )
+    required_fields = {
+        "base_url": config.base_url,
+        "speech_path": config.speech_path,
+        "default_model": config.default_model,
+        "default_voice": effective_default_voice,
+    }
+    missing = [name for name, field_value in required_fields.items() if not field_value]
+    if missing:
+        placeholder_path = next(
+            (
+                f"{path}.{name}"
+                for name in missing
+                if f"{path}.{name}" in missing_paths
+            ),
+            None,
+        )
+        if placeholder_path:
+            raise ValueError(
+                f"unresolved environment placeholder at {placeholder_path}"
+            )
+        raise ValueError(f"{path}: enabled gateway requires {', '.join(missing)}")
+    if not config.api_key and not config.allow_user_api_key:
+        if f"{path}.api_key" in missing_paths:
+            raise ValueError(f"unresolved environment placeholder at {path}.api_key")
+        raise ValueError(f"{path}: enabled gateway requires a credential source")
+    return config
 
 
 def _config_generation(spec_data: dict[str, Any]) -> str:
@@ -508,47 +571,7 @@ def _normalize_one(
     path: str,
     ffmpeg_available: bool,
 ) -> GatewaySpec:
-    enabled = bool(raw.get("enabled", False))
-    missing_paths: set[str] = set()
-    resolved = _resolve_environment(raw, path=path, missing_paths=missing_paths)
-    config = GatewayConfig.model_validate(resolved)
-
-    if config.allowed_models is not None and config.allow_discovered_models:
-        raise ValueError(
-            f"{path}: allowed_models and allow_discovered_models cannot both be set"
-        )
-    if enabled:
-        default_overlay = config.model_overrides.get(config.default_model or "")
-        effective_default_voice = config.default_voice or (
-            default_overlay.default_voice if default_overlay else None
-        )
-        required_fields = {
-            "base_url": config.base_url,
-            "speech_path": config.speech_path,
-            "default_model": config.default_model,
-            "default_voice": effective_default_voice,
-        }
-        missing = [name for name, value in required_fields.items() if not value]
-        if missing:
-            placeholder_path = next(
-                (
-                    f"{path}.{name}"
-                    for name in missing
-                    if f"{path}.{name}" in missing_paths
-                ),
-                None,
-            )
-            if placeholder_path:
-                raise ValueError(
-                    f"unresolved environment placeholder at {placeholder_path}"
-                )
-            raise ValueError(f"{path}: enabled gateway requires {', '.join(missing)}")
-        if not config.api_key and not config.allow_user_api_key:
-            if f"{path}.api_key" in missing_paths:
-                raise ValueError(
-                    f"unresolved environment placeholder at {path}.api_key"
-                )
-            raise ValueError(f"{path}: enabled gateway requires a credential source")
+    config = materialize_gateway_config(raw, path=path)
 
     base_url = _validate_base_url(
         config.base_url or "https://disabled.invalid/",
@@ -594,6 +617,7 @@ def _normalize_one(
     )
     output_fields = {
         "backend_id": backend_id,
+        "display_name": config.display_name or backend_id,
         "enabled": config.enabled,
         "base_url": base_url,
         "speech_path": speech_path,
@@ -730,6 +754,7 @@ __all__ = [
     "build_gateway_url",
     "canonicalize_gateway_id",
     "decode_json_pointer",
+    "materialize_gateway_config",
     "normalize_gateway_specs",
     "validate_relative_gateway_path",
 ]

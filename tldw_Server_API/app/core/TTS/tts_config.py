@@ -34,6 +34,7 @@ from .gateway_config import (
     GatewayConfig,
     GatewaySpec,
     canonicalize_gateway_id,
+    materialize_gateway_config,
     normalize_gateway_specs,
 )
 from .utils import parse_bool
@@ -183,10 +184,10 @@ class TTSConfig(BaseModel):
         parsed: dict[str, ProviderConfig | GatewayConfig] = {}
         for name, raw_config in value.items():
             if name == "openrouter":
-                parsed[name] = (
-                    raw_config
-                    if isinstance(raw_config, GatewayConfig)
-                    else GatewayConfig.model_validate(raw_config)
+                parsed[name] = materialize_gateway_config(
+                    raw_config,
+                    path="providers.openrouter",
+                    openrouter=True,
                 )
             else:
                 parsed[name] = (
@@ -195,6 +196,22 @@ class TTSConfig(BaseModel):
                     else ProviderConfig.model_validate(raw_config)
                 )
         return parsed
+
+    @field_validator("gateways", mode="before")
+    @classmethod
+    def parse_gateway_configs(cls, value: Any) -> dict[str, GatewayConfig]:
+        """Resolve every named gateway before nested Pydantic validation."""
+        if value is None:
+            return {}
+        if not isinstance(value, Mapping):
+            raise ValueError("gateways must be a mapping")
+        return {
+            name: materialize_gateway_config(
+                raw_config,
+                path=f"gateways.{name}",
+            )
+            for name, raw_config in value.items()
+        }
 
 
 class TTSConfigManager:

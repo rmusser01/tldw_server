@@ -2,11 +2,14 @@ from __future__ import annotations
 
 from dataclasses import FrozenInstanceError
 from types import MappingProxyType
+from urllib.parse import quote
 
 import pytest
+from pydantic import ValidationError
 
 from tldw_Server_API.app.core.TTS.gateway_config import (
     GatewayConfig,
+    GatewayPCMCapabilities,
     GatewaySpec,
     build_gateway_url,
     canonicalize_gateway_id,
@@ -112,6 +115,10 @@ def test_insecure_http_requires_opt_in_and_local_or_private_literal(base_url):
         "audio/./speech",
         "audio/speech?x=1",
         "audio/speech#x",
+        "audio/%2e%2e/speech",
+        "audio/%252e%252e/speech",
+        "audio/%255c..%255cspeech",
+        "%252f%252fevil.example/audio/speech",
     ],
 )
 def test_gateway_paths_are_strict_relative_paths(path):
@@ -127,6 +134,16 @@ def test_build_gateway_url_preserves_base_authority_and_path():
     )
     with pytest.raises(ValueError):
         build_gateway_url("https://speech.example/v1/", "https://evil.example/")
+
+
+@pytest.mark.unit
+def test_gateway_path_rejects_excessive_encoding_layers():
+    path = "audio/speech"
+    for _ in range(10):
+        path = quote(path, safe="")
+
+    with pytest.raises(ValueError, match="encoding layers"):
+        normalize_gateway_specs({}, {"company": _gateway(speech_path=path)})
 
 
 @pytest.mark.unit
@@ -186,6 +203,33 @@ def test_model_authorization_capability_and_voice_overlay_precedence():
     assert spec.default_voice_for_model("Vendor/Expressive-TTS") == "narrator"
     assert spec.default_voice_for_model("Vendor/Other") == "guide"
     assert spec.default_voice_for_model("Unknown/Discovered") is None
+
+
+@pytest.mark.unit
+def test_pcm_model_overlay_remains_typed_and_deeply_immutable():
+    spec = normalize_gateway_specs(
+        {},
+        {
+            "company": _gateway(
+                model_overrides={
+                    "Vendor/Expressive-TTS": {
+                        "pcm": {
+                            "sample_rate": 48000,
+                            "channels": 2,
+                            "sample_width_bits": 24,
+                        }
+                    }
+                }
+            )
+        },
+    )["gateway:company"]
+
+    capabilities = spec.capabilities_for_model("Vendor/Expressive-TTS")
+
+    assert isinstance(capabilities.pcm, GatewayPCMCapabilities)
+    assert capabilities.pcm.sample_rate == 48000
+    with pytest.raises(ValidationError):
+        capabilities.pcm.sample_rate = 16000
 
 
 @pytest.mark.unit
@@ -453,6 +497,163 @@ def test_gateway_spec_is_deeply_immutable_and_generation_is_secret_free():
         first.enabled = False
     with pytest.raises(TypeError):
         first.model_overrides["x"] = None
+
+
+@pytest.mark.unit
+def test_display_name_changes_config_generation():
+    first = normalize_gateway_specs(
+        {}, {"company": _gateway(display_name="First label")}
+    )["gateway:company"]
+    second = normalize_gateway_specs(
+        {}, {"company": _gateway(display_name="Second label")}
+    )["gateway:company"]
+
+    assert first.config_generation != second.config_generation
+
+
+@pytest.mark.unit
+def test_tts_config_resolves_nested_gateway_environment_before_validation(monkeypatch):
+    monkeypatch.setenv("GW_SUPPORTS_SPEED", "true")
+    monkeypatch.setenv("GW_MAX_RESPONSE", "1048576")
+    monkeypatch.setenv("GW_DISCOVERY_TTL", "321")
+    monkeypatch.setenv("GW_DISCOVERY_MODE", "speech")
+    monkeypatch.setenv("GW_CONVERSION_ENABLED", "true")
+    monkeypatch.setenv("GW_CONVERSION_LIMIT", "2048")
+    monkeypatch.setenv("GW_FALLBACK_ATTEMPTS", "2")
+    monkeypatch.setenv("GW_FALLBACK_MODEL", "Vendor/Fallback")
+    monkeypatch.setenv("GW_FALLBACK_VOICE", "guide")
+    config = TTSConfig(
+        gateways={
+            "primary": _gateway(
+                capability_defaults={
+                    "formats": ["mp3"],
+                    "supports_speed": "${GW_SUPPORTS_SPEED}",
+                    "max_response_bytes": "${GW_MAX_RESPONSE}",
+                },
+                discovery={
+                    "enabled": True,
+                    "models_path": "models",
+                    "query": {"output_modalities": "${GW_DISCOVERY_MODE}"},
+                    "ttl_seconds": "${GW_DISCOVERY_TTL}",
+                },
+                conversion={
+                    "enabled": "${GW_CONVERSION_ENABLED}",
+                    "max_input_bytes": "${GW_CONVERSION_LIMIT}",
+                },
+                fallback={
+                    "max_attempts": "${GW_FALLBACK_ATTEMPTS}",
+                    "targets": [
+                        {
+                            "backend": "gateway:secondary",
+                            "model": "${GW_FALLBACK_MODEL}",
+                            "voice": "${GW_FALLBACK_VOICE}",
+                        }
+                    ],
+                },
+            ),
+            "secondary": _gateway(),
+        }
+    )
+
+    primary = config.gateways["primary"]
+    assert isinstance(primary, GatewayConfig)
+    assert primary.capability_defaults.supports_speed is True
+    assert primary.capability_defaults.max_response_bytes == 1048576
+    assert primary.discovery.ttl_seconds == 321
+    assert primary.discovery.query == (("output_modalities", "speech"),)
+    assert primary.conversion.enabled is True
+    assert primary.conversion.max_input_bytes == 2048
+    assert primary.fallback.max_attempts == 2
+    assert primary.fallback.targets[0].model == "Vendor/Fallback"
+    assert primary.fallback.targets[0].voice == "guide"
+
+
+@pytest.mark.unit
+def test_openrouter_environment_is_materialized_by_key_before_validation(monkeypatch):
+    monkeypatch.setenv("OPENROUTER_GATEWAY_LIMIT", "4096")
+    config = TTSConfig(
+        providers={
+            "openrouter": _gateway(
+                base_url=None,
+                speech_path=None,
+                capability_defaults={
+                    "formats": ["mp3"],
+                    "max_response_bytes": "${OPENROUTER_GATEWAY_LIMIT}",
+                },
+            )
+        }
+    )
+
+    openrouter = config.providers["openrouter"]
+    assert isinstance(openrouter, GatewayConfig)
+    assert openrouter.base_url == "https://openrouter.ai/api/v1/"
+    assert openrouter.capability_defaults.max_response_bytes == 4096
+
+
+@pytest.mark.unit
+def test_tts_config_required_placeholder_error_has_exact_secret_free_path(monkeypatch):
+    monkeypatch.delenv("VERY_SECRET_MISSING_MODEL_NAME", raising=False)
+
+    with pytest.raises(ValueError) as exc_info:
+        TTSConfig(
+            gateways={
+                "company": _gateway(
+                    default_model="${VERY_SECRET_MISSING_MODEL_NAME}"
+                )
+            }
+        )
+
+    message = str(exc_info.value)
+    assert "gateways.company.default_model" in message
+    assert "VERY_SECRET_MISSING_MODEL_NAME" not in message
+
+
+@pytest.mark.unit
+def test_false_enabled_placeholder_keeps_incomplete_gateway_disabled(monkeypatch):
+    monkeypatch.setenv("GW_DISABLED_FLAG", "false")
+    config = TTSConfig(
+        gateways={
+            "disabled": {
+                "enabled": "${GW_DISABLED_FLAG}",
+                "conversion": {"max_input_bytes": 2048},
+            }
+        }
+    )
+
+    assert config.gateways["disabled"].enabled is False
+
+
+@pytest.mark.unit
+def test_config_manager_reload_materializes_gateway_environment_first(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("GW_MANAGER_RESPONSE_LIMIT", "8192")
+    yaml_path = tmp_path / "tts.yaml"
+    yaml_path.write_text(
+        """
+gateways:
+  managed:
+    enabled: true
+    display_name: Managed Gateway
+    base_url: https://speech.example.com/v1/
+    speech_path: audio/speech
+    api_key: manager-secret
+    default_model: Vendor/Managed
+    default_voice: narrator
+    capability_defaults:
+      formats: [mp3]
+      max_response_bytes: ${GW_MANAGER_RESPONSE_LIMIT}
+""",
+        encoding="utf-8",
+    )
+    manager = TTSConfigManager(
+        yaml_path=yaml_path,
+        config_txt_path=tmp_path / "missing-config.txt",
+    )
+
+    assert manager.get_config().gateways["managed"].capability_defaults.max_response_bytes == 8192
+    assert manager.get_gateway_spec("managed").backend_id == "gateway:managed"
 
 
 @pytest.mark.unit
