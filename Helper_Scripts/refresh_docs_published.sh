@@ -7,7 +7,8 @@ if [[ "${TLDW_DOCS_TEST_MODE:-}" != "1" ]]; then
   for seam in \
     TLDW_DOCS_SOURCE_DIR \
     TLDW_DOCS_PUBLISHED_DIR \
-    TLDW_DOCS_TEST_FAIL_AFTER_BACKUP; do
+    TLDW_DOCS_TEST_FAIL_AFTER_BACKUP \
+    TLDW_DOCS_TEST_FAIL_DURING_BACKUP_CLEANUP; do
     if [[ -n "${!seam+x}" ]]; then
       echo "$seam requires TLDW_DOCS_TEST_MODE=1" >&2
       exit 1
@@ -181,9 +182,11 @@ if [[ -n "${TLDW_DOCS_TEST_FAIL_AFTER_BACKUP:-}" ]]; then
 fi
 mv "$STAGE_DIR" "$DEST_DIR"
 STAGE_OWNED=0
-if [[ $BACKUP_OWNED -eq 1 ]]; then
-  rm -rf -- "$BACKUP_DIR"
-  BACKUP_OWNED=0
+BACKUP_OWNED=0
+if [[ -n "${TLDW_DOCS_TEST_FAIL_DURING_BACKUP_CLEANUP:-}" ]]; then
+  echo "Injected docs refresh failure during backup cleanup" >&2
+  exit 1
 fi
+rm -rf -- "$BACKUP_DIR"
 
 echo "Refreshed curated docs in: $DEST_DIR"

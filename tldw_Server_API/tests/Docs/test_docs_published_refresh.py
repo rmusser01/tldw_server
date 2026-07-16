@@ -78,6 +78,7 @@ def _refresh(
     source: Path | None = None,
     destination: Path | None = None,
     fail_after_backup: bool = False,
+    fail_during_backup_cleanup: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     env = _clean_env()
     env["TLDW_DOCS_TEST_MODE"] = "1"
@@ -87,6 +88,8 @@ def _refresh(
         env["TLDW_DOCS_PUBLISHED_DIR"] = str(destination)
     if fail_after_backup:
         env["TLDW_DOCS_TEST_FAIL_AFTER_BACKUP"] = "1"
+    if fail_during_backup_cleanup:
+        env["TLDW_DOCS_TEST_FAIL_DURING_BACKUP_CLEANUP"] = "1"
     return _run_refresh_script(REFRESH_SCRIPT, env)
 
 
@@ -161,6 +164,7 @@ def test_only_reviewed_published_json_files_are_unignored_and_tracked() -> None:
         "TLDW_DOCS_SOURCE_DIR",
         "TLDW_DOCS_PUBLISHED_DIR",
         "TLDW_DOCS_TEST_FAIL_AFTER_BACKUP",
+        "TLDW_DOCS_TEST_FAIL_DURING_BACKUP_CLEANUP",
     ),
 )
 def test_refresh_rejects_ungated_test_seams_before_mutation(
@@ -175,6 +179,7 @@ def test_refresh_rejects_ungated_test_seams_before_mutation(
         "TLDW_DOCS_SOURCE_DIR": str(source),
         "TLDW_DOCS_PUBLISHED_DIR": str(override_destination),
         "TLDW_DOCS_TEST_FAIL_AFTER_BACKUP": "1",
+        "TLDW_DOCS_TEST_FAIL_DURING_BACKUP_CLEANUP": "1",
     }
 
     result = _run_refresh_script(script, {seam_name: values[seam_name]})
@@ -249,6 +254,7 @@ def test_refresh_removes_unknown_stale_file(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stderr
     assert not stale_file.exists()
+    assert not destination.with_name(f"{destination.name}.backup").exists()
 
 
 def test_refresh_preserves_getting_started_readme_without_sibling_index(
@@ -327,6 +333,41 @@ def test_refresh_restores_destination_after_failure_post_backup(tmp_path: Path) 
     assert not destination.with_name(f"{destination.name}.backup").exists()
     assert not destination.with_name(f"{destination.name}.lock").exists()
     assert not list(tmp_path.glob(f"{destination.name}.stage.*"))
+
+
+def test_refresh_preserves_committed_destination_when_backup_cleanup_fails(
+    tmp_path: Path,
+) -> None:
+    source = _copy_docs_source(tmp_path / "source" / "Docs")
+    source_sentinel = source / "source-sentinel.md"
+    source_sentinel.write_text("keep source\n", encoding="utf-8")
+    destination = tmp_path / "published"
+    destination.mkdir()
+    old_sentinel = destination / "old-sentinel.md"
+    old_sentinel.write_text("keep old\n", encoding="utf-8")
+    backup = destination.with_name(f"{destination.name}.backup")
+
+    result = _refresh(
+        source=source,
+        destination=destination,
+        fail_during_backup_cleanup=True,
+    )
+
+    assert result.returncode != 0
+    assert _tree_manifest(destination) == _tree_manifest(REPO_ROOT / "Docs" / "Published")
+    assert not old_sentinel.exists()
+    assert (backup / "old-sentinel.md").read_text(encoding="utf-8") == "keep old\n"
+    assert source_sentinel.read_text(encoding="utf-8") == "keep source\n"
+    assert not destination.with_name(f"{destination.name}.lock").exists()
+    assert not list(tmp_path.glob(f"{destination.name}.stage.*"))
+
+
+def test_refresh_helper_clears_inherited_backup_cleanup_failure_seam(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("TLDW_DOCS_TEST_FAIL_DURING_BACKUP_CLEANUP", "1")
+
+    assert "TLDW_DOCS_TEST_FAIL_DURING_BACKUP_CLEANUP" not in _clean_env()
 
 
 def test_refresh_fails_closed_when_lock_already_exists(tmp_path: Path) -> None:

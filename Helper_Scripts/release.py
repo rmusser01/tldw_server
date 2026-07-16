@@ -904,6 +904,8 @@ class ShellReleaseRunner:
                 "-u",
                 "TLDW_DOCS_TEST_FAIL_AFTER_BACKUP",
                 "-u",
+                "TLDW_DOCS_TEST_FAIL_DURING_BACKUP_CLEANUP",
+                "-u",
                 "TLDW_DOCS_TEST_MODE",
                 "/bin/bash",
                 str(self.repo_root / "Helper_Scripts" / "refresh_docs_published.sh"),
