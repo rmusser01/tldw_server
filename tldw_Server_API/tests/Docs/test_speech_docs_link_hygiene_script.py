@@ -44,7 +44,11 @@ def test_hygiene_allows_audited_qwen_stt_tts_blob(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     result, output = _run_hygiene(
-        (QWEN3_ASR_URL, f"{QWEN3_ASR_URL}#manual-model-download"),
+        (
+            QWEN3_ASR_URL,
+            f"{QWEN3_ASR_URL}#manual-model-download",
+            f"{QWEN3_ASR_URL}?plain=1#manual-model-download",
+        ),
         tmp_path,
         capsys,
     )
@@ -62,6 +66,27 @@ def test_hygiene_rejects_unreviewed_stt_tts_blob(
     assert result == 1
     assert "unaudited_stt_tts_blob_target" in output
     assert "NOT_A_REVIEWED_OR_EXISTING_GUIDE.md" in output
+
+
+@pytest.mark.parametrize(
+    "url",
+    (
+        f"{QWEN3_ASR_URL}@NOT_A_REVIEWED_TARGET",
+        f"{QWEN3_ASR_URL};NOT_A_REVIEWED_TARGET",
+        "https://github.com/rmusser01/tldw_server/blob/main/Docs/STT-TTS/",
+    ),
+    ids=("at-path-suffix", "semicolon-path-suffix", "bare-prefix"),
+)
+def test_hygiene_rejects_audited_target_parser_bypasses(
+    url: str,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    result, output = _run_hygiene((url,), tmp_path, capsys)
+
+    assert result == 1
+    assert "unaudited_stt_tts_blob_target" in output
+    assert url in output
 
 
 def test_hygiene_rejects_remaining_legacy_patterns(
