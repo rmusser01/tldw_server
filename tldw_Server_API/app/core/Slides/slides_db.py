@@ -7,7 +7,7 @@ import json
 import sqlite3
 import threading
 import uuid
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -43,6 +43,12 @@ class ConflictError(SlidesDatabaseError):
 
 class InputError(ValueError):
     """Raised for invalid inputs."""
+
+
+_STANDALONE_HTML_MAX_DOCUMENT_BYTES = 1_048_576
+_STANDALONE_HTML_SNAPSHOT_MAX_BYTES = 2 * _STANDALONE_HTML_MAX_DOCUMENT_BYTES + 65_536
+_STANDALONE_HTML_MAX_VERSION_RETENTION = 25
+_SNAPSHOT_SCHEMA_VERSION = 1
 
 
 @dataclass
@@ -212,50 +218,33 @@ _PRESENTATION_DETAIL_COLUMNS = (
     "generation_provenance_json",
 )
 _PRESENTATION_DETAIL_PROJECTION = ", ".join(_PRESENTATION_DETAIL_COLUMNS)
-_PRESENTATION_DETAIL_PROJECTION_QUALIFIED = ", ".join(
-    f"p.{column}" for column in _PRESENTATION_DETAIL_COLUMNS
-)
+_PRESENTATION_DETAIL_PROJECTION_QUALIFIED = ", ".join(f"p.{column}" for column in _PRESENTATION_DETAIL_COLUMNS)
 
-_PRESENTATION_SUMMARY_PROJECTION = """
-    id,
-    title,
-    description,
-    theme,
-    content_kind,
-    json_extract(generation_provenance_json, '$.source_kind') AS source_kind,
-    json_extract(generation_provenance_json, '$.provider') AS provider,
-    json_extract(generation_provenance_json, '$.model') AS model,
-    CASE
-        WHEN content_kind = 'standalone_html' THEN html_slide_count
-        ELSE json_array_length(slides)
-    END AS slide_count,
-    html_slide_count,
-    html_bytes,
-    created_at,
-    last_modified,
-    deleted,
-    version
-"""
-_PRESENTATION_SUMMARY_PROJECTION_QUALIFIED = """
-    p.id,
-    p.title,
-    p.description,
-    p.theme,
-    p.content_kind,
-    json_extract(p.generation_provenance_json, '$.source_kind') AS source_kind,
-    json_extract(p.generation_provenance_json, '$.provider') AS provider,
-    json_extract(p.generation_provenance_json, '$.model') AS model,
-    CASE
-        WHEN p.content_kind = 'standalone_html' THEN p.html_slide_count
-        ELSE json_array_length(p.slides)
-    END AS slide_count,
-    p.html_slide_count,
-    p.html_bytes,
-    p.created_at,
-    p.last_modified,
-    p.deleted,
-    p.version
-"""
+
+def _build_presentation_summary_projection(table_alias: str | None = None) -> str:
+    """Build the source-free summary projection with an optional table alias."""
+
+    prefix = f"{table_alias}." if table_alias else ""
+    expressions = (
+        *(f"{prefix}{column}" for column in ("id", "title", "description", "theme", "content_kind")),
+        f"json_extract({prefix}generation_provenance_json, '$.source_kind') AS source_kind",
+        f"json_extract({prefix}generation_provenance_json, '$.provider') AS provider",
+        f"json_extract({prefix}generation_provenance_json, '$.model') AS model",
+        (
+            f"CASE WHEN {prefix}content_kind = 'standalone_html' "
+            f"THEN {prefix}html_slide_count ELSE json_array_length({prefix}slides) "
+            "END AS slide_count"
+        ),
+        *(
+            f"{prefix}{column}"
+            for column in ("html_slide_count", "html_bytes", "created_at", "last_modified", "deleted", "version")
+        ),
+    )
+    return ",\n    ".join(expressions)
+
+
+_PRESENTATION_SUMMARY_PROJECTION = _build_presentation_summary_projection()
+_PRESENTATION_SUMMARY_PROJECTION_QUALIFIED = _build_presentation_summary_projection("p")
 
 _RECEIPT_PROJECTION = """
     id, owner_user_id, digest_key_id, idempotency_key_hmac_sha256,
@@ -297,10 +286,19 @@ _REQUIRED_BASE_SCHEMA_OBJECTS = {
 class SlidesDatabase:
     _SCHEMA_VERSION = SLIDES_SCHEMA_VERSION
 
-    def __init__(self, db_path: str | Path, client_id: str) -> None:
+    def __init__(
+        self,
+        db_path: str | Path,
+        client_id: str,
+        *,
+        standalone_html_version_retention: int = _STANDALONE_HTML_MAX_VERSION_RETENTION,
+    ) -> None:
         if not client_id:
             raise ValueError("client_id is required")
+        if not 1 <= standalone_html_version_retention <= _STANDALONE_HTML_MAX_VERSION_RETENTION:
+            raise ValueError("standalone_html_version_retention must be between 1 and 25")
         self.client_id = str(client_id)
+        self.standalone_html_version_retention = standalone_html_version_retention
         if isinstance(db_path, Path):
             self.db_path = db_path.resolve()
             self._db_path_str = str(self.db_path)
@@ -318,8 +316,7 @@ class SlidesDatabase:
         objects = {
             (str(row[0]), str(row[1]))
             for row in conn.execute(
-                "SELECT type, name FROM sqlite_master "
-                "WHERE type IN ('table', 'index', 'trigger')"
+                "SELECT type, name FROM sqlite_master " "WHERE type IN ('table', 'index', 'trigger')"
             ).fetchall()
         }
         if not _REQUIRED_BASE_SCHEMA_OBJECTS.issubset(objects):
@@ -528,7 +525,7 @@ class SlidesDatabase:
                 self.client_id,
                 version,
                 payload_json,
-            )
+            ),
         )
 
     @staticmethod
@@ -580,12 +577,8 @@ class SlidesDatabase:
             )
             """
         )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_visual_styles_scope ON visual_styles(scope)"
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_visual_styles_name ON visual_styles(name)"
-        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_visual_styles_scope ON visual_styles(scope)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_visual_styles_name ON visual_styles(name)")
 
     @staticmethod
     def _validate_presentation_candidate(candidate: Mapping[str, Any]) -> None:
@@ -608,14 +601,10 @@ class SlidesDatabase:
         )
         if content_kind == "structured_slides":
             if any(candidate.get(field) is not None for field in standalone_fields):
-                raise InputError(
-                    "structured_slides cannot contain standalone presentation fields"
-                )
+                raise InputError("structured_slides cannot contain standalone presentation fields")
             return
         if content_kind != "standalone_html":
-            raise InputError(
-                "content_kind must be one of: structured_slides, standalone_html"
-            )
+            raise InputError("content_kind must be one of: structured_slides, standalone_html")
         if parsed_slides != []:
             raise InputError("standalone_html slides must be an empty JSON list")
 
@@ -634,11 +623,7 @@ class SlidesDatabase:
         if isinstance(stored_bytes, bool) or stored_bytes != len(html_bytes):
             raise InputError("standalone_html html_bytes does not match html_document")
         slide_count = candidate.get("html_slide_count")
-        if (
-            isinstance(slide_count, bool)
-            or not isinstance(slide_count, int)
-            or not 1 <= slide_count <= 30
-        ):
+        if isinstance(slide_count, bool) or not isinstance(slide_count, int) or not 1 <= slide_count <= 30:
             raise InputError("standalone_html html_slide_count must be between 1 and 30")
 
         generation_job_uuid = candidate.get("generation_job_uuid")
@@ -651,17 +636,11 @@ class SlidesDatabase:
             encoded_provenance = provenance_json.encode("utf-8")
             provenance = json.loads(provenance_json)
         except (UnicodeEncodeError, json.JSONDecodeError) as exc:
-            raise InputError(
-                "standalone_html generation_provenance_json must be valid JSON"
-            ) from exc
+            raise InputError("standalone_html generation_provenance_json must be valid JSON") from exc
         if not isinstance(provenance, dict) or not provenance:
-            raise InputError(
-                "standalone_html generation_provenance_json must be a nonempty object"
-            )
+            raise InputError("standalone_html generation_provenance_json must be a nonempty object")
         if len(encoded_provenance) > 4096:
-            raise InputError(
-                "standalone_html generation_provenance_json exceeds 4096 bytes"
-            )
+            raise InputError("standalone_html generation_provenance_json exceeds 4096 bytes")
 
     @staticmethod
     def _fetch_presentation_by_id(
@@ -695,11 +674,47 @@ class SlidesDatabase:
         )
 
     @staticmethod
+    def _normalize_content_kinds(
+        accepted_content_kinds: Iterable[str] | None,
+    ) -> tuple[str, ...]:
+        if accepted_content_kinds is None:
+            return ("structured_slides", "standalone_html")
+        requested = set(accepted_content_kinds)
+        kinds = tuple(kind for kind in ("structured_slides", "standalone_html") if kind in requested)
+        if not kinds:
+            raise InputError("accepted_content_kinds must include a supported kind")
+        return kinds
+
+    @staticmethod
     def _build_version_payload(row: PresentationRow) -> dict[str, Any]:
-        return {
+        common = {
+            "snapshot_schema_version": _SNAPSHOT_SCHEMA_VERSION,
+            "content_kind": row.content_kind,
             "id": row.id,
             "title": row.title,
             "description": row.description,
+            "source_type": row.source_type,
+            "source_ref": row.source_ref,
+            "source_query": row.source_query,
+            "created_at": row.created_at,
+            "last_modified": row.last_modified,
+            "deleted": int(row.deleted or 0),
+            "client_id": row.client_id,
+            "version": int(row.version),
+        }
+
+        if row.content_kind == "standalone_html":
+            return {
+                **common,
+                "html_document": row.html_document,
+                "html_sha256": row.html_sha256,
+                "html_bytes": row.html_bytes,
+                "html_slide_count": row.html_slide_count,
+                "generation_job_uuid": row.generation_job_uuid,
+                "generation_provenance_json": row.generation_provenance_json,
+            }
+        return {
+            **common,
             "theme": row.theme,
             "marp_theme": row.marp_theme,
             "template_id": row.template_id,
@@ -711,19 +726,21 @@ class SlidesDatabase:
             "settings": row.settings,
             "studio_data": row.studio_data,
             "slides": row.slides,
+            "slides_text": row.slides_text,
             "custom_css": row.custom_css,
-            "source_type": row.source_type,
-            "source_ref": row.source_ref,
-            "source_query": row.source_query,
-            "created_at": row.created_at,
-            "last_modified": row.last_modified,
-            "deleted": int(row.deleted or 0),
-            "client_id": row.client_id,
-            "version": int(row.version),
         }
 
     def _insert_version_snapshot(self, conn: sqlite3.Connection, row: PresentationRow) -> None:
-        payload_json = json.dumps(self._build_version_payload(row), ensure_ascii=True)
+        payload_json = json.dumps(
+            self._build_version_payload(row),
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        if (
+            row.content_kind == "standalone_html"
+            and len(payload_json.encode("utf-8")) > _STANDALONE_HTML_SNAPSHOT_MAX_BYTES
+        ):
+            raise InputError("standalone_html_storage_limit")
         conn.execute(
             """
             INSERT INTO presentations_versions (
@@ -738,6 +755,24 @@ class SlidesDatabase:
                 row.client_id,
             ),
         )
+        if row.content_kind == "standalone_html":
+            conn.execute(
+                """
+                DELETE FROM presentations_versions
+                WHERE presentation_id = ?
+                  AND id NOT IN (
+                    SELECT id FROM presentations_versions
+                    WHERE presentation_id = ?
+                    ORDER BY version DESC
+                    LIMIT ?
+                  )
+                """,
+                (
+                    row.id,
+                    row.id,
+                    self.standalone_html_version_retention,
+                ),
+            )
 
     @staticmethod
     def _normalize_visual_style_payload(style_payload: str) -> str:
@@ -1002,6 +1037,13 @@ class SlidesDatabase:
                 )
             return row
         except sqlite3.IntegrityError as exc:
+            message = str(exc).lower()
+            if "presentations.generation_job_uuid" in message:
+                raise ConflictError(
+                    "generation_job_uuid_conflict",
+                    entity="presentations",
+                    identifier=generation_job_uuid,
+                ) from exc
             if "UNIQUE" in str(exc).upper() or "PRIMARY" in str(exc).upper():
                 raise ConflictError("presentation already exists", entity="presentations", identifier=pres_id) from exc
             raise SlidesDatabaseError(f"Failed to create presentation: {exc}") from exc
@@ -1069,6 +1111,7 @@ class SlidesDatabase:
         include_deleted: bool,
         sort_column: str,
         sort_direction: str,
+        accepted_content_kinds: Iterable[str] | None = None,
     ) -> tuple[list[PresentationSummaryRow], int]:
         """List source-free presentation summaries."""
         if limit < 1:
@@ -1080,7 +1123,12 @@ class SlidesDatabase:
         }
         safe_column = allowed_columns.get(sort_column, "created_at")
         safe_direction = "DESC" if sort_direction.upper() == "DESC" else "ASC"
-        where = "" if include_deleted else "WHERE deleted = 0"
+        kinds = self._normalize_content_kinds(accepted_content_kinds)
+        placeholders = ", ".join("?" for _ in kinds)
+        clauses = [f"content_kind IN ({placeholders})"]
+        if not include_deleted:
+            clauses.append("deleted = 0")
+        where = "WHERE " + " AND ".join(clauses)
         query_template = (
             f"SELECT {_PRESENTATION_SUMMARY_PROJECTION} FROM presentations "  # nosec B608
             "{where} ORDER BY {safe_column} {safe_direction} LIMIT ? OFFSET ?"
@@ -1089,8 +1137,8 @@ class SlidesDatabase:
         count_query_template = "SELECT COUNT(*) AS cnt FROM presentations {where}"
         count_query = count_query_template.format_map(locals())  # nosec B608
         conn = self.get_connection()
-        rows = conn.execute(query, (limit, offset)).fetchall()
-        count_row = conn.execute(count_query).fetchone()
+        rows = conn.execute(query, (*kinds, limit, offset)).fetchall()
+        count_row = conn.execute(count_query, kinds).fetchone()
         total = int(count_row["cnt"]) if count_row else 0
         return [PresentationSummaryRow(**dict(row)) for row in rows], total
 
@@ -1140,13 +1188,19 @@ class SlidesDatabase:
         limit: int,
         offset: int,
         include_deleted: bool,
+        accepted_content_kinds: Iterable[str] | None = None,
     ) -> tuple[list[PresentationSummaryRow], int]:
         """Search presentations without selecting standalone source."""
         if not query:
             raise InputError("query is required")
         if limit < 1:
             raise InputError("limit must be >= 1")
-        where = "" if include_deleted else "AND p.deleted = 0"
+        kinds = self._normalize_content_kinds(accepted_content_kinds)
+        placeholders = ", ".join("?" for _ in kinds)
+        clauses = [f"p.content_kind IN ({placeholders})"]
+        if not include_deleted:
+            clauses.append("p.deleted = 0")
+        where = "AND " + " AND ".join(clauses)
         search_sql_template = (
             f"SELECT {_PRESENTATION_SUMMARY_PROJECTION_QUALIFIED} "  # nosec B608
             "FROM presentations p "
@@ -1165,8 +1219,8 @@ class SlidesDatabase:
         count_sql = count_sql_template.format_map(locals())  # nosec B608
         conn = self.get_connection()
         try:
-            rows = conn.execute(sql, (query, limit, offset)).fetchall()
-            count_row = conn.execute(count_sql, (query,)).fetchone()
+            rows = conn.execute(sql, (query, *kinds, limit, offset)).fetchall()
+            count_row = conn.execute(count_sql, (query, *kinds)).fetchone()
         except sqlite3.OperationalError as exc:
             if not self._is_fts_query_error(exc):
                 raise
@@ -1212,9 +1266,7 @@ class SlidesDatabase:
             "generation_job_uuid",
             "generation_provenance_json",
         }
-        valid_updates = {
-            key: value for key, value in update_fields.items() if key in allowed
-        }
+        valid_updates = {key: value for key, value in update_fields.items() if key in allowed}
         if not valid_updates:
             raise InputError("no valid fields to update")
         sets: list[str] = []
@@ -1241,6 +1293,14 @@ class SlidesDatabase:
                     entity="presentations",
                     identifier=presentation_id,
                 )
+            immutable_errors = {
+                "content_kind": "content_kind_immutable",
+                "generation_job_uuid": "generation_job_uuid_immutable",
+                "generation_provenance_json": "generation_provenance_immutable",
+            }
+            for field, error_code in immutable_errors.items():
+                if field in valid_updates and valid_updates[field] != getattr(current, field):
+                    raise InputError(error_code)
             candidate = vars(current).copy()
             candidate.update(valid_updates)
             self._validate_presentation_candidate(candidate)
@@ -1260,6 +1320,203 @@ class SlidesDatabase:
                 payload={"fields": list(valid_updates.keys())},
             )
         return row
+
+    def save_standalone_html_source(
+        self,
+        *,
+        presentation_id: str,
+        html_document: str | bytes,
+        expected_version: int,
+        validator: Callable[..., Any],
+    ) -> PresentationRow:
+        """Validate and atomically replace one standalone source document."""
+        with self.transaction(immediate=True) as conn:
+            current = self._fetch_presentation_by_id(conn, presentation_id, include_deleted=False)
+            if current.content_kind != "standalone_html":
+                raise InputError("operation_not_supported_for_content_kind")
+            if current.version != expected_version:
+                raise ConflictError(
+                    "version_conflict",
+                    entity="presentations",
+                    identifier=presentation_id,
+                )
+            derived = validator(html_document)
+            if isinstance(html_document, bytes):
+                source = html_document.decode("utf-8", "strict")
+            else:
+                source = html_document
+            if current.html_document == source and current.title == derived.title:
+                return current
+
+            next_version = expected_version + 1
+            modified = self._utcnow_iso()
+            candidate = vars(current).copy()
+            candidate.update(
+                {
+                    "title": derived.title,
+                    "html_document": source,
+                    "html_sha256": derived.html_sha256,
+                    "html_bytes": derived.html_bytes,
+                    "html_slide_count": derived.slide_count,
+                    "slides_text": derived.indexable_text,
+                    "last_modified": modified,
+                    "version": next_version,
+                }
+            )
+            self._validate_presentation_candidate(candidate)
+            cur = conn.execute(
+                """
+                UPDATE presentations
+                SET title = ?, html_document = ?, html_sha256 = ?,
+                    html_bytes = ?, html_slide_count = ?, slides_text = ?,
+                    last_modified = ?, version = ?
+                WHERE id = ? AND version = ?
+                """,
+                (
+                    derived.title,
+                    source,
+                    derived.html_sha256,
+                    derived.html_bytes,
+                    derived.slide_count,
+                    derived.indexable_text,
+                    modified,
+                    next_version,
+                    presentation_id,
+                    expected_version,
+                ),
+            )
+            if cur.rowcount != 1:  # pragma: no cover - held write transaction
+                raise ConflictError(
+                    "version_conflict",
+                    entity="presentations",
+                    identifier=presentation_id,
+                )
+            row = self._fetch_presentation_by_id(conn, presentation_id, include_deleted=True)
+            self._insert_version_snapshot(conn, row)
+            self._insert_sync_log(
+                conn,
+                entity_uuid=presentation_id,
+                operation="update",
+                version=next_version,
+                payload={"fields": ["html_document"]},
+            )
+            return row
+
+    def restore_standalone_html_version(
+        self,
+        *,
+        presentation_id: str,
+        version: int,
+        expected_version: int,
+        validator: Callable[..., Any],
+    ) -> PresentationRow:
+        """Restore one standalone document from a validated same-kind snapshot."""
+        with self.transaction(immediate=True) as conn:
+            current = self._fetch_presentation_by_id(conn, presentation_id, include_deleted=True)
+            if current.content_kind != "standalone_html":
+                raise InputError("operation_not_supported_for_content_kind")
+            if current.version != expected_version:
+                raise ConflictError(
+                    "version_conflict",
+                    entity="presentations",
+                    identifier=presentation_id,
+                )
+            version_row = conn.execute(
+                """
+                SELECT payload_json
+                FROM presentations_versions
+                WHERE presentation_id = ? AND version = ?
+                """,
+                (presentation_id, version),
+            ).fetchone()
+            if not version_row:
+                raise KeyError("presentation_version_not_found")
+            try:
+                payload = json.loads(version_row["payload_json"])
+            except (TypeError, json.JSONDecodeError) as exc:
+                raise InputError("version_payload_invalid") from exc
+            if not isinstance(payload, dict):
+                raise InputError("version_payload_invalid")
+            if payload.get("content_kind") != "standalone_html":
+                raise InputError("version_content_kind_mismatch")
+            if payload.get("generation_job_uuid", current.generation_job_uuid) != current.generation_job_uuid:
+                raise InputError("generation_job_uuid_immutable")
+            if payload.get("generation_provenance_json") != current.generation_provenance_json:
+                raise InputError("generation_provenance_immutable")
+            source = payload.get("html_document")
+            if not isinstance(source, str):
+                raise InputError("version_payload_invalid")
+            derived = validator(source)
+            expected_metadata = (
+                payload.get("html_sha256"),
+                payload.get("html_bytes"),
+                payload.get("html_slide_count"),
+                payload.get("title"),
+            )
+            actual_metadata = (
+                derived.html_sha256,
+                derived.html_bytes,
+                derived.slide_count,
+                derived.title,
+            )
+            if expected_metadata != actual_metadata:
+                raise InputError("version_payload_invalid")
+            updates = {
+                "title": derived.title,
+                "description": payload.get("description"),
+                "html_document": source,
+                "html_sha256": derived.html_sha256,
+                "html_bytes": derived.html_bytes,
+                "html_slide_count": derived.slide_count,
+                "slides_text": derived.indexable_text,
+                "source_type": payload.get("source_type"),
+                "source_ref": payload.get("source_ref"),
+                "source_query": payload.get("source_query"),
+                "deleted": 0,
+            }
+
+            next_version = expected_version + 1
+            modified = self._utcnow_iso()
+            candidate = vars(current).copy()
+            candidate.update(updates)
+            candidate.update(
+                {
+                    "last_modified": modified,
+                    "version": next_version,
+                }
+            )
+            self._validate_presentation_candidate(candidate)
+            set_clause = ", ".join(f"{field} = ?" for field in updates)
+            sql = (
+                f"UPDATE presentations SET {set_clause}, last_modified = ?, "  # nosec B608
+                "version = ? WHERE id = ? AND version = ?"
+            )
+            cur = conn.execute(
+                sql,
+                (
+                    *updates.values(),
+                    modified,
+                    next_version,
+                    presentation_id,
+                    expected_version,
+                ),
+            )
+            if cur.rowcount != 1:  # pragma: no cover - held write transaction
+                raise ConflictError(
+                    "version_conflict",
+                    entity="presentations",
+                    identifier=presentation_id,
+                )
+            row = self._fetch_presentation_by_id(conn, presentation_id, include_deleted=True)
+            self._insert_version_snapshot(conn, row)
+            self._insert_sync_log(
+                conn,
+                entity_uuid=presentation_id,
+                operation="restore",
+                version=next_version,
+                payload={"version": version},
+            )
+            return row
 
     def list_presentation_versions(
         self,
@@ -1347,10 +1604,14 @@ class SlidesDatabase:
             "FROM slides_generation_receipts "
             "WHERE id = ? AND owner_user_id = ?"
         )
-        row = self.get_connection().execute(
-            query,
-            (receipt_id, owner_user_id),
-        ).fetchone()
+        row = (
+            self.get_connection()
+            .execute(
+                query,
+                (receipt_id, owner_user_id),
+            )
+            .fetchone()
+        )
         if not row:
             raise KeyError("slides_generation_receipt_not_found")
         return SlidesGenerationReceiptRow(**dict(row))
@@ -1371,10 +1632,14 @@ class SlidesDatabase:
             "AND r.owner_user_id = ?"
             ")"
         )
-        row = self.get_connection().execute(
-            query,
-            (receipt_id, owner_user_id),
-        ).fetchone()
+        row = (
+            self.get_connection()
+            .execute(
+                query,
+                (receipt_id, owner_user_id),
+            )
+            .fetchone()
+        )
         if not row:
             raise KeyError("slides_generation_input_not_found")
         return SlidesGenerationInputRow(**dict(row))

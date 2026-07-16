@@ -1,0 +1,572 @@
+from __future__ import annotations
+
+import hashlib
+import json
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
+from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import (
+    get_collections_db_for_user,
+)
+from tldw_Server_API.app.api.v1.API_Deps.Slides_DB_Deps import (
+    get_slides_db_for_user,
+)
+from tldw_Server_API.app.api.v1.endpoints.slides import router as slides_router
+from tldw_Server_API.app.api.v1.schemas.slides_schemas import ExportFormat
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.core.Slides.slides_db import SlidesDatabase
+from tldw_Server_API.app.core.Slides.standalone_html_validator import (
+    validate_standalone_html,
+)
+
+_ACCEPT = "X-Slides-Accept-Content-Kinds"
+_BOTH = {_ACCEPT: "structured_slides,standalone_html"}
+
+
+def _document(*, title: str = "HTML Deck", text: str = "Visible HTML text") -> str:
+    return (
+        '<!doctype html><html><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width,initial-scale=1">'
+        f"<title>{title}</title><style>.slide{{color:#111}}</style></head>"
+        f'<body><section class="slide"><h1>{text}</h1>'
+        '<aside class="notes">Hidden note</aside></section>'
+        "<script>document.addEventListener('keydown', () => {});</script>"
+        "</body></html>"
+    )
+
+
+def _provenance_json() -> str:
+    return json.dumps(
+        {
+            "schema_version": 1,
+            "source_kind": "prompt",
+            "source_ref": None,
+            "source_snapshot_hmac_sha256": "a" * 64,
+            "digest_key_id": "slides-generation-v1",
+            "source_bytes": 10,
+            "provider": "openai",
+            "model": "test-model",
+            "adapter_id": "openai_official_chat_v1",
+            "endpoint_identity": "https://api.openai.com:443/v1/chat/completions",
+            "prompt_sha256": "b" * 64,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def _create_html(db: SlidesDatabase, *, presentation_id: str = "html"):
+    document = _document()
+    derived = validate_standalone_html(document)
+    return db.create_presentation(
+        presentation_id=presentation_id,
+        title=derived.title,
+        description=None,
+        theme="black",
+        marp_theme=None,
+        settings=None,
+        studio_data=None,
+        slides="[]",
+        slides_text=derived.indexable_text,
+        source_type="prompt",
+        source_ref=None,
+        source_query=None,
+        custom_css=None,
+        content_kind="standalone_html",
+        html_document=document,
+        html_sha256=derived.html_sha256,
+        html_bytes=derived.html_bytes,
+        html_slide_count=derived.slide_count,
+        generation_job_uuid=f"job-{presentation_id}",
+        generation_provenance_json=_provenance_json(),
+    )
+
+
+def _create_structured(db: SlidesDatabase, *, presentation_id: str = "structured"):
+    slides = [
+        {
+            "order": 0,
+            "layout": "title",
+            "title": "Structured Deck",
+            "content": "",
+            "speaker_notes": None,
+            "metadata": {},
+        }
+    ]
+    return db.create_presentation(
+        presentation_id=presentation_id,
+        title="Structured Deck",
+        description=None,
+        theme="black",
+        marp_theme=None,
+        settings=None,
+        studio_data=None,
+        slides=json.dumps(slides),
+        slides_text="Structured Deck",
+        source_type="manual",
+        source_ref=None,
+        source_query=None,
+        custom_css=None,
+    )
+
+
+class _Collections:
+    list_calls = 0
+
+    def get_output_artifact(self, output_id: int):
+        return {"id": output_id}
+
+    def resolve_output_storage_path(self, path_value):
+        return str(path_value)
+
+    def list_output_artifacts(self, **_kwargs):
+        type(self).list_calls += 1
+        return [], 0
+
+
+@pytest.fixture()
+def html_client(tmp_path):
+    _Collections.list_calls = 0
+    db = SlidesDatabase(db_path=tmp_path / "Slides.db", client_id="1")
+    structured = _create_structured(db)
+    html = _create_html(db)
+    app = FastAPI()
+    app.include_router(slides_router, prefix="/api/v1", tags=["slides"])
+
+    async def _override_user():
+        return User(
+            id=1,
+            username="tester",
+            email=None,
+            is_active=True,
+            is_admin=True,
+        )
+
+    async def _override_principal(request=None):
+        principal = AuthPrincipal(
+            kind="user",
+            user_id=1,
+            api_key_id=None,
+            subject="test-user",
+            token_type="single_user",  # nosec B106 - test principal type
+            jti=None,
+            roles=["admin"],
+            permissions=[
+                "media.create",
+                "media.read",
+                "media.update",
+                "media.delete",
+            ],
+            is_admin=True,
+            org_ids=[],
+            team_ids=[],
+        )
+        if request is not None:
+            request.state.auth = AuthContext(
+                principal=principal,
+                ip=None,
+                user_agent=None,
+                request_id=None,
+            )
+        return principal
+
+    async def _override_db():
+        yield db
+
+    async def _override_collections():
+        return _Collections()
+
+    app.dependency_overrides[get_request_user] = _override_user
+    app.dependency_overrides[get_auth_principal] = _override_principal
+    app.dependency_overrides[get_slides_db_for_user] = _override_db
+    app.dependency_overrides[get_collections_db_for_user] = _override_collections
+
+    with TestClient(app) as client:
+        yield client, db, structured, html
+
+    app.dependency_overrides.clear()
+    db.close_connection()
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["", " ", ",", "structured_slides,", "bad token", "future_kind"],
+)
+def test_malformed_or_unknown_only_negotiation_is_fixed_400(html_client, value):
+    client, _db, _structured, _html = html_client
+
+    response = client.get(
+        "/api/v1/slides/presentations",
+        headers={_ACCEPT: value},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "invalid_content_kind_header"
+    assert _ACCEPT.lower() in response.headers["Vary"].lower()
+
+
+def test_list_negotiation_filters_before_pagination_and_returns_source_free_unions(
+    html_client,
+):
+    client, _db, _structured, _html = html_client
+
+    legacy = client.get("/api/v1/slides/presentations?limit=1&offset=0")
+    html_only = client.get(
+        "/api/v1/slides/presentations?limit=1&offset=0",
+        headers={_ACCEPT: " standalone_html ,standalone_html "},
+    )
+    structured_only = client.get(
+        "/api/v1/slides/presentations?limit=1&offset=0",
+        headers={_ACCEPT: "structured_slides,future_kind"},
+    )
+    dual = client.get(
+        "/api/v1/slides/presentations?limit=1&offset=0",
+        headers={_ACCEPT: "structured_slides, future_kind, standalone_html"},
+    )
+
+    assert legacy.status_code == structured_only.status_code == html_only.status_code == dual.status_code == 200
+    assert legacy.json()["total"] == 1
+    assert set(legacy.json()["presentations"][0]) == {
+        "id",
+        "title",
+        "description",
+        "theme",
+        "created_at",
+        "last_modified",
+        "deleted",
+        "version",
+    }
+    assert structured_only.json()["presentations"] == legacy.json()["presentations"]
+    assert html_only.json()["total"] == 1
+    html_summary = html_only.json()["presentations"][0]
+    assert html_summary["content_kind"] == "standalone_html"
+    assert html_summary["html_slide_count"] == 1
+    assert html_summary["html_bytes"] == len(_document().encode("utf-8"))
+    assert html_summary["provenance"] == {
+        "source_kind": "prompt",
+        "provider": "openai",
+        "model": "test-model",
+    }
+    assert "html_document" not in html_summary and "slides" not in html_summary
+    assert dual.json()["total"] == 2
+    assert len(dual.json()["presentations"]) == 1
+    for response in (legacy, structured_only, html_only, dual):
+        assert _ACCEPT.lower() in {item.strip().lower() for item in response.headers["Vary"].split(",")}
+
+
+def test_targeted_html_requires_opt_in_before_source_projection(html_client):
+    client, db, _structured, html = html_client
+    statements: list[str] = []
+    db.get_connection().set_trace_callback(statements.append)
+
+    response = client.get(f"/api/v1/slides/presentations/{html.id}")
+
+    assert response.status_code == 406
+    assert response.json()["detail"] == "content_kind_not_accepted"
+    assert _ACCEPT.lower() in response.headers["Vary"].lower()
+    selected = "\n".join(
+        statement for statement in statements if statement.lstrip().upper().startswith("SELECT")
+    ).lower()
+    assert "html_document" not in selected
+
+
+def test_opted_in_html_detail_is_discriminated_json_with_strong_etag(html_client):
+    client, _db, _structured, html = html_client
+
+    response = client.get(f"/api/v1/slides/presentations/{html.id}", headers=_BOTH)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert response.headers["content-type"].startswith("application/json")
+    assert response.headers["ETag"] == '"v1"'
+    assert payload["content_kind"] == "standalone_html"
+    assert payload["html_document"] == _document()
+    assert payload["html_sha256"] == hashlib.sha256(_document().encode("utf-8")).hexdigest()
+    assert payload["html_slide_count"] == 1
+    assert "slides" not in payload
+    assert _ACCEPT.lower() in response.headers["Vary"].lower()
+
+
+def test_generic_create_and_mutation_reject_standalone_kind(html_client):
+    client, _db, structured, html = html_client
+
+    create = client.post(
+        "/api/v1/slides/presentations",
+        json={
+            "title": "No",
+            "content_kind": "standalone_html",
+            "html_document": _document(),
+            "slides": [],
+        },
+    )
+    html_patch = client.patch(
+        f"/api/v1/slides/presentations/{html.id}",
+        json={"title": "No"},
+        headers={**_BOTH, "If-Match": '"v1"'},
+    )
+    wrong_accept = client.patch(
+        f"/api/v1/slides/presentations/{structured.id}",
+        json={"title": "No"},
+        headers={_ACCEPT: "standalone_html", "If-Match": 'W/"v1"'},
+    )
+
+    assert create.status_code == 409
+    assert create.json()["detail"] == "standalone_html_creation_requires_generation"
+    assert html_patch.status_code == 409
+    assert html_patch.json()["detail"] == "operation_not_supported_for_content_kind"
+    assert wrong_accept.status_code == 406
+    assert wrong_accept.json()["detail"] == "content_kind_not_accepted"
+
+
+def test_html_source_save_validates_derives_and_noops_with_strong_etag(html_client):
+    client, _db, _structured, html = html_client
+    changed_document = _document(title="Renamed", text="New searchable content")
+
+    changed = client.put(
+        f"/api/v1/slides/presentations/{html.id}/html-source",
+        content=changed_document.encode("utf-8"),
+        headers={
+            **_BOTH,
+            "If-Match": '"v1"',
+            "Content-Type": "application/octet-stream",
+        },
+    )
+    same = client.put(
+        f"/api/v1/slides/presentations/{html.id}/html-source",
+        content=changed_document.encode("utf-8"),
+        headers={
+            **_BOTH,
+            "If-Match": '"v2"',
+            "Content-Type": "application/octet-stream",
+        },
+    )
+
+    assert changed.status_code == 200, changed.text
+    assert changed.headers["ETag"] == '"v2"'
+    assert changed.json()["title"] == "Renamed"
+    assert changed.json()["html_bytes"] == len(changed_document.encode("utf-8"))
+    assert same.status_code == 200, same.text
+    assert same.headers["ETag"] == '"v2"'
+    assert same.json()["version"] == 2
+
+
+def test_html_version_list_and_delete_are_source_free(html_client):
+    client, db, _structured, html = html_client
+    statements: list[str] = []
+    db.get_connection().set_trace_callback(statements.append)
+
+    versions = client.get(f"/api/v1/slides/presentations/{html.id}/versions", headers=_BOTH)
+    deleted = client.delete(
+        f"/api/v1/slides/presentations/{html.id}",
+        headers={**_BOTH, "If-Match": '"v1"'},
+    )
+
+    assert versions.status_code == 200, versions.text
+    assert versions.json()["total"] == 1
+    assert "html_document" not in json.dumps(versions.json())
+    assert deleted.status_code == 200, deleted.text
+    assert set(deleted.json()) == {"id", "content_kind", "deleted_at"}
+    assert deleted.json()["content_kind"] == "standalone_html"
+    selected = "\n".join(
+        statement for statement in statements if statement.lstrip().upper().startswith("SELECT")
+    ).lower()
+    assert "payload_json" not in selected
+    assert "html_document" not in selected
+
+
+def test_html_reveal_and_render_reject_before_source_or_dispatch(html_client):
+    client, db, _structured, html = html_client
+    statements: list[str] = []
+    db.get_connection().set_trace_callback(statements.append)
+
+    export = client.get(
+        f"/api/v1/slides/presentations/{html.id}/export?format=revealjs",
+        headers=_BOTH,
+    )
+    render = client.post(
+        f"/api/v1/slides/presentations/{html.id}/render-jobs",
+        json={"format": "mp4"},
+        headers={**_BOTH, "If-Match": '"v1"'},
+    )
+
+    assert export.status_code == 409
+    assert export.json()["detail"] == "operation_not_supported_for_content_kind"
+    assert render.status_code == 409
+    assert render.json()["detail"] == "operation_not_supported_for_content_kind"
+    selected = "\n".join(
+        statement for statement in statements if statement.lstrip().upper().startswith("SELECT")
+    ).lower()
+    assert "html_document" not in selected
+
+
+def test_html_is_an_explicit_export_format_but_transport_is_deferred():
+    assert ExportFormat.HTML.value == "html"
+
+
+def test_search_negotiation_filters_before_count_and_preserves_legacy_shape(
+    html_client,
+):
+    client, _db, _structured, _html = html_client
+
+    legacy = client.get("/api/v1/slides/presentations/search?q=Deck&limit=1")
+    html_only = client.get(
+        "/api/v1/slides/presentations/search?q=Deck&limit=1",
+        headers={_ACCEPT: "standalone_html"},
+    )
+    dual = client.get(
+        "/api/v1/slides/presentations/search?q=Deck&limit=1",
+        headers=_BOTH,
+    )
+
+    assert legacy.status_code == html_only.status_code == dual.status_code == 200
+    assert legacy.json()["total"] == 1
+    assert "content_kind" not in legacy.json()["presentations"][0]
+    assert html_only.json()["total"] == 1
+    assert html_only.json()["presentations"][0]["content_kind"] == "standalone_html"
+    assert dual.json()["total"] == 2
+    assert len(dual.json()["presentations"]) == 1
+    for response in (legacy, html_only, dual):
+        assert _ACCEPT.lower() in response.headers["Vary"].lower()
+
+
+def test_html_render_artifacts_rejects_before_collection_dispatch(html_client):
+    client, _db, _structured, html = html_client
+
+    response = client.get(
+        f"/api/v1/slides/presentations/{html.id}/render-artifacts",
+        headers=_BOTH,
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "operation_not_supported_for_content_kind"
+    assert _Collections.list_calls == 0
+
+
+def test_explicit_null_standalone_fields_and_kind_are_rejected_by_presence(
+    html_client,
+):
+    client, _db, structured, _html = html_client
+
+    create = client.post(
+        "/api/v1/slides/presentations",
+        json={"title": "No", "slides": [], "html_document": None},
+    )
+    null_source = client.patch(
+        f"/api/v1/slides/presentations/{structured.id}",
+        json={"html_document": None},
+        headers={**_BOTH, "If-Match": 'W/"v1"'},
+    )
+    null_kind = client.patch(
+        f"/api/v1/slides/presentations/{structured.id}",
+        json={"content_kind": None},
+        headers={**_BOTH, "If-Match": 'W/"v1"'},
+    )
+
+    assert create.status_code == 409
+    assert create.json()["detail"] == "operation_not_supported_for_content_kind"
+    assert null_source.status_code == 409
+    assert null_source.json()["detail"] == "operation_not_supported_for_content_kind"
+    assert null_kind.status_code == 409
+    assert null_kind.json()["detail"] == "content_kind_immutable"
+
+
+@pytest.mark.parametrize(
+    ("method", "payload"),
+    [
+        ("PUT", {"title": "No", "content_kind": "structured_slides"}),
+        ("PATCH", {"content_kind": "structured_slides"}),
+    ],
+)
+def test_html_kind_change_has_stable_immutable_error(html_client, method, payload):
+    client, _db, _structured, html = html_client
+
+    response = client.request(
+        method,
+        f"/api/v1/slides/presentations/{html.id}",
+        json=payload,
+        headers={**_BOTH, "If-Match": '"v1"'},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "content_kind_immutable"
+
+
+def test_json_export_is_explicit_and_discriminated_for_opted_in_kinds(html_client):
+    client, _db, structured, html = html_client
+
+    html_export = client.get(
+        f"/api/v1/slides/presentations/{html.id}/export?format=json",
+        headers=_BOTH,
+    )
+    structured_export = client.get(
+        f"/api/v1/slides/presentations/{structured.id}/export?format=json",
+        headers=_BOTH,
+    )
+
+    assert html_export.status_code == 200, html_export.text
+    assert html_export.headers["content-type"].startswith("application/json")
+    assert html_export.json()["content_kind"] == "standalone_html"
+    assert html_export.json()["html_document"] == _document()
+    assert "slides" not in html_export.json()
+    assert structured_export.status_code == 200, structured_export.text
+    assert structured_export.json()["content_kind"] == "structured_slides"
+    assert "slides" in structured_export.json()
+
+
+def test_structured_restore_recomputes_legacy_slide_text_with_image_alt(html_client):
+    client, db, _structured, _html = html_client
+    created = client.post(
+        "/api/v1/slides/presentations",
+        json={
+            "title": "Legacy image deck",
+            "slides": [
+                {
+                    "order": 0,
+                    "layout": "content",
+                    "title": "Image slide",
+                    "content": "Body",
+                    "speaker_notes": "Narration",
+                    "metadata": {"images": [{"asset_ref": "output:123", "alt": "Restored cover"}]},
+                }
+            ],
+        },
+    )
+    assert created.status_code == 201, created.text
+    presentation_id = created.json()["id"]
+
+    with db.transaction(immediate=True) as conn:
+        version_row = conn.execute(
+            """
+            SELECT payload_json FROM presentations_versions
+            WHERE presentation_id = ? AND version = 1
+            """,
+            (presentation_id,),
+        ).fetchone()
+        payload = json.loads(version_row["payload_json"])
+        payload.pop("slides_text", None)
+        conn.execute(
+            """
+            UPDATE presentations_versions SET payload_json = ?
+            WHERE presentation_id = ? AND version = 1
+            """,
+            (json.dumps(payload), presentation_id),
+        )
+
+    updated = client.patch(
+        f"/api/v1/slides/presentations/{presentation_id}",
+        json={"title": "Changed"},
+        headers={"If-Match": created.headers["ETag"]},
+    )
+    assert updated.status_code == 200, updated.text
+
+    restored = client.post(
+        f"/api/v1/slides/presentations/{presentation_id}/versions/1/restore",
+        headers={"If-Match": updated.headers["ETag"]},
+    )
+
+    assert restored.status_code == 200, restored.text
+    assert "Restored cover" in db.get_presentation_by_id(presentation_id).slides_text

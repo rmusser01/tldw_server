@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Any
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
 
@@ -79,6 +79,13 @@ class PresentationBase(VisualStyleSelectionMixin):
     studio_data: dict[str, Any] | None = None
     slides: list[Slide] = Field(default_factory=list)
     custom_css: str | None = None
+    content_kind: str | None = "structured_slides"
+    html_document: str | None = None
+    html_sha256: str | None = None
+    html_bytes: int | None = None
+    html_slide_count: int | None = None
+    generation_job_uuid: str | None = None
+    generation_provenance: dict[str, Any] | None = None
 
 
 class PresentationCreateRequest(PresentationBase):
@@ -105,6 +112,13 @@ class PresentationPatchRequest(VisualStyleSelectionMixin):
     studio_data: dict[str, Any] | None = None
     slides: list[Slide] | None = None
     custom_css: str | None = None
+    content_kind: str | None = None
+    html_document: str | None = None
+    html_sha256: str | None = None
+    html_bytes: int | None = None
+    html_slide_count: int | None = None
+    generation_job_uuid: str | None = None
+    generation_provenance: dict[str, Any] | None = None
 
 
 class PresentationReorderRequest(BaseModel):
@@ -113,13 +127,13 @@ class PresentationReorderRequest(BaseModel):
     order: list[int] = Field(..., min_items=1)
 
 
-class PresentationResponse(PresentationBase):
-    """Presentation response model."""
+class PresentationResponseBase(BaseModel):
+    """Fields shared by every authenticated detail representation."""
 
     id: str
-    visual_style_name: str | None = None
-    visual_style_version: int | None = None
-    visual_style_snapshot: dict[str, Any] | None = None
+    title: str
+    description: str | None = None
+    theme: str = "black"
     source_type: str | None = None
     source_ref: Any | None = None
     source_query: str | None = None
@@ -130,14 +144,78 @@ class PresentationResponse(PresentationBase):
     version: int
 
 
-class PresentationVersionSummary(BaseModel):
-    """Summary for a presentation version entry."""
+class LegacyPresentationResponse(PresentationResponseBase):
+    """Exact pre-negotiation structured Slides detail shape."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    marp_theme: str | None = None
+    template_id: str | None = None
+    visual_style_id: str | None = None
+    visual_style_scope: str | None = None
+    visual_style_name: str | None = None
+    visual_style_version: int | None = None
+    visual_style_snapshot: dict[str, Any] | None = None
+    settings: dict[str, Any] | None = None
+    studio_data: dict[str, Any] | None = None
+    slides: list[Slide] = Field(default_factory=list)
+    custom_css: str | None = None
+
+
+class StructuredPresentationResponse(LegacyPresentationResponse):
+    """Opted-in structured Slides detail."""
+
+    content_kind: Literal["structured_slides"]
+
+
+class StandaloneHtmlPresentationResponse(PresentationResponseBase):
+    """Standalone source detail; never rendered or executed by tldw."""
+
+    content_kind: Literal["standalone_html"]
+    html_document: str
+    html_sha256: str
+    html_bytes: int
+    html_slide_count: int
+    generation_provenance: dict[str, Any]
+
+
+DiscriminatedPresentationResponse = Annotated[
+    StructuredPresentationResponse | StandaloneHtmlPresentationResponse,
+    Field(discriminator="content_kind"),
+]
+PresentationResponse = LegacyPresentationResponse | DiscriminatedPresentationResponse
+
+
+class StandaloneHtmlTombstone(BaseModel):
+    """Source-free delete result for standalone HTML."""
+
+    id: str
+    content_kind: Literal["standalone_html"]
+    deleted_at: datetime
+
+
+PresentationDeleteResponse = PresentationResponse | StandaloneHtmlTombstone
+
+
+class LegacyPresentationVersionSummary(BaseModel):
+    """Exact pre-negotiation version-list entry."""
+
+    model_config = ConfigDict(extra="forbid")
 
     presentation_id: str
     version: int
     created_at: datetime
     title: str | None = None
     deleted: bool | None = None
+
+
+class AdditivePresentationVersionSummary(LegacyPresentationVersionSummary):
+    """Opted-in source-free version-list entry."""
+
+    content_kind: Literal["structured_slides", "standalone_html"]
+
+
+PresentationVersionSummary = LegacyPresentationVersionSummary | AdditivePresentationVersionSummary
 
 
 class PresentationVersionListResponse(BaseModel):
@@ -232,8 +310,16 @@ class VisualStyleListResponse(BaseModel):
         return _default_offset_pagination_aliases(self)
 
 
-class PresentationSummary(BaseModel):
-    """Summary item for presentation listings."""
+class PresentationProvenanceSummary(BaseModel):
+    """Bounded generation provenance safe for list and search responses."""
+
+    source_kind: str | None = None
+    provider: str | None = None
+    model: str | None = None
+
+
+class PresentationSummaryBase(BaseModel):
+    """Source-free fields common to presentation summaries."""
 
     id: str
     title: str
@@ -243,6 +329,40 @@ class PresentationSummary(BaseModel):
     last_modified: datetime
     deleted: bool
     version: int
+    provenance: PresentationProvenanceSummary
+
+
+class LegacyPresentationSummary(BaseModel):
+    """Exact pre-negotiation structured list/search item."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    title: str
+    description: str | None = None
+    theme: str
+    created_at: datetime
+    last_modified: datetime
+    deleted: bool
+    version: int
+
+
+class StructuredPresentationSummary(PresentationSummaryBase):
+    content_kind: Literal["structured_slides"]
+    slide_count: int
+
+
+class StandaloneHtmlPresentationSummary(PresentationSummaryBase):
+    content_kind: Literal["standalone_html"]
+    html_slide_count: int
+    html_bytes: int
+
+
+DiscriminatedPresentationSummary = Annotated[
+    StructuredPresentationSummary | StandaloneHtmlPresentationSummary,
+    Field(discriminator="content_kind"),
+]
+PresentationSummary = LegacyPresentationSummary | DiscriminatedPresentationSummary
 
 
 class PresentationListResponse(BaseModel):
@@ -337,6 +457,7 @@ class ExportFormat(str, Enum):
     MARKDOWN = "markdown"
     JSON = "json"
     PDF = "pdf"
+    HTML = "html"
 
 
 class PresentationRenderFormat(str, Enum):

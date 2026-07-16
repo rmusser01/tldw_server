@@ -23,12 +23,18 @@ modified_files:
 - tldw_Server_API/app/core/Slides/standalone_html_contracts.py
 - tldw_Server_API/app/core/Slides/standalone_html_validator.py
 - tldw_Server_API/app/core/Slides/standalone_html_validation_pool.py
+- tldw_Server_API/app/core/Slides/presentation_service.py
+- tldw_Server_API/app/api/v1/schemas/slides_schemas.py
+- tldw_Server_API/app/api/v1/endpoints/slides.py
+- tldw_Server_API/app/core/Slides/slides_export.py
 - tldw_Server_API/tests/Slides/test_standalone_html_db_migration.py
 - tldw_Server_API/tests/Slides/test_standalone_html_domain.py
-- tldw_Server_API/tests/Slides/test_slides_db.py
 - tldw_Server_API/tests/Slides/test_standalone_html_validator.py
 - tldw_Server_API/tests/Slides/test_standalone_html_validation_pool.py
 - tldw_Server_API/tests/Slides/test_standalone_html_dependency_smoke.py
+- tldw_Server_API/tests/Slides/test_standalone_html_api.py
+- tldw_Server_API/tests/Slides/test_slides_db.py
+- tldw_Server_API/tests/Slides/test_slides_export.py
 - pyproject.toml
 - backlog/tasks/task-12115 - Add-first-class-standalone-HTML-JS-presentation-generation.md
 - tldw_Server_API/app/core/Slides/__init__.py
@@ -145,4 +151,13 @@ Targeted GREEN passed 28/28. The complete validator/pool suite passed 307/307. A
 
 Nonblocking debt deliberately not expanded in this security patch: pool/validator policy constants remain duplicated, and existing unused internal response/state fields remain available for a later relevant simplification. Overall TASK-12115 remains In Progress for Tasks 3+.
 Backlog scope clarification: the final commit contains the four scoped validator/pool code and test files plus this required TASK-12115 record; no other repository file is modified.
+
+2026-07-16 Task 2 closure: commits f860f1aa26351520ee8df503ac2b5c2a5955c668, ce5ddc97bc7dcc8e4c5ef571c406538358bb5597, 936a33ec6f1aa678fdc574a4fb57a1cabb86d195, 6bb58289538f0f256ac7bd9f8336f4f7da8052d0, and 788255d18639698a9a16cceeeaf539dda62b3c5f. Final specification review returned ✅ Spec compliant. The quality re-review found no Critical or Important findings and explicitly approved proceeding to Task 3. Final focused and neighboring verification passed 344 tests; Black, Ruff, Bandit, git diff, and residual-process gates were clean. Two nonblocking quality debts remain for a later relevant cleanup: duplicated closed validator/pool policy constants and unused _HtmlPreflight, queue_kind, and RPC argument fields.
+2026-07-16 Task 3 domain/REST/export guard implementation evidence: assertion-level TDD started with 56 collected, 26 expected failures, 30 passes, and 5 warnings. The shared PresentationService now owns closed content-kind negotiation, source-free guards/projections, worker-only standalone creation, raw octet-stream source save, same-kind restore, source-free deletion, and operation allowlisting. SQLite persistence enforces immutable kind/generation identity, authoritative standalone validation and derived metadata, compact UTF-8 active-kind snapshots with a standalone-only storage ceiling and bounded retention, generation-job conflict translation, pre-pagination kind filtering for list/search, and a single alias-aware summary projection builder. The standalone restore DB path is explicitly standalone-only; structured restore preserves the legacy API normalization/update pipeline including image alt-text indexing.
+
+The REST schema and routes preserve exact legacy structured response shapes unless standalone_html is explicitly accepted, emit Vary on negotiated success/error paths, use strong standalone and weak structured ETags, guard detail/version/search/render/artifact/export routes before source loading or dispatch, reject explicit kind changes with stable content_kind_immutable ordering, expose explicit raw HTML source save, return source-free version/delete metadata, support UTF-8 discriminated JSON export, and keep HTML attachment transport plus all interactive execution/render/preview behavior deferred. Generic create/mutation remains fail-closed for standalone fields.
+
+Final focused Task 3 suite: 63 collected, 61 passed, with exactly two unchanged-base export fixture failures because assets/custom.css is absent (test_export_bundle_includes_assets and test_export_bundle_stamps_style_hooks_and_includes_builtin_pack_css); no Task 3 test failed. Final structured regression with the previously failing random seed: 108 collected, 106 passed, with only those same two baseline failures. A one-off schema-concurrency SQLite lock was investigated without code changes: isolated 1/1, three bounded repetitions 3/3, the preceding rollback+concurrency slice 2/2, and the seeded full rerun all passed. Targeted cleanup/error-order regressions passed 5/5.
+
+Black --check left all eight scoped Python files unchanged after formatting; Ruff reported all checks passed. Production-only Bandit exited 0 with 0 findings across five production files (5,703 LOC; eight justified skipped SQL checks). git diff --check passed and no residual pytest/validator/Bandit process remained. Overall TASK-12115 remains In Progress for Task 4+; Task 3 adds no execution, rendering, preview, generation worker, or attachment transport.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
