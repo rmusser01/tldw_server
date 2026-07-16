@@ -434,6 +434,54 @@ class TestEgressPolicy:
         assert egress._resolve_host_ips("example.com") == ["93.184.216.34"]
         assert calls == []
 
+    def test_public_resolver_forwards_timeout_and_deduplicates(self, monkeypatch):
+        calls: list[tuple[str, float]] = []
+
+        def _resolve(host: str, timeout_s: float = 2.0) -> list[tuple]:
+            calls.append((host, timeout_s))
+            return [
+                (egress.socket.AF_INET, egress.socket.SOCK_STREAM, 0, "", ("8.8.8.8", 443)),
+                (egress.socket.AF_INET, egress.socket.SOCK_STREAM, 0, "", ("8.8.8.8", 443)),
+                (
+                    egress.socket.AF_INET6,
+                    egress.socket.SOCK_STREAM,
+                    0,
+                    "",
+                    ("2001:4860:4860::8888", 443, 0, 0),
+                ),
+            ]
+
+        monkeypatch.setattr(egress, "_getaddrinfo_with_timeout", _resolve)
+
+        assert egress.resolve_host_ips("dns.example", timeout_s=0.25) == (
+            "8.8.8.8",
+            "2001:4860:4860::8888",
+        )
+        assert calls == [("dns.example", 0.25)]
+
+    @pytest.mark.parametrize(
+        "malformed",
+        (
+            (egress.socket.AF_INET, egress.socket.SOCK_STREAM, 0, "", ()),
+            (egress.socket.AF_INET, egress.socket.SOCK_STREAM, 0, "", (123, 443)),
+        ),
+    )
+    def test_public_resolver_rejects_mixed_valid_and_malformed_answers(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        malformed: tuple[object, ...],
+    ) -> None:
+        monkeypatch.setattr(
+            egress,
+            "_getaddrinfo_with_timeout",
+            lambda *_args, **_kwargs: [
+                (egress.socket.AF_INET, egress.socket.SOCK_STREAM, 0, "", ("8.8.8.8", 443)),
+                malformed,
+            ],
+        )
+
+        assert egress.resolve_host_ips("dns.example") == ()
+
     def test_dns_timeout_limits_outstanding_resolver_threads(
         self: "TestEgressPolicy",
         monkeypatch: pytest.MonkeyPatch,
@@ -467,8 +515,7 @@ class TestEgressPolicy:
             assert results == [[], [], [], [], []]
             assert started <= 2
             assert any(
-                fields.get("event") == "dns_resolver_slots_exhausted"
-                and fields.get("host") == "example-2.invalid"
+                fields.get("event") == "dns_resolver_slots_exhausted" and fields.get("host") == "example-2.invalid"
                 for fields, _message in captured_logger.warning_logs
             )
         finally:
@@ -551,7 +598,6 @@ class TestEgressPolicy:
         assert len(join_timeouts) == 1
         assert join_timeouts[0] == pytest.approx(0.06)
         assert any(
-            fields.get("event") == "dns_resolver_timeout"
-            and fields.get("host") == "example.invalid"
+            fields.get("event") == "dns_resolver_timeout" and fields.get("host") == "example.invalid"
             for fields, _message in captured_logger.warning_logs
         )

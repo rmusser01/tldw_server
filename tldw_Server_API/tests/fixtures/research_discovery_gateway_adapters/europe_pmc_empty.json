@@ -1,0 +1,13 @@
+{
+  "version": "6.9",
+  "hitCount": 0,
+  "request": {
+    "queryString": "sanitized fixture query",
+    "resultType": "core",
+    "pageSize": 1,
+    "cursorMark": "*"
+  },
+  "resultList": {
+    "result": []
+  }
+}

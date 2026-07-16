@@ -1,0 +1,51 @@
+{
+  "version": "6.9",
+  "hitCount": 37,
+  "nextCursorMark": "AoIIPPR-BIORXIV-NEXT",
+  "nextPageUrl": "https://example.invalid/europe-pmc/next?continuation=ignored-biorxiv",
+  "request": {
+    "queryString": "sanitized fixture query",
+    "resultType": "core",
+    "pageSize": 1,
+    "cursorMark": "*"
+  },
+  "resultList": {
+    "result": [
+      {
+        "id": "PPR900001",
+        "source": "PPR",
+        "doi": "10.5555/biorxiv.synthetic.2026",
+        "title": "<em>Bounded</em> bioRxiv discovery",
+        "authorList": {
+          "author": [
+            {
+              "fullName": "Ada Example"
+            },
+            {
+              "fullName": "Grace Sample"
+            }
+          ]
+        },
+        "pubYear": "2026",
+        "abstractText": "<p>A <strong>sanitized</strong> abstract &amp; test.</p><script>ignored-script-content</script><a href=\"https://example.invalid/ignored-link\">Linked text</a>",
+        "bookOrReportDetails": {
+          "publisher": "bioRxiv"
+        },
+        "firstPublicationDate": "2026-06-10",
+        "fullTextUrlList": {
+          "fullTextUrl": [
+            {
+              "availability": "Open access",
+              "documentStyle": "html",
+              "site": "Provider",
+              "url": "https://example.invalid/fulltext/biorxiv?ignored=provider-url"
+            }
+          ]
+        },
+        "isOpenAccess": "Y",
+        "hasPDF": "Y",
+        "unknownFixtureField": "must-not-survive"
+      }
+    ]
+  }
+}

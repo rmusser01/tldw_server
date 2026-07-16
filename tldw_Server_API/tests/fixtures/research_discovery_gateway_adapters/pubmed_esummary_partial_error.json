@@ -1,0 +1,27 @@
+{
+  "header": {
+    "type": "esummary",
+    "version": "0.3"
+  },
+  "result": {
+    "uids": [
+      "31415926",
+      "27182818"
+    ],
+    "31415926": {
+      "uid": "31415926",
+      "title": "Shared Discovery Record",
+      "authors": [],
+      "articleids": [
+        {
+          "idtype": "pubmed",
+          "value": "31415926"
+        }
+      ]
+    },
+    "27182818": {
+      "uid": "27182818",
+      "error": "sanitized missing document summary"
+    }
+  }
+}

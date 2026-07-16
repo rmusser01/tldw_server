@@ -1,0 +1,34 @@
+{
+  "messages": [
+    {
+      "status": "ok",
+      "category": "neuroscience",
+      "interval": "2026-06-01:2026-06-02",
+      "funder": "all",
+      "cursor": "1",
+      "count": "1",
+      "count_new_papers": 2,
+      "total": 2
+    }
+  ],
+  "collection": [
+    {
+      "title": "Bounded interval result two",
+      "authors": "Vera Example",
+      "author_corresponding": "Vera Example",
+      "author_corresponding_institution": "Synthetic Laboratory",
+      "doi": "10.5555/biorxiv.interval.two",
+      "date": "2026-06-02",
+      "version": 2,
+      "type": "new results",
+      "license": "cc_by_nc",
+      "category": "neuroscience",
+      "jatsxml": "https://provider.example.invalid/interval-two.xml?token=fixture-secret",
+      "abstract": "A sanitized second interval abstract.",
+      "funder": "Synthetic Research Fund",
+      "published": "10.5555/published.interval.two",
+      "server": "bioRxiv",
+      "fullTextUrl": "https://provider.example.invalid/interval-two.pdf"
+    }
+  ]
+}

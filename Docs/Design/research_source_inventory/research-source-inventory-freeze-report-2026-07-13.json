@@ -1,0 +1,89 @@
+{
+  "errors": [],
+  "schema_validated": true,
+  "as_of": "2026-07-15",
+  "trusted_reviewer_ids": [
+    "codex-task-12968.1-source-triage",
+    "codex-task-12968.5-inventory-review"
+  ],
+  "trusted_approval_references": [],
+  "counts": {
+    "manifest": 235,
+    "ledger": 235,
+    "unreviewed": 0,
+    "triaged": 235,
+    "terminal": 0,
+    "non_terminal": 235,
+    "resolution": {
+      "unreviewed": 0,
+      "mapped": 191,
+      "duplicate": 0,
+      "not_applicable": 1,
+      "credentialed_out_of_scope": 35,
+      "policy_blocked": 7,
+      "technically_infeasible": 1
+    },
+    "implementation": {
+      "planned": 233,
+      "implemented": 2
+    },
+    "fixture": {
+      "not_run": 233,
+      "passed": 2,
+      "failed": 0
+    },
+    "live": {
+      "not_run": 235,
+      "current": 0,
+      "expired": 0,
+      "failed": 0
+    }
+  },
+  "blockers": [],
+  "required_sources": {
+    "sourclip-2026-07-13-0021": {
+      "canonical_target": "biorxiv",
+      "required_general_route_id": "biorxiv_europe_pmc_search_aggregator",
+      "required_lookup_route_id": "biorxiv_details_lookup_direct",
+      "required_interval_route_id": "biorxiv_details_interval_direct",
+      "captured_label": "bioRxiv",
+      "resolution": "mapped",
+      "canonical_targets": [
+        "biorxiv"
+      ],
+      "declared_surfaces": [
+        "standalone_search",
+        "deep_research"
+      ],
+      "mapping_satisfied": true
+    },
+    "sourclip-2026-07-13-0022": {
+      "canonical_target": "medrxiv",
+      "required_general_route_id": "medrxiv_europe_pmc_search_aggregator",
+      "required_lookup_route_id": "medrxiv_details_lookup_direct",
+      "required_interval_route_id": "medrxiv_details_interval_direct",
+      "captured_label": "medRxiv",
+      "resolution": "mapped",
+      "canonical_targets": [
+        "medrxiv"
+      ],
+      "declared_surfaces": [
+        "standalone_search",
+        "deep_research"
+      ],
+      "mapping_satisfied": true
+    }
+  },
+  "required_source_blockers": [],
+  "digests": {
+    "manifest": "6715db5a499abb13a3095c5153566323afd037db5ce0ff77ade7b629d5137c1e",
+    "ledger": "1a5748978a75821dc2376817e1295721dc43013e102981a48184f3d0fac2f39e",
+    "ledger_rows": "1d607d9b7e3a14aa47f773bf3248f5ecfcdf3dcbf9934ee36999fcfb555881c9",
+    "schema": "ac85c7889ce84d25b8ddf9473c8fa1a8db43da848c683f1dbc1dce91a3375f29",
+    "validator": "db2de88ee4cbb7bf93439268ae8af4fd3c1fc600641a67cb1b9ea78ee3653e67",
+    "schema_validator": "ef79194445aa2544a3dd4b52cadcfd1b4efe99e52e49aabfb499bb3caa46fe16"
+  },
+  "structurally_valid": true,
+  "contract_freeze_ready": true,
+  "inventory_delivery_ready": false
+}

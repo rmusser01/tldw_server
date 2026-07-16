@@ -1,0 +1,33 @@
+{
+  "messages": [
+    {
+      "status": "ok",
+      "category": "neuroscience",
+      "interval": "2026-06-01:2026-06-02",
+      "funder": "all",
+      "cursor": 0,
+      "count": 1,
+      "count_new_papers": "2",
+      "total": "2"
+    }
+  ],
+  "collection": [
+    {
+      "title": "Bounded interval result one",
+      "authors": "Tess Example; Uri Sample",
+      "author_corresponding": "Tess Example",
+      "author_corresponding_institution": "Synthetic Laboratory",
+      "doi": "10.5555/biorxiv.interval.one",
+      "date": "2026-06-01",
+      "version": "1",
+      "type": "new results",
+      "license": "cc_by",
+      "category": "neuroscience",
+      "jatsxml": "https://provider.example.invalid/interval-one.xml",
+      "abstract": "A sanitized first interval abstract.",
+      "funder": "Synthetic Research Fund",
+      "published": "NA",
+      "server": "bioRxiv"
+    }
+  ]
+}

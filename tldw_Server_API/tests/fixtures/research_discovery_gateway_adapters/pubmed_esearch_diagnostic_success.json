@@ -1,0 +1,23 @@
+{
+  "header": {
+    "type": "esearch",
+    "version": "0.3"
+  },
+  "esearchresult": {
+    "count": "5659736",
+    "retmax": "2",
+    "retstart": "0",
+    "idlist": [
+      "31415926",
+      "27182818"
+    ],
+    "translationset": [],
+    "querytranslation": "bounded discovery",
+    "errorlist": {
+      "phrasesnotfound": [
+        "sanitized absent alternative"
+      ],
+      "fieldsnotfound": []
+    }
+  }
+}

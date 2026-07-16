@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import email.utils
 import re
+import weakref
 from collections.abc import Mapping
 from typing import Any, Literal
 
@@ -31,6 +33,212 @@ class EgressPolicyError(Exception):
 
 class NetworkError(Exception):
     """Raised for network transport errors (connect/read timeouts, DNS, TLS, etc.)."""
+
+
+HTTPHopErrorCode = Literal[
+    "invalid_request",
+    "dns_resolution_failed",
+    "dns_timeout",
+    "dns_address_denied",
+    "connect_timeout",
+    "read_timeout",
+    "write_timeout",
+    "total_timeout",
+    "peer_verification_failed",
+    "tls_error",
+    "protocol_error",
+    "response_headers_too_large",
+    "response_too_large",
+    "decompressed_response_too_large",
+    "parser_input_too_large",
+    "unsupported_content_encoding",
+    "invalid_content_encoding",
+    "transport_error",
+]
+
+_HTTP_HOP_ERROR_MESSAGES: dict[HTTPHopErrorCode, str] = {
+    "invalid_request": "The outbound request is invalid.",
+    "dns_resolution_failed": "The destination could not be resolved.",
+    "dns_timeout": "Destination resolution timed out.",
+    "dns_address_denied": "The destination address is not allowed.",
+    "connect_timeout": "The destination connection timed out.",
+    "read_timeout": "The destination response timed out.",
+    "write_timeout": "The outbound request timed out.",
+    "total_timeout": "The outbound request exceeded its time limit.",
+    "peer_verification_failed": "The connected destination could not be verified.",
+    "tls_error": "The secure destination connection failed.",
+    "protocol_error": "The destination returned an invalid response.",
+    "response_headers_too_large": "The destination response headers are too large.",
+    "response_too_large": "The destination response is too large.",
+    "decompressed_response_too_large": "The decoded destination response is too large.",
+    "parser_input_too_large": "The destination response exceeds the parser limit.",
+    "unsupported_content_encoding": "The destination used an unsupported content encoding.",
+    "invalid_content_encoding": "The destination returned invalid encoded content.",
+    "transport_error": "The destination request failed.",
+}
+
+
+class HTTPHopError(Exception):
+    """A stable, sanitized failure from the one-hop HTTP boundary."""
+
+    def __init__(self, code: HTTPHopErrorCode, *, retryable: bool = False) -> None:
+        message = _HTTP_HOP_ERROR_MESSAGES.get(code)
+        if message is None:
+            raise ValueError("Unsupported HTTP hop error code")
+        if not isinstance(retryable, bool):
+            raise TypeError("retryable must be a boolean")
+        self.code = code
+        self.retryable = retryable
+        super().__init__(message)
+
+
+DiscoveryGatewayErrorCode = Literal[
+    "request_rejected",
+    "policy_inactive",
+    "hop_failed",
+    "invalid_hop_response",
+]
+
+_DISCOVERY_GATEWAY_ERROR_MESSAGES: dict[DiscoveryGatewayErrorCode, str] = {
+    "request_rejected": "Discovery gateway request rejected",
+    "policy_inactive": "Discovery gateway policy inactive",
+    "hop_failed": "Discovery gateway hop failed",
+    "invalid_hop_response": "Discovery gateway hop response rejected",
+}
+
+
+class DiscoveryGatewayError(Exception):
+    """Stable failure without request, response, or provider detail."""
+
+    __slots__ = ("code", "retryable", "timed_out")
+
+    def __init__(
+        self,
+        code: DiscoveryGatewayErrorCode,
+        *,
+        retryable: bool = False,
+        timed_out: bool = False,
+    ) -> None:
+        if code not in _DISCOVERY_GATEWAY_ERROR_MESSAGES:
+            raise ValueError("Unsupported discovery gateway error code")
+        if type(retryable) is not bool:
+            raise TypeError("retryable must be a boolean")
+        if type(timed_out) is not bool:
+            raise TypeError("timed_out must be a boolean")
+        self.code = code
+        self.retryable = retryable
+        self.timed_out = timed_out
+        super().__init__(_DISCOVERY_GATEWAY_ERROR_MESSAGES[code])
+
+
+class DiscoveryExecutionError(ValueError):
+    """Stable executor failure containing only a sanitized code."""
+
+    __slots__ = ("code",)
+
+    def __init__(self, code: str) -> None:
+        if type(code) is not str or not code:
+            raise TypeError("execution_error_code_must_be_nonempty_string")
+        self.code = code
+        super().__init__(code)
+
+
+_DISCOVERY_ADAPTER_ERROR_CODES = frozenset(
+    {
+        "provider_rate_limited",
+        "provider_response_rejected",
+        "provider_payload_invalid",
+        "provider_parse_limit_exceeded",
+        "provider_parse_deadline_exceeded",
+    }
+)
+_DISCOVERY_RETRY_AFTER_DELTA_SECONDS_RE = re.compile(r"[0-9]+\Z")
+
+
+def _valid_discovery_retry_after(value: object) -> bool:
+    """Return whether one discovery retry hint is delta-seconds or strict IMF-fixdate."""
+    if type(value) is not str:
+        return False
+    if _DISCOVERY_RETRY_AFTER_DELTA_SECONDS_RE.fullmatch(value) is not None:
+        return True
+    try:
+        parsed = email.utils.parsedate_to_datetime(value)
+        return email.utils.format_datetime(parsed, usegmt=True) == value
+    except (TypeError, ValueError):
+        return False
+
+
+class DiscoveryAdapterError(ValueError):
+    """Stable adapter failure containing only allowlisted metadata."""
+
+    __slots__ = (
+        "code",
+        "retry_after",
+        "__weakref__",
+    )
+
+    def __init__(self, code: str, *, retry_after: str | None = None) -> None:
+        if type(code) is not str:
+            raise TypeError("adapter_error_code_must_be_string")
+        if code not in _DISCOVERY_ADAPTER_ERROR_CODES:
+            raise ValueError("adapter_error_code_invalid")
+        if retry_after is not None:
+            if code != "provider_rate_limited":
+                raise ValueError("retry_after_requires_rate_limit")
+            if not _valid_discovery_retry_after(retry_after):
+                raise ValueError("retry_after_invalid")
+        self.code = code
+        self.retry_after = retry_after
+        super().__init__(code)
+        _DISCOVERY_ADAPTER_ERROR_SEALS[self] = (code, retry_after)
+
+
+_DISCOVERY_ADAPTER_ERROR_SEALS: weakref.WeakKeyDictionary[
+    DiscoveryAdapterError,
+    tuple[str, str | None],
+] = weakref.WeakKeyDictionary()
+
+
+def _trusted_discovery_adapter_error(error: BaseException) -> tuple[str, str | None] | None:
+    """Snapshot one exact, unmodified discovery adapter failure."""
+    if type(error) is not DiscoveryAdapterError:
+        return None
+    try:
+        code = error.code
+        retry_after = error.retry_after
+        if (
+            type(code) is not str
+            or (retry_after is not None and type(retry_after) is not str)
+            or _DISCOVERY_ADAPTER_ERROR_SEALS.get(error) != (code, retry_after)
+            or error.args != (code,)
+            or code not in _DISCOVERY_ADAPTER_ERROR_CODES
+            or (retry_after is not None and not _valid_discovery_retry_after(retry_after))
+            or (code != "provider_rate_limited" and retry_after is not None)
+        ):
+            return None
+    except Exception:  # noqa: BLE001 - malformed adapter failures fail closed.
+        return None
+    return code, retry_after
+
+
+class PlanningError(ValueError):
+    """Typed pure-planning failure."""
+
+    def __init__(self, code: str) -> None:
+        self.code = code
+        super().__init__(code)
+
+
+class _PayloadInvalid(Exception):
+    pass
+
+
+class _ParseLimitExceeded(Exception):
+    pass
+
+
+class _ParseDeadlineExceeded(Exception):
+    pass
 
 
 class AudioQuotaStoreUnavailable(AuthNZDatabaseError):

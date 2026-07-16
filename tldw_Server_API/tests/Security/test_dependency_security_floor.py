@@ -2,10 +2,15 @@ import ast
 import re
 from pathlib import Path
 
+import pytest
+
 try:
     import tomllib
 except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
     import tomli as tomllib
+
+
+pytestmark = pytest.mark.unit
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -52,9 +57,7 @@ def _mock_setup_keywords() -> dict[str, object]:
         if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "setup":
             wanted_keys = {"install_requires", "python_requires"}
             return {
-                keyword.arg: ast.literal_eval(keyword.value)
-                for keyword in node.keywords
-                if keyword.arg in wanted_keys
+                keyword.arg: ast.literal_eval(keyword.value) for keyword in node.keywords if keyword.arg in wanted_keys
             }
     raise AssertionError("mock_openai_server/setup.py does not call setup()")
 
@@ -72,6 +75,16 @@ def test_starlette_dependency_floor_excludes_badhost_cve_versions():
 
 def test_fastapi_dependency_floor_supports_starlette_1_series():
     _expect_project_dependency("fastapi", "fastapi>=0.136.3,<0.137.0")
+
+
+def test_httpcore_dependency_floor_supports_validated_network_backend():
+    """Keep the public async backend API and patched h11 floor used by secure hops."""
+    _expect_project_dependency("httpcore", "httpcore[asyncio]>=1.0.9,<2")
+
+
+def test_certifi_dependency_is_direct_for_environment_independent_tls_roots():
+    """Secure hops build a TLS context from this explicit CA bundle."""
+    _expect_project_dependency("certifi", "certifi>=2024.2.2")
 
 
 def test_tzlocal_declared_for_apscheduler_session_import_path():

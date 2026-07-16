@@ -1,0 +1,1044 @@
+{
+  "all_sources_success": {
+    "persisted_effective_config": {
+      "categories": [
+        "biomedical",
+        "open_research_graph",
+        "preprints",
+        "repositories"
+      ],
+      "defaulted_categories": [],
+      "execution_policy": {
+        "max_concurrency": 4,
+        "per_source_timeout_seconds": 10.0,
+        "total_timeout_seconds": 30.0
+      },
+      "fallback_policy": "disabled",
+      "filters": {
+        "language": "en",
+        "year_from": 2020
+      },
+      "snapshot_retention_hours": 24,
+      "source_ids": [
+        "openalex",
+        "semantic_scholar",
+        "crossref",
+        "arxiv",
+        "pubmed",
+        "zenodo",
+        "figshare",
+        "osf"
+      ],
+      "source_policy": "balanced"
+    },
+    "persisted_request": {
+      "categories": [],
+      "fallback_policy": "disabled",
+      "filters": {
+        "language": "en",
+        "year_from": 2020
+      },
+      "max_sources": null,
+      "per_source_limit": 2,
+      "query": "legacy execution contract",
+      "source_ids": [
+        "osf",
+        "figshare",
+        "zenodo",
+        "pubmed",
+        "arxiv",
+        "crossref",
+        "semantic_scholar",
+        "openalex"
+      ],
+      "source_policy": "balanced",
+      "total_limit": 16,
+      "total_timeout_seconds": 30.0
+    },
+    "provider_calls": [
+      {
+        "filters": {
+          "language": "en",
+          "year_from": 2020
+        },
+        "limit": 2,
+        "query": "legacy execution contract",
+        "source_id": "openalex",
+        "source_priority": 10
+      },
+      {
+        "filters": {
+          "language": "en",
+          "year_from": 2020
+        },
+        "limit": 2,
+        "query": "legacy execution contract",
+        "source_id": "semantic_scholar",
+        "source_priority": 20
+      },
+      {
+        "filters": {
+          "language": "en",
+          "year_from": 2020
+        },
+        "limit": 2,
+        "query": "legacy execution contract",
+        "source_id": "crossref",
+        "source_priority": 30
+      },
+      {
+        "filters": {
+          "language": "en",
+          "year_from": 2020
+        },
+        "limit": 2,
+        "query": "legacy execution contract",
+        "source_id": "arxiv",
+        "source_priority": 40
+      },
+      {
+        "filters": {
+          "language": "en",
+          "year_from": 2020
+        },
+        "limit": 2,
+        "query": "legacy execution contract",
+        "source_id": "pubmed",
+        "source_priority": 50
+      },
+      {
+        "filters": {
+          "language": "en",
+          "year_from": 2020
+        },
+        "limit": 2,
+        "query": "legacy execution contract",
+        "source_id": "zenodo",
+        "source_priority": 60
+      },
+      {
+        "filters": {
+          "language": "en",
+          "year_from": 2020
+        },
+        "limit": 2,
+        "query": "legacy execution contract",
+        "source_id": "figshare",
+        "source_priority": 70
+      },
+      {
+        "filters": {
+          "language": "en",
+          "year_from": 2020
+        },
+        "limit": 2,
+        "query": "legacy execution contract",
+        "source_id": "osf",
+        "source_priority": 80
+      }
+    ],
+    "request": {
+      "categories": [],
+      "filters": {
+        "language": "en",
+        "year_from": 2020
+      },
+      "owner_user_id": "legacy-owner",
+      "per_source_limit": 2,
+      "query": "legacy execution contract",
+      "source_ids": [
+        "osf",
+        "figshare",
+        "zenodo",
+        "pubmed",
+        "arxiv",
+        "crossref",
+        "semantic_scholar",
+        "openalex"
+      ],
+      "total_limit": 16
+    },
+    "stable_response": {
+      "catalog_version": "research-discovery-v1",
+      "effective_config": {
+        "categories": [
+          "biomedical",
+          "open_research_graph",
+          "preprints",
+          "repositories"
+        ],
+        "defaulted_categories": [],
+        "execution_policy": {
+          "max_concurrency": 4,
+          "per_source_timeout_seconds": 10.0,
+          "total_timeout_seconds": 30.0
+        },
+        "fallback_policy": "disabled",
+        "filters": {
+          "language": "en",
+          "year_from": 2020
+        },
+        "snapshot_retention_hours": 24,
+        "source_ids": [
+          "openalex",
+          "semantic_scholar",
+          "crossref",
+          "arxiv",
+          "pubmed",
+          "zenodo",
+          "figshare",
+          "osf"
+        ],
+        "source_policy": "balanced"
+      },
+      "metrics": {
+        "deduped_result_count": 8,
+        "oa_candidate_count": 0,
+        "result_count": 8,
+        "selected_source_count": 8
+      },
+      "query": "legacy execution contract",
+      "results": [
+        {
+          "abstract": "Deterministic abstract from Openalex.",
+          "adapter_version": "openalex:research-discovery-router-v1",
+          "arxiv_id": null,
+          "authors": [
+            "Openalex Author"
+          ],
+          "canonical_url": "https://records.example/openalex",
+          "catalog_version": "research-discovery-v1",
+          "dedupe_confidence": 1.0,
+          "discovery_mode": "api",
+          "doi": "10.4242/openalex",
+          "fingerprint": "doi:10.4242/openalex",
+          "ingest_eligible": false,
+          "merged_provenance": [
+            {
+              "adapter_version": "openalex:research-discovery-router-v1",
+              "discovery_mode": "api",
+              "provider": "openalex",
+              "provider_ids": {
+                "doi": "10.4242/openalex",
+                "fixture_id": "openalex-001"
+              },
+              "safe_metadata": {
+                "abstract": "Deterministic abstract from Openalex.",
+                "adapter_version": "openalex:research-discovery-router-v1",
+                "authors": [
+                  "Openalex Author"
+                ],
+                "discovery_mode": "api",
+                "doi": "10.4242/openalex",
+                "fixture_label": "openalex-legacy-record",
+                "provider": "openalex",
+                "provider_ids": {
+                  "fixture_id": "openalex-001"
+                },
+                "published_at": "2026-01-01",
+                "source_category": "open_research_graph",
+                "source_id": "openalex",
+                "source_priority": 10,
+                "title": "Openalex Legacy Result"
+              },
+              "source_id": "openalex",
+              "source_rank": 10,
+              "status": "ok",
+              "url": "https://records.example/openalex",
+              "warnings": []
+            }
+          ],
+          "oa_candidates": [],
+          "pmcid": null,
+          "pmid": null,
+          "primary_provider": "openalex",
+          "primary_source_id": "openalex",
+          "provider_ids": {
+            "doi": "10.4242/openalex",
+            "fixture_id": "openalex-001"
+          },
+          "published_at": "2026-01-01",
+          "ranking_signals": {
+            "fingerprint": "doi:10.4242/openalex",
+            "has_oa_candidate": false,
+            "identifier_strength": 6,
+            "primary_source_priority": 10,
+            "title_length": 22
+          },
+          "recommended_candidate_id": null,
+          "result_id": "discovery_result:abc89e3124dcd5d283f70deb",
+          "safe_metadata": {
+            "abstract": "Deterministic abstract from Openalex.",
+            "adapter_version": "openalex:research-discovery-router-v1",
+            "authors": [
+              "Openalex Author"
+            ],
+            "discovery_mode": "api",
+            "doi": "10.4242/openalex",
+            "fixture_label": "openalex-legacy-record",
+            "provider": "openalex",
+            "provider_ids": {
+              "fixture_id": "openalex-001"
+            },
+            "published_at": "2026-01-01",
+            "source_category": "open_research_graph",
+            "source_id": "openalex",
+            "source_priority": 10,
+            "title": "Openalex Legacy Result"
+          },
+          "source_category": "open_research_graph",
+          "title": "Openalex Legacy Result",
+          "updated_at": null,
+          "warnings": []
+        },
+        {
+          "abstract": "Deterministic abstract from Semantic Scholar.",
+          "adapter_version": "semantic_scholar:research-discovery-router-v1",
+          "arxiv_id": null,
+          "authors": [
+            "Semantic Scholar Author"
+          ],
+          "canonical_url": "https://records.example/semantic_scholar",
+          "catalog_version": "research-discovery-v1",
+          "dedupe_confidence": 1.0,
+          "discovery_mode": "api",
+          "doi": "10.4242/semantic_scholar",
+          "fingerprint": "doi:10.4242/semantic_scholar",
+          "ingest_eligible": false,
+          "merged_provenance": [
+            {
+              "adapter_version": "semantic_scholar:research-discovery-router-v1",
+              "discovery_mode": "api",
+              "provider": "semantic_scholar",
+              "provider_ids": {
+                "doi": "10.4242/semantic_scholar",
+                "fixture_id": "semantic_scholar-001"
+              },
+              "safe_metadata": {
+                "abstract": "Deterministic abstract from Semantic Scholar.",
+                "adapter_version": "semantic_scholar:research-discovery-router-v1",
+                "authors": [
+                  "Semantic Scholar Author"
+                ],
+                "discovery_mode": "api",
+                "doi": "10.4242/semantic_scholar",
+                "fixture_label": "semantic_scholar-legacy-record",
+                "provider": "semantic_scholar",
+                "provider_ids": {
+                  "fixture_id": "semantic_scholar-001"
+                },
+                "published_at": "2026-01-02",
+                "source_category": "open_research_graph",
+                "source_id": "semantic_scholar",
+                "source_priority": 20,
+                "title": "Semantic Scholar Legacy Result"
+              },
+              "source_id": "semantic_scholar",
+              "source_rank": 20,
+              "status": "ok",
+              "url": "https://records.example/semantic_scholar",
+              "warnings": []
+            }
+          ],
+          "oa_candidates": [],
+          "pmcid": null,
+          "pmid": null,
+          "primary_provider": "semantic_scholar",
+          "primary_source_id": "semantic_scholar",
+          "provider_ids": {
+            "doi": "10.4242/semantic_scholar",
+            "fixture_id": "semantic_scholar-001"
+          },
+          "published_at": "2026-01-02",
+          "ranking_signals": {
+            "fingerprint": "doi:10.4242/semantic_scholar",
+            "has_oa_candidate": false,
+            "identifier_strength": 6,
+            "primary_source_priority": 20,
+            "title_length": 30
+          },
+          "recommended_candidate_id": null,
+          "result_id": "discovery_result:c8e2d82a85a8e4532399b691",
+          "safe_metadata": {
+            "abstract": "Deterministic abstract from Semantic Scholar.",
+            "adapter_version": "semantic_scholar:research-discovery-router-v1",
+            "authors": [
+              "Semantic Scholar Author"
+            ],
+            "discovery_mode": "api",
+            "doi": "10.4242/semantic_scholar",
+            "fixture_label": "semantic_scholar-legacy-record",
+            "provider": "semantic_scholar",
+            "provider_ids": {
+              "fixture_id": "semantic_scholar-001"
+            },
+            "published_at": "2026-01-02",
+            "source_category": "open_research_graph",
+            "source_id": "semantic_scholar",
+            "source_priority": 20,
+            "title": "Semantic Scholar Legacy Result"
+          },
+          "source_category": "open_research_graph",
+          "title": "Semantic Scholar Legacy Result",
+          "updated_at": null,
+          "warnings": []
+        },
+        {
+          "abstract": "Deterministic abstract from Crossref.",
+          "adapter_version": "crossref:research-discovery-router-v1",
+          "arxiv_id": null,
+          "authors": [
+            "Crossref Author"
+          ],
+          "canonical_url": "https://records.example/crossref",
+          "catalog_version": "research-discovery-v1",
+          "dedupe_confidence": 1.0,
+          "discovery_mode": "api",
+          "doi": "10.4242/crossref",
+          "fingerprint": "doi:10.4242/crossref",
+          "ingest_eligible": false,
+          "merged_provenance": [
+            {
+              "adapter_version": "crossref:research-discovery-router-v1",
+              "discovery_mode": "api",
+              "provider": "crossref",
+              "provider_ids": {
+                "doi": "10.4242/crossref",
+                "fixture_id": "crossref-001"
+              },
+              "safe_metadata": {
+                "abstract": "Deterministic abstract from Crossref.",
+                "adapter_version": "crossref:research-discovery-router-v1",
+                "authors": [
+                  "Crossref Author"
+                ],
+                "discovery_mode": "api",
+                "doi": "10.4242/crossref",
+                "fixture_label": "crossref-legacy-record",
+                "provider": "crossref",
+                "provider_ids": {
+                  "fixture_id": "crossref-001"
+                },
+                "published_at": "2026-01-03",
+                "source_category": "open_research_graph",
+                "source_id": "crossref",
+                "source_priority": 30,
+                "title": "Crossref Legacy Result"
+              },
+              "source_id": "crossref",
+              "source_rank": 30,
+              "status": "ok",
+              "url": "https://records.example/crossref",
+              "warnings": []
+            }
+          ],
+          "oa_candidates": [],
+          "pmcid": null,
+          "pmid": null,
+          "primary_provider": "crossref",
+          "primary_source_id": "crossref",
+          "provider_ids": {
+            "doi": "10.4242/crossref",
+            "fixture_id": "crossref-001"
+          },
+          "published_at": "2026-01-03",
+          "ranking_signals": {
+            "fingerprint": "doi:10.4242/crossref",
+            "has_oa_candidate": false,
+            "identifier_strength": 6,
+            "primary_source_priority": 30,
+            "title_length": 22
+          },
+          "recommended_candidate_id": null,
+          "result_id": "discovery_result:205e634f8a8aa4dfceb34cda",
+          "safe_metadata": {
+            "abstract": "Deterministic abstract from Crossref.",
+            "adapter_version": "crossref:research-discovery-router-v1",
+            "authors": [
+              "Crossref Author"
+            ],
+            "discovery_mode": "api",
+            "doi": "10.4242/crossref",
+            "fixture_label": "crossref-legacy-record",
+            "provider": "crossref",
+            "provider_ids": {
+              "fixture_id": "crossref-001"
+            },
+            "published_at": "2026-01-03",
+            "source_category": "open_research_graph",
+            "source_id": "crossref",
+            "source_priority": 30,
+            "title": "Crossref Legacy Result"
+          },
+          "source_category": "open_research_graph",
+          "title": "Crossref Legacy Result",
+          "updated_at": null,
+          "warnings": []
+        },
+        {
+          "abstract": "Deterministic abstract from Arxiv.",
+          "adapter_version": "arxiv:research-discovery-router-v1",
+          "arxiv_id": null,
+          "authors": [
+            "Arxiv Author"
+          ],
+          "canonical_url": "https://records.example/arxiv",
+          "catalog_version": "research-discovery-v1",
+          "dedupe_confidence": 1.0,
+          "discovery_mode": "api",
+          "doi": "10.4242/arxiv",
+          "fingerprint": "doi:10.4242/arxiv",
+          "ingest_eligible": false,
+          "merged_provenance": [
+            {
+              "adapter_version": "arxiv:research-discovery-router-v1",
+              "discovery_mode": "api",
+              "provider": "arxiv",
+              "provider_ids": {
+                "doi": "10.4242/arxiv",
+                "fixture_id": "arxiv-001"
+              },
+              "safe_metadata": {
+                "abstract": "Deterministic abstract from Arxiv.",
+                "adapter_version": "arxiv:research-discovery-router-v1",
+                "authors": [
+                  "Arxiv Author"
+                ],
+                "discovery_mode": "api",
+                "doi": "10.4242/arxiv",
+                "fixture_label": "arxiv-legacy-record",
+                "provider": "arxiv",
+                "provider_ids": {
+                  "fixture_id": "arxiv-001"
+                },
+                "published_at": "2026-01-04",
+                "source_category": "preprints",
+                "source_id": "arxiv",
+                "source_priority": 40,
+                "title": "Arxiv Legacy Result"
+              },
+              "source_id": "arxiv",
+              "source_rank": 40,
+              "status": "ok",
+              "url": "https://records.example/arxiv",
+              "warnings": []
+            }
+          ],
+          "oa_candidates": [],
+          "pmcid": null,
+          "pmid": null,
+          "primary_provider": "arxiv",
+          "primary_source_id": "arxiv",
+          "provider_ids": {
+            "doi": "10.4242/arxiv",
+            "fixture_id": "arxiv-001"
+          },
+          "published_at": "2026-01-04",
+          "ranking_signals": {
+            "fingerprint": "doi:10.4242/arxiv",
+            "has_oa_candidate": false,
+            "identifier_strength": 6,
+            "primary_source_priority": 40,
+            "title_length": 19
+          },
+          "recommended_candidate_id": null,
+          "result_id": "discovery_result:5114008d1aba7f6d962ecb43",
+          "safe_metadata": {
+            "abstract": "Deterministic abstract from Arxiv.",
+            "adapter_version": "arxiv:research-discovery-router-v1",
+            "authors": [
+              "Arxiv Author"
+            ],
+            "discovery_mode": "api",
+            "doi": "10.4242/arxiv",
+            "fixture_label": "arxiv-legacy-record",
+            "provider": "arxiv",
+            "provider_ids": {
+              "fixture_id": "arxiv-001"
+            },
+            "published_at": "2026-01-04",
+            "source_category": "preprints",
+            "source_id": "arxiv",
+            "source_priority": 40,
+            "title": "Arxiv Legacy Result"
+          },
+          "source_category": "preprints",
+          "title": "Arxiv Legacy Result",
+          "updated_at": null,
+          "warnings": []
+        },
+        {
+          "abstract": "Deterministic abstract from Pubmed.",
+          "adapter_version": "pubmed:research-discovery-router-v1",
+          "arxiv_id": null,
+          "authors": [
+            "Pubmed Author"
+          ],
+          "canonical_url": "https://records.example/pubmed",
+          "catalog_version": "research-discovery-v1",
+          "dedupe_confidence": 1.0,
+          "discovery_mode": "api",
+          "doi": "10.4242/pubmed",
+          "fingerprint": "doi:10.4242/pubmed",
+          "ingest_eligible": false,
+          "merged_provenance": [
+            {
+              "adapter_version": "pubmed:research-discovery-router-v1",
+              "discovery_mode": "api",
+              "provider": "pubmed",
+              "provider_ids": {
+                "doi": "10.4242/pubmed",
+                "fixture_id": "pubmed-001"
+              },
+              "safe_metadata": {
+                "abstract": "Deterministic abstract from Pubmed.",
+                "adapter_version": "pubmed:research-discovery-router-v1",
+                "authors": [
+                  "Pubmed Author"
+                ],
+                "discovery_mode": "api",
+                "doi": "10.4242/pubmed",
+                "fixture_label": "pubmed-legacy-record",
+                "provider": "pubmed",
+                "provider_ids": {
+                  "fixture_id": "pubmed-001"
+                },
+                "published_at": "2026-01-05",
+                "source_category": "biomedical",
+                "source_id": "pubmed",
+                "source_priority": 50,
+                "title": "Pubmed Legacy Result"
+              },
+              "source_id": "pubmed",
+              "source_rank": 50,
+              "status": "ok",
+              "url": "https://records.example/pubmed",
+              "warnings": []
+            }
+          ],
+          "oa_candidates": [],
+          "pmcid": null,
+          "pmid": null,
+          "primary_provider": "pubmed",
+          "primary_source_id": "pubmed",
+          "provider_ids": {
+            "doi": "10.4242/pubmed",
+            "fixture_id": "pubmed-001"
+          },
+          "published_at": "2026-01-05",
+          "ranking_signals": {
+            "fingerprint": "doi:10.4242/pubmed",
+            "has_oa_candidate": false,
+            "identifier_strength": 6,
+            "primary_source_priority": 50,
+            "title_length": 20
+          },
+          "recommended_candidate_id": null,
+          "result_id": "discovery_result:fc17a29cbe3d232d45debe3e",
+          "safe_metadata": {
+            "abstract": "Deterministic abstract from Pubmed.",
+            "adapter_version": "pubmed:research-discovery-router-v1",
+            "authors": [
+              "Pubmed Author"
+            ],
+            "discovery_mode": "api",
+            "doi": "10.4242/pubmed",
+            "fixture_label": "pubmed-legacy-record",
+            "provider": "pubmed",
+            "provider_ids": {
+              "fixture_id": "pubmed-001"
+            },
+            "published_at": "2026-01-05",
+            "source_category": "biomedical",
+            "source_id": "pubmed",
+            "source_priority": 50,
+            "title": "Pubmed Legacy Result"
+          },
+          "source_category": "biomedical",
+          "title": "Pubmed Legacy Result",
+          "updated_at": null,
+          "warnings": []
+        },
+        {
+          "abstract": "Deterministic abstract from Zenodo.",
+          "adapter_version": "zenodo:research-discovery-router-v1",
+          "arxiv_id": null,
+          "authors": [
+            "Zenodo Author"
+          ],
+          "canonical_url": "https://records.example/zenodo",
+          "catalog_version": "research-discovery-v1",
+          "dedupe_confidence": 1.0,
+          "discovery_mode": "api",
+          "doi": "10.4242/zenodo",
+          "fingerprint": "doi:10.4242/zenodo",
+          "ingest_eligible": false,
+          "merged_provenance": [
+            {
+              "adapter_version": "zenodo:research-discovery-router-v1",
+              "discovery_mode": "api",
+              "provider": "zenodo",
+              "provider_ids": {
+                "doi": "10.4242/zenodo",
+                "fixture_id": "zenodo-001"
+              },
+              "safe_metadata": {
+                "abstract": "Deterministic abstract from Zenodo.",
+                "adapter_version": "zenodo:research-discovery-router-v1",
+                "authors": [
+                  "Zenodo Author"
+                ],
+                "discovery_mode": "api",
+                "doi": "10.4242/zenodo",
+                "fixture_label": "zenodo-legacy-record",
+                "provider": "zenodo",
+                "provider_ids": {
+                  "fixture_id": "zenodo-001"
+                },
+                "published_at": "2026-01-06",
+                "source_category": "repositories",
+                "source_id": "zenodo",
+                "source_priority": 60,
+                "title": "Zenodo Legacy Result"
+              },
+              "source_id": "zenodo",
+              "source_rank": 60,
+              "status": "ok",
+              "url": "https://records.example/zenodo",
+              "warnings": []
+            }
+          ],
+          "oa_candidates": [],
+          "pmcid": null,
+          "pmid": null,
+          "primary_provider": "zenodo",
+          "primary_source_id": "zenodo",
+          "provider_ids": {
+            "doi": "10.4242/zenodo",
+            "fixture_id": "zenodo-001"
+          },
+          "published_at": "2026-01-06",
+          "ranking_signals": {
+            "fingerprint": "doi:10.4242/zenodo",
+            "has_oa_candidate": false,
+            "identifier_strength": 6,
+            "primary_source_priority": 60,
+            "title_length": 20
+          },
+          "recommended_candidate_id": null,
+          "result_id": "discovery_result:6f28f346618e3eb33e1907e2",
+          "safe_metadata": {
+            "abstract": "Deterministic abstract from Zenodo.",
+            "adapter_version": "zenodo:research-discovery-router-v1",
+            "authors": [
+              "Zenodo Author"
+            ],
+            "discovery_mode": "api",
+            "doi": "10.4242/zenodo",
+            "fixture_label": "zenodo-legacy-record",
+            "provider": "zenodo",
+            "provider_ids": {
+              "fixture_id": "zenodo-001"
+            },
+            "published_at": "2026-01-06",
+            "source_category": "repositories",
+            "source_id": "zenodo",
+            "source_priority": 60,
+            "title": "Zenodo Legacy Result"
+          },
+          "source_category": "repositories",
+          "title": "Zenodo Legacy Result",
+          "updated_at": null,
+          "warnings": []
+        },
+        {
+          "abstract": "Deterministic abstract from Figshare.",
+          "adapter_version": "figshare:research-discovery-router-v1",
+          "arxiv_id": null,
+          "authors": [
+            "Figshare Author"
+          ],
+          "canonical_url": "https://records.example/figshare",
+          "catalog_version": "research-discovery-v1",
+          "dedupe_confidence": 1.0,
+          "discovery_mode": "api",
+          "doi": "10.4242/figshare",
+          "fingerprint": "doi:10.4242/figshare",
+          "ingest_eligible": false,
+          "merged_provenance": [
+            {
+              "adapter_version": "figshare:research-discovery-router-v1",
+              "discovery_mode": "api",
+              "provider": "figshare",
+              "provider_ids": {
+                "doi": "10.4242/figshare",
+                "fixture_id": "figshare-001"
+              },
+              "safe_metadata": {
+                "abstract": "Deterministic abstract from Figshare.",
+                "adapter_version": "figshare:research-discovery-router-v1",
+                "authors": [
+                  "Figshare Author"
+                ],
+                "discovery_mode": "api",
+                "doi": "10.4242/figshare",
+                "fixture_label": "figshare-legacy-record",
+                "provider": "figshare",
+                "provider_ids": {
+                  "fixture_id": "figshare-001"
+                },
+                "published_at": "2026-01-07",
+                "source_category": "repositories",
+                "source_id": "figshare",
+                "source_priority": 70,
+                "title": "Figshare Legacy Result"
+              },
+              "source_id": "figshare",
+              "source_rank": 70,
+              "status": "ok",
+              "url": "https://records.example/figshare",
+              "warnings": []
+            }
+          ],
+          "oa_candidates": [],
+          "pmcid": null,
+          "pmid": null,
+          "primary_provider": "figshare",
+          "primary_source_id": "figshare",
+          "provider_ids": {
+            "doi": "10.4242/figshare",
+            "fixture_id": "figshare-001"
+          },
+          "published_at": "2026-01-07",
+          "ranking_signals": {
+            "fingerprint": "doi:10.4242/figshare",
+            "has_oa_candidate": false,
+            "identifier_strength": 6,
+            "primary_source_priority": 70,
+            "title_length": 22
+          },
+          "recommended_candidate_id": null,
+          "result_id": "discovery_result:16151b1d968e723dcb6cdfea",
+          "safe_metadata": {
+            "abstract": "Deterministic abstract from Figshare.",
+            "adapter_version": "figshare:research-discovery-router-v1",
+            "authors": [
+              "Figshare Author"
+            ],
+            "discovery_mode": "api",
+            "doi": "10.4242/figshare",
+            "fixture_label": "figshare-legacy-record",
+            "provider": "figshare",
+            "provider_ids": {
+              "fixture_id": "figshare-001"
+            },
+            "published_at": "2026-01-07",
+            "source_category": "repositories",
+            "source_id": "figshare",
+            "source_priority": 70,
+            "title": "Figshare Legacy Result"
+          },
+          "source_category": "repositories",
+          "title": "Figshare Legacy Result",
+          "updated_at": null,
+          "warnings": []
+        },
+        {
+          "abstract": "Deterministic abstract from Osf.",
+          "adapter_version": "osf:research-discovery-router-v1",
+          "arxiv_id": null,
+          "authors": [
+            "Osf Author"
+          ],
+          "canonical_url": "https://records.example/osf",
+          "catalog_version": "research-discovery-v1",
+          "dedupe_confidence": 1.0,
+          "discovery_mode": "api",
+          "doi": "10.4242/osf",
+          "fingerprint": "doi:10.4242/osf",
+          "ingest_eligible": false,
+          "merged_provenance": [
+            {
+              "adapter_version": "osf:research-discovery-router-v1",
+              "discovery_mode": "api",
+              "provider": "osf",
+              "provider_ids": {
+                "doi": "10.4242/osf",
+                "fixture_id": "osf-001"
+              },
+              "safe_metadata": {
+                "abstract": "Deterministic abstract from Osf.",
+                "adapter_version": "osf:research-discovery-router-v1",
+                "authors": [
+                  "Osf Author"
+                ],
+                "discovery_mode": "api",
+                "doi": "10.4242/osf",
+                "fixture_label": "osf-legacy-record",
+                "provider": "osf",
+                "provider_ids": {
+                  "fixture_id": "osf-001"
+                },
+                "published_at": "2026-01-08",
+                "source_category": "repositories",
+                "source_id": "osf",
+                "source_priority": 80,
+                "title": "Osf Legacy Result"
+              },
+              "source_id": "osf",
+              "source_rank": 80,
+              "status": "ok",
+              "url": "https://records.example/osf",
+              "warnings": []
+            }
+          ],
+          "oa_candidates": [],
+          "pmcid": null,
+          "pmid": null,
+          "primary_provider": "osf",
+          "primary_source_id": "osf",
+          "provider_ids": {
+            "doi": "10.4242/osf",
+            "fixture_id": "osf-001"
+          },
+          "published_at": "2026-01-08",
+          "ranking_signals": {
+            "fingerprint": "doi:10.4242/osf",
+            "has_oa_candidate": false,
+            "identifier_strength": 6,
+            "primary_source_priority": 80,
+            "title_length": 17
+          },
+          "recommended_candidate_id": null,
+          "result_id": "discovery_result:e62bee09f9150ddcda635c7c",
+          "safe_metadata": {
+            "abstract": "Deterministic abstract from Osf.",
+            "adapter_version": "osf:research-discovery-router-v1",
+            "authors": [
+              "Osf Author"
+            ],
+            "discovery_mode": "api",
+            "doi": "10.4242/osf",
+            "fixture_label": "osf-legacy-record",
+            "provider": "osf",
+            "provider_ids": {
+              "fixture_id": "osf-001"
+            },
+            "published_at": "2026-01-08",
+            "source_category": "repositories",
+            "source_id": "osf",
+            "source_priority": 80,
+            "title": "Osf Legacy Result"
+          },
+          "source_category": "repositories",
+          "title": "Osf Legacy Result",
+          "updated_at": null,
+          "warnings": []
+        }
+      ],
+      "source_statuses": [
+        {
+          "message": null,
+          "provider": "openalex",
+          "result_count": 1,
+          "source_id": "openalex",
+          "status": "ok",
+          "warnings": []
+        },
+        {
+          "message": null,
+          "provider": "semantic_scholar",
+          "result_count": 1,
+          "source_id": "semantic_scholar",
+          "status": "ok",
+          "warnings": []
+        },
+        {
+          "message": null,
+          "provider": "crossref",
+          "result_count": 1,
+          "source_id": "crossref",
+          "status": "ok",
+          "warnings": []
+        },
+        {
+          "message": null,
+          "provider": "arxiv",
+          "result_count": 1,
+          "source_id": "arxiv",
+          "status": "ok",
+          "warnings": []
+        },
+        {
+          "message": null,
+          "provider": "pubmed",
+          "result_count": 1,
+          "source_id": "pubmed",
+          "status": "ok",
+          "warnings": []
+        },
+        {
+          "message": null,
+          "provider": "zenodo",
+          "result_count": 1,
+          "source_id": "zenodo",
+          "status": "ok",
+          "warnings": []
+        },
+        {
+          "message": null,
+          "provider": "figshare",
+          "result_count": 1,
+          "source_id": "figshare",
+          "status": "ok",
+          "warnings": []
+        },
+        {
+          "message": null,
+          "provider": "osf",
+          "result_count": 1,
+          "source_id": "osf",
+          "status": "ok",
+          "warnings": []
+        }
+      ],
+      "warnings": []
+    }
+  },
+  "catalog_version": "research-discovery-v1",
+  "contract_version": "research-discovery-legacy-execution-v1",
+  "source_priority": [
+    {
+      "priority": 10,
+      "source_id": "openalex"
+    },
+    {
+      "priority": 20,
+      "source_id": "semantic_scholar"
+    },
+    {
+      "priority": 30,
+      "source_id": "crossref"
+    },
+    {
+      "priority": 40,
+      "source_id": "arxiv"
+    },
+    {
+      "priority": 50,
+      "source_id": "pubmed"
+    },
+    {
+      "priority": 60,
+      "source_id": "zenodo"
+    },
+    {
+      "priority": 70,
+      "source_id": "figshare"
+    },
+    {
+      "priority": 80,
+      "source_id": "osf"
+    }
+  ]
+}
