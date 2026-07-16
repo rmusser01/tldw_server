@@ -87,7 +87,6 @@ vi.mock("wxt/browser", () => ({
       removeAll: vi.fn(),
       onClicked: { addListener: vi.fn() }
     },
-    commands: { onCommand: { addListener: vi.fn() } },
     i18n: { getMessage: (key: string) => key }
   }
 }))
@@ -185,6 +184,13 @@ describe("background effective extension auth", () => {
     } else {
       delete (globalThis as any).window
     }
+  })
+
+  it("registers runtime messaging when the optional commands API is unavailable", async () => {
+    await expect(sendRuntimeMessage({ type: "tldw:ping" })).resolves.toMatchObject({
+      ok: true,
+      pong: true
+    })
   })
 
   it("authenticates ordinary worker requests with session credentials", async () => {

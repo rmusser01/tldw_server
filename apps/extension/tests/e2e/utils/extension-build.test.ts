@@ -18,7 +18,7 @@ const setupBuiltExtensionLaunchTest = async () => {
     waitForTimeout: vi.fn().mockResolvedValue(undefined),
     goto: vi.fn().mockResolvedValue(undefined),
     waitForFunction: vi.fn().mockResolvedValue(undefined),
-    evaluate: vi.fn().mockResolvedValue(undefined),
+    evaluate: vi.fn().mockResolvedValue({ ok: true }),
   }
   const context = {
     serviceWorkers: vi.fn(() => []),
@@ -345,6 +345,22 @@ describe("normalizeBuiltExtensionSeedConfig", () => {
 
       expect(context.close).toHaveBeenCalledTimes(1)
       expect(page.goto).not.toHaveBeenCalled()
+    } finally {
+      cleanup()
+    }
+  })
+
+  it("closes the persistent context when the background worker is not ready", async () => {
+    const { cleanup, context, launchWithBuiltExtension, page } =
+      await setupBuiltExtensionLaunchTest()
+    page.evaluate.mockResolvedValueOnce(null)
+
+    try {
+      await expect(launchWithBuiltExtension()).rejects.toThrow(
+        "Extension background worker did not become ready",
+      )
+
+      expect(context.close).toHaveBeenCalledTimes(1)
     } finally {
       cleanup()
     }

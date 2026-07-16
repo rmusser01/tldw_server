@@ -122,6 +122,36 @@ async function waitForStorageSeed(page: any) {
   )
 }
 
+async function waitForBackgroundReady(page: any) {
+  const response = await page.evaluate(
+    (timeoutMs: number) =>
+      new Promise<unknown>((resolve) => {
+        const timeout = setTimeout(() => resolve(null), timeoutMs)
+        try {
+          chrome.runtime.sendMessage(
+            { type: "tldw:diagnostics" },
+            (value) => {
+              clearTimeout(timeout)
+              resolve(chrome.runtime.lastError ? null : value)
+            },
+          )
+        } catch {
+          clearTimeout(timeout)
+          resolve(null)
+        }
+      }),
+    5_000,
+  )
+
+  if (
+    !response ||
+    typeof response !== "object" ||
+    (response as { ok?: unknown }).ok !== true
+  ) {
+    throw new Error("Extension background worker did not become ready within 5000ms")
+  }
+}
+
 function makeTempProfileDirs(profileRoot?: string) {
   const root = profileRoot === undefined
     ? path.resolve('tmp-playwright-profile')
@@ -566,6 +596,7 @@ export async function launchWithBuiltExtension(
   await prepareOptionsPage?.({ context, page })
   await page.goto(resolveExtensionPageUrl(optionsUrl, optionsTarget))
   await waitForStorageSeed(page)
+  await waitForBackgroundReady(page)
 
   // When seeding config, proactively hydrate the connection store so tests do
   // not race first-run onboarding checks on initial mount.

@@ -3792,7 +3792,7 @@ export default defineBackground({
       }
     });
 
-    browser.commands.onCommand.addListener((command) => {
+    browser.commands?.onCommand?.addListener((command) => {
       switch (command) {
         case "execute_side_panel":
           browser.tabs
