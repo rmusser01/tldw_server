@@ -300,7 +300,7 @@ A second compatibility review restored the pre-Stage-3 client factory transport 
 
 **Tests:** Setup route/validation/readiness plus provider readiness/catalog/error mapping.
 
-**Status:** In Progress
+**Status:** Complete
 
 ### Task 4.1: Write failing setup and readiness tests
 
@@ -359,7 +359,7 @@ Verification used the repository virtual environment at `../../.venv` from the i
 - [x] Treat HTTP 429 discovery responses as transient server errors and never cache them.
 - [x] Re-run Stage 4, Stages 1–3, Ruff, compilation, Bandit, and diff checks; leave Stage 4 in progress until review approval.
 
-Correction TDD evidence: the focused RED run produced 9 expected failures and 77 passes; the focused GREEN run passed 86 tests. The corrected Stage 4 suite passed 228 tests, and the Stages 1–3 compatibility union passed 264 tests. Ruff, Python compilation, Bandit (0 findings, 0 errors), and `git diff --check` passed. Stage 4 remains `In Progress` pending post-correction review approval.
+Correction TDD evidence: the focused RED run produced 9 expected failures and 77 passes; the focused GREEN run passed 86 tests. The corrected Stage 4 suite passed 228 tests, and the Stages 1–3 compatibility union passed 264 tests. Ruff, Python compilation, Bandit (0 findings, 0 errors), and `git diff --check` passed. Independent post-correction specification and quality reviews approved the authorization ordering, one-shot discovery, cache policy, diagnostic readiness matrix, and exact metadata contract.
 
 ---
 
