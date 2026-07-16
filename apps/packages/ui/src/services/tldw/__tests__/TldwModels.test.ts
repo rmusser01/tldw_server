@@ -625,6 +625,164 @@ describe("TldwModelsService caching", () => {
     expect(remoteInvalidations).toHaveLength(1)
   })
 
+  it("ignores a delayed first-clear echo after a second clear owns the cache", async () => {
+    const firstTombstoneStarted = deferred<void>()
+    const releaseFirstTombstone = deferred<void>()
+    const fresh = deferred<Array<Record<string, unknown>>>()
+    mocks.getModels
+      .mockResolvedValueOnce([
+        { id: "old-model", name: "Old Model", provider: "llama", type: "chat" }
+      ])
+      .mockImplementationOnce(() => fresh.promise)
+      .mockResolvedValueOnce([
+        { id: "unexpected-model", name: "Unexpected", provider: "llama", type: "chat" }
+      ])
+
+    const { TldwModelsService } = await importService()
+    const service = new TldwModelsService()
+    const invalidations: string[] = []
+    service.subscribeInvalidation((token) => invalidations.push(token))
+    await service.getModels(true)
+
+    let tombstoneCount = 0
+    mocks.storageSet.mockImplementation(async (_key, value) => {
+      const record = value as {
+        models?: unknown
+        invalidationToken?: unknown
+      }
+      if (
+        record.models === null &&
+        typeof record.invalidationToken === "string"
+      ) {
+        tombstoneCount += 1
+        if (tombstoneCount === 1) {
+          firstTombstoneStarted.resolve(undefined)
+          await releaseFirstTombstone.promise
+        }
+      }
+      const oldValue = mocks.storageValue
+      mocks.storageValue = value
+      mocks.storageWatchers.forEach((callback) =>
+        callback({ oldValue, newValue: value })
+      )
+    })
+
+    const clearA = service.clearCache()
+    await firstTombstoneStarted.promise
+    const tokenA = invalidations[0]
+
+    const clearB = service.clearCache()
+    const tokenB = invalidations[1]
+    expect(tokenA).not.toBe(tokenB)
+
+    const requestB = service.getModels(true)
+    await vi.waitFor(() => expect(mocks.getModels).toHaveBeenCalledTimes(2))
+
+    releaseFirstTombstone.resolve(undefined)
+    await Promise.all([clearA, clearB])
+
+    expect(invalidations).toEqual([tokenA, tokenB])
+    const followerB = service.getModels(true)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(mocks.getModels).toHaveBeenCalledTimes(2)
+
+    fresh.resolve([
+      { id: "fresh-model", name: "Fresh Model", provider: "llama", type: "chat" }
+    ])
+    await expect(Promise.all([requestB, followerB])).resolves.toEqual([
+      [expect.objectContaining({ id: "fresh-model" })],
+      [expect.objectContaining({ id: "fresh-model" })]
+    ])
+
+    const writes = mocks.storageSet.mock.calls.map((call) => call[1])
+    const tombstones = writes.filter((value) => {
+      const record = value as {
+        models?: unknown
+        invalidationToken?: unknown
+      }
+      return (
+        record.models === null &&
+        typeof record.invalidationToken === "string"
+      )
+    })
+    const freshIndex = writes.findIndex((value) => {
+      const record = value as { models?: unknown }
+      return (
+        Array.isArray(record.models) &&
+        record.models.some(
+          (model) =>
+            typeof model === "object" &&
+            model !== null &&
+            "id" in model &&
+            model.id === "fresh-model"
+        )
+      )
+    })
+    expect(tombstones).toHaveLength(2)
+    expect(
+      (tombstones[1] as { invalidationToken?: unknown }).invalidationToken
+    ).toBe(tokenB)
+    expect(freshIndex).toBeGreaterThan(writes.indexOf(tombstones[1]))
+    await expect(service.getModels()).resolves.toEqual([
+      expect.objectContaining({ id: "fresh-model" })
+    ])
+    expect(mocks.getModels).toHaveBeenCalledTimes(2)
+  })
+
+  it("skips stale persistent hydration when cleared before the first read", async () => {
+    const tombstoneStarted = deferred<void>()
+    const releaseTombstone = deferred<void>()
+    mocks.storageValue = {
+      version: 4,
+      timestamp: Date.now(),
+      scope: "http://127.0.0.1:8000|single-user|key|none",
+      models: [
+        { id: "stale-model", name: "Stale Model", provider: "llama", type: "chat" }
+      ]
+    }
+    mocks.getModels.mockResolvedValueOnce([
+      { id: "fresh-model", name: "Fresh Model", provider: "llama", type: "chat" }
+    ])
+    mocks.storageSet.mockImplementation(async (_key, value) => {
+      const record = value as {
+        models?: unknown
+        invalidationToken?: unknown
+      }
+      if (
+        record.models === null &&
+        typeof record.invalidationToken === "string"
+      ) {
+        tombstoneStarted.resolve(undefined)
+        await releaseTombstone.promise
+      }
+      const oldValue = mocks.storageValue
+      mocks.storageValue = value
+      mocks.storageWatchers.forEach((callback) =>
+        callback({ oldValue, newValue: value })
+      )
+    })
+
+    const { TldwModelsService } = await importService()
+    const service = new TldwModelsService()
+    const clear = service.clearCache()
+    await tombstoneStarted.promise
+
+    try {
+      const models = service.getModels()
+      await vi.waitFor(() => expect(mocks.getModels).toHaveBeenCalledTimes(1))
+      expect(mocks.storageGet).not.toHaveBeenCalled()
+
+      releaseTombstone.resolve(undefined)
+      await expect(models).resolves.toEqual([
+        expect.objectContaining({ id: "fresh-model" })
+      ])
+      await clear
+    } finally {
+      releaseTombstone.resolve(undefined)
+      await clear
+    }
+  })
+
   it("invalidates an extension-like background context without window access", async () => {
     mocks.getModels
       .mockResolvedValueOnce([

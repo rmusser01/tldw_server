@@ -125,6 +125,9 @@ describe("fetchChatModels", () => {
       .mockResolvedValueOnce([
         { id: "llama/newer", name: "Newer", provider: "llama", type: "chat" }
       ])
+      .mockResolvedValueOnce([
+        { id: "llama/unexpected", name: "Unexpected", provider: "llama", type: "chat" }
+      ])
 
     const { fetchChatModels } = await importService()
     expect(mocks.subscribeInvalidation).toHaveBeenCalledTimes(1)
@@ -142,6 +145,12 @@ describe("fetchChatModels", () => {
     expect(mocks.getChatModels).toHaveBeenCalledTimes(2)
 
     mocks.invalidationListener?.("next-token")
+    await expect(fetchChatModels({ returnEmpty: true })).resolves.toEqual([
+      expect.objectContaining({ model: "tldw:llama/newer" })
+    ])
+    expect(mocks.getChatModels).toHaveBeenCalledTimes(3)
+
+    mocks.invalidationListener?.("shared-token")
     await expect(fetchChatModels({ returnEmpty: true })).resolves.toEqual([
       expect.objectContaining({ model: "tldw:llama/newer" })
     ])

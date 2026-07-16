@@ -4,7 +4,7 @@ title: Allow trusted configured local LLM endpoints through scoped egress policy
 status: In Progress
 assignee: []
 created_date: '2026-07-15 19:34'
-updated_date: '2026-07-16 01:26'
+updated_date: '2026-07-16 01:40'
 labels:
   - browser-extension
 dependencies: []
@@ -70,6 +70,8 @@ Stage 5 touched paths: apps/packages/ui/src/services/tldw/TldwModels.ts; apps/pa
 2026-07-15 Stage 5 cross-context cache correction: strict RED failed 5 tests with 30 passing under both WebUI and extension Vitest configurations. The existing tldwModelsCache record now carries a unique tombstone token; source, other WebUI tabs, extension sidepanel, and no-window/background contexts apply each token once through the existing Plasmo storage watch, invalidate the inner cache, and notify the outer cache subscription. Source applies synchronously and ignores its watch echo. Serialized writes preserve a fresh post-clear model record after the tombstone; startup tombstones never hydrate models. Window config events and stored-config changes now request this single tokenized path. Focused GREEN passed 35/35; complete shared suites passed 51/51 in both configs. Pinned ESLint passed with 0 errors and 11 pre-existing warnings; full frontend TypeScript passed with incremental output disabled. Backend is unchanged, so prior 492-test and zero-finding Bandit evidence remains valid. Stage 5 and TASK-12972 remain In Progress pending re-review.
 
 2026-07-15 verification evidence correction: the focused cache suite passed 35/35. The exact planned four-file complete shared command from Stage 5 Task 5.1 passed 50/50 under the WebUI configuration and 50/50 under the extension configuration; the preceding 51/51 count included one additional chat-model test outside that planned command. No implementation or test result changed. TASK-12972 and Stage 5 remain In Progress.
+
+2026-07-15 final Stage 5 cache-race correction: strict focused RED failed 3 tests with 34 passing under both WebUI and extension configurations. A delayed clear-A echo after clear B replayed A and invalidated B ownership; clear-before-first-hydration returned a seeded stale record without reaching backend; and the outer cache independently accepted A/B/A replay. Inner seen tokens, locally pending tokens, and outer seen tokens now use bounded 64-entry insertion-order histories while lastAppliedInvalidationToken remains the active tombstone guard. A clear before hydration starts consumes the initial hydration slot; in-flight hydration retains the generation guard. Focused GREEN passed 37/37 in both configs. The exact planned four-file suites passed 52/52 WebUI and 52/52 extension. Full frontend TypeScript passed; pinned ESLint passed with 0 errors and 11 pre-existing warnings. Backend remains unchanged, so prior 492-test and zero-finding Bandit evidence remains valid. TASK-12972 and Stage 5 remain In Progress pending re-review.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

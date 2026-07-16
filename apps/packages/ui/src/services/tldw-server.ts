@@ -175,6 +175,7 @@ const mapTldwModelToUi = (model: any) => ({
 })
 
 const CHAT_MODELS_CACHE_TTL_MS = 60_000
+const CHAT_MODELS_INVALIDATION_HISTORY_LIMIT = 64
 let chatModelsCache: { value: any[]; expiresAt: number } | null = null
 let chatModelsInFlight: Promise<any[]> | null = null
 let chatModelsCacheGeneration = 0
@@ -262,9 +263,25 @@ export const clearChatModelsCache = () => {
 }
 
 let chatModelsLastInvalidationToken: string | null = null
+const chatModelsSeenInvalidationTokens = new Set<string>()
 tldwModels.subscribeInvalidation?.((token) => {
-  if (!token || token === chatModelsLastInvalidationToken) return
-  chatModelsLastInvalidationToken = token
+  const normalizedToken = token.trim()
+  if (
+    !normalizedToken ||
+    normalizedToken === chatModelsLastInvalidationToken ||
+    chatModelsSeenInvalidationTokens.has(normalizedToken)
+  ) {
+    return
+  }
+  chatModelsSeenInvalidationTokens.add(normalizedToken)
+  if (
+    chatModelsSeenInvalidationTokens.size >
+    CHAT_MODELS_INVALIDATION_HISTORY_LIMIT
+  ) {
+    const oldestToken = chatModelsSeenInvalidationTokens.values().next().value
+    if (oldestToken) chatModelsSeenInvalidationTokens.delete(oldestToken)
+  }
+  chatModelsLastInvalidationToken = normalizedToken
   clearChatModelsCache()
 })
 

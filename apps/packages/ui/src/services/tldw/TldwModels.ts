@@ -117,6 +117,7 @@ export class TldwModelsService {
   private readonly FORCE_REFRESH_COOLDOWN = 30 * 1000
   private readonly CACHE_KEY = "tldwModelsCache"
   private readonly CACHE_SCHEMA_VERSION = 4
+  private readonly INVALIDATION_TOKEN_HISTORY_LIMIT = 64
   private storage = createSafeStorage({ area: "local" })
   private storageLoaded = false
   private storageInitPromise: Promise<void> | null = null
@@ -125,6 +126,8 @@ export class TldwModelsService {
   private cacheScopeKey: string | null = null
   private invalidationGeneration = 0
   private lastAppliedInvalidationToken: string | null = null
+  private seenInvalidationTokens = new Set<string>()
+  private pendingLocalInvalidationTokens = new Set<string>()
   private invalidationListeners = new Set<InvalidationListener>()
 
   constructor() {
@@ -210,11 +213,13 @@ export class TldwModelsService {
         expectedGeneration !== this.invalidationGeneration ||
         token !== this.lastAppliedInvalidationToken
       ) {
+        this.pendingLocalInvalidationTokens.delete(token)
         return
       }
       try {
         await this.storage.set(this.CACHE_KEY, value)
       } catch {
+        this.pendingLocalInvalidationTokens.delete(token)
         // Best-effort persistence; ignore errors
       }
     })
@@ -240,21 +245,41 @@ export class TldwModelsService {
     ) {
       return false
     }
-    return this.applyInvalidationToken(record.invalidationToken)
+    const token = record.invalidationToken.trim()
+    const applied = this.applyInvalidationToken(token)
+    this.pendingLocalInvalidationTokens.delete(token)
+    return applied
   }
 
   private applyInvalidationToken(token: string): boolean {
     const normalizedToken = token.trim()
     if (
       !normalizedToken ||
-      normalizedToken === this.lastAppliedInvalidationToken
+      normalizedToken === this.lastAppliedInvalidationToken ||
+      this.seenInvalidationTokens.has(normalizedToken) ||
+      this.pendingLocalInvalidationTokens.has(normalizedToken)
     ) {
       return false
     }
+    this.rememberInvalidationToken(
+      this.seenInvalidationTokens,
+      normalizedToken
+    )
     this.lastAppliedInvalidationToken = normalizedToken
+    if (!this.storageLoaded && !this.storageInitPromise) {
+      this.storageLoaded = true
+    }
     this.invalidateCacheState()
     this.invalidationListeners.forEach((listener) => listener(normalizedToken))
     return true
+  }
+
+  private rememberInvalidationToken(tokens: Set<string>, token: string): void {
+    if (tokens.has(token)) return
+    tokens.add(token)
+    if (tokens.size <= this.INVALIDATION_TOKEN_HISTORY_LIMIT) return
+    const oldestToken = tokens.values().next().value
+    if (oldestToken) tokens.delete(oldestToken)
   }
 
   private createInvalidationToken(): string {
@@ -601,6 +626,10 @@ export class TldwModelsService {
   async clearCache(): Promise<void> {
     const token = this.createInvalidationToken()
     this.applyInvalidationToken(token)
+    this.rememberInvalidationToken(
+      this.pendingLocalInvalidationTokens,
+      token
+    )
     await this.persistInvalidationTombstone(
       token,
       this.invalidationGeneration
