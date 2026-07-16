@@ -579,6 +579,15 @@ class PromptsDatabase:
                     logging.debug("Rollback successful.")
                 except sqlite3.Error as rb_err:
                     logging.error(f"Rollback FAILED: {type(rb_err).__name__}", exc_info=False)
+                    if getattr(self._local, "conn", None) is conn:
+                        self._local.conn = None
+                    try:
+                        conn.close()
+                    except Exception as close_err:  # noqa: BLE001
+                        logging.error(f"Connection retirement FAILED: {type(close_err).__name__}", exc_info=False)
+                    finally:
+                        if getattr(self._local, "conn", None) is conn:
+                            self._local.conn = None
             raise
 
     def get_service_prompt_override(

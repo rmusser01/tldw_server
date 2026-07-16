@@ -104,6 +104,33 @@ class _CommitFailingConnection:
         raise sqlite3.OperationalError("PROMPT_BODY_MUST_NOT_APPEAR")
 
 
+class _CommitRollbackFailingConnection:
+    """Fail one commit and rollback, then delegate to the real connection."""
+
+    def __init__(self, conn: sqlite3.Connection):
+        self._conn = conn
+        self._fail_commit = True
+        self._fail_rollback = True
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+    def commit(self):
+        if self._fail_commit:
+            self._fail_commit = False
+            raise sqlite3.OperationalError(SENSITIVE_SQLITE_ERROR)
+        return self._conn.commit()
+
+    def rollback(self):
+        if self._fail_rollback:
+            self._fail_rollback = False
+            raise sqlite3.OperationalError(SENSITIVE_SQLITE_ERROR)
+        return self._conn.rollback()
+
+    def close(self):
+        return self._conn.close()
+
+
 class _BeginFailingConnection:
     """Fail transaction entry before any transaction body operation."""
 
@@ -594,6 +621,70 @@ def test_service_prompt_override_commit_failure_is_wrapped_and_rolled_back(
     assert "PROMPT_BODY_MUST_NOT_APPEAR" not in str(captured.value)
     assert all("PROMPT_BODY_MUST_NOT_APPEAR" not in str(message) for message in log_messages)
     assert memory_db.get_service_prompt_override(definition_id) == original
+
+
+@pytest.mark.parametrize(
+    ("operation", "safe_message"),
+    [
+        ("save", "Failed to save Service Prompt override."),
+        ("reset", "Failed to reset Service Prompt override."),
+    ],
+)
+def test_service_prompt_override_rollback_failure_retires_connection_and_discards_transaction(
+    file_db,
+    operation,
+    safe_message,
+):
+    definition_id = "chat.rag.answer"
+    original = file_db.save_service_prompt_override(
+        definition_id,
+        {"template": "Original {context} {question}"},
+        None,
+    )
+    raw_connection = file_db.get_connection()
+    failing_connection = _CommitRollbackFailingConnection(raw_connection)
+    file_db._local.conn = failing_connection
+
+    log_messages = []
+    sink_id = logger.add(log_messages.append, format="{message}")
+    try:
+        with pytest.raises(DatabaseError) as captured:
+            if operation == "save":
+                file_db.save_service_prompt_override(
+                    definition_id,
+                    {"template": "Rejected PROMPT_BODY_MUST_NOT_APPEAR"},
+                    original.revision,
+                )
+            else:
+                file_db.reset_service_prompt_override(definition_id, original.revision)
+    finally:
+        logger.remove(sink_id)
+
+    later_connection = file_db.get_connection()
+    later_connection.commit()
+    with sqlite3.connect(file_db.db_path) as observer:
+        stored = observer.execute(
+            """
+            SELECT parts_json, revision
+            FROM ServicePromptOverrides
+            WHERE definition_id = ?
+            """,
+            (definition_id,),
+        ).fetchone()
+
+    assert type(captured.value) is DatabaseError
+    assert str(captured.value) == safe_message
+    rendered_logs = "".join(str(message) for message in log_messages)
+    for sentinel in ("PROMPT_BODY_MUST_NOT_APPEAR", "DB_PATH_MUST_NOT_APPEAR"):
+        assert sentinel not in str(captured.value)
+        assert sentinel not in rendered_logs
+    assert "Rollback FAILED: OperationalError" in rendered_logs
+    assert stored == (original.parts_json, original.revision)
+    assert later_connection is not failing_connection
+    assert later_connection is not raw_connection
+    assert file_db._local.conn is later_connection
+    with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+        raw_connection.execute("SELECT 1")
 
 
 def test_initialization_empty_client_id():
