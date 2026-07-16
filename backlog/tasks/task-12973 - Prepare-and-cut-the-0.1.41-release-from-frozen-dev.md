@@ -77,6 +77,16 @@ Release resolutions preserve 0.1.41, 2026-07-16, historical 0.1.40 sections, str
 Combined merge resolution differs from first parent only by a six-line Vitest-hoisted test mock for the real transitive tldwModels.subscribeInvalidation dependency; it returns an unsubscribe callback and fixes a pre-existing release-head collection failure without changing production code.
 Independent merge spec and quality reviews approved. Verification at merge: strict MkDocs zero warning-level diagnostics; Docs/boundary 195 passed; CI contracts 40 passed; shard coverage new_uncovered=0; focused release 101 passed; backend conflict suites 73 passed; conflicted frontend suites 44 passed; broader Playground/model-invalidation frontend tests 22 passed; boundary/hygiene/parity/version/diff/Bandit application checks passed.
 Worktree clean. The corrected merge ancestry has not yet been pushed at note time; PR human-authored Change summary and six remote required gates remain pending.
+2026-07-16 pre-wait CI capacity evidence for PR #2745 at head 0a7e56b5ee66179f63edfde68ff225a56f80dc0a:
+- Repo sweep audit: /tmp/tldw-0.1.41-ci-focus-pre-wait.log. Normal cancellation wedged on 11 unrelated tldw_server runs; guarded force-cancel succeeded; rerun emitted PROOF with active_unrelated_runs=[] and 29 release runs.
+- Account sweep audit: /tmp/tldw-0.1.41-ci-focus-account-pre-wait.log. Today's Actions compute repositories were tldw_server, tldw_chatbook, and puzzle-attack. Normal cancellation of unrelated tldw_chatbook runs wedged; guarded force-cancel cleared them. ACCOUNT_PROOF emitted active_unrelated_runs=[] while preserving PR #2745 runs.
+
+2026-07-16 backend-required failure diagnosis and approved in-scope fix:
+- Failed run 29531588334 / job 87736407394 on exact release head. OpenAPI drift gate reported checked-in sha256 8dace04f... (1985 paths, 2892 schemas) versus current sha256 22324cf1... (1985 paths, 2890 schemas).
+- CI installed FastAPI 0.136.3, Pydantic 2.13.4, Pydantic Core 2.46.4, Pydantic Settings 2.14.2, and Starlette 1.3.1; the older local release venv used Pydantic 2.11.7 and Starlette 1.2.1.
+- Reproduced CI hash exactly in an isolated /tmp dependency environment. Contract comparison found no path changes. Pydantic unified identical ChatWorkflowTemplateStep input/output components and their draft wrappers; five common schemas only retargeted $ref values.
+- Updated apps/tldw-frontend/lib/api/openapi.fingerprint.json to schema_count=2890 and sha256=22324cf1f3e80b7bdf7eec1807e85de4ff9eab1602173fcc8a92e880ca1d621c.
+- Reproduced CI-version drift check passed. openapi-typescript 7.13.0 generated both old/new views successfully; the ignored generated diff only reflected unified component names/references.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
