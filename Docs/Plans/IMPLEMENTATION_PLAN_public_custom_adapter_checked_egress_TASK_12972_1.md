@@ -361,27 +361,27 @@ git commit -m "docs: finalize public adapter egress migration (TASK-12972.1)"
 
 **Tests:** Re-check clean worktree and PR head after push; do not wait on CI if the requester says to ignore it.
 
-**Status:** In Progress
+**Status:** Complete
 
 ### Task 4.1: Push and create the pull request
 
-- [ ] **Step 1: Verify branch state**
+- [x] **Step 1: Verify branch state**
 
 ```bash
 git status --short --branch
 git log --oneline origin/dev..HEAD
 ```
 
-- [ ] **Step 2: Push the branch**
+- [x] **Step 2: Push the branch**
 
 ```bash
 git push -u origin codex/public-custom-egress
 ```
 
-- [ ] **Step 3: Open a ready PR against `dev`**
+- [x] **Step 3: Open a ready PR against `dev`**
 
 Summarize the checked transport migration and local verification. Leave the human-authored `Change summary` section for the requester; the PR is not merge-ready until that policy gate is satisfied.
 
-- [ ] **Step 4: Address review feedback**
+- [x] **Step 4: Address review feedback**
 
 Verify each comment against current code, fix actionable findings test-first, reply with evidence, resolve addressed threads, and keep the PR ready unless the requester says otherwise.
