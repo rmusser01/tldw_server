@@ -866,6 +866,27 @@ def _gateway_scope_token(*parts: Any) -> str | None:
     return hashlib.sha256(material.encode("utf-8"), usedforsecurity=True).hexdigest()
 
 
+def _gateway_user_credential_revision(row: dict[str, Any]) -> str | None:
+    """Return a usage-stable, secret-safe revision for one encrypted credential.
+
+    Explicit credential revisions take precedence. Otherwise the stored
+    ciphertext is immediately reduced to a one-way fingerprint; neither the
+    ciphertext nor its fingerprint is logged or emitted.
+    """
+    for field_name in ("revision", "version"):
+        value = row.get(field_name)
+        if value is not None and str(value).strip():
+            return f"{field_name}:{value}"
+
+    ciphertext = row.get("encrypted_blob")
+    if not isinstance(ciphertext, str) or not ciphertext:
+        return None
+    return hashlib.sha256(
+        ciphertext.encode("utf-8"),
+        usedforsecurity=True,
+    ).hexdigest()
+
+
 def _unavailable_gateway_result(provider: str, *, allowlisted: bool) -> ResolvedByokCredentials:
     return ResolvedByokCredentials(
         provider=provider,
@@ -2339,11 +2360,7 @@ async def resolve_gateway_byok_credentials(
                 api_key = _legacy_payload_api_key(payload) or _v2_payload_api_key(payload)
             scope_token = None
             if api_key:
-                revision = (
-                    user_row.get("revision")
-                    or user_row.get("version")
-                    or user_row.get("updated_at")
-                )
+                revision = _gateway_user_credential_revision(user_row)
                 scope_token = _gateway_scope_token(
                     provider_norm,
                     user_row.get("id"),

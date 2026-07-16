@@ -8,7 +8,7 @@ import hashlib
 import json
 import secrets
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from datetime import datetime, timedelta, timezone
 from typing import Any, NoReturn
 from urllib.parse import urlencode
@@ -97,23 +97,37 @@ _OPENAI_SOURCE_OAUTH = "oauth"
 _OPENAI_CREDENTIAL_VERSION = 2
 _OPENAI_DEFAULT_OAUTH_STATE_TTL_MINUTES = 10
 _TTS_GATEWAY_VERIFICATION_METADATA_KEY = "tts_gateway_verification_status"
-_TTS_GATEWAY_FORBIDDEN_METADATA_KEYS = frozenset(
+_TTS_GATEWAY_FORBIDDEN_METADATA_ALIASES = frozenset(
     {
-        "api_key",
+        "accesstoken",
+        "apiendpoint",
+        "apikey",
+        "apibaseuri",
+        "apibaseurl",
+        "apiuri",
+        "apiurl",
         "auth",
-        "auth_scheme",
+        "authheaders",
+        "authscheme",
         "authentication",
         "authorization",
-        "base_url",
+        "baseuri",
+        "baseurl",
         "bearer",
         "credential",
         "credentials",
         "endpoint",
+        "endpointuri",
+        "endpointurl",
         "headers",
         "host",
+        "hostname",
+        "httpheaders",
         "password",
+        "requestheaders",
         "secret",
         "token",
+        "uri",
         "url",
     }
 )
@@ -373,16 +387,28 @@ def _row_metadata(row: dict[str, Any] | None) -> dict[str, Any] | None:
 
 
 def _metadata_contains_gateway_authority(value: Any) -> bool:
-    if isinstance(value, dict):
+    if isinstance(value, Mapping):
         for key, child in value.items():
-            normalized_key = str(key).strip().casefold().replace("-", "_")
-            if normalized_key in _TTS_GATEWAY_FORBIDDEN_METADATA_KEYS:
+            canonical_key = "".join(
+                character
+                for character in str(key).casefold()
+                if character.isalnum()
+            )
+            if canonical_key in _TTS_GATEWAY_FORBIDDEN_METADATA_ALIASES:
                 return True
             if _metadata_contains_gateway_authority(child):
                 return True
     elif isinstance(value, (list, tuple)):
         return any(_metadata_contains_gateway_authority(item) for item in value)
     return False
+
+
+def _is_named_user_key_gateway(provider: str, gateway_spec: Any | None) -> bool:
+    return (
+        provider.startswith("gateway:")
+        and gateway_spec is not None
+        and bool(gateway_spec.allow_user_api_key)
+    )
 
 
 def _validate_gateway_metadata(provider: str, metadata: dict[str, Any] | None) -> None:
@@ -902,7 +928,7 @@ async def upsert_user_provider_key(
         )
 
     verification_status: str | None = None
-    if gateway_spec is not None and bool(gateway_spec.allow_user_api_key):
+    if _is_named_user_key_gateway(provider_norm, gateway_spec):
         verification_status = await probe_gateway_credentials(
             spec=gateway_spec,
             api_key=api_key,
@@ -1217,7 +1243,7 @@ async def test_user_provider_key(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Key not found")
 
     verification_status: str | None = None
-    if gateway_spec is not None and bool(gateway_spec.allow_user_api_key):
+    if _is_named_user_key_gateway(provider_norm, gateway_spec):
         verification_status = await probe_gateway_credentials(
             spec=gateway_spec,
             api_key=api_key,

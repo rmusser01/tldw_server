@@ -1461,6 +1461,9 @@ async def test_gateway_scope_changes_on_rotation_and_is_distinct_between_records
         user_id=2,
         gateway_spec=_gateway_spec(),
     )
+    rows[1]["encrypted_blob"] = _encrypted_row(
+        build_secret_payload("rotated-key")
+    )["encrypted_blob"]
     rows[1]["updated_at"] = "2026-07-16T12:01:00+00:00"
     rotated = await byok_runtime.resolve_gateway_byok_credentials(
         "gateway:voice-lab",
@@ -1472,6 +1475,67 @@ async def test_gateway_scope_changes_on_rotation_and_is_distinct_between_records
     assert first.credential_scope_token != rotated.credential_scope_token
     assert "101" not in first.credential_scope_token
     assert "202" not in other_user.credential_scope_token
+
+
+@pytest.mark.asyncio
+async def test_gateway_scope_ignores_usage_timestamps_but_changes_with_ciphertext(
+    monkeypatch,
+    gateway_byok_encryption,
+):
+    from tldw_Server_API.app.core.AuthNZ import byok_runtime
+
+    row = {
+        **_encrypted_row(build_secret_payload("first-key")),
+        "id": 707,
+        "updated_at": "2026-07-16T12:00:00+00:00",
+        "last_used_at": None,
+    }
+
+    class _FakeUserRepo:
+        async def fetch_secret_for_user(self, _user_id: int, _provider: str):
+            return row
+
+        async def touch_last_used(self, _user_id: int, _provider: str, used_at):
+            row["last_used_at"] = used_at.isoformat()
+            row["updated_at"] = used_at.isoformat()
+
+    repo = _FakeUserRepo()
+
+    async def _fake_get_user_repo():
+        return repo
+
+    monkeypatch.setattr(byok_runtime, "_get_user_repo", _fake_get_user_repo)
+    first = await byok_runtime.resolve_gateway_byok_credentials(
+        "gateway:voice-lab",
+        user_id=44,
+        gateway_spec=_gateway_spec(),
+    )
+    await repo.touch_last_used(
+        44,
+        "gateway:voice-lab",
+        datetime.now(timezone.utc),
+    )
+    after_touch = await byok_runtime.resolve_gateway_byok_credentials(
+        "gateway:voice-lab",
+        user_id=44,
+        gateway_spec=_gateway_spec(),
+    )
+
+    row["encrypted_blob"] = _encrypted_row(build_secret_payload("rotated-key"))[
+        "encrypted_blob"
+    ]
+    row["updated_at"] = "2026-07-16T12:05:00+00:00"
+    after_rotation = await byok_runtime.resolve_gateway_byok_credentials(
+        "gateway:voice-lab",
+        user_id=44,
+        gateway_spec=_gateway_spec(),
+    )
+
+    assert first.credential_scope_token == after_touch.credential_scope_token
+    assert first.credential_scope_token != after_rotation.credential_scope_token
+    assert "first-key" not in first.credential_scope_token
+    assert "rotated-key" not in after_rotation.credential_scope_token
+    assert "44" not in first.credential_scope_token
 
 
 @pytest.mark.asyncio
