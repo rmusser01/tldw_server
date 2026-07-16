@@ -37,7 +37,7 @@
 - Modify: `tldw_Server_API/tests/LLM_Calls/test_openai_compatible_provider_adapters.py:1-196`
 - Test: `tldw_Server_API/tests/LLM_Calls/test_openai_compatible_provider_adapters.py`
 
-- [ ] **Step 1: Replace the fake-client seam with checked-hook capture**
+- [x] **Step 1: Replace the fake-client seam with checked-hook capture**
 
 Keep `_FakeResp` as the response and stream context. Remove `_FakeClient` after no test needs it. Add one deliberate legacy guard that can be installed with `raising=False` during RED/GREEN:
 
@@ -46,7 +46,7 @@ def _forbid_legacy_factory(*_args, **_kwargs):
     pytest.fail("public provider used the legacy client factory")
 ```
 
-- [ ] **Step 2: Rewrite the non-streaming provider table**
+- [x] **Step 2: Rewrite the non-streaming provider table**
 
 Parameterize Novita, Poe, and Together with their existing environment variables and URL suffixes. Inject `adapter.http_fetcher`, install `_forbid_legacy_factory`, call `chat`, and assert:
 
@@ -60,7 +60,7 @@ assert captured["json"]["model"] == "test-model"
 assert captured["response_closed"] is True
 ```
 
-- [ ] **Step 3: Rewrite the streaming provider table**
+- [x] **Step 3: Rewrite the streaming provider table**
 
 Inject `adapter.http_streamer`, install `_forbid_legacy_factory`, consume `stream`, and assert the existing URL, payload, timeout, SSE, single-`[DONE]`, and context-cleanup contracts plus:
 
@@ -71,7 +71,7 @@ assert captured["response_entered"] is True
 assert captured["response_exited"] is True
 ```
 
-- [ ] **Step 4: Add async coverage for all three subclasses**
+- [x] **Step 4: Add async coverage for all three subclasses**
 
 Use `@pytest.mark.asyncio` and the same injected checked hooks:
 
@@ -85,7 +85,7 @@ assert [call[0] for call in calls] == ["chat", "stream"]
 assert all(call[1]["configured_endpoint"] is None for call in calls)
 ```
 
-- [ ] **Step 5: Run RED and verify the failure reason**
+- [x] **Step 5: Run RED and verify the failure reason**
 
 Run:
 
@@ -104,7 +104,7 @@ Expected: FAIL because Novita, Poe, and Together reach `_forbid_legacy_factory` 
 - Modify: `tldw_Server_API/tests/LLM_Adapters/unit/test_custom_openai_native_http.py:307-387`
 - Test: `tldw_Server_API/tests/LLM_Adapters/unit/test_custom_openai_native_http.py`
 
-- [ ] **Step 1: Replace the old public transport-boundary assertion**
+- [x] **Step 1: Replace the old public transport-boundary assertion**
 
 Rename `test_public_custom_subclasses_never_use_configured_local_transport` to describe checked ordinary egress. Inject a capturing `http_fetcher`, install a failing legacy factory with `raising=False`, and pass forged request fields:
 
@@ -123,11 +123,11 @@ request = {
 
 Capture the sanitized request by monkeypatching `validate_payload`. Assert every reserved field is absent from validation and JSON, and `captured["configured_endpoint"] is None`.
 
-- [ ] **Step 2: Add typed policy-error coverage for the public path**
+- [x] **Step 2: Add typed policy-error coverage for the public path**
 
 Use one representative public subclass (`NovitaAdapter`) because all three inherit the same methods. Inject fetch and stream hooks that raise an `EgressPolicyError` and exercise `chat`, `stream`, `achat`, and `astream`, following the existing configured-custom test shape. Assert the same error object or `reason_code` survives every mode.
 
-- [ ] **Step 3: Run RED and verify the failure reason**
+- [x] **Step 3: Run RED and verify the failure reason**
 
 Run:
 
@@ -162,11 +162,11 @@ Execution evidence: the public contract RED run produced 9 expected failures and
 - Test: `tldw_Server_API/tests/LLM_Calls/test_openai_compatible_provider_adapters.py`
 - Test: `tldw_Server_API/tests/LLM_Adapters/unit/test_custom_openai_native_http.py`
 
-- [ ] **Step 1: Delete obsolete transport plumbing**
+- [x] **Step 1: Delete obsolete transport plumbing**
 
 Remove `ExitStack`, the `create_client` import, and the module-level `http_client_factory = create_client`. Keep the string `"http_client_factory"` in `_RESERVED_CONTEXT_KEYS` so caller data cannot leak into validation or provider payloads.
 
-- [ ] **Step 2: Route every non-streaming call through `http_fetcher`**
+- [x] **Step 2: Route every non-streaming call through `http_fetcher`**
 
 Delete the public-only factory branch and retain the existing response `finally`:
 
@@ -189,7 +189,7 @@ finally:
 
 The boolean preserves configured-custom fetch defaults and the public path's previous no-redirect behavior.
 
-- [ ] **Step 3: Route every streaming call through `http_streamer`**
+- [x] **Step 3: Route every streaming call through `http_streamer`**
 
 Replace the `ExitStack` and conditional client construction with the existing checked context:
 
@@ -206,7 +206,7 @@ with self.http_streamer(
     # Keep the existing SSE iteration and finalize_stream body unchanged.
 ```
 
-- [ ] **Step 4: Run focused GREEN**
+- [x] **Step 4: Run focused GREEN**
 
 Run:
 
@@ -219,7 +219,7 @@ python -m pytest -q --tb=short \
 
 Expected: PASS with all Stage 1 and existing configured-custom cases green.
 
-- [ ] **Step 5: Run adjacent compatibility tests**
+- [x] **Step 5: Run adjacent compatibility tests**
 
 Run:
 
@@ -233,7 +233,7 @@ python -m pytest -q --tb=short \
 
 Expected: PASS; payload merging, timeouts, roles, and HTTP error mapping remain unchanged.
 
-- [ ] **Step 6: Commit the green implementation**
+- [x] **Step 6: Commit the green implementation**
 
 ```bash
 git add \
@@ -251,9 +251,11 @@ git commit -m "fix(llm): check public custom adapter egress (TASK-12972.1)"
 
 **Tests:** Complete prior Stage 3 adapter union plus static/security checks.
 
-**Status:** In Progress
+**Status:** Complete
 
 Pre-rebase verification evidence: the complete affected adapter union passed 143/143 with 5 warnings. Scoped Ruff correctness, Python compilation, the production seam search, and `git diff --check` passed. Bandit scanned 373 production lines with 0 findings and 0 errors. Whole-branch self-review against base `28a305eefc` found no critical, important, or minor code issues; independent delegated review was unavailable under the current no-delegation policy. Final verification remains pending after rebasing onto current `origin/dev`.
+
+Post-rebase verification evidence: rebase onto `994e5e7756` completed without conflicts. The complete affected adapter union again passed 143/143 with 5 warnings. Scoped Ruff correctness, Python compilation, the production seam search, and `git diff --check` passed. Bandit scanned 373 production lines with 0 findings, 0 errors, and 0 skips. The only external-provider verification skip is live Novita/Poe/Together traffic because credentials are unavailable; deterministic tests mock those services while exercising every sync, async, and streaming transport mode.
 
 ### Task 3.1: Update the ADR and plan status
 
@@ -261,17 +263,17 @@ Pre-rebase verification evidence: the complete affected adapter union passed 143
 - Modify: `Docs/ADR/030-configured-local-llm-egress-policy.md:41-52`
 - Modify: `Docs/Plans/IMPLEMENTATION_PLAN_public_custom_adapter_checked_egress_TASK_12972_1.md`
 
-- [ ] **Step 1: Mark the follow-up implemented**
+- [x] **Step 1: Mark the follow-up implemented**
 
 Change ADR-030 to state that Novita, Poe, and Together now use checked central egress with ordinary policy and no configured-local scope. Remove the completed TASK-12972.1 follow-up bullet; do not change local-provider policy.
 
-- [ ] **Step 2: Update stage statuses and append actual RED/GREEN evidence**
+- [x] **Step 2: Update stage statuses and append actual RED/GREEN evidence**
 
 Record collected counts, commands, and any baseline warnings in this plan. Do not claim completion before final verification.
 
 ### Task 3.2: Run the final verification matrix
 
-- [ ] **Step 1: Run the full affected adapter union**
+- [x] **Step 1: Run the full affected adapter union**
 
 ```bash
 source ../../.venv/bin/activate
@@ -292,7 +294,7 @@ python -m pytest -q --tb=short \
 
 Expected: PASS.
 
-- [ ] **Step 2: Confirm the production factory seam is gone**
+- [x] **Step 2: Confirm the production factory seam is gone**
 
 ```bash
 rg -n 'http_client_factory|create_client|ExitStack' \
@@ -301,7 +303,7 @@ rg -n 'http_client_factory|create_client|ExitStack' \
 
 Expected: only the reserved request-key string `"http_client_factory"` remains.
 
-- [ ] **Step 3: Run scoped correctness and compilation checks**
+- [x] **Step 3: Run scoped correctness and compilation checks**
 
 ```bash
 source ../../.venv/bin/activate
@@ -315,7 +317,7 @@ python -m py_compile \
 
 Expected: both commands pass.
 
-- [ ] **Step 4: Run the required security scan**
+- [x] **Step 4: Run the required security scan**
 
 ```bash
 source ../../.venv/bin/activate
@@ -326,7 +328,7 @@ python -m bandit -r \
 
 Expected: zero findings and zero errors.
 
-- [ ] **Step 5: Run repository hygiene checks**
+- [x] **Step 5: Run repository hygiene checks**
 
 ```bash
 git diff --check
@@ -337,11 +339,11 @@ Expected: no whitespace errors and only intentional TASK-12972.1 files are modif
 
 ### Task 3.3: Finalize task records and commit
 
-- [ ] **Step 1: Finalize TASK-12972.1 through the Backlog CLI**
+- [x] **Step 1: Finalize TASK-12972.1 through the Backlog CLI**
 
 Append the test counts, Ruff/compile/Bandit/diff results, touched paths, and any known skips. Check the acceptance criteria and Definition of Done, then set status to Done only after all verification passes.
 
-- [ ] **Step 2: Commit documentation and task finalization**
+- [x] **Step 2: Commit documentation and task finalization**
 
 ```bash
 git add \
@@ -359,7 +361,7 @@ git commit -m "docs: finalize public adapter egress migration (TASK-12972.1)"
 
 **Tests:** Re-check clean worktree and PR head after push; do not wait on CI if the requester says to ignore it.
 
-**Status:** Not Started
+**Status:** In Progress
 
 ### Task 4.1: Push and create the pull request
 
