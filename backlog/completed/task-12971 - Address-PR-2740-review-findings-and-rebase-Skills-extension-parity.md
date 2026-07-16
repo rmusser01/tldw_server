@@ -1,7 +1,7 @@
 ---
 id: TASK-12971
 title: Address PR 2740 review findings and rebase Skills extension parity
-status: In Progress
+status: Done
 labels:
 - skills
 - extension
@@ -39,12 +39,6 @@ Resolve every actionable review finding on PR #2740, reply to and resolve review
 - [ ] #5 Branch is rebased onto latest origin/dev and merged only when repository merge gates are satisfied.
 <!-- AC:END -->
 
-## Implementation Plan
-
-<!-- SECTION:PLAN:BEGIN -->
-See IMPLEMENTATION_PLAN_skills_extension_parity_pr_2740_review.md.
-<!-- SECTION:PLAN:END -->
-
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
@@ -52,20 +46,21 @@ See IMPLEMENTATION_PLAN_skills_extension_parity_pr_2740_review.md.
 2026-07-15: CodeRabbit added six threads after the initial review. Implemented four confirmed fixes/evidence: unknown-based runtime shim narrowing plus nullish diagnostics fallback; persistent-context cleanup when targeted page preparation/navigation/readiness fails; a non-overlapping /skills/context fixture route; and a packaged focus-handoff regression. The focus regression passed against the unchanged Drawer after its close transition, so no speculative focusable prop was added. The environment-cleanup suggestion was not applied because afterEach already restores the complete environment and both setup callers clean filesystem state in finally. The shared focus-hook extraction was not applied because only two effects share the fallback and abstracting them would broaden a targeted fix. New TDD tests failed for context leak and route overlap, then passed. Final current evidence: touched extension tests 21/21, compile passed, strict packaged parity 6/6 with zero skips/unexpected/flaky, and WebUI Skills Playwright 13 mocked passed with the same three unavailable live-server skips.
 2026-07-15: Independent review found that a rejected context.close() could mask the original extension setup error. Added a regression that first failed with the cleanup error, then updated cleanup to preserve and rethrow the setup error while attaching the cleanup failure as its cause. Final touched extension verification now passes 22/22; TypeScript compile passes; strict packaged parity passes 6/6 with skipped=0 unexpected=0 flaky=0.
 2026-07-15: Pushed fdbce2032b, replied to all eight inline review threads, and resolved all eight after documenting implemented fixes or verified reasons for retaining current behavior. A fresh GraphQL inventory confirms zero unresolved threads. Rebase against freshly fetched origin/dev was a clean no-op; branch is 0 behind and 31 ahead. Post-rebase evidence: 22/22 focused extension tests, TypeScript compile, strict packaged parity 6/6 with zero skips/unexpected/flaky, and clean worktree.
+2026-07-15: PR #2740 merged into dev as 25c0165f4a9891aa703357453071944d259af5aa. The PR body still contained the mandatory human-written Change summary placeholder at merge, so acceptance criterion #5 and Definition of Done #1 remain intentionally unchecked; this records the policy exception instead of claiming the merge gate was satisfied. The user explicitly directed post-merge task closure and local cleanup.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+PR #2740 merged the reviewed Skills extension parity work into dev. All eight actionable review threads were addressed and resolved; focused extension tests passed 22/22, TypeScript compilation passed, and strict packaged parity passed 6/6 with zero skips, unexpected failures, or flakes. The branch was current with dev at review time, and the merged worktree was fast-forwarded to merge commit 25c0165f4a9891aa703357453071944d259af5aa before cleanup. Known exception: the required human-authored Change summary placeholder was not replaced before merge, so the corresponding acceptance/definition checkbox remains open by design.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
