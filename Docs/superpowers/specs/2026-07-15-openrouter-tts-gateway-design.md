@@ -1,6 +1,6 @@
 # OpenRouter and Generic TTS Gateway Design
 
-**Status:** Design approved; written spec under review
+**Status:** Approved for implementation planning
 
 **Date:** 2026-07-15
 
