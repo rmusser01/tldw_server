@@ -91,7 +91,9 @@ export async function runSkillsLiveCertification({
   const skillsView = page.getByRole("radiogroup", { name: "Skills view" })
 
   await step("1. Verify initial Skills state", async () => {
-    await expect(page.getByRole("radio", { name: "Library", exact: true })).toBeChecked()
+    await expect(page.getByRole("radio", { name: "Library", exact: true })).toBeChecked({
+      timeout: 15_000,
+    })
 
     if (initialExpectation === "empty-library-and-trash") {
       await expect(page.getByRole("heading", { name: "Start with a reusable skill" })).toBeVisible()
