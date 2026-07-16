@@ -1,4 +1,4 @@
-import type { Expect, Page } from "@playwright/test"
+import type { Expect, Page, Response } from "@playwright/test"
 
 export const SKILLS_CERT_DESCRIPTION = "Skills live certification fixture"
 export const SKILLS_CERT_INSTRUCTIONS = "Organize $ARGUMENTS into verified notes."
@@ -19,27 +19,47 @@ type SkillsCertificationLifecycleOptions = {
 
 const skillsPath = "/api/v1/skills"
 
-const isSkillsListRequest = (url: string, method: string, name: string): boolean => {
-  const parsed = new URL(url)
+const normalizedPath = (url: string): string => new URL(url).pathname.replace(/\/$/, "")
+
+const isSkillsResponse = (response: Response, method: string, path: string): boolean =>
+  response.request().method() === method && normalizedPath(response.url()) === path
+
+const isSkillsListRequest = (response: Response, query: string | null): boolean => {
+  const parsed = new URL(response.url())
   return (
-    method === "GET"
+    response.request().method() === "GET"
     && parsed.pathname.replace(/\/$/, "") === skillsPath
-    && parsed.searchParams.get("q") === name
+    && parsed.searchParams.get("q") === query
   )
 }
 
-async function submitExactSearch(page: Page, name: string): Promise<void> {
-  const search = page.getByPlaceholder("Search skills...")
-  const listResponse = page.waitForResponse((response) =>
-    isSkillsListRequest(response.url(), response.request().method(), name)
-  )
+async function expectResponseStatus(
+  expect: Expect,
+  response: Promise<Response>,
+  status: number
+): Promise<void> {
+  await expect((await response).status()).toBe(status)
+}
 
+async function clearSearch(page: Page, expect: Expect): Promise<void> {
+  const search = page.getByPlaceholder("Search skills...")
+  if (await search.inputValue()) {
+    const clearedListResponse = page.waitForResponse((response) => isSkillsListRequest(response, null))
+    await search.clear()
+    await expectResponseStatus(expect, clearedListResponse, 200)
+  }
+}
+
+async function submitExactSearch(page: Page, expect: Expect, name: string): Promise<void> {
+  const search = page.getByPlaceholder("Search skills...")
+  await clearSearch(page, expect)
+  const listResponse = page.waitForResponse((response) => isSkillsListRequest(response, name))
   await search.fill(name)
-  await listResponse
+  await expectResponseStatus(expect, listResponse, 200)
 }
 
 async function searchForSkill(page: Page, expect: Expect, name: string): Promise<void> {
-  await submitExactSearch(page, name)
+  await submitExactSearch(page, expect, name)
   await expect(page.getByText(name, { exact: true })).toBeVisible()
 }
 
@@ -49,8 +69,13 @@ async function moveSkillToTrash(page: Page, expect: Expect, name: string): Promi
 
   const dialog = page.getByRole("dialog", { name: `Delete ${name}?`, exact: true })
   await expect(dialog).toBeVisible()
+  const deleteResponse = page.waitForResponse((response) =>
+    isSkillsResponse(response, "DELETE", `${skillsPath}/${encodeURIComponent(name)}`)
+  )
   await dialog.getByRole("button", { name: "Move to Trash", exact: true }).click()
+  await expectResponseStatus(expect, deleteResponse, 204)
   await expect(dialog).toBeHidden()
+  await expect(page.getByText(name, { exact: true })).toHaveCount(0)
 }
 
 /** Exercise the shared Skills lifecycle without owning backend or evidence setup. */
@@ -72,7 +97,7 @@ export async function runSkillsLiveCertification({
       await expect(page.getByRole("heading", { name: "Start with a reusable skill" })).toBeVisible()
       await expect(page.getByTestId("skills-empty-state")).toBeVisible()
     } else {
-      await submitExactSearch(page, name)
+      await submitExactSearch(page, expect, name)
       await expect(page.getByText(name, { exact: true })).toHaveCount(0)
     }
 
@@ -88,7 +113,7 @@ export async function runSkillsLiveCertification({
     await skillsView.getByText("Library", { exact: true }).click()
     await expect(page.getByRole("radio", { name: "Library", exact: true })).toBeChecked()
     if (initialExpectation === "target-absent") {
-      await page.getByPlaceholder("Search skills...").clear()
+      await clearSearch(page, expect)
     }
   })
 
@@ -99,7 +124,11 @@ export async function runSkillsLiveCertification({
     await drawer.getByLabel("Name", { exact: true }).fill(name)
     await drawer.getByLabel("Description", { exact: true }).fill(SKILLS_CERT_DESCRIPTION)
     await drawer.getByLabel("Instructions", { exact: true }).fill(SKILLS_CERT_INSTRUCTIONS)
+    const createResponse = page.waitForResponse((response) =>
+      isSkillsResponse(response, "POST", skillsPath)
+    )
     await drawer.getByRole("button", { name: "Save", exact: true }).click()
+    await expectResponseStatus(expect, createResponse, 201)
   })
 
   await step("3. Confirm skill creation", async () => {
@@ -153,7 +182,12 @@ export async function runSkillsLiveCertification({
     await skillsView.getByText("Trash", { exact: true }).click()
     await expect(page.getByRole("radio", { name: "Trash", exact: true })).toBeChecked()
     await expect(page.getByText(name, { exact: true })).toBeVisible()
+    const restoreResponse = page.waitForResponse((response) =>
+      isSkillsResponse(response, "POST", `${skillsPath}/${encodeURIComponent(name)}/restore`)
+    )
     await page.getByRole("button", { name: `Restore ${name}`, exact: true }).click()
+    await expectResponseStatus(expect, restoreResponse, 200)
+    await expect(page.getByText(name, { exact: true })).toHaveCount(0)
 
     await skillsView.getByText("Library", { exact: true }).click()
     await expect(page.getByRole("radio", { name: "Library", exact: true })).toBeChecked()
@@ -174,7 +208,14 @@ export async function runSkillsLiveCertification({
       exact: true,
     })
     await expect(dialog).toBeVisible()
+    const purgeResponse = page.waitForResponse((response) =>
+      isSkillsResponse(response, "DELETE", `${skillsPath}/${encodeURIComponent(name)}/purge`)
+    )
     await dialog.getByRole("button", { name: "Delete permanently", exact: true }).click()
-    await expect(page.getByRole("heading", { name: "Trash is empty" })).toBeVisible()
+    await expectResponseStatus(expect, purgeResponse, 204)
+    await expect(page.getByText(name, { exact: true })).toHaveCount(0)
+    if (initialExpectation === "empty-library-and-trash") {
+      await expect(page.getByRole("heading", { name: "Trash is empty" })).toBeVisible()
+    }
   })
 }
