@@ -3261,7 +3261,7 @@ class TTSServiceV2:
             if registry and hasattr(registry, "_adapter_specs"):
                 specs = registry._adapter_specs
                 try:
-                    if provider not in specs:
+                    if provider.value not in specs and provider not in specs:
                         continue
                 except TypeError:
                     # If specs is not dict-like, fall back to attempting fetch

@@ -157,15 +157,13 @@ class TTSRequest:
             self._original_volume = self.volume
         except Exception:
             self._original_volume = None
-        # Coerce provider/model to lowercase strings if present
+        # Normalize provider routing hints while preserving exact model IDs.
         try:
             if isinstance(self.provider, str):
                 self.provider = self.provider.lower()
-            if isinstance(self.model, str):
-                self.model = self.model.lower()
         except Exception as casing_error:
             logger.debug(
-                "TTS provider/model lowercase normalization failed; exception_type={}",
+                "TTS provider lowercase normalization failed; exception_type={}",
                 type(casing_error).__name__,
             )
         # If voice_settings arrives as a plain dict (from round-trip), coerce to VoiceSettings
