@@ -8,13 +8,19 @@ from collections.abc import Callable, Iterable, Mapping, MutableMapping
 from typing import Any
 
 from tldw_Server_API.app.core.Slides.slides_db import (
+    ConflictError,
     InputError,
     PresentationRow,
     PresentationSummaryRow,
     SlidesDatabase,
+    bind_validated_standalone_source,
+    decode_presentation_version_payload,
 )
-from tldw_Server_API.app.core.Slides.standalone_html_validator import (
-    validate_standalone_html,
+from tldw_Server_API.app.core.Slides.standalone_html_contracts import (
+    StandaloneHtmlValidationResult,
+)
+from tldw_Server_API.app.core.Slides.standalone_html_validation_pool import (
+    StandaloneHtmlValidationPool,
 )
 
 CONTENT_KIND_HEADER = "X-Slides-Accept-Content-Kinds"
@@ -27,9 +33,18 @@ _TOKEN_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 class PresentationServiceError(RuntimeError):
     """Fixed source-free domain error suitable for REST and MCP mapping."""
 
-    def __init__(self, code: str, *, status_code: int) -> None:
+    def __init__(
+        self,
+        code: str,
+        *,
+        status_code: int,
+        operation: str | None = None,
+        content_kind: str | None = None,
+    ) -> None:
         self.code = code
         self.status_code = status_code
+        self.operation = operation
+        self.content_kind = content_kind
         super().__init__(code)
 
 
@@ -215,8 +230,35 @@ def snapshot_detail(payload: Mapping[str, Any]) -> dict[str, Any]:
 class PresentationService:
     """The sole content-kind-aware domain seam used by Slides transports."""
 
-    def __init__(self, db: SlidesDatabase) -> None:
+    def __init__(
+        self,
+        db: SlidesDatabase,
+        *,
+        validation_pool: StandaloneHtmlValidationPool | None = None,
+    ) -> None:
         self.db = db
+        self.validation_pool = validation_pool
+
+    def _require_validation_pool(self) -> StandaloneHtmlValidationPool:
+        if self.validation_pool is None:
+            raise PresentationServiceError("validator_unavailable", status_code=503)
+        return self.validation_pool
+
+    @staticmethod
+    def operation_not_supported(content_kind: str, operation: str) -> PresentationServiceError:
+        """Build one bounded structured operation error."""
+        bounded_operation = operation if _TOKEN_RE.fullmatch(operation) and len(operation) <= 64 else "unknown"
+        bounded_kind = (
+            content_kind
+            if isinstance(content_kind, str) and len(content_kind) <= 64 and _TOKEN_RE.fullmatch(content_kind)
+            else "unknown"
+        )
+        return PresentationServiceError(
+            "operation_not_supported_for_content_kind",
+            status_code=409,
+            operation=bounded_operation,
+            content_kind=bounded_kind,
+        )
 
     def guard_target(
         self,
@@ -239,22 +281,22 @@ class PresentationService:
     ) -> None:
         if content_kind == STRUCTURED_SLIDES:
             if operation == "html_source" or export_format == "html":
-                raise PresentationServiceError("operation_not_supported_for_content_kind", status_code=409)
+                raise PresentationService.operation_not_supported(content_kind, operation)
             return
         if content_kind != STANDALONE_HTML:
-            raise PresentationServiceError("operation_not_supported_for_content_kind", status_code=409)
+            raise PresentationService.operation_not_supported(content_kind, operation)
         allowed = {"read", "versions", "delete", "restore", "html_source"}
         if operation == "export" and export_format in {"html", "json"}:
             return
         if operation not in allowed:
-            raise PresentationServiceError("operation_not_supported_for_content_kind", status_code=409)
+            raise PresentationService.operation_not_supported(content_kind, operation)
 
     @staticmethod
     def require_generic_create(content_kind: str) -> None:
         if content_kind == STANDALONE_HTML:
             raise PresentationServiceError("standalone_html_creation_requires_generation", status_code=409)
         if content_kind != STRUCTURED_SLIDES:
-            raise PresentationServiceError("operation_not_supported_for_content_kind", status_code=409)
+            raise PresentationService.operation_not_supported(content_kind, "create")
 
     def list_summaries(self, *, accepted_content_kinds: Iterable[str], **kwargs: Any):
         return self.db.list_presentation_summaries(accepted_content_kinds=accepted_content_kinds, **kwargs)
@@ -281,11 +323,12 @@ class PresentationService:
         *,
         presentation_id: str,
         html_document: str | bytes,
+        validation_result: StandaloneHtmlValidationResult,
         generation_job_uuid: str,
         generation_provenance: Mapping[str, Any],
     ) -> PresentationRow:
-        derived = validate_standalone_html(html_document)
-        source = html_document.decode("utf-8", "strict") if isinstance(html_document, bytes) else html_document
+        derived = validation_result
+        source = bind_validated_standalone_source(html_document, derived)
         provenance_json = json.dumps(
             dict(generation_provenance),
             ensure_ascii=False,
@@ -315,21 +358,31 @@ class PresentationService:
             generation_provenance_json=provenance_json,
         )
 
-    def save_html_source(
+    async def save_html_source(
         self,
         *,
         presentation_id: str,
         html_document: str | bytes,
         expected_version: int,
     ) -> PresentationRow:
+        current = self.db.get_presentation_kind(presentation_id)
+        if current.content_kind != STANDALONE_HTML:
+            raise InputError("operation_not_supported_for_content_kind")
+        if current.version != expected_version:
+            raise ConflictError(
+                "version_conflict",
+                entity="presentations",
+                identifier=presentation_id,
+            )
+        derived = await self._require_validation_pool().validate(html_document)
         return self.db.save_standalone_html_source(
             presentation_id=presentation_id,
             html_document=html_document,
+            validation_result=derived,
             expected_version=expected_version,
-            validator=validate_standalone_html,
         )
 
-    def restore_version(
+    async def restore_version(
         self,
         *,
         presentation_id: str,
@@ -337,7 +390,8 @@ class PresentationService:
         expected_version: int,
         structured_restore: Callable[[Mapping[str, Any]], PresentationRow] | None = None,
     ) -> PresentationRow:
-        kind = self.db.get_presentation_kind(presentation_id, include_deleted=True).content_kind
+        current_kind = self.db.get_presentation_kind(presentation_id, include_deleted=True)
+        kind = current_kind.content_kind
         if kind == STRUCTURED_SLIDES:
             if structured_restore is None:
                 raise PresentationServiceError("structured_restore_handler_required", status_code=500)
@@ -345,21 +399,58 @@ class PresentationService:
                 presentation_id=presentation_id,
                 version=version,
             )
-            try:
-                payload = json.loads(version_row.payload_json)
-            except (TypeError, json.JSONDecodeError) as exc:
-                raise InputError("version_payload_invalid") from exc
-            if not isinstance(payload, dict):
-                raise InputError("version_payload_invalid")
+            payload = decode_presentation_version_payload(version_row.payload_json)
             if payload.get("content_kind", STRUCTURED_SLIDES) != kind:
                 raise InputError("version_content_kind_mismatch")
             return structured_restore(payload)
+        if kind != STANDALONE_HTML:
+            raise self.operation_not_supported(kind, "restore")
+        if current_kind.version != expected_version:
+            raise ConflictError(
+                "version_conflict",
+                entity="presentations",
+                identifier=presentation_id,
+            )
+        version_row = self.db.get_presentation_version(
+            presentation_id=presentation_id,
+            version=version,
+        )
+        payload = decode_presentation_version_payload(version_row.payload_json)
+        if payload.get("content_kind") != STANDALONE_HTML:
+            raise InputError("version_content_kind_mismatch")
+        source = payload.get("html_document")
+        if not isinstance(source, str):
+            raise InputError("version_payload_invalid")
+        derived = await self._require_validation_pool().validate(source)
         return self.db.restore_standalone_html_version(
             presentation_id=presentation_id,
             version=version,
             expected_version=expected_version,
-            validator=validate_standalone_html,
+            html_document=source,
+            validation_result=derived,
+            expected_payload_json=version_row.payload_json,
         )
+
+    async def validate_saved_standalone(self, row: PresentationRow) -> StandaloneHtmlValidationResult:
+        """Revalidate an exact persisted source before standalone export."""
+        if row.content_kind != STANDALONE_HTML or not isinstance(row.html_document, str):
+            raise PresentationServiceError("standalone_html_response_invalid", status_code=500)
+        derived = await self._require_validation_pool().validate(row.html_document)
+        if (
+            row.title,
+            row.html_sha256,
+            row.html_bytes,
+            row.html_slide_count,
+            row.slides_text,
+        ) != (
+            derived.title,
+            derived.html_sha256,
+            derived.html_bytes,
+            derived.slide_count,
+            derived.indexable_text,
+        ):
+            raise PresentationServiceError("standalone_html_response_invalid", status_code=500)
+        return derived
 
     def delete_presentation(
         self,

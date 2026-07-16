@@ -4,7 +4,7 @@ import hashlib
 import json
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
@@ -14,7 +14,12 @@ from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import (
 from tldw_Server_API.app.api.v1.API_Deps.Slides_DB_Deps import (
     get_slides_db_for_user,
 )
-from tldw_Server_API.app.api.v1.endpoints.slides import router as slides_router
+from tldw_Server_API.app.api.v1.endpoints.slides import (
+    _load_version_payload,
+)
+from tldw_Server_API.app.api.v1.endpoints.slides import (
+    router as slides_router,
+)
 from tldw_Server_API.app.api.v1.schemas.slides_schemas import ExportFormat
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
@@ -25,6 +30,30 @@ from tldw_Server_API.app.core.Slides.standalone_html_validator import (
 
 _ACCEPT = "X-Slides-Accept-Content-Kinds"
 _BOTH = {_ACCEPT: "structured_slides,standalone_html"}
+
+
+class _InlineValidationPool:
+    def __init__(self, db: SlidesDatabase) -> None:
+        self.db = db
+        self.calls: list[str | bytes] = []
+        self.closed = False
+
+    async def validate(self, document: str | bytes):
+        assert not self.db.get_connection().in_transaction
+        self.calls.append(document)
+        return validate_standalone_html(document)
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+def _assert_operation_error(response, *, operation: str, content_kind: str) -> None:
+    assert response.status_code == 409
+    assert response.json() == {
+        "detail": "operation_not_supported_for_content_kind",
+        "operation": operation,
+        "content_kind": content_kind,
+    }
 
 
 def _document(*, title: str = "HTML Deck", text: str = "Visible HTML text") -> str:
@@ -135,6 +164,8 @@ def html_client(tmp_path):
     structured = _create_structured(db)
     html = _create_html(db)
     app = FastAPI()
+    validation_pool = _InlineValidationPool(db)
+    app.state.standalone_html_validation_pool = validation_pool
     app.include_router(slides_router, prefix="/api/v1", tags=["slides"])
 
     async def _override_user():
@@ -188,6 +219,9 @@ def html_client(tmp_path):
     with TestClient(app) as client:
         yield client, db, structured, html
 
+    assert validation_pool.closed
+    assert getattr(app.state, "standalone_html_validation_pool", None) is None
+    assert getattr(app.state, "standalone_html_validation_pool_lock", None) is None
     app.dependency_overrides.clear()
     db.close_connection()
 
@@ -207,6 +241,48 @@ def test_malformed_or_unknown_only_negotiation_is_fixed_400(html_client, value):
     assert response.status_code == 400
     assert response.json()["detail"] == "invalid_content_kind_header"
     assert _ACCEPT.lower() in response.headers["Vary"].lower()
+
+
+def _html_mutation_requests(html_id: str):
+    return [
+        (
+            "PUT",
+            f"/api/v1/slides/presentations/{html_id}/html-source",
+            {
+                "content": _document().encode("utf-8"),
+                "headers": {"Content-Type": "application/octet-stream"},
+            },
+        ),
+        ("PUT", f"/api/v1/slides/presentations/{html_id}", {"json": {"title": "No"}}),
+        ("PATCH", f"/api/v1/slides/presentations/{html_id}", {"json": {"title": "No"}}),
+        ("POST", f"/api/v1/slides/presentations/{html_id}/reorder", {"json": {"order": [0]}}),
+        ("DELETE", f"/api/v1/slides/presentations/{html_id}", {}),
+        ("POST", f"/api/v1/slides/presentations/{html_id}/restore", {}),
+        ("POST", f"/api/v1/slides/presentations/{html_id}/versions/1/restore", {}),
+    ]
+
+
+def test_negotiated_mutations_reject_malformed_kind_before_missing_if_match(html_client):
+    client, _db, _structured, html = html_client
+
+    for method, path, kwargs in _html_mutation_requests(html.id):
+        kwargs["headers"] = {**kwargs.get("headers", {}), _ACCEPT: "bad token"}
+        response = client.request(method, path, **kwargs)
+
+        assert response.status_code == 400, (method, path, response.text)
+        assert response.json()["detail"] == "invalid_content_kind_header"
+        assert _ACCEPT.lower() in response.headers["Vary"].lower()
+
+
+def test_negotiated_mutations_reject_unaccepted_html_before_missing_if_match(html_client):
+    client, _db, _structured, html = html_client
+
+    for method, path, kwargs in _html_mutation_requests(html.id):
+        response = client.request(method, path, **kwargs)
+
+        assert response.status_code == 406, (method, path, response.text)
+        assert response.json()["detail"] == "content_kind_not_accepted"
+        assert _ACCEPT.lower() in response.headers["Vary"].lower()
 
 
 def test_list_negotiation_filters_before_pagination_and_returns_source_free_unions(
@@ -316,14 +392,18 @@ def test_generic_create_and_mutation_reject_standalone_kind(html_client):
 
     assert create.status_code == 409
     assert create.json()["detail"] == "standalone_html_creation_requires_generation"
-    assert html_patch.status_code == 409
-    assert html_patch.json()["detail"] == "operation_not_supported_for_content_kind"
+    _assert_operation_error(
+        html_patch,
+        operation="update",
+        content_kind="standalone_html",
+    )
     assert wrong_accept.status_code == 406
     assert wrong_accept.json()["detail"] == "content_kind_not_accepted"
 
 
 def test_html_source_save_validates_derives_and_noops_with_strong_etag(html_client):
     client, _db, _structured, html = html_client
+    validation_pool = client.app.state.standalone_html_validation_pool
     changed_document = _document(title="Renamed", text="New searchable content")
 
     changed = client.put(
@@ -352,6 +432,45 @@ def test_html_source_save_validates_derives_and_noops_with_strong_etag(html_clie
     assert same.status_code == 200, same.text
     assert same.headers["ETag"] == '"v2"'
     assert same.json()["version"] == 2
+    assert validation_pool.calls == [
+        changed_document.encode("utf-8"),
+        changed_document.encode("utf-8"),
+    ]
+
+
+def test_html_source_errors_preserve_negotiation_vary(html_client):
+    client, _db, _structured, html = html_client
+    path = f"/api/v1/slides/presentations/{html.id}/html-source"
+
+    wrong_media = client.put(
+        path,
+        content=_document(),
+        headers={**_BOTH, "If-Match": '"v1"', "Content-Type": "text/html"},
+    )
+    invalid_source = client.put(
+        path,
+        content=b"not a complete document",
+        headers={
+            **_BOTH,
+            "If-Match": '"v1"',
+            "Content-Type": "application/octet-stream",
+        },
+    )
+    stale = client.put(
+        path,
+        content=_document(),
+        headers={
+            **_BOTH,
+            "If-Match": '"v0"',
+            "Content-Type": "application/octet-stream",
+        },
+    )
+
+    assert wrong_media.status_code == 415
+    assert invalid_source.status_code == 422
+    assert stale.status_code == 412
+    for response in (wrong_media, invalid_source, stale):
+        assert _ACCEPT.lower() in response.headers["Vary"].lower()
 
 
 def test_html_version_list_and_delete_are_source_free(html_client):
@@ -393,10 +512,16 @@ def test_html_reveal_and_render_reject_before_source_or_dispatch(html_client):
         headers={**_BOTH, "If-Match": '"v1"'},
     )
 
-    assert export.status_code == 409
-    assert export.json()["detail"] == "operation_not_supported_for_content_kind"
-    assert render.status_code == 409
-    assert render.json()["detail"] == "operation_not_supported_for_content_kind"
+    _assert_operation_error(
+        export,
+        operation="export",
+        content_kind="standalone_html",
+    )
+    _assert_operation_error(
+        render,
+        operation="render",
+        content_kind="standalone_html",
+    )
     selected = "\n".join(
         statement for statement in statements if statement.lstrip().upper().startswith("SELECT")
     ).lower()
@@ -441,8 +566,11 @@ def test_html_render_artifacts_rejects_before_collection_dispatch(html_client):
         headers=_BOTH,
     )
 
-    assert response.status_code == 409
-    assert response.json()["detail"] == "operation_not_supported_for_content_kind"
+    _assert_operation_error(
+        response,
+        operation="render",
+        content_kind="standalone_html",
+    )
     assert _Collections.list_calls == 0
 
 
@@ -466,10 +594,16 @@ def test_explicit_null_standalone_fields_and_kind_are_rejected_by_presence(
         headers={**_BOTH, "If-Match": 'W/"v1"'},
     )
 
-    assert create.status_code == 409
-    assert create.json()["detail"] == "operation_not_supported_for_content_kind"
-    assert null_source.status_code == 409
-    assert null_source.json()["detail"] == "operation_not_supported_for_content_kind"
+    _assert_operation_error(
+        create,
+        operation="create",
+        content_kind="structured_slides",
+    )
+    _assert_operation_error(
+        null_source,
+        operation="update",
+        content_kind="structured_slides",
+    )
     assert null_kind.status_code == 409
     assert null_kind.json()["detail"] == "content_kind_immutable"
 
@@ -497,6 +631,7 @@ def test_html_kind_change_has_stable_immutable_error(html_client, method, payloa
 
 def test_json_export_is_explicit_and_discriminated_for_opted_in_kinds(html_client):
     client, _db, structured, html = html_client
+    validation_pool = client.app.state.standalone_html_validation_pool
 
     html_export = client.get(
         f"/api/v1/slides/presentations/{html.id}/export?format=json",
@@ -515,6 +650,97 @@ def test_json_export_is_explicit_and_discriminated_for_opted_in_kinds(html_clien
     assert structured_export.status_code == 200, structured_export.text
     assert structured_export.json()["content_kind"] == "structured_slides"
     assert "slides" in structured_export.json()
+    assert validation_pool.calls == [_document()]
+
+
+def test_json_export_rejects_corrupt_stored_derived_metadata_after_pool_validation(html_client):
+    client, db, _structured, html = html_client
+    with db.transaction(immediate=True) as conn:
+        conn.execute(
+            "UPDATE presentations SET slides_text = ? WHERE id = ?",
+            ("forged", html.id),
+        )
+
+    response = client.get(
+        f"/api/v1/slides/presentations/{html.id}/export?format=json",
+        headers=_BOTH,
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "standalone_html_response_invalid"
+    assert _ACCEPT.lower() in response.headers["Vary"].lower()
+    assert client.app.state.standalone_html_validation_pool.calls == [_document()]
+
+
+def test_json_export_never_parses_irrelevant_structured_payload_for_html(html_client):
+    client, db, _structured, html = html_client
+    with db.transaction(immediate=True) as conn:
+        conn.execute(
+            "UPDATE presentations SET slides = ? WHERE id = ?",
+            ("not-json", html.id),
+        )
+
+    response = client.get(
+        f"/api/v1/slides/presentations/{html.id}/export?format=json",
+        headers=_BOTH,
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["content_kind"] == "standalone_html"
+    assert response.json()["html_document"] == _document()
+
+
+def test_negotiated_downstream_http_error_keeps_vary(html_client):
+    client, _db, structured, _html = html_client
+
+    response = client.patch(
+        f"/api/v1/slides/presentations/{structured.id}",
+        json={},
+        headers={"If-Match": 'W/"v1"'},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "no_fields_to_update"
+    assert _ACCEPT.lower() in response.headers["Vary"].lower()
+
+
+def test_html_version_restore_uses_interactive_pool_before_atomic_write(html_client):
+    client, _db, _structured, html = html_client
+    changed_document = _document(title="Changed", text="second")
+    changed = client.put(
+        f"/api/v1/slides/presentations/{html.id}/html-source",
+        content=changed_document.encode("utf-8"),
+        headers={
+            **_BOTH,
+            "If-Match": '"v1"',
+            "Content-Type": "application/octet-stream",
+        },
+    )
+    assert changed.status_code == 200, changed.text
+    validation_pool = client.app.state.standalone_html_validation_pool
+    validation_pool.calls.clear()
+
+    restored = client.post(
+        f"/api/v1/slides/presentations/{html.id}/versions/1/restore",
+        headers={**_BOTH, "If-Match": '"v2"'},
+    )
+
+    assert restored.status_code == 200, restored.text
+    assert restored.json()["html_document"] == _document()
+    assert validation_pool.calls == [_document()]
+
+
+def test_endpoint_snapshot_decoder_retains_no_source_exception_context():
+    sentinel = "SECRET-ENDPOINT-SNAPSHOT"
+
+    with pytest.raises(HTTPException) as exc_info:
+        _load_version_payload('{"html_document":"' + sentinel)
+
+    chain = [exc_info.value]
+    while chain[-1].__cause__ is not None or chain[-1].__context__ is not None:
+        chain.append(chain[-1].__cause__ or chain[-1].__context__)
+    assert not any(isinstance(exc, json.JSONDecodeError) for exc in chain)
+    assert sentinel not in " ".join(repr(exc) for exc in chain)
 
 
 def test_structured_restore_recomputes_legacy_slide_text_with_image_alt(html_client):
@@ -570,3 +796,15 @@ def test_structured_restore_recomputes_legacy_slide_text_with_image_alt(html_cli
 
     assert restored.status_code == 200, restored.text
     assert "Restored cover" in db.get_presentation_by_id(presentation_id).slides_text
+
+
+def test_structured_restore_keeps_legacy_missing_version_precedence(html_client):
+    client, _db, structured, _html = html_client
+
+    response = client.post(
+        f"/api/v1/slides/presentations/{structured.id}/versions/999/restore",
+        headers={"If-Match": 'W/"v0"'},
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "presentation_version_not_found"
