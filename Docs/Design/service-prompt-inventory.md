@@ -1,16 +1,16 @@
-# Service Prompt Inventory and Rollout Matrix
+# Historical Service Prompt Inventory
 
 ## Purpose
 
-This document is the authoritative inventory and migration worklist for prompts that may become user-customizable Service Prompt definitions. It applies the approved design to file-backed and hard-coded instructions that are sent to an LLM or other model-backed service. The inventory is documentation only; it does not create runtime registry entries or change prompt resolution.
+This document preserves the broad prompt-discovery work completed before the Service Prompts design was reduced to an incremental self-service feature. It is research material for selecting later vertical slices; it is not a runtime registry, implementation plan, or migration commitment.
 
-Missing candidate rows are a release blocker. The completed matrix—not a prompt's filename, directory, loader, or source-code location—controls eligibility and rollout.
+Nothing in this document is a release blocker. Each future definition must be revalidated against the current design, a concrete consumer, and current tests before it enters the static runtime registry.
 
 ## Review state
 
 - **Review date:** 2026-07-13
 - **Reviewer:** Human requester
-- **Approval state:** Approved for rollout-domain task and implementation-plan creation, including the compatibility-affecting runtime rejection limits below
+- **Current state:** Superseded as rollout authority by the approved incremental design; retained as a historical discovery backlog and reconciled under TASK-12973
 
 ## Governing references
 
@@ -25,7 +25,7 @@ A candidate is `excluded` when it controls authentication or authorization; safe
 
 A content-facing candidate is `deferred` when eligibility depends on a missing prerequisite, such as independent output enforcement, atomic multipart consumption, or a finite prompt requirement set for queued work. The row must name that prerequisite.
 
-Every file-backed prompt key and hard-coded instruction sent to a model-backed service must be accounted for by a candidate row. Coordinated system, user, and locked fragments share one atomic definition row. Stable lowercase dotted `service_prompt_id` values are assigned only to eligible definitions, are code-defined, and cannot be created dynamically from user data.
+Rows and stable IDs below are historical candidates. The current runtime registry remains the only allowlist, and missing inventory rows do not block a vertical slice.
 
 ## Inventory matrix
 
@@ -266,9 +266,9 @@ This matrix inventories both file-backed and hard-coded definitions. “No direc
 | Dots OCR model protocol | `tldw_Server_API/app/core/Ingestion_Media_Processing/OCR/backends/dots_ocr.py:28-29,46-69,181-232` | Dots OCR backend | Document/image owner/operator | OCR ingestion | Upstream selector/control strings | Image input and deployment path | Model-specific selector and multimodal protocol | Fully locked/provider-sensitive | Protocol controls deployment/model behavior | Critical | excluded | Hidden machine/deployment protocol | — | Locked protocol fragments | none—excluded |
 | Nemotron Parse model protocol | `tldw_Server_API/app/core/Ingestion_Media_Processing/OCR/backends/nemotron_parse.py:23,134-190,339-395,440-475` | Nemotron vLLM/Transformers parse backends | Document/image owner/operator | OCR ingestion | Default model token/protocol | Image and backend | Model-specific parse instruction/token framing | Fully locked/provider-sensitive | Protocol controls generated parse structure | Critical | excluded | Hidden machine/deployment protocol | — | Locked protocol shared by finite backends | none—excluded |
 
-## Eligible definition contract validation
+## Historical contract analysis
 
-The following contract index is normative for rows that remain `eligible`. It is sorted lexicographically by `service_prompt_id`; candidate-row order remains source-oriented for auditability. A definition is not rollout-ready unless its candidate row and this index agree.
+The following contract index records the rejected broad-rollout analysis. It is non-normative: its limits, topology requirements, validators, and counts must not be used as current release or implementation gates. A future vertical slice may reuse source and consumer evidence, but it must follow the current design instead.
 
 ### Contract notation and inherited budgets
 
@@ -284,8 +284,7 @@ The following contract index is normative for rows that remain `eligible`. It is
 
 ### Validation result
 
-- Re-run the durable inventory, source-reference, writing-plans-header, and exact domain-scope validator from the repository root with `node Helper_Scripts/validate_service_prompt_inventory.mjs .`; any nonzero exit blocks inventory or rollout-plan completion.
-- Run its dependency-free negative fixture suite with `node --test Helper_Scripts/tests/validate_service_prompt_inventory.test.mjs`; it must reject coordinated decision/subset drift, approved ID/domain swaps, duplicate candidates, blank cells, and missing/malformed rows.
+- The historical full-inventory and domain-plan validator was removed with the rejected broad rollout. Current vertical slices rely on registry, consumer, golden-default, and integration tests defined by the current design.
 - Post-validation decisions: **232 rows = 73 eligible, 75 deferred, 84 excluded**. The file-backed subset is **36 = 5 eligible, 14 deferred, 17 excluded**; the hard-coded subset is **196 = 68 eligible, 61 deferred, 67 excluded**.
 - The 73 eligible IDs are unique, lowercase dotted identifiers and sort exactly as the index below. Candidate names are unique within the eligible set.
 - Shared source functions are unambiguous only through the selector recorded below: preset/style/action/backend values select exactly one definition; coordinated variants that execute together remain one atomic definition.
@@ -393,7 +392,7 @@ All Jobs rows below have a finite definition/selector set and can consume one at
 
 ### Hard-coded pass reconciliation
 
-- Historical Task 3 hard-coded counts before Task 4 topology validation were **196 atomic rows: 92 eligible, 37 deferred, 67 excluded**; current post-validation hard-coded counts are **68 eligible, 61 deferred, 67 excluded**. The current authoritative matrix contains **232 atomic rows: 73 eligible, 75 deferred, 84 excluded**.
+- Historical Task 3 hard-coded counts before Task 4 topology validation were **196 atomic rows: 92 eligible, 37 deferred, 67 excluded**; later historical counts were **68 eligible, 61 deferred, 67 excluded**. The preserved snapshot contains **232 atomic rows: 73 formerly eligible, 75 deferred, 84 excluded**.
 - Mandatory scans cover the backend core/services/endpoints and both TypeScript/TSX frontend trees using the exact name-based and omission-pattern commands recorded in TASK-12958. The omission pass includes `You are`, strict-return wording, prompt-injection wording, moderation, judge, rerank, and route terms.
 - Relevant model-facing constructions are mapped to exact atomic rows. Non-candidates from the raw hits were reconciled into these discard classes: schema/request fields; forwarding adapters and provider plumbing; explicit user-selected Chat/Playground catalogs, Character/chat presets, World Book content, Prompt Library content, Prompt Studio `prompt_executor` data, and ACP Workflow prompt/template data; deterministic Prompt Studio XML builders and VN asset prompt preview assembly with no model dispatch; unused Genetic-optimizer constructions that `OptimizationEngine` does not instantiate or dispatch; UI labels/help/examples; tests/e2e/demo scripts; comments/docstrings; route declarations and non-model instructions; inactive Voice Assistant constructions; the formatted `GAP_ASSESSMENT_PROMPT` and `FACT_EXTRACTION_PROMPT` values used only as unknown template selectors while the shared RAG default bytes are dispatched instead; and the RAG gap-follow-up, draft-critique, and faithfulness extraction/verification adapter literals whose calls pass empty `input_data` and therefore return at `Summarization_General_Lib.py:458-463` before provider dispatch. These discards are not counted as atomic definitions. Security, moderation, routing, retrieval, judging, grading, tool-control, and machine-protocol constructions that do reach a model have exact excluded rows rather than broad family placeholders.
 - The shared TypeScript bulleted-summary default is byte-equivalent to the normalized file-backed definition and is folded into `media.summary.bulleted`. Enhanced-web-scraping file fallbacks remain in `media.web.summary`; distinct legacy web, PDF-recursive, video-recursive, EPUB-recursive, and plaintext-recursive literals have their own atomic rows.
