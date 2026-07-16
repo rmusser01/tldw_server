@@ -749,11 +749,18 @@ class PostgreSQLBackend(DatabaseBackend):
         self,
         query: str,
         params: Optional[Union[tuple, dict]] = None,
-        connection: Optional[Any] = None
+        connection: Optional[Any] = None,
+        *,
+        log_errors: bool = True,
     ) -> QueryResult:
-        """Execute a query and return results."""
+        """Execute a query and return results.
+
+        ``log_errors=False`` keeps driver and rollback error details out of logs
+        and exception chains for queries that may materialize sensitive data.
+        """
         start_time = time.time()
         query, params = self._prepare_query(query, params)
+        redacted_failure = False
 
         if connection:
             conn = connection
@@ -802,7 +809,13 @@ class PostgreSQLBackend(DatabaseBackend):
                     try:
                         conn.rollback()
                     except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS as rollback_exc:  # noqa: BLE001
-                        logger.debug(f"Rollback after read-only execute() failed: {rollback_exc}")
+                        if log_errors:
+                            logger.debug(f"Rollback after read-only execute() failed: {rollback_exc}")
+                        else:
+                            logger.debug(
+                                "Redacted rollback failure after read-only execute() ({})",
+                                type(rollback_exc).__name__,
+                            )
 
             execution_time = time.time() - start_time
 
@@ -824,12 +837,24 @@ class PostgreSQLBackend(DatabaseBackend):
                 try:
                     conn.rollback()
                 except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS as rollback_exc:  # noqa: BLE001
-                    logger.debug(f"Rollback after failed execute() also failed: {rollback_exc}")
-            logger.error(f"Query execution failed: {e}")
-            raise DatabaseError(f"PostgreSQL error: {e}") from e
+                    if log_errors:
+                        logger.debug(f"Rollback after failed execute() also failed: {rollback_exc}")
+                    else:
+                        logger.debug(
+                            "Redacted rollback failure after failed execute() ({})",
+                            type(rollback_exc).__name__,
+                        )
+            if log_errors:
+                logger.error(f"Query execution failed: {e}")
+                raise DatabaseError(f"PostgreSQL error: {e}") from e
+            logger.error("Redacted PostgreSQL query failure ({})", type(e).__name__)
+            redacted_failure = True
         finally:
             if not external_conn:
                 self.get_pool().return_connection(conn)
+
+        if redacted_failure:
+            raise DatabaseError("PostgreSQL query execution failed.")
 
     def execute_many(
         self,

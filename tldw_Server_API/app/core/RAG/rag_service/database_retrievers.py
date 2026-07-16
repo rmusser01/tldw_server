@@ -9,7 +9,6 @@ including media database, notes, prompts, and character cards.
 import asyncio
 import contextlib
 import copy
-from difflib import SequenceMatcher
 import json
 import os
 import re
@@ -19,6 +18,7 @@ import urllib.parse as _urlparse
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, replace
 from datetime import datetime
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Optional
 
@@ -34,9 +34,10 @@ from tldw_Server_API.app.core.DB_Management.media_db.api import (
 from tldw_Server_API.app.core.DB_Management.media_db.errors import (
     DatabaseError as MediaDatabaseError,
 )
+from tldw_Server_API.app.core.RAG.exceptions import RAGDatabaseError
 
-from .types import DataSource, Document
 from .retrieval_plan import RetrievalPlan
+from .types import DataSource, Document
 from .utils import get_float_env as _get_float_env
 from .utils import normalize_scores as _normalize_scores
 from .vector_stores import (
@@ -185,7 +186,7 @@ def _sanitize_media_fts_query(query: Optional[str]) -> Optional[str]:
     if text.startswith('"') and text.endswith('"'):
         return text
     if "-" in text and " " not in text:
-        return f"\"{text}\""
+        return f'"{text}"'
     if _SQLITE_FTS_UNSAFE_PUNCTUATION_RE.search(text):
         text = _SQLITE_FTS_UNSAFE_PUNCTUATION_RE.sub(" ", text)
         text = re.sub(r"\s+", " ", text).strip()
@@ -328,15 +329,12 @@ def _score_media_chunk_text(
     *,
     title: Optional[str] = None,
 ) -> float:
-    lowered = chunk_text.lower()
     if not query_terms:
         return 0.0
 
     combined_text = f"{title or ''}\n{chunk_text}".lower()
     doc_terms = {
-        token.strip("'")
-        for token in re.findall(r"[A-Za-z0-9']+", combined_text)
-        if len(token.strip("'")) >= 3
+        token.strip("'") for token in re.findall(r"[A-Za-z0-9']+", combined_text) if len(token.strip("'")) >= 3
     }
 
     matched_score = 0.0
@@ -452,6 +450,7 @@ def _apply_location_metadata(document: Document) -> None:
 @dataclass
 class RetrievalConfig:
     """Configuration for database retrieval."""
+
     max_results: int = 20
     min_score: float = 0.0
     use_fts: bool = True
@@ -461,7 +460,7 @@ class RetrievalConfig:
     tags_filter: Optional[list[str]] = None
     source_filter: Optional[list[str]] = None
     # FTS search level: media-level (default) or chunk-level (UnvectorizedMediaChunks)
-    fts_level: Literal['media', 'chunk'] = 'media'
+    fts_level: Literal["media", "chunk"] = "media"
     # Query-scoped text late chunking: bypass stored chunks and rechunk
     # matched media in memory without persisting replacements.
     enable_text_late_chunking: bool = False
@@ -469,6 +468,145 @@ class RetrievalConfig:
     chunk_size: Optional[int] = None
     chunk_overlap: Optional[int] = None
     chunk_language: Optional[str] = None
+
+
+_SLIDES_SOURCE_TRUNCATED = "_standalone_source_projection_truncated"
+_SLIDES_SOURCE_PREFORMATTED = "_standalone_source_preformatted"
+_SLIDES_SOURCE_FULL_CHARS = "_standalone_source_full_chars"
+_SLIDES_SOURCE_PROJECTION_KEY = "_standalone_source_projection_key"
+_SLIDES_SOURCE_INVALID_TEXT = "_standalone_source_invalid_text"
+
+
+def _build_slides_source_fts_query(query: str) -> str | None:
+    """Translate natural-language input into inert SQLite FTS5 terms."""
+    terms = re.findall(r"[^\W_]+", query, flags=re.UNICODE)
+    if not terms:
+        return None
+    return " ".join(f'"{term}"' for term in terms)
+
+
+def _allocate_slides_source_projection_caps(
+    documents: list[Document],
+    *,
+    total_chars: int,
+    separator_chars: int,
+) -> tuple[list[Document], list[int]]:
+    """Max-min allocate one bounded text budget, redistributing unused shares."""
+    if isinstance(total_chars, bool) or not isinstance(total_chars, int) or total_chars < 1:
+        raise ValueError("total_chars must be a positive integer")
+    if isinstance(separator_chars, bool) or not isinstance(separator_chars, int) or separator_chars < 0:
+        raise ValueError("separator_chars must be a non-negative integer")
+    if not documents:
+        return [], []
+
+    per_document_floor = separator_chars + 1
+    selected_count = min(
+        len(documents),
+        (total_chars + separator_chars) // per_document_floor,
+    )
+    selected = documents[:selected_count]
+    content_budget = total_chars - (separator_chars * max(0, selected_count - 1))
+    full_lengths: list[int] = []
+    for document in selected:
+        full_chars = document.metadata.get(_SLIDES_SOURCE_FULL_CHARS)
+        if isinstance(full_chars, bool) or not isinstance(full_chars, int) or full_chars < 1:
+            raise ValueError("Invalid source candidate character length.")
+        full_lengths.append(full_chars)
+
+    caps = [0] * selected_count
+    remaining_budget = content_budget
+    remaining_indices = sorted(
+        range(selected_count),
+        key=lambda index: (full_lengths[index], index),
+    )
+    while remaining_indices:
+        fair_share = remaining_budget // len(remaining_indices)
+        shortest_index = remaining_indices[0]
+        if full_lengths[shortest_index] <= fair_share:
+            caps[shortest_index] = full_lengths[shortest_index]
+            remaining_budget -= caps[shortest_index]
+            remaining_indices.pop(0)
+            continue
+        base, extra = divmod(remaining_budget, len(remaining_indices))
+        for position, index in enumerate(sorted(remaining_indices)):
+            caps[index] = base + int(position < extra)
+        break
+    return selected, caps
+
+
+def _slides_source_requested_values(count: int) -> str:
+    """Return a fixed-placeholder derived table for at most 100 candidates."""
+    if not 1 <= count <= 100:
+        raise ValueError("Projection request count must be between 1 and 100.")
+    first = "SELECT ? AS projection_key, ? AS projection_cap, ? AS projection_order"
+    return " UNION ALL ".join([first, *("SELECT ?, ?, ?" for _ in range(count - 1))])
+
+
+def _read_slides_source_candidate_rows(cursor: Any) -> list[dict[str, Any]]:
+    """Read metadata-only candidates and fail closed on invalid source text."""
+    columns = [column[0] for column in cursor.description] if cursor.description else []
+    rows: list[dict[str, Any]] = []
+    while True:
+        raw_row = cursor.fetchone()
+        if raw_row is None:
+            break
+        row = (
+            dict(raw_row)
+            if isinstance(raw_row, dict)
+            else {columns[index]: raw_row[index] for index in range(len(columns))}
+        )
+        if "source_text" in row:
+            raise ValueError("Candidate query returned source text.")
+        invalid_text = row.get(_SLIDES_SOURCE_INVALID_TEXT)
+        if not isinstance(invalid_text, (bool, int)) or invalid_text not in (0, 1):
+            raise ValueError("Invalid source text validation marker.")
+        if invalid_text:
+            raise ValueError("Invalid source text.")
+        full_chars = row.get(_SLIDES_SOURCE_FULL_CHARS)
+        if isinstance(full_chars, bool) or not isinstance(full_chars, int) or full_chars < 1:
+            raise ValueError("Invalid source candidate character length.")
+        rows.append(row)
+    return rows
+
+
+def _read_slides_source_projection_rows(
+    cursor: Any,
+    *,
+    max_materialized_chars: int,
+) -> list[dict[str, Any]]:
+    """Read already SQL-bounded single-field source projections."""
+    columns = [column[0] for column in cursor.description] if cursor.description else []
+    rows: list[dict[str, Any]] = []
+    materialized_chars = 0
+    while True:
+        raw_row = cursor.fetchone()
+        if raw_row is None:
+            break
+        row = (
+            dict(raw_row)
+            if isinstance(raw_row, dict)
+            else {columns[index]: raw_row[index] for index in range(len(columns))}
+        )
+        source_text = row.get("source_text")
+        projection_cap = row.get("projection_cap")
+        if isinstance(projection_cap, bool) or not isinstance(projection_cap, int) or projection_cap < 1:
+            raise ValueError("Invalid source projection cap.")
+        invalid_text = row.get(_SLIDES_SOURCE_INVALID_TEXT)
+        if not isinstance(invalid_text, (bool, int)) or invalid_text not in (0, 1):
+            raise ValueError("Invalid source text validation marker.")
+        if invalid_text:
+            raise ValueError("Invalid source text.")
+        if not isinstance(source_text, str) or "\x00" in source_text or len(source_text) > projection_cap:
+            raise ValueError("Invalid bounded source projection.")
+        materialized_chars += len(source_text)
+        if materialized_chars > max_materialized_chars:
+            raise ValueError("Source projection exceeded its aggregate bound.")
+        truncated = row.get(_SLIDES_SOURCE_TRUNCATED)
+        if not isinstance(truncated, (bool, int)) or truncated not in (0, 1):
+            raise ValueError("Invalid source projection truncation marker.")
+        row[_SLIDES_SOURCE_TRUNCATED] = bool(truncated)
+        rows.append(row)
+    return rows
 
 
 _RETRIEVAL_PLAN_SEARCH_MODES = frozenset({"fts", "vector", "hybrid"})
@@ -559,11 +697,7 @@ class BaseRetriever(ABC):
     """Base class for database-specific retrievers."""
 
     def __init__(
-        self,
-        db_path: Optional[str],
-        config: Optional[RetrievalConfig] = None,
-        *,
-        db_adapter: Optional[Any] = None
+        self, db_path: Optional[str], config: Optional[RetrievalConfig] = None, *, db_adapter: Optional[Any] = None
     ) -> None:
         """Initialise the retriever with optional backend adapters."""
         self.config = config or RetrievalConfig()
@@ -604,8 +738,8 @@ class BaseRetriever(ABC):
             return memory_path
 
         # Handle URI schemes - only allow file:// and validate the path component
-        if '://' in path:
-            if path.startswith('file://'):
+        if "://" in path:
+            if path.startswith("file://"):
                 # Extract and decode the path component
                 extracted_path = _extract_file_uri_path(path)
                 extracted_parts = [part.lower() for part in extracted_path.split("/") if part]
@@ -624,7 +758,7 @@ class BaseRetriever(ABC):
                 return validated
             else:
                 # Reject non-file URI schemes (http://, ftp://, etc.)
-                scheme = path.split('://')[0]
+                scheme = path.split("://")[0]
                 logger.warning(f"Rejected unsupported URI scheme: {scheme}")
                 raise UnsupportedDatabaseSchemeError()
 
@@ -638,7 +772,7 @@ class BaseRetriever(ABC):
             first_component = normalized_input_path.split("/", 2)[1].lower()
             if first_component in {"etc", "proc", "sys", "dev", "boot", "root"}:
                 raise RestrictedDatabasePathError()
-        if '..' in path:
+        if ".." in path:
             logger.warning(f"Path traversal attempt detected in: {path}")
             raise PathTraversalError()
 
@@ -652,18 +786,18 @@ class BaseRetriever(ABC):
 
         # Check for suspicious system paths in the resolved path
         suspicious_patterns = [
-            '/etc/',
-            '/proc/',
-            '/sys/',
-            '\\System32\\',
-            '\\Windows\\',
+            "/etc/",
+            "/proc/",
+            "/sys/",
+            "\\System32\\",
+            "\\Windows\\",
         ]
         for pattern in suspicious_patterns:
             if pattern in path_str:
                 logger.warning(f"Suspicious path pattern detected: {pattern} in {path_str}")
                 raise SuspiciousDatabasePathError()
-        if abs_path.parts and abs_path.parts[0] == '/' and len(abs_path.parts) > 1:
-            restricted_dirs = ['etc', 'proc', 'sys', 'dev', 'boot', 'root']
+        if abs_path.parts and abs_path.parts[0] == "/" and len(abs_path.parts) > 1:
+            restricted_dirs = ["etc", "proc", "sys", "dev", "boot", "root"]
             if abs_path.parts[1] in restricted_dirs:
                 raise RestrictedDatabasePathError()
         parent_dir = abs_path.parent
@@ -685,11 +819,7 @@ class BaseRetriever(ABC):
         """Get metadata for a document."""
         raise NotImplementedError
 
-    def _execute_query(
-        self,
-        query: str,
-        params: tuple[Any, ...] = ()
-    ) -> list[dict[str, Any]]:
+    def _execute_query(self, query: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
         """Execute SQL query and return results as dictionaries."""
         if self._db_adapter is not None:
             try:
@@ -749,7 +879,7 @@ class MediaDBRetriever(BaseRetriever):
         db_path: Optional[str],
         config: Optional[RetrievalConfig] = None,
         user_id: str = "0",
-        media_db: Optional[Any] = None
+        media_db: Optional[Any] = None,
     ) -> None:
         """Initialize MediaDBRetriever with optional vector store."""
         super().__init__(db_path, config, db_adapter=media_db)
@@ -764,7 +894,8 @@ class MediaDBRetriever(BaseRetriever):
         self._own_media_db = own
         self.user_id = user_id
         self.vector_store: Optional[VectorStoreAdapter] = None
-        self._initialize_vector_store()
+        if self.config.use_vector:
+            self._initialize_vector_store()
 
     def _maybe_attach_media_db(self, db_path: Optional[str]):
         """Best-effort: attach a content DB adapter when a canonical media DB path is provided.
@@ -797,7 +928,7 @@ class MediaDBRetriever(BaseRetriever):
     def close(self):
         try:
             if self._own_media_db and self.media_db is not None:
-                close_fn = getattr(self.media_db, 'close_connection', None)
+                close_fn = getattr(self.media_db, "close_connection", None)
                 if callable(close_fn):
                     close_fn()
         except (AttributeError, RuntimeError, TypeError, ValueError):
@@ -808,34 +939,295 @@ class MediaDBRetriever(BaseRetriever):
         try:
             # Try to get vector store from settings
             from tldw_Server_API.app.core.config import settings
+
             settings_dict: dict[str, Any] = dict(settings)
-            self.vector_store = create_from_settings_for_user(
-                settings_dict,
-                self.user_id
-            )
+            self.vector_store = create_from_settings_for_user(settings_dict, self.user_id)
             if self.vector_store is not None:
                 logger.info(f"Vector store adapter initialized for MediaDBRetriever with user_id={self.user_id}")
         except (ImportError, AttributeError, RuntimeError, TypeError, ValueError) as e:
             logger.warning(f"Could not initialize vector store: {e}")
             self.vector_store = None
 
-    async def retrieve(
+    async def retrieve_slides_source_candidates_v1(
         self,
+        *,
         query: str,
-        media_type: Optional[str] = None,
-        **kwargs
+        owner_user_id: str,
+        top_k: int,
     ) -> list[Document]:
+        """Search owner-local chunk FTS while returning metadata only."""
+        if self.media_db is None:
+            raise RAGDatabaseError(
+                "The owner-local media database is unavailable.",
+                database_name="media",
+                operation_type="slides_source_retrieval",
+            )
+        if not isinstance(query, str) or not query.strip():
+            raise ValueError("query must be a non-empty string")
+        if not isinstance(owner_user_id, str) or not owner_user_id.strip():
+            raise ValueError("owner_user_id must be a non-empty string")
+        if isinstance(top_k, bool) or not isinstance(top_k, int) or not 1 <= top_k <= 100:
+            raise ValueError("top_k must be an integer between 1 and 100")
+
+        backend_type = getattr(self.media_db, "backend_type", None)
+        formatted_text = """
+            '# ' || COALESCE(NULLIF(TRIM(m.title), ''), CAST(u.uuid AS TEXT), 'source') || '
+
+' || COALESCE(u.chunk_text, '')
+        """
+        if backend_type == BackendType.SQLITE:
+            fts_query = _build_slides_source_fts_query(query)
+            if fts_query is None:
+                return []
+            sql = f"""
+                SELECT
+                    u.uuid AS chunk_uuid,
+                    u.media_id,
+                    LENGTH({formatted_text}) AS _standalone_source_full_chars,
+                    INSTR({formatted_text}, CHAR(0)) > 0 AS _standalone_source_invalid_text,
+                    u.chunk_index,
+                    bm25(unvectorized_chunks_fts) AS rank
+                FROM unvectorized_chunks_fts
+                JOIN UnvectorizedMediaChunks u ON unvectorized_chunks_fts.rowid = u.id
+                JOIN Media m ON u.media_id = m.id
+                WHERE unvectorized_chunks_fts MATCH ?
+                  AND m.deleted = 0
+                  AND m.is_trash = 0
+                  AND u.deleted = 0
+                  AND (m.owner_user_id IS NULL OR CAST(m.owner_user_id AS TEXT) = ?)
+                ORDER BY rank ASC, u.id ASC
+                LIMIT ?
+            """  # nosec B608 - fixed expression only.
+            params = (
+                fts_query,
+                owner_user_id.strip(),
+                top_k,
+            )
+        else:
+            sql = f"""
+                SELECT
+                    u.uuid AS chunk_uuid,
+                    u.media_id,
+                    LENGTH({formatted_text}) AS _standalone_source_full_chars,
+                    FALSE AS _standalone_source_invalid_text,
+                    u.chunk_index,
+                    ts_rank(
+                        u.unvectorized_chunks_fts_tsv,
+                        plainto_tsquery('english', ?)
+                    ) AS rank
+                FROM unvectorizedmediachunks u
+                JOIN media m ON u.media_id = m.id
+                WHERE m.deleted = FALSE
+                  AND m.is_trash = FALSE
+                  AND u.deleted = FALSE
+                  AND COALESCE(CAST(m.owner_user_id AS TEXT), m.client_id) = ?
+                  AND u.unvectorized_chunks_fts_tsv @@ plainto_tsquery('english', ?)
+                ORDER BY rank DESC, u.id ASC
+                LIMIT ?
+            """  # nosec B608 - fixed expression only.
+            params = (
+                query,
+                owner_user_id.strip(),
+                query,
+                top_k,
+            )
+
+        try:
+            cursor = self.media_db.execute_query(
+                sql,
+                params,
+                log_errors=False,
+            )
+            rows = _read_slides_source_candidate_rows(cursor)
+        except Exception:  # noqa: BLE001 - closed boundary normalizes DB failures
+            raise RAGDatabaseError(
+                "Media source candidate retrieval failed.",
+                database_name="media",
+                operation_type="slides_source_retrieval",
+            ) from None
+
+        raw_ranks: list[float] = []
+        for row in rows:
+            try:
+                raw_ranks.append(float(row.get("rank") or 0.0))
+            except (TypeError, ValueError):
+                raw_ranks.append(0.0)
+        scores = _normalize_scores(
+            [-rank for rank in raw_ranks] if backend_type == BackendType.SQLITE else raw_ranks,
+            method="minmax",
+        )
+        documents: list[Document] = []
+        for row, score in zip(rows, scores):
+            metadata: dict[str, Any] = {
+                "media_id": str(row.get("media_id")),
+                "chunk_index": int(row.get("chunk_index") or 0),
+                "source": "media_db",
+                _SLIDES_SOURCE_FULL_CHARS: row[_SLIDES_SOURCE_FULL_CHARS],
+                _SLIDES_SOURCE_PROJECTION_KEY: str(row.get("chunk_uuid")),
+            }
+            documents.append(
+                Document(
+                    id=str(row.get("chunk_uuid")),
+                    content="",
+                    source=DataSource.MEDIA_DB,
+                    metadata=metadata,
+                    score=float(score),
+                    chunk_index=metadata["chunk_index"],
+                )
+            )
+        return documents
+
+    async def project_slides_source_documents_v1(
+        self,
+        *,
+        projections: list[tuple[Document, int]],
+        owner_user_id: str,
+    ) -> list[Document]:
+        """Fetch selected media text once, bounded by caller-provided caps."""
+        if self.media_db is None:
+            raise RAGDatabaseError(
+                "The owner-local media database is unavailable.",
+                database_name="media",
+                operation_type="slides_source_retrieval",
+            )
+        if not isinstance(owner_user_id, str) or not owner_user_id.strip():
+            raise ValueError("owner_user_id must be a non-empty string")
+        if not projections:
+            return []
+        values_sql = _slides_source_requested_values(len(projections))
+        params: list[Any] = []
+        for order, (candidate, char_cap) in enumerate(projections):
+            projection_key = candidate.metadata.get(_SLIDES_SOURCE_PROJECTION_KEY)
+            if candidate.source is not DataSource.MEDIA_DB or not isinstance(projection_key, str) or not projection_key:
+                raise ValueError("Invalid media source candidate.")
+            if isinstance(char_cap, bool) or not isinstance(char_cap, int) or char_cap < 1:
+                raise ValueError("Invalid media source projection cap.")
+            params.extend((projection_key, char_cap, order))
+
+        formatted_text = """
+            '# ' || COALESCE(NULLIF(TRIM(m.title), ''), CAST(u.uuid AS TEXT), 'source') || '
+
+' || COALESCE(u.chunk_text, '')
+        """
+        backend_type = getattr(self.media_db, "backend_type", None)
+        invalid_text = "INSTR({formatted_text}, CHAR(0)) > 0" if backend_type == BackendType.SQLITE else "FALSE"
+        owner_filter = (
+            "(m.owner_user_id IS NULL OR CAST(m.owner_user_id AS TEXT) = ?)"
+            if backend_type == BackendType.SQLITE
+            else "COALESCE(CAST(m.owner_user_id AS TEXT), m.client_id) = ?"
+        )
+        sql = """
+            SELECT
+                requested.projection_order,
+                requested.projection_cap,
+                SUBSTR({formatted_text}, 1, requested.projection_cap) AS source_text,
+                LENGTH({formatted_text}) > requested.projection_cap AS _standalone_source_projection_truncated,
+                {invalid_text} AS _standalone_source_invalid_text
+            FROM ({values_sql}) AS requested
+            JOIN {chunks_table} u ON CAST(u.uuid AS TEXT) = requested.projection_key
+            JOIN {media_table} m ON u.media_id = m.id
+            WHERE m.deleted = {false_value}
+              AND m.is_trash = {false_value}
+              AND u.deleted = {false_value}
+              AND {owner_filter}
+            ORDER BY requested.projection_order ASC
+        """.format(  # nosec B608 - placeholders and fixed identifiers only.
+            values_sql=values_sql,
+            formatted_text=formatted_text,
+            invalid_text=invalid_text.format(formatted_text=formatted_text),
+            chunks_table=(
+                "UnvectorizedMediaChunks" if backend_type == BackendType.SQLITE else "unvectorizedmediachunks"
+            ),
+            media_table="Media" if backend_type == BackendType.SQLITE else "media",
+            false_value="0" if backend_type == BackendType.SQLITE else "FALSE",
+            owner_filter=owner_filter,
+        )
+        params.append(owner_user_id.strip())
+        try:
+            cursor = self.media_db.execute_query(
+                sql,
+                tuple(params),
+                log_errors=False,
+            )
+            rows = _read_slides_source_projection_rows(
+                cursor,
+                max_materialized_chars=sum(cap for _, cap in projections),
+            )
+        except Exception:  # noqa: BLE001 - closed boundary normalizes DB failures
+            raise RAGDatabaseError(
+                "Bounded media source projection failed.",
+                database_name="media",
+                operation_type="slides_source_retrieval",
+            ) from None
+
+        documents: list[Document] = []
+        seen_orders: set[int] = set()
+        for row in rows:
+            order = row.get("projection_order")
+            if (
+                isinstance(order, bool)
+                or not isinstance(order, int)
+                or not 0 <= order < len(projections)
+                or order in seen_orders
+            ):
+                raise RAGDatabaseError(
+                    "Bounded media source projection failed.",
+                    database_name="media",
+                    operation_type="slides_source_retrieval",
+                ) from None
+            seen_orders.add(order)
+            candidate, _ = projections[order]
+            metadata = dict(candidate.metadata)
+            metadata.pop(_SLIDES_SOURCE_FULL_CHARS, None)
+            metadata.pop(_SLIDES_SOURCE_PROJECTION_KEY, None)
+            metadata[_SLIDES_SOURCE_PREFORMATTED] = True
+            if row.get(_SLIDES_SOURCE_TRUNCATED):
+                metadata[_SLIDES_SOURCE_TRUNCATED] = True
+            documents.append(
+                replace(
+                    candidate,
+                    content=row["source_text"],
+                    metadata=metadata,
+                )
+            )
+        return documents
+
+    async def retrieve_slides_source_documents_v1(
+        self,
+        *,
+        query: str,
+        owner_user_id: str,
+        max_source_chars: int,
+        top_k: int,
+    ) -> list[Document]:
+        """Run strict bounded chunk FTS without media-level or vector fallback."""
+        if isinstance(max_source_chars, bool) or not isinstance(max_source_chars, int) or max_source_chars < 1:
+            raise ValueError("max_source_chars must be a positive integer")
+        candidates = await self.retrieve_slides_source_candidates_v1(
+            query=query,
+            owner_user_id=owner_user_id,
+            top_k=top_k,
+        )
+        selected, caps = _allocate_slides_source_projection_caps(
+            candidates,
+            total_chars=max_source_chars,
+            separator_chars=0,
+        )
+        return await self.project_slides_source_documents_v1(
+            projections=list(zip(selected, caps)),
+            owner_user_id=owner_user_id,
+        )
+
+    async def retrieve(self, query: str, media_type: Optional[str] = None, **kwargs) -> list[Document]:
         """Retrieve documents from the media database."""
         if self.media_db is not None:
             # Branch on FTS level when FTS search is enabled
             try:
-                if self.config.use_fts and getattr(self.config, 'fts_level', 'media') == 'chunk':
+                if self.config.use_fts and getattr(self.config, "fts_level", "media") == "chunk":
                     if "enable_text_late_chunking" in kwargs:
                         prefer_text_late_chunking = bool(kwargs.get("enable_text_late_chunking"))
                     else:
-                        prefer_text_late_chunking = bool(
-                            getattr(self.config, "enable_text_late_chunking", False)
-                        )
+                        prefer_text_late_chunking = bool(getattr(self.config, "enable_text_late_chunking", False))
                     if prefer_text_late_chunking:
                         media_documents = self._retrieve_via_backend(
                             query,
@@ -883,9 +1275,14 @@ class MediaDBRetriever(BaseRetriever):
         content_w = 1.0
         try:
             from tldw_Server_API.app.core.config import settings as _settings
+
             # Allow nested RAG.FTS config or flat vars
-            title_w = float((_settings.get("RAG", {}) or {}).get("fts_title_weight", _settings.get("FTS_TITLE_WEIGHT", 2.0)))
-            content_w = float((_settings.get("RAG", {}) or {}).get("fts_content_weight", _settings.get("FTS_CONTENT_WEIGHT", 1.0)))
+            title_w = float(
+                (_settings.get("RAG", {}) or {}).get("fts_title_weight", _settings.get("FTS_TITLE_WEIGHT", 2.0))
+            )
+            content_w = float(
+                (_settings.get("RAG", {}) or {}).get("fts_content_weight", _settings.get("FTS_CONTENT_WEIGHT", 1.0))
+            )
         except (AttributeError, RuntimeError, TypeError, ValueError):
             pass
 
@@ -965,9 +1362,9 @@ class MediaDBRetriever(BaseRetriever):
                     "url": row.get("url"),
                     "created_at": row.get("ingestion_date"),
                     "transcription_model": row.get("transcription_model"),
-                    "source": "media_db"
+                    "source": "media_db",
                 },
-                score=float(score)
+                score=float(score),
             )
             documents.append(doc)
         logger.debug(f"Retrieved {len(documents)} documents from Media_DB (normalized scores)")
@@ -993,27 +1390,21 @@ class MediaDBRetriever(BaseRetriever):
             logger.debug("Late chunk media retrieval skipped because Chunker is unavailable")
             return []
 
-        chunk_method = str(
-            kwargs.get("chunk_method")
-            or getattr(self.config, "chunk_method", None)
-            or "sentences"
-        )
+        chunk_method = str(kwargs.get("chunk_method") or getattr(self.config, "chunk_method", None) or "sentences")
         chunk_size = (
             _coerce_int(kwargs.get("chunk_size") or kwargs.get("max_chunk_size"))
             or _coerce_int(getattr(self.config, "chunk_size", None))
             or 500
         )
         chunk_overlap = (
-            _coerce_int(kwargs.get("chunk_overlap"))
-            or _coerce_int(getattr(self.config, "chunk_overlap", None))
-            or 50
+            _coerce_int(kwargs.get("chunk_overlap")) or _coerce_int(getattr(self.config, "chunk_overlap", None)) or 50
         )
         chunk_language = kwargs.get("chunk_language") or getattr(self.config, "chunk_language", None)
         query_terms = _extract_media_query_terms(query)
 
         try:
             chunker = Chunker()
-        except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
+        except (AttributeError, RuntimeError, ValueError) as exc:
             logger.debug(f"Late chunk media retrieval skipped because Chunker could not initialize: {exc}")
             return []
 
@@ -1121,15 +1512,15 @@ class MediaDBRetriever(BaseRetriever):
         if self.media_db is None:
             return [], 0
 
-        backend_type = getattr(self.media_db, 'backend_type', None)
+        backend_type = getattr(self.media_db, "backend_type", None)
         if backend_type == BackendType.SQLITE:
             # Ensure FTS virtual table exists; rebuild if empty to prime content
             try:
-                ensure = getattr(self.media_db, 'ensure_chunk_fts', None)
+                ensure = getattr(self.media_db, "ensure_chunk_fts", None)
                 if callable(ensure):
                     self.media_db.ensure_chunk_fts()
                 # Optionally prime FTS if empty (cheap count)
-                check = getattr(self.media_db, 'maybe_rebuild_chunk_fts_if_empty', None)
+                check = getattr(self.media_db, "maybe_rebuild_chunk_fts_if_empty", None)
                 if callable(check):
                     self.media_db.maybe_rebuild_chunk_fts_if_empty()
             except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
@@ -1163,7 +1554,7 @@ class MediaDBRetriever(BaseRetriever):
             params.append(fts_query)
         else:
             # Postgres tsquery path over generated tsvector column
-            tsquery = FTSQueryTranslator.normalize_query(query, 'postgresql')
+            tsquery = FTSQueryTranslator.normalize_query(query, "postgresql")
             sql = (
                 "SELECT "
                 " u.uuid AS chunk_uuid, u.id AS chunk_rowid, u.media_id, u.chunk_text,"
@@ -1233,7 +1624,7 @@ class MediaDBRetriever(BaseRetriever):
             row_maps = [r if isinstance(r, dict) else dict(r) for r in rows]
             raw_vals: list[float] = []
             for rm in row_maps:
-                rv = rm.get('rank')
+                rv = rm.get("rank")
                 try:
                     raw_vals.append(float(rv) if rv is not None else 0.0)
                 except (TypeError, ValueError):
@@ -1254,39 +1645,40 @@ class MediaDBRetriever(BaseRetriever):
             md: dict[str, Any] = {}
             if self.config.include_metadata:
                 md = {
-                    'title': row.get('title'),
-                    'media_type': row.get('media_type'),
-                    'url': row.get('url'),
-                    'media_id': str(row.get('media_id')) if row.get('media_id') is not None else None,
-                    'chunk_type': row.get('chunk_type'),
-                    'chunk_index': int(row.get('chunk_index') or 0),
-                    'start_char': row.get('start_char'),
-                    'end_char': row.get('end_char'),
-                    'source': 'media_db',
+                    "title": row.get("title"),
+                    "media_type": row.get("media_type"),
+                    "url": row.get("url"),
+                    "media_id": str(row.get("media_id")) if row.get("media_id") is not None else None,
+                    "chunk_type": row.get("chunk_type"),
+                    "chunk_index": int(row.get("chunk_index") or 0),
+                    "start_char": row.get("start_char"),
+                    "end_char": row.get("end_char"),
+                    "source": "media_db",
                 }
 
                 # Optionally enrich with nearest section info from DocumentStructureIndex
                 try:
                     from tldw_Server_API.app.core.config import rag_enable_structure_index  # lazy import
+
                     _enable_si = rag_enable_structure_index()
                 except (ImportError, AttributeError, RuntimeError, TypeError, ValueError):
                     _enable_si = True
                 if _enable_si:
                     try:
-                        mid_raw = md.get('media_id')
-                        st = md.get('start_char')
+                        mid_raw = md.get("media_id")
+                        st = md.get("start_char")
                         if self.media_db and mid_raw is not None and st is not None:
                             mid = int(str(mid_raw))
                             st_i = int(st)
                             lookup_section = getattr(self.media_db, "lookup_section_for_offset", None)
                             sec = lookup_section(mid, st_i) if callable(lookup_section) else None
                             if isinstance(sec, dict):
-                                md['section_title'] = sec.get('title')
-                                md['section_start'] = sec.get('start_char')
-                                md['section_end'] = sec.get('end_char')
+                                md["section_title"] = sec.get("title")
+                                md["section_start"] = sec.get("start_char")
+                                md["section_end"] = sec.get("end_char")
                                 # Paragraph bounds default to chunk bounds
-                                md.setdefault('paragraph_start', md.get('start_char'))
-                                md.setdefault('paragraph_end', md.get('end_char'))
+                                md.setdefault("paragraph_start", md.get("start_char"))
+                                md.setdefault("paragraph_end", md.get("end_char"))
                     except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
                         pass
 
@@ -1307,8 +1699,8 @@ class MediaDBRetriever(BaseRetriever):
                             if key not in md and value is not None:
                                 md[key] = value
 
-            chunk_uuid = str(row.get('chunk_uuid'))
-            content_text = (row.get('chunk_text') or "")
+            chunk_uuid = str(row.get("chunk_uuid"))
+            content_text = row.get("chunk_text") or ""
 
             doc = Document(
                 id=chunk_uuid,
@@ -1316,9 +1708,9 @@ class MediaDBRetriever(BaseRetriever):
                 source=DataSource.MEDIA_DB,
                 metadata=md,
                 score=float(score_val),
-                start_char=md.get('start_char'),
-                end_char=md.get('end_char'),
-                chunk_index=md.get('chunk_index'),
+                start_char=md.get("start_char"),
+                end_char=md.get("end_char"),
+                chunk_index=md.get("chunk_index"),
             )
             _apply_location_metadata(doc)
             docs.append(doc)
@@ -1338,10 +1730,10 @@ class MediaDBRetriever(BaseRetriever):
         date_range = None
         if self.config.date_filter:
             start, end = self.config.date_filter
-            date_range = {'start_date': start, 'end_date': end}
+            date_range = {"start_date": start, "end_date": end}
         media_types = [media_type] if media_type else None
-        sort_by = 'relevance' if self.config.use_fts else 'last_modified_desc'
-        backend_type = getattr(self.media_db, 'backend_type', None)
+        sort_by = "relevance" if self.config.use_fts else "last_modified_desc"
+        backend_type = getattr(self.media_db, "backend_type", None)
         search_query = query
         if backend_type == BackendType.SQLITE:
             search_query = _sanitize_media_fts_query(query) or query
@@ -1394,7 +1786,7 @@ class MediaDBRetriever(BaseRetriever):
             results, _total = search_media(
                 self.media_db,
                 search_query=search_query,
-                search_fields=['title', 'content'],
+                search_fields=["title", "content"],
                 media_types=media_types,
                 date_range=date_range,
                 media_ids_filter=list(allowed_media_ids) if allowed_media_ids else None,
@@ -1422,9 +1814,9 @@ class MediaDBRetriever(BaseRetriever):
         # Normalize scores across results to [0,1] (higher is better)
         raw_vals: list[float] = []
         for row in results:
-            rv = row.get('relevance_score')
+            rv = row.get("relevance_score")
             if rv is None:
-                rv = row.get('rank')
+                rv = row.get("rank")
             try:
                 raw_vals.append(float(rv) if rv is not None else 0.0)
             except (TypeError, ValueError):
@@ -1442,19 +1834,19 @@ class MediaDBRetriever(BaseRetriever):
             metadata = {}
             if self.config.include_metadata:
                 metadata = {
-                    'title': row.get('title'),
-                    'media_type': row.get('type'),
-                    'url': row.get('url'),
-                    'created_at': row.get('ingestion_date'),
-                    'transcription_model': row.get('transcription_model'),
-                    'last_modified': row.get('last_modified'),
-                    'source': 'media_db',
+                    "title": row.get("title"),
+                    "media_type": row.get("type"),
+                    "url": row.get("url"),
+                    "created_at": row.get("ingestion_date"),
+                    "transcription_model": row.get("transcription_model"),
+                    "last_modified": row.get("last_modified"),
+                    "source": "media_db",
                 }
             # Use numeric media ID for Document.id to match callers/tests that
             # expect Media DB identifiers, and keep uuid in metadata if needed.
-            doc_id = row.get('id')
-            title_text = (row.get('title') or '').strip()
-            body_text = (row.get('content') or '').strip()
+            doc_id = row.get("id")
+            title_text = (row.get("title") or "").strip()
+            body_text = (row.get("content") or "").strip()
             if title_text and (not body_text or title_text.lower() not in body_text.lower()):
                 content_text = f"{title_text}\n{body_text}" if body_text else title_text
             else:
@@ -1468,7 +1860,7 @@ class MediaDBRetriever(BaseRetriever):
                     score=float(score_val),
                 )
             )
-        documents.sort(key=lambda doc: getattr(doc, 'score', 0.0), reverse=True)
+        documents.sort(key=lambda doc: getattr(doc, "score", 0.0), reverse=True)
         for doc in documents:
             _apply_location_metadata(doc)
         return documents
@@ -1481,16 +1873,17 @@ class MediaDBRetriever(BaseRetriever):
         apply_min_score: bool = True,
         **kwargs,
     ) -> list[Document]:
-        backend_type = getattr(self.media_db, 'backend_type', None)
+        backend_type = getattr(self.media_db, "backend_type", None)
         search_query = _sanitize_media_fts_query(fallback_query) or fallback_query
         results, _raw_row_count = self._search_media_db(
             search_query=search_query,
             media_types=[media_type] if media_type else None,
-            date_range=self.config.date_filter and {
-                'start_date': self.config.date_filter[0],
-                'end_date': self.config.date_filter[1],
+            date_range=self.config.date_filter
+            and {
+                "start_date": self.config.date_filter[0],
+                "end_date": self.config.date_filter[1],
             },
-            sort_by='relevance' if self.config.use_fts else 'last_modified_desc',
+            sort_by="relevance" if self.config.use_fts else "last_modified_desc",
             **kwargs,
         )
         if apply_min_score:
@@ -1501,11 +1894,7 @@ class MediaDBRetriever(BaseRetriever):
             apply_min_score=False,
         )
 
-    async def retrieve_with_keywords(
-        self,
-        query: str,
-        keywords: list[str]
-    ) -> list[Document]:
+    async def retrieve_with_keywords(self, query: str, keywords: list[str]) -> list[Document]:
         """Retrieve with additional keyword filtering."""
         # Get base results
         documents = await self.retrieve(query)
@@ -1521,12 +1910,7 @@ class MediaDBRetriever(BaseRetriever):
 
         return documents
 
-    async def _retrieve_fts(
-        self,
-        query: str,
-        media_type: Optional[str] = None,
-        **kwargs
-    ) -> list[Document]:
+    async def _retrieve_fts(self, query: str, media_type: Optional[str] = None, **kwargs) -> list[Document]:
         """Internal method for FTS retrieval (same as retrieve)."""
         return await self.retrieve(query, media_type, **kwargs)
 
@@ -1551,9 +1935,7 @@ class MediaDBRetriever(BaseRetriever):
     def _build_allowed_media_vector_filter(
         allowed_media_ids: Any,
     ) -> Optional[dict[str, Any]]:
-        normalized_ids = MediaDBRetriever._normalize_allowed_media_ids_for_vector_filter(
-            allowed_media_ids
-        )
+        normalized_ids = MediaDBRetriever._normalize_allowed_media_ids_for_vector_filter(allowed_media_ids)
         if not normalized_ids:
             return None
         if len(normalized_ids) == 1:
@@ -1597,9 +1979,7 @@ class MediaDBRetriever(BaseRetriever):
             return None
 
         scoped_filter = self._build_allowed_media_vector_filter(allowed_media_ids)
-        scoped_media_ids = set(
-            self._normalize_allowed_media_ids_for_vector_filter(allowed_media_ids)
-        )
+        scoped_media_ids = set(self._normalize_allowed_media_ids_for_vector_filter(allowed_media_ids))
         if not scoped_filter or not scoped_media_ids:
             return None
 
@@ -1660,7 +2040,7 @@ class MediaDBRetriever(BaseRetriever):
                     exc,
                 )
                 return None
-        except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
+        except (AttributeError, RuntimeError, ValueError) as exc:
             logger.debug(
                 "Vector metadata lookup failed for collection '{}': {}",
                 collection_name,
@@ -1670,11 +2050,7 @@ class MediaDBRetriever(BaseRetriever):
 
         metadatas = self._extract_collection_metadatas(metadata_payload)
         if scoped_media_ids:
-            metadatas = [
-                item
-                for item in metadatas
-                if str(item.get("media_id")) in scoped_media_ids
-            ]
+            metadatas = [item for item in metadatas if str(item.get("media_id")) in scoped_media_ids]
 
         model_overrides: set[str] = set()
         for metadata in metadatas:
@@ -1698,12 +2074,7 @@ class MediaDBRetriever(BaseRetriever):
             )
         return None
 
-    async def _retrieve_vector(
-        self,
-        query: str,
-        media_type: Optional[str] = None,
-        **kwargs
-    ) -> list[Document]:
+    async def _retrieve_vector(self, query: str, media_type: Optional[str] = None, **kwargs) -> list[Document]:
         """
         Retrieve documents using vector search.
 
@@ -1760,6 +2131,7 @@ class MediaDBRetriever(BaseRetriever):
                         create_embeddings_batch,
                         get_embedding_config,
                     )
+
                     user_app_config = get_embedding_config()
                     model_id_override = self._resolve_scoped_query_embedding_override(
                         collection_name=collection_name,
@@ -1778,7 +2150,7 @@ class MediaDBRetriever(BaseRetriever):
                         return []
 
                     query_vector = embeddings[0]
-                    if hasattr(query_vector, 'tolist'):
+                    if hasattr(query_vector, "tolist"):
                         query_vector = query_vector.tolist()
                 except (ImportError, AttributeError, RuntimeError, TypeError, ValueError) as e:
                     logger.error(f"Failed to generate query embedding: {e}")
@@ -1805,6 +2177,7 @@ class MediaDBRetriever(BaseRetriever):
             # HYDE-aware retrieval and merge
             try:
                 from tldw_Server_API.app.core.config import settings as _settings  # late import
+
                 hyde_enabled = bool(_settings.get("HYDE_ENABLED", False))
                 hyde_only_if_needed = bool(_settings.get("HYDE_ONLY_IF_NEEDED", True))
                 hyde_score_floor = float(_settings.get("HYDE_SCORE_FLOOR", 0.30) or 0.30)
@@ -2018,11 +2391,7 @@ class MediaDBRetriever(BaseRetriever):
             return await self._retrieve_fts(query, media_type, **kwargs)
 
     async def retrieve_hybrid(
-        self,
-        query: str,
-        media_type: Optional[str] = None,
-        alpha: float = 0.7,
-        **kwargs
+        self, query: str, media_type: Optional[str] = None, alpha: float = 0.7, **kwargs
     ) -> list[Document]:
         """
         Retrieve documents using hybrid search (FTS + Vector).
@@ -2045,11 +2414,7 @@ class MediaDBRetriever(BaseRetriever):
         return self._reciprocal_rank_fusion(fts_docs, vector_docs, alpha)
 
     def _reciprocal_rank_fusion(
-        self,
-        fts_docs: list[Document],
-        vector_docs: list[Document],
-        alpha: float = 0.7,
-        k: int = 60
+        self, fts_docs: list[Document], vector_docs: list[Document], alpha: float = 0.7, k: int = 60
     ) -> list[Document]:
         """
         Merge FTS and vector results using reciprocal rank fusion.
@@ -2096,7 +2461,7 @@ class MediaDBRetriever(BaseRetriever):
 
         # Create final document list
         merged_docs = []
-        for doc_id in sorted_ids[:self.config.max_results]:
+        for doc_id in sorted_ids[: self.config.max_results]:
             doc = doc_map[doc_id]
             doc.score = final_scores[doc_id]
             merged_docs.append(doc)
@@ -2107,8 +2472,8 @@ class MediaDBRetriever(BaseRetriever):
     async def get_metadata(self, doc_id: str) -> dict[str, Any]:
         """Get full metadata for a media item."""
         aggregator = "GROUP_CONCAT(t.name)"
-        media_adapter = getattr(self, 'media_db', None)
-        if media_adapter is not None and getattr(media_adapter, 'backend_type', None) == BackendType.POSTGRESQL:
+        media_adapter = getattr(self, "media_db", None)
+        if media_adapter is not None and getattr(media_adapter, "backend_type", None) == BackendType.POSTGRESQL:
             aggregator = "STRING_AGG(t.name, ',')"
         metadata_sql_template = """
             SELECT
@@ -2135,7 +2500,7 @@ class MediaDBRetriever(BaseRetriever):
                 "url": row["url"],
                 "tags": row["tags"].split(",") if row["tags"] else [],
                 "analysis_count": row["analysis_count"],
-                "created_at": row["created_at"]
+                "created_at": row["created_at"],
             }
 
         return {}
@@ -2167,17 +2532,259 @@ class NotesDBRetriever(BaseRetriever):
         db_path: Optional[str],
         config: Optional[RetrievalConfig] = None,
         *,
-        chacha_db: Optional['CharactersRAGDB'] = None
+        chacha_db: Optional["CharactersRAGDB"] = None,
     ) -> None:
         super().__init__(db_path, config, db_adapter=chacha_db)
         self.chacha_db = chacha_db
 
-    async def retrieve(
+    async def retrieve_slides_source_candidates_v1(
         self,
+        *,
         query: str,
-        notebook_id: Optional[int] = None,
-        **kwargs
+        owner_user_id: str,
+        top_k: int,
     ) -> list[Document]:
+        """Search owner-local note FTS while returning metadata only."""
+        if self.chacha_db is None:
+            raise RAGDatabaseError(
+                "The owner-local notes database is unavailable.",
+                database_name="notes",
+                operation_type="slides_source_retrieval",
+            )
+        if not isinstance(query, str) or not query.strip():
+            raise ValueError("query must be a non-empty string")
+        if not isinstance(owner_user_id, str) or not owner_user_id.strip():
+            raise ValueError("owner_user_id must be a non-empty string")
+        if isinstance(top_k, bool) or not isinstance(top_k, int) or not 1 <= top_k <= 100:
+            raise ValueError("top_k must be an integer between 1 and 100")
+
+        is_postgres = getattr(self.chacha_db, "backend_type", None) == BackendType.POSTGRESQL
+        formatted_text = """
+            '# ' || COALESCE(NULLIF(TRIM(n.title), ''), CAST(n.id AS TEXT), 'source') || '
+
+' || COALESCE(n.content, '')
+        """
+        if is_postgres:
+            sql = """
+                SELECT
+                    n.id,
+                    LENGTH({formatted_text}) AS _standalone_source_full_chars,
+                    FALSE AS _standalone_source_invalid_text,
+                    n.last_modified AS updated_at,
+                    ts_rank(n.notes_fts_tsv, plainto_tsquery('english', ?)) AS rank
+                FROM notes n
+                WHERE n.deleted = FALSE
+                  AND n.client_id = ?
+                  AND n.notes_fts_tsv @@ plainto_tsquery('english', ?)
+                ORDER BY rank DESC, n.last_modified DESC, n.id ASC
+                LIMIT ?
+            """  # nosec B608 - fixed expression only.
+            params: tuple[Any, ...] = (
+                query,
+                owner_user_id.strip(),
+                query,
+                top_k,
+            )
+        else:
+            fts_query = _build_slides_source_fts_query(query)
+            if fts_query is None:
+                return []
+            sql = f"""
+                SELECT
+                    n.id,
+                    LENGTH({formatted_text}) AS _standalone_source_full_chars,
+                    INSTR({formatted_text}, CHAR(0)) > 0 AS _standalone_source_invalid_text,
+                    n.last_modified AS updated_at,
+                    bm25(notes_fts) AS rank
+                FROM notes_fts
+                JOIN notes n ON notes_fts.rowid = n.rowid
+                WHERE notes_fts MATCH ?
+                  AND n.deleted = 0
+                ORDER BY rank ASC, n.last_modified DESC, n.id ASC
+                LIMIT ?
+            """  # nosec B608 - fixed expression only.
+            params = (
+                fts_query,
+                top_k,
+            )
+        try:
+            cursor = self.chacha_db.execute_query(
+                sql,
+                params,
+                log_params=False,
+                log_errors=False,
+            )
+            rows = _read_slides_source_candidate_rows(cursor)
+        except Exception:  # noqa: BLE001 - closed boundary normalizes DB failures
+            raise RAGDatabaseError(
+                "Note source candidate retrieval failed.",
+                database_name="notes",
+                operation_type="slides_source_retrieval",
+            ) from None
+
+        raw_ranks: list[float] = []
+        for row in rows:
+            try:
+                raw_ranks.append(float(row.get("rank") or 0.0))
+            except (TypeError, ValueError):
+                raw_ranks.append(0.0)
+        scores = _normalize_scores(
+            raw_ranks if is_postgres else [-rank for rank in raw_ranks],
+            method="minmax",
+        )
+        documents: list[Document] = []
+        for row, score in zip(rows, scores):
+            note_id = str(row.get("id"))
+            metadata: dict[str, Any] = {
+                "note_id": note_id,
+                "updated_at": row.get("updated_at"),
+                "source": "notes_db",
+                _SLIDES_SOURCE_FULL_CHARS: row[_SLIDES_SOURCE_FULL_CHARS],
+                _SLIDES_SOURCE_PROJECTION_KEY: note_id,
+            }
+            documents.append(
+                Document(
+                    id=f"note_{note_id}",
+                    content="",
+                    source=DataSource.NOTES,
+                    metadata=metadata,
+                    score=float(score),
+                )
+            )
+        return documents
+
+    async def project_slides_source_documents_v1(
+        self,
+        *,
+        projections: list[tuple[Document, int]],
+        owner_user_id: str,
+    ) -> list[Document]:
+        """Fetch selected note text once, bounded by caller-provided caps."""
+        if self.chacha_db is None:
+            raise RAGDatabaseError(
+                "The owner-local notes database is unavailable.",
+                database_name="notes",
+                operation_type="slides_source_retrieval",
+            )
+        if not isinstance(owner_user_id, str) or not owner_user_id.strip():
+            raise ValueError("owner_user_id must be a non-empty string")
+        if not projections:
+            return []
+        values_sql = _slides_source_requested_values(len(projections))
+        params: list[Any] = []
+        for order, (candidate, char_cap) in enumerate(projections):
+            projection_key = candidate.metadata.get(_SLIDES_SOURCE_PROJECTION_KEY)
+            if candidate.source is not DataSource.NOTES or not isinstance(projection_key, str) or not projection_key:
+                raise ValueError("Invalid note source candidate.")
+            if isinstance(char_cap, bool) or not isinstance(char_cap, int) or char_cap < 1:
+                raise ValueError("Invalid note source projection cap.")
+            params.extend((projection_key, char_cap, order))
+
+        is_postgres = getattr(self.chacha_db, "backend_type", None) == BackendType.POSTGRESQL
+        formatted_text = """
+            '# ' || COALESCE(NULLIF(TRIM(n.title), ''), CAST(n.id AS TEXT), 'source') || '
+
+' || COALESCE(n.content, '')
+        """
+        owner_clause = "AND n.client_id = ?" if is_postgres else ""
+        sql = """
+            SELECT
+                requested.projection_order,
+                requested.projection_cap,
+                SUBSTR({formatted_text}, 1, requested.projection_cap) AS source_text,
+                LENGTH({formatted_text}) > requested.projection_cap AS _standalone_source_projection_truncated,
+                {invalid_text} AS _standalone_source_invalid_text
+            FROM ({values_sql}) AS requested
+            JOIN notes n ON CAST(n.id AS TEXT) = requested.projection_key
+            WHERE n.deleted = {false_value}
+              {owner_clause}
+            ORDER BY requested.projection_order ASC
+        """.format(  # nosec B608 - placeholders and fixed expressions only.
+            values_sql=values_sql,
+            formatted_text=formatted_text,
+            invalid_text=("FALSE" if is_postgres else f"INSTR({formatted_text}, CHAR(0)) > 0"),
+            false_value="FALSE" if is_postgres else "0",
+            owner_clause=owner_clause,
+        )
+        if is_postgres:
+            params.append(owner_user_id.strip())
+        try:
+            cursor = self.chacha_db.execute_query(
+                sql,
+                tuple(params),
+                log_params=False,
+                log_errors=False,
+            )
+            rows = _read_slides_source_projection_rows(
+                cursor,
+                max_materialized_chars=sum(cap for _, cap in projections),
+            )
+        except Exception:  # noqa: BLE001 - closed boundary normalizes DB failures
+            raise RAGDatabaseError(
+                "Bounded note source projection failed.",
+                database_name="notes",
+                operation_type="slides_source_retrieval",
+            ) from None
+
+        documents: list[Document] = []
+        seen_orders: set[int] = set()
+        for row in rows:
+            order = row.get("projection_order")
+            if (
+                isinstance(order, bool)
+                or not isinstance(order, int)
+                or not 0 <= order < len(projections)
+                or order in seen_orders
+            ):
+                raise RAGDatabaseError(
+                    "Bounded note source projection failed.",
+                    database_name="notes",
+                    operation_type="slides_source_retrieval",
+                ) from None
+            seen_orders.add(order)
+            candidate, _ = projections[order]
+            metadata = dict(candidate.metadata)
+            metadata.pop(_SLIDES_SOURCE_FULL_CHARS, None)
+            metadata.pop(_SLIDES_SOURCE_PROJECTION_KEY, None)
+            metadata[_SLIDES_SOURCE_PREFORMATTED] = True
+            if row.get(_SLIDES_SOURCE_TRUNCATED):
+                metadata[_SLIDES_SOURCE_TRUNCATED] = True
+            documents.append(
+                replace(
+                    candidate,
+                    content=row["source_text"],
+                    metadata=metadata,
+                )
+            )
+        return documents
+
+    async def retrieve_slides_source_documents_v1(
+        self,
+        *,
+        query: str,
+        owner_user_id: str,
+        max_source_chars: int,
+        top_k: int,
+    ) -> list[Document]:
+        """Return strict bounded note matches from the owner-local database."""
+        if isinstance(max_source_chars, bool) or not isinstance(max_source_chars, int) or max_source_chars < 1:
+            raise ValueError("max_source_chars must be a positive integer")
+        candidates = await self.retrieve_slides_source_candidates_v1(
+            query=query,
+            owner_user_id=owner_user_id,
+            top_k=top_k,
+        )
+        selected, caps = _allocate_slides_source_projection_caps(
+            candidates,
+            total_chars=max_source_chars,
+            separator_chars=0,
+        )
+        return await self.project_slides_source_documents_v1(
+            projections=list(zip(selected, caps)),
+            owner_user_id=owner_user_id,
+        )
+
+    async def retrieve(self, query: str, notebook_id: Optional[int] = None, **kwargs) -> list[Document]:
         """Retrieve from notes database."""
         allowed_note_ids = self._normalize_allowed_note_ids(kwargs.get("allowed_note_ids"))
         if allowed_note_ids:
@@ -2293,10 +2900,7 @@ class NotesDBRetriever(BaseRetriever):
             params.append(notebook_id)
         sql += " ORDER BY n.last_modified DESC LIMIT ?"
         params.append(self.config.max_results)
-        return [
-            self._row_to_document(row, score=1.0)
-            for row in self._execute_query(sql, tuple(params))
-        ]
+        return [self._row_to_document(row, score=1.0) for row in self._execute_query(sql, tuple(params))]
 
     def _row_to_document(self, row: dict[str, Any], *, score: float) -> Document:
         """Convert a note row into the RAG document shape."""
@@ -2333,9 +2937,9 @@ class NotesDBRetriever(BaseRetriever):
         # Normalize backend-provided ranks (if present) to [0,1]
         ranks = []
         for r in results:
-            rv = r.get('rank')
+            rv = r.get("rank")
             if rv is None:
-                rv = r.get('bm25_score')
+                rv = r.get("bm25_score")
             try:
                 ranks.append(float(rv) if rv is not None else None)
             except (TypeError, ValueError):
@@ -2343,7 +2947,7 @@ class NotesDBRetriever(BaseRetriever):
         norm_map = {}
         if any(v is not None for v in ranks):
             vals = [v for v in ranks if v is not None]
-            if getattr(self.chacha_db, 'backend_type', None) == BackendType.POSTGRESQL:
+            if getattr(self.chacha_db, "backend_type", None) == BackendType.POSTGRESQL:
                 scaled = _normalize_scores(vals, method="minmax")
             else:
                 scaled = _normalize_scores([-v for v in vals], method="minmax")
@@ -2353,7 +2957,7 @@ class NotesDBRetriever(BaseRetriever):
                     norm_map[idx] = float(next(it))
         min_score = float(self.config.min_score or 0.0)
         for idx, row in enumerate(results):
-            if notebook_id and row.get('notebook_id') != notebook_id:
+            if notebook_id and row.get("notebook_id") != notebook_id:
                 continue
             score_val = norm_map.get(idx, 0.75)
             if score_val < min_score:
@@ -2361,18 +2965,18 @@ class NotesDBRetriever(BaseRetriever):
             metadata = {}
             if self.config.include_metadata:
                 metadata = {
-                    'title': row.get('title'),
-                    'notebook': row.get('notebook_name'),
-                    'notebook_id': row.get('notebook_id'),
-                    'created_at': row.get('created_at'),
-                    'updated_at': row.get('updated_at'),
-                    'source': 'notes_db',
+                    "title": row.get("title"),
+                    "notebook": row.get("notebook_name"),
+                    "notebook_id": row.get("notebook_id"),
+                    "created_at": row.get("created_at"),
+                    "updated_at": row.get("updated_at"),
+                    "source": "notes_db",
                 }
             document = self._row_to_document(row, score=float(score_val))
             if metadata:
                 document.metadata = {**document.metadata, **metadata}
             documents.append(document)
-        documents.sort(key=lambda x: getattr(x, 'score', 0.0), reverse=True)
+        documents.sort(key=lambda x: getattr(x, "score", 0.0), reverse=True)
         return documents
 
     async def get_metadata(self, doc_id: str) -> dict[str, Any]:
@@ -2381,7 +2985,7 @@ class NotesDBRetriever(BaseRetriever):
         note_id = doc_id.replace("note_", "")
 
         aggregator = "GROUP_CONCAT(t.name)"
-        if self.chacha_db is not None and getattr(self.chacha_db, 'backend_type', None) == BackendType.POSTGRESQL:
+        if self.chacha_db is not None and getattr(self.chacha_db, "backend_type", None) == BackendType.POSTGRESQL:
             aggregator = "STRING_AGG(t.name, ',')"
         metadata_sql_template = """
             SELECT
@@ -2407,7 +3011,7 @@ class NotesDBRetriever(BaseRetriever):
                 "notebook": row["notebook_name"],
                 "tags": row["tags"].split(",") if row["tags"] else [],
                 "created_at": row["created_at"],
-                "updated_at": row["updated_at"]
+                "updated_at": row["updated_at"],
             }
 
         return {}
@@ -2596,11 +3200,7 @@ class KanbanDBRetriever(BaseRetriever):
         )
         if not vector_results:
             return fts_cards[:limit]
-        vector_scores = {
-            r["card_id"]: r.get("relevance_score", 0.0)
-            for r in vector_results
-            if r.get("card_id")
-        }
+        vector_scores = {r["card_id"]: r.get("relevance_score", 0.0) for r in vector_results if r.get("card_id")}
         combined: list[dict[str, Any]] = []
         seen: set[int] = set()
         for _idx, card in enumerate(fts_cards):
@@ -2726,7 +3326,7 @@ class PromptsDBRetriever(BaseRetriever):
         db_path: Optional[str],
         config: Optional[RetrievalConfig] = None,
         *,
-        chacha_db: Optional['CharactersRAGDB'] = None,
+        chacha_db: Optional["CharactersRAGDB"] = None,
         prompts_db: Optional[Any] = None,
     ) -> None:
         super().__init__(db_path, config, db_adapter=prompts_db or chacha_db)
@@ -2742,11 +3342,7 @@ class PromptsDBRetriever(BaseRetriever):
         system_prompt = str(row.get("system_prompt") or "")
         user_prompt = str(row.get("user_prompt") or "")
         searchable_parts = [name, details, system_prompt, user_prompt]
-        matched_terms = sum(
-            1
-            for term in query_terms
-            if any(term in part.lower() for part in searchable_parts if part)
-        )
+        matched_terms = sum(1 for term in query_terms if any(term in part.lower() for part in searchable_parts if part))
         usage_count = _coerce_int(row.get("usage_count")) or 0
         score = min(
             1.0,
@@ -2754,12 +3350,7 @@ class PromptsDBRetriever(BaseRetriever):
         )
 
         prompt_id = row.get("id")
-        content = (
-            f"**{name}**\n\n"
-            f"{details}\n\n"
-            f"System:\n{system_prompt}\n\n"
-            f"User:\n{user_prompt}"
-        ).strip()
+        content = (f"**{name}**\n\n" f"{details}\n\n" f"System:\n{system_prompt}\n\n" f"User:\n{user_prompt}").strip()
         return Document(
             id=f"prompt_{prompt_id}",
             content=content,
@@ -2806,10 +3397,7 @@ class PromptsDBRetriever(BaseRetriever):
                     results_per_page=max_results,
                     include_deleted=False,
                 )
-                documents = [
-                    self._document_from_prompt_row(dict(row), query_terms)
-                    for row in results
-                ]
+                documents = [self._document_from_prompt_row(dict(row), query_terms) for row in results]
                 documents.sort(key=lambda doc: doc.score, reverse=True)
                 return documents
             except (AttributeError, OSError, RuntimeError, TypeError, ValueError, sqlite3.Error) as exc:
@@ -2880,11 +3468,275 @@ class ChatHistoryRetriever(BaseRetriever):
         db_path: Optional[str],
         config: Optional[RetrievalConfig] = None,
         *,
-        chacha_db: Optional['CharactersRAGDB'] = None,
+        chacha_db: Optional["CharactersRAGDB"] = None,
     ) -> None:
         super().__init__(db_path, config, db_adapter=chacha_db)
         self.chacha_db = chacha_db
         self._excluded_source_cache: dict[str, bool] = {}
+
+    async def retrieve_slides_source_candidates_v1(
+        self,
+        *,
+        query: str,
+        owner_user_id: str,
+        top_k: int,
+    ) -> list[Document]:
+        """Search owner-local chat FTS while returning metadata only."""
+        if self.chacha_db is None:
+            raise RAGDatabaseError(
+                "The owner-local chat database is unavailable.",
+                database_name="chats",
+                operation_type="slides_source_retrieval",
+            )
+        if not isinstance(query, str) or not query.strip():
+            raise ValueError("query must be a non-empty string")
+        if not isinstance(owner_user_id, str) or not owner_user_id.strip():
+            raise ValueError("owner_user_id must be a non-empty string")
+        if isinstance(top_k, bool) or not isinstance(top_k, int) or not 1 <= top_k <= 100:
+            raise ValueError("top_k must be an integer between 1 and 100")
+
+        is_postgres = getattr(self.chacha_db, "backend_type", None) == BackendType.POSTGRESQL
+        formatted_text = "COALESCE(NULLIF(m.sender, ''), 'unknown') || ': ' || m.content"
+        if is_postgres:
+            sql = f"""
+                SELECT
+                    m.id,
+                    m.conversation_id,
+                    LENGTH({formatted_text}) AS _standalone_source_full_chars,
+                    FALSE AS _standalone_source_invalid_text,
+                    m.timestamp,
+                    ts_rank(m.messages_fts_tsv, plainto_tsquery('english', ?)) AS rank
+                FROM messages m
+                JOIN conversations conv ON conv.id = m.conversation_id
+                WHERE m.deleted = FALSE
+                  AND conv.deleted = FALSE
+                  AND m.content IS NOT NULL
+                  AND m.content != ''
+                  AND COALESCE(conv.source, '') != ?
+                  AND conv.client_id = ?
+                  AND m.messages_fts_tsv @@ plainto_tsquery('english', ?)
+                ORDER BY rank DESC, m.timestamp DESC, m.last_modified DESC, m.id ASC
+                LIMIT ?
+            """  # nosec B608 - fixed expression only.
+            params: tuple[Any, ...] = (
+                query,
+                "knowledge_qa",
+                owner_user_id.strip(),
+                query,
+                top_k,
+            )
+        else:
+            fts_query = _build_slides_source_fts_query(query)
+            if fts_query is None:
+                return []
+            sql = f"""
+                SELECT
+                    m.id,
+                    m.conversation_id,
+                    LENGTH({formatted_text}) AS _standalone_source_full_chars,
+                    INSTR({formatted_text}, CHAR(0)) > 0 AS _standalone_source_invalid_text,
+                    m.timestamp,
+                    bm25(messages_fts) AS rank
+                FROM messages_fts
+                JOIN messages m ON messages_fts.rowid = m.rowid
+                JOIN conversations conv ON conv.id = m.conversation_id
+                WHERE messages_fts MATCH ?
+                  AND m.deleted = 0
+                  AND conv.deleted = 0
+                  AND m.content IS NOT NULL
+                  AND m.content != ''
+                  AND COALESCE(conv.source, '') != ?
+                ORDER BY rank ASC, m.timestamp DESC, m.last_modified DESC, m.id ASC
+                LIMIT ?
+            """  # nosec B608 - fixed expression only.
+            params = (
+                fts_query,
+                "knowledge_qa",
+                top_k,
+            )
+        try:
+            cursor = self.chacha_db.execute_query(
+                sql,
+                params,
+                log_params=False,
+                log_errors=False,
+            )
+            rows = _read_slides_source_candidate_rows(cursor)
+        except Exception:  # noqa: BLE001 - closed boundary normalizes DB failures
+            raise RAGDatabaseError(
+                "Chat source candidate retrieval failed.",
+                database_name="chats",
+                operation_type="slides_source_retrieval",
+            ) from None
+
+        raw_ranks: list[float] = []
+        for row in rows:
+            try:
+                raw_ranks.append(float(row.get("rank") or 0.0))
+            except (TypeError, ValueError):
+                raw_ranks.append(0.0)
+        scores = _normalize_scores(
+            raw_ranks if is_postgres else [-rank for rank in raw_ranks],
+            method="minmax",
+        )
+        documents: list[Document] = []
+        for row, score in zip(rows, scores):
+            message_id = str(row.get("id"))
+            metadata: dict[str, Any] = {
+                "message_id": message_id,
+                "conversation_id": row.get("conversation_id"),
+                "timestamp": row.get("timestamp"),
+                "source": "chats",
+                _SLIDES_SOURCE_FULL_CHARS: row[_SLIDES_SOURCE_FULL_CHARS],
+                _SLIDES_SOURCE_PROJECTION_KEY: message_id,
+            }
+            documents.append(
+                Document(
+                    id=f"chat_{message_id}",
+                    content="",
+                    source=DataSource.CHAT_HISTORY,
+                    metadata=metadata,
+                    score=float(score),
+                )
+            )
+        return documents
+
+    async def project_slides_source_documents_v1(
+        self,
+        *,
+        projections: list[tuple[Document, int]],
+        owner_user_id: str,
+    ) -> list[Document]:
+        """Fetch selected chat text once, bounded by caller-provided caps."""
+        if self.chacha_db is None:
+            raise RAGDatabaseError(
+                "The owner-local chat database is unavailable.",
+                database_name="chats",
+                operation_type="slides_source_retrieval",
+            )
+        if not isinstance(owner_user_id, str) or not owner_user_id.strip():
+            raise ValueError("owner_user_id must be a non-empty string")
+        if not projections:
+            return []
+        values_sql = _slides_source_requested_values(len(projections))
+        params: list[Any] = []
+        for order, (candidate, char_cap) in enumerate(projections):
+            projection_key = candidate.metadata.get(_SLIDES_SOURCE_PROJECTION_KEY)
+            if (
+                candidate.source is not DataSource.CHAT_HISTORY
+                or not isinstance(projection_key, str)
+                or not projection_key
+            ):
+                raise ValueError("Invalid chat source candidate.")
+            if isinstance(char_cap, bool) or not isinstance(char_cap, int) or char_cap < 1:
+                raise ValueError("Invalid chat source projection cap.")
+            params.extend((projection_key, char_cap, order))
+
+        is_postgres = getattr(self.chacha_db, "backend_type", None) == BackendType.POSTGRESQL
+        formatted_text = "COALESCE(NULLIF(m.sender, ''), 'unknown') || ': ' || m.content"
+        owner_clause = "AND conv.client_id = ?" if is_postgres else ""
+        sql = """
+            SELECT
+                requested.projection_order,
+                requested.projection_cap,
+                SUBSTR({formatted_text}, 1, requested.projection_cap) AS source_text,
+                LENGTH({formatted_text}) > requested.projection_cap AS _standalone_source_projection_truncated,
+                {invalid_text} AS _standalone_source_invalid_text
+            FROM ({values_sql}) AS requested
+            JOIN messages m ON CAST(m.id AS TEXT) = requested.projection_key
+            JOIN conversations conv ON conv.id = m.conversation_id
+            WHERE m.deleted = {false_value}
+              AND conv.deleted = {false_value}
+              AND m.content IS NOT NULL
+              AND m.content != ''
+              AND COALESCE(conv.source, '') != ?
+              {owner_clause}
+            ORDER BY requested.projection_order ASC
+        """.format(  # nosec B608 - placeholders and fixed expressions only.
+            values_sql=values_sql,
+            formatted_text=formatted_text,
+            invalid_text=("FALSE" if is_postgres else f"INSTR({formatted_text}, CHAR(0)) > 0"),
+            false_value="FALSE" if is_postgres else "0",
+            owner_clause=owner_clause,
+        )
+        params.append("knowledge_qa")
+        if is_postgres:
+            params.append(owner_user_id.strip())
+        try:
+            cursor = self.chacha_db.execute_query(
+                sql,
+                tuple(params),
+                log_params=False,
+                log_errors=False,
+            )
+            rows = _read_slides_source_projection_rows(
+                cursor,
+                max_materialized_chars=sum(cap for _, cap in projections),
+            )
+        except Exception:  # noqa: BLE001 - closed boundary normalizes DB failures
+            raise RAGDatabaseError(
+                "Bounded chat source projection failed.",
+                database_name="chats",
+                operation_type="slides_source_retrieval",
+            ) from None
+
+        documents: list[Document] = []
+        seen_orders: set[int] = set()
+        for row in rows:
+            order = row.get("projection_order")
+            if (
+                isinstance(order, bool)
+                or not isinstance(order, int)
+                or not 0 <= order < len(projections)
+                or order in seen_orders
+            ):
+                raise RAGDatabaseError(
+                    "Bounded chat source projection failed.",
+                    database_name="chats",
+                    operation_type="slides_source_retrieval",
+                ) from None
+            seen_orders.add(order)
+            candidate, _ = projections[order]
+            metadata = dict(candidate.metadata)
+            metadata.pop(_SLIDES_SOURCE_FULL_CHARS, None)
+            metadata.pop(_SLIDES_SOURCE_PROJECTION_KEY, None)
+            metadata[_SLIDES_SOURCE_PREFORMATTED] = True
+            if row.get(_SLIDES_SOURCE_TRUNCATED):
+                metadata[_SLIDES_SOURCE_TRUNCATED] = True
+            documents.append(
+                replace(
+                    candidate,
+                    content=row["source_text"],
+                    metadata=metadata,
+                )
+            )
+        return documents
+
+    async def retrieve_slides_source_documents_v1(
+        self,
+        *,
+        query: str,
+        owner_user_id: str,
+        max_source_chars: int,
+        top_k: int,
+    ) -> list[Document]:
+        """Return strict bounded active chat-message matches without blobs."""
+        if isinstance(max_source_chars, bool) or not isinstance(max_source_chars, int) or max_source_chars < 1:
+            raise ValueError("max_source_chars must be a positive integer")
+        candidates = await self.retrieve_slides_source_candidates_v1(
+            query=query,
+            owner_user_id=owner_user_id,
+            top_k=top_k,
+        )
+        selected, caps = _allocate_slides_source_projection_caps(
+            candidates,
+            total_chars=max_source_chars,
+            separator_chars=0,
+        )
+        return await self.project_slides_source_documents_v1(
+            projections=list(zip(selected, caps)),
+            owner_user_id=owner_user_id,
+        )
 
     def _is_excluded_conversation_source(self, conversation_id: Any) -> bool:
         """Return whether a conversation should be hidden from chat evidence."""
@@ -2988,7 +3840,15 @@ class ChatHistoryRetriever(BaseRetriever):
                         )
                     )
                 return documents
-            except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError, sqlite3.Error) as exc:
+            except (
+                AttributeError,
+                ConnectionError,
+                OSError,
+                RuntimeError,
+                TypeError,
+                ValueError,
+                sqlite3.Error,
+            ) as exc:
                 logger.debug(f"ChaCha chat search failed: {exc}")
         return documents
 
@@ -3054,12 +3914,7 @@ class WorldBooksRetriever(BaseRetriever):
             documents.append(
                 Document(
                     id=f"world_book_entry_{row['entry_id']}",
-                    content=(
-                        f"# {name}\n\n"
-                        f"{description}\n\n"
-                        f"Keywords: {keywords}\n\n"
-                        f"{content}"
-                    ).strip(),
+                    content=(f"# {name}\n\n" f"{description}\n\n" f"Keywords: {keywords}\n\n" f"{content}").strip(),
                     source=DataSource.WORLD_BOOKS,
                     metadata={
                         "world_book_id": row.get("world_book_id"),
@@ -3097,7 +3952,7 @@ class ChatDictionariesRetriever(BaseRetriever):
         db_path: Optional[str],
         config: Optional[RetrievalConfig] = None,
         *,
-        chacha_db: Optional['CharactersRAGDB'] = None,
+        chacha_db: Optional["CharactersRAGDB"] = None,
         db_adapter: Optional[Any] = None,
     ) -> None:
         super().__init__(db_path, config, db_adapter=db_adapter or chacha_db)
@@ -3147,11 +4002,7 @@ class ChatDictionariesRetriever(BaseRetriever):
             documents.append(
                 Document(
                     id=f"dictionary_entry_{row['entry_id']}",
-                    content=(
-                        f"# {dictionary_name}\n\n"
-                        f"Key: {key}\n\n"
-                        f"{content}"
-                    ).strip(),
+                    content=(f"# {dictionary_name}\n\n" f"Key: {key}\n\n" f"{content}").strip(),
                     source=DataSource.DICTIONARIES,
                     metadata={
                         "dictionary_id": row.get("dictionary_id"),
@@ -3189,17 +4040,12 @@ class CharacterCardsRetriever(BaseRetriever):
         db_path: Optional[str],
         config: Optional[RetrievalConfig] = None,
         *,
-        chacha_db: Optional['CharactersRAGDB'] = None
+        chacha_db: Optional["CharactersRAGDB"] = None,
     ) -> None:
         super().__init__(db_path, config, db_adapter=chacha_db)
         self.chacha_db = chacha_db
 
-    async def retrieve(
-        self,
-        query: str,
-        include_chats: bool = True,
-        **kwargs
-    ) -> list[Document]:
+    async def retrieve(self, query: str, include_chats: bool = True, **kwargs) -> list[Document]:
         """
         Retrieve from character cards and chats.
 
@@ -3228,7 +4074,7 @@ class CharacterCardsRetriever(BaseRetriever):
                 norm_map = {}
                 if any(v is not None for v in raw_ranks):
                     vals = [v for v in raw_ranks if v is not None]
-                    if getattr(self.chacha_db, 'backend_type', None) == BackendType.POSTGRESQL:
+                    if getattr(self.chacha_db, "backend_type", None) == BackendType.POSTGRESQL:
                         scaled = _normalize_scores(vals, method="minmax")
                     else:
                         scaled = _normalize_scores([-v for v in vals], method="minmax")
@@ -3308,7 +4154,7 @@ class CharacterCardsRetriever(BaseRetriever):
             except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError) as e:
                 if getattr(self.chacha_db, "backend_type", None) == BackendType.POSTGRESQL:
                     logger.warning(
-                        'ChaCha backend search failed under PostgreSQL backend; skipping legacy fallback: {}',
+                        "ChaCha backend search failed under PostgreSQL backend; skipping legacy fallback: {}",
                         e,
                     )
                     raise
@@ -3345,10 +4191,12 @@ class CharacterCardsRetriever(BaseRetriever):
         card_results = self._execute_query(card_sql, tuple(params))
         for row in card_results:
             content = f"""# {row['name']}\n\n**Description:** {row['description']}\n\n**Personality:** {row['personality']}\n\n**Scenario:** {row['scenario']}\n\n**First Message:** {row['first_message']}"""
-            matches = sum([
-                query.lower() in (row[field] or "").lower()
-                for field in ["name", "description", "personality", "scenario", "system_prompt"]
-            ])
+            matches = sum(
+                [
+                    query.lower() in (row[field] or "").lower()
+                    for field in ["name", "description", "personality", "scenario", "system_prompt"]
+                ]
+            )
             score = matches / 5.0 if matches else 0.0
             doc = Document(
                 id=f"character_{row['id']}",
@@ -3508,6 +4356,7 @@ class SQLRetriever(BaseRetriever):
         try:
             from tldw_Server_API.app.core.Text2SQL.executor import SqliteReadOnlyExecutor
             from tldw_Server_API.app.core.Text2SQL.service import Text2SQLCoreService
+
             return Text2SQLCoreService(
                 generator=_PassThroughSqlGenerator(),
                 executor=SqliteReadOnlyExecutor(self.db_path),
@@ -3798,61 +4647,73 @@ class MultiDatabaseRetriever:
                 and getattr(config, "use_fts", False)
                 and hasattr(retr, "retrieve_hybrid")
             ):
-                tasks.append(_run_with_config(
-                    retr,
-                    retr.retrieve_hybrid,
-                    query=query,
-                    index_namespace=index_namespace,
-                    allowed_media_ids=allowed_media_ids,
-                ))
+                tasks.append(
+                    _run_with_config(
+                        retr,
+                        retr.retrieve_hybrid,
+                        query=query,
+                        index_namespace=index_namespace,
+                        allowed_media_ids=allowed_media_ids,
+                    )
+                )
             elif (
                 isinstance(retr, MediaDBRetriever)
                 and config is not None
                 and getattr(config, "use_vector", False)
                 and hasattr(retr, "_retrieve_vector")
             ):
-                tasks.append(_run_with_config(
-                    retr,
-                    retr._retrieve_vector,
-                    query,
-                    index_namespace=index_namespace,
-                    allowed_media_ids=allowed_media_ids,
-                ))
+                tasks.append(
+                    _run_with_config(
+                        retr,
+                        retr._retrieve_vector,
+                        query,
+                        index_namespace=index_namespace,
+                        allowed_media_ids=allowed_media_ids,
+                    )
+                )
             elif (
                 isinstance(retr, MediaDBRetriever)
                 and config is not None
                 and getattr(config, "use_fts", True)
                 and hasattr(retr, "_retrieve_fts")
             ):
-                tasks.append(_run_with_config(
-                    retr,
-                    retr._retrieve_fts,
-                    query,
-                    allowed_media_ids=allowed_media_ids,
-                ))
+                tasks.append(
+                    _run_with_config(
+                        retr,
+                        retr._retrieve_fts,
+                        query,
+                        allowed_media_ids=allowed_media_ids,
+                    )
+                )
             else:
                 # Generic retrieve; pass through allowed IDs where applicable
                 if isinstance(retr, NotesDBRetriever):
-                    tasks.append(_run_with_config(
-                        retr,
-                        retr.retrieve,
-                        query,
-                        allowed_note_ids=allowed_note_ids,
-                    ))
+                    tasks.append(
+                        _run_with_config(
+                            retr,
+                            retr.retrieve,
+                            query,
+                            allowed_note_ids=allowed_note_ids,
+                        )
+                    )
                 elif isinstance(retr, MediaDBRetriever):
-                    tasks.append(_run_with_config(
-                        retr,
-                        retr.retrieve,
-                        query,
-                        allowed_media_ids=allowed_media_ids,
-                    ))
+                    tasks.append(
+                        _run_with_config(
+                            retr,
+                            retr.retrieve,
+                            query,
+                            allowed_media_ids=allowed_media_ids,
+                        )
+                    )
                 elif isinstance(retr, CharacterCardsRetriever):
-                    tasks.append(_run_with_config(
-                        retr,
-                        retr.retrieve,
-                        query,
-                        include_chats=False,
-                    ))
+                    tasks.append(
+                        _run_with_config(
+                            retr,
+                            retr.retrieve,
+                            query,
+                            include_chats=False,
+                        )
+                    )
                 else:
                     tasks.append(_run_with_config(retr, retr.retrieve, query))
 
@@ -3993,21 +4854,16 @@ class MultiDatabaseRetriever:
         for _source, docs in source_results.items():
             for doc in docs:
                 existing = doc_map.get(doc.id)
-                if existing is None or float(getattr(doc, "score", 0.0)) > float(
-                    getattr(existing, "score", 0.0)
-                ):
+                if existing is None or float(getattr(doc, "score", 0.0)) > float(getattr(existing, "score", 0.0)):
                     doc_map[doc.id] = doc
         return sorted(doc_map.values(), key=lambda d: getattr(d, "score", 0.0), reverse=True)
+
 
 class ClaimsRetriever(BaseRetriever):
     """Retriever for Claims table (ingestion-time factual statements)."""
 
     def __init__(
-        self,
-        db_path: Optional[str],
-        config: Optional[RetrievalConfig] = None,
-        *,
-        media_db: Optional[Any] = None
+        self, db_path: Optional[str], config: Optional[RetrievalConfig] = None, *, media_db: Optional[Any] = None
     ) -> None:
         super().__init__(db_path, config, db_adapter=media_db)
         attached = None
@@ -4040,7 +4896,7 @@ class ClaimsRetriever(BaseRetriever):
     def close(self):
         try:
             if self._own_media_db and self.media_db is not None:
-                close_fn = getattr(self.media_db, 'close_connection', None)
+                close_fn = getattr(self.media_db, "close_connection", None)
                 if callable(close_fn):
                     close_fn()
         except (AttributeError, RuntimeError, TypeError, ValueError):
@@ -4136,9 +4992,9 @@ class ClaimsRetriever(BaseRetriever):
             return []
         documents: list[Document] = []
         min_score = float(self.config.min_score or 0.0)
-        backend_type = getattr(self.media_db, 'backend_type', None)
+        backend_type = getattr(self.media_db, "backend_type", None)
         for row in results:
-            score = row.get('relevance_score') if isinstance(row, dict) else None
+            score = row.get("relevance_score") if isinstance(row, dict) else None
             try:
                 score_val = float(score) if score is not None else 0.0
             except (TypeError, ValueError):
@@ -4156,7 +5012,7 @@ class ClaimsRetriever(BaseRetriever):
             documents.append(
                 Document(
                     id=f"claim_{row.get('id')}",
-                    content=row.get('claim_text') or '',
+                    content=row.get("claim_text") or "",
                     metadata=metadata,
                     source=DataSource.CLAIMS,
                     score=score_val if score_val else 0.4,
@@ -4174,6 +5030,7 @@ class ClaimsRetriever(BaseRetriever):
             return {}
 
     # (no second retrieve method inside ClaimsRetriever)
+
 
 # ---------------------------------------------------------------------------
 # Backward compatibility aliases for test suites expecting older names
@@ -4203,7 +5060,7 @@ async def retrieve_from_databases(context: Any, **kwargs) -> Any:
         max_results=config.get("max_results", 20),
         min_score=config.get("min_score", 0.0),
         use_fts=config.get("use_fts", True),
-        include_metadata=config.get("include_metadata", True)
+        include_metadata=config.get("include_metadata", True),
     )
 
     # Get sources to search
@@ -4214,23 +5071,17 @@ async def retrieve_from_databases(context: Any, **kwargs) -> Any:
     # Retrieve with fusion if enabled
     if config.get("use_fusion", True):
         documents = await retriever.retrieve_with_fusion(
-            query=context.query,
-            sources=sources,
-            fusion_method=config.get("fusion_method", "rrf")
+            query=context.query, sources=sources, fusion_method=config.get("fusion_method", "rrf")
         )
     else:
-        documents = await retriever.retrieve(
-            query=context.query,
-            sources=sources,
-            config=retrieval_config
-        )
+        documents = await retriever.retrieve(query=context.query, sources=sources, config=retrieval_config)
 
     # Update context
     context.documents = documents
     context.metadata["database_retrieval"] = {
         "sources_searched": [s.value for s in (sources or retriever.retrievers.keys())],
         "documents_retrieved": len(documents),
-        "fusion_used": config.get("use_fusion", True)
+        "fusion_used": config.get("use_fusion", True),
     }
 
     logger.info(f"Retrieved {len(documents)} documents from databases")

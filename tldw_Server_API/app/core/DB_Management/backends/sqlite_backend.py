@@ -353,7 +353,9 @@ class SQLiteBackend(DatabaseBackend):
         self,
         query: str,
         params: Optional[Union[tuple, dict]] = None,
-        connection: Optional[sqlite3.Connection] = None
+        connection: Optional[sqlite3.Connection] = None,
+        *,
+        log_errors: bool = True,
     ) -> QueryResult:
         """Execute a query and return results."""
         start_time = time.time()
@@ -386,8 +388,15 @@ class SQLiteBackend(DatabaseBackend):
             )
 
         except sqlite3.Error as e:
-            logger.exception(f"Query execution failed: {e}")
-            raise DatabaseError(f"SQLite error: {e}") from e
+            if log_errors:
+                logger.exception(f"Query execution failed: {e}")
+                raise DatabaseError(f"SQLite error: {e}") from e
+            logger.error(  # noqa: TRY400 - exception details are intentionally redacted
+                "Redacted SQLite backend query failure ({})",
+                type(e).__name__,
+            )
+
+        raise DatabaseError("SQLite query execution failed.")
 
     def execute_many(
         self,

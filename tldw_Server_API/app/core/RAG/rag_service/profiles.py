@@ -23,6 +23,7 @@ Callers can always override any individual flag on top of a profile.
 
 from collections.abc import Mapping, MutableMapping
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any, Literal, Optional
 
 ProfileName = Literal[
@@ -32,7 +33,109 @@ ProfileName = Literal[
     "fast",
     "balanced",
     "accuracy",
+    "slides_source_retrieval_v1",
 ]
+
+SLIDES_SOURCE_PROFILE = "slides_source_retrieval_v1"
+SLIDES_SOURCE_RERANKING_STRATEGIES = frozenset({"none", "flashrank", "cross_encoder"})
+
+_SLIDES_SOURCE_DISABLED_STAGES = (
+    "enable_text_late_chunking",
+    "adaptive_hybrid_weights",
+    "enable_intent_routing",
+    "auto_temporal_filters",
+    "expand_query",
+    "spell_check",
+    "enable_prf",
+    "enable_hyde",
+    "enable_gap_analysis",
+    "enable_cache",
+    "adaptive_cache",
+    "enable_table_processing",
+    "enable_vlm_late_chunking",
+    "enable_enhanced_chunking",
+    "enable_parent_expansion",
+    "include_sibling_chunks",
+    "include_parent_document",
+    "enable_multi_vector_passages",
+    "enable_precomputed_spans",
+    "enable_numeric_table_boost",
+    "enable_learned_fusion",
+    "enable_citations",
+    "enable_chunk_citations",
+    "enable_generation",
+    "strict_extractive",
+    "enable_pre_retrieval_clarification",
+    "enable_abstention",
+    "enable_multi_turn_synthesis",
+    "enable_post_verification",
+    "adaptive_rerun_on_low_confidence",
+    "adaptive_rerun_include_generation",
+    "enable_query_decomposition",
+    "enable_graph_retrieval",
+    "collect_feedback",
+    "apply_feedback_boost",
+    "enable_monitoring",
+    "enable_observability",
+    "enable_performance_analysis",
+    "enable_streaming",
+    "highlight_results",
+    "track_cost",
+    "debug_mode",
+    "include_rerank_debug_documents",
+    "enable_injection_filter",
+    "enable_content_policy_filter",
+    "enable_html_sanitizer",
+    "require_hard_citations",
+    "enable_numeric_fidelity",
+    "enable_claims",
+    "doc_only_verification",
+    "generate_verification_report",
+    "enable_dynamic_granularity",
+    "enable_evidence_accumulation",
+    "enable_evidence_chains",
+    "enable_document_grading",
+    "enable_query_rewriting_loop",
+    "enable_web_fallback",
+    "enable_knowledge_strips",
+    "enable_fast_hallucination_check",
+    "enable_utility_grading",
+    "enable_batch",
+    "enable_resilience",
+    "enable_date_filter",
+    "fallback_on_error",
+    "enable_faithfulness_eval",
+    "enable_query_classification",
+    "enable_query_reformulation",
+    "enable_research_loop",
+    "enable_discussion_search",
+    "search_url_scraping",
+    "enable_research_progress",
+    "enable_suggestions",
+    "enable_structured_response",
+    "enable_image_search",
+    "enable_video_search",
+)
+
+_SLIDES_SOURCE_DEFAULTS = MappingProxyType(
+    {
+        "sources": ("media_db", "notes", "chats"),
+        "search_mode": "fts",
+        "fts_level": "chunk",
+        "enable_reranking": False,
+        "reranking_strategy": "none",
+        "reranking_model": None,
+        "adaptive_max_retries": 0,
+        "generation_provider": None,
+        "generation_model": None,
+        "generation_prompt": None,
+        "search_depth_mode": None,
+        "chat_history": None,
+        "discussion_platforms": None,
+        "rag_profile": None,
+        **dict.fromkeys(_SLIDES_SOURCE_DISABLED_STAGES, False),
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -254,6 +357,14 @@ _PROFILES: dict[ProfileName, RAGProfile] = {
             "enable_claims": True,
         },
     ),
+    "slides_source_retrieval_v1": RAGProfile(
+        name="slides_source_retrieval_v1",
+        description=(
+            "Closed, owner-local FTS retrieval used only to snapshot source "
+            "material for standalone HTML presentations."
+        ),
+        defaults=_SLIDES_SOURCE_DEFAULTS,
+    ),
 }
 
 
@@ -281,6 +392,8 @@ def get_profile_kwargs(
     provided overrides take precedence over profile defaults.
     """
     profile = get_profile(name)
+    if name == SLIDES_SOURCE_PROFILE and overrides:
+        raise ValueError(f"{SLIDES_SOURCE_PROFILE!r} does not accept overrides")
     kwargs: dict[str, Any] = dict(profile.defaults)
     if overrides:
         # Copy into a mutable dict to avoid mutating caller mappings
@@ -299,6 +412,8 @@ def apply_profile_to_kwargs(
     This is useful when a caller already has a dict of parameters and wants
     to layer a profile underneath as a set of defaults.
     """
+    if name == SLIDES_SOURCE_PROFILE and existing:
+        raise ValueError(f"{SLIDES_SOURCE_PROFILE!r} does not accept overrides")
     base = dict(get_profile(name).defaults)
     if existing:
         base.update(existing)

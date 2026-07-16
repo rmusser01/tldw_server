@@ -1,12 +1,19 @@
 import ast
 import inspect
+import sqlite3
+import threading
 from pathlib import Path
 
 import pytest
+from loguru import logger
 
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.chacha.message_store import MessageStore
-
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+    BackendType,
+    CharactersRAGDB,
+    CharactersRAGDBError,
+    InputError,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -48,11 +55,7 @@ def _class_method_names(class_obj: type[object]) -> set[str]:
     tree = ast.parse(source_path.read_text())
     for node in tree.body:
         if isinstance(node, ast.ClassDef) and node.name == class_obj.__name__:
-            return {
-                item.name
-                for item in node.body
-                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
-            }
+            return {item.name for item in node.body if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))}
     raise AssertionError(f"Class {class_obj.__name__} not found in {source_path}")
 
 
@@ -88,7 +91,10 @@ def test_message_store_owns_delegated_methods_without_monolith_duplicates(db, mo
 
     monkeypatch.setattr(db["db"].message_store, "add_message", _fake_add_message)
 
-    assert db["db"].add_message({"conversation_id": db["conversation_id"], "sender": "user", "content": "hi"}) == "message-from-store"
+    assert (
+        db["db"].add_message({"conversation_id": db["conversation_id"], "sender": "user", "content": "hi"})
+        == "message-from-store"
+    )
     assert captured["msg_data"] == {
         "conversation_id": db["conversation_id"],
         "sender": "user",
@@ -441,6 +447,433 @@ def test_message_store_preserves_append_order_when_insert_clock_ties(db, monkeyp
     ]
 
 
+def test_source_message_projection_is_bounded_ordered_and_never_loads_images(db, monkeypatch):
+    store = db["store"]
+    raw_db = db["db"]
+    conversation_id = db["conversation_id"]
+    timestamp = "2026-01-01T00:00:00.000Z"
+
+    second_id = store.add_message(
+        {
+            "id": "source-message-b",
+            "conversation_id": conversation_id,
+            "sender": "assistant",
+            "content": "second-content",
+            "timestamp": timestamp,
+            "image_data": b"secret-image",
+            "image_mime_type": "image/png",
+        }
+    )
+    first_id = store.add_message(
+        {
+            "id": "source-message-a",
+            "conversation_id": conversation_id,
+            "sender": "user",
+            "content": "first-content",
+            "timestamp": timestamp,
+        }
+    )
+    image_only_id = store.add_message(
+        {
+            "id": "source-message-image-only",
+            "conversation_id": conversation_id,
+            "sender": "user",
+            "image_data": b"image-only",
+            "image_mime_type": "image/png",
+            "timestamp": timestamp,
+        }
+    )
+    assert second_id and first_id and image_only_id
+
+    raw_db.execute_query(
+        "UPDATE messages SET last_modified = ? WHERE id = ?",
+        ("2026-01-01T00:00:00.100Z", second_id),
+        commit=True,
+    )
+    raw_db.execute_query(
+        "UPDATE messages SET last_modified = ? WHERE id = ?",
+        ("2026-01-01T00:00:00.000Z", first_id),
+        commit=True,
+    )
+
+    queries: list[str] = []
+    original_execute = raw_db.execute_query
+
+    def recording_execute(query, params=None, **kwargs):
+        queries.append(str(query))
+        return original_execute(query, params, **kwargs)
+
+    monkeypatch.setattr(raw_db, "execute_query", recording_execute)
+    monkeypatch.setattr(
+        store,
+        "get_message_images",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("source projection must never load message images")
+        ),
+    )
+
+    projection = store.get_source_message_projection(
+        conversation_id,
+        max_chars=30,
+    )
+
+    assert [row["source_text"] for row in projection["rows"]] == [
+        "user: first-content",
+        "assistant: ",
+    ]
+    assert sum(len(row["source_text"]) for row in projection["rows"]) + 1 == 31
+    assert projection["conversation_exists"] is True
+    assert projection["invalid"] is False
+    assert projection["truncated"] is True
+    normalized_sql = " ".join(queries).lower()
+    assert "select *" not in normalized_sql
+    assert "image_data" not in normalized_sql
+    assert "message_images" not in normalized_sql
+    assert "substr" in normalized_sql
+    assert "limit" in normalized_sql
+    assert "offset" not in normalized_sql
+    assert "row_number()" in normalized_sql
+    assert normalized_sql.count("substr(") == 1
+    assert len(queries) == 1
+
+
+def test_source_message_projection_uses_one_statement_snapshot(db, monkeypatch):
+    store = db["store"]
+    raw_db = db["db"]
+    conversation_id = db["conversation_id"]
+
+    first_id = store.add_message(
+        {
+            "id": "snapshot-first",
+            "conversation_id": conversation_id,
+            "sender": "user",
+            "content": "first",
+            "timestamp": "2026-01-01T00:00:00.000Z",
+        }
+    )
+    second_id = store.add_message(
+        {
+            "id": "snapshot-second",
+            "conversation_id": conversation_id,
+            "sender": "assistant",
+            "content": "second",
+            "timestamp": "2026-01-01T00:00:01.000Z",
+        }
+    )
+    assert first_id and second_id
+
+    queries: list[str] = []
+    original_execute = raw_db.execute_query
+
+    def recording_execute(query, params=None, **kwargs):
+        queries.append(str(query))
+        return original_execute(query, params, **kwargs)
+
+    monkeypatch.setattr(raw_db, "execute_query", recording_execute)
+
+    projection = store.get_source_message_projection(conversation_id, max_chars=100)
+
+    assert [row["source_text"] for row in projection["rows"]] == [
+        "user: first",
+        "assistant: second",
+    ]
+    assert projection == {
+        "rows": [
+            {"source_text": "user: first"},
+            {"source_text": "assistant: second"},
+        ],
+        "conversation_exists": True,
+        "invalid": False,
+        "truncated": False,
+    }
+    assert len(queries) == 1
+    assert "after_cursor" not in inspect.signature(store.get_source_message_projection).parameters
+    assert "high_water" not in inspect.signature(store.get_source_message_projection).parameters
+
+
+@pytest.mark.parametrize("concurrent_write", ["backdated_insert", "content_update"])
+def test_source_message_projection_snapshot_excludes_concurrent_writes(
+    db,
+    concurrent_write,
+):
+    store = db["store"]
+    raw_db = db["db"]
+    conversation_id = db["conversation_id"]
+    first_id = store.add_message(
+        {
+            "id": "race-first",
+            "conversation_id": conversation_id,
+            "sender": "user",
+            "content": "first",
+            "timestamp": "2026-01-01T00:00:00.000Z",
+        }
+    )
+    second_id = store.add_message(
+        {
+            "id": "race-second",
+            "conversation_id": conversation_id,
+            "sender": "assistant",
+            "content": "second",
+            "timestamp": "2026-01-01T00:00:02.000Z",
+        }
+    )
+    hidden_id = store.add_message(
+        {
+            "id": "race-backdated",
+            "conversation_id": conversation_id,
+            "sender": "user",
+            "content": "must not enter snapshot",
+            "timestamp": "2026-01-01T00:00:01.000Z",
+        }
+    )
+    assert first_id and second_id and hidden_id
+    raw_db.execute_query(
+        "UPDATE messages SET deleted = 1 WHERE id = ?",
+        (hidden_id,),
+        commit=True,
+    )
+
+    reader_connection = raw_db.get_connection()
+    reader_connection.execute("PRAGMA journal_mode = WAL")
+    projection_started = threading.Event()
+    writer_finished = threading.Event()
+    first_substr = True
+
+    def blocking_substr(value, start, length):
+        nonlocal first_substr
+        if first_substr:
+            first_substr = False
+            projection_started.set()
+            assert writer_finished.wait(timeout=5)
+        offset = max(0, int(start) - 1)
+        return value[offset : offset + int(length)]
+
+    reader_connection.create_function("SUBSTR", 3, blocking_substr)
+
+    def write_concurrently():
+        assert projection_started.wait(timeout=5)
+        connection = sqlite3.connect(raw_db.db_path_str, timeout=5)
+        try:
+            if concurrent_write == "backdated_insert":
+                connection.execute(
+                    "UPDATE messages SET deleted = 0 WHERE id = ?",
+                    (hidden_id,),
+                )
+            else:
+                connection.execute(
+                    """
+                    UPDATE messages
+                    SET content = ?, last_modified = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        "changed after snapshot",
+                        "2026-01-01T00:00:03.000Z",
+                        first_id,
+                    ),
+                )
+            connection.commit()
+        finally:
+            connection.close()
+            writer_finished.set()
+
+    writer = threading.Thread(target=write_concurrently)
+    writer.start()
+    projection = store.get_source_message_projection(conversation_id, max_chars=100)
+    writer.join(timeout=5)
+
+    assert not writer.is_alive()
+    assert [row["source_text"] for row in projection["rows"]] == [
+        "user: first",
+        "assistant: second",
+    ]
+
+
+def test_source_message_projection_hides_deleted_conversation_and_messages(db):
+    store = db["store"]
+    raw_db = db["db"]
+    conversation_id = db["conversation_id"]
+    message_id = store.add_message(
+        {
+            "conversation_id": conversation_id,
+            "sender": "user",
+            "content": "visible",
+        }
+    )
+    assert message_id
+
+    raw_db.execute_query(
+        "UPDATE messages SET deleted = 1 WHERE id = ?",
+        (message_id,),
+        commit=True,
+    )
+    assert (
+        store.get_source_message_projection(
+            conversation_id,
+            max_chars=20,
+        )["rows"]
+        == []
+    )
+
+    live_message_id = store.add_message(
+        {
+            "conversation_id": conversation_id,
+            "sender": "assistant",
+            "content": "hidden with conversation",
+        }
+    )
+    assert live_message_id
+    raw_db.execute_query(
+        "UPDATE conversations SET deleted = 1 WHERE id = ?",
+        (conversation_id,),
+        commit=True,
+    )
+    assert (
+        store.get_source_message_projection(
+            conversation_id,
+            max_chars=20,
+        )["conversation_exists"]
+        is False
+    )
+
+
+@pytest.mark.parametrize("max_chars", [True, 0, -1, "10"])
+def test_source_message_projection_rejects_invalid_character_budget(db, max_chars):
+    with pytest.raises(InputError):
+        db["store"].get_source_message_projection(
+            db["conversation_id"],
+            max_chars=max_chars,
+        )
+
+
+def test_source_message_projection_marks_nul_content_invalid(db):
+    store = db["store"]
+    raw_db = db["db"]
+    conversation_id = db["conversation_id"]
+    message_id = store.add_message(
+        {
+            "conversation_id": conversation_id,
+            "sender": "user",
+            "content": "valid",
+        }
+    )
+    assert message_id
+    raw_db.execute_query(
+        "UPDATE messages SET content = ? WHERE id = ?",
+        ("prefix\0" + ("secret" * 1000), message_id),
+        commit=True,
+    )
+
+    projection = store.get_source_message_projection(conversation_id, max_chars=20)
+
+    assert projection["invalid"] is True
+
+
+def test_postgres_source_message_projection_is_one_owner_scoped_statement():
+    captured: dict[str, object] = {}
+
+    class _Cursor:
+        @staticmethod
+        def fetchall():
+            return []
+
+    class _PostgresDb:
+        backend_type = BackendType.POSTGRESQL
+
+        @staticmethod
+        def execute_query(query, params, **kwargs):
+            captured["query"] = str(query)
+            captured["params"] = params
+            captured["kwargs"] = kwargs
+            return _Cursor()
+
+    projection = MessageStore(_PostgresDb()).get_source_message_projection(
+        "conversation-1",
+        max_chars=100,
+        owner_user_id="owner-1",
+    )
+
+    sql = " ".join(str(captured["query"]).split()).lower()
+    assert projection["conversation_exists"] is False
+    assert "c.client_id = ?" in sql
+    assert "c.deleted = false" in sql
+    assert "m.deleted = false" in sql
+    assert "instr(" not in sql
+    assert sql.count("substr(") == 1
+    assert captured["params"] == (101, "conversation-1", "owner-1", 21)
+    assert captured["kwargs"] == {"log_params": False, "log_errors": False}
+
+
+def test_postgres_source_message_projection_requires_owner_scope():
+    class _PostgresDb:
+        backend_type = BackendType.POSTGRESQL
+
+        @staticmethod
+        def execute_query(*_args, **_kwargs):
+            raise AssertionError("unscoped PostgreSQL projection must not query")
+
+    with pytest.raises(InputError, match="owner_user_id"):
+        MessageStore(_PostgresDb()).get_source_message_projection(
+            "conversation-1",
+            max_chars=20,
+        )
+
+
+def test_source_message_projection_failure_drops_raw_exception_context():
+    secret = "PRIVATE_MESSAGE_FRAGMENT"
+
+    class _FailingDb:
+        backend_type = BackendType.SQLITE
+
+        @staticmethod
+        def execute_query(*_args, **_kwargs):
+            raise CharactersRAGDBError(secret)
+
+    with pytest.raises(CharactersRAGDBError) as exc_info:
+        MessageStore(_FailingDb()).get_source_message_projection(
+            "conversation-1",
+            max_chars=20,
+        )
+
+    assert str(exc_info.value) == "Source-message projection failed."
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__context__ is None
+    assert secret not in repr(exc_info.value)
+
+
+def test_source_message_projection_redacts_delayed_fetch_failure():
+    secret = "PRIVATE_MESSAGE_FETCH_FRAGMENT"
+    messages: list[str] = []
+
+    class _FailingCursor:
+        @staticmethod
+        def fetchall():
+            raise sqlite3.OperationalError(f"Could not decode {secret}")
+
+    class _FailingDb:
+        backend_type = BackendType.SQLITE
+
+        @staticmethod
+        def execute_query(*_args, **_kwargs):
+            return _FailingCursor()
+
+    sink_id = logger.add(messages.append, level="DEBUG", format="{message}")
+    try:
+        with pytest.raises(CharactersRAGDBError) as exc_info:
+            MessageStore(_FailingDb()).get_source_message_projection(
+                "conversation-1",
+                max_chars=20,
+            )
+    finally:
+        logger.remove(sink_id)
+
+    assert str(exc_info.value) == "Source-message projection failed."
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__context__ is None
+    assert secret not in repr(exc_info.value)
+    assert secret not in "\n".join(messages)
+
+
 def test_message_store_counts_and_soft_delete_roundtrip(db):
     store = db["store"]
     conversation_id = db["conversation_id"]
@@ -478,18 +911,21 @@ def test_message_store_counts_and_soft_delete_roundtrip(db):
         root_message_id,
         system_message_id,
     ]
-    assert [row["id"] for row in store.get_messages_for_conversation_by_parent_ids(conversation_id, [root_message_id])] == [
-        child_message_id
-    ]
+    assert [
+        row["id"] for row in store.get_messages_for_conversation_by_parent_ids(conversation_id, [root_message_id])
+    ] == [child_message_id]
     assert store.has_system_message_for_conversation(conversation_id) is True
 
     root_message = store.get_message_by_id(root_message_id)
     assert root_message is not None
-    assert store.update_message(
-        root_message_id,
-        {"content": "Root updated"},
-        expected_version=root_message["version"],
-    ) is True
+    assert (
+        store.update_message(
+            root_message_id,
+            {"content": "Root updated"},
+            expected_version=root_message["version"],
+        )
+        is True
+    )
 
     updated_root = store.get_message_by_id(root_message_id)
     assert updated_root is not None
