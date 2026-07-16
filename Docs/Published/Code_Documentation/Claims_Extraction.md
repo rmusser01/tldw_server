@@ -43,7 +43,7 @@ Config (env or `[Claims]` in `Config_Files/config.txt`, see `tldw_Server_API.app
   - `CLAIMS_ADAPTIVE_THROTTLE_ERROR_RATE`
   - `CLAIMS_ADAPTIVE_THROTTLE_BUDGET_RATIO`
 
-Storage schema: see `Media_DB_v2.py` (table `Claims` + `claims_fts`)
+Storage schema: see the package-native MediaDatabase claims tables (table `Claims` + `claims_fts`)
 - FTS: `claims_fts` is content-backed and maintained via SQLite triggers (insert/update/delete).
 - Helpers: `upsert_claims`, `get_claims_by_media`, `soft_delete_claims_for_media`, `rebuild_claims_fts`.
 

@@ -72,7 +72,7 @@ Upload flow in endpoints
 
 ## FastAPI Endpoints (Media)
 Base prefix: `/api/v1/media`
-- `POST /add` - Ingest URLs/files, process via the core libraries, and persist to `Media_DB_v2` (with versioning, metadata, keywords).
+- `POST /add` - Ingest URLs/files, process via the core libraries, and persist to the package-native MediaDatabase-backed media store (with versioning, metadata, keywords).
 - Processing-only (no DB writes):
   - `POST /process-videos`
   - `POST /process-audios`

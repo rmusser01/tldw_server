@@ -252,11 +252,15 @@ pip install "numpy<2"
 
 **Symptoms:** `make quickstart` fails on Windows.
 
-**Fix:** Use WSL2 or Git Bash. Alternatively, run the Docker commands directly:
-```bash
-docker compose --env-file tldw_Server_API/Config_Files/.env \
-  -f Dockerfiles/docker-compose.yml \
-  -f Dockerfiles/docker-compose.webui.yml up -d --build
+**Fix:** Use WSL2 for the documented Makefile path, or run the PowerShell/no-`make` setup from the profile guide. For Docker single-user + WebUI, the current direct compose command is:
+
+```powershell
+if (!(Test-Path "tldw_Server_API/Config_Files/.env")) { Copy-Item "tldw_Server_API/Config_Files/.env.example" "tldw_Server_API/Config_Files/.env" }
+py -m venv .setup-venv
+.\.setup-venv\Scripts\python -m pip install --upgrade pip setuptools wheel
+.\.setup-venv\Scripts\python -m pip install "typer>=0.12.0" "loguru>=0.7.0" "httpx>=0.24.0" "python-dotenv>=1.0.0" "cryptography>=41.0.0"
+.\.setup-venv\Scripts\python -m tldw_Server_API.cli.wizard.cli init --profile docker-single-webui --env-file tldw_Server_API/Config_Files/.env --default --yes
+docker compose --env-file tldw_Server_API/Config_Files/.env -f Dockerfiles/docker-compose.single-user.yml -f Dockerfiles/docker-compose.webui.yml up -d --wait
 ```
 
 ---
@@ -441,9 +445,14 @@ The server auto-creates per-user subdirectories on first use.
 **Symptoms:** Frontend admin features do not work, or you get 401 errors only from the WebUI.
 
 **Fix:**
-1. `NEXT_PUBLIC_X_API_KEY` is for the frontend admin API and is **not** the same as `SINGLE_USER_API_KEY`.
-2. The Docker quickstart proxy handles this automatically. Only set this variable in advanced (non-proxy) deployments.
-3. If needed, set it in `.env` and rebuild the WebUI.
+Docker single-user WebUI quickstart uses runtime auth bootstrap. Check these when the WebUI returns `401`:
+
+- `make setup-docker-single` or the equivalent `tldw-setup init --profile docker-single-webui` command wrote `TLDW_WEBUI_EXPOSE_RUNTIME_AUTH=1` to `tldw_Server_API/Config_Files/.env`; the shared WebUI compose overlay defaults that flag to `0` without this explicit local quickstart opt-in.
+- The WebUI is opened through the default loopback URL, `http://127.0.0.1:8080`.
+- `SINGLE_USER_API_KEY` is not `change-me`.
+- The backend `app` service has the same `SINGLE_USER_API_KEY`.
+
+`NEXT_PUBLIC_X_API_KEY` is a browser-visible copy of the single-user API key. Only advanced/static local single-user deployments should set it before building the WebUI. In a separate local WebUI dev server, set it only if you want automatic single-user auth. Do not set it for multi-user/JWT deployments, shared production deployments, or any browser bundle where exposing the single-user API key is unacceptable. If you intentionally change it for a built WebUI image, rebuild the WebUI so the public build-time value changes.
 
 ---
 

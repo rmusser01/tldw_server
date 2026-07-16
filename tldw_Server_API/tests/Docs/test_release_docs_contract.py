@@ -184,13 +184,15 @@ def test_release_helper_does_not_manage_generated_docs_site_outputs() -> None:
 
 def test_release_process_doc_is_authoritative_operator_path() -> None:
     release_process_path = REPO_ROOT / "Docs/Development/Release_Process.md"
-    release_notes_path = REPO_ROOT / "Docs/Published/RELEASE_NOTES.md"
+    canonical_release_notes_path = REPO_ROOT / "Docs/Site/RELEASE_NOTES.md"
+    published_release_notes_path = REPO_ROOT / "Docs/Published/RELEASE_NOTES.md"
     release_checklist_path = REPO_ROOT / "Docs/Release_Checklist.md"
 
     assert release_process_path.exists(), "expected release process operator doc to exist"
 
     release_process_text = release_process_path.read_text(encoding="utf-8")
-    release_notes_text = release_notes_path.read_text(encoding="utf-8")
+    canonical_release_notes_text = canonical_release_notes_path.read_text(encoding="utf-8")
+    published_release_notes_text = published_release_notes_path.read_text(encoding="utf-8")
     release_checklist_text = release_checklist_path.read_text(encoding="utf-8")
 
     assert all(
@@ -209,9 +211,14 @@ def test_release_process_doc_is_authoritative_operator_path() -> None:
     assert "PyPI" in release_process_text
     assert "manual" in release_process_text.lower()
 
-    assert "Docs/Development/Release_Process.md" in release_notes_text
-    assert "](../Development/Release_Process.md)" in release_notes_text
-    assert "](../Release_Checklist.md)" in release_notes_text
+    assert canonical_release_notes_text == published_release_notes_text
+    for release_notes_text in (
+        canonical_release_notes_text,
+        published_release_notes_text,
+    ):
+        assert "Docs/Development/Release_Process.md" in release_notes_text
+        assert "](../Development/Release_Process.md)" in release_notes_text
+        assert "](../Release_Checklist.md)" in release_notes_text
 
     assert "Docs/Development/Release_Process.md" in release_checklist_text
     assert "broad readiness checklist" in release_checklist_text.lower()

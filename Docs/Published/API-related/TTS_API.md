@@ -6,6 +6,22 @@
 - [TTS Providers Getting Started](../User_Guides/WebUI_Extension/TTS_Getting_Started.md) — provider selection and first successful synthesis.
 - [TTS Provider Setup Guide](../User_Guides/WebUI_Extension/TTS-SETUP-GUIDE.md) — runbook index for deep provider setup/tuning.
 
+PocketTTS note:
+
+- `pocket_tts` is the Python/ONNX runtime.
+- `pocket_tts_cpp` is the compiled native runtime.
+- Both use the same public request fields and the same `/api/v1/audio/speech` route.
+- For either provider, voice cloning requests must supply either a direct base64 `voice_reference` or `voice: "custom:<voice_id>"` for a stored reference.
+- `pocket_tts_cpp` only exposes streaming when the local CLI probe proves the install is truly incremental; otherwise the adapter fails closed.
+- This page documents public request inputs only. Provider-internal `extra_params` keys are intentionally omitted.
+- Audio Studio Narration, Podcast, and Briefing speech generation use server-managed Audio Studio jobs over the configured TTS providers. See [Audio Studio](../Audio_Studio.md) for project, revision, artifact, render, and migration behavior.
+
+OmniVoice note:
+
+- `omnivoice` is a first-class local provider backed by a managed loopback sidecar runtime.
+- Requests that explicitly resolve to OmniVoice and omit `voice` normalize to `voice: "auto"`.
+- Explicit caller-provided voices are preserved, including `custom:<voice_id>` selections.
+- Setup/install details for the dedicated runtime live in `Docs/STT-TTS/TTS-SETUP-GUIDE.md`.
 
 1. Client pattern (Python)
 

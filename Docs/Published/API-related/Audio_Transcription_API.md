@@ -182,6 +182,19 @@ Notes:
 - For `response_format: verbose_json`, the response includes `task` and `duration` fields.
 - For Whisper-based models, the underlying `speech_to_text(...)` helper prepends a metadata header (model + detected language) to the first segment. The HTTP API always calls `strip_whisper_metadata_header(...)` before returning JSON/text so clients see only user content. If you use `speech_to_text` directly (e.g., in workflows or custom tools), call `strip_whisper_metadata_header` on segment lists, or `_strip_whisper_metadata_header_from_text` (speech chat) before presenting text to end users.
 
+### Retention and Redaction Policy
+
+- REST transcription resolves an effective STT policy before persistence and response emission.
+- In multi-user mode, effective policy is `org override -> global STT defaults`.
+- In single-user mode, only the global STT defaults apply.
+- Request-level overrides may only be stricter than the effective policy:
+  - shorter retention TTL is allowed
+  - enabling delete-after-success is allowed
+  - enabling redaction or adding redact categories is allowed
+  - weakening a tenant-required retention/redaction rule is rejected
+- When effective policy requires redaction, the persisted transcript and HTTP response are redacted before serialization.
+- Retained raw-audio artifacts are indexed through `generated_files`; when retention is not enabled, delete-after-success remains the default behavior.
+
 ### Dictation Error Taxonomy
 
 Structured error payloads include:
@@ -339,6 +352,23 @@ Additional streaming quota/env controls:
 - `AUDIO_STREAM_TTL_SECONDS`: TTL for Redis stream counters (default 120) to mitigate counter leaks on abrupt disconnects
 - `AUDIO_FAILOPEN_CAP_MINUTES`: Bounded fail-open allowance (minutes) per WebSocket connection when the quota backing store (DB/Redis) is unavailable. Defaults to `5.0`. Set to a positive float to change.
 
+Legacy STT control-helper settings exposed through `get_stt_config()`:
+- `STT_WS_CONTROL_V2_ENABLED`: legacy/internal control-v2 helper flag. The public `/api/v1/audio/stream/transcribe` WebSocket now uses strict audio protocol v1 and rejects `protocol_version` values other than `1`.
+- `STT_PAUSED_AUDIO_QUEUE_CAP_SECONDS`: paused-audio queue cap for legacy control-helper sessions (default `2.0`)
+- `STT_OVERFLOW_WARNING_INTERVAL_SECONDS`: rate limit for paused-queue overflow warnings (default `5.0`)
+- `STT_TRANSCRIPT_DIAGNOSTICS_ENABLED`: include deterministic final/full transcript diagnostics
+- `STT_DELETE_AUDIO_AFTER_SUCCESS` / `STT_DELETE_AUDIO_AFTER`: default raw-audio delete-after-success policy
+- `STT_AUDIO_RETENTION_HOURS`: default retained-audio TTL when retention is enabled
+- `STT_REDACT_PII`: default transcript redaction toggle
+- `STT_ALLOW_UNREDACTED_PARTIALS`: allow unredacted partial frames when policy permits it
+- `STT_REDACT_CATEGORIES`: comma-separated or JSON list of category names to redact
+
+Multi-user deployments can override the effective STT policy per org through:
+- `GET /api/v1/admin/orgs/{org_id}/stt/settings`
+- `PATCH /api/v1/admin/orgs/{org_id}/stt/settings`
+
+Single-user mode does not use org policy rows; global STT config defaults are authoritative.
+
 Config file overrides (Config_Files/config.txt):
 ```ini
 [Audio-Quota]
@@ -374,9 +404,10 @@ failopen_cap_minutes = 5.0
 - Streaming model-init fallback to Whisper is opt-in via `[STT-Settings].streaming_fallback_to_whisper=true`; default is fail-fast.
 - Server messages include:
     - `{ "type": "status", "message": "Authenticated" }` or `"Authenticated (JWT)"`
+    - legacy reset acknowledgement: `{ "type": "status", "state": "reset" }`
     - `{ "type": "partial", "text": "...", "timestamp": ..., "is_final": false, "segment_id": 3, "segment_start": 12.5, "segment_end": 15.0 }`
     - `{ "type": "final", "text": "...", "timestamp": ..., "is_final": true, "segment_id": 3, "segment_start": 12.5, "segment_end": 14.0, "overlap": 0.5, "speaker_id": 1, "speaker_label": "SPEAKER_1" }` (speaker fields appear when diarization is enabled)
-    - `{ "type": "full_transcript", "text": "..." }`
+    - `{ "type": "full_transcript", "text": "...", "auto_commit": false, "vad_status": "enabled|disabled|fail_open", "diarization_status": "enabled|disabled|unavailable", "diarization_details": { "code": "...", "summary": "..." }? }`
     - `{ "type": "insight", "stage": "live|final", "summary": [...], "action_items": [...], ... }` when live meeting notes are enabled
     - `{ "type": "diarization_summary", "speaker_map": [...], "audio_path": "...", "speakers": [...] }` after `commit` when diarization is enabled
     - `{ "type": "error", "message": "..." }`
@@ -394,6 +425,7 @@ When the quota backing store is unavailable, the server allows a bounded amount 
 Use these to build dashboards/alerts on fail-open frequency and potential quota-store outages.
 
   - Metadata fields (`segment_id`, `segment_start`, `segment_end`, `chunk_start`, `chunk_end`, `overlap`) allow clients to align transcripts on a timeline or build diarization overlays.
+  - WS final/full transcript frames follow the same effective redaction policy as REST responses. Partial frames are only allowed to bypass redaction when the effective policy explicitly permits unredacted partials.
 
 #### WS Protocol Contract
 
@@ -482,6 +514,7 @@ The insight payload mirrors granola-style UX:
   - `4003` Application quota violation (daily minutes / concurrent streams)
   - `1008` Policy violation (e.g., IP not on allowlist)
   - `1011` Internal error (e.g., no models available, or fallback failed when explicitly enabled)
+  - `4400` Unsupported protocol version on WS surfaces that do not accept the requested version
 
 
 #### Speaker Diarization & Audio Persistence

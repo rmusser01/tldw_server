@@ -54,7 +54,7 @@ Database migrations
 
 What to back up
 - AuthNZ DB: Postgres (`pg_dump`) or SQLite file at `Databases/users.db`.
-- Content DBs: per-user content database file under `<USER_DB_BASE_DIR>/<user_id>/` (legacy root-level path deprecated) or Postgres content DBs if you’ve migrated.
+- Content DBs: per-user `<USER_DB_BASE_DIR>/<user_id>/Media_DB_v2.db` (root-level path deprecated) or Postgres content DBs if you’ve migrated.
 - Per-user data: `<USER_DB_BASE_DIR>/<user_id>/ChaChaNotes.db` and associated files.
 - Chroma/vector data: volume/directory you configured (default under `Databases/user_databases`).
 - Config: `.env`, `tldw_Server_API/Config_Files/config.txt`.

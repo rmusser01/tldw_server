@@ -33,7 +33,7 @@ Environment and config determine paths. Defaults are created on startup if missi
   - Root-level DB paths are deprecated; prefer per-user files for isolation and portability
   - Factory: tldw_Server_API/app/core/DB_Management/DB_Manager.py:33
   - Engine/backends: SQLite (default), PostgreSQL support via backends layer
-  - Library: tldw_Server_API/app/core/DB_Management/Media_DB_v2.py:1
+  - Library seam: tldw_Server_API/app/core/DB_Management/media_db/native_class.py:1
 
 - ChaChaNotes (notes, chats, characters)
   - Per user: `<USER_DB_BASE_DIR>/<user_id>/ChaChaNotes.db`
@@ -86,7 +86,7 @@ Notes:
 - Backends: SQLite default; backend layer supports PostgreSQL for many operations.
 - Doc: Docs/Code_Documentation/Databases/Media_DB_v2.md
   - Sections: Claims API, Chunking Templates API, Troubleshooting
-- Code: tldw_Server_API/app/core/DB_Management/Media_DB_v2.py:1
+- Code: tldw_Server_API/app/core/DB_Management/media_db/media_database.py:1, tldw_Server_API/app/core/DB_Management/media_db/native_class.py:1
 
 ### ChaChaNotes DB
 - Purpose: Notes, characters, chats, tags, flashcards, decks, reviews, sessions.

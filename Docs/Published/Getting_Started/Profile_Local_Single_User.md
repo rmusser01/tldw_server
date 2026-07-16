@@ -11,6 +11,7 @@ Prerequisites:
 - Python 3.10+
 - `ffmpeg`
 - Git
+- Bun for the WebUI (`npm` also works as a fallback)
 
 ```bash
 git clone https://github.com/rmusser01/tldw_server.git
@@ -23,15 +24,15 @@ No-`make` shortcut scripts from the repository root:
 
 ```bash
 # macOS/Linux terminal
-./quick-launch.sh
+./quick-launch.sh all
 ```
 
 ```powershell
 # Windows PowerShell
-.\quick-launch.ps1
+.\quick-launch.ps1 all
 ```
 
-On macOS, you can also double-click `quick-launch.command` from Finder. These shortcuts create or update `.venv`, run the `local-single` setup wizard, and start the API at `http://127.0.0.1:8000`.
+On macOS, you can also double-click `quick-launch.command` from Finder. These shortcuts create or update `.venv`, run the `local-single` setup wizard when the API is started, and default to `all`: API at `http://127.0.0.1:8000` plus WebUI at `http://127.0.0.1:8080`. Use `api` for backend-only startup or `webui` when the API is already running.
 
 PowerShell / manual no-`make` equivalent:
 
@@ -65,22 +66,31 @@ Start the WebUI in a second terminal when you are ready for the cohesive first-t
 ```bash
 cd apps/tldw-frontend
 cp .env.local.example .env.local
-bun install
-bun run dev -- -p 8080
 ```
 
-Confirm `.env.local` contains:
+Edit `.env.local` so it points the WebUI at the local API:
 
-```bash
+```dotenv
 NEXT_PUBLIC_API_URL=http://127.0.0.1:8000
 NEXT_PUBLIC_API_VERSION=v1
-# Optional local single-user bootstrap auth:
+# Optional in single-user mode:
 # NEXT_PUBLIC_X_API_KEY=your_single_user_api_key
 ```
 
-If Bun is not installed, use the Bun install steps or npm fallback in [Local Profile: Add the WebUI](../../../README.md#local-profile-add-the-webui).
+`NEXT_PUBLIC_X_API_KEY` is browser-visible. Use it only for local single-user convenience, and avoid exposing this setup directly to the public internet.
 
-Then open http://127.0.0.1:8080 to open the WebUI.
+Install and start the WebUI:
+
+```bash
+bun install
+bun run dev -- -p 8080
+
+# npm fallback:
+# npm install
+# npm run dev -- -p 8080
+```
+
+Open http://127.0.0.1:8080.
 
 ## Verify
 
@@ -109,7 +119,7 @@ curl -sS http://127.0.0.1:8080 > /dev/null && echo "webui-ok"
 
 Open http://127.0.0.1:8080 to open the WebUI and complete first-time setup there. The setup completion gate is the first successful chat response from your selected hosted API key or local OpenAI-compatible provider. Immediately after that, add your first source so chat can use your own material.
 
-The CLI verify command still runs a provider-independent first-value ingest/search verification. It posts a small Markdown document to `/api/v1/media/add`, then searches for `tldw-onboarding-verification-unique` through `/api/v1/media/search`.
+If you prefer terminal verification, the CLI verify command still runs a provider-independent first-value ingest/search check. It posts a small Markdown document to `/api/v1/media/add`, then searches for `tldw-onboarding-verification-unique` through `/api/v1/media/search`.
 
 ```bash
 make verify-local-single
@@ -129,12 +139,16 @@ Local audio setup can use host-side config and model files directly. After this 
 - If install fails due to Python version, rerun with `PYTHON=python3.12 make install-local` or another supported interpreter.
 - If startup fails on audio/video dependencies, verify `ffmpeg -version`.
 - If port `8000` is in use, stop the conflicting process or run `uvicorn` on another port.
+- If the WebUI port `8080` is in use, stop the conflicting process or start Next.js on another port with `bun run dev -- -p 8081`.
+- If `bun install` fails, verify Bun with `bun --version`, or use the npm fallback commands from the WebUI section.
+- If the WebUI loads but cannot reach the API, confirm `.env.local` uses the same host and port as the running API, usually `NEXT_PUBLIC_API_URL=http://127.0.0.1:8000`.
 - If direct API calls return `401`, confirm `SINGLE_USER_API_KEY` in `tldw_Server_API/Config_Files/.env` and use it as `X-API-KEY`.
 - If WebUI setup cannot save provider settings, use `/setup` as the backend/operator recovery surface and inspect `tldw_Server_API/Config_Files/.env` only as a troubleshooting step.
 - On Windows, use WSL2 for the Makefile path or run the PowerShell equivalents.
 
 ## Optional Add-ons
 
-- Add the WebUI after the API is healthy: see [Local Profile: Add the WebUI](../../../README.md#local-profile-add-the-webui).
-- Keep provider setup in the WebUI first-run wizard for the normal path; use file-based configuration only for recovery, automation, or advanced deployments.
+- Keep provider setup in the WebUI first-run wizard for the normal path; add provider API keys to `tldw_Server_API/Config_Files/.env` only for recovery, automation, or advanced deployments, then restart the server.
+- For deeper WebUI development details, see [Extension & Web UI Development Guide](../../apps/DEVELOPMENT.md) and [tldw-frontend README](../../apps/tldw-frontend/README.md).
+- For LAN, mobile, reverse-proxy, or custom-host browser access, see [Run the Web UI (WIP)](../../README.md#run-the-web-ui-wip).
 - Install development extras with `source .venv/bin/activate && pip install -e ".[dev]"`.

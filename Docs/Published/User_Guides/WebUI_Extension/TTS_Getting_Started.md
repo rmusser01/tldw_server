@@ -145,7 +145,7 @@ Installer flags:
    - FFmpeg (`brew install ffmpeg` or `apt-get install -y ffmpeg`)
    - eSpeak NG for phonemizer-backed models (`brew install espeak-ng` / `apt-get install -y espeak-ng`)
 3. **Model cache helpers**
-   `pip install huggingface-hub` and log in if you need gated repos.
+   `pip install -U "huggingface_hub"` and run `hf auth login` if you need gated repos.
 4. **Runtime**
    Start the API:
    ```bash
@@ -155,7 +155,7 @@ Installer flags:
 
 ## Recommended Setup Flow
 1. **Pick providers** you care about and install their extras.
-2. **Download models** proactively (use `huggingface-cli download ... --local-dir ...` for offline hosts).
+2. **Download models** proactively (use `hf download ... --local-dir ...` for offline hosts).
 3. **Edit `tts_providers_config.yaml`**
    - Enable providers, point to local paths, and adjust `device`, `sample_rate`, etc.
    - Adjust `provider_priority` so preferred backends run first.
@@ -290,7 +290,7 @@ Each section highlights installation, configuration, and a smoke test.
 
 ### Chatterbox
 - **Install**: install the manual runtime dependencies from the Chatterbox runbook, then `pip install chatterbox-tts`; add `.[TTS_chatterbox_lang]` if you plan to enable `use_multilingual`.
-- **Models**: cache `ResembleAI/chatterbox` locally with `huggingface-cli download ...`.
+- **Models**: cache `ResembleAI/chatterbox` locally with `hf download ...`.
 - **Config**:
   ```yaml
   providers:
@@ -467,7 +467,7 @@ All env vars above are documented in `Env_Vars.md`.
 
 ## Troubleshooting Cheatsheet
 - **`ImportError` / missing modules** — re-run the correct extra install (e.g., `pip install -e ".[TTS_vibevoice]"`).
-- **Auto-download blocked** — set `TTS_AUTO_DOWNLOAD=0` (or per provider) and pre-populate `models/` via `huggingface-cli download`.
+- **Auto-download blocked** — set `TTS_AUTO_DOWNLOAD=0` (or per provider) and pre-populate `models/` via `hf download`.
 - **`eSpeak` not found** — install `espeak-ng`; on macOS export `PHONEMIZER_ESPEAK_LIBRARY=/opt/homebrew/lib/libespeak-ng.dylib`.
 - **CUDA OOM** — enable quantization (VibeVoice), lower `vibevoice_variant`, or move the provider lower in `provider_priority` so lighter backends run first.
 - **Voice cloning rejects sample** — ensure duration/sample rate matches provider requirements and send mono audio.

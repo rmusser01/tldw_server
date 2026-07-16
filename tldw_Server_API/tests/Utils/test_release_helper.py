@@ -677,9 +677,11 @@ def test_orchestrate_release_local_tag_only_fails_closed_when_tag_points_behind_
     assert runner.github_release_created is False
 
 
-def test_shell_release_runner_prepare_metadata_allows_cross_section_warning(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_shell_release_runner_prepare_metadata_allows_cross_section_warning(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     repo_root = tmp_path
-    (repo_root / "Docs" / "Published").mkdir(parents=True)
+    (repo_root / "Docs" / "Site").mkdir(parents=True)
 
     (repo_root / "pyproject.toml").write_text(
         """
@@ -715,7 +717,7 @@ version = "0.1.30"
         'extra:\n  version: v0.1.30\ncopyright: |\n  © 2024-2025 tldw_Server - v0.1.30 - <a href="https://github.com/rmusser01/tldw_server">GitHub</a>\n',
         encoding="utf-8",
     )
-    (repo_root / "Docs" / "Published" / "RELEASE_NOTES.md").write_text(
+    (repo_root / "Docs" / "Site" / "RELEASE_NOTES.md").write_text(
         "Published release notes entry point.\n\nFor release process details, see `Docs/Development/Release_Process.md`.\n",
         encoding="utf-8",
     )
@@ -729,6 +731,78 @@ version = "0.1.30"
     assert "Add release helper core docs and metadata" in runner._release_notes_body
     assert runner.get_metadata_warnings()
     assert all("Docs/site" not in str(path) for path in runner._prepared_paths)
+    assert repo_root / "Docs" / "Site" / "RELEASE_NOTES.md" in runner._prepared_paths
+    assert repo_root / "Docs" / "Published" in runner._prepared_paths
+
+
+def test_shell_release_runner_refreshes_published_before_staging_and_commit(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    commands: list[list[str]] = []
+
+    def _fake_run_command(
+        self: ShellReleaseRunner,
+        args: list[str],
+        *,
+        check: bool = True,
+        capture_output: bool = True,
+    ) -> subprocess.CompletedProcess[str]:
+        commands.append(list(args))
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(ShellReleaseRunner, "_run_command", _fake_run_command)
+    runner = ShellReleaseRunner(repo_root=tmp_path, dry_run=False)
+    runner._prepared_paths = [
+        tmp_path / "pyproject.toml",
+        tmp_path / "Docs" / "Site" / "RELEASE_NOTES.md",
+        tmp_path / "Docs" / "Published",
+    ]
+    monkeypatch.setattr(runner, "get_head_sha", lambda: "release-sha")
+
+    assert runner.create_release_commit("1.2.3") == "release-sha"
+    assert commands == [
+        [
+            "/bin/bash",
+            str(tmp_path / "Helper_Scripts" / "refresh_docs_published.sh"),
+        ],
+        [
+            "git",
+            "add",
+            "pyproject.toml",
+            "Docs/Site/RELEASE_NOTES.md",
+            "Docs/Published",
+        ],
+        ["git", "commit", "-m", release_module.release_commit_message("1.2.3")],
+    ]
+
+
+def test_shell_release_runner_refresh_failure_blocks_staging_and_commit(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    commands: list[list[str]] = []
+
+    def _fake_run(
+        command_args: list[str],
+        **kwargs: object,
+    ) -> subprocess.CompletedProcess[str]:
+        commands.append(list(command_args))
+        return subprocess.CompletedProcess(command_args, 1, "", "refresh failed")
+
+    monkeypatch.setattr(release_module.subprocess, "run", _fake_run)
+    runner = ShellReleaseRunner(repo_root=tmp_path, dry_run=False)
+    runner._prepared_paths = [tmp_path / "Docs" / "Published"]
+
+    with pytest.raises(RuntimeError, match="refresh failed"):
+        runner.create_release_commit("1.2.3")
+
+    assert commands == [
+        [
+            "/bin/bash",
+            str(tmp_path / "Helper_Scripts" / "refresh_docs_published.sh"),
+        ]
+    ]
 
 
 def test_shell_release_runner_run_command_uses_absolute_executable_path(
