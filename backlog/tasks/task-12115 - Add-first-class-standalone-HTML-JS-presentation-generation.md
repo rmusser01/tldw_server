@@ -4,17 +4,21 @@ title: Add first-class standalone HTML-JS presentation generation
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-07-16 01:50'
+updated_date: 2026-07-16 01:50
 labels:
-  - slides
-  - presentation-studio
-  - backend
-  - frontend
-  - security
+- slides
+- presentation-studio
+- backend
+- frontend
+- security
 dependencies: []
 documentation:
-  - Docs/superpowers/specs/2026-07-15-standalone-html-presentations-design.md
+- Docs/superpowers/specs/2026-07-15-standalone-html-presentations-design.md
+- Docs/superpowers/plans/2026-07-15-standalone-html-presentations-implementation-plan.md
 priority: high
+modified_files:
+- Docs/superpowers/plans/2026-07-15-standalone-html-presentations-implementation-plan.md
+- backlog/tasks/task-12115 - Add-first-class-standalone-HTML-JS-presentation-generation.md
 ---
 
 ## Description
@@ -48,6 +52,12 @@ Design and implement a hardened standalone HTML+JavaScript presentation mode sha
 - [ ] #7 Focused backend, frontend, security, integration, and E2E tests pass, and Bandit reports no new findings in touched Python.
 <!-- AC:END -->
 
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Docs/superpowers/plans/2026-07-15-standalone-html-presentations-implementation-plan.md
+<!-- SECTION:PLAN:END -->
+
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
@@ -57,3 +67,9 @@ Design and implement a hardened standalone HTML+JavaScript presentation mode sha
 
 2026-07-15 fresh re-review: backend, security, and product reviewers all returned APPROVED with no remaining P0-P3 or blocking design findings. Four embedded JSON contracts parse, Markdown fences are balanced, the related link resolves, heading hierarchy is valid, required hardened contracts are present, and stale superseded contracts are absent. This revision changes only documentation and Backlog metadata, so Python tests, frontend builds, and Bandit are not applicable. Implementation has not started; the next step is the task-specific implementation plan.
 <!-- SECTION:NOTES:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+2026-07-15 implementation plan approved: the five-stage, 17-task TDD plan locks the closed provider adapter catalog, external-secret/shared-Jobs-store key and reconciliation metadata, fenced receipt/worker recovery, guarded per-request MCP discovery and execution, and the inert form/editor/download boundary. A fresh independent plan review returned APPROVED after correcting the HTML slides=[] persistence invariant, shared Jobs coordination, guarded Uvicorn/WebSocket pins, exact outer-fence parsing, dependency smoke gates, per-commit Backlog staging, and mechanically complete Bandit scope. Backend Slides baseline: 100 passed with 5 warnings. The isolated frontend worktree had no installed workspace dependencies, so no frontend product test ran or failed; Task 13 begins with a frozen clean install and pre-change regression gate. Implementation code has not started.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
