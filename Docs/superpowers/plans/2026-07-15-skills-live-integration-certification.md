@@ -449,7 +449,8 @@ export const SKILLS_CERT_RENDERED = "Organize bounded certification input into v
 
 Named phases must cover:
 
-1. confirm Library empty;
+1. confirm Library empty, open Trash and confirm it is empty, then return to
+   Library;
 2. open `New Skill`, fill `Name`, `Description`, and `Instructions`, then save;
 3. confirm `Skill created` and the exact name;
 4. fill `Search skills` and await a GET list request whose `q` equals the exact name;
@@ -563,7 +564,9 @@ await launchWithBuiltExtension({
 })
 ```
 
-Then call the shared UI lifecycle with `skills-cert-extension`.
+Import the shared lifecycle from
+`../../../tldw-frontend/e2e/utils/skills-live-certification`, pass the extension
+package's own runtime `expect`, then run it with `skills-cert-extension`.
 
 - [ ] **Step 3: Preserve multiple extension failure categories**
 
@@ -683,6 +686,10 @@ finally:
 
 The extension does not depend on the frontend process. A frontend startup or WebUI browser/workflow failure must not short-circuit extension build/run while backend health remains usable.
 
+The CLI entrypoint must pass every caught error through `redactText()` and a
+fixed diagnostic length bound before writing stderr. Artifact-safety failures
+print only the generic category because their evidence root has been removed.
+
 - [ ] **Step 4: Implement direct API assertions without sensitive diagnostics**
 
 Use Node `fetch()` with the synthetic `X-API-KEY` header. Error detail contains only a route label and HTTP status.
@@ -703,7 +710,7 @@ GET /api/v1/skills/trash?limit=500&offset=0 -> skills excludes <name>
 
 - [ ] **Step 5: Parse Playwright reports and surface results strictly**
 
-Each JSON report must show exactly one executed test, `skipped === 0`, `flaky === 0`, and `unexpected === 0`. Do not shell out to another report parser. Missing result files classify launch failures; present `running`/failed results classify workflow/worker/relay failures according to the surface contract.
+Each JSON report must show exactly one executed test, `skipped === 0`, `flaky === 0`, and `unexpected === 0`. Do not shell out to another report parser. Missing result files classify launch failures; present `running`/failed results classify workflow/worker/relay failures according to the surface contract. Bound every retained failure `detail` to 500 redacted characters.
 
 - [ ] **Step 6: Add the public command and short operator documentation**
 
