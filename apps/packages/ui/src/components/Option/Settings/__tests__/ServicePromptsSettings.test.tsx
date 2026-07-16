@@ -7,9 +7,10 @@ import {
   waitFor,
   within
 } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { App } from "antd"
-import { BrowserRouter, Route, Routes } from "react-router-dom"
+import { BrowserRouter, Link, Route, Routes } from "react-router-dom"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { ServicePromptsSettings } from "../ServicePromptsSettings"
@@ -272,7 +273,15 @@ const renderSettings = (client = createClient()) => ({
       <QueryClientProvider client={client}>
         <App>
           <Routes>
-            <Route path="/settings/prompt" element={<ServicePromptsSettings />} />
+            <Route
+              path="/settings/prompt"
+              element={(
+                <>
+                  <ServicePromptsSettings />
+                  <Link to="/settings/chat">Chat settings test route</Link>
+                </>
+              )}
+            />
             <Route path="*" element={<p>Outside workflow prompt route</p>} />
           </Routes>
         </App>
@@ -491,6 +500,7 @@ describe("ServicePromptsSettings", () => {
   })
 
   it("disables competing actions during save and clears loading when it finishes", async () => {
+    const user = userEvent.setup()
     mocks.readLegacy.mockResolvedValue([legacyRagCandidate])
     mocks.get.mockResolvedValue(detailFor(catalog[0], { source: "user" }))
     const pendingSave = deferred<ServicePromptDetail>()
@@ -498,11 +508,21 @@ describe("ServicePromptsSettings", () => {
     renderSettings()
     await screen.findByText("Browser-local workflow prompts found")
     await openPrompt("RAG answer")
-    fireEvent.change(screen.getByRole("textbox", { name: "Template" }), {
-      target: { value: "Saving {context} {question}" }
+    const editor = screen.getByRole("textbox", { name: "Template" })
+    const submittedValue = "Saving {context} {question}"
+    fireEvent.change(editor, {
+      target: { value: submittedValue }
     })
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
     await waitFor(() => expect(mocks.save).toHaveBeenCalledTimes(1))
+    expect(editor).toBeDisabled()
+    await user.type(editor, " Ignored newer text")
+    expect(editor).toHaveValue(submittedValue)
+    expect(mocks.save).toHaveBeenCalledWith(
+      "chat.rag.answer",
+      expect.objectContaining({ parts: { template: submittedValue } }),
+      { signal: expect.any(AbortSignal) }
+    )
     expect(screen.getByRole("button", { name: /Save changes/ })).toBeDisabled()
     expect(screen.getByRole("button", { name: "Reset to default" })).toBeDisabled()
     expect(screen.getByRole("button", { name: "Import to this server" }))
@@ -513,7 +533,7 @@ describe("ServicePromptsSettings", () => {
     await act(async () => {
       pendingSave.resolve(detailFor(catalog[0], {
         source: "user",
-        parts: { template: "Saving {context} {question}" }
+        parts: { template: submittedValue }
       }))
     })
     await waitFor(() => expect(document.querySelector(".ant-btn-loading"))
@@ -522,6 +542,8 @@ describe("ServicePromptsSettings", () => {
       .toBeEnabled()
     expect(screen.getByRole("button", { name: "Import to this server" }))
       .toBeEnabled()
+    expect(screen.getByRole("textbox", { name: "Template" }))
+      .toHaveValue(submittedValue)
   })
 
   it("aborts an in-flight save when another definition is selected and ignores its late result", async () => {
@@ -790,7 +812,9 @@ describe("ServicePromptsSettings", () => {
     const recovery = screen.getByText("Saved customization is unavailable")
       .closest<HTMLElement>('[data-ds-component="RecoveryCallout"]')!
     expect(within(recovery).getByText(rebindMessage)).toBeInTheDocument()
-    expect(screen.getByRole("status")).toHaveTextContent(rebindMessage)
+    expect(within(recovery).getByRole("alert")).toHaveTextContent(rebindMessage)
+    expect(screen.getAllByText(rebindMessage)).toHaveLength(1)
+    expect(screen.getByRole("status")).not.toHaveTextContent(rebindMessage)
 
     fireEvent.click(await screen.findByRole("button", {
       name: "Reset corrupt customization"
@@ -921,6 +945,45 @@ describe("ServicePromptsSettings", () => {
     ))
     expect(screen.queryByText("Browser-local workflow prompts found"))
       .not.toBeInTheDocument()
+  })
+
+  it("keeps migration editors immutable for the complete deferred import", async () => {
+    const user = userEvent.setup()
+    mocks.readLegacy.mockResolvedValue([legacyRagCandidate])
+    const pendingDetail = deferred<ServicePromptDetail>()
+    const pendingImport = deferred<ServicePromptDetail>()
+    mocks.get.mockReturnValueOnce(pendingDetail.promise)
+    mocks.importLegacy.mockReturnValueOnce(pendingImport.promise)
+    renderSettings()
+    await screen.findByText("Browser-local workflow prompts found")
+    const repair = screen.getByRole("textbox", { name: "Repair RAG answer" })
+
+    fireEvent.click(screen.getByRole("button", { name: "Import to this server" }))
+    await waitFor(() => expect(mocks.get).toHaveBeenCalledTimes(1))
+    expect(repair).toBeDisabled()
+    await user.type(repair, " Ignored newer text")
+    expect(repair).toHaveValue(legacyRagCandidate.value)
+
+    await act(async () => {
+      pendingDetail.resolve(detailFor(catalog[0]))
+    })
+    await waitFor(() => expect(mocks.importLegacy).toHaveBeenCalledWith(
+      expect.objectContaining({ value: legacyRagCandidate.value }),
+      expect.objectContaining({ id: "chat.rag.answer" }),
+      { signal: expect.any(AbortSignal) }
+    ))
+    expect(repair).toBeDisabled()
+    expect(repair).toHaveValue(legacyRagCandidate.value)
+
+    await act(async () => {
+      pendingImport.resolve(detailFor(catalog[0], {
+        source: "user",
+        parts: { template: legacyRagCandidate.value }
+      }))
+    })
+    await waitFor(() => expect(screen.queryByText(
+      "Browser-local workflow prompts found"
+    )).not.toBeInTheDocument())
   })
 
   it("confirms replacements, exposes invalid raw text for repair, and preserves failed imports", async () => {
@@ -1163,11 +1226,12 @@ describe("ServicePromptsSettings", () => {
     window.dispatchEvent(unload)
     expect(unload.defaultPrevented).toBe(true)
 
-    window.history.replaceState({ servicePromptHistoryIndex: 0 }, "", "/settings/prompt")
+    window.history.replaceState({}, "", "/settings/prompt")
     window.dispatchEvent(new PopStateEvent("popstate", {
-      state: { servicePromptHistoryIndex: 0 }
+      state: {}
     }))
     expect(go).toHaveBeenCalledTimes(1)
+    expect(go).toHaveBeenCalledWith(1)
     const confirmations = vi.mocked(window.confirm).mock.calls.length
     window.dispatchEvent(new PopStateEvent("popstate", {
       state: { servicePromptHistoryIndex: 1 }
@@ -1297,6 +1361,69 @@ describe("ServicePromptsSettings", () => {
     const restored = await screen.findByRole("textbox", { name: "Template" })
     expect(restored).toHaveValue("Forward dirty {context} {question}")
     await waitFor(() => expect(restored).toHaveFocus())
+  })
+
+  it("restores dirty prompt state after declining unindexed Forward to an outside route", async () => {
+    window.history.replaceState(
+      { __N: true, key: "next-root", hostMarker: "preserved" },
+      "",
+      "/settings/prompt"
+    )
+    installNextStyleHistory()
+    renderSettings()
+    await openPrompt("RAG answer")
+    const outsideUrl = new URL("/settings/chat", window.location.href).href
+    fireEvent.change(screen.getByRole("textbox", { name: "Template" }), {
+      target: { value: "Accepted leave {context} {question}" }
+    })
+
+    fireEvent.click(screen.getByRole("link", { name: "Chat settings test route" }))
+    expect(await screen.findByText("Outside workflow prompt route"))
+      .toBeInTheDocument()
+    expect(window.location.href).toBe(outsideUrl)
+    expect(window.history.state).toMatchObject({
+      __N: true,
+      hostMarker: "preserved"
+    })
+    expect(window.history.state).not.toHaveProperty("idx")
+    const historyLength = window.history.length
+
+    await act(async () => {
+      window.history.back()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+    await screen.findByRole("heading", { name: "RAG answer" })
+    expect(window.history.state).toMatchObject({
+      __N: true,
+      hostMarker: "preserved",
+      servicePromptHistoryForwardDestination: outsideUrl,
+      servicePromptHistoryIndex: 1
+    })
+
+    const dirtyUrl = window.location.href
+    const authoredValue = "Outside forward dirty {context} {question}"
+    const editor = screen.getByRole("textbox", { name: "Template" })
+    fireEvent.change(editor, {
+      target: { value: authoredValue }
+    })
+    editor.focus()
+    vi.mocked(window.confirm).mockReturnValue(false)
+
+    await act(async () => {
+      window.history.forward()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+    await waitFor(() => expect(window.location.href).toBe(dirtyUrl))
+    expect(window.history.length).toBe(historyLength)
+    const restored = await screen.findByRole("textbox", { name: "Template" })
+    expect(restored).toHaveValue(authoredValue)
+    await waitFor(() => expect(restored).toHaveFocus())
+    expect(JSON.stringify(window.history.state)).not.toContain(authoredValue)
+    for (const storage of [window.localStorage, window.sessionStorage]) {
+      for (let index = 0; index < storage.length; index += 1) {
+        expect(storage.getItem(storage.key(index)!) ?? "").not.toContain(authoredValue)
+      }
+    }
   })
 
   it.each(["success", "error"] as const)(

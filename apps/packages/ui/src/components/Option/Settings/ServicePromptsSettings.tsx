@@ -32,6 +32,51 @@ type Draft = {
   revision: string | null
 }
 
+type PendingHistoryRestore = {
+  conflict: boolean
+  definitionId: string
+  draft: Draft
+  fieldErrors: Record<string, string>
+  focusId: string | null
+  operationError: string | null
+  preview: Record<string, string> | null
+  scopeKey: string
+  url: string
+}
+
+let pendingHistoryRestore: PendingHistoryRestore | null = null
+let pendingHistoryRestoreTimer: ReturnType<typeof setTimeout> | null = null
+
+const clearPendingHistoryRestore = () => {
+  if (pendingHistoryRestoreTimer !== null) {
+    clearTimeout(pendingHistoryRestoreTimer)
+    pendingHistoryRestoreTimer = null
+  }
+  pendingHistoryRestore = null
+}
+
+const stagePendingHistoryRestore = (restore: PendingHistoryRestore) => {
+  clearPendingHistoryRestore()
+  pendingHistoryRestore = restore
+  pendingHistoryRestoreTimer = setTimeout(clearPendingHistoryRestore, 2_000)
+}
+
+const consumePendingHistoryRestore = (
+  url: string,
+  definitionId: string,
+  scopeKey: string
+): PendingHistoryRestore | null => {
+  const restore = pendingHistoryRestore
+  if (!restore) return null
+  if (restore.url !== url || restore.definitionId !== definitionId ||
+    restore.scopeKey !== scopeKey) {
+    clearPendingHistoryRestore()
+    return null
+  }
+  clearPendingHistoryRestore()
+  return restore
+}
+
 type MigrationItem = LegacyServicePromptCandidate & {
   error?: string
 }
@@ -155,12 +200,21 @@ const getHistoryIndex = (state: unknown): number | null => {
   if (!state || typeof state !== "object") return null
   const historyState = state as {
     idx?: unknown
+    servicePromptHistoryForwardDestination?: unknown
     servicePromptHistoryIndex?: unknown
   }
   if (typeof historyState.servicePromptHistoryIndex === "number") {
     return historyState.servicePromptHistoryIndex
   }
   return typeof historyState.idx === "number" ? historyState.idx : null
+}
+
+const getHistoryForwardDestination = (state: unknown): string | null => {
+  if (!state || typeof state !== "object") return null
+  const destination = (state as {
+    servicePromptHistoryForwardDestination?: unknown
+  }).servicePromptHistoryForwardDestination
+  return typeof destination === "string" ? destination : null
 }
 
 const toDomId = (value: string): string =>
@@ -198,6 +252,11 @@ export const ServicePromptsSettings = () => {
   const dirtyRef = React.useRef(false)
   const historyIndexRef = React.useRef(0)
   const historyInitializedRef = React.useRef(false)
+  const historyForwardDestinationRef = React.useRef<string | null>(null)
+  const historyUrlRef = React.useRef(
+    typeof window === "undefined" ? "" : window.location.href
+  )
+  const historyRestoreCheckedRef = React.useRef(false)
   const historyFocusRef = React.useRef<{
     element: HTMLElement | null
     id: string | null
@@ -253,6 +312,21 @@ export const ServicePromptsSettings = () => {
   const isSaving = activeKind === "save"
   const isResetting = activeKind === "reset"
 
+  const replaceHistoryForwardDestination = React.useCallback(
+    (destination: string | null) => {
+      const existing = window.history.state ?? {}
+      const next = { ...existing }
+      if (destination === null) {
+        delete next.servicePromptHistoryForwardDestination
+      } else {
+        next.servicePromptHistoryForwardDestination = destination
+      }
+      window.history.replaceState(next, "", window.location.href)
+      historyForwardDestinationRef.current = destination
+    },
+    []
+  )
+
   React.useEffect(() => {
     scopeRef.current = scope
   }, [scope])
@@ -266,6 +340,25 @@ export const ServicePromptsSettings = () => {
   }, [dirty])
 
   React.useEffect(() => {
+    if (historyRestoreCheckedRef.current || !selectedId || !scope) return
+    historyRestoreCheckedRef.current = true
+    const restore = consumePendingHistoryRestore(
+      window.location.href,
+      selectedId,
+      scope.scopeKey
+    )
+    if (!restore) return
+    historyFocusRef.current = { element: null, id: restore.focusId }
+    dirtyRef.current = true
+    setDraft({ ...restore.draft, parts: { ...restore.draft.parts } })
+    setDirty(true)
+    setFieldErrors({ ...restore.fieldErrors })
+    setPreview(restore.preview ? { ...restore.preview } : null)
+    setConflict(restore.conflict)
+    setOperationError(restore.operationError)
+  }, [scope, selectedId])
+
+  React.useEffect(() => {
     if (typeof window === "undefined") return
     const existing = window.history.state ?? {}
     if (!historyInitializedRef.current) {
@@ -273,6 +366,8 @@ export const ServicePromptsSettings = () => {
       if (existingIndex !== null) historyIndexRef.current = existingIndex
       historyInitializedRef.current = true
     }
+    historyUrlRef.current = window.location.href
+    historyForwardDestinationRef.current = getHistoryForwardDestination(existing)
     window.history.replaceState(
       { ...existing, servicePromptHistoryIndex: historyIndexRef.current },
       "",
@@ -301,6 +396,7 @@ export const ServicePromptsSettings = () => {
   React.useEffect(() => {
     const handleScopeChange = () => {
       const oldScope = scopeRef.current
+      clearPendingHistoryRestore()
       abortActiveOperation()
       if (oldScope) {
         const queryKey = ["service-prompts", oldScope.scopeKey]
@@ -397,7 +493,7 @@ export const ServicePromptsSettings = () => {
 
   React.useEffect(() => {
     const detail = detailQuery.data
-    if (!detail || !scope || dirty) return
+    if (!detail || !scope || dirty || dirtyRef.current) return
     setDraft({
       scopeKey: scope.scopeKey,
       definitionId: detail.id,
@@ -465,7 +561,7 @@ export const ServicePromptsSettings = () => {
       event.returnValue = ""
     }
     const anchorClick = (event: MouseEvent) => {
-      if (!dirtyRef.current || event.defaultPrevented || event.button !== 0 ||
+      if (event.defaultPrevented || event.button !== 0 ||
         event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
         return
       }
@@ -478,15 +574,19 @@ export const ServicePromptsSettings = () => {
       }
       const destination = new URL(element.href, window.location.href)
       if (destination.origin !== window.location.origin) return
-      const leave = window.confirm(t("servicePrompts.unsaved.leave", {
-        defaultValue: "Discard unsaved workflow prompt changes?"
-      }))
-      if (!leave) {
-        event.preventDefault()
-        return
+      if (dirtyRef.current) {
+        const leave = window.confirm(t("servicePrompts.unsaved.leave", {
+          defaultValue: "Discard unsaved workflow prompt changes?"
+        }))
+        if (!leave) {
+          event.preventDefault()
+          return
+        }
+        dirtyRef.current = false
+        setDirty(false)
       }
-      dirtyRef.current = false
-      setDirty(false)
+      clearPendingHistoryRestore()
+      replaceHistoryForwardDestination(destination.href)
     }
     const popstate = (event: PopStateEvent) => {
       if (suppressPopstateRef.current) {
@@ -514,6 +614,7 @@ export const ServicePromptsSettings = () => {
         defaultValue: "Discard unsaved workflow prompt changes?"
       }))
       if (leave) {
+        clearPendingHistoryRestore()
         dirtyRef.current = false
         setDirty(false)
         const index = getHistoryIndex(event.state)
@@ -522,11 +623,25 @@ export const ServicePromptsSettings = () => {
       }
       const targetIndex = getHistoryIndex(event.state)
       const delta = targetIndex === null
-        ? 1
+        ? historyForwardDestinationRef.current === window.location.href ? -1 : 1
         : historyIndexRef.current - targetIndex
       const activeElement = document.activeElement instanceof HTMLElement
         ? document.activeElement
         : null
+      if (draft && scopeRef.current?.scopeKey === draft.scopeKey &&
+        selectedIdRef.current === draft.definitionId) {
+        stagePendingHistoryRestore({
+          conflict,
+          definitionId: draft.definitionId,
+          draft: { ...draft, parts: { ...draft.parts } },
+          fieldErrors: { ...fieldErrors },
+          focusId: activeElement?.id || null,
+          operationError,
+          preview: preview ? { ...preview } : null,
+          scopeKey: draft.scopeKey,
+          url: historyUrlRef.current
+        })
+      }
       historyFocusRef.current = {
         element: activeElement ?? detailFocusRef.current,
         id: activeElement?.id || null
@@ -543,7 +658,15 @@ export const ServicePromptsSettings = () => {
       window.removeEventListener("popstate", popstate)
       document.removeEventListener("click", anchorClick, true)
     }
-  }, [t])
+  }, [
+    conflict,
+    draft,
+    fieldErrors,
+    operationError,
+    preview,
+    replaceHistoryForwardDestination,
+    t
+  ])
 
   React.useEffect(() => () => {
     activeOperationRef.current?.controller.abort()
@@ -563,6 +686,7 @@ export const ServicePromptsSettings = () => {
     }))) {
       return
     }
+    clearPendingHistoryRestore()
     abortActiveOperation()
     if (scope && selectedId) {
       const oldDetailKey = [
@@ -586,6 +710,7 @@ export const ServicePromptsSettings = () => {
     setOperationError(null)
     const next = new URLSearchParams(searchParams)
     next.set("prompt", id)
+    replaceHistoryForwardDestination(null)
     historyIndexRef.current += 1
     setSearchParams(next)
   }
@@ -845,7 +970,6 @@ export const ServicePromptsSettings = () => {
                   "The saved customization changed. The latest revision was loaded. Retry reset."
               })
               setOperationError(message)
-              setOperationAnnouncement(message)
             }
           }
         } else {
@@ -1229,6 +1353,7 @@ export const ServicePromptsSettings = () => {
                         aria-invalid={Boolean(item.error)}
                         aria-describedby={item.error ? errorId : undefined}
                         className="mt-2 font-mono"
+                        disabled={activeKind !== null}
                         autoSize={{ minRows: 3, maxRows: 10 }}
                         value={item.value}
                         onChange={(event) => setMigrationItems((items) =>
@@ -1492,6 +1617,7 @@ export const ServicePromptsSettings = () => {
                               aria-invalid={Boolean(fieldError)}
                               aria-describedby={fieldError ? errorId : undefined}
                               className="font-mono"
+                              disabled={activeKind !== null}
                               autoSize={{ minRows: 6, maxRows: 18 }}
                               value={draft.parts[part.key]}
                               onChange={(event) => updatePart(part.key, event.target.value)}
