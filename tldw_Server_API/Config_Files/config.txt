@@ -856,6 +856,37 @@ retention_days_quarantined = 90
 # non-terminal (queued/processing); 0 disables
 retention_days_nonterminal = 0
 
+[SlidesStandaloneHtml]
+# Standalone HTML generation is independently gated and disabled by default.
+enabled = false
+egress_enabled = false
+
+# HMAC secrets are environment-only: SLIDES_STANDALONE_HMAC_KEYS_JSON and
+# SLIDES_STANDALONE_HMAC_CURRENT_KEY_ID. Never put those secrets in this file
+# or a database. Source-free key lifecycle metadata is shared through the Jobs
+# store (implemented by the standalone generation registry).
+
+# Configure one exact target and include that same provider/model/adapter tuple
+# in allowed_targets_json. Endpoint identities come only from the built-in
+# adapter catalog; no endpoint/base URL, proxy, router, or fallback is accepted.
+default_provider =
+default_model =
+default_adapter_id =
+allowed_targets_json = []
+
+# Finite server-owned provider budgets. Timeouts can only be lowered from these
+# defaults. max_output_tokens defaults to 16,384 and may be raised only to the
+# fixed 32,768 safety ceiling.
+connect_timeout_seconds = 10
+read_timeout_seconds = 120
+overall_timeout_seconds = 180
+max_output_tokens = 16384
+
+# Effective exposure limits are clamped to these fixed V1 maxima.
+max_source_chars = 200000
+max_source_tokens = 50000
+max_provider_response_bytes = 8388608
+
 [Diarization]
 # VAD backend:
 #   silero_hub (default): use the Silero PyTorch repo via torch.hub (and optional local checkout under models/).

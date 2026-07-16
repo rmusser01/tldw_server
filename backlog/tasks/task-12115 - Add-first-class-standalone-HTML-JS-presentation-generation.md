@@ -38,6 +38,18 @@ modified_files:
 - pyproject.toml
 - backlog/tasks/task-12115 - Add-first-class-standalone-HTML-JS-presentation-generation.md
 - tldw_Server_API/app/core/Slides/__init__.py
+- Docs/superpowers/plans/2026-07-15-standalone-html-presentations-implementation-plan.md
+- tldw_Server_API/Config_Files/Prompts/README.md
+- tldw_Server_API/Config_Files/Prompts/slides.prompts.md
+- tldw_Server_API/Config_Files/config.txt
+- tldw_Server_API/app/core/Slides/standalone_html_config.py
+- tldw_Server_API/app/core/Slides/standalone_html_registry.py
+- tldw_Server_API/app/core/Utils/prompt_loader.py
+- tldw_Server_API/app/core/config_sections/__init__.py
+- tldw_Server_API/app/core/config_sections/slides.py
+- tldw_Server_API/tests/Config/test_config_sections_typed_loaders.py
+- tldw_Server_API/tests/Slides/test_standalone_html_config.py
+- tldw_Server_API/tests/Slides/test_standalone_html_registry.py
 ---
 
 ## Description
@@ -173,4 +185,10 @@ Post-correction verification passed 88/88 migration/domain/API tests. The struct
 2026-07-16 Task 3 final follow-up closure: two fresh reviewers found that successful standalone soft-undelete lacked the source-bearing `private, no-store`/`nosniff` response policy and that saved JSON export checked only validator-derived metadata rather than the complete persisted standalone invariant. Test-first fixes now apply those headers only to standalone restore responses and reject malformed/nonempty/non-list `slides`, missing/blank generation job identity, and missing/malformed/empty/nonobject/oversized provenance before validator-pool admission with a fixed chain-free `standalone_html_response_invalid`. Valid rows still run through the authoritative subprocess pool. Routine Slides and Research Workspace health checks now use a source-free `SELECT 1` probe with fixed SQLite failure normalization instead of materializing detail rows. Deeply nested stored version JSON now maps `RecursionError` to the same chain-free `version_payload_invalid` behavior for domain decode, version GET, and restore. The stale structured sanitization fixture was aligned with Task 3's discriminated response contract.
 
 Final follow-up evidence: assertion-level RED was 15/15 for the initial review findings, 5/5 for boundedness/health hardening, and 3/3 for recursive snapshot handling. Focused GREEN passed 20/20, and the combined standalone/health/capability/sanitization suite passed 446/446. Structured regressions passed 106 tests with only the same two base-reproduced `assets/custom.css` failures. Black and Ruff are clean on the touched Slides scope; existing Research Workspace whole-file formatter/lint debt reproduces unchanged at HEAD. Production-only Bandit exits 0 with no findings, and `git diff --check` is clean. Fresh specification and quality re-reviews both returned READY with 0 Critical, 0 Important, and 0 Minor findings. Task 3 is complete; Task 4 may begin. Interactive HTML execution remains disabled.
+
+2026-07-16 Task 4 closure: assertion-level TDD began with two collection errors because the closed standalone configuration and typed Slides section did not exist; later RED tranches reproduced each prompt, configuration, keyring, rotation, and retirement hardening issue before its fix. The implementation now provides a default-off standalone generation gate with an independent egress kill, six fixed application-owned provider adapters, exact case-sensitive provider/model/adapter allowlisting with derived endpoints, bounded typed limits and timeouts, a deterministic canonical UTF-8 generation revision, and strict fail-closed loading of the maintained 128 KiB `slides.standalone_html.v1` prompt. The adapted prompt requires self-contained HTML, the normative twelve narrative flows, keyboard navigation, reduced motion, current-slide speaker notes, accessibility, no autoplay, and no external or executable tldw-side resource path.
+
+The environment-only HMAC keyring accepts one to four canonical 32-byte secrets, pins five versioned domains and a known-answer vector, hides secret and digest material from representations, and fails the full generation gate when any shared current/retiring secret is absent. Its injected source-free Jobs-store interface supports explicit current-key activation, distinct local-versus-identical-winner CAS outcomes, exact transition validation, bounded rotation, and removal only after the 32-day floor plus a complete same-epoch fenced dormant-database sweep. No source, prompt, provider credential, secret, or HMAC value enters registry store calls. Interactive execution remains disabled.
+
+Final verification: the combined Task 4 configuration, registry, and typed-loader suite passed 193/193 with 3 existing warnings; legacy prompt-loader regressions passed 10/10 with 3 existing warnings. Black left all eight touched Python files unchanged, Ruff passed, `git diff --check` passed, and production-only Bandit reported 0 findings and 0 errors across 1,765 LOC. Fresh independent specification and quality reviews both returned READY with 0 Critical, 0 Important, and 0 Minor findings. Task 4 is complete; overall TASK-12115 remains In Progress for Task 5+.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->

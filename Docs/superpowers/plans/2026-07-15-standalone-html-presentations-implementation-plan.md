@@ -43,7 +43,7 @@ Before Task 1, read `backlog://workflow/overview`, view `TASK-12115` through the
 
 **Tests:** Migration rollback/concurrency, domain invariants, validator budgets/watchdogs, summaries/search/version retention, content-kind negotiation, and unchanged structured Slides regressions.
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Stage 2: Bounded Generation, Receipts, Jobs, And Recovery
 
@@ -53,7 +53,7 @@ Before Task 1, read `backlog://workflow/overview`, view `TASK-12115` through the
 
 **Tests:** Config/allowlist/prompt/key rotation, max+1 source cases, retrieval-only RAG, raw provider streaming and error redaction, receipt races, active/archive UUID recovery, worker retry/cancel/expiry, and fenced reconciler takeover.
 
-**Status:** Not Started
+**Status:** In Progress
 
 ### Stage 3: REST, MCP, Transport, And Secondary-Surface Guards
 
@@ -133,7 +133,7 @@ Before Task 1, read `backlog://workflow/overview`, view `TASK-12115` through the
 - Test: `tldw_Server_API/tests/Slides/test_standalone_html_domain.py`
 - Test: `tldw_Server_API/tests/Slides/test_slides_db.py`
 
-- [ ] **Step 1: Write failing schema-v2 and invariant tests**
+- [x] **Step 1: Write failing schema-v2 and invariant tests**
 
 Cover new databases, v0/v1 databases, an empty/multirow version table, idempotent reopen, injected statement rollback, concurrent first access, legacy backfill, explicit projections, and these complete-row invariants:
 
@@ -146,7 +146,7 @@ assert json.loads(html.slides) == [] and html.html_document is not None
 
 Also prove `generation_job_uuid` is unique when nonnull and that list/search/version-metadata queries do not select `html_document` or `payload_json`.
 
-- [ ] **Step 2: Run tests and confirm the expected red state**
+- [x] **Step 2: Run tests and confirm the expected red state**
 
 ```bash
 source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate
@@ -158,15 +158,15 @@ python -m pytest -q \
 
 Expected: new tests fail because schema v2, discriminators, and projections do not exist; existing structured tests remain green.
 
-- [ ] **Step 3: Implement the transactional migration**
+- [x] **Step 3: Implement the transactional migration**
 
 Move feature DDL out of `_ensure_schema` into a `BEGIN IMMEDIATE` runner that re-reads actual schema/version after the lock, executes statements individually, normalizes `schema_version` to one row containing `2`, and rolls back on any failure. Add the seven presentation fields, receipt/input ledgers, indexes, and legacy `structured_slides` backfill exactly as specified.
 
-- [ ] **Step 4: Add explicit row and projection APIs**
+- [x] **Step 4: Add explicit row and projection APIs**
 
 Replace feature-path `SELECT *` usage with typed detail, summary, kind, version-metadata, receipt, and input projections. Add a no-create Slides DB path resolver for dormant reconciliation. Enforce complete-candidate invariants in database transactions rather than relying on Pydantic alone.
 
-- [ ] **Step 5: Run the focused tests and structured regression**
+- [x] **Step 5: Run the focused tests and structured regression**
 
 Run the Step 2 command, then:
 
@@ -176,7 +176,7 @@ python -m pytest -q tldw_Server_API/tests/Slides/test_slides_api.py
 
 Expected: all pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/Slides/slides_migrations.py tldw_Server_API/app/core/Slides/slides_db.py tldw_Server_API/app/core/DB_Management/db_path_utils.py tldw_Server_API/tests/Slides/test_standalone_html_db_migration.py tldw_Server_API/tests/Slides/test_standalone_html_domain.py tldw_Server_API/tests/Slides/test_slides_db.py "backlog/tasks/task-12115 - Add-first-class-standalone-HTML-JS-presentation-generation.md"
@@ -194,15 +194,15 @@ git commit -m "feat(slides): add discriminated schema v2 (TASK-12115)"
 - Test: `tldw_Server_API/tests/Slides/test_standalone_html_validation_pool.py`
 - Test: `tldw_Server_API/tests/Slides/test_standalone_html_dependency_smoke.py`
 
-- [ ] **Step 1: Write failing pure-validator tests**
+- [x] **Step 1: Write failing pure-validator tests**
 
 Cover UTF-8/scalar validity, allowed HTML whitespace controls, forbidden other C0/C1 controls, NUL, exact 1 MiB bytes, one complete document, required document/slide structure, 1–30 slides, 50,000 HTML tokens, 65,536-byte tokens, 10,000 elements, 20,000 attributes, depth 128, strict first parse error, at most 64 styles/524,288 CSS bytes/100,000 CSS tokens/10,000 declarations/65,536-byte CSS tokens/depth 64/100 CSS errors, and 250,000 indexable characters. Test the allowed single classic final-child script; forbidden URLs/events/styles/forms/frames/workers/storage/network/resource CSS; generation-time notes cardinality versus later edit rules; title NFC/control/bidi/scalar/byte bounds; malformed parser/CSS inputs; iterative semantic-text extraction; derived title/count/digest; and fixed redacted error codes. Include max-1/max/max+1 and adversarial nesting/token cases. Add a clean-install smoke test that imports `html5lib` and `tinycss2` and exercises one accepted HTML and CSS path through the authoritative validator.
 
-- [ ] **Step 2: Write failing pool tests**
+- [x] **Step 2: Write failing pool tests**
 
 Cover at most four subprocesses, interactive queue 24, reserved generation queue 8, fairness, saturation `503`, a 60-second watchdog using a shortened test clock, terminate/reap/replace, caller cancellation, and no source in logs/exceptions.
 
-- [ ] **Step 3: Run tests and confirm failure**
+- [x] **Step 3: Run tests and confirm failure**
 
 ```bash
 source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate
@@ -214,7 +214,7 @@ python -m pytest -q \
 
 Expected: fail because the validator modules and direct dependencies do not exist.
 
-- [ ] **Step 4: Implement the smallest authoritative pipeline**
+- [x] **Step 4: Implement the smallest authoritative pipeline**
 
 Pin `html5lib==1.1` and `tinycss2==1.4.0`; parse without executing; walk bounded parser output; rebuild only derived scalar metadata; and return a frozen result object. Keep subprocess messages closed and source-bearing only on the private pipe. Do not introduce a sanitizer or renderer. Install the modified project into the activated project environment before running green tests:
 
@@ -224,7 +224,7 @@ python -m pip install -e .
 
 If dependency download is blocked by sandbox/network policy, request the normal package-install approval and retry; do not substitute an unpinned package.
 
-- [ ] **Step 5: Re-run tests and dependency metadata check**
+- [x] **Step 5: Re-run tests and dependency metadata check**
 
 ```bash
 python -m pytest -q \
@@ -236,7 +236,7 @@ python -m pip check
 
 Expected: pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add pyproject.toml tldw_Server_API/app/core/Slides/standalone_html_contracts.py tldw_Server_API/app/core/Slides/standalone_html_validator.py tldw_Server_API/app/core/Slides/standalone_html_validation_pool.py tldw_Server_API/tests/Slides/test_standalone_html_validator.py tldw_Server_API/tests/Slides/test_standalone_html_validation_pool.py tldw_Server_API/tests/Slides/test_standalone_html_dependency_smoke.py "backlog/tasks/task-12115 - Add-first-class-standalone-HTML-JS-presentation-generation.md"
@@ -255,11 +255,11 @@ git commit -m "feat(slides): validate standalone HTML safely (TASK-12115)"
 - Test: `tldw_Server_API/tests/Slides/test_standalone_html_api.py`
 - Test: `tldw_Server_API/tests/Slides/test_slides_export.py`
 
-- [ ] **Step 1: Write failing representation and persistence tests**
+- [x] **Step 1: Write failing representation and persistence tests**
 
 Require discriminated detail/summary models, source-free list/search/version metadata, HTML FTS from derived semantic text only, compact UTF-8 snapshots, 25-version retention, no-op source saves, same-kind restore, immutable kind/provenance/job UUID, and metadata-only HTML tombstones. Test omitted/structured-only/dual `X-Slides-Accept-Content-Kinds` behavior before pagination and source loading.
 
-- [ ] **Step 2: Run the focused tests and confirm failure**
+- [x] **Step 2: Run the focused tests and confirm failure**
 
 ```bash
 source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate
@@ -269,15 +269,15 @@ python -m pytest -q \
   tldw_Server_API/tests/Slides/test_slides_export.py
 ```
 
-- [ ] **Step 3: Implement shared domain projections and guards**
+- [x] **Step 3: Implement shared domain projections and guards**
 
 Make `presentation_service.py` the only kind-aware mapping/mutation seam used by REST and later MCP code. Parse the negotiation header once; apply structured-only filtering inside list/search SQL; check a target's kind using the lightweight projection before detail/version/export/render work; and return fixed `400`, `406`, or `409` errors without loading HTML.
 
-- [ ] **Step 4: Implement snapshots, summaries, and explicit export mapping**
+- [x] **Step 4: Implement snapshots, summaries, and explicit export mapping**
 
 Serialize snapshots with `ensure_ascii=False` under the fixed ceiling, prune within the successful transaction, and restore only mutable same-kind fields. Add `html` to export format but defer attachment transport to Task 11. Preserve existing structured response fields and weak ETags.
 
-- [ ] **Step 5: Run tests and structured regressions**
+- [x] **Step 5: Run tests and structured regressions**
 
 Run Step 2, then:
 
@@ -290,7 +290,7 @@ python -m pytest -q \
 
 Expected: pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/Slides/presentation_service.py tldw_Server_API/app/core/Slides/slides_db.py tldw_Server_API/app/api/v1/schemas/slides_schemas.py tldw_Server_API/app/api/v1/endpoints/slides.py tldw_Server_API/app/core/Slides/slides_export.py tldw_Server_API/tests/Slides/test_standalone_html_domain.py tldw_Server_API/tests/Slides/test_standalone_html_api.py tldw_Server_API/tests/Slides/test_slides_export.py "backlog/tasks/task-12115 - Add-first-class-standalone-HTML-JS-presentation-generation.md"
@@ -312,13 +312,13 @@ git commit -m "feat(slides): add content-kind domain guards (TASK-12115)"
 - Test: `tldw_Server_API/tests/Slides/test_standalone_html_registry.py`
 - Test: `tldw_Server_API/tests/Config/test_config_sections_typed_loaders.py`
 
-- [ ] **Step 1: Write failing config, endpoint, prompt, and key tests**
+- [x] **Step 1: Write failing config, endpoint, prompt, and key tests**
 
 Cover default-off behavior, independent egress kill, exact catalog entries and normalized identities, exact default-tuple membership, model case sensitivity, rejected custom/override/router/proxy/fallback targets, verified HTTPS, all six catalog adapters including the four explicit loopback adapters, remote HTTP/`localhost`/LAN/link-local/userinfo/query/fragment rejection, prompt digest/version/size, unreadable override fail-closed behavior, effective limit clamping, and deterministic `generation_config_revision`.
 
 For the HMAC keyring, cover strict JSON/duplicate IDs/base64url/32-byte secret validation, maximum four current/retiring keys, constant-time comparisons, domain separation, current-key selection, 32-day retirement floor, complete-sweep proof, missing-secret global admission/worker failure, and absence of secrets in persisted registry rows.
 
-- [ ] **Step 2: Run tests and confirm failure**
+- [x] **Step 2: Run tests and confirm failure**
 
 ```bash
 source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate
@@ -328,19 +328,19 @@ python -m pytest -q \
   tldw_Server_API/tests/Config/test_config_sections_typed_loaders.py
 ```
 
-- [ ] **Step 3: Implement typed configuration and strict prompt loading**
+- [x] **Step 3: Implement typed configuration and strict prompt loading**
 
 Add a frozen `SlidesStandaloneHtmlConfig` loaded from `[SlidesStandaloneHtml]` plus environment overrides. The section contains nonsecret enable/kill flags, default provider/model/adapter, exact `allowed_targets_json`, timeouts, token budget, and only downward-adjustable limits. Derive endpoint identity from the closed adapter catalog; do not accept a base URL. Add `load_prompt_strict(module, key, max_bytes)` without changing fallback behavior for unrelated callers.
 
-- [ ] **Step 4: Implement keyring logic against a shared-store interface**
+- [x] **Step 4: Implement keyring logic against a shared-store interface**
 
 Define a narrow injected registry interface for source-free key ID/state/timestamps and sweep-proof queries; test Task 4 with an in-memory fake. Do not create a local coordination database. Task 7 implements the SQLite/PostgreSQL Jobs-store tables and manager methods behind this interface.
 
-- [ ] **Step 5: Run tests and inspect stored values**
+- [x] **Step 5: Run tests and inspect stored values**
 
 Run Step 2. Assert serialized fake-repository calls contain no configured secret bytes or base64 strings; Task 7 repeats this assertion against raw SQLite/PostgreSQL rows.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/Slides/standalone_html_config.py tldw_Server_API/app/core/Slides/standalone_html_registry.py tldw_Server_API/Config_Files/Prompts/slides.prompts.md tldw_Server_API/app/core/Utils/prompt_loader.py tldw_Server_API/app/core/config_sections/__init__.py tldw_Server_API/app/core/config_sections/slides.py tldw_Server_API/Config_Files/config.txt tldw_Server_API/Config_Files/Prompts/README.md tldw_Server_API/tests/Slides/test_standalone_html_config.py tldw_Server_API/tests/Slides/test_standalone_html_registry.py tldw_Server_API/tests/Config/test_config_sections_typed_loaders.py "backlog/tasks/task-12115 - Add-first-class-standalone-HTML-JS-presentation-generation.md"
