@@ -1,6 +1,6 @@
 # OpenRouter and Generic TTS Gateway Design
 
-**Status:** Approved for implementation planning
+**Status:** Design approved; written spec under review
 
 **Date:** 2026-07-15
 
@@ -155,6 +155,8 @@ providers:
       stale_ttl_seconds: 3600
       timeout_seconds: 5
 
+    allow_discovered_models: true
+
     capability_defaults:
       formats: [mp3, pcm]
       max_input_characters: 12000
@@ -249,11 +251,16 @@ All definitions are schema-validated. Enabled gateways additionally require a
 usable base URL, speech path, default model, default voice, capability defaults,
 and at least one possible credential source. Startup fails for invalid enabled
 definitions, identity collisions, forbidden paths, malformed JSON Pointers,
-unknown fallback targets, fallback cycles, disallowed default models, or an
-attempt bound smaller than the configured path requires.
+unknown or duplicate fallback targets, a fallback target equal to its primary,
+disallowed default models, or an attempt bound larger than the supported limit.
 
 Configuration is restart-based in the first release. No background hot-reload
 or registry mutation mechanism is added.
+
+Environment interpolation applies recursively to scalar values throughout a
+gateway definition, including nested discovery settings, model overlays,
+conversion settings, and fallback targets. Unresolved variables required by an
+enabled definition fail startup validation.
 
 The built-in OpenRouter backend may send the documented `HTTP-Referer` and
 `X-Title` attribution headers from existing administrator-owned application URL
@@ -268,26 +275,42 @@ Discovery accepts only the standard OpenAI-compatible shape:
 {"data": [{"id": "Vendor/Expressive-TTS"}]}
 ```
 
-The merge order is:
+Catalog construction and request authorization are separate. Catalog merge order
+is:
 
 1. Read discovered model IDs while preserving exact spelling and case.
-2. Apply `allowed_models`, when present, as authorization rather than merely a
-   UI filter.
-3. Add explicitly configured `default_model` and `model_overrides` entries when
-   they pass the allowlist.
-4. Apply gateway capability defaults to all remaining models.
-5. Apply per-model overrides last.
+2. Add explicitly configured `default_model` and `model_overrides` entries.
+3. Apply gateway capability defaults to all catalog entries.
+4. Apply per-model overrides last.
 
-Discovery is advisory and partial. It does not authorize a model, prove speech
-support, or provide a reliable voice catalog. A configured default and configured
-model overlays remain usable when discovery is unavailable.
+Authorization follows one deterministic rule:
+
+- If `allowed_models` is present, only its exact-cased IDs are authorized. The
+  configured default and every model override must also appear in that list.
+- Otherwise, when `allow_discovered_models: true`, discovered IDs plus the
+  configured default and model overrides are authorized.
+- Otherwise, only the configured default and explicit model overrides are
+  authorized.
+- Setting both `allowed_models` and `allow_discovered_models: true` is invalid.
+
+Authenticated user-facing catalogs return only authorized models. Discovery
+source metadata may report that additional upstream models were observed, but
+does not expose their IDs or make them selectable.
+
+Discovery is advisory and partial unless the administrator explicitly enables
+`allow_discovered_models`. Even then, it does not prove speech support or provide
+a reliable voice catalog. A configured default and configured model overlays
+remain usable when discovery is unavailable.
 
 Voice lists, formats, input limits, and PCM metadata come from configuration.
 When a voice list is absent, clients may use a free-form voice field while the
 backend still applies its configured default for an omitted voice.
 
-Discovery results use a bounded LRU cache partitioned by effective credential
-scope. Cache keys never contain raw credentials. Fresh entries use
+Discovery results use a bounded LRU cache partitioned by an opaque effective
+credential-scope token. The token incorporates the canonical backend and either
+the user credential record ID plus revision or the administrator configuration
+generation. It contains no raw credential or user identifier, and key rotation
+changes the revision so older entries cannot be reused. Fresh entries use
 `ttl_seconds`; a discovery error may use a cached entry only through
 `stale_ttl_seconds`. After the stale window, discovery metadata is unavailable,
 but explicitly configured models remain available.
@@ -308,16 +331,28 @@ parent-only, or partially matching pointers are rejected rather than dropped.
 This permits documented OpenRouter `provider` options or vendor extensions
 without accepting arbitrary upstream payloads.
 
+User-supplied `gateway_options` apply only to the explicitly selected primary
+backend. They are validated against that backend before the first synthesis call
+and are never propagated to a fallback target. Fallback therefore changes the
+model/voice route without silently leaking provider-specific controls to another
+service. A caller that requires those controls can set `allow_fallback: false`.
+Fallback targets may use only their administrator-configured defaults and common
+speech fields; the first release does not add target-specific arbitrary option
+payloads.
+
 ### Fallback policy
 
-Fallback is disabled unless the source backend declares a policy. The policy
-contains a bounded ordered target list, a total-attempt limit, and explicit error
-categories. Supported configuration categories are stable internal codes such
-as:
+Fallback is disabled unless the explicitly selected primary backend declares a
+policy. That primary policy owns the entire request's flat, ordered target list,
+attempt limit, and eligible error categories. A target backend's own fallback
+policy is ignored when it is reached as a fallback; it applies only when that
+backend is selected as the primary for another request. Supported configuration
+categories are stable internal codes such as:
 
 - `timeout`
 - `network_error`
 - `upstream_5xx`
+- `circuit_open`
 - `rate_limited`
 - `quota_exceeded`
 - `authentication_failed`
@@ -330,12 +365,18 @@ are terminal. There is no same-backend synthesis retry. This avoids accidental
 double billing while still letting administrators explicitly choose a
 cross-backend availability policy.
 
-Fallback graphs are acyclic and have a hard upper bound of four total attempts,
-including the initial backend.
+`max_attempts` counts synthesis POSTs, including the primary, and has a hard
+upper bound of four. A disabled, uncredentialed, or circuit-open target is
+skipped without consuming a synthesis attempt because no billable POST occurs;
+the target list itself is limited to three unique entries. After an attempted
+target fails, the primary policy's `on` set determines whether iteration may
+continue. A non-eligible failure terminates the request.
+
 Each target specifies its model; voice may be omitted only when the target has a
 configured default. Backend discovery reports that fallback is possible and the
-possible target backend identities. A request may set `allow_fallback: false`,
-but cannot enable a fallback disabled by configuration.
+possible target backend identities. `allow_fallback` defaults to `true` so
+legacy server policy remains effective. A request may set it to `false`, but
+cannot enable a fallback disabled by configuration.
 
 ## API Contract
 
@@ -362,6 +403,9 @@ but cannot enable a fallback disabled by configuration.
   }
 }
 ```
+
+`gateway_options` requires an explicit `backend`; it is rejected on the legacy
+inference path because no deterministic gateway allowlist can be selected.
 
 `backend` may alternatively be supplied as `X-TLDW-TTS-Backend` for SDKs that
 cannot add the body extension. Supplying both with different normalized values
@@ -411,6 +455,12 @@ the response. The adapter uses it to validate `Content-Type` and capture a
 provider generation ID before any bytes are yielded. It does not introduce a
 parallel transport or replace streaming with the buffered HTTP helper.
 
+Every billable speech POST explicitly supplies `RetryPolicy(attempts=1)` (or the
+equivalent one-attempt policy) to the central client. This applies to the primary
+request, conversion-source synthesis, and every fallback target. Discovery GETs
+may use the normal safe-method retry policy. The adapter/service state machine,
+not the HTTP client, is the sole owner of cross-backend synthesis attempts.
+
 Once the successful attempt is known, the response includes
 `X-TLDW-TTS-Backend` with the actual producing backend and
 `X-TLDW-TTS-Fallback-Used` with `true` or `false`. These headers are selected
@@ -421,15 +471,27 @@ before response commitment and contain only canonical backend metadata.
 Gateway endpoint authority is exclusively administrative. Credential resolution
 for every attempt follows this order:
 
-1. If `allow_user_api_key` is true and the authenticated user has a stored key
-   for the canonical backend, use that key.
-2. Otherwise use the administrator-configured key.
-3. If neither exists, mark that backend unavailable for the request.
+1. If `allow_user_api_key` is true, look up the authenticated user's credential
+   for the canonical backend.
+2. If an eligible user credential exists, use it.
+3. If a rejected credential exists, return a sanitized credential error without
+   falling through to the administrator key.
+4. If no user credential exists, use the administrator-configured key.
+5. If neither source exists, mark that backend unavailable for the request.
+
+Only `verified` and `stored-unverified` user keys are eligible for synthesis. A
+`rejected` credential is never used and blocks administrator-key fallthrough for
+that user/backend, returning a sanitized credential error instead. Likewise, an
+eligible user key that fails upstream authentication is not silently replaced by
+the administrator key for the same backend. Cross-backend fallback may still
+occur only when the primary policy explicitly permits that failure category.
 
 The built-in `openrouter` backend reuses an existing user OpenRouter BYOK record
 so users do not need duplicate credentials for LLM and TTS access. TTS-specific
 validation state must not overwrite or downgrade general OpenRouter credential
-state. Named gateways use their `gateway:<slug>` identity.
+state. TTS reads only key material from an existing record and ignores any user
+`base_url`, headers, or generic credential metadata. Named gateways use their
+`gateway:<slug>` identity.
 
 Credential creation never accepts a gateway base URL, including through generic
 credential metadata fields. Dynamic TTS credentials are checked using a
@@ -469,6 +531,12 @@ The adapter validates:
 - Container or codec signatures when the format has a reliable signature.
 - PCM metadata against configured sample rate, channels, and sample width.
 - `Content-Length`, when present, and an enforced streaming byte counter.
+
+Validation may buffer at most 64 KiB before the response commit to inspect a
+container signature. Headerless raw PCM cannot self-report sample rate or channel
+layout; for PCM, validation instead checks frame-width alignment and response
+limits, while the configured sample rate, channels, and sample width define the
+public metadata contract.
 
 `application/octet-stream` is accepted only through an explicit gateway
 capability and still requires configured/signature validation. A response that
@@ -523,17 +591,19 @@ model and voice selections to the new backend defaults. Remembering independent
 per-backend selection history is deferred.
 
 The requested and actual producing backends become part of persisted TTS
-metadata,
-including playground presets, chat playback, document reading, audiobook jobs,
-and history metadata. A representative primary-success cache key contains:
+metadata, including playground presets, chat playback, document reading,
+audiobook jobs, and history metadata.
 
-```text
-tldw + backend + model + voice + format + speed + language
-```
-
-To prevent an implicit route change, a result produced by cross-backend fallback
-does not populate the primary backend's reusable audio cache in the first
-release. It still records both requested and actual backend identities.
+This feature introduces no new server-side synthesized-audio cache. If an
+existing consumer reuses generated audio, its key is a canonical digest of the
+input text and every output-affecting effective field: requested backend, model,
+voice, format and PCM controls, speed, language, canonical `gateway_options`,
+conversion/config generation, and authenticated tenant scope. Requests using a
+user credential are not reusable across calls unless the cache also includes an
+opaque credential-record revision; otherwise caching is disabled for that
+request. A cross-backend fallback result never populates a reusable primary or
+fallback audio cache in the first release. It still records both backend
+identities.
 
 New queued jobs resolve and store the requested backend, model, voice, and
 fallback permission before enqueueing so later configuration changes cannot
@@ -586,17 +656,20 @@ URLs or credential availability sources.
 
 - Gateway identity normalization and collision rejection.
 - Absolute base URL and strict relative-path validation.
-- Config normalization, discovery/overlay precedence, exact model casing, and
-  gateway capability defaults.
+- Config normalization, recursive environment interpolation,
+  discovery/overlay precedence, all three model-authorization modes, exact
+  model casing, and gateway capability defaults.
 - JSON Pointer leaf allowlists, reserved-field protection, and payload bounds.
-- Fallback graph cycle detection, attempt bounds, error eligibility, and fresh
-  per-attempt request/credential resolution.
+- Flat fallback target validation, primary-policy ownership, synthesis-attempt
+  counting, error eligibility, target skipping, and fresh per-attempt
+  request/credential resolution.
 - Discovery TTL/stale-TTL behavior, credential-scope partitioning, and bounded
-  LRU eviction.
+  LRU eviction, including invalidation after credential revision.
 - BYOK endpoint immutability, existing OpenRouter credential reuse, named gateway
-  identities, and orphaned-key deletion.
-- Property-based invariants for gateway slugs, relative paths, fallback graphs,
-  and bounded option payloads.
+  identities, eligible/rejected state handling, administrator-key fallthrough,
+  and orphaned-key deletion.
+- Property-based invariants for gateway slugs, relative paths, bounded fallback
+  target lists, and bounded option payloads.
 
 ### Adapter and API integration tests
 
@@ -606,6 +679,8 @@ service. Cover:
 - OpenRouter and at least two named gateway configurations.
 - Request-body mapping, bearer auth, documented OpenRouter headers, and
   allowlisted provider options.
+- Rejection of `gateway_options` without explicit backend and proof that user
+  options reach only the primary backend, never a fallback target.
 - Model discovery success, partial overlays, stale results, malformed payloads,
   timeouts, and credential-scoped caches.
 - Body/header backend selection, conflicts, unknown/disabled/uncredentialed
@@ -614,11 +689,15 @@ service. Cover:
 - MIME aliases, signatures, opt-in octet-stream, PCM metadata, content length,
   and streaming byte limits.
 - Fallback before the first byte and terminal failure after it.
+- Exactly one upstream POST for each primary or fallback synthesis attempt,
+  including pre-yield network failure and conversion-source synthesis.
 - Proof that output from separate attempts is never concatenated.
 - Native streaming and first-chunk prefetch behavior.
 - Buffered conversion success, malformed input, timeout, input/output limits,
   and proof that no client bytes escape before success.
 - `allow_fallback: false` and configured fallback transparency.
+- Rejected user credentials blocking administrator-key fallthrough, eligible
+  stored-unverified keys, and ignoring user credential URL/metadata fields.
 
 ### WebUI tests
 
@@ -626,7 +705,9 @@ service. Cover:
 - Backend-scoped query keys and stale selection cancellation.
 - Atomic backend/model/voice default reset.
 - Exact model casing and free-form voice behavior.
-- Backend propagation through all TTS clients and cache keys.
+- Backend propagation through all TTS clients, canonical output-affecting cache
+  digests where caching already exists, BYOK cache isolation/disablement, and no
+  cache population after fallback.
 - Deterministic queued-job and persisted-preset identity.
 - Fallback disclosure/control and orphaned credential deletion.
 
