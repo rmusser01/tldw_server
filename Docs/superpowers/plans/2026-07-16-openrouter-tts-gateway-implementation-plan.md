@@ -22,7 +22,7 @@ Spec: Docs/superpowers/specs/2026-07-15-openrouter-tts-gateway-design.md
 
 **Tests:** Existing TTS request-resolution, endpoint, registry, HTTP client, BYOK, jobs/history, and WebUI TTS tests.
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Task 0.1: Start the implementation task in an isolated branch
 
@@ -70,7 +70,7 @@ Expected result: all selected WebUI baseline tests pass.
 
 **Tests:** Unit and property tests for config normalization, overlays, paths, fallback graphs, secret redaction, model case, and dynamic registry behavior.
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Files
 
@@ -213,7 +213,7 @@ git commit -m "feat(tts): validate named gateway configuration"
 
 **Tests:** Shared HTTP transport tests for httpx/aiohttp, mocked adapter tests, catalog cache tests, and property tests for option filtering.
 
-**Status:** Not Started
+**Status:** In Progress
 
 ### Files
 
