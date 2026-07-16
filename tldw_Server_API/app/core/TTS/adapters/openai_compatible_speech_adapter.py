@@ -55,7 +55,6 @@ _SIGNATURE_BYTES: dict[AudioFormat, int] = {
     AudioFormat.WAV: 12,
     AudioFormat.FLAC: 4,
     AudioFormat.OGG: 4,
-    AudioFormat.OPUS: 4,
     AudioFormat.AAC: 8,
     AudioFormat.WEBM: 4,
 }
@@ -273,9 +272,13 @@ class OpenAICompatibleSpeechAdapter(TTSAdapter):
         if not isinstance(voice, str) or not voice.strip():
             raise TTSValidationError("Gateway voice is required", provider=self._backend_id)
 
+        supplied_fields = getattr(request, "supplied_fields", frozenset()) or frozenset()
+        speed_supplied = "speed" in supplied_fields
+        lang_code_supplied = "lang_code" in supplied_fields
+        language_supplied = "language" in supplied_fields
         lang_code = getattr(request, "lang_code", None)
         language = getattr(request, "language", None)
-        if lang_code is not None and language is not None and lang_code != language:
+        if lang_code_supplied and language_supplied and lang_code != language:
             raise TTSValidationError(
                 "Gateway lang_code and language values conflict",
                 provider=self._backend_id,
@@ -287,16 +290,23 @@ class OpenAICompatibleSpeechAdapter(TTSAdapter):
             "voice": voice,
             "response_format": self._source_format.value,
         }
-        if self._supports_speed:
+        if speed_supplied:
+            if not self._supports_speed:
+                raise TTSValidationError(
+                    "Gateway does not support speed",
+                    provider=self._backend_id,
+                )
             payload["speed"] = request.speed
-        elif request.speed != 1.0:
-            raise TTSValidationError(
-                "Gateway does not support speed",
-                provider=self._backend_id,
-            )
-        effective_language = lang_code if lang_code is not None else language
-        if self._supports_language and effective_language is not None:
-            payload["language"] = effective_language
+        if lang_code_supplied or language_supplied:
+            unsupported_field = "lang_code" if lang_code_supplied else "language"
+            if not self._supports_language:
+                raise TTSValidationError(
+                    f"Gateway does not support {unsupported_field}",
+                    provider=self._backend_id,
+                )
+            effective_language = lang_code if lang_code_supplied else language
+            if effective_language is not None:
+                payload["language"] = effective_language
         target_sample_rate = request.target_sample_rate
         if target_sample_rate is not None:
             if not self._supports_target_sample_rate:
@@ -371,6 +381,10 @@ class OpenAICompatibleSpeechAdapter(TTSAdapter):
             async for chunk in self._validated_pcm_chunks(upstream):
                 yield chunk
             return
+        if self._source_format is AudioFormat.OPUS:
+            async for chunk in self._validated_opus_chunks(upstream):
+                yield chunk
+            return
 
         minimum = _SIGNATURE_BYTES.get(self._source_format)
         prefix = bytearray()
@@ -407,6 +421,57 @@ class OpenAICompatibleSpeechAdapter(TTSAdapter):
             yield bytes(prefix)
             if remainder:
                 yield remainder
+        if total == 0:
+            raise TTSAudioQualityError("Gateway returned empty audio", provider=self._backend_id)
+        if not validated:
+            raise TTSAudioQualityError(
+                "Gateway audio signature does not match the source format",
+                provider=self._backend_id,
+            )
+
+    async def _validated_opus_chunks(
+        self,
+        upstream: AsyncIterator[bytes],
+    ) -> AsyncIterator[bytes]:
+        sniffed = bytearray()
+        total = 0
+        validated = False
+        async for chunk in upstream:
+            if not chunk:
+                continue
+            if not isinstance(chunk, bytes):
+                raise TTSAudioQualityError(
+                    "Gateway returned an invalid audio chunk",
+                    provider=self._backend_id,
+                )
+            total += len(chunk)
+            if total > self._max_response_bytes:
+                raise TTSAudioQualityError(
+                    "Gateway response size exceeds the configured limit",
+                    provider=self._backend_id,
+                )
+            if validated:
+                yield chunk
+                continue
+            remaining = _SNIFF_LIMIT - len(sniffed)
+            accepted = min(len(chunk), remaining)
+            sniffed.extend(chunk[:accepted])
+            remainder = chunk[accepted:]
+            if len(sniffed) >= 4 and not sniffed.startswith(b"OggS"):
+                raise TTSAudioQualityError(
+                    "Gateway audio signature does not match the source format",
+                    provider=self._backend_id,
+                )
+            if b"OpusHead" in sniffed:
+                validated = True
+                yield bytes(sniffed)
+                if remainder:
+                    yield remainder
+            elif len(sniffed) == _SNIFF_LIMIT or remainder:
+                raise TTSAudioQualityError(
+                    "Gateway audio signature does not match the source format",
+                    provider=self._backend_id,
+                )
         if total == 0:
             raise TTSAudioQualityError("Gateway returned empty audio", provider=self._backend_id)
         if not validated:
@@ -454,7 +519,7 @@ class OpenAICompatibleSpeechAdapter(TTSAdapter):
             return data.startswith(b"RIFF") and data[8:12] == b"WAVE"
         if self._source_format is AudioFormat.FLAC:
             return data.startswith(b"fLaC")
-        if self._source_format in {AudioFormat.OGG, AudioFormat.OPUS}:
+        if self._source_format is AudioFormat.OGG:
             return data.startswith(b"OggS")
         if self._source_format is AudioFormat.AAC:
             return (len(data) >= 2 and data[0] == 0xFF and data[1] & 0xF0 == 0xF0) or (

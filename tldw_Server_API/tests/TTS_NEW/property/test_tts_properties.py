@@ -4,26 +4,21 @@ Property-based tests for TTS functionality.
 Uses Hypothesis to verify invariants and properties of the TTS system.
 """
 
-import pytest
-from hypothesis import given, strategies as st, assume, settings
-from hypothesis.stateful import RuleBasedStateMachine, rule, initialize, invariant
-import numpy as np
 import string
-from typing import Dict, List, Optional, Any
-import wave
-import io
+
+import pytest
+from hypothesis import assume, given, settings
+from hypothesis import strategies as st
+from hypothesis.stateful import RuleBasedStateMachine, initialize, invariant, rule
 
 from tldw_Server_API.app.core.TTS.adapters.base import (
+    AudioFormat,
     TTSRequest,
     TTSResponse,
-    AudioFormat,
-    VoiceSettings
+    VoiceSettings,
 )
+from tldw_Server_API.app.core.TTS.tts_exceptions import TTSValidationError
 from tldw_Server_API.app.core.TTS.tts_service_v2 import TTSServiceV2
-from tldw_Server_API.app.core.TTS.tts_exceptions import (
-    TTSValidationError,
-    TTSGenerationError
-)
 
 # ========================================================================
 # Custom Hypothesis Strategies
@@ -155,6 +150,29 @@ class TestRequestValidationProperties:
         assert request2.voice == request.voice
         assert request2.model == request.model
         assert request2.speed == request.speed
+        assert request2.supplied_fields == request.supplied_fields
+
+    @pytest.mark.property
+    @given(explicit_speed=st.booleans(), explicit_language=st.booleans())
+    def test_common_field_explicitness_survives_serialization(
+        self,
+        explicit_speed,
+        explicit_language,
+    ):
+        kwargs = {"text": "Test", "model": "Vendor/MiXeD-Case"}
+        if explicit_speed:
+            kwargs["speed"] = 1.0
+        if explicit_language:
+            kwargs["language"] = "en"
+        request = TTSRequest(**kwargs)
+
+        restored = TTSRequest(**request.dict())
+
+        assert restored.model == "Vendor/MiXeD-Case"
+        assert restored.speed == 1.0
+        assert restored.language == "en"
+        assert ("speed" in restored.supplied_fields) is explicit_speed
+        assert ("language" in restored.supplied_fields) is explicit_language
 
 # ========================================================================
 # Audio Output Properties
@@ -350,7 +368,7 @@ class TTSStateMachine(RuleBasedStateMachine):
     )
     def generate_audio(self, text, voice):
         """Rule: Generate audio with current provider."""
-        request = TTSRequest(
+        _request = TTSRequest(
             text=text,
             voice=voice,
             provider=self.current_provider

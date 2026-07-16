@@ -7,7 +7,7 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 #
 # Third-party Imports
@@ -20,6 +20,8 @@ from loguru import logger
 #######################################################################################################################
 #
 # Enums and Data Classes
+
+_TTS_REQUEST_UNSET = object()
 
 class AudioFormat(Enum):
     """Supported audio output formats"""
@@ -103,10 +105,10 @@ class TTSRequest:
     """Unified TTS request format"""
     text: str
     voice: Optional[str] = None
-    language: Optional[str] = "en"
+    language: Optional[str] = cast(Optional[str], _TTS_REQUEST_UNSET)
     format: AudioFormat = AudioFormat.MP3
     target_sample_rate: Optional[int] = None
-    speed: float = 1.0
+    speed: float = cast(float, _TTS_REQUEST_UNSET)
     pitch: float = 1.0
     volume: float = 1.0
     emotion: Optional[str] = None
@@ -133,8 +135,29 @@ class TTSRequest:
     voice_settings: Optional[VoiceSettings] = None
     # Additional provider-specific parameters
     extra_params: dict[str, Any] = field(default_factory=dict)
+    # Additive request aliases/state kept last to preserve positional compatibility.
+    lang_code: Optional[str] = cast(Optional[str], _TTS_REQUEST_UNSET)
+    supplied_fields: Optional[frozenset[str]] = None
 
     def __post_init__(self):
+        if self.supplied_fields is None:
+            supplied_fields: set[str] = set()
+            if self.speed is not _TTS_REQUEST_UNSET:
+                supplied_fields.add("speed")
+            if self.language is not _TTS_REQUEST_UNSET:
+                supplied_fields.add("language")
+            if self.lang_code is not _TTS_REQUEST_UNSET:
+                supplied_fields.add("lang_code")
+        else:
+            supplied_fields = set(self.supplied_fields)
+        if self.speed is _TTS_REQUEST_UNSET:
+            self.speed = 1.0
+        if self.language is _TTS_REQUEST_UNSET:
+            self.language = "en"
+        if self.lang_code is _TTS_REQUEST_UNSET:
+            self.lang_code = None
+        self.supplied_fields = frozenset(supplied_fields)
+
         # Clamp speed into a broadly accepted range
         try:
             self._original_speed = self.speed
