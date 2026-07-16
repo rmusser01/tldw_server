@@ -4,7 +4,7 @@ title: Add first-class standalone HTML-JS presentation generation
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-07-16 13:15'
+updated_date: 2026-07-16 13:15
 labels:
 - slides
 - presentation-studio
@@ -50,6 +50,32 @@ modified_files:
 - tldw_Server_API/tests/Config/test_config_sections_typed_loaders.py
 - tldw_Server_API/tests/Slides/test_standalone_html_config.py
 - tldw_Server_API/tests/Slides/test_standalone_html_registry.py
+- tldw_Server_API/app/core/Slides/standalone_html_sources.py
+- tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py
+- tldw_Server_API/app/core/DB_Management/backends/base.py
+- tldw_Server_API/app/core/DB_Management/backends/postgresql_backend.py
+- tldw_Server_API/app/core/DB_Management/backends/sqlite_backend.py
+- tldw_Server_API/app/core/DB_Management/chacha/message_store.py
+- tldw_Server_API/app/core/DB_Management/chacha/note_store.py
+- tldw_Server_API/app/core/DB_Management/media_db/api.py
+- tldw_Server_API/app/core/DB_Management/media_db/repositories/media_lookup_repository.py
+- tldw_Server_API/app/core/DB_Management/media_db/runtime/execution_ops.py
+- tldw_Server_API/app/core/DB_Management/media_db/schema/backends/postgres_helpers.py
+- tldw_Server_API/app/core/RAG/rag_service/advanced_reranking.py
+- tldw_Server_API/app/core/RAG/rag_service/database_retrievers.py
+- tldw_Server_API/app/core/RAG/rag_service/profiles.py
+- tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py
+- tldw_Server_API/tests/Slides/test_standalone_html_sources.py
+- tldw_Server_API/tests/ChaChaNotesDB/test_chacha_message_store.py
+- tldw_Server_API/tests/ChaChaNotesDB/test_chacha_note_store.py
+- tldw_Server_API/tests/DB_Management/test_media_db_api_imports.py
+- tldw_Server_API/tests/DB_Management/test_media_db_core_repositories.py
+- tldw_Server_API/tests/DB_Management/test_media_db_schema_bootstrap.py
+- tldw_Server_API/tests/DB_Management/unit/test_postgresql_error_redaction.py
+- tldw_Server_API/tests/RAG_NEW/unit/test_rag_profiles.py
+- tldw_Server_API/tests/RAG_NEW/unit/test_reranker_trust_remote_code.py
+- tldw_Server_API/tests/RAG_NEW/unit/test_preinstalled_local_reranker.py
+- tldw_Server_API/tests/RAG_NEW/unit/test_slides_source_retrieval_hardening.py
 ---
 
 ## Description
@@ -191,4 +217,7 @@ Final follow-up evidence: assertion-level RED was 15/15 for the initial review f
 The environment-only HMAC keyring accepts one to four canonical 32-byte secrets, pins five versioned domains and a known-answer vector, hides secret and digest material from representations, and fails the full generation gate when any shared current/retiring secret is absent. Its injected source-free Jobs-store interface supports explicit current-key activation, distinct local-versus-identical-winner CAS outcomes, exact transition validation, bounded rotation, and removal only after the 32-day floor plus a complete same-epoch fenced dormant-database sweep. No source, prompt, provider credential, secret, or HMAC value enters registry store calls. Interactive execution remains disabled.
 
 Final verification: the combined Task 4 configuration, registry, and typed-loader suite passed 193/193 with 3 existing warnings; legacy prompt-loader regressions passed 10/10 with 3 existing warnings. Black left all eight touched Python files unchanged, Ruff passed, `git diff --check` passed, and production-only Bandit reported 0 findings and 0 errors across 1,765 LOC. Fresh independent specification and quality reviews both returned READY with 0 Critical, 0 Important, and 0 Minor findings. Task 4 is complete; overall TASK-12115 remains In Progress for Task 5+.
+2026-07-16 Task 5 closure: implemented one bounded, immutable source-snapshot path for prompt, chat, media, notes, and retrieval-only RAG. Chat projections use one statement snapshot; notes and media use owner-scoped max+1 projections with explicit invalid/truncation markers; media preserves normalized-transcript/document/media fallback behavior on SQLite and PostgreSQL; and database failures cross source-redacted boundaries. The closed slides_source_retrieval_v1 profile disables generation, rewriting, decomposition, adaptive reruns, remote/web fallbacks, and request-time downloads; it formats only bounded local documents and permits only preinstalled local flashrank, cross_encoder, or none reranking. Raw RAG query bounds are enforced before trimming, all source families participate fairly, and generated_answer is never consumed. Interactive HTML execution remains disabled.
+
+Final verification: the 14-file affected matrix passed 589/589 with 11 existing warnings. Ruff passed the scoped files; Black left all five entirely new files unchanged after formatting; git diff --check passed. Production-only Bandit reported 0 findings across the full touched scope (report /tmp/bandit_task12115_task5_final.json). Fresh independent specification/security review returned APPROVED with no remaining P0-P2 findings. Task 5 is complete; overall TASK-12115 remains In Progress for Task 6+.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->

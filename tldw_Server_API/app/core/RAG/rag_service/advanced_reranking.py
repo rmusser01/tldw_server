@@ -28,6 +28,7 @@ from tldw_Server_API.app.core.Chat.bounded_daemon import (
     SYNC_ADAPTER_CALL_POOL,
     await_bounded_daemon_with_timeout,
 )
+from tldw_Server_API.app.core.RAG.exceptions import RAGConfigurationError, RAGError
 from tldw_Server_API.app.core.Utils.prompt_loader import load_prompt
 
 from .types import DataSource, Document
@@ -128,6 +129,176 @@ def _load_flashrank_defaults_from_config() -> tuple[str, Optional[str]]:
     return (model_name or "ms-marco-TinyBERT-L-2-v2"), cache_dir
 
 
+def _load_cross_encoder_model_from_config() -> Optional[str]:
+    """Return the configured cross-encoder model without loading it."""
+    model_name = os.getenv("RAG_TRANSFORMERS_RERANKER_MODEL")
+    if model_name:
+        return model_name
+
+    try:
+        from tldw_Server_API.app.core.config import load_comprehensive_config
+
+        config = load_comprehensive_config()
+        if config and hasattr(config, "has_section") and config.has_section("RAG"):
+            return config.get("RAG", "transformers_reranker_model", fallback=None)
+    except Exception:  # noqa: BLE001 - best-effort configuration lookup
+        logger.debug("Cross-encoder config lookup failed")
+    return None
+
+
+def _load_preinstalled_flashrank_ranker(
+    *,
+    model_name: str,
+    model_dir: Path,
+    required_files: Iterable[str],
+) -> Any:
+    """Load FlashRank from one verified local bundle without download fallback."""
+    from flashrank import Ranker
+
+    verified_model_dir = model_dir.resolve()
+    required_paths = tuple(verified_model_dir / filename for filename in required_files)
+
+    class _PreinstalledRanker(Ranker):
+        def _prepare_model_dir(self, requested_model_name: str) -> None:
+            try:
+                current_model_dir = Path(self.model_dir).resolve(strict=True)
+            except OSError:
+                raise FileNotFoundError("The local FlashRank model bundle is unavailable.") from None
+            if requested_model_name != model_name or current_model_dir != verified_model_dir:
+                raise FileNotFoundError("The local FlashRank model bundle changed.")
+            if any(not path.is_file() for path in required_paths):
+                raise FileNotFoundError("The local FlashRank model bundle is incomplete.")
+
+        def _download_model_files(self, *_args: Any, **_kwargs: Any) -> None:
+            raise FileNotFoundError("FlashRank downloads are disabled for this reranker.")
+
+    return _PreinstalledRanker(
+        model_name=model_name,
+        cache_dir=str(verified_model_dir.parent),
+    )
+
+
+def _has_complete_finite_scores(scores: list[Any], expected_count: int) -> bool:
+    """Return whether a strict reranker produced one finite score per input."""
+    return len(scores) == expected_count and all(
+        not isinstance(score, bool) and isinstance(score, (int, float, np.number)) and math.isfinite(float(score))
+        for score in scores
+    )
+
+
+def create_preinstalled_local_reranker(
+    strategy: str,
+    *,
+    top_k: int,
+) -> Optional["BaseReranker"]:
+    """Create a local reranker only when its model bundle already exists."""
+    if strategy == "none":
+        return None
+
+    if strategy == "flashrank":
+        model_name, configured_cache = _load_flashrank_defaults_from_config()
+        model_dir = Path(_resolve_flashrank_cache_dir(configured_cache)) / model_name
+        if not model_dir.is_dir():
+            raise RAGConfigurationError(
+                "The configured FlashRank model is not installed locally.",
+                config_section="RAG",
+                config_key="flashrank_model_name",
+            )
+        try:
+            import importlib
+
+            flashrank_module = importlib.import_module("flashrank.Ranker")
+            model_file_map = dict(getattr(flashrank_module, "model_file_map", {}))
+            listwise_rankers = set(getattr(flashrank_module, "listwise_rankers", set()))
+        except Exception:  # noqa: BLE001 - normalize plugin failures at the closed boundary
+            raise RAGConfigurationError(
+                "FlashRank local model validation is unavailable.",
+                config_section="RAG",
+                config_key="flashrank_model_name",
+            ) from None
+        model_file = model_file_map.get(model_name)
+        if not isinstance(model_file, str) or model_name in listwise_rankers:
+            raise RAGConfigurationError(
+                "The configured FlashRank model is not an allowed local cross-encoder.",
+                config_section="RAG",
+                config_key="flashrank_model_name",
+            )
+        required_files = {
+            model_file,
+            "config.json",
+            "tokenizer_config.json",
+            "special_tokens_map.json",
+            "tokenizer.json",
+        }
+        if any(not (model_dir / filename).is_file() for filename in required_files):
+            raise RAGConfigurationError(
+                "The configured FlashRank model bundle is incomplete.",
+                config_section="RAG",
+                config_key="flashrank_model_name",
+            )
+        config = RerankingConfig(
+            strategy=RerankingStrategy.FLASHRANK,
+            model_name=model_name,
+            top_k=top_k,
+            fail_closed_on_error=True,
+        )
+        try:
+            reranker = FlashRankReranker(
+                config,
+                local_model_dir=model_dir.resolve(),
+                required_local_files=required_files,
+            )
+        except Exception:  # noqa: BLE001 - normalize local loading failures
+            raise RAGConfigurationError(
+                "The configured FlashRank model could not be loaded locally.",
+                config_section="RAG",
+                config_key="flashrank_model_name",
+            ) from None
+        if reranker._ranker is None:
+            raise RAGConfigurationError(
+                "The configured FlashRank model could not be loaded locally.",
+                config_section="RAG",
+                config_key="flashrank_model_name",
+            )
+        return reranker
+
+    if strategy == "cross_encoder":
+        configured_model = _load_cross_encoder_model_from_config()
+        if not configured_model:
+            raise RAGConfigurationError(
+                "No local cross-encoder reranker is configured.",
+                config_section="RAG",
+                config_key="transformers_reranker_model",
+            )
+        model_path = Path(configured_model).expanduser()
+        if not model_path.is_absolute():
+            model_path = _repo_root_dir() / model_path
+        if not model_path.is_dir():
+            raise RAGConfigurationError(
+                "The configured cross-encoder reranker is not installed locally.",
+                config_section="RAG",
+                config_key="transformers_reranker_model",
+            )
+        config = RerankingConfig(
+            strategy=RerankingStrategy.CROSS_ENCODER,
+            model_name=str(model_path.resolve()),
+            top_k=top_k,
+            transformers_trust_remote_code=False,
+            transformers_local_files_only=True,
+            fail_closed_on_error=True,
+        )
+        reranker = TransformersCrossEncoderReranker(config)
+        if reranker._ce is None and not hasattr(reranker, "_model"):
+            raise RAGConfigurationError(
+                "The configured cross-encoder reranker could not be loaded locally.",
+                config_section="RAG",
+                config_key="transformers_reranker_model",
+            )
+        return reranker
+
+    raise ValueError(f"Unsupported local reranking strategy: {strategy!r}")
+
+
 class LlamaEmbeddingError(RuntimeError):
     """Raised when llama-embedding returns an error."""
 
@@ -169,7 +340,7 @@ class RerankingConfig:
     })
     # llama.cpp (GGUF) reranker options
     llama_binary: Optional[str] = None  # path or program name (defaults to 'llama-embedding')
-    llama_ngl: Optional[int] = None     # n_gpu_layers (-ngl)
+    llama_ngl: Optional[int] = None  # n_gpu_layers (-ngl)
     llama_embd_separator: str = "<#sep#>"
     llama_embd_output_format: str = "json+"
     llama_pooling: str = "last"
@@ -177,13 +348,15 @@ class RerankingConfig:
     llama_max_doc_chars: int = 2000
     # Instruction/prefix formatting for instruct-style embedding models (e.g., BGE)
     llama_template_mode: Optional[str] = None  # 'auto' | 'bge' | 'jina' | 'none'
-    llama_query_prefix: Optional[str] = None   # e.g., 'query: '
-    llama_doc_prefix: Optional[str] = None     # e.g., 'passage: '
+    llama_query_prefix: Optional[str] = None  # e.g., 'query: '
+    llama_doc_prefix: Optional[str] = None  # e.g., 'passage: '
     # Transformers Cross-Encoder options
     transformers_device: Optional[str] = None  # 'auto' | 'cuda' | 'cpu'
     transformers_trust_remote_code: bool = False
+    transformers_local_files_only: bool = False
     transformers_max_length: Optional[int] = None
     hf_revision: Optional[str] = None
+    fail_closed_on_error: bool = False
     # Two-tier gating overrides (optional per-request)
     min_relevance_prob: Optional[float] = None
     sentinel_margin: Optional[float] = None
@@ -192,6 +365,7 @@ class RerankingConfig:
 @dataclass
 class ScoredDocument:
     """Document with detailed scoring information."""
+
     document: Document
     original_score: float
     rerank_score: float
@@ -256,10 +430,28 @@ class BaseReranker(ABC):
 class FlashRankReranker(BaseReranker):
     """Fast neural reranking using FlashRank."""
 
-    def __init__(self, config: RerankingConfig):
+    def __init__(
+        self,
+        config: RerankingConfig,
+        *,
+        local_model_dir: Optional[Path] = None,
+        required_local_files: Iterable[str] = (),
+    ):
         """Initialize FlashRank reranker."""
         super().__init__(config)
         self._ranker = None
+        if local_model_dir is not None:
+            if not config.model_name:
+                raise ValueError("A model name is required for local FlashRank loading.")
+            resolved_model_dir = local_model_dir.resolve()
+            self._flashrank_model_name = config.model_name
+            self._flashrank_cache_dir = str(resolved_model_dir.parent)
+            self._ranker = _load_preinstalled_flashrank_ranker(
+                model_name=config.model_name,
+                model_dir=resolved_model_dir,
+                required_files=required_local_files,
+            )
+            return
         default_model_name, default_cache_dir = _load_flashrank_defaults_from_config()
         self._flashrank_model_name = default_model_name
         self._flashrank_cache_dir = _resolve_flashrank_cache_dir(None)
@@ -303,7 +495,11 @@ class FlashRankReranker(BaseReranker):
         original_scores: Optional[list[float]] = None
     ) -> list[ScoredDocument]:
         """Rerank using FlashRank."""
-        if not self._ranker or not documents:
+        if not documents:
+            return []
+        if not self._ranker:
+            if self.config.fail_closed_on_error:
+                raise RAGError("Local reranking failed.", operation="reranking")
             # Fallback to original scores
             return [
                 ScoredDocument(
@@ -327,6 +523,23 @@ class FlashRankReranker(BaseReranker):
             from flashrank import RerankRequest
             request = RerankRequest(query=query, passages=passages)
             results = self._ranker.rerank(request)
+            if self.config.fail_closed_on_error:
+                results = list(results)
+                indices: list[int] = []
+                scores: list[Any] = []
+                for result in results:
+                    if not isinstance(result, dict):
+                        raise ValueError("Invalid local reranker result.")
+                    index = result.get("id")
+                    if isinstance(index, bool) or not isinstance(index, (int, np.integer)):
+                        raise ValueError("Invalid local reranker result index.")
+                    indices.append(int(index))
+                    scores.append(result.get("score"))
+                if sorted(indices) != list(range(len(documents))) or not _has_complete_finite_scores(
+                    scores,
+                    len(documents),
+                ):
+                    raise ValueError("Incomplete local reranker results.")
 
             # Create scored documents
             scored_docs = []
@@ -343,6 +556,8 @@ class FlashRankReranker(BaseReranker):
 
         except Exception as e:  # noqa: BLE001 - fallback to original order
             logger.error("FlashRank reranking failed (error_type={})", type(e).__name__)
+            if self.config.fail_closed_on_error:
+                raise RAGError("Local reranking failed.", operation="reranking") from None
             # Fallback to original order
             return [
                 ScoredDocument(
@@ -618,27 +833,26 @@ class TransformersCrossEncoderReranker(BaseReranker):
         self._using_st = False
         self._device = (config.transformers_device or "auto").lower()
         self._max_length = config.transformers_max_length or None
-        self._trust_remote_code = bool(config.transformers_trust_remote_code)
-        self._hf_revision = (
-            config.hf_revision
-            or os.getenv("RAG_TRANSFORMERS_RERANKER_REVISION")
-            or None
-        )
+        self._local_files_only = bool(config.transformers_local_files_only)
+        self._trust_remote_code = False if self._local_files_only else bool(config.transformers_trust_remote_code)
+        self._hf_revision = config.hf_revision or os.getenv("RAG_TRANSFORMERS_RERANKER_REVISION") or None
 
         model_id = config.model_name or None
         if not model_id:
             # Attempt to load from global config
             try:
                 from tldw_Server_API.app.core.config import load_and_log_configs
+
                 _cfg = load_and_log_configs() or {}
                 model_id = _cfg.get("RAG_TRANSFORMERS_RERANKER_MODEL")
             except Exception:  # noqa: BLE001 - config load best-effort
                 model_id = None
         # Auto-enable trust_remote_code for known reranker families that require it,
         # unless explicitly overridden by request config.
-        if model_id and not self._trust_remote_code:
+        if model_id and not self._trust_remote_code and not self._local_files_only:
             try:
                 from tldw_Server_API.app.core.config import load_and_log_configs
+
                 _cfg = load_and_log_configs() or {}
                 allowlist = _cfg.get("TRUSTED_HF_REMOTE_CODE_MODELS") or []
             except Exception:  # noqa: BLE001 - config load best-effort
@@ -652,22 +866,32 @@ class TransformersCrossEncoderReranker(BaseReranker):
                 # Prefer sentence-transformers CrossEncoder if available
                 try:
                     from sentence_transformers import CrossEncoder
-                    self._ce = CrossEncoder(model_id, device=None if self._device == "auto" else self._device, trust_remote_code=self._trust_remote_code)
+
+                    self._ce = CrossEncoder(
+                        model_id,
+                        device=None if self._device == "auto" else self._device,
+                        trust_remote_code=self._trust_remote_code,
+                        revision=self._hf_revision,
+                        local_files_only=self._local_files_only,
+                    )
                     self._using_st = True
                     logger.info(f"Loaded CrossEncoder model via sentence-transformers: {model_id}")
                 except Exception:  # noqa: BLE001 - fallback to transformers
                     # Fallback: raw transformers pipeline if provided
                     import torch
                     from transformers import AutoModelForSequenceClassification, AutoTokenizer
+
                     self._tokenizer = AutoTokenizer.from_pretrained(  # nosec B615
                         model_id,
                         revision=self._hf_revision,
                         trust_remote_code=self._trust_remote_code,
+                        local_files_only=self._local_files_only,
                     )
                     self._model = AutoModelForSequenceClassification.from_pretrained(  # nosec B615
                         model_id,
                         revision=self._hf_revision,
                         trust_remote_code=self._trust_remote_code,
+                        local_files_only=self._local_files_only,
                     )
                     self._model.eval()
                     self._torch = torch
@@ -678,15 +902,14 @@ class TransformersCrossEncoderReranker(BaseReranker):
                 logger.warning("Failed to load transformers reranker model (error_type={})", type(e).__name__)
 
     async def rerank(
-        self,
-        query: str,
-        documents: list[Document],
-        original_scores: Optional[list[float]] = None
+        self, query: str, documents: list[Document], original_scores: Optional[list[float]] = None
     ) -> list[ScoredDocument]:
         if not documents:
             return []
 
         if self._ce is None and not hasattr(self, "_model"):
+            if self.config.fail_closed_on_error:
+                raise RAGError("Local reranking failed.", operation="reranking")
             logger.warning("TransformersCrossEncoderReranker not available; returning original order")
             return [
                 ScoredDocument(
@@ -702,10 +925,10 @@ class TransformersCrossEncoderReranker(BaseReranker):
         pairs = [(query, (d.content or "")[: self.config.llama_max_doc_chars if self.config.llama_max_doc_chars else None]) for d in documents]
 
         try:
-            scores: list[float]
+            raw_scores: list[Any]
             if self._using_st and self._ce is not None:
                 # sentence-transformers CrossEncoder
-                scores = list(map(float, self._ce.predict(pairs, batch_size=self.config.batch_size)))
+                raw_scores = list(self._ce.predict(pairs, batch_size=self.config.batch_size))
             else:
                 # Raw transformers inference
                 tok = self._tokenizer
@@ -729,7 +952,14 @@ class TransformersCrossEncoderReranker(BaseReranker):
                         else:
                             probs = torch.softmax(logits, dim=-1)[..., -1]
                         all_scores.extend(probs.detach().cpu().tolist())
-                scores = [float(s) for s in all_scores]
+                raw_scores = all_scores
+
+            if self.config.fail_closed_on_error and not _has_complete_finite_scores(
+                raw_scores,
+                len(documents),
+            ):
+                raise ValueError("Incomplete local reranker scores.")
+            scores = [float(score) for score in raw_scores]
 
             # Normalize scores to [0,1]
             try:
@@ -738,6 +968,11 @@ class TransformersCrossEncoderReranker(BaseReranker):
                     scores = [(s - mn) / (mx - mn) for s in scores]
             except (ValueError, TypeError):
                 pass
+            if self.config.fail_closed_on_error and not _has_complete_finite_scores(
+                scores,
+                len(documents),
+            ):
+                raise ValueError("Invalid normalized local reranker scores.")
 
             scored_out: list[ScoredDocument] = []
             for i, d in enumerate(documents):
@@ -753,6 +988,8 @@ class TransformersCrossEncoderReranker(BaseReranker):
             return scored_out[: self.config.top_k]
         except Exception as e:  # noqa: BLE001 - fallback to original order
             logger.error("Transformers cross-encoder reranking failed (error_type={})", type(e).__name__)
+            if self.config.fail_closed_on_error:
+                raise RAGError("Local reranking failed.", operation="reranking") from None
             return [
                 ScoredDocument(
                     document=doc,

@@ -1,16 +1,16 @@
 from __future__ import annotations
 
 import json
-from math import ceil
 import sqlite3
+from math import ceil
 from typing import Any
 
 from loguru import logger
 
-from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError, InputError
 from tldw_Server_API.app.core.DB_Management.media_db.dedupe_urls import (
     media_dedupe_url_candidates,
 )
+from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError, InputError
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.validation import (
     MediaDbLike,
     require_media_database_like,
@@ -24,7 +24,7 @@ class MediaLookupRepository:
         self.session = session
 
     @classmethod
-    def from_legacy_db(cls, db: MediaDbLike) -> "MediaLookupRepository":
+    def from_legacy_db(cls, db: MediaDbLike) -> MediaLookupRepository:
         return cls(session=require_media_database_like(
             db,
             error_message="db_instance must be a Database object.",
@@ -115,6 +115,160 @@ class MediaLookupRepository:
                 exc_info=True,
             )
             raise DatabaseError(f"Unexpected error fetching media status by ID: {exc}") from exc  # noqa: TRY003
+
+    def source_projection_by_id(
+        self,
+        media_id: int,
+        *,
+        max_chars: int,
+        owner_user_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Return bounded text-only fields for standalone Slides generation."""
+        if isinstance(media_id, bool) or not isinstance(media_id, int) or not 1 <= media_id <= 2**63 - 1:
+            raise InputError("media_id must be a positive 64-bit integer.")  # noqa: TRY003
+        if isinstance(max_chars, bool) or not isinstance(max_chars, int) or max_chars < 1:
+            raise InputError("max_chars must be a positive integer.")  # noqa: TRY003
+        if owner_user_id is not None and (not isinstance(owner_user_id, str) or not owner_user_id.strip()):
+            raise InputError("owner_user_id must be a non-empty string.")  # noqa: TRY003
+
+        prefix_chars = max_chars + 1
+        backend_name = getattr(getattr(self.session, "backend_type", None), "name", None)
+        is_postgres = backend_name == "POSTGRESQL"
+        if is_postgres and owner_user_id is None:
+            raise InputError("owner_user_id is required for PostgreSQL source projections.")  # noqa: TRY003
+        false_literal = "FALSE" if is_postgres else "0"
+        owner_clause = ""
+        owner_params: list[Any] = []
+        if owner_user_id is not None:
+            owner_params.append(owner_user_id.strip())
+            if is_postgres:
+                owner_clause = "AND COALESCE(CAST(m.owner_user_id AS TEXT), m.client_id) = ?"
+            else:
+                owner_clause = "AND (m.owner_user_id IS NULL OR CAST(m.owner_user_id AS TEXT) = ?)"
+        if is_postgres:
+            transcript_text = """
+                CASE
+                    WHEN LEFT(LTRIM(t.transcription), 1) = '{' THEN
+                        COALESCE(
+                            public.tldw_try_extract_normalized_transcript_text(
+                                t.transcription
+                            ),
+                            t.transcription
+                        )
+                    ELSE t.transcription
+                END
+            """
+        else:
+            transcript_text = """
+                CASE
+                    WHEN json_valid(t.transcription)
+                         AND json_type(t.transcription) = 'object'
+                    THEN
+                        CASE
+                            WHEN json_type(t.transcription, '$.text') IS NULL
+                                 OR json_type(t.transcription, '$.text') = 'null'
+                            THEN ''
+                            WHEN json_type(t.transcription, '$.text') = 'text'
+                            THEN json_extract(t.transcription, '$.text')
+                            WHEN json_type(t.transcription, '$.text') = 'true'
+                            THEN 'True'
+                            WHEN json_type(t.transcription, '$.text') = 'false'
+                            THEN 'False'
+                            ELSE CAST(json_extract(t.transcription, '$.text') AS TEXT)
+                        END
+                    ELSE t.transcription
+                END
+            """
+        resolved_text = f"""
+            COALESCE(
+                NULLIF(TRIM({transcript_text}), ''),
+                NULLIF(TRIM(dv.content), ''),
+                NULLIF(TRIM(m.content), '')
+            )
+        """
+        invalid_expression = "FALSE" if is_postgres else f"COALESCE(INSTR({resolved_text}, CHAR(0)), 0) > 0"
+
+        query = f"""
+            SELECT
+                m.id AS id,
+                SUBSTR(
+                    {resolved_text},
+                    1,
+                    ?
+                ) AS source_text,
+                {invalid_expression} AS source_invalid
+            FROM Media m
+            LEFT JOIN Transcripts t
+              ON t.id = COALESCE(
+                    (
+                        SELECT pointed_t.id
+                        FROM Transcripts pointed_t
+                        WHERE pointed_t.media_id = m.id
+                          AND pointed_t.deleted = {false_literal}
+                          AND pointed_t.transcription_run_id = m.latest_transcription_run_id
+                        ORDER BY pointed_t.created_at DESC, pointed_t.id DESC
+                        LIMIT 1
+                    ),
+                    (
+                        SELECT fallback_t.id
+                        FROM Transcripts fallback_t
+                        WHERE fallback_t.media_id = m.id
+                          AND fallback_t.deleted = {false_literal}
+                        ORDER BY
+                            CASE WHEN fallback_t.transcription_run_id IS NULL THEN 1 ELSE 0 END,
+                            fallback_t.transcription_run_id DESC,
+                            fallback_t.created_at DESC,
+                            fallback_t.id DESC
+                        LIMIT 1
+                    )
+                )
+             AND t.deleted = {false_literal}
+            LEFT JOIN DocumentVersions dv
+              ON dv.id = (
+                    SELECT selected_dv.id
+                    FROM DocumentVersions selected_dv
+                    WHERE selected_dv.media_id = m.id
+                      AND selected_dv.deleted = {false_literal}
+                    ORDER BY selected_dv.version_number DESC, selected_dv.id DESC
+                    LIMIT 1
+                )
+             AND dv.deleted = {false_literal}
+            WHERE m.id = ?
+              AND m.deleted = {false_literal}
+              AND m.is_trash = {false_literal}
+              {owner_clause}
+            LIMIT 1
+        """  # nosec B608
+        params = (
+            prefix_chars,
+            media_id,
+            *owner_params,
+        )
+
+        failure_type: str | None = None
+        try:
+            result = self.session.execute_query(
+                query,
+                params,
+                log_errors=False,
+            ).fetchone()
+            if not result:
+                return None
+            record = dict(result)
+            invalid = record.get("source_invalid")
+            if not isinstance(invalid, (bool, int)) or invalid not in (0, 1):
+                raise DatabaseError("Invalid media source validation marker.")  # noqa: TRY003
+            record["source_invalid"] = bool(invalid)
+            return record
+        except Exception as exc:  # noqa: BLE001 - source reads cross a redacted boundary
+            failure_type = type(exc).__name__
+
+        logger.error(
+            "Media source projection failed for ID {} ({})",
+            media_id,
+            failure_type,
+        )
+        raise DatabaseError("Media source projection failed.")  # noqa: TRY003
 
     def by_uuid(
         self,

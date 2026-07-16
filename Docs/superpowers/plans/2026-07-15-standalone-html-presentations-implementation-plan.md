@@ -351,27 +351,42 @@ git commit -m "feat(slides): configure isolated HTML generation (TASK-12115)"
 
 **Files:**
 - Create: `tldw_Server_API/app/core/Slides/standalone_html_sources.py`
+- Create: `tldw_Server_API/tests/DB_Management/unit/test_postgresql_error_redaction.py`
+- Create: `tldw_Server_API/tests/RAG_NEW/unit/test_preinstalled_local_reranker.py`
+- Create: `tldw_Server_API/tests/RAG_NEW/unit/test_slides_source_retrieval_hardening.py`
+- Modify: `tldw_Server_API/app/api/v1/endpoints/slides.py`
+- Modify: `tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py`
+- Modify: `tldw_Server_API/app/core/DB_Management/backends/base.py`
+- Modify: `tldw_Server_API/app/core/DB_Management/backends/postgresql_backend.py`
+- Modify: `tldw_Server_API/app/core/DB_Management/backends/sqlite_backend.py`
 - Modify: `tldw_Server_API/app/core/DB_Management/chacha/message_store.py`
 - Modify: `tldw_Server_API/app/core/DB_Management/chacha/note_store.py`
-- Modify: `tldw_Server_API/app/core/DB_Management/Media_DB_v2.py`
 - Modify: `tldw_Server_API/app/core/DB_Management/media_db/api.py`
 - Modify: `tldw_Server_API/app/core/DB_Management/media_db/repositories/media_lookup_repository.py`
-- Modify: `tldw_Server_API/app/core/DB_Management/media_db/repositories/document_versions_repository.py`
-- Modify: `tldw_Server_API/app/core/DB_Management/media_db/legacy_reads.py`
+- Modify: `tldw_Server_API/app/core/DB_Management/media_db/runtime/execution_ops.py`
+- Modify: `tldw_Server_API/app/core/DB_Management/media_db/schema/backends/postgres_helpers.py`
+- Modify: `tldw_Server_API/app/core/RAG/rag_service/advanced_reranking.py`
+- Modify: `tldw_Server_API/app/core/RAG/rag_service/database_retrievers.py`
 - Modify: `tldw_Server_API/app/core/RAG/rag_service/profiles.py`
 - Modify: `tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py`
 - Test: `tldw_Server_API/tests/Slides/test_standalone_html_sources.py`
+- Test: `tldw_Server_API/tests/ChaChaNotesDB/test_chacha_message_store.py`
+- Test: `tldw_Server_API/tests/ChaChaNotesDB/test_chacha_note_store.py`
+- Test: `tldw_Server_API/tests/DB_Management/test_media_db_api_imports.py`
+- Test: `tldw_Server_API/tests/DB_Management/test_media_db_core_repositories.py`
+- Test: `tldw_Server_API/tests/DB_Management/test_media_db_schema_bootstrap.py`
 - Test: `tldw_Server_API/tests/RAG_NEW/unit/test_rag_profiles.py`
+- Test: `tldw_Server_API/tests/RAG_NEW/unit/test_reranker_trust_remote_code.py`
 
-- [ ] **Step 1: Write failing source-contract tests**
+- [x] **Step 1: Write failing source-contract tests**
 
 For prompt, chat, media, notes, and RAG, cover owner isolation, missing/soft-deleted sources, deterministic ordering/separators, identifier/count/query bounds, character max+1 before tokenization, token max+1 before enqueue, exact provenance summaries, no image/blob selection, and no unbounded `SELECT *`. Assert rejected inputs make zero tokenizer, provider, or Jobs calls.
 
-- [ ] **Step 2: Write failing RAG-profile tests**
+- [x] **Step 2: Write failing RAG-profile tests**
 
 Require an immutable `slides_source_retrieval_v1` profile with answer generation, HyDE, completion/VLM rewriting, decomposition, clarification, generative reranking, verification, adaptive reruns, web/discussion/URL/image/video fallback, and request-time model downloads disabled. Accept only preinstalled local `flashrank`, `cross_encoder`, or `none`; format bounded `rag_result.documents` and never `generated_answer`.
 
-- [ ] **Step 3: Run tests and confirm failure**
+- [x] **Step 3: Run tests and confirm failure**
 
 ```bash
 source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate
@@ -380,18 +395,20 @@ python -m pytest -q \
   tldw_Server_API/tests/RAG_NEW/unit/test_rag_profiles.py
 ```
 
-- [ ] **Step 4: Add bounded repository projections and resolvers**
+- [x] **Step 4: Add bounded repository projections and resolvers**
 
 Add max+1, owner-scoped title/content/transcript/message projections at the repository layer. Resolve dependencies explicitly in `standalone_html_sources.py`, canonicalize one immutable source snapshot/provenance object, and run the advertised tokenizer only after the character ceiling. Do not call the existing structured generator's chunk-summary path.
 
-- [ ] **Step 5: Run focused tests plus affected repository suites**
+- [x] **Step 5: Run focused tests plus affected repository suites**
 
 Run Step 3, then the narrow Chat/Media/RAG suites containing the modified repository tests. Record exact paths and counts in Backlog.
 
-- [ ] **Step 6: Commit**
+Final Task 5 verification: the 14-file affected matrix passed 589 tests with 11 existing warnings. Ruff passed the scoped production and test files; Black left all five entirely new files unchanged after formatting; `git diff --check` passed. Production-only Bandit scanned the complete touched scope and reported 0 findings. A fresh independent specification/security review returned APPROVED with no remaining P0-P2 findings.
+
+- [x] **Step 6: Commit**
 
 ```bash
-git add tldw_Server_API/app/core/Slides/standalone_html_sources.py tldw_Server_API/app/core/DB_Management/chacha/message_store.py tldw_Server_API/app/core/DB_Management/chacha/note_store.py tldw_Server_API/app/core/DB_Management/Media_DB_v2.py tldw_Server_API/app/core/DB_Management/media_db tldw_Server_API/app/core/RAG/rag_service/profiles.py tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py tldw_Server_API/tests/Slides/test_standalone_html_sources.py tldw_Server_API/tests/RAG_NEW/unit/test_rag_profiles.py "backlog/tasks/task-12115 - Add-first-class-standalone-HTML-JS-presentation-generation.md"
+git add tldw_Server_API/app/api/v1/endpoints/slides.py tldw_Server_API/app/core/Slides/standalone_html_sources.py tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py tldw_Server_API/app/core/DB_Management/backends tldw_Server_API/app/core/DB_Management/chacha/message_store.py tldw_Server_API/app/core/DB_Management/chacha/note_store.py tldw_Server_API/app/core/DB_Management/media_db tldw_Server_API/app/core/RAG/rag_service/advanced_reranking.py tldw_Server_API/app/core/RAG/rag_service/database_retrievers.py tldw_Server_API/app/core/RAG/rag_service/profiles.py tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py tldw_Server_API/tests/Slides/test_standalone_html_sources.py tldw_Server_API/tests/ChaChaNotesDB/test_chacha_message_store.py tldw_Server_API/tests/ChaChaNotesDB/test_chacha_note_store.py tldw_Server_API/tests/DB_Management/test_media_db_api_imports.py tldw_Server_API/tests/DB_Management/test_media_db_core_repositories.py tldw_Server_API/tests/DB_Management/test_media_db_schema_bootstrap.py tldw_Server_API/tests/DB_Management/unit/test_postgresql_error_redaction.py tldw_Server_API/tests/RAG_NEW/unit/test_rag_profiles.py tldw_Server_API/tests/RAG_NEW/unit/test_reranker_trust_remote_code.py tldw_Server_API/tests/RAG_NEW/unit/test_preinstalled_local_reranker.py tldw_Server_API/tests/RAG_NEW/unit/test_slides_source_retrieval_hardening.py Docs/superpowers/plans/2026-07-15-standalone-html-presentations-implementation-plan.md "backlog/tasks/task-12115 - Add-first-class-standalone-HTML-JS-presentation-generation.md"
 git commit -m "feat(slides): snapshot bounded generation sources (TASK-12115)"
 ```
 

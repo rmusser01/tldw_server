@@ -860,12 +860,18 @@ class PostgreSQLBackend(DatabaseBackend):
         self,
         query: str,
         params: Optional[Union[tuple, dict]] = None,
-        connection: Optional[Any] = None
+        connection: Optional[Any] = None,
+        *,
+        log_errors: bool = True,
     ) -> QueryResult:
-        """Execute a query and return results."""
+        """Execute a query and return results.
+
+        ``log_errors`` remains accepted for backend-interface compatibility;
+        driver and rollback details are always redacted.
+        """
         start_time = time.time()
         query, params = self._prepare_query(query, params)
-
+        redacted_failure = False
         if connection:
             conn = connection
             external_conn = True
@@ -943,10 +949,13 @@ class PostgreSQLBackend(DatabaseBackend):
             logger.bind(exception_type=type(e).__name__).error(
                 "PostgreSQL query execution failed"
             )
-            raise DatabaseError("PostgreSQL query execution failed") from None
+            redacted_failure = True
         finally:
             if not external_conn:
                 self.get_pool().return_connection(conn)
+
+        if redacted_failure:
+            raise DatabaseError("PostgreSQL query execution failed")
 
     def execute_many(
         self,

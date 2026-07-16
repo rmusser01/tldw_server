@@ -205,7 +205,11 @@ def test_ensure_postgres_post_core_structures_runs_followup_ensures(monkeypatch)
 
     conn = object()
     calls: list[object] = []
+    backend = SimpleNamespace(
+        execute=lambda statement, *, connection: calls.append(("safe_transcript_extractor", statement, connection))
+    )
     db = SimpleNamespace(
+        backend=backend,
         _ensure_postgres_collections_tables=lambda value: calls.append(("collections", value)),
         _ensure_postgres_tts_history=lambda value: calls.append(("tts_history", value)),
         _ensure_postgres_audio_presets=lambda value: calls.append(("audio_presets", value)),
@@ -235,6 +239,11 @@ def test_ensure_postgres_post_core_structures_runs_followup_ensures(monkeypatch)
         ("tts_history", conn),
         ("audio_presets", conn),
         ("data_tables", conn),
+        (
+            "safe_transcript_extractor",
+            postgres_helpers_module._SAFE_TRANSCRIPT_TEXT_FUNCTION_SQL,
+            conn,
+        ),
         ("document_workspace", conn),
         ("source_hash", conn),
         ("claims_extensions", conn),
@@ -242,6 +251,28 @@ def test_ensure_postgres_post_core_structures_runs_followup_ensures(monkeypatch)
         ("sequence_sync", conn),
         ("policies", db, conn),
     ]
+
+
+@pytest.mark.unit
+def test_postgres_safe_transcript_extractor_is_pg13_compatible_and_non_throwing() -> None:
+    from tldw_Server_API.app.core.DB_Management.media_db.schema.backends import (
+        postgres_helpers as postgres_helpers_module,
+    )
+
+    ddl = " ".join(postgres_helpers_module._SAFE_TRANSCRIPT_TEXT_FUNCTION_SQL.split()).lower()
+
+    assert "create or replace function public.tldw_try_extract_normalized_transcript_text" in ddl
+    assert "language plpgsql" in ddl
+    assert "immutable" in ddl
+    assert "strict" in ddl
+    assert "set search_path = pg_catalog" in ddl
+    assert "exception when data_exception then return null" in ddl
+    assert "json_typeof(parsed) <> 'object'" in ddl
+    assert "value_type := json_typeof(parsed -> 'text')" in ddl
+    assert "value_type is null or value_type = 'null'" in ddl
+    assert "if value_type = 'boolean'" in ddl
+    assert "pg_input_is_valid" not in ddl
+    assert " is json" not in ddl
 
 
 @pytest.mark.unit

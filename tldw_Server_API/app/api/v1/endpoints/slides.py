@@ -78,7 +78,6 @@ from tldw_Server_API.app.core.DB_Management.media_db.api import (
     get_document_version,
     get_latest_transcription,
 )
-from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Metrics.metrics_manager import get_metrics_registry
 from tldw_Server_API.app.core.RAG.rag_service.types import Document
@@ -1178,7 +1177,7 @@ def _resolve_provider(request_provider: str | None) -> str:
 
 def _resolve_media_source_text(
     *,
-    media_db: MediaDatabase,
+    media_db: MediaDbSession,
     media_row: dict[str, Any],
     media_id: int,
 ) -> str | None:
