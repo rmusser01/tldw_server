@@ -72,6 +72,63 @@ const asFieldErrors = (value: unknown): Record<string, string> | undefined => {
     : undefined
 }
 
+const isStringArray = (value: unknown): value is string[] =>
+  Array.isArray(value) && value.every((item) => typeof item === "string")
+
+const isStringRecord = (value: unknown): value is Record<string, string> => {
+  const record = asRecord(value)
+  return record !== null && Object.values(record).every(
+    (item) => typeof item === "string"
+  )
+}
+
+const isServicePromptPart = (value: unknown): value is ServicePromptPart => {
+  const record = asRecord(value)
+  return record !== null &&
+    typeof record.key === "string" &&
+    typeof record.label === "string" &&
+    (record.mode === "literal" || record.mode === "template") &&
+    isStringArray(record.required_variables)
+}
+
+const isServicePromptWorkflow = (
+  value: unknown
+): value is ServicePromptWorkflow => {
+  const record = asRecord(value)
+  return record !== null &&
+    typeof record.id === "string" &&
+    typeof record.label === "string"
+}
+
+const isServicePromptCatalogItem = (
+  value: unknown
+): value is ServicePromptCatalogItem => {
+  const record = asRecord(value)
+  return record !== null &&
+    typeof record.id === "string" &&
+    typeof record.label === "string" &&
+    typeof record.description === "string" &&
+    Array.isArray(record.parts) &&
+    record.parts.every(isServicePromptPart) &&
+    Array.isArray(record.affected_workflows) &&
+    record.affected_workflows.every(isServicePromptWorkflow)
+}
+
+const isServicePromptDetail = (
+  value: unknown,
+  expectedId: string
+): value is ServicePromptDetail => {
+  if (!isServicePromptCatalogItem(value) || value.id !== expectedId) {
+    return false
+  }
+  const record = value as unknown as Record<string, unknown>
+  return isStringRecord(record.default_parts) &&
+    (record.saved_parts === null || isStringRecord(record.saved_parts)) &&
+    isStringRecord(record.effective_parts) &&
+    (record.source === "user" || record.source === "packaged") &&
+    (record.revision === null || typeof record.revision === "string")
+}
+
 export class ServicePromptApiError extends Error {
   status: number
   code?: string
@@ -98,6 +155,12 @@ export class ServicePromptApiError extends Error {
     this.canReset = options.canReset
   }
 }
+
+const invalidProtocolResponse = (): ServicePromptApiError =>
+  new ServicePromptApiError(
+    "Service Prompt server response was invalid.",
+    { status: 0, code: "service_prompt_protocol_error" }
+  )
 
 const normalizeServicePromptError = (error: unknown): ServicePromptApiError => {
   const candidate = error as {
@@ -141,24 +204,32 @@ export const servicePromptMethods = {
   async listServicePrompts(
     options?: { signal?: AbortSignal }
   ): Promise<ServicePromptCatalogItem[]> {
-    return await request<ServicePromptCatalogItem[]>({
+    const response = await request<unknown>({
       path: "/api/v1/service-prompts",
       method: "GET",
       expectedStatuses: [404],
       abortSignal: options?.signal
     })
+    if (!Array.isArray(response) || !response.every(isServicePromptCatalogItem)) {
+      throw invalidProtocolResponse()
+    }
+    return response
   },
 
   async getServicePrompt(
     id: string,
     options?: { signal?: AbortSignal }
   ): Promise<ServicePromptDetail> {
-    return await request<ServicePromptDetail>({
+    const response = await request<unknown>({
       path: detailPath(id),
       method: "GET",
       expectedStatuses: [404, 500],
       abortSignal: options?.signal
     })
+    if (!isServicePromptDetail(response, id)) {
+      throw invalidProtocolResponse()
+    }
+    return response
   },
 
   async saveServicePrompt(
@@ -166,7 +237,7 @@ export const servicePromptMethods = {
     payload: ServicePromptUpdateRequest,
     options?: { signal?: AbortSignal }
   ): Promise<ServicePromptDetail> {
-    return await request<ServicePromptDetail>({
+    const response = await request<unknown>({
       path: detailPath(id),
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -174,6 +245,10 @@ export const servicePromptMethods = {
       expectedStatuses: [404, 409, 422, 500],
       abortSignal: options?.signal
     })
+    if (!isServicePromptDetail(response, id)) {
+      throw invalidProtocolResponse()
+    }
+    return response
   },
 
   async resetServicePrompt(
@@ -182,7 +257,7 @@ export const servicePromptMethods = {
     options?: { signal?: AbortSignal }
   ): Promise<ServicePromptDetail> {
     const path = detailPath(id)
-    return await request<ServicePromptDetail>({
+    const response = await request<unknown>({
       path: expectedRevision === null
         ? path
         : `${path}?expected_revision=${encodeURIComponent(expectedRevision)}`,
@@ -190,6 +265,10 @@ export const servicePromptMethods = {
       expectedStatuses: [404, 409, 422, 500],
       abortSignal: options?.signal
     })
+    if (!isServicePromptDetail(response, id)) {
+      throw invalidProtocolResponse()
+    }
+    return response
   }
 }
 

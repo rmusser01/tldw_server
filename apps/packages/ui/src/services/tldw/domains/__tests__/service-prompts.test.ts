@@ -52,7 +52,10 @@ describe("Service Prompt API methods", () => {
   })
 
   it("gets one encoded definition path and preserves actionable errors", async () => {
-    vi.mocked(bgRequest).mockResolvedValueOnce(detail)
+    vi.mocked(bgRequest).mockResolvedValueOnce({
+      ...detail,
+      id: "chat.rag.answer/unsafe"
+    })
     const controller = new AbortController()
 
     await servicePromptMethods.getServicePrompt("chat.rag.answer/unsafe", {
@@ -92,7 +95,10 @@ describe("Service Prompt API methods", () => {
   })
 
   it("deletes conditionally and encodes the revision query value", async () => {
-    vi.mocked(bgRequest).mockResolvedValueOnce(detail)
+    vi.mocked(bgRequest).mockResolvedValueOnce({
+      ...detail,
+      id: "chat.rag.answer/unsafe"
+    })
     const controller = new AbortController()
 
     await servicePromptMethods.resetServicePrompt(
@@ -222,5 +228,112 @@ describe("Service Prompt API methods", () => {
     await expect(
       servicePromptMethods.listServicePrompts()
     ).rejects.toBe(aborted)
+  })
+
+  it.each([
+    ["null", null],
+    ["object instead of array", {}],
+    ["null item", [null]],
+    ["malformed item", [{ ...detail, parts: null }]]
+  ])("rejects malformed successful catalog payloads: %s", async (_name, payload) => {
+    vi.mocked(bgRequest).mockResolvedValueOnce(payload)
+
+    const rejection = await servicePromptMethods
+      .listServicePrompts()
+      .catch((error) => error)
+
+    expect(rejection).toBeInstanceOf(ServicePromptApiError)
+    expect(rejection).toMatchObject({
+      status: 0,
+      code: "service_prompt_protocol_error",
+      message: "Service Prompt server response was invalid."
+    })
+  })
+
+  it("accepts a structurally valid unknown catalog id", async () => {
+    const future = { ...detail, id: "chat.future.definition" }
+    vi.mocked(bgRequest).mockResolvedValueOnce([future])
+
+    await expect(servicePromptMethods.listServicePrompts()).resolves.toEqual([
+      future
+    ])
+  })
+
+  it("rejects malformed and mismatched successful detail responses", async () => {
+    const authoredSentinel = "PROMPT_BODY_MUST_NOT_APPEAR"
+    vi.mocked(bgRequest)
+      .mockResolvedValueOnce({
+        ...detail,
+        id: "chat.rag.question_rewrite"
+      })
+      .mockResolvedValueOnce({
+        ...detail,
+        effective_parts: { template: authoredSentinel },
+        revision: 7
+      })
+
+    const mismatched = await servicePromptMethods
+      .getServicePrompt("chat.rag.answer")
+      .catch((error) => error)
+    const malformed = await servicePromptMethods
+      .getServicePrompt("chat.rag.answer")
+      .catch((error) => error)
+
+    for (const rejection of [mismatched, malformed]) {
+      expect(rejection).toMatchObject({
+        status: 0,
+        code: "service_prompt_protocol_error",
+        message: "Service Prompt server response was invalid."
+      })
+      expect(String(rejection)).not.toContain(authoredSentinel)
+    }
+  })
+
+  it.each([
+    ["default parts", { default_parts: { template: 5 } }],
+    ["saved parts", { saved_parts: [] }],
+    ["effective parts", { effective_parts: null }],
+    ["source", { source: "unexpected" }],
+    ["revision", { revision: 7 }]
+  ])("rejects malformed successful detail %s shape", async (_name, change) => {
+    vi.mocked(bgRequest).mockResolvedValueOnce({ ...detail, ...change })
+
+    await expect(
+      servicePromptMethods.getServicePrompt("chat.rag.answer")
+    ).rejects.toMatchObject({
+      status: 0,
+      code: "service_prompt_protocol_error"
+    })
+  })
+
+  it("rejects mismatched PUT and malformed reset results", async () => {
+    vi.mocked(bgRequest)
+      .mockResolvedValueOnce({
+        ...detail,
+        id: "chat.web_search.answer"
+      })
+      .mockResolvedValueOnce({
+        ...detail,
+        affected_workflows: [{ id: 5, label: "invalid" }]
+      })
+
+    const saved = await servicePromptMethods
+      .saveServicePrompt("chat.rag.answer", {
+        parts: { template: "{context} {question}" },
+        expected_revision: null
+      })
+      .catch((error) => error)
+    const reset = await servicePromptMethods
+      .resetServicePrompt("chat.rag.answer", null)
+      .catch((error) => error)
+
+    expect(saved).toMatchObject({
+      status: 0,
+      code: "service_prompt_protocol_error"
+    })
+    expect(reset).toMatchObject({
+      status: 0,
+      code: "service_prompt_protocol_error"
+    })
   })
 })

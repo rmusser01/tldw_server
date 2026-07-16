@@ -6,7 +6,6 @@ import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { ServicePromptApiError } from "@/services/tldw/domains/service-prompts"
 import type {
   KnownServicePromptId,
-  ServicePromptCatalogItem,
   ServicePromptDetail,
   ServicePromptSource
 } from "@/services/tldw/domains/service-prompts"
@@ -24,6 +23,15 @@ const PYTHON_WHITESPACE_ONLY =
 type TemplateToken =
   | { kind: "literal"; value: string }
   | { kind: "field"; name: string }
+
+export type ServicePromptRenderDefinition = Readonly<{
+  id: string
+  parts: readonly Readonly<{
+    key: string
+    mode: "literal" | "template"
+    required_variables: readonly string[]
+  }>[]
+}>
 
 class TemplateSyntaxError extends Error {}
 
@@ -116,7 +124,7 @@ const tokenizeTemplate = (
 }
 
 export const validateServicePromptParts = (
-  definition: ServicePromptCatalogItem,
+  definition: ServicePromptRenderDefinition,
   parts: Record<string, unknown>
 ): Record<string, string> => {
   if (!parts || typeof parts !== "object" || Array.isArray(parts)) {
@@ -165,7 +173,7 @@ export const validateServicePromptParts = (
 }
 
 export const renderServicePromptPart = (
-  definition: ServicePromptCatalogItem,
+  definition: ServicePromptRenderDefinition,
   partKey: string,
   authoredText: string,
   variables: Record<string, string>
@@ -220,6 +228,7 @@ export type ServicePromptSnapshot = Readonly<{
   capability: "supported" | "legacy-404"
   definitions: Readonly<
     Partial<Record<KnownServicePromptId, Readonly<{
+      definition: ServicePromptRenderDefinition
       parts: Readonly<Record<string, string>>
       source: ServicePromptSource
       revision: string | null
@@ -227,8 +236,62 @@ export type ServicePromptSnapshot = Readonly<{
   >
 }>
 
+type SnapshotDefinition = {
+  definition: ServicePromptRenderDefinition
+  parts: Record<string, string>
+  source: ServicePromptSource
+  revision: string | null
+}
+
+const freezeRenderDefinition = (
+  definition: ServicePromptRenderDefinition
+): ServicePromptRenderDefinition => Object.freeze({
+  id: definition.id,
+  parts: Object.freeze(definition.parts.map((part) => Object.freeze({
+    key: part.key,
+    mode: part.mode,
+    required_variables: Object.freeze([...part.required_variables])
+  })))
+})
+
+const LEGACY_RENDER_DEFINITIONS = Object.freeze({
+  "chat.rag.answer": freezeRenderDefinition({
+    id: "chat.rag.answer",
+    parts: [{
+      key: "template",
+      mode: "template",
+      required_variables: ["context", "question"]
+    }]
+  }),
+  "chat.rag.question_rewrite": freezeRenderDefinition({
+    id: "chat.rag.question_rewrite",
+    parts: [{
+      key: "template",
+      mode: "template",
+      required_variables: ["chat_history", "question"]
+    }]
+  }),
+  "chat.web_search.answer": freezeRenderDefinition({
+    id: "chat.web_search.answer",
+    parts: [{
+      key: "template",
+      mode: "template",
+      required_variables: ["current_date_time", "search_results"]
+    }]
+  })
+})
+
 const legacyLocalStorage = createSafeStorage({ area: "local" })
 const legacySyncStorage = createSafeStorage({ area: "sync" })
+
+type SignalOptions = { signal?: AbortSignal }
+
+const throwIfAborted = (signal?: AbortSignal): void => {
+  if (!signal?.aborted) return
+  const error = new Error("Service Prompt request was aborted.")
+  error.name = "AbortError"
+  throw error
+}
 
 const LEGACY_MIGRATION_MAP = Object.freeze([
   Object.freeze({
@@ -251,15 +314,20 @@ const LEGACY_MIGRATION_MAP = Object.freeze([
   })
 ])
 
-export const readLegacyServicePromptCandidates = async (): Promise<
+export const readLegacyServicePromptCandidates = async (
+  options: SignalOptions = {}
+): Promise<
   LegacyServicePromptCandidate[]
 > => {
   const candidates: LegacyServicePromptCandidate[] = []
+  throwIfAborted(options.signal)
   for (const entry of LEGACY_MIGRATION_MAP) {
-    const local = await legacyLocalStorage.get<unknown>(entry.storageKey)
-    const raw = local === undefined && entry.readSync
-      ? await legacySyncStorage.get<unknown>(entry.storageKey)
-      : local
+    let raw = await legacyLocalStorage.get<unknown>(entry.storageKey)
+    throwIfAborted(options.signal)
+    if (raw === undefined && entry.readSync) {
+      raw = await legacySyncStorage.get<unknown>(entry.storageKey)
+      throwIfAborted(options.signal)
+    }
     if (typeof raw !== "string") continue
     candidates.push(Object.freeze({
       definitionId: entry.definitionId,
@@ -284,8 +352,12 @@ export const clearLegacyServicePromptCandidate = async (
   ])
 }
 
-export const resolveServicePromptScope = async (): Promise<ServicePromptScope> => {
+export const resolveServicePromptScope = async (
+  options: SignalOptions = {}
+): Promise<ServicePromptScope> => {
+  throwIfAborted(options.signal)
   const config = await tldwClient.getConfig()
+  throwIfAborted(options.signal)
   if (!config) {
     throw new Error("tldw server is not configured.")
   }
@@ -293,6 +365,7 @@ export const resolveServicePromptScope = async (): Promise<ServicePromptScope> =
   let userId: string | number | null = null
   if (isHostedTldwDeployment() || config.authMode === "multi-user") {
     const user = await tldwAuth.getCurrentUser()
+    throwIfAborted(options.signal)
     if (user?.id === null || user?.id === undefined) {
       throw new Error("Authenticated Service Prompt scope is unresolved.")
     }
@@ -308,13 +381,10 @@ export const resolveServicePromptScope = async (): Promise<ServicePromptScope> =
 const freezeSnapshot = (
   scopeKey: string,
   capability: ServicePromptSnapshot["capability"],
-  definitions: Partial<Record<KnownServicePromptId, {
-    parts: Record<string, string>
-    source: ServicePromptSource
-    revision: string | null
-  }>>
+  definitions: Partial<Record<KnownServicePromptId, SnapshotDefinition>>
 ): ServicePromptSnapshot => {
   const frozenDefinitions: Partial<Record<KnownServicePromptId, Readonly<{
+    definition: ServicePromptRenderDefinition
     parts: Readonly<Record<string, string>>
     source: ServicePromptSource
     revision: string | null
@@ -322,6 +392,7 @@ const freezeSnapshot = (
   for (const [id, definition] of Object.entries(definitions)) {
     frozenDefinitions[id as KnownServicePromptId] = Object.freeze({
       ...definition,
+      definition: freezeRenderDefinition(definition.definition),
       parts: Object.freeze({ ...definition.parts })
     })
   }
@@ -334,22 +405,22 @@ const freezeSnapshot = (
 
 const legacySnapshot = async (
   ids: readonly KnownServicePromptId[],
-  scopeKey: string
+  scopeKey: string,
+  signal: AbortSignal
 ): Promise<ServicePromptSnapshot> => {
+  throwIfAborted(signal)
   const requested = new Set(ids)
-  const definitions: Partial<Record<KnownServicePromptId, {
-    parts: Record<string, string>
-    source: ServicePromptSource
-    revision: null
-  }>> = {}
+  const definitions: Partial<Record<KnownServicePromptId, SnapshotDefinition>> = {}
 
   if (
     requested.has("chat.rag.answer") ||
     requested.has("chat.rag.question_rewrite")
   ) {
     const prompts = await promptForRag()
+    throwIfAborted(signal)
     if (requested.has("chat.rag.answer")) {
       definitions["chat.rag.answer"] = {
+        definition: LEGACY_RENDER_DEFINITIONS["chat.rag.answer"],
         parts: { template: prompts.ragPrompt },
         source: prompts.ragPrompt ===
           LEGACY_SERVICE_PROMPT_DEFAULTS["chat.rag.answer"].template
@@ -360,6 +431,7 @@ const legacySnapshot = async (
     }
     if (requested.has("chat.rag.question_rewrite")) {
       definitions["chat.rag.question_rewrite"] = {
+        definition: LEGACY_RENDER_DEFINITIONS["chat.rag.question_rewrite"],
         parts: { template: prompts.ragQuestionPrompt },
         source: prompts.ragQuestionPrompt ===
           LEGACY_SERVICE_PROMPT_DEFAULTS["chat.rag.question_rewrite"].template
@@ -372,7 +444,9 @@ const legacySnapshot = async (
 
   if (requested.has("chat.web_search.answer")) {
     const prompt = await getWebSearchPrompt()
+    throwIfAborted(signal)
     definitions["chat.web_search.answer"] = {
+      definition: LEGACY_RENDER_DEFINITIONS["chat.web_search.answer"],
       parts: { template: prompt },
       source: prompt ===
         LEGACY_SERVICE_PROMPT_DEFAULTS["chat.web_search.answer"].template
@@ -382,6 +456,7 @@ const legacySnapshot = async (
     }
   }
 
+  throwIfAborted(signal)
   return freezeSnapshot(scopeKey, "legacy-404", definitions)
 }
 
@@ -398,6 +473,7 @@ const createInvocationSignal = (signal?: AbortSignal): {
   }
   if (typeof window !== "undefined") {
     window.addEventListener("tldw:config-updated", abort)
+    window.addEventListener("tldw:auth-credentials-changed", abort)
   }
   return {
     signal: controller.signal,
@@ -405,6 +481,7 @@ const createInvocationSignal = (signal?: AbortSignal): {
       signal?.removeEventListener("abort", abort)
       if (typeof window !== "undefined") {
         window.removeEventListener("tldw:config-updated", abort)
+        window.removeEventListener("tldw:auth-credentials-changed", abort)
       }
     }
   }
@@ -414,20 +491,32 @@ export const loadServicePromptSnapshot = async (
   ids: readonly KnownServicePromptId[],
   options: { signal?: AbortSignal } = {}
 ): Promise<ServicePromptSnapshot> => {
-  const scope = await resolveServicePromptScope()
   const invocation = createInvocationSignal(options.signal)
   try {
+    throwIfAborted(invocation.signal)
+    const scope = await resolveServicePromptScope({ signal: invocation.signal })
+    throwIfAborted(invocation.signal)
     try {
       await tldwClient.listServicePrompts({ signal: invocation.signal })
+      throwIfAborted(invocation.signal)
     } catch (error) {
       if (error instanceof ServicePromptApiError && error.status === 404) {
-        return await legacySnapshot(ids, scope.scopeKey)
+        const snapshot = await legacySnapshot(
+          ids,
+          scope.scopeKey,
+          invocation.signal
+        )
+        throwIfAborted(invocation.signal)
+        return snapshot
       }
       throw error
     }
 
     const requested = [...new Set(ids)]
-    const candidates = await readLegacyServicePromptCandidates()
+    const candidates = await readLegacyServicePromptCandidates({
+      signal: invocation.signal
+    })
+    throwIfAborted(invocation.signal)
     const unresolved = candidates.filter((candidate) =>
       requested.includes(candidate.definitionId)
     )
@@ -444,19 +533,19 @@ export const loadServicePromptSnapshot = async (
     const details = await Promise.all(requested.map((id) =>
       tldwClient.getServicePrompt(id, { signal: invocation.signal })
     ))
-    const definitions: Partial<Record<KnownServicePromptId, {
-      parts: Record<string, string>
-      source: ServicePromptSource
-      revision: string | null
-    }>> = {}
+    throwIfAborted(invocation.signal)
+    const definitions: Partial<Record<KnownServicePromptId, SnapshotDefinition>> = {}
     for (const detail of details) {
       definitions[detail.id as KnownServicePromptId] = {
+        definition: detail,
         parts: { ...detail.effective_parts },
         source: detail.source,
         revision: detail.revision
       }
     }
-    return freezeSnapshot(scope.scopeKey, "supported", definitions)
+    const snapshot = freezeSnapshot(scope.scopeKey, "supported", definitions)
+    throwIfAborted(invocation.signal)
+    return snapshot
   } finally {
     invocation.cleanup()
   }

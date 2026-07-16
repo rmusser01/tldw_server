@@ -290,6 +290,15 @@ const detailFor = (
 
 const catalog = Object.values(definitions)
 
+const renderDefinitionFor = (id: KnownServicePromptId) => ({
+  id,
+  parts: definitions[id].parts.map((part) => ({
+    key: part.key,
+    mode: part.mode,
+    required_variables: [...part.required_variables]
+  }))
+})
+
 describe("Service Prompt migration and runtime snapshots", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -432,16 +441,19 @@ describe("Service Prompt migration and runtime snapshots", () => {
       capability: "legacy-404",
       definitions: {
         "chat.rag.answer": {
+          definition: renderDefinitionFor("chat.rag.answer"),
           parts: { template: "legacy rag {context} {question}" },
           source: "user",
           revision: null
         },
         "chat.rag.question_rewrite": {
+          definition: renderDefinitionFor("chat.rag.question_rewrite"),
           parts: { template: "legacy rewrite {chat_history} {question}" },
           source: "user",
           revision: null
         },
         "chat.web_search.answer": {
+          definition: renderDefinitionFor("chat.web_search.answer"),
           parts: {
             template: "legacy web {current_date_time} {search_results}"
           },
@@ -548,7 +560,7 @@ describe("Service Prompt migration and runtime snapshots", () => {
     expect(mocks.promptForRag).not.toHaveBeenCalled()
   })
 
-  it("deep-freezes snapshot definitions and parts", async () => {
+  it("deep-freezes snapshot definitions, render schemas, and nested variables", async () => {
     const snapshot = await loadServicePromptSnapshot(["chat.rag.answer"])
     const resolved = snapshot.definitions["chat.rag.answer"]!
 
@@ -556,6 +568,18 @@ describe("Service Prompt migration and runtime snapshots", () => {
     expect(Object.isFrozen(snapshot.definitions)).toBe(true)
     expect(Object.isFrozen(resolved)).toBe(true)
     expect(Object.isFrozen(resolved.parts)).toBe(true)
+    expect(Object.isFrozen(resolved.definition)).toBe(true)
+    expect(Object.isFrozen(resolved.definition.parts)).toBe(true)
+    expect(Object.isFrozen(resolved.definition.parts[0])).toBe(true)
+    expect(Object.isFrozen(
+      resolved.definition.parts[0].required_variables
+    )).toBe(true)
+    expect(renderServicePromptPart(
+      resolved.definition,
+      "template",
+      resolved.parts.template,
+      { context: "Frozen context", question: "Frozen question" }
+    )).toContain("Frozen context")
   })
 
   it("propagates invocation aborts and aborts old reads on config changes", async () => {
@@ -585,6 +609,66 @@ describe("Service Prompt migration and runtime snapshots", () => {
     window.dispatchEvent(new Event("tldw:config-updated"))
     await expect(second).rejects.toMatchObject({ name: "AbortError" })
     expect(detailSignal?.aborted).toBe(true)
+  })
+
+  it("aborts when hosted credentials change during principal resolution", async () => {
+    let resolveUser!: (user: { id: number; username: string }) => void
+    mocks.isHosted.mockReturnValue(true)
+    mocks.getCurrentUser.mockImplementation(() =>
+      new Promise((resolve) => {
+        resolveUser = resolve
+      })
+    )
+
+    const pending = loadServicePromptSnapshot(["chat.rag.answer"])
+    await vi.waitFor(() => expect(mocks.getCurrentUser).toHaveBeenCalled())
+    window.dispatchEvent(new Event("tldw:auth-credentials-changed"))
+    resolveUser({ id: 99, username: "changed" })
+
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" })
+    expect(mocks.listServicePrompts).not.toHaveBeenCalled()
+  })
+
+  it("aborts during an unabortable catalog-404 compatibility getter", async () => {
+    let resolvePrompts!: (value: {
+      ragPrompt: string
+      ragQuestionPrompt: string
+    }) => void
+    mocks.listServicePrompts.mockRejectedValue(
+      new ServicePromptApiError("Not found", { status: 404 })
+    )
+    mocks.promptForRag.mockImplementation(() =>
+      new Promise((resolve) => {
+        resolvePrompts = resolve
+      })
+    )
+
+    const pending = loadServicePromptSnapshot(["chat.rag.answer"])
+    await vi.waitFor(() => expect(mocks.promptForRag).toHaveBeenCalled())
+    window.dispatchEvent(new Event("tldw:config-updated"))
+    resolvePrompts({
+      ragPrompt: "legacy {context} {question}",
+      ragQuestionPrompt: "legacy {chat_history} {question}"
+    })
+
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" })
+  })
+
+  it("aborts during the supported raw migration probe", async () => {
+    let resolveRaw!: (value: undefined) => void
+    mocks.localGet.mockImplementationOnce(() =>
+      new Promise((resolve) => {
+        resolveRaw = resolve
+      })
+    )
+
+    const pending = loadServicePromptSnapshot(["chat.rag.answer"])
+    await vi.waitFor(() => expect(mocks.localGet).toHaveBeenCalled())
+    window.dispatchEvent(new Event("tldw:auth-credentials-changed"))
+    resolveRaw(undefined)
+
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" })
+    expect(mocks.getServicePrompt).not.toHaveBeenCalled()
   })
 
   it("clears both raw areas only after each successful import", async () => {
@@ -641,5 +725,27 @@ describe("Service Prompt migration and runtime snapshots", () => {
     expect(mocks.syncRemove).toHaveBeenCalledWith("webSearchPrompt")
     expect(mocks.localRemove).not.toHaveBeenCalledWith("webSearchFollowUpPrompt")
     expect(mocks.syncRemove).not.toHaveBeenCalledWith("webSearchFollowUpPrompt")
+  })
+
+  it("does not clear legacy values when PUT returns a protocol error", async () => {
+    mocks.saveServicePrompt.mockRejectedValueOnce(
+      new ServicePromptApiError(
+        "Service Prompt server response was invalid.",
+        { status: 0, code: "service_prompt_protocol_error" }
+      )
+    )
+    const candidate = {
+      definitionId: "chat.rag.answer" as const,
+      partKey: "template" as const,
+      storageKey: "systemPromptForRag" as const,
+      value: "import {context} {question}"
+    }
+
+    await expect(importLegacyServicePromptCandidate(
+      candidate,
+      detailFor("chat.rag.answer")
+    )).rejects.toMatchObject({ code: "service_prompt_protocol_error" })
+    expect(mocks.localRemove).not.toHaveBeenCalled()
+    expect(mocks.syncRemove).not.toHaveBeenCalled()
   })
 })

@@ -781,7 +781,11 @@ Use this fixed migration map—no key discovery or generic migration framework:
 
 `media.text.translation` has no browser-local predecessor. `webSearchFollowUpPrompt` is deliberately neither read nor cleared.
 
-Lock the snapshot:
+Lock the snapshot. Each entry carries only the deeply frozen render schema the
+shared renderer needs. Supported entries clone it from the validated detail;
+catalog-404 compatibility uses three fixed internal Chat schemas. Do not put
+defaults, labels, workflows, a cache, or a second client registry in the
+snapshot, and do not create a Translation compatibility schema:
 
 ```typescript
 export type ServicePromptSnapshot = Readonly<{
@@ -789,6 +793,14 @@ export type ServicePromptSnapshot = Readonly<{
   capability: "supported" | "legacy-404"
   definitions: Readonly<
     Partial<Record<KnownServicePromptId, Readonly<{
+      definition: Readonly<{
+        id: string
+        parts: readonly Readonly<{
+          key: string
+          mode: "literal" | "template"
+          required_variables: readonly string[]
+        }>[]
+      }>
       parts: Readonly<Record<string, string>>
       source: ServicePromptSource
       revision: string | null
