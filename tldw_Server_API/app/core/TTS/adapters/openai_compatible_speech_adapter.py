@@ -276,8 +276,9 @@ class OpenAICompatibleSpeechAdapter(TTSAdapter):
         speed_supplied = "speed" in supplied_fields
         lang_code_supplied = "lang_code" in supplied_fields
         language_supplied = "language" in supplied_fields
-        lang_code = getattr(request, "lang_code", None)
-        language = getattr(request, "language", None)
+        supplied_values = getattr(request, "supplied_field_values", None) or {}
+        lang_code = supplied_values.get("lang_code", getattr(request, "lang_code", None))
+        language = supplied_values.get("language", getattr(request, "language", None))
         if lang_code_supplied and language_supplied and lang_code != language:
             raise TTSValidationError(
                 "Gateway lang_code and language values conflict",

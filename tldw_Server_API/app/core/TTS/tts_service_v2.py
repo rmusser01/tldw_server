@@ -2568,13 +2568,17 @@ class TTSServiceV2:
         }
 
         model_id = str(getattr(request, "model", "") or "").strip().lower()
+        raw_explicit_fields = getattr(request, "model_fields_set", None)
+        if raw_explicit_fields is None:
+            raw_explicit_fields = getattr(request, "__fields_set__", set())
+        explicit_fields = set(raw_explicit_fields or ())
+        supplied_common_fields = frozenset(
+            explicit_fields & {"speed", "language", "lang_code"}
+        )
         response_format = request.response_format
         output_format = getattr(request, "output_format", None)
         if output_format:
             try:
-                explicit_fields = getattr(request, "model_fields_set", None)
-                if explicit_fields is None:
-                    explicit_fields = getattr(request, "__fields_set__", set())
                 if model_id.startswith("chatterbox") and "response_format" not in explicit_fields:
                     response_format = output_format
                     request.response_format = response_format
@@ -2586,9 +2590,11 @@ class TTSServiceV2:
             AudioFormat.MP3
         )
         # Optional language code mapping (lang_code primary; Chatterbox language alias next; extra_params.language override)
-        language = self._normalize_language_code(getattr(request, 'lang_code', None))
+        source_lang_code = self._normalize_language_code(getattr(request, 'lang_code', None))
+        source_language = self._normalize_language_code(getattr(request, "language", None))
+        language = source_lang_code
         if language is None and model_id.startswith("chatterbox"):
-            language = self._normalize_language_code(getattr(request, "language", None))
+            language = source_language
         # Optional voice reference decoding (base64)
         voice_ref_bytes = None
         if getattr(request, 'voice_reference', None):
@@ -2659,6 +2665,16 @@ class TTSServiceV2:
                 except _TTS_NONCRITICAL_EXCEPTIONS:
                     seed = None
 
+        supplied_common_values = {
+            name: value
+            for name, value in {
+                "speed": request.speed,
+                "language": source_language,
+                "lang_code": source_lang_code,
+            }.items()
+            if name in supplied_common_fields
+        }
+
         tts_request = TTSRequest(
             text=request.input,
             voice=request.voice,
@@ -2667,6 +2683,9 @@ class TTSServiceV2:
             speed=request.speed,
             stream=request.stream if hasattr(request, 'stream') else True,
             language=language,
+            lang_code=source_lang_code,
+            supplied_fields=supplied_common_fields,
+            supplied_field_values=supplied_common_values,
             voice_reference=voice_ref_bytes,
             seed=seed,
             # Additional parameters can be added via extra_params

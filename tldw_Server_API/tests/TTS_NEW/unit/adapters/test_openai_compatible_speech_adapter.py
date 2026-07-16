@@ -6,10 +6,13 @@ import asyncio
 import math
 from collections.abc import AsyncIterator, Mapping
 from copy import deepcopy
+from types import SimpleNamespace
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 
+from tldw_Server_API.app.api.v1.schemas.audio_schemas import OpenAISpeechRequest
 from tldw_Server_API.app.core.exceptions import NetworkError
 from tldw_Server_API.app.core.TTS.adapters import (
     openai_compatible_speech_adapter as adapter_module,
@@ -39,6 +42,7 @@ from tldw_Server_API.app.core.TTS.tts_exceptions import (
     TTSTimeoutError,
     TTSValidationError,
 )
+from tldw_Server_API.app.core.TTS.tts_service_v2 import TTSServiceV2
 
 MP3 = b"ID3\x04\x00\x00\x00\x00\x00\x00" + b"\x01" * 32
 WAV = b"RIFF\x24\x00\x00\x00WAVEfmt " + b"\x00" * 24
@@ -122,6 +126,16 @@ def _request(**overrides: Any) -> TTSRequest:
         else:
             values[key] = value
     return TTSRequest(**values)
+
+
+def _convert_api_request(**overrides: Any) -> TTSRequest:
+    values: dict[str, Any] = {
+        "input": "Read this exactly.",
+        "model": "Vendor/Expressive-TTS",
+        "voice": "GuideVoice",
+    }
+    values.update(overrides)
+    return TTSServiceV2(MagicMock())._convert_request(OpenAISpeechRequest(**values))
 
 
 def _stream_stub(
@@ -323,6 +337,132 @@ async def test_explicit_unsupported_target_sample_rate_still_fails_before_networ
 
     with pytest.raises(TTSValidationError, match="target_sample_rate"):
         await adapter.generate(_request(target_sample_rate=44100))
+
+    assert calls == []
+
+
+@pytest.mark.unit
+def test_api_conversion_preserves_omitted_defaults_without_supplied_markers() -> None:
+    converted = _convert_api_request()
+
+    assert converted.speed == 1.0
+    assert converted.language is None
+    assert converted.lang_code is None
+    assert converted.supplied_fields.isdisjoint({"speed", "language", "lang_code"})
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("api_fields", "expected_supplied", "expected_language", "expected_lang_code"),
+    [
+        ({"speed": 1.0}, {"speed"}, None, None),
+        (
+            {"model": "chatterbox-multilingual", "language": "fr"},
+            {"language"},
+            "fr",
+            None,
+        ),
+        ({"lang_code": "es"}, {"lang_code"}, "es", "es"),
+    ],
+)
+def test_api_conversion_marks_only_actual_common_field_sources(
+    api_fields: dict[str, Any],
+    expected_supplied: set[str],
+    expected_language: str | None,
+    expected_lang_code: str | None,
+) -> None:
+    converted = _convert_api_request(**api_fields)
+
+    assert converted.supplied_fields & {"speed", "language", "lang_code"} == expected_supplied
+    assert converted.language == expected_language
+    assert converted.lang_code == expected_lang_code
+
+
+@pytest.mark.unit
+def test_api_conversion_supplied_markers_survive_dict_roundtrip() -> None:
+    converted = _convert_api_request(speed=1.0, lang_code="es")
+
+    restored = TTSRequest(**converted.dict())
+
+    assert restored.dict() == converted.dict()
+    assert restored.supplied_fields == frozenset({"speed", "lang_code"})
+
+
+@pytest.mark.unit
+def test_api_conversion_uses_pydantic_v1_fields_set_fallback() -> None:
+    pydantic_request = OpenAISpeechRequest(
+        input="Read this exactly.",
+        model="Vendor/Expressive-TTS",
+        voice="GuideVoice",
+        speed=1.0,
+    )
+    request = SimpleNamespace(**pydantic_request.model_dump())
+    request.__fields_set__ = {"input", "model", "voice", "speed"}
+
+    converted = TTSServiceV2(MagicMock())._convert_request(request)
+
+    assert converted.supplied_fields & {"speed", "language", "lang_code"} == {"speed"}
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_omitted_api_defaults_are_not_rejected_or_forwarded_by_gateway(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(adapter_module, "astream_bytes", _stream_stub(calls))
+    converted = _convert_api_request()
+    adapter = OpenAICompatibleSpeechAdapter(
+        _adapter_config(
+            capability_overrides={
+                "supports_speed": False,
+                "supports_language": False,
+            }
+        )
+    )
+
+    await _collect(await adapter.generate(converted))
+
+    assert "speed" not in calls[0]["json"]
+    assert "language" not in calls[0]["json"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_explicit_api_speed_default_is_rejected_by_unsupported_gateway(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(adapter_module, "astream_bytes", _stream_stub(calls))
+    converted = _convert_api_request(speed=1.0)
+    adapter = OpenAICompatibleSpeechAdapter(
+        _adapter_config(capability_overrides={"supports_speed": False})
+    )
+
+    with pytest.raises(TTSValidationError, match="speed"):
+        await adapter.generate(converted)
+
+    assert calls == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_conflicting_api_language_sources_remain_distinct_at_gateway(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(adapter_module, "astream_bytes", _stream_stub(calls))
+    converted = _convert_api_request(
+        model="chatterbox-multilingual",
+        lang_code="es",
+        language="fr",
+    )
+
+    assert converted.language == "es"
+    with pytest.raises(TTSValidationError, match="conflict"):
+        await OpenAICompatibleSpeechAdapter(
+            _adapter_config(model="chatterbox-multilingual")
+        ).generate(converted)
 
     assert calls == []
 
