@@ -2590,8 +2590,10 @@ class TTSServiceV2:
             AudioFormat.MP3
         )
         # Optional language code mapping (lang_code primary; Chatterbox language alias next; extra_params.language override)
-        source_lang_code = self._normalize_language_code(getattr(request, 'lang_code', None))
-        source_language = self._normalize_language_code(getattr(request, "language", None))
+        raw_lang_code = getattr(request, "lang_code", None)
+        raw_language = getattr(request, "language", None)
+        source_lang_code = self._normalize_language_code(raw_lang_code)
+        source_language = self._normalize_language_code(raw_language)
         language = source_lang_code
         if language is None and model_id.startswith("chatterbox"):
             language = source_language
@@ -2669,8 +2671,8 @@ class TTSServiceV2:
             name: value
             for name, value in {
                 "speed": request.speed,
-                "language": source_language,
-                "lang_code": source_lang_code,
+                "language": raw_language,
+                "lang_code": raw_lang_code,
             }.items()
             if name in supplied_common_fields
         }
