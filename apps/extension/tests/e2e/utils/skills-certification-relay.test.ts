@@ -105,6 +105,42 @@ describe("createSkillsRelayObserver", () => {
     ])
   })
 
+  it("ignores non-Skills URLs", () => {
+    const context = new ContextDouble()
+    const observer = createSkillsRelayObserver(context as any, workerUrl)
+
+    emitRequest(
+      context,
+      makeRequest({ url: "https://server.test/api/v1/media" })
+    )
+
+    expect(observer.entries).toEqual([])
+  })
+
+  it("records unsupported Skills paths with a sanitized sentinel and rejects them", () => {
+    const context = new ContextDouble()
+    const observer = createSkillsRelayObserver(context as any, workerUrl)
+
+    for (const suffix of [
+      "/api/v1/skills/widget/unknown",
+      "/api/v1/skills/widget/execute/again",
+      "/api/v1/skills/trash/widget",
+      "/api/v1/skills//widget"
+    ]) {
+      const request = makeRequest({ url: `https://server.test${suffix}` })
+      emitRequest(context, request)
+      respond(context, request, 200)
+    }
+
+    expect(observer.entries.map((entry) => entry.path)).toEqual([
+      "/api/v1/skills/:unexpected",
+      "/api/v1/skills/:unexpected",
+      "/api/v1/skills/:unexpected",
+      "/api/v1/skills/:unexpected"
+    ])
+    expect(() => observer.assertValid()).toThrow(/unexpected Skills route/i)
+  })
+
   it("uses exact worker URL strings for ownership", () => {
     const context = new ContextDouble()
     const observer = createSkillsRelayObserver(context as any, workerUrl)
@@ -194,6 +230,31 @@ describe("createSkillsRelayObserver", () => {
     }
 
     expect(() => observer.assertValid()).not.toThrow()
+  })
+
+  it("does not include successful GET execute routes in dry-run accounting", () => {
+    const context = new ContextDouble()
+    const observer = createSkillsRelayObserver(context as any, workerUrl)
+    successfulLifecycle(context)
+    const getExecute = makeRequest({
+      url: "https://server.test/api/v1/skills/widget/execute"
+    })
+    emitRequest(context, getExecute)
+    respond(context, getExecute, 200)
+
+    expect(() => observer.assertValid()).not.toThrow()
+  })
+
+  it("rejects pending tracked Skills requests, including GETs", () => {
+    const context = new ContextDouble()
+    const observer = createSkillsRelayObserver(context as any, workerUrl)
+    successfulLifecycle(context)
+    emitRequest(
+      context,
+      makeRequest({ url: "https://server.test/api/v1/skills" })
+    )
+
+    expect(() => observer.assertValid()).toThrow(/pending/i)
   })
 
   it("requires the exact create, dry execute, trash, restore, and purge mutations", () => {

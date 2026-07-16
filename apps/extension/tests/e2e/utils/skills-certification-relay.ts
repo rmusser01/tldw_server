@@ -14,6 +14,7 @@ type InternalEntry = {
 }
 
 const SKILLS_ROOT = "/api/v1/skills"
+const UNEXPECTED_SKILLS_PATH = `${SKILLS_ROOT}/:unexpected`
 
 const canonicalizeSkillsPath = (url: string): string | null => {
   let pathname: string
@@ -27,20 +28,21 @@ const canonicalizeSkillsPath = (url: string): string | null => {
     return SKILLS_ROOT
   if (!pathname.startsWith(`${SKILLS_ROOT}/`)) return null
 
-  const segments = pathname
-    .slice(SKILLS_ROOT.length + 1)
-    .split("/")
-    .filter(Boolean)
+  const remainder = pathname.slice(SKILLS_ROOT.length)
+  if (remainder.includes("//")) return UNEXPECTED_SKILLS_PATH
+
+  const segments = remainder.slice(1).split("/")
   if (segments.length === 1 && segments[0] === "trash")
     return `${SKILLS_ROOT}/trash`
   if (segments.length === 1) return `${SKILLS_ROOT}/:name`
   if (
     segments.length === 2 &&
+    segments[0] !== "trash" &&
     ["execute", "restore", "purge"].includes(segments[1])
   ) {
     return `${SKILLS_ROOT}/:name/${segments[1]}`
   }
-  return `${SKILLS_ROOT}/:name`
+  return UNEXPECTED_SKILLS_PATH
 }
 
 const isDryRun = (request: Request, path: string): boolean | undefined => {
@@ -91,6 +93,7 @@ export function createSkillsRelayObserver(
           : "http_error"
     if (
       internal.entry.outcome === "success" &&
+      internal.entry.method === "POST" &&
       internal.entry.path === `${SKILLS_ROOT}/:name/execute`
     ) {
       successfulExecuteDryRuns.push(internal.dryRun === true)
@@ -108,6 +111,13 @@ export function createSkillsRelayObserver(
 
   let disposed = false
   const assertValid = () => {
+    const pending = entries.find((entry) => entry.outcome === "pending")
+    if (pending) {
+      throw new Error(
+        `Skills request is still pending: ${pending.method} ${pending.path}`
+      )
+    }
+
     const invalid = entries.find((entry) => !entry.worker_owned)
     if (invalid)
       throw new Error(
@@ -121,6 +131,15 @@ export function createSkillsRelayObserver(
       throw new Error(
         `Skills request failed or returned HTTP error: ${failed.method} ${failed.path}`
       )
+
+    const unexpected = entries.find(
+      (entry) => entry.path === UNEXPECTED_SKILLS_PATH
+    )
+    if (unexpected) {
+      throw new Error(
+        `Unexpected Skills route: ${unexpected.method} ${unexpected.path}`
+      )
+    }
 
     const terminalMutations = entries.filter(
       (entry) => entry.outcome === "success" && entry.method !== "GET"
