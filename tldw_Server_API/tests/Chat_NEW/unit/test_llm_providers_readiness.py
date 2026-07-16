@@ -85,10 +85,10 @@ def _model(data: dict[str, object], provider: str, name: str) -> dict[str, objec
     ("result", "has_explicit_models", "probe", "enabled", "reason"),
     [
         (ModelDiscoveryResult("ready", ("discovered",)), False, False, True, None),
-        (ModelDiscoveryResult("ready", ()), False, False, False, "no_models_reported"),
+        (ModelDiscoveryResult("ready", ()), False, False, True, "no_models_reported"),
         (ModelDiscoveryResult("auth_failed", ()), False, False, False, "auth_failed"),
         (ModelDiscoveryResult("server_error", ()), False, False, False, "endpoint_error"),
-        (ModelDiscoveryResult("unsupported", ()), False, False, False, "model_discovery_unavailable"),
+        (ModelDiscoveryResult("unsupported", ()), False, False, True, "model_discovery_unavailable"),
         (ModelDiscoveryResult("unreachable", ()), False, False, False, "endpoint_unreachable"),
         (None, True, False, True, None),
         (ModelDiscoveryResult("ready", ()), True, True, True, None),
@@ -246,6 +246,118 @@ def test_catalog_computes_discovery_once_and_passes_same_result_to_readiness(
     assert readiness_results == [result]
     assert readiness_results[0] is result
     assert _provider(response.json(), "llama")["models"] == ["discovered-llama"]
+
+
+@pytest.mark.unit
+def test_catalog_maps_dns_unresolved_to_endpoint_unreachable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parser = _config(
+        {
+            "Local-API": {
+                "llama_api_IP": "http://llama.internal:18080/v1",
+                "llama_model": "manual-llama.gguf",
+            }
+        }
+    )
+    client = _client_for_config(monkeypatch, parser)
+    monkeypatch.setattr(
+        llm_providers,
+        "evaluate_url_policy",
+        lambda *_args, **_kwargs: URLPolicyResult(
+            False,
+            "Host could not be resolved",
+            reason_code="dns_unresolved",
+        ),
+    )
+
+    with client:
+        response = client.get("/api/v1/llm/providers")
+
+    assert response.status_code == 200, response.text
+    llama = _provider(response.json(), "llama")
+    assert llama["provider_enabled"] is False
+    assert llama["availability"] == "unavailable"
+    assert llama["readiness_reason_code"] == "endpoint_unreachable"
+    assert "llama.internal" not in llama["readiness_message"]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("result", "reason_code"),
+    [
+        (ModelDiscoveryResult("ready", ()), "no_models_reported"),
+        (ModelDiscoveryResult("unsupported", ()), "model_discovery_unavailable"),
+    ],
+)
+def test_catalog_keeps_empty_discovery_diagnostics_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+    result: ModelDiscoveryResult,
+    reason_code: str,
+) -> None:
+    parser = _config(
+        {"Local-API": {"llama_api_IP": "http://10.0.0.5:18080/v1"}}
+    )
+    client = _client_for_config(monkeypatch, parser)
+    monkeypatch.setattr(
+        llm_providers,
+        "discover_models_from_endpoint",
+        lambda *_args, **_kwargs: result,
+    )
+
+    with client:
+        response = client.get("/api/v1/llm/providers")
+
+    assert response.status_code == 200, response.text
+    llama = _provider(response.json(), "llama")
+    assert llama["provider_enabled"] is True
+    assert llama["availability"] == "enabled"
+    assert llama["models"] == []
+    assert llama["endpoint_only"] is True
+    assert llama["readiness_reason_code"] == reason_code
+
+
+@pytest.mark.unit
+def test_catalog_requested_discovery_merges_after_explicit_models(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LLM_PROVIDER_READINESS_PROBE_ENDPOINTS", "1")
+    parser = _config(
+        {
+            "Local-API": {
+                "llama_api_IP": "http://10.0.0.5:18080/v1",
+                "llama_model": "manual-llama,shared-model",
+            }
+        }
+    )
+    discovery_calls = []
+    client = _client_for_config(monkeypatch, parser)
+    monkeypatch.setattr(
+        llm_providers,
+        "_resolve_model_tokenizer_support",
+        lambda *_args, **_kwargs: {
+            "available": False,
+            "strict_mode_effective": False,
+        },
+    )
+
+    def discover(*args, **kwargs):
+        discovery_calls.append((args, kwargs))
+        return ModelDiscoveryResult(
+            "ready",
+            ("shared-model", "discovered-model", "manual-llama"),
+        )
+
+    monkeypatch.setattr(llm_providers, "discover_models_from_endpoint", discover)
+
+    with client:
+        response = client.get("/api/v1/llm/providers")
+
+    assert response.status_code == 200, response.text
+    llama = _provider(response.json(), "llama")
+    assert len(discovery_calls) == 1
+    assert llama["models"] == ["manual-llama", "shared-model", "discovered-model"]
+    assert llama["provider_enabled"] is True
 
 
 @pytest.mark.unit

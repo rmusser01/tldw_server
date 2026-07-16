@@ -300,7 +300,7 @@ A second compatibility review restored the pre-Stage-3 client factory transport 
 
 **Tests:** Setup route/validation/readiness plus provider readiness/catalog/error mapping.
 
-**Status:** Complete
+**Status:** In Progress
 
 ### Task 4.1: Write failing setup and readiness tests
 
@@ -350,6 +350,16 @@ A second compatibility review restored the pre-Stage-3 client factory transport 
 - [x] Commit with `fix(setup): align local provider readiness and discovery (TASK-12972)`.
 
 Verification used the repository virtual environment at `../../.venv` from the isolated worktree. The Stage 4 primary suite passed 221 tests, and the complete Stages 1–3 compatibility union passed 264 tests. Focused Ruff, Python compilation, Bandit, and `git diff --check` passed before commit.
+
+### Post-review corrections
+
+- [x] Map scoped DNS resolution failures to reachability in setup and catalog readiness while retaining other policy denials.
+- [x] Keep recognized-empty and unsupported discovery results enabled as diagnostics when no explicit model exists.
+- [x] Merge successful requested discovery after explicit models with stable deduplication.
+- [x] Treat HTTP 429 discovery responses as transient server errors and never cache them.
+- [x] Re-run Stage 4, Stages 1–3, Ruff, compilation, Bandit, and diff checks; leave Stage 4 in progress until review approval.
+
+Correction TDD evidence: the focused RED run produced 9 expected failures and 77 passes; the focused GREEN run passed 86 tests. The corrected Stage 4 suite passed 228 tests, and the Stages 1–3 compatibility union passed 264 tests. Ruff, Python compilation, Bandit (0 findings, 0 errors), and `git diff --check` passed. Stage 4 remains `In Progress` pending post-correction review approval.
 
 ---
 

@@ -76,7 +76,8 @@ def test_discover_models_from_endpoint_sanitizes_http_status_log(monkeypatch):
     )
 
 
-def test_model_discovery_transient_failure_is_not_cached(monkeypatch):
+@pytest.mark.parametrize("transient_status", [429, 503])
+def test_model_discovery_transient_failure_is_not_cached(monkeypatch, transient_status):
     calls = 0
 
     class Response:
@@ -94,7 +95,7 @@ def test_model_discovery_transient_failure_is_not_cached(monkeypatch):
         nonlocal calls
         calls += 1
         if calls == 1:
-            return Response(503)
+            return Response(transient_status)
         return Response(200, {"data": [{"id": "recovered"}]})
 
     monkeypatch.setattr(llm_endpoints, "_http_fetch", fake_fetch)

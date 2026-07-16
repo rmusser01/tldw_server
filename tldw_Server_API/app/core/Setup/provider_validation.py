@@ -62,6 +62,23 @@ def _manual_model_fallback_response(
     )
 
 
+def _egress_failure_response(
+    payload: LocalEndpointValidationRequest,
+    exc: EgressPolicyError,
+) -> SetupProviderValidationResponse:
+    if exc.reason_code == "dns_unresolved":
+        return _failed_response(
+            payload,
+            failure_category=FAILURE_LOCAL_PROVIDER_UNREACHABLE,
+            message="Local provider endpoint is unreachable.",
+        )
+    return _failed_response(
+        payload,
+        failure_category=FAILURE_LOCAL_PROVIDER_ENDPOINT_NOT_ALLOWED,
+        message="Local provider endpoint target is not allowed.",
+    )
+
+
 def _extract_model_ids(body: Any) -> list[str] | None:
     if not isinstance(body, dict):
         return None
@@ -155,12 +172,8 @@ async def validate_local_openai_endpoint(
             retry=RetryPolicy(attempts=1),
             configured_endpoint=configured_endpoint,
         )
-    except EgressPolicyError:
-        return _failed_response(
-            payload,
-            failure_category=FAILURE_LOCAL_PROVIDER_ENDPOINT_NOT_ALLOWED,
-            message="Local provider endpoint target is not allowed.",
-        )
+    except EgressPolicyError as exc:
+        return _egress_failure_response(payload, exc)
     except (NetworkError, RetryExhaustedError, TimeoutError, OSError, ValueError):
         return _failed_response(
             payload,
@@ -236,12 +249,8 @@ async def validate_native_kobold_endpoint(
             retry=RetryPolicy(attempts=1),
             configured_endpoint=configured_endpoint,
         )
-    except EgressPolicyError:
-        return _failed_response(
-            payload,
-            failure_category=FAILURE_LOCAL_PROVIDER_ENDPOINT_NOT_ALLOWED,
-            message="Local provider endpoint target is not allowed.",
-        )
+    except EgressPolicyError as exc:
+        return _egress_failure_response(payload, exc)
     except (NetworkError, RetryExhaustedError, TimeoutError, OSError, ValueError):
         return _failed_response(
             payload,

@@ -1181,7 +1181,7 @@ def discover_models_from_endpoint(
             try:
                 if resp.status_code in {401, 403}:
                     candidate_result = ModelDiscoveryResult("auth_failed")
-                elif resp.status_code >= 500:
+                elif resp.status_code == 429 or resp.status_code >= 500:
                     logger.debug("Model discovery endpoint returned an error status")
                     candidate_result = ModelDiscoveryResult("server_error")
                 elif resp.status_code >= 400:
@@ -1769,8 +1769,10 @@ def get_configured_providers(
                         configured_endpoint=endpoint_scope,
                     )
                 )
-                if not models and discovery_result.status == "ready":
-                    models = list(discovery_result.models)
+                if discovery_result.status == "ready":
+                    models = _dedupe_preserve_order(
+                        [*models, *discovery_result.models]
+                    )
 
             provider_readiness = _provider_readiness(
                 provider_name=provider_name,

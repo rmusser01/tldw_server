@@ -160,11 +160,15 @@ def provider_readiness(
         elif not endpoint_policy.allowed:
             provider_enabled = False
             availability = "unavailable"
-            reason_code = "egress_blocked"
-            message = (
-                "Provider endpoint is blocked by the server egress policy"
-                + (f": {endpoint_policy.reason}" if endpoint_policy.reason else ".")
-            )
+            if endpoint_policy.reason_code == "dns_unresolved":
+                reason_code = "endpoint_unreachable"
+                message = "Provider endpoint could not be resolved."
+            else:
+                reason_code = "egress_blocked"
+                message = (
+                    "Provider endpoint is blocked by the server egress policy"
+                    + (f": {endpoint_policy.reason}" if endpoint_policy.reason else ".")
+                )
 
     if provider_enabled and isinstance(health_entry, dict):
         health_status = str(health_entry.get("status") or "").strip().lower()
@@ -187,8 +191,6 @@ def provider_readiness(
         result = discovery_result or ModelDiscoveryResult("unreachable")
         display_name = provider_info.get("display_name") or provider_name
         if result.status == "ready" and not result.models and not has_explicit_models:
-            provider_enabled = False
-            availability = "unavailable"
             reason_code = "no_models_reported"
             message = f"{display_name} did not report any models."
         elif result.status == "auth_failed":
@@ -204,9 +206,6 @@ def provider_readiness(
         elif result.status == "unsupported":
             reason_code = "model_discovery_unavailable"
             message = f"{display_name} does not expose a supported model discovery response."
-            if not has_explicit_models:
-                provider_enabled = False
-                availability = "unavailable"
         elif result.status == "unreachable":
             provider_enabled = False
             availability = "unavailable"

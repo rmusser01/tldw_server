@@ -104,6 +104,16 @@ def _patch_policy_denial(monkeypatch):
     monkeypatch.setattr(provider_validation, "afetch", deny)
 
 
+def _patch_dns_failure(monkeypatch):
+    async def fail_dns(**_kwargs):
+        raise EgressPolicyError(
+            "DNS failed for http://secret-host.invalid/private",
+            reason_code="dns_unresolved",
+        )
+
+    monkeypatch.setattr(provider_validation, "afetch", fail_dns)
+
+
 def _config_with_openai_key(raw_key: str) -> ConfigParser:
     parser = ConfigParser()
     parser.optionxform = str
@@ -183,6 +193,42 @@ async def test_local_validator_requires_preconstructed_scope():
                 base_url="http://127.0.0.1:8080/v1",
             )
         )
+
+
+@pytest.mark.asyncio
+async def test_openai_dns_unresolved_maps_to_reachability_without_details(monkeypatch):
+    _patch_dns_failure(monkeypatch)
+
+    response = await validate_local_openai_endpoint(
+        LocalEndpointValidationRequest(
+            provider_key="llamacpp",
+            base_url="http://secret-host.invalid:18080/v1",
+            api_key="secret-local-token",
+        )
+    )
+
+    assert response.status == "failed"
+    assert response.failure_category == "local_provider_unreachable"
+    assert "secret-host" not in response.model_dump_json()
+    assert "secret-local-token" not in response.model_dump_json()
+
+
+@pytest.mark.asyncio
+async def test_kobold_dns_unresolved_maps_to_reachability_without_details(monkeypatch):
+    _patch_dns_failure(monkeypatch)
+
+    response = await validate_native_kobold_endpoint(
+        LocalEndpointValidationRequest(
+            provider_key="koboldcpp",
+            base_url="http://secret-host.invalid:5001/api/v1/generate",
+            api_key="secret-local-token",
+        )
+    )
+
+    assert response.status == "failed"
+    assert response.failure_category == "local_provider_unreachable"
+    assert "secret-host" not in response.model_dump_json()
+    assert "secret-local-token" not in response.model_dump_json()
 
 
 @pytest.mark.asyncio
