@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 import threading
 import uuid
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -15,6 +16,10 @@ from typing import Any, ClassVar
 
 from tldw_Server_API.app.core.DB_Management.sqlite_policy import (
     configure_sqlite_connection,
+)
+from tldw_Server_API.app.core.Slides.slides_migrations import (
+    SLIDES_SCHEMA_VERSION,
+    migrate_slides_schema,
 )
 
 
@@ -65,6 +70,44 @@ class PresentationRow:
     deleted: int
     client_id: str
     version: int
+    content_kind: str
+    html_document: str | None
+    html_sha256: str | None
+    html_bytes: int | None
+    html_slide_count: int | None
+    generation_job_uuid: str | None
+    generation_provenance_json: str | None
+
+
+PresentationDetailRow = PresentationRow
+
+
+@dataclass
+class PresentationSummaryRow:
+    id: str
+    title: str
+    description: str | None
+    theme: str
+    content_kind: str
+    source_kind: str | None
+    provider: str | None
+    model: str | None
+    slide_count: int | None
+    html_slide_count: int | None
+    html_bytes: int | None
+    created_at: str
+    last_modified: str
+    deleted: int
+    version: int
+
+
+@dataclass
+class PresentationKindRow:
+    id: str
+    content_kind: str
+    version: int
+    deleted: int
+    last_modified: str
 
 
 @dataclass
@@ -77,6 +120,54 @@ class PresentationVersionRow:
 
 
 @dataclass
+class PresentationVersionMetadataRow:
+    presentation_id: str
+    version: int
+    created_at: str
+    client_id: str
+
+
+@dataclass
+class SlidesGenerationReceiptRow:
+    id: str
+    owner_user_id: str
+    digest_key_id: str
+    idempotency_key_hmac_sha256: str
+    jobs_idempotency_key: str
+    client_request_hmac_sha256: str
+    execution_hmac_sha256: str
+    job_id: int | None
+    job_uuid: str | None
+    presentation_id: str | None
+    receipt_status: str
+    error_code: str | None
+    error_message: str | None
+    created_at: str
+    updated_at: str
+    expires_at: str | None
+
+
+@dataclass
+class SlidesGenerationInputRow:
+    receipt_id: str
+    source_kind: str
+    source_text: str
+    source_hmac_sha256: str
+    source_bytes: int
+    provenance_json: str
+    html_options_json: str
+    provider: str
+    model: str
+    adapter_id: str
+    endpoint_identity: str
+    system_prompt: str
+    prompt_sha256: str
+    prompt_contract_version: str
+    input_expires_at: str
+    created_at: str
+
+
+@dataclass
 class VisualStyleRow:
     id: str
     name: str
@@ -86,8 +177,102 @@ class VisualStyleRow:
     updated_at: str
 
 
+_PRESENTATION_DETAIL_COLUMNS = (
+    "id",
+    "title",
+    "description",
+    "theme",
+    "marp_theme",
+    "template_id",
+    "visual_style_id",
+    "visual_style_scope",
+    "visual_style_name",
+    "visual_style_version",
+    "visual_style_snapshot",
+    "settings",
+    "studio_data",
+    "slides",
+    "slides_text",
+    "source_type",
+    "source_ref",
+    "source_query",
+    "custom_css",
+    "created_at",
+    "last_modified",
+    "deleted",
+    "client_id",
+    "version",
+    "content_kind",
+    "html_document",
+    "html_sha256",
+    "html_bytes",
+    "html_slide_count",
+    "generation_job_uuid",
+    "generation_provenance_json",
+)
+_PRESENTATION_DETAIL_PROJECTION = ", ".join(_PRESENTATION_DETAIL_COLUMNS)
+_PRESENTATION_DETAIL_PROJECTION_QUALIFIED = ", ".join(
+    f"p.{column}" for column in _PRESENTATION_DETAIL_COLUMNS
+)
+
+_PRESENTATION_SUMMARY_PROJECTION = """
+    id,
+    title,
+    description,
+    theme,
+    content_kind,
+    json_extract(generation_provenance_json, '$.source_kind') AS source_kind,
+    json_extract(generation_provenance_json, '$.provider') AS provider,
+    json_extract(generation_provenance_json, '$.model') AS model,
+    CASE
+        WHEN content_kind = 'standalone_html' THEN html_slide_count
+        ELSE json_array_length(slides)
+    END AS slide_count,
+    html_slide_count,
+    html_bytes,
+    created_at,
+    last_modified,
+    deleted,
+    version
+"""
+_PRESENTATION_SUMMARY_PROJECTION_QUALIFIED = """
+    p.id,
+    p.title,
+    p.description,
+    p.theme,
+    p.content_kind,
+    json_extract(p.generation_provenance_json, '$.source_kind') AS source_kind,
+    json_extract(p.generation_provenance_json, '$.provider') AS provider,
+    json_extract(p.generation_provenance_json, '$.model') AS model,
+    CASE
+        WHEN p.content_kind = 'standalone_html' THEN p.html_slide_count
+        ELSE json_array_length(p.slides)
+    END AS slide_count,
+    p.html_slide_count,
+    p.html_bytes,
+    p.created_at,
+    p.last_modified,
+    p.deleted,
+    p.version
+"""
+
+_RECEIPT_PROJECTION = """
+    id, owner_user_id, digest_key_id, idempotency_key_hmac_sha256,
+    jobs_idempotency_key, client_request_hmac_sha256,
+    execution_hmac_sha256, job_id, job_uuid, presentation_id,
+    receipt_status, error_code, error_message, created_at, updated_at,
+    expires_at
+"""
+_INPUT_PROJECTION = """
+    receipt_id, source_kind, source_text, source_hmac_sha256, source_bytes,
+    provenance_json, html_options_json, provider, model, adapter_id,
+    endpoint_identity, system_prompt, prompt_sha256, prompt_contract_version,
+    input_expires_at, created_at
+"""
+
+
 class SlidesDatabase:
-    _SCHEMA_VERSION = 1
+    _SCHEMA_VERSION = SLIDES_SCHEMA_VERSION
     _schema_init_paths: ClassVar[set[str]] = set()
     _schema_init_lock: ClassVar[threading.Lock] = threading.Lock()
 
@@ -106,11 +291,7 @@ class SlidesDatabase:
 
     def _ensure_schema(self) -> None:
         cache_schema_path = self._db_path_str != ":memory:"
-        if cache_schema_path and self._db_path_str in self._schema_init_paths:
-            return
         with self._schema_init_lock:
-            if cache_schema_path and self._db_path_str in self._schema_init_paths:
-                return
             conn = self.get_connection()
             try:
                 conn.executescript(
@@ -118,7 +299,6 @@ class SlidesDatabase:
                     CREATE TABLE IF NOT EXISTS schema_version (
                         version INTEGER PRIMARY KEY NOT NULL
                     );
-                    INSERT OR IGNORE INTO schema_version (version) VALUES (0);
 
                     CREATE TABLE IF NOT EXISTS presentations (
                         id TEXT PRIMARY KEY,
@@ -224,9 +404,10 @@ class SlidesDatabase:
                 self._ensure_studio_data_column(conn)
                 self._ensure_visual_styles_table(conn)
                 conn.commit()
+                migrate_slides_schema(conn)
                 if cache_schema_path:
                     self._schema_init_paths.add(self._db_path_str)
-            except sqlite3.Error as exc:
+            except Exception as exc:
                 conn.rollback()
                 raise SchemaError(f"Failed to initialize Slides DB schema: {exc}") from exc
 
@@ -246,8 +427,11 @@ class SlidesDatabase:
             self._local.connection = None
 
     @contextmanager
-    def transaction(self) -> Iterable[sqlite3.Connection]:
+    def transaction(self, *, immediate: bool = False) -> Iterable[sqlite3.Connection]:
         conn = self.get_connection()
+        if conn.in_transaction:
+            raise SlidesDatabaseError("nested Slides transactions are not supported")
+        conn.execute("BEGIN IMMEDIATE" if immediate else "BEGIN")
         try:
             yield conn
             conn.commit()
@@ -343,10 +527,89 @@ class SlidesDatabase:
         )
 
     @staticmethod
+    def _validate_presentation_candidate(candidate: Mapping[str, Any]) -> None:
+        """Validate the complete discriminated row before it is persisted."""
+        try:
+            parsed_slides = json.loads(candidate.get("slides"))
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise InputError("slides must be a valid JSON list") from exc
+        if not isinstance(parsed_slides, list):
+            raise InputError("slides must be a valid JSON list")
+
+        content_kind = candidate.get("content_kind")
+        standalone_fields = (
+            "html_document",
+            "html_sha256",
+            "html_bytes",
+            "html_slide_count",
+            "generation_job_uuid",
+            "generation_provenance_json",
+        )
+        if content_kind == "structured_slides":
+            if any(candidate.get(field) is not None for field in standalone_fields):
+                raise InputError(
+                    "structured_slides cannot contain standalone presentation fields"
+                )
+            return
+        if content_kind != "standalone_html":
+            raise InputError(
+                "content_kind must be one of: structured_slides, standalone_html"
+            )
+        if parsed_slides != []:
+            raise InputError("standalone_html slides must be an empty JSON list")
+
+        html_document = candidate.get("html_document")
+        if not isinstance(html_document, str) or not html_document.strip():
+            raise InputError("standalone_html html_document must be nonblank")
+        try:
+            html_bytes = html_document.encode("utf-8")
+        except UnicodeEncodeError as exc:
+            raise InputError("standalone_html html_document must be valid UTF-8") from exc
+
+        expected_digest = hashlib.sha256(html_bytes).hexdigest()
+        if candidate.get("html_sha256") != expected_digest:
+            raise InputError("standalone_html html_sha256 does not match html_document")
+        stored_bytes = candidate.get("html_bytes")
+        if isinstance(stored_bytes, bool) or stored_bytes != len(html_bytes):
+            raise InputError("standalone_html html_bytes does not match html_document")
+        slide_count = candidate.get("html_slide_count")
+        if (
+            isinstance(slide_count, bool)
+            or not isinstance(slide_count, int)
+            or not 1 <= slide_count <= 30
+        ):
+            raise InputError("standalone_html html_slide_count must be between 1 and 30")
+
+        generation_job_uuid = candidate.get("generation_job_uuid")
+        if not isinstance(generation_job_uuid, str) or not generation_job_uuid.strip():
+            raise InputError("standalone_html generation_job_uuid is required")
+        provenance_json = candidate.get("generation_provenance_json")
+        if not isinstance(provenance_json, str):
+            raise InputError("standalone_html generation_provenance_json is required")
+        try:
+            encoded_provenance = provenance_json.encode("utf-8")
+            provenance = json.loads(provenance_json)
+        except (UnicodeEncodeError, json.JSONDecodeError) as exc:
+            raise InputError(
+                "standalone_html generation_provenance_json must be valid JSON"
+            ) from exc
+        if not isinstance(provenance, dict) or not provenance:
+            raise InputError(
+                "standalone_html generation_provenance_json must be a nonempty object"
+            )
+        if len(encoded_provenance) > 4096:
+            raise InputError(
+                "standalone_html generation_provenance_json exceeds 4096 bytes"
+            )
+
+    @staticmethod
     def _fetch_presentation_by_id(
         conn: sqlite3.Connection, presentation_id: str, include_deleted: bool
     ) -> PresentationRow:
-        query = "SELECT * FROM presentations WHERE id = ?"
+        query = (
+            f"SELECT {_PRESENTATION_DETAIL_PROJECTION} "  # nosec B608
+            "FROM presentations WHERE id = ?"
+        )
         params: list[Any] = [presentation_id]
         if not include_deleted:
             query += " AND deleted = 0"
@@ -597,13 +860,52 @@ class SlidesDatabase:
         source_ref: str | None,
         source_query: str | None,
         custom_css: str | None,
+        content_kind: str = "structured_slides",
+        html_document: str | None = None,
+        html_sha256: str | None = None,
+        html_bytes: int | None = None,
+        html_slide_count: int | None = None,
+        generation_job_uuid: str | None = None,
+        generation_provenance_json: str | None = None,
     ) -> PresentationRow:
         if not title:
             raise InputError("title is required")
         pres_id = presentation_id or str(uuid.uuid4())
         now = self._utcnow_iso()
+        candidate = {
+            "id": pres_id,
+            "title": title,
+            "description": description,
+            "theme": theme,
+            "marp_theme": marp_theme,
+            "template_id": template_id,
+            "visual_style_id": visual_style_id,
+            "visual_style_scope": visual_style_scope,
+            "visual_style_name": visual_style_name,
+            "visual_style_version": visual_style_version,
+            "visual_style_snapshot": visual_style_snapshot,
+            "settings": settings,
+            "studio_data": studio_data,
+            "slides": slides,
+            "slides_text": slides_text,
+            "source_type": source_type,
+            "source_ref": source_ref,
+            "source_query": source_query,
+            "custom_css": custom_css,
+            "created_at": now,
+            "last_modified": now,
+            "client_id": self.client_id,
+            "content_kind": content_kind,
+            "html_document": html_document,
+            "html_sha256": html_sha256,
+            "html_bytes": html_bytes,
+            "html_slide_count": html_slide_count,
+            "generation_job_uuid": generation_job_uuid,
+            "generation_provenance_json": generation_provenance_json,
+        }
         try:
-            with self.transaction() as conn:
+            with self.transaction(immediate=True) as conn:
+                self._validate_presentation_candidate(candidate)
                 conn.execute(
                     """
                     INSERT INTO presentations (
@@ -611,33 +913,22 @@ class SlidesDatabase:
                         visual_style_id, visual_style_scope, visual_style_name, visual_style_version, visual_style_snapshot,
                         settings, studio_data, slides, slides_text,
                         source_type, source_ref, source_query, custom_css,
-                        created_at, last_modified, deleted, client_id, version
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 1)
+                        created_at, last_modified, deleted, client_id, version,
+                        content_kind, html_document, html_sha256, html_bytes,
+                        html_slide_count, generation_job_uuid,
+                        generation_provenance_json
+                    ) VALUES (
+                        :id, :title, :description, :theme, :marp_theme, :template_id,
+                        :visual_style_id, :visual_style_scope, :visual_style_name,
+                        :visual_style_version, :visual_style_snapshot, :settings,
+                        :studio_data, :slides, :slides_text, :source_type, :source_ref,
+                        :source_query, :custom_css, :created_at, :last_modified, 0,
+                        :client_id, 1, :content_kind, :html_document, :html_sha256,
+                        :html_bytes, :html_slide_count, :generation_job_uuid,
+                        :generation_provenance_json
+                    )
                     """,
-                    (
-                        pres_id,
-                        title,
-                        description,
-                        theme,
-                        marp_theme,
-                        template_id,
-                        visual_style_id,
-                        visual_style_scope,
-                        visual_style_name,
-                        visual_style_version,
-                        visual_style_snapshot,
-                        settings,
-                        studio_data,
-                        slides,
-                        slides_text,
-                        source_type,
-                        source_ref,
-                        source_query,
-                        custom_css,
-                        now,
-                        now,
-                        self.client_id,
-                    ),
+                    candidate,
                 )
                 row = self._fetch_presentation_by_id(conn, pres_id, include_deleted=True)
                 self._insert_version_snapshot(conn, row)
@@ -658,6 +949,25 @@ class SlidesDatabase:
         conn = self.get_connection()
         return self._fetch_presentation_by_id(conn, presentation_id, include_deleted)
 
+    def get_presentation_kind(
+        self,
+        presentation_id: str,
+        *,
+        include_deleted: bool = False,
+    ) -> PresentationKindRow:
+        """Fetch only fields needed to guard an operation by content kind."""
+        query = """
+            SELECT id, content_kind, version, deleted, last_modified
+            FROM presentations
+            WHERE id = ?
+        """
+        if not include_deleted:
+            query += " AND deleted = 0"
+        row = self.get_connection().execute(query, (presentation_id,)).fetchone()
+        if not row:
+            raise KeyError("presentation_not_found")
+        return PresentationKindRow(**dict(row))
+
     def list_presentations(
         self,
         *,
@@ -677,7 +987,10 @@ class SlidesDatabase:
         safe_column = allowed_columns.get(sort_column, "created_at")
         safe_direction = "DESC" if sort_direction.upper() == "DESC" else "ASC"
         where = "" if include_deleted else "WHERE deleted = 0"
-        query_template = "SELECT * FROM presentations {where} ORDER BY {safe_column} {safe_direction} LIMIT ? OFFSET ?"
+        query_template = (
+            f"SELECT {_PRESENTATION_DETAIL_PROJECTION} FROM presentations "  # nosec B608
+            "{where} ORDER BY {safe_column} {safe_direction} LIMIT ? OFFSET ?"
+        )
         query = query_template.format_map(locals())  # nosec B608
         count_query_template = "SELECT COUNT(*) AS cnt FROM presentations {where}"
         count_query = count_query_template.format_map(locals())  # nosec B608
@@ -686,6 +999,39 @@ class SlidesDatabase:
         count_row = conn.execute(count_query).fetchone()
         total = int(count_row["cnt"]) if count_row else 0
         return [PresentationRow(**dict(row)) for row in rows], total
+
+    def list_presentation_summaries(
+        self,
+        *,
+        limit: int,
+        offset: int,
+        include_deleted: bool,
+        sort_column: str,
+        sort_direction: str,
+    ) -> tuple[list[PresentationSummaryRow], int]:
+        """List source-free presentation summaries."""
+        if limit < 1:
+            raise InputError("limit must be >= 1")
+        allowed_columns = {
+            "created_at": "created_at",
+            "last_modified": "last_modified",
+            "title": "title",
+        }
+        safe_column = allowed_columns.get(sort_column, "created_at")
+        safe_direction = "DESC" if sort_direction.upper() == "DESC" else "ASC"
+        where = "" if include_deleted else "WHERE deleted = 0"
+        query_template = (
+            f"SELECT {_PRESENTATION_SUMMARY_PROJECTION} FROM presentations "  # nosec B608
+            "{where} ORDER BY {safe_column} {safe_direction} LIMIT ? OFFSET ?"
+        )
+        query = query_template.format_map(locals())  # nosec B608
+        count_query_template = "SELECT COUNT(*) AS cnt FROM presentations {where}"
+        count_query = count_query_template.format_map(locals())  # nosec B608
+        conn = self.get_connection()
+        rows = conn.execute(query, (limit, offset)).fetchall()
+        count_row = conn.execute(count_query).fetchone()
+        total = int(count_row["cnt"]) if count_row else 0
+        return [PresentationSummaryRow(**dict(row)) for row in rows], total
 
     def search_presentations(
         self,
@@ -701,7 +1047,7 @@ class SlidesDatabase:
             raise InputError("limit must be >= 1")
         where = "" if include_deleted else "AND p.deleted = 0"
         search_sql_template = (
-            "SELECT p.* FROM presentations p "
+            f"SELECT {_PRESENTATION_DETAIL_PROJECTION_QUALIFIED} FROM presentations p "  # nosec B608
             "JOIN presentations_fts fts ON p.rowid = fts.rowid "
             "WHERE presentations_fts MATCH ? "
             "{where} "
@@ -725,6 +1071,47 @@ class SlidesDatabase:
             raise InputError("search query is invalid") from exc
         total = int(count_row["cnt"]) if count_row else 0
         return [PresentationRow(**dict(row)) for row in rows], total
+
+    def search_presentation_summaries(
+        self,
+        *,
+        query: str,
+        limit: int,
+        offset: int,
+        include_deleted: bool,
+    ) -> tuple[list[PresentationSummaryRow], int]:
+        """Search presentations without selecting standalone source."""
+        if not query:
+            raise InputError("query is required")
+        if limit < 1:
+            raise InputError("limit must be >= 1")
+        where = "" if include_deleted else "AND p.deleted = 0"
+        search_sql_template = (
+            f"SELECT {_PRESENTATION_SUMMARY_PROJECTION_QUALIFIED} "  # nosec B608
+            "FROM presentations p "
+            "JOIN presentations_fts fts ON p.rowid = fts.rowid "
+            "WHERE presentations_fts MATCH ? "
+            "{where} "
+            "ORDER BY p.last_modified DESC LIMIT ? OFFSET ?"
+        )
+        sql = search_sql_template.format_map(locals())  # nosec B608
+        count_sql_template = (
+            "SELECT COUNT(*) AS cnt FROM presentations p "
+            "JOIN presentations_fts fts ON p.rowid = fts.rowid "
+            "WHERE presentations_fts MATCH ? "
+            "{where}"
+        )
+        count_sql = count_sql_template.format_map(locals())  # nosec B608
+        conn = self.get_connection()
+        try:
+            rows = conn.execute(sql, (query, limit, offset)).fetchall()
+            count_row = conn.execute(count_sql, (query,)).fetchone()
+        except sqlite3.OperationalError as exc:
+            if not self._is_fts_query_error(exc):
+                raise
+            raise InputError("search query is invalid") from exc
+        total = int(count_row["cnt"]) if count_row else 0
+        return [PresentationSummaryRow(**dict(row)) for row in rows], total
 
     def update_presentation(
         self,
@@ -756,16 +1143,24 @@ class SlidesDatabase:
             "source_query",
             "custom_css",
             "deleted",
+            "content_kind",
+            "html_document",
+            "html_sha256",
+            "html_bytes",
+            "html_slide_count",
+            "generation_job_uuid",
+            "generation_provenance_json",
         }
+        valid_updates = {
+            key: value for key, value in update_fields.items() if key in allowed
+        }
+        if not valid_updates:
+            raise InputError("no valid fields to update")
         sets: list[str] = []
         params: list[Any] = []
-        for key, value in update_fields.items():
-            if key not in allowed:
-                continue
+        for key, value in valid_updates.items():
             sets.append(f"{key} = ?")
             params.append(value)
-        if not sets:
-            raise InputError("no valid fields to update")
         next_version = expected_version + 1
         sets.extend(["last_modified = ?", "version = ?", "client_id = ?"])
         params.extend([self._utcnow_iso(), next_version, self.client_id, presentation_id, expected_version])
@@ -773,7 +1168,21 @@ class SlidesDatabase:
         set_clause_sql = ", ".join(sets)
         update_sql_template = "UPDATE presentations SET {set_clause_sql} WHERE id = ? AND version = ?"
         sql = update_sql_template.format_map(locals())  # nosec B608
-        with self.transaction() as conn:
+        with self.transaction(immediate=True) as conn:
+            current = self._fetch_presentation_by_id(
+                conn,
+                presentation_id,
+                include_deleted=True,
+            )
+            if current.version != expected_version:
+                raise ConflictError(
+                    "version_conflict",
+                    entity="presentations",
+                    identifier=presentation_id,
+                )
+            candidate = vars(current).copy()
+            candidate.update(valid_updates)
+            self._validate_presentation_candidate(candidate)
             cur = conn.execute(sql, tuple(params))
             if cur.rowcount == 0:
                 existing = conn.execute("SELECT version FROM presentations WHERE id = ?", (presentation_id,)).fetchone()
@@ -787,7 +1196,7 @@ class SlidesDatabase:
                 entity_uuid=presentation_id,
                 operation=operation,
                 version=next_version,
-                payload={"fields": list(update_fields.keys())},
+                payload={"fields": list(valid_updates.keys())},
             )
         return row
 
@@ -818,6 +1227,34 @@ class SlidesDatabase:
         total = int(count_row["cnt"]) if count_row else 0
         return [PresentationVersionRow(**dict(row)) for row in rows], total
 
+    def list_presentation_version_metadata(
+        self,
+        *,
+        presentation_id: str,
+        limit: int,
+        offset: int,
+    ) -> tuple[list[PresentationVersionMetadataRow], int]:
+        """List version metadata without selecting snapshot payloads."""
+        if limit < 1:
+            raise InputError("limit must be >= 1")
+        conn = self.get_connection()
+        rows = conn.execute(
+            """
+            SELECT presentation_id, version, created_at, client_id
+            FROM presentations_versions
+            WHERE presentation_id = ?
+            ORDER BY version DESC
+            LIMIT ? OFFSET ?
+            """,
+            (presentation_id, limit, offset),
+        ).fetchall()
+        count_row = conn.execute(
+            "SELECT COUNT(*) AS cnt FROM presentations_versions WHERE presentation_id = ?",
+            (presentation_id,),
+        ).fetchone()
+        total = int(count_row["cnt"]) if count_row else 0
+        return [PresentationVersionMetadataRow(**dict(row)) for row in rows], total
+
     def get_presentation_version(
         self,
         *,
@@ -836,6 +1273,50 @@ class SlidesDatabase:
         if not row:
             raise KeyError("presentation_version_not_found")
         return PresentationVersionRow(**dict(row))
+
+    def get_generation_receipt(
+        self,
+        receipt_id: str,
+        *,
+        owner_user_id: str,
+    ) -> SlidesGenerationReceiptRow:
+        """Fetch one generation receipt scoped to its canonical owner."""
+        query = (
+            f"SELECT {_RECEIPT_PROJECTION} "  # nosec B608
+            "FROM slides_generation_receipts "
+            "WHERE id = ? AND owner_user_id = ?"
+        )
+        row = self.get_connection().execute(
+            query,
+            (receipt_id, owner_user_id),
+        ).fetchone()
+        if not row:
+            raise KeyError("slides_generation_receipt_not_found")
+        return SlidesGenerationReceiptRow(**dict(row))
+
+    def get_generation_input(
+        self,
+        receipt_id: str,
+        *,
+        owner_user_id: str,
+    ) -> SlidesGenerationInputRow:
+        """Fetch immutable execution input scoped through its receipt owner."""
+        query = (
+            f"SELECT {_INPUT_PROJECTION} "  # nosec B608
+            "FROM slides_generation_inputs WHERE receipt_id = ? "
+            "AND EXISTS ("
+            "SELECT 1 FROM slides_generation_receipts r "
+            "WHERE r.id = slides_generation_inputs.receipt_id "
+            "AND r.owner_user_id = ?"
+            ")"
+        )
+        row = self.get_connection().execute(
+            query,
+            (receipt_id, owner_user_id),
+        ).fetchone()
+        if not row:
+            raise KeyError("slides_generation_input_not_found")
+        return SlidesGenerationInputRow(**dict(row))
 
     def soft_delete_presentation(self, presentation_id: str, expected_version: int) -> PresentationRow:
         return self.update_presentation(

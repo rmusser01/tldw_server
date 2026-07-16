@@ -17,7 +17,12 @@ documentation:
 - Docs/superpowers/plans/2026-07-15-standalone-html-presentations-implementation-plan.md
 priority: high
 modified_files:
-- Docs/superpowers/plans/2026-07-15-standalone-html-presentations-implementation-plan.md
+- tldw_Server_API/app/core/Slides/slides_migrations.py
+- tldw_Server_API/app/core/Slides/slides_db.py
+- tldw_Server_API/app/core/DB_Management/db_path_utils.py
+- tldw_Server_API/tests/Slides/test_standalone_html_db_migration.py
+- tldw_Server_API/tests/Slides/test_standalone_html_domain.py
+- tldw_Server_API/tests/Slides/test_slides_db.py
 - backlog/tasks/task-12115 - Add-first-class-standalone-HTML-JS-presentation-generation.md
 ---
 
@@ -72,4 +77,12 @@ Docs/superpowers/plans/2026-07-15-standalone-html-presentations-implementation-p
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-07-15 implementation plan approved: the five-stage, 17-task TDD plan locks the closed provider adapter catalog, external-secret/shared-Jobs-store key and reconciliation metadata, fenced receipt/worker recovery, guarded per-request MCP discovery and execution, and the inert form/editor/download boundary. A fresh independent plan review returned APPROVED after correcting the HTML slides=[] persistence invariant, shared Jobs coordination, guarded Uvicorn/WebSocket pins, exact outer-fence parsing, dependency smoke gates, per-commit Backlog staging, and mechanically complete Bandit scope. Backend Slides baseline: 100 passed with 5 warnings. The isolated frontend worktree had no installed workspace dependencies, so no frontend product test ran or failed; Task 13 begins with a frozen clean install and pre-change regression gate. Implementation code has not started.
+
+2026-07-15 Task 1 implementation evidence: assertion-level TDD RED was 36 collected, 24 failed, 12 passed, 5 warnings in 8.92s. The owner-isolation review test separately went RED with 1 failed, 5 warnings in 8.86s before adding the owner-scoped input projection.
+
+Final GREEN: schema/domain/database suite 36 passed, 5 warnings in 12.12s; existing Slides API regression 76 passed, 5 warnings in 12.95s. Bandit over slides_migrations.py, slides_db.py, and db_path_utils.py reported 0 findings and 0 errors.
+
+Migration verification covers new/v0/v1/empty/multirow version state, normalization, idempotent reopen, injected rollback, concurrent connections, legacy backfill, per-statement execution, and FTS synchronization. The legacy failure was traced to a newly created external-content FTS index with 1 content row and 0 docsize rows; one transactional rebuild before backfill restored synchronization.
+
+Deferred for the mandated root spec gate, not hidden: unrelated pre-v2 compatibility check/ALTER helpers remain process-local before the v2 runner; future-version rejection follows base/unrelated initialization; normalized v2 reopen rewrites the single schema_version row. Task 1 did not expand these because the approved spec permits unrelated legacy helpers to remain and root review will adjudicate scope.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
