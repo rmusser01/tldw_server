@@ -247,6 +247,20 @@ describe('Skills certification summary aggregation', () => {
     expect(summary.artifact_safety).toEqual({ passed: false });
     expect(summary.status).toBe('failed');
   });
+
+  it('redacts failure detail before capping it at 500 characters', () => {
+    const detail = `${'p'.repeat(480)} ${SKILLS_CERT_API_KEY} ${'tail'.repeat(100)}`;
+
+    const summary = buildCertificationSummary({
+      ...passingSummaryInput(),
+      failures: [{ category: 'webui_workflow', detail, surface: 'webui' }],
+    });
+    const retainedDetail = summary.failures[0].detail;
+
+    expect(retainedDetail).toContain('[REDACTED]');
+    expect(retainedDetail).not.toContain(SKILLS_CERT_API_KEY);
+    expect(retainedDetail).toHaveLength(500);
+  });
 });
 
 describe('Skills certification evidence finalization', () => {
@@ -387,10 +401,14 @@ describe('Skills certification evidence finalization', () => {
     );
 
     const summary = await finalizeSkillsCertificationEvidence(finalizationOptions(fixture));
+    const retained = JSON.parse(readFileSync(fixture.evidence.summaryPath, 'utf8'));
 
     expect(summary.status).toBe('failed');
     expect(summary.artifact_safety.passed).toBe(false);
     expect(summary.failures).toContainEqual({ category: 'artifact_safety' });
+    expect(retained).toEqual(summary);
+    expect(retained.status).toBe('failed');
+    expect(retained.artifact_safety.passed).toBe(false);
     expect(existsSync(fixture.evidence.root)).toBe(true);
   });
 });

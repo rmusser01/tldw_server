@@ -153,6 +153,14 @@ describe('Skills certification profile', () => {
     expect(JSON.stringify(profile)).not.toContain(SKILLS_CERT_API_KEY);
   });
 
+  it('returns the resolved supplied temporary base for strict runtime cleanup', () => {
+    const fixture = createFixture();
+    const profile = createProfile(fixture);
+
+    expect(profile.baseRoot).toBe(path.resolve(fixture.temporaryBase));
+    expect(path.dirname(profile.root)).toBe(profile.baseRoot);
+  });
+
   it('scrubs copied credentials before setting completed single-user auth', () => {
     const fixture = createFixture();
     const profile = createProfile(fixture);

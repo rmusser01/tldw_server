@@ -67,10 +67,6 @@ export function createProcessRegistry({
     states.set(record, { closePromise });
     registered.push(record);
     child.once('close', (code, signal) => {
-      const index = registered.indexOf(record);
-      if (index >= 0) {
-        registered.splice(index, 1);
-      }
       resolveClose({ code, signal });
     });
 
@@ -130,6 +126,8 @@ export function createProcessRegistry({
       }
     }
 
+    registered.length = 0;
+
     if (errors.length > 0) {
       throw new AggregateError(
         errors,
@@ -162,8 +160,12 @@ export function installCertificationSignalHandlers({
 
   const handleSignal = (signal) => {
     const teardownPromise = registry.teardown();
-    onSignal?.(signal, teardownPromise);
     teardownPromise.catch(() => undefined);
+    try {
+      onSignal?.(signal, teardownPromise);
+    } catch {
+      // Cleanup takes precedence over optional signal notification callbacks.
+    }
   };
   const handleSigint = () => handleSignal('SIGINT');
   const handleSigterm = () => handleSignal('SIGTERM');

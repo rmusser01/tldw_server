@@ -104,6 +104,28 @@ describe('Skills certification process registry', () => {
     await expect(teardown).resolves.toBeUndefined();
   });
 
+  it('verifies a surviving process group after its parent has already closed', async () => {
+    const child = new FakeChild(4112);
+    const events: string[] = [];
+    const stopProcessTree = vi.fn(async () => {
+      events.push('stop');
+    });
+    const probeProcessTree = vi.fn(async () => {
+      events.push('probe');
+      return true;
+    });
+    const { registry } = createHarness({ probeProcessTree, stopProcessTree });
+    const record = registry.spawn(command('closed-parent', child), '/tmp/closed-parent.log');
+
+    child.emit('close', 0, null);
+    await expect(registry.wait(record)).resolves.toEqual({ code: 0, signal: null });
+
+    await expect(registry.teardown()).rejects.toThrow(/process group -4112 is still running/i);
+    expect(stopProcessTree).toHaveBeenCalledWith(record, { timeoutMs: 25 });
+    expect(probeProcessTree).toHaveBeenCalledWith(-4112);
+    expect(events).toEqual(['stop', 'probe']);
+  });
+
   it('stops, waits for close, then probes the detached POSIX process group', async () => {
     const child = new FakeChild(4103);
     const stopProcessTree = vi.fn(
@@ -266,5 +288,39 @@ describe('Skills certification signal handlers', () => {
     expect(processObject.listenerCount('SIGTERM')).toBe(0);
     processObject.emit('SIGINT');
     expect(teardown).toHaveBeenCalledTimes(2);
+  });
+
+  it('isolates throwing signal callbacks after attaching teardown rejection handling', () => {
+    const events: string[] = [];
+    const processObject = new EventEmitter();
+    const { registry } = createHarness();
+    const teardownPromise = {
+      catch: vi.fn(() => {
+        events.push('catch');
+        return teardownPromise;
+      }),
+    } as unknown as Promise<void>;
+    const teardown = vi.spyOn(registry, 'teardown').mockImplementation(() => {
+      events.push('teardown');
+      return teardownPromise;
+    });
+    const onSignal = vi.fn(() => {
+      events.push('callback');
+      throw new Error('callback exploded');
+    });
+
+    const removeHandlers = installCertificationSignalHandlers({
+      onSignal,
+      processObject,
+      registry,
+    });
+
+    expect(() => processObject.emit('SIGINT')).not.toThrow();
+    expect(() => processObject.emit('SIGTERM')).not.toThrow();
+    expect(teardown).toHaveBeenCalledTimes(2);
+    expect(onSignal).toHaveBeenCalledTimes(2);
+    expect(events).toEqual(['teardown', 'catch', 'callback', 'teardown', 'catch', 'callback']);
+
+    removeHandlers();
   });
 });

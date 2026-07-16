@@ -198,6 +198,7 @@ export function createSkillsCertificationProfile({ repoRoot, temporaryBase }) {
 
   const root = mkdtempSync(path.join(resolvedTemporaryBase, 'tldw-skills-certification-'));
   const profile = {
+    baseRoot: resolvedTemporaryBase,
     root,
     markerPath: path.join(root, runtimeMarker),
     configDir: path.join(root, 'Config_Files'),

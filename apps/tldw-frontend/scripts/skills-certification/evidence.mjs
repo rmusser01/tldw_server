@@ -111,7 +111,7 @@ function normalizeFailure(failure) {
     normalized.surface = failure.surface;
   }
   if (typeof failure?.detail === 'string') {
-    normalized.detail = failure.detail;
+    normalized.detail = redactText(failure.detail).slice(0, 500);
   }
   return normalized;
 }
@@ -330,6 +330,11 @@ export async function finalizeSkillsCertificationEvidence({
         finalSummaryInput(summaryInput, evidence, childrenClosed, runtimeDeleted, false)
       )
     ).value;
+    try {
+      summary = writeSanitizedJson(evidence.summaryPath, summary);
+    } catch {
+      // Evidence removal still takes precedence when the failed summary cannot be retained.
+    }
     try {
       removeEvidenceRoot(evidence);
     } catch {
