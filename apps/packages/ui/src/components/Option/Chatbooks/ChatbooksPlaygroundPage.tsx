@@ -2386,7 +2386,7 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
               <p className="mt-1">
                 {t(
                   "settings:chatbooksPlayground.backupAllExclusions",
-                  "Service Prompt overrides are not included in this portable backup."
+                  "This portable backup does not include Service Prompt overrides."
                 )}
               </p>
             </DesignSystemAlert>

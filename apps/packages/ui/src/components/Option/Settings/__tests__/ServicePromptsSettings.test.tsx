@@ -20,6 +20,7 @@ import {
 } from "@/services/tldw/domains/service-prompts"
 
 const mocks = vi.hoisted(() => ({
+  confirmDanger: vi.fn(),
   resolveScope: vi.fn(),
   readLegacy: vi.fn(),
   clearLegacy: vi.fn(),
@@ -30,6 +31,20 @@ const mocks = vi.hoisted(() => ({
   save: vi.fn(),
   reset: vi.fn()
 }))
+
+vi.mock("@/components/Common/confirm-danger", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/components/Common/confirm-danger")
+  >("@/components/Common/confirm-danger")
+  return {
+    ...actual,
+    useConfirmDanger: () => {
+      const confirmDanger = actual.useConfirmDanger()
+      return (options: Parameters<typeof confirmDanger>[0]) =>
+        mocks.confirmDanger(options, confirmDanger)
+    }
+  }
+})
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
@@ -202,6 +217,23 @@ const scopeTwo = {
   scopeKey: "server:research-two:auth:multi-user:org:none:user:84"
 }
 
+const legacyRagCandidate = {
+  definitionId: "chat.rag.answer",
+  partKey: "template",
+  storageKey: "systemPromptForRag",
+  value: "Legacy {context} {question}"
+}
+
+const deferred = <T,>() => {
+  let resolve!: (value: T) => void
+  let reject!: (reason: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, reject, resolve }
+}
+
 const createClient = () => new QueryClient({
   defaultOptions: {
     queries: { retry: false, gcTime: Infinity },
@@ -229,7 +261,7 @@ const openPrompt = async (name: string) => {
 
 describe("ServicePromptsSettings", () => {
   beforeEach(() => {
-    vi.clearAllMocks()
+    vi.resetAllMocks()
     window.history.replaceState({}, "", "/settings/prompt")
     mocks.resolveScope.mockResolvedValue(scopeOne)
     mocks.list.mockResolvedValue(catalog)
@@ -259,6 +291,9 @@ describe("ServicePromptsSettings", () => {
         parts: { ...detail.effective_parts, template: candidate.value }
       }
     ))
+    mocks.confirmDanger.mockImplementation((options, confirmDanger) =>
+      confirmDanger(options)
+    )
     vi.spyOn(window, "confirm").mockReturnValue(true)
   })
 
@@ -273,7 +308,11 @@ describe("ServicePromptsSettings", () => {
     }))
     renderSettings()
 
-    expect(screen.getByText("Loading server and account scope…")).toBeInTheDocument()
+    const loading = screen.getByRole("status", {
+      name: "Loading server and account scope…"
+    })
+    expect(loading).toHaveAttribute("aria-busy", "true")
+    expect(loading.querySelector(".ant-skeleton-active")).toBeNull()
 
     await act(async () => {
       rejectScope(new Error("offline"))
@@ -287,6 +326,7 @@ describe("ServicePromptsSettings", () => {
     fireEvent.click(screen.getByRole("button", { name: "Retry" }))
     expect(await screen.findByRole("button", { name: "RAG answer" }))
       .toBeInTheDocument()
+    expect(document.querySelector("h1")).toBeNull()
   })
 
   it("renders the four localized definitions, query selection, status, workflows, and exact scope", async () => {
@@ -343,8 +383,9 @@ describe("ServicePromptsSettings", () => {
     const systemGroup = editors[0].closest("section")!
     expect(within(systemGroup).queryByText("target_language")).toBeNull()
     const templateGroup = editors[1].closest("section")!
-    expect(within(templateGroup).getByText("target_language")).toBeInTheDocument()
-    expect(within(templateGroup).getByText("text")).toBeInTheDocument()
+    expect(within(templateGroup).getByText("{target_language}"))
+      .toBeInTheDocument()
+    expect(within(templateGroup).getByText("{text}")).toBeInTheDocument()
   })
 
   it("previews every part locally in registry order with visible markers and no request", async () => {
@@ -417,6 +458,128 @@ describe("ServicePromptsSettings", () => {
       )
     })
     expect(await screen.findByText("Customized")).toBeInTheDocument()
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Workflow prompt saved."
+    )
+  })
+
+  it("replaces an in-flight save with migration import without leaving save loading stuck", async () => {
+    mocks.readLegacy.mockResolvedValue([legacyRagCandidate])
+    const pendingSave = deferred<ServicePromptDetail>()
+    mocks.save.mockReturnValue(pendingSave.promise)
+    const { client } = renderSettings()
+    await screen.findByText("Browser-local workflow prompts found")
+    await openPrompt("RAG answer")
+    fireEvent.change(screen.getByRole("textbox", { name: "Template" }), {
+      target: { value: "Saving {context} {question}" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
+    await waitFor(() => expect(mocks.save).toHaveBeenCalledTimes(1))
+    const saveSignal = mocks.save.mock.calls[0][2].signal as AbortSignal
+
+    fireEvent.click(screen.getByRole("button", { name: "Import to this server" }))
+    await waitFor(() => expect(mocks.importLegacy).toHaveBeenCalledTimes(1))
+    expect(saveSignal.aborted).toBe(true)
+    await act(async () => {
+      pendingSave.resolve(detailFor(catalog[0], {
+        source: "user",
+        parts: { template: "Late {context} {question}" }
+      }))
+    })
+    await waitFor(() => expect(document.querySelector(".ant-btn-loading"))
+      .toBeNull())
+    expect((client.getQueryData([
+      "service-prompts",
+      scopeOne.scopeKey,
+      "detail",
+      "chat.rag.answer"
+    ]) as ServicePromptDetail).effective_parts.template)
+      .toBe(legacyRagCandidate.value)
+  })
+
+  it("replaces an in-flight save with reset and ignores the late save result", async () => {
+    mocks.get.mockResolvedValue(detailFor(catalog[0], { source: "user" }))
+    const pendingSave = deferred<ServicePromptDetail>()
+    mocks.save.mockReturnValue(pendingSave.promise)
+    const { client } = renderSettings()
+    await openPrompt("RAG answer")
+    fireEvent.change(screen.getByRole("textbox", { name: "Template" }), {
+      target: { value: "Saving {context} {question}" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
+    await waitFor(() => expect(mocks.save).toHaveBeenCalledTimes(1))
+    const saveSignal = mocks.save.mock.calls[0][2].signal as AbortSignal
+
+    fireEvent.click(screen.getByRole("button", { name: "Reset to default" }))
+    fireEvent.click(within(await screen.findByRole("dialog"))
+      .getByRole("button", { name: "Reset" }))
+    await waitFor(() => expect(mocks.reset).toHaveBeenCalledTimes(1))
+    expect(saveSignal.aborted).toBe(true)
+    await act(async () => {
+      pendingSave.resolve(detailFor(catalog[0], {
+        source: "user",
+        parts: { template: "Late {context} {question}" }
+      }))
+    })
+    await waitFor(() => expect(document.querySelector(".ant-btn-loading"))
+      .toBeNull())
+    expect((client.getQueryData([
+      "service-prompts",
+      scopeOne.scopeKey,
+      "detail",
+      "chat.rag.answer"
+    ]) as ServicePromptDetail).effective_parts.template)
+      .toBe("Context: {context}\nQuestion: {question}")
+  })
+
+  it("aborts an in-flight save when another definition is selected and ignores its late result", async () => {
+    const pendingSave = deferred<ServicePromptDetail>()
+    mocks.save.mockReturnValue(pendingSave.promise)
+    renderSettings()
+    await openPrompt("RAG answer")
+    fireEvent.change(screen.getByRole("textbox", { name: "Template" }), {
+      target: { value: "Saving {context} {question}" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
+    await waitFor(() => expect(mocks.save).toHaveBeenCalledTimes(1))
+    const signal = mocks.save.mock.calls[0][2].signal as AbortSignal
+
+    fireEvent.click(screen.getByRole("button", { name: "RAG follow-up rewrite" }))
+    await screen.findByRole("heading", { name: "RAG follow-up rewrite" })
+    expect(signal.aborted).toBe(true)
+    await act(async () => {
+      pendingSave.resolve(detailFor(catalog[0], {
+        source: "user",
+        parts: { template: "Late {context} {question}" }
+      }))
+    })
+    expect(screen.getByRole("textbox", { name: "Template" }))
+      .toHaveValue("History: {chat_history}\nQuestion: {question}")
+  })
+
+  it("aborts an in-flight reset when another definition is selected and ignores its late result", async () => {
+    mocks.get.mockImplementation(async (id: string) => detailFor(
+      catalog.find((item) => item.id === id)!,
+      id === "chat.rag.answer" ? { source: "user" } : {}
+    ))
+    const pendingReset = deferred<ServicePromptDetail>()
+    mocks.reset.mockReturnValue(pendingReset.promise)
+    renderSettings()
+    await openPrompt("RAG answer")
+    fireEvent.click(screen.getByRole("button", { name: "Reset to default" }))
+    fireEvent.click(within(await screen.findByRole("dialog"))
+      .getByRole("button", { name: "Reset" }))
+    await waitFor(() => expect(mocks.reset).toHaveBeenCalledTimes(1))
+    const signal = mocks.reset.mock.calls[0][2].signal as AbortSignal
+
+    fireEvent.click(screen.getByRole("button", { name: "RAG follow-up rewrite" }))
+    await screen.findByRole("heading", { name: "RAG follow-up rewrite" })
+    expect(signal.aborted).toBe(true)
+    await act(async () => {
+      pendingReset.resolve(detailFor(catalog[0]))
+    })
+    expect(screen.getByRole("textbox", { name: "Template" }))
+      .toHaveValue("History: {chat_history}\nQuestion: {question}")
   })
 
   it("names permanent customization removal before a conditional reset", async () => {
@@ -430,6 +593,7 @@ describe("ServicePromptsSettings", () => {
     expect(dialog).toHaveTextContent(
       "permanently remove the saved customization"
     )
+    expect(dialog).toHaveTextContent("There is no history or undo.")
     fireEvent.click(within(dialog).getByRole("button", { name: "Reset" }))
 
     await waitFor(() => {
@@ -439,6 +603,9 @@ describe("ServicePromptsSettings", () => {
         { signal: expect.any(AbortSignal) }
       )
     })
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Workflow prompt reset to the server default."
+    )
   })
 
   it("shows local and authoritative field validation without dropping the draft", async () => {
@@ -450,6 +617,12 @@ describe("ServicePromptsSettings", () => {
     expect(await screen.findByText(
       "Template variables must match the registered variables exactly once."
     )).toBeInTheDocument()
+    const localError = screen.getByText(
+      "Template variables must match the registered variables exactly once."
+    )
+    expect(editor).toHaveAttribute("aria-invalid", "true")
+    expect(editor).toHaveAttribute("aria-describedby", localError.id)
+    expect(localError.id).toBe("service-prompt-chat-rag-answer-template-error")
     expect(mocks.save).not.toHaveBeenCalled()
 
     fireEvent.change(editor, {
@@ -463,6 +636,8 @@ describe("ServicePromptsSettings", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
     expect(await screen.findByText("Server rejected this template."))
       .toBeInTheDocument()
+    const serverError = screen.getByText("Server rejected this template.")
+    expect(editor).toHaveAttribute("aria-describedby", serverError.id)
     expect(editor).toHaveValue("Context {context}; question {question}")
   })
 
@@ -500,6 +675,38 @@ describe("ServicePromptsSettings", () => {
     await waitFor(() => expect(editor).toHaveValue("Server {context} {question}"))
   })
 
+  it("aborts conflict reload on selection and cannot bind its late result to the new editor", async () => {
+    renderSettings()
+    await openPrompt("RAG answer")
+    fireEvent.change(screen.getByRole("textbox", { name: "Template" }), {
+      target: { value: "Draft {context} {question}" }
+    })
+    mocks.save.mockRejectedValueOnce(new ServicePromptApiError("Conflict", {
+      status: 409,
+      code: "service_prompt_revision_conflict"
+    }))
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
+    await screen.findByText("This prompt changed on the server.")
+
+    const pendingReload = deferred<ServicePromptDetail>()
+    mocks.get.mockReturnValueOnce(pendingReload.promise)
+    fireEvent.click(screen.getByRole("button", { name: "Reload server value" }))
+    await waitFor(() => expect(mocks.get).toHaveBeenCalledTimes(2))
+    const signal = mocks.get.mock.calls[1][1].signal as AbortSignal
+    fireEvent.click(screen.getByRole("button", { name: "RAG follow-up rewrite" }))
+    await screen.findByRole("heading", { name: "RAG follow-up rewrite" })
+    expect(signal.aborted).toBe(true)
+
+    await act(async () => {
+      pendingReload.resolve(detailFor(catalog[0], {
+        source: "user",
+        parts: { template: "Late server {context} {question}" }
+      }))
+    })
+    expect(screen.getByRole("textbox", { name: "Template" }))
+      .toHaveValue("History: {chat_history}\nQuestion: {question}")
+  })
+
   it("offers revision-bound recovery for a corrupt override", async () => {
     const revision = "44444444-4444-4444-8444-444444444444"
     mocks.get.mockRejectedValue(new ServicePromptApiError(
@@ -516,6 +723,9 @@ describe("ServicePromptsSettings", () => {
 
     expect(await screen.findByText("Saved customization is unavailable"))
       .toBeInTheDocument()
+    expect(screen.getByText(
+      "The saved value cannot be read safely. Reset it to restore the server default."
+    )).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Reset corrupt customization" }))
     const dialog = await screen.findByRole("dialog")
     fireEvent.click(within(dialog).getByRole("button", { name: "Reset" }))
@@ -523,6 +733,78 @@ describe("ServicePromptsSettings", () => {
       expect(mocks.reset).toHaveBeenCalledWith(
         "chat.rag.answer",
         revision,
+        { signal: expect.any(AbortSignal) }
+      )
+    })
+  })
+
+  it("shows a failed corrupt reset inside the corrupt recovery callout", async () => {
+    const revision = "44444444-4444-4444-8444-444444444444"
+    mocks.get.mockRejectedValue(new ServicePromptApiError("Corrupt", {
+      status: 500,
+      code: "service_prompt_corrupt_override",
+      revision,
+      canReset: true
+    }))
+    mocks.reset.mockRejectedValueOnce(new Error("reset unavailable"))
+    renderSettings()
+    fireEvent.click(await screen.findByRole("button", { name: "RAG answer" }))
+    const resetButton = await screen.findByRole("button", {
+      name: "Reset corrupt customization"
+    })
+    fireEvent.click(resetButton)
+    fireEvent.click(within(await screen.findByRole("dialog"))
+      .getByRole("button", { name: "Reset" }))
+
+    const recovery = (await screen.findByText("Saved customization is unavailable"))
+      .closest<HTMLElement>('[data-ds-component="RecoveryCallout"]')!
+    expect(within(recovery).getByText("Unable to reset this workflow prompt."))
+      .toBeInTheDocument()
+  })
+
+  it("refetches a corrupt revision after reset conflict before offering reset again", async () => {
+    const firstRevision = "44444444-4444-4444-8444-444444444444"
+    const secondRevision = "55555555-5555-4555-8555-555555555555"
+    mocks.get
+      .mockRejectedValueOnce(new ServicePromptApiError("Corrupt", {
+        status: 500,
+        code: "service_prompt_corrupt_override",
+        revision: firstRevision,
+        canReset: true
+      }))
+      .mockRejectedValueOnce(new ServicePromptApiError("Corrupt again", {
+        status: 500,
+        code: "service_prompt_corrupt_override",
+        revision: secondRevision,
+        canReset: true
+      }))
+    mocks.reset
+      .mockRejectedValueOnce(new ServicePromptApiError("Conflict", {
+        status: 409,
+        code: "service_prompt_revision_conflict"
+      }))
+      .mockResolvedValueOnce(detailFor(catalog[0]))
+    renderSettings()
+    fireEvent.click(await screen.findByRole("button", { name: "RAG answer" }))
+    fireEvent.click(await screen.findByRole("button", {
+      name: "Reset corrupt customization"
+    }))
+    const dialogs = await screen.findAllByRole("dialog")
+    fireEvent.click(within(dialogs[dialogs.length - 1])
+      .getByRole("button", { name: "Reset" }))
+    await waitFor(() => expect(mocks.get).toHaveBeenCalledTimes(2))
+
+    fireEvent.click(await screen.findByRole("button", {
+      name: "Reset corrupt customization"
+    }))
+    const retryDialogs = await screen.findAllByRole("dialog")
+    fireEvent.click(within(retryDialogs[retryDialogs.length - 1])
+      .getByRole("button", { name: "Reset" }))
+    await waitFor(() => {
+      expect(mocks.reset).toHaveBeenNthCalledWith(
+        2,
+        "chat.rag.answer",
+        secondRevision,
         { signal: expect.any(AbortSignal) }
       )
     })
@@ -550,6 +832,70 @@ describe("ServicePromptsSettings", () => {
       .not.toBeInTheDocument()
   })
 
+  it("shows and retries a legacy probe failure even when no candidates were returned", async () => {
+    mocks.readLegacy
+      .mockRejectedValueOnce(new Error("storage unavailable"))
+      .mockResolvedValueOnce([legacyRagCandidate])
+    renderSettings()
+
+    expect(await screen.findByText("Unable to read browser-local workflow prompts."))
+      .toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }))
+    expect(await screen.findByText("Browser-local workflow prompts found"))
+      .toBeInTheDocument()
+    expect(mocks.readLegacy).toHaveBeenCalledTimes(2)
+  })
+
+  it("preserves candidates and allows retry when migration detail prefetch fails", async () => {
+    mocks.readLegacy.mockResolvedValue([legacyRagCandidate])
+    mocks.get.mockRejectedValueOnce(new Error("detail unavailable"))
+    renderSettings()
+    await screen.findByText("Browser-local workflow prompts found")
+
+    fireEvent.click(await screen.findByRole("button", {
+      name: "Import to this server"
+    }))
+    expect(await screen.findByText(
+      "Unable to prepare this import. The browser-local values were preserved."
+    )).toBeInTheDocument()
+    expect(screen.getByText("1 browser-local prompt still needs attention."))
+      .toBeInTheDocument()
+    expect(screen.getByRole("textbox", { name: "Repair RAG answer" }))
+      .toHaveValue(legacyRagCandidate.value)
+
+    mocks.get.mockResolvedValue(detailFor(catalog[0]))
+    const retryImport = screen.getByText("Import to this server").closest("button")!
+    await waitFor(() => expect(retryImport).not.toBeDisabled())
+    fireEvent.click(retryImport)
+    await waitFor(() => expect(mocks.importLegacy).toHaveBeenCalledTimes(1))
+  })
+
+  it("handles replacement-confirm rejection without losing candidates and remains retryable", async () => {
+    mocks.readLegacy.mockResolvedValue([legacyRagCandidate])
+    mocks.get.mockResolvedValue(detailFor(catalog[0], {
+      source: "user",
+      parts: { template: "Saved {context} {question}" }
+    }))
+    mocks.confirmDanger.mockRejectedValueOnce(new Error("dialog unavailable"))
+    renderSettings()
+    await screen.findByText("Browser-local workflow prompts found")
+
+    const retryImport = screen.getByText("Import to this server").closest("button")!
+    await waitFor(() => expect(retryImport).not.toBeDisabled())
+    fireEvent.click(retryImport)
+    expect(await screen.findByText(
+      "Unable to prepare this import. The browser-local values were preserved."
+    )).toBeInTheDocument()
+    expect(screen.getByRole("textbox", { name: "Repair RAG answer" }))
+      .toHaveValue(legacyRagCandidate.value)
+
+    await waitFor(() => expect(retryImport).not.toBeDisabled())
+    fireEvent.click(retryImport)
+    fireEvent.click(within(await screen.findByRole("dialog"))
+      .getByRole("button", { name: "Replace and import" }))
+    await waitFor(() => expect(mocks.importLegacy).toHaveBeenCalledTimes(1))
+  })
+
   it("imports raw migration values and removes each only after confirmed save", async () => {
     mocks.readLegacy.mockResolvedValue([
       {
@@ -563,7 +909,7 @@ describe("ServicePromptsSettings", () => {
     expect(await screen.findByText("Browser-local workflow prompts found"))
       .toBeInTheDocument()
     expect(screen.getByText("https://research-one.test")).toBeInTheDocument()
-    expect(screen.getByText(/not included in Backup supported account data/i))
+    expect(screen.getByText(/Portable backups do not include Service Prompt overrides/i))
       .toBeInTheDocument()
 
     fireEvent.click(screen.getByRole("button", { name: "Import to this server" }))
@@ -613,6 +959,12 @@ describe("ServicePromptsSettings", () => {
     )).toBeInTheDocument()
     const repair = screen.getByRole("textbox", { name: "Repair RAG answer" })
     expect(repair).toHaveValue("invalid legacy")
+    const migrationError = screen.getByText(
+      "Template variables must match the registered variables exactly once."
+    )
+    expect(repair).toHaveAttribute("aria-invalid", "true")
+    expect(repair).toHaveAttribute("aria-describedby", migrationError.id)
+    expect(migrationError.id).toBe("migration-chat-rag-answer-error")
     fireEvent.change(repair, {
       target: { value: "Repaired {context} {question}" }
     })
@@ -662,6 +1014,47 @@ describe("ServicePromptsSettings", () => {
     expect(await screen.findByText("1 browser-local prompt still needs attention."))
       .toBeInTheDocument()
   })
+
+  it.each(["resolve", "reject"] as const)(
+    "does not restore old migration state when non-abortable discard %s settles after scope change",
+    async (outcome) => {
+      const secondCandidate = {
+        definitionId: "chat.web_search.answer",
+        partKey: "template",
+        storageKey: "webSearchPrompt",
+        value: "Web {current_date_time} {search_results}"
+      }
+      mocks.readLegacy
+        .mockResolvedValueOnce([legacyRagCandidate, secondCandidate])
+        .mockResolvedValueOnce([])
+      const pendingClear = deferred<void>()
+      mocks.clearLegacy.mockReturnValueOnce(pendingClear.promise)
+      mocks.resolveScope.mockResolvedValueOnce(scopeOne).mockResolvedValueOnce(scopeTwo)
+      renderSettings()
+      await screen.findByText("Browser-local workflow prompts found")
+      fireEvent.click(screen.getByRole("button", { name: "Discard local values" }))
+      fireEvent.click(within(await screen.findByRole("dialog"))
+        .getByRole("button", { name: "Discard" }))
+      await waitFor(() => expect(mocks.clearLegacy).toHaveBeenCalledTimes(1))
+
+      window.dispatchEvent(new Event("tldw:config-updated"))
+      await waitFor(() => {
+        expect(mocks.resolveScope).toHaveBeenCalledTimes(2)
+        expect(mocks.readLegacy).toHaveBeenCalledTimes(2)
+      })
+      await act(async () => {
+        if (outcome === "resolve") pendingClear.resolve()
+        else pendingClear.reject(new Error("late clear failure"))
+      })
+
+      await waitFor(() => {
+        expect(screen.queryByText("Browser-local workflow prompts found"))
+          .not.toBeInTheDocument()
+        expect(screen.queryByText(/browser-local prompt still needs attention/i))
+          .not.toBeInTheDocument()
+      })
+    }
+  )
 
   it("cancels the old scope, clears migration, and makes its dirty draft unsaveable", async () => {
     mocks.readLegacy.mockResolvedValue([
@@ -792,6 +1185,59 @@ describe("ServicePromptsSettings", () => {
       true
     )
   })
+
+  it("uses router history idx to reverse a real declined back navigation without adding history", async () => {
+    window.history.replaceState({ idx: 40 }, "", "/settings")
+    window.history.pushState({ idx: 41 }, "", "/settings/prompt")
+    renderSettings()
+    await openPrompt("RAG answer")
+    const historyLength = window.history.length
+    const editor = screen.getByRole("textbox", { name: "Template" })
+    fireEvent.change(editor, {
+      target: { value: "Dirty {context} {question}" }
+    })
+    editor.focus()
+    vi.mocked(window.confirm).mockReturnValue(false)
+
+    await act(async () => {
+      window.history.back()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+    await waitFor(() => {
+      expect(window.confirm).toHaveBeenCalled()
+      expect(window.location.pathname).toBe("/settings/prompt")
+      expect(new URLSearchParams(window.location.search).get("prompt"))
+        .toBe("chat.rag.answer")
+    })
+    expect(window.history.length).toBe(historyLength)
+    const restoredEditor = await screen.findByRole("textbox", { name: "Template" })
+    await waitFor(() => expect(restoredEditor).toHaveFocus())
+    expect(restoredEditor).toHaveValue("Dirty {context} {question}")
+  })
+
+  it.each(["success", "error"] as const)(
+    "focuses the shared narrow-layout detail target after explicit selection %s",
+    async (outcome) => {
+      Object.defineProperty(window, "innerWidth", {
+        value: 390,
+        configurable: true
+      })
+      if (outcome === "error") {
+        mocks.get.mockRejectedValueOnce(new Error("detail unavailable"))
+      }
+      renderSettings()
+      fireEvent.click(await screen.findByRole("button", { name: "RAG answer" }))
+      if (outcome === "success") {
+        await screen.findByRole("heading", { name: "RAG answer" })
+      } else {
+        await screen.findByText("Unable to load this workflow prompt")
+      }
+      const detailTarget = screen.getByRole("region", {
+        name: "Workflow prompt details"
+      })
+      await waitFor(() => expect(detailTarget).toHaveFocus())
+    }
+  )
 
   it("keeps the selected editor structurally usable on narrow layouts and renders prompt text as text only", async () => {
     Object.defineProperty(window, "innerWidth", { value: 390, configurable: true })

@@ -205,9 +205,9 @@ describe("ChatbooksPlaygroundPage backup-all flow", () => {
     ).toBeInTheDocument()
     expect(screen.getAllByText("Backup supported account data").length)
       .toBeGreaterThan(0)
-    expect(
-      screen.getByText(/Service Prompt overrides are not included/i)
-    ).toBeInTheDocument()
+    expect(screen.getByText(
+      "This portable backup does not include Service Prompt overrides."
+    )).toBeInTheDocument()
 
     await waitFor(() => {
       expect(screen.getByText("Backup all scope")).toBeInTheDocument()

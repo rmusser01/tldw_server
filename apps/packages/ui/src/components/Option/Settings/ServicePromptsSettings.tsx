@@ -33,8 +33,22 @@ type Draft = {
 }
 
 type MigrationItem = LegacyServicePromptCandidate & {
-  value: string
   error?: string
+}
+
+type OperationKind =
+  | "save"
+  | "reset"
+  | "reload"
+  | "migration-import"
+  | "migration-discard"
+
+type ActiveOperation = {
+  controller: AbortController
+  definitionId?: string
+  identity: number
+  kind: OperationKind
+  scopeKey: string
 }
 
 const KNOWN_DEFINITIONS = {
@@ -137,6 +151,21 @@ const getPromptSearchId = (searchParams: URLSearchParams): string | null => {
   return value || null
 }
 
+const getHistoryIndex = (state: unknown): number | null => {
+  if (!state || typeof state !== "object") return null
+  const historyState = state as {
+    idx?: unknown
+    servicePromptHistoryIndex?: unknown
+  }
+  if (typeof historyState.servicePromptHistoryIndex === "number") {
+    return historyState.servicePromptHistoryIndex
+  }
+  return typeof historyState.idx === "number" ? historyState.idx : null
+}
+
+const toDomId = (value: string): string =>
+  value.replace(/[^a-zA-Z0-9_-]+/g, "-")
+
 export const ServicePromptsSettings = () => {
   const { t } = useTranslation("settings")
   const queryClient = useQueryClient()
@@ -155,42 +184,100 @@ export const ServicePromptsSettings = () => {
   const [preview, setPreview] = React.useState<Record<string, string> | null>(null)
   const [conflict, setConflict] = React.useState(false)
   const [operationError, setOperationError] = React.useState<string | null>(null)
-  const [isSaving, setIsSaving] = React.useState(false)
-  const [isResetting, setIsResetting] = React.useState(false)
+  const [operationAnnouncement, setOperationAnnouncement] = React.useState("")
+  const [activeOperation, setActiveOperation] =
+    React.useState<ActiveOperation | null>(null)
   const [migrationItems, setMigrationItems] = React.useState<MigrationItem[]>([])
-  const [migrationLoading, setMigrationLoading] = React.useState(false)
+  const [migrationError, setMigrationError] = React.useState<string | null>(null)
   const [migrationMessage, setMigrationMessage] = React.useState<string | null>(null)
+  const [migrationProbeError, setMigrationProbeError] = React.useState<string | null>(null)
+  const [migrationProbeGeneration, setMigrationProbeGeneration] = React.useState(0)
 
   const scopeRef = React.useRef<ServicePromptScope | null>(null)
+  const selectedIdRef = React.useRef<string | null>(selectedId)
   const dirtyRef = React.useRef(false)
-  const editedUrlRef = React.useRef(window.location.href)
   const historyIndexRef = React.useRef(0)
+  const historyFocusRef = React.useRef<{
+    element: HTMLElement | null
+    id: string | null
+  } | null>(null)
   const suppressPopstateRef = React.useRef(false)
-  const mutationControllerRef = React.useRef<AbortController | null>(null)
+  const activeOperationRef = React.useRef<ActiveOperation | null>(null)
+  const operationIdentityRef = React.useRef(0)
   const migrationProbedScopeRef = React.useRef<string | null>(null)
+  const detailFocusRef = React.useRef<HTMLElement | null>(null)
+  const pendingFocusDefinitionRef = React.useRef<string | null>(null)
+
+  const abortActiveOperation = React.useCallback(() => {
+    activeOperationRef.current?.controller.abort()
+    activeOperationRef.current = null
+    setActiveOperation(null)
+    setOperationAnnouncement("")
+  }, [])
+
+  const startOperation = React.useCallback((
+    kind: OperationKind,
+    scopeKey: string,
+    definitionId?: string
+  ): ActiveOperation => {
+    activeOperationRef.current?.controller.abort()
+    const operation = {
+      controller: new AbortController(),
+      definitionId,
+      identity: operationIdentityRef.current + 1,
+      kind,
+      scopeKey
+    }
+    operationIdentityRef.current = operation.identity
+    activeOperationRef.current = operation
+    setActiveOperation(operation)
+    return operation
+  }, [])
+
+  const isCurrentOperation = React.useCallback((operation: ActiveOperation) =>
+    !operation.controller.signal.aborted &&
+    activeOperationRef.current?.identity === operation.identity &&
+    scopeRef.current?.scopeKey === operation.scopeKey &&
+    (!operation.definitionId || selectedIdRef.current === operation.definitionId), [])
+
+  const finishOperation = React.useCallback((operation: ActiveOperation) => {
+    if (activeOperationRef.current?.identity === operation.identity) {
+      activeOperationRef.current = null
+    }
+    setActiveOperation((current) =>
+      current?.identity === operation.identity ? null : current
+    )
+  }, [])
+
+  const activeKind = activeOperation?.kind ?? null
+  const isSaving = activeKind === "save"
+  const isResetting = activeKind === "reset"
+  const migrationLoading = activeKind === "migration-import" ||
+    activeKind === "migration-discard"
 
   React.useEffect(() => {
     scopeRef.current = scope
   }, [scope])
 
   React.useEffect(() => {
+    selectedIdRef.current = selectedId
+  }, [selectedId])
+
+  React.useEffect(() => {
     dirtyRef.current = dirty
-    if (dirty) editedUrlRef.current = window.location.href
   }, [dirty])
 
   React.useEffect(() => {
+    if (typeof window === "undefined") return
     const existing = window.history.state ?? {}
-    const existingIndex = existing.servicePromptHistoryIndex
-    if (typeof existingIndex === "number") {
-      historyIndexRef.current = existingIndex
-      return
-    }
+    const existingIndex = getHistoryIndex(existing)
+    if (existingIndex !== null) historyIndexRef.current = existingIndex
     window.history.replaceState(
       { ...existing, servicePromptHistoryIndex: historyIndexRef.current },
       "",
       window.location.href
     )
-  }, [])
+  }, [selectedId])
 
   React.useEffect(() => {
     const controller = new AbortController()
@@ -213,15 +300,18 @@ export const ServicePromptsSettings = () => {
   React.useEffect(() => {
     const handleScopeChange = () => {
       const oldScope = scopeRef.current
-      mutationControllerRef.current?.abort()
+      abortActiveOperation()
       if (oldScope) {
         const queryKey = ["service-prompts", oldScope.scopeKey]
         void queryClient.cancelQueries({ queryKey })
         void queryClient.invalidateQueries({ queryKey, refetchType: "none" })
       }
       migrationProbedScopeRef.current = null
+      pendingFocusDefinitionRef.current = null
       setMigrationItems([])
+      setMigrationError(null)
       setMigrationMessage(null)
+      setMigrationProbeError(null)
       setScope(null)
       setScopeError(null)
       setScopeLoading(true)
@@ -243,7 +333,7 @@ export const ServicePromptsSettings = () => {
       window.removeEventListener("tldw:config-updated", handleScopeChange)
       window.removeEventListener("tldw:auth-credentials-changed", handleScopeChange)
     }
-  }, [queryClient, searchParams, setSearchParams])
+  }, [abortActiveOperation, queryClient, searchParams, setSearchParams])
 
   const catalogKey = [
     "service-prompts",
@@ -262,25 +352,24 @@ export const ServicePromptsSettings = () => {
     }
     migrationProbedScopeRef.current = scope.scopeKey
     const controller = new AbortController()
+    setMigrationProbeError(null)
     void readLegacyServicePromptCandidates({ signal: controller.signal })
       .then((candidates) => {
         if (controller.signal.aborted || scopeRef.current?.scopeKey !== scope.scopeKey) {
           return
         }
-        setMigrationItems(candidates.map((candidate) => ({
-          ...candidate,
-          value: candidate.value
-        })))
+        setMigrationItems(candidates)
       })
       .catch((error) => {
-        if (!isAbortError(error)) {
-          setMigrationMessage(t("servicePrompts.migration.readFailed", {
+        if (!controller.signal.aborted && !isAbortError(error) &&
+          scopeRef.current?.scopeKey === scope.scopeKey) {
+          setMigrationProbeError(t("servicePrompts.migration.readFailed", {
             defaultValue: "Unable to read browser-local workflow prompts."
           }))
         }
       })
     return () => controller.abort()
-  }, [catalogQuery.data, scope, t])
+  }, [catalogQuery.data, migrationProbeGeneration, scope, t])
 
   const selectedDefinition = React.useMemo(
     () => catalogQuery.data?.find((item) => item.id === selectedId) ?? null,
@@ -298,6 +387,12 @@ export const ServicePromptsSettings = () => {
     queryFn: ({ signal }) =>
       tldwClient.getServicePrompt(selectedDefinition!.id, { signal })
   })
+  const detailFocusReady = Boolean(
+    detailQuery.data && draft && scope && selectedDefinition &&
+    draft.scopeKey === scope.scopeKey &&
+    draft.definitionId === selectedDefinition.id &&
+    detailQuery.data.id === selectedDefinition.id
+  )
 
   React.useEffect(() => {
     const detail = detailQuery.data
@@ -313,6 +408,54 @@ export const ServicePromptsSettings = () => {
     setConflict(false)
     setOperationError(null)
   }, [detailQuery.data, dirty, scope])
+
+  React.useEffect(() => {
+    if (!selectedId || pendingFocusDefinitionRef.current !== selectedId ||
+      !detailQuery.isError) {
+      return
+    }
+    const target = detailFocusRef.current
+    if (!target) return
+    const timeout = window.setTimeout(() => {
+      if (pendingFocusDefinitionRef.current !== selectedId ||
+        selectedIdRef.current !== selectedId || !target.isConnected) {
+        return
+      }
+      pendingFocusDefinitionRef.current = null
+      target.focus()
+    }, 0)
+    return () => window.clearTimeout(timeout)
+  }, [detailQuery.isError, selectedId])
+
+  React.useEffect(() => {
+    const selectionFocusPending = pendingFocusDefinitionRef.current === selectedId
+    const historyFocusPending = Boolean(historyFocusRef.current?.id)
+    if (!selectedId || (!selectionFocusPending && !historyFocusPending) ||
+      !detailFocusReady) {
+      return
+    }
+    const target = detailFocusRef.current
+    if (!target) return
+    const frame = window.requestAnimationFrame(() => {
+      if (selectedIdRef.current !== selectedId || !target.isConnected) {
+        return
+      }
+      const historyTargetId = historyFocusRef.current?.id
+      const historyTarget = historyTargetId
+        ? document.getElementById(historyTargetId)
+        : null
+      if (historyTarget) {
+        historyFocusRef.current = null
+        historyTarget.focus()
+        return
+      }
+      if (pendingFocusDefinitionRef.current === selectedId) {
+        pendingFocusDefinitionRef.current = null
+        target.focus()
+      }
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [detailFocusReady, selectedId])
 
   React.useEffect(() => {
     const beforeUnload = (event: BeforeUnloadEvent) => {
@@ -347,11 +490,21 @@ export const ServicePromptsSettings = () => {
     const popstate = (event: PopStateEvent) => {
       if (suppressPopstateRef.current) {
         suppressPopstateRef.current = false
+        const focusTarget = historyFocusRef.current
+        const restored = focusTarget?.id
+          ? document.getElementById(focusTarget.id)
+          : focusTarget?.element?.isConnected
+            ? focusTarget.element
+            : detailFocusRef.current
+        if (restored) {
+          historyFocusRef.current = null
+          restored.focus()
+        }
         return
       }
       if (!dirtyRef.current) {
-        const index = event.state?.servicePromptHistoryIndex
-        if (typeof index === "number") historyIndexRef.current = index
+        const index = getHistoryIndex(event.state)
+        if (index !== null) historyIndexRef.current = index
         return
       }
       const leave = window.confirm(t("servicePrompts.unsaved.leave", {
@@ -360,22 +513,23 @@ export const ServicePromptsSettings = () => {
       if (leave) {
         dirtyRef.current = false
         setDirty(false)
-        const index = event.state?.servicePromptHistoryIndex
-        if (typeof index === "number") historyIndexRef.current = index
+        const index = getHistoryIndex(event.state)
+        if (index !== null) historyIndexRef.current = index
         return
       }
-      const targetIndex = event.state?.servicePromptHistoryIndex
-      if (typeof targetIndex === "number") {
-        const delta = historyIndexRef.current - targetIndex
-        suppressPopstateRef.current = true
-        window.history.go(delta || 1)
-      } else {
-        window.history.pushState(
-          { servicePromptHistoryIndex: historyIndexRef.current },
-          "",
-          editedUrlRef.current
-        )
+      const targetIndex = getHistoryIndex(event.state)
+      const delta = targetIndex === null
+        ? 1
+        : historyIndexRef.current - targetIndex
+      const activeElement = document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null
+      historyFocusRef.current = {
+        element: activeElement ?? detailFocusRef.current,
+        id: activeElement?.id || null
       }
+      suppressPopstateRef.current = true
+      window.history.go(delta || 1)
     }
 
     window.addEventListener("beforeunload", beforeUnload)
@@ -388,7 +542,10 @@ export const ServicePromptsSettings = () => {
     }
   }, [t])
 
-  React.useEffect(() => () => mutationControllerRef.current?.abort(), [])
+  React.useEffect(() => () => {
+    activeOperationRef.current?.controller.abort()
+    activeOperationRef.current = null
+  }, [])
 
   const definitionLabel = React.useCallback(
     (definition: ServicePromptCatalogItem) =>
@@ -403,6 +560,21 @@ export const ServicePromptsSettings = () => {
     }))) {
       return
     }
+    abortActiveOperation()
+    if (scope && selectedId) {
+      const oldDetailKey = [
+        "service-prompts",
+        scope.scopeKey,
+        "detail",
+        selectedId
+      ] as const
+      void queryClient.cancelQueries({ queryKey: oldDetailKey })
+      void queryClient.invalidateQueries({
+        queryKey: oldDetailKey,
+        refetchType: "none"
+      })
+    }
+    pendingFocusDefinitionRef.current = id
     setDirty(false)
     setScopeChanged(false)
     setFieldErrors({})
@@ -411,18 +583,7 @@ export const ServicePromptsSettings = () => {
     setOperationError(null)
     const next = new URLSearchParams(searchParams)
     next.set("prompt", id)
-    historyIndexRef.current += 1
     setSearchParams(next)
-    queueMicrotask(() => {
-      window.history.replaceState(
-        {
-          ...(window.history.state ?? {}),
-          servicePromptHistoryIndex: historyIndexRef.current
-        },
-        "",
-        window.location.href
-      )
-    })
   }
 
   const updatePart = (key: string, value: string) => {
@@ -473,25 +634,30 @@ export const ServicePromptsSettings = () => {
     setFieldErrors(errors)
     if (Object.keys(errors).length > 0) return
     const operationScope = scope.scopeKey
-    const controller = new AbortController()
-    mutationControllerRef.current?.abort()
-    mutationControllerRef.current = controller
-    setIsSaving(true)
+    const definitionId = selectedDefinition.id
+    const operation = startOperation("save", operationScope, definitionId)
+    const operationDetailKey = [
+      "service-prompts",
+      operationScope,
+      "detail",
+      definitionId
+    ] as const
     setConflict(false)
     setOperationError(null)
+    setOperationAnnouncement(t("servicePrompts.operations.saving", {
+      defaultValue: "Saving workflow prompt…"
+    }))
     try {
       const saved = await tldwClient.saveServicePrompt(
-        selectedDefinition.id,
+        definitionId,
         {
           parts: { ...draft.parts },
           expected_revision: draft.revision
         },
-        { signal: controller.signal }
+        { signal: operation.controller.signal }
       )
-      if (controller.signal.aborted || scopeRef.current?.scopeKey !== operationScope) {
-        return
-      }
-      queryClient.setQueryData(detailKey, saved)
+      if (!isCurrentOperation(operation)) return
+      queryClient.setQueryData(operationDetailKey, saved)
       setDraft({
         scopeKey: operationScope,
         definitionId: saved.id,
@@ -500,9 +666,16 @@ export const ServicePromptsSettings = () => {
       })
       setDirty(false)
       setPreview(null)
-      await queryClient.invalidateQueries({ queryKey: detailKey, refetchType: "none" })
+      setOperationAnnouncement(t("servicePrompts.operations.saved", {
+        defaultValue: "Workflow prompt saved."
+      }))
+      await queryClient.invalidateQueries({
+        queryKey: operationDetailKey,
+        refetchType: "none"
+      })
     } catch (error) {
-      if (controller.signal.aborted || isAbortError(error)) return
+      if (!isCurrentOperation(operation) || isAbortError(error)) return
+      setOperationAnnouncement("")
       if (error instanceof ServicePromptApiError && error.status === 422) {
         setFieldErrors(error.fieldErrors ?? {})
       } else if (error instanceof ServicePromptApiError && error.status === 409) {
@@ -513,68 +686,108 @@ export const ServicePromptsSettings = () => {
         }))
       }
     } finally {
-      if (mutationControllerRef.current === controller) {
-        mutationControllerRef.current = null
-        setIsSaving(false)
-      }
+      finishOperation(operation)
     }
   }
 
   const reloadServerValue = async () => {
+    if (!selectedDefinition || !scope) return
+    const operationScope = scope.scopeKey
+    const definitionId = selectedDefinition.id
+    const operation = startOperation("reload", operationScope, definitionId)
+    const operationDetailKey = [
+      "service-prompts",
+      operationScope,
+      "detail",
+      definitionId
+    ] as const
     setFieldErrors({})
-    const result = await detailQuery.refetch()
-    if (result.isError || !result.data || !scope) {
+    setOperationError(null)
+    setOperationAnnouncement("")
+    try {
+      const result = await tldwClient.getServicePrompt(definitionId, {
+        signal: operation.controller.signal
+      })
+      if (!isCurrentOperation(operation)) return
+      queryClient.setQueryData(operationDetailKey, result)
+      setDraft({
+        scopeKey: operationScope,
+        definitionId: result.id,
+        parts: { ...result.effective_parts },
+        revision: result.revision
+      })
+      setDirty(false)
+      setConflict(false)
+      setOperationError(null)
+    } catch (error) {
+      if (!isCurrentOperation(operation) || isAbortError(error)) return
       setDirty(true)
       setConflict(true)
       setOperationError(t("servicePrompts.errors.reloadFailed", {
         defaultValue: "Unable to reload the server value."
       }))
-      return
+    } finally {
+      finishOperation(operation)
     }
-    setDraft({
-      scopeKey: scope.scopeKey,
-      definitionId: result.data.id,
-      parts: { ...result.data.effective_parts },
-      revision: result.data.revision
-    })
-    setDirty(false)
-    setConflict(false)
-    setOperationError(null)
   }
 
   const resetPrompt = async (revision: string | null, corrupt = false) => {
     if (!selectedDefinition || !scope || (!corrupt && !draftIsCurrent)) return
+    const operationScope = scope.scopeKey
+    const definitionId = selectedDefinition.id
     const label = definitionLabel(selectedDefinition)
-    const confirmed = await confirmDanger({
-      title: t("servicePrompts.reset.title", {
-        defaultValue: "Reset {{name}}?",
-        name: label
-      }),
-      content: t("servicePrompts.reset.content", {
-        defaultValue:
-          "This will permanently remove the saved customization. V1 has no history or undo.",
-        name: label
-      }),
-      okText: t("servicePrompts.actions.resetConfirm", { defaultValue: "Reset" })
-    })
-    if (!confirmed || scopeRef.current?.scopeKey !== scope.scopeKey) return
-    const controller = new AbortController()
-    mutationControllerRef.current?.abort()
-    mutationControllerRef.current = controller
-    setIsResetting(true)
+    let confirmed = false
+    try {
+      confirmed = await confirmDanger({
+        title: t("servicePrompts.reset.title", {
+          defaultValue: "Reset {{name}}?",
+          name: label
+        }),
+        content: t("servicePrompts.reset.content", {
+          defaultValue:
+            "This will permanently remove the saved customization. There is no history or undo.",
+          name: label
+        }),
+        okText: t("servicePrompts.actions.resetConfirm", { defaultValue: "Reset" })
+      })
+    } catch {
+      if (scopeRef.current?.scopeKey === operationScope &&
+        selectedIdRef.current === definitionId) {
+        setOperationError(t("servicePrompts.errors.resetFailed", {
+          defaultValue: "Unable to reset this workflow prompt."
+        }))
+      }
+      return
+    }
+    if (!confirmed || scopeRef.current?.scopeKey !== operationScope ||
+      selectedIdRef.current !== definitionId) {
+      return
+    }
+    const operation = startOperation(
+      "reset",
+      operationScope,
+      definitionId
+    )
+    const operationDetailKey = [
+      "service-prompts",
+      operationScope,
+      "detail",
+      definitionId
+    ] as const
     setOperationError(null)
+    setOperationAnnouncement(t("servicePrompts.operations.resetting", {
+      defaultValue: "Resetting workflow prompt…"
+    }))
     try {
       const reset = await tldwClient.resetServicePrompt(
-        selectedDefinition.id,
+        definitionId,
         revision,
-        { signal: controller.signal }
+        { signal: operation.controller.signal }
       )
-      if (controller.signal.aborted || scopeRef.current?.scopeKey !== scope.scopeKey) {
-        return
-      }
-      queryClient.setQueryData(detailKey, reset)
+      if (!isCurrentOperation(operation)) return
+      queryClient.setQueryData(operationDetailKey, reset)
       setDraft({
-        scopeKey: scope.scopeKey,
+        scopeKey: operationScope,
         definitionId: reset.id,
         parts: { ...reset.effective_parts },
         revision: null
@@ -582,22 +795,58 @@ export const ServicePromptsSettings = () => {
       setDirty(false)
       setFieldErrors({})
       setPreview(null)
-      await queryClient.invalidateQueries({ queryKey: detailKey, refetchType: "none" })
+      setConflict(false)
+      setOperationAnnouncement(t("servicePrompts.operations.reset", {
+        defaultValue: "Workflow prompt reset to the server default."
+      }))
+      await queryClient.invalidateQueries({
+        queryKey: operationDetailKey,
+        refetchType: "none"
+      })
     } catch (error) {
-      if (!controller.signal.aborted && !isAbortError(error)) {
-        if (error instanceof ServicePromptApiError && error.status === 409) {
-          setConflict(true)
+      if (!isCurrentOperation(operation) || isAbortError(error)) return
+      setOperationAnnouncement("")
+      if (error instanceof ServicePromptApiError && error.status === 409) {
+        if (corrupt) {
+          try {
+            const refreshed = await queryClient.fetchQuery({
+              queryKey: operationDetailKey,
+              queryFn: () => tldwClient.getServicePrompt(definitionId, {
+                signal: operation.controller.signal
+              }),
+              retry: false,
+              staleTime: 0
+            })
+            if (!isCurrentOperation(operation)) return
+            setDraft({
+              scopeKey: operationScope,
+              definitionId: refreshed.id,
+              parts: { ...refreshed.effective_parts },
+              revision: refreshed.revision
+            })
+            setDirty(false)
+            setConflict(false)
+          } catch (refreshError) {
+            if (!isCurrentOperation(operation) || isAbortError(refreshError)) return
+            if (!(refreshError instanceof ServicePromptApiError &&
+              refreshError.code === "service_prompt_corrupt_override" &&
+              refreshError.canReset === true &&
+              typeof refreshError.revision === "string")) {
+              setOperationError(t("servicePrompts.errors.resetFailed", {
+                defaultValue: "Unable to reset this workflow prompt."
+              }))
+            }
+          }
         } else {
-          setOperationError(t("servicePrompts.errors.resetFailed", {
-            defaultValue: "Unable to reset this workflow prompt."
-          }))
+          setConflict(true)
         }
+      } else {
+        setOperationError(t("servicePrompts.errors.resetFailed", {
+          defaultValue: "Unable to reset this workflow prompt."
+        }))
       }
     } finally {
-      if (mutationControllerRef.current === controller) {
-        mutationControllerRef.current = null
-        setIsResetting(false)
-      }
+      finishOperation(operation)
     }
   }
 
@@ -610,10 +859,9 @@ export const ServicePromptsSettings = () => {
   const importMigration = async () => {
     if (!scope || migrationItems.length === 0 || migrationLoading) return
     const operationScope = scope.scopeKey
-    const controller = new AbortController()
-    mutationControllerRef.current?.abort()
-    mutationControllerRef.current = controller
-    setMigrationLoading(true)
+    const operation = startOperation("migration-import", operationScope)
+    setOperationAnnouncement("")
+    setMigrationError(null)
     setMigrationMessage(null)
     const details = new Map<string, ServicePromptDetail>()
     const nextItems = migrationItems.map((item) => ({ ...item, error: undefined }))
@@ -629,15 +877,15 @@ export const ServicePromptsSettings = () => {
         if (errors.template) item.error = errors.template
       }
       if (nextItems.some((item) => item.error)) {
-        setMigrationItems(nextItems)
+        if (isCurrentOperation(operation)) setMigrationItems(nextItems)
         return
       }
 
       for (const item of nextItems) {
         const detail = await tldwClient.getServicePrompt(item.definitionId, {
-          signal: controller.signal
+          signal: operation.controller.signal
         })
-        if (scopeRef.current?.scopeKey !== operationScope) return
+        if (!isCurrentOperation(operation)) return
         details.set(item.definitionId, detail)
       }
 
@@ -665,27 +913,34 @@ export const ServicePromptsSettings = () => {
             defaultValue: "Replace and import"
           })
         })
-        if (!confirmed) return
+        if (!isCurrentOperation(operation) || !confirmed) return
       }
 
       let remaining = [...nextItems]
       for (const item of nextItems) {
         try {
-          await importLegacyServicePromptCandidate(
+          const saved = await importLegacyServicePromptCandidate(
             item,
             details.get(item.definitionId)!,
-            { signal: controller.signal }
+            { signal: operation.controller.signal }
           )
-          if (scopeRef.current?.scopeKey !== operationScope) return
+          if (!isCurrentOperation(operation)) return
+          queryClient.setQueryData([
+            "service-prompts",
+            operationScope,
+            "detail",
+            item.definitionId
+          ], saved)
           remaining = remaining.filter(
             (candidate) => candidate.definitionId !== item.definitionId
           )
           setMigrationItems(remaining)
-          await queryClient.invalidateQueries({
-            queryKey: ["service-prompts", operationScope]
+          void queryClient.invalidateQueries({
+            queryKey: ["service-prompts", operationScope],
+            refetchType: "none"
           })
         } catch (error) {
-          if (controller.signal.aborted || isAbortError(error)) return
+          if (!isCurrentOperation(operation) || isAbortError(error)) return
           remaining = remaining.map((candidate) =>
             candidate.definitionId === item.definitionId
               ? {
@@ -702,84 +957,107 @@ export const ServicePromptsSettings = () => {
       if (remaining.length > 0) {
         setMigrationMessage(remainingMigrationMessage(remaining.length))
       }
+    } catch (error) {
+      if (!isCurrentOperation(operation) || isAbortError(error)) return
+      setMigrationItems(nextItems)
+      setMigrationError(t("servicePrompts.migration.prepareFailed", {
+        defaultValue:
+          "Unable to prepare this import. The browser-local values were preserved."
+      }))
+      setMigrationMessage(remainingMigrationMessage(nextItems.length))
     } finally {
-      if (mutationControllerRef.current === controller) {
-        mutationControllerRef.current = null
-        setMigrationLoading(false)
-      }
+      finishOperation(operation)
     }
   }
 
   const discardMigration = async () => {
     if (!scope || migrationItems.length === 0 || migrationLoading) return
-    const confirmed = await confirmDanger({
-      title: t("servicePrompts.migration.discardTitle", {
-        defaultValue: "Discard browser-local workflow prompts?"
-      }),
-      content: t("servicePrompts.migration.discardContent", {
-        defaultValue:
-          "This permanently removes only the three mapped browser-local values."
-      }),
-      okText: t("servicePrompts.migration.discardAction", {
-        defaultValue: "Discard"
+    let confirmed = false
+    try {
+      confirmed = await confirmDanger({
+        title: t("servicePrompts.migration.discardTitle", {
+          defaultValue: "Discard browser-local workflow prompts?"
+        }),
+        content: t("servicePrompts.migration.discardContent", {
+          defaultValue:
+            "This permanently removes only the three mapped browser-local values."
+        }),
+        okText: t("servicePrompts.migration.discardAction", {
+          defaultValue: "Discard"
+        })
       })
-    })
+    } catch {
+      if (scopeRef.current?.scopeKey === scope.scopeKey) {
+        setMigrationError(t("servicePrompts.migration.discardFailed", {
+          defaultValue: "Discard failed. The browser-local value was preserved."
+        }))
+      }
+      return
+    }
     if (!confirmed || scopeRef.current?.scopeKey !== scope.scopeKey) return
     const operationScope = scope.scopeKey
-    const controller = new AbortController()
-    mutationControllerRef.current?.abort()
-    mutationControllerRef.current = controller
-    setMigrationLoading(true)
+    const operation = startOperation("migration-discard", operationScope)
+    setOperationAnnouncement("")
+    setMigrationError(null)
     setMigrationMessage(null)
     let remaining = [...migrationItems]
-    for (const item of migrationItems) {
-      if (controller.signal.aborted || scopeRef.current?.scopeKey !== operationScope) break
-      try {
-        await clearLegacyServicePromptCandidate(item.definitionId)
-        remaining = remaining.filter(
-          (candidate) => candidate.definitionId !== item.definitionId
-        )
-        setMigrationItems(remaining)
-      } catch {
-        remaining = remaining.map((candidate) =>
-          candidate.definitionId === item.definitionId
-            ? {
-                ...candidate,
-                error: t("servicePrompts.migration.discardFailed", {
-                  defaultValue: "Discard failed. The browser-local value was preserved."
-                })
-              }
-            : candidate
-        )
-        setMigrationItems(remaining)
+    try {
+      for (const item of migrationItems) {
+        if (!isCurrentOperation(operation)) return
+        try {
+          await clearLegacyServicePromptCandidate(item.definitionId)
+          if (!isCurrentOperation(operation)) return
+          remaining = remaining.filter(
+            (candidate) => candidate.definitionId !== item.definitionId
+          )
+          setMigrationItems(remaining)
+        } catch (error) {
+          if (!isCurrentOperation(operation) || isAbortError(error)) return
+          remaining = remaining.map((candidate) =>
+            candidate.definitionId === item.definitionId
+              ? {
+                  ...candidate,
+                  error: t("servicePrompts.migration.discardFailed", {
+                    defaultValue: "Discard failed. The browser-local value was preserved."
+                  })
+                }
+              : candidate
+          )
+          setMigrationItems(remaining)
+        }
       }
-    }
-    if (remaining.length > 0) {
-      setMigrationMessage(remainingMigrationMessage(remaining.length))
-    }
-    if (mutationControllerRef.current === controller) {
-      mutationControllerRef.current = null
-      setMigrationLoading(false)
+      if (isCurrentOperation(operation) && remaining.length > 0) {
+        setMigrationMessage(remainingMigrationMessage(remaining.length))
+      }
+    } finally {
+      finishOperation(operation)
     }
   }
 
   const retryScope = () => setScopeGeneration((value) => value + 1)
+  const retryMigrationProbe = () => {
+    migrationProbedScopeRef.current = null
+    setMigrationProbeError(null)
+    setMigrationProbeGeneration((value) => value + 1)
+  }
   const catalogError = catalogQuery.error
   const unsupported = catalogError instanceof ServicePromptApiError &&
     catalogError.status === 404
-  const corruptError = detailQuery.error instanceof ServicePromptApiError &&
+  const corruptRevision = detailQuery.error instanceof ServicePromptApiError &&
     detailQuery.error.code === "service_prompt_corrupt_override" &&
     detailQuery.error.canReset === true &&
     typeof detailQuery.error.revision === "string"
+    ? detailQuery.error.revision
+    : null
 
   return (
     <div className="flex min-w-0 flex-col gap-5">
-      <header className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+      <p className="sr-only" role="status" aria-live="polite">
+        {operationAnnouncement}
+      </p>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div className="max-w-[70ch]">
-          <h1 className="text-xl font-semibold text-text">
-            {t("servicePrompts.title", { defaultValue: "Workflow prompts" })}
-          </h1>
-          <p className="mt-1 text-sm text-text-muted">
+          <p className="text-sm text-text-muted">
             {t("servicePrompts.description", {
               defaultValue:
                 "Review and customize the instructions used by supported content workflows."
@@ -794,7 +1072,7 @@ export const ServicePromptsSettings = () => {
             defaultValue: "Open reusable Prompts workspace"
           })}
         </a>
-      </header>
+      </div>
 
       {scopeChanged ? (
         <Alert variant="warning" title={t("servicePrompts.scope.changedTitle", {
@@ -808,15 +1086,20 @@ export const ServicePromptsSettings = () => {
       ) : null}
 
       {scopeLoading ? (
-        <div aria-label={t("servicePrompts.states.loadingScope", {
-          defaultValue: "Loading server and account scope…"
-        })}>
+        <div
+          role="status"
+          aria-live="polite"
+          aria-busy="true"
+          aria-label={t("servicePrompts.states.loadingScope", {
+            defaultValue: "Loading server and account scope…"
+          })}
+        >
           <p className="mb-2 text-sm text-text-muted">
             {t("servicePrompts.states.loadingScope", {
               defaultValue: "Loading server and account scope…"
             })}
           </p>
-          <Skeleton active paragraph={{ rows: 5 }} />
+          <Skeleton paragraph={{ rows: 5 }} />
         </div>
       ) : scopeError ? (
         <RecoveryCallout
@@ -834,10 +1117,15 @@ export const ServicePromptsSettings = () => {
           }}
         />
       ) : catalogQuery.isPending ? (
-        <div aria-label={t("servicePrompts.states.loadingCatalog", {
-          defaultValue: "Loading workflow prompts…"
-        })}>
-          <Skeleton active paragraph={{ rows: 6 }} />
+        <div
+          role="status"
+          aria-live="polite"
+          aria-busy="true"
+          aria-label={t("servicePrompts.states.loadingCatalog", {
+            defaultValue: "Loading workflow prompts…"
+          })}
+        >
+          <Skeleton paragraph={{ rows: 6 }} />
         </div>
       ) : unsupported ? (
         <RecoveryCallout
@@ -867,6 +1155,21 @@ export const ServicePromptsSettings = () => {
         />
       ) : (
         <>
+          {scope && migrationProbeError && migrationItems.length === 0 ? (
+            <RecoveryCallout
+              state="error"
+              role="alert"
+              title={migrationProbeError}
+              message={t("servicePrompts.migration.readFailedDescription", {
+                defaultValue:
+                  "No browser-local values were changed. Retry the browser storage check."
+              })}
+              primaryAction={{
+                label: t("servicePrompts.actions.retry", { defaultValue: "Retry" }),
+                onClick: retryMigrationProbe
+              }}
+            />
+          ) : null}
           {scope && migrationItems.length > 0 ? (
             <RecoveryCallout
               state="blocked"
@@ -875,7 +1178,7 @@ export const ServicePromptsSettings = () => {
               })}
               message={t("servicePrompts.migration.description", {
                 defaultValue:
-                  "Review these values before Chat uses this server. Imported overrides belong to the connected server and account and are not included in Backup supported account data."
+                  "Review these browser-local values before using Chat with this server. Imported overrides are saved to the connected server and account. Portable backups do not include Service Prompt overrides."
               })}
             >
               <dl className="grid gap-1 text-sm sm:grid-cols-[8rem_minmax(0,1fr)]">
@@ -896,20 +1199,24 @@ export const ServicePromptsSettings = () => {
                   const label = definition
                     ? definitionLabel(definition)
                     : item.definitionId
+                  const fieldId = `migration-${toDomId(item.definitionId)}`
+                  const errorId = `${fieldId}-error`
                   return (
                     <div key={item.definitionId} className="p-3">
                       <label
-                        htmlFor={`migration-${item.definitionId}`}
+                        htmlFor={fieldId}
                         className="text-sm font-semibold text-text"
                       >
                         {label}
                       </label>
                       <Input.TextArea
-                        id={`migration-${item.definitionId}`}
+                        id={fieldId}
                         aria-label={t("servicePrompts.migration.repairLabel", {
                           defaultValue: "Repair {{name}}",
                           name: label
                         })}
+                        aria-invalid={Boolean(item.error)}
+                        aria-describedby={item.error ? errorId : undefined}
                         className="mt-2 font-mono"
                         autoSize={{ minRows: 3, maxRows: 10 }}
                         value={item.value}
@@ -922,7 +1229,11 @@ export const ServicePromptsSettings = () => {
                         )}
                       />
                       {item.error ? (
-                        <p className="mt-1 text-sm text-danger" role="alert">
+                        <p
+                          id={errorId}
+                          className="mt-1 text-sm text-danger"
+                          role="alert"
+                        >
                           {item.error}
                         </p>
                       ) : null}
@@ -930,6 +1241,9 @@ export const ServicePromptsSettings = () => {
                   )
                 })}
               </div>
+              {migrationError ? (
+                <Alert className="mt-3" variant="error" title={migrationError} />
+              ) : null}
               {migrationMessage ? (
                 <p className="mt-3 text-sm text-warn" role="status">{migrationMessage}</p>
               ) : null}
@@ -937,6 +1251,8 @@ export const ServicePromptsSettings = () => {
                 <Button
                   type="primary"
                   loading={migrationLoading}
+                  disabled={activeKind !== null && activeKind !== "save" &&
+                    activeKind !== "migration-import"}
                   onClick={() => void importMigration()}
                 >
                   {t("servicePrompts.migration.importAction", {
@@ -945,7 +1261,7 @@ export const ServicePromptsSettings = () => {
                 </Button>
                 <Button
                   danger
-                  disabled={migrationLoading}
+                  disabled={activeKind !== null}
                   onClick={() => void discardMigration()}
                 >
                   {t("servicePrompts.migration.discardButton", {
@@ -1001,13 +1317,28 @@ export const ServicePromptsSettings = () => {
                   })}
                 </p>
               </section>
-            ) : detailQuery.isPending ? (
-              <section className="min-w-0" aria-label={t("servicePrompts.states.loadingDetail", {
-                defaultValue: "Loading workflow prompt…"
-              })}>
-                <Skeleton active paragraph={{ rows: 7 }} />
-              </section>
-            ) : corruptError ? (
+            ) : (
+              <section
+                ref={detailFocusRef}
+                className="min-w-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                role="region"
+                aria-label={t("servicePrompts.detailRegionLabel", {
+                  defaultValue: "Workflow prompt details"
+                })}
+                tabIndex={-1}
+              >
+                {detailQuery.isPending ? (
+                  <div
+                    role="status"
+                    aria-live="polite"
+                    aria-busy="true"
+                    aria-label={t("servicePrompts.states.loadingDetail", {
+                      defaultValue: "Loading workflow prompt…"
+                    })}
+                  >
+                    <Skeleton paragraph={{ rows: 7 }} />
+                  </div>
+            ) : corruptRevision ? (
               <RecoveryCallout
                 state="error"
                 title={t("servicePrompts.corrupt.title", {
@@ -1015,16 +1346,21 @@ export const ServicePromptsSettings = () => {
                 })}
                 message={t("servicePrompts.corrupt.description", {
                   defaultValue:
-                    "The saved value cannot be read safely. Reset it conditionally to restore the server default."
+                    "The saved value cannot be read safely. Reset it to restore the server default."
                 })}
                 primaryAction={{
                   label: t("servicePrompts.corrupt.resetAction", {
                     defaultValue: "Reset corrupt customization"
                   }),
-                  onClick: () => void resetPrompt(detailQuery.error.revision!, true),
-                  loading: isResetting
+                  onClick: () => void resetPrompt(corruptRevision, true),
+                  loading: isResetting,
+                  disabled: activeKind !== null && activeKind !== "reset"
                 }}
-              />
+              >
+                {operationError ? (
+                  <Alert variant="error" title={operationError} />
+                ) : null}
+              </RecoveryCallout>
             ) : detailQuery.isError && !(draft && draftIsCurrent && dirty) ? (
               <RecoveryCallout
                 state="error"
@@ -1037,7 +1373,7 @@ export const ServicePromptsSettings = () => {
                 }}
               />
             ) : draft && draftIsCurrent && detailQuery.data ? (
-              <section
+              <div
                 className="min-w-0 rounded-lg border border-border bg-surface p-4 sm:p-5"
                 role="region"
                 aria-label={t("servicePrompts.editorLabel", {
@@ -1106,7 +1442,9 @@ export const ServicePromptsSettings = () => {
                       label: t("servicePrompts.conflict.reload", {
                         defaultValue: "Reload server value"
                       }),
-                      onClick: () => void reloadServerValue()
+                      onClick: () => void reloadServerValue(),
+                      loading: activeKind === "reload",
+                      disabled: activeKind !== null && activeKind !== "reload"
                     }}
                   >
                     {t("servicePrompts.conflict.description", {
@@ -1123,15 +1461,25 @@ export const ServicePromptsSettings = () => {
                   <div className="flex flex-col gap-5">
                     {selectedDefinition.parts.map((part) => {
                       const partLabel = getPartLabel(part.key, part.label, t)
+                      const fieldId = `service-prompt-${toDomId(
+                        selectedDefinition.id
+                      )}-${toDomId(part.key)}`
+                      const errorId = `${fieldId}-error`
+                      const fieldError = fieldErrors[part.key]
                       return (
                         <section key={part.key} className="min-w-0">
                           <Form.Item
                             label={partLabel}
-                            validateStatus={fieldErrors[part.key] ? "error" : undefined}
-                            help={fieldErrors[part.key]}
+                            validateStatus={fieldError ? "error" : undefined}
+                            help={fieldError
+                              ? <span id={errorId}>{fieldError}</span>
+                              : undefined}
                           >
                             <Input.TextArea
+                              id={fieldId}
                               aria-label={partLabel}
+                              aria-invalid={Boolean(fieldError)}
+                              aria-describedby={fieldError ? errorId : undefined}
                               className="font-mono"
                               autoSize={{ minRows: 6, maxRows: 18 }}
                               value={draft.parts[part.key]}
@@ -1150,7 +1498,7 @@ export const ServicePromptsSettings = () => {
                               </span>
                               {part.required_variables.map((variable) => (
                                 <Badge key={variable} size="sm" outline>
-                                  {variable}
+                                  {`{${variable}}`}
                                 </Badge>
                               ))}
                             </div>
@@ -1186,21 +1534,23 @@ export const ServicePromptsSettings = () => {
                   ) : null}
 
                   <div className="mt-5 flex flex-wrap items-center gap-2">
-                    <Button onClick={previewDraft}>
+                    <Button onClick={previewDraft} disabled={activeKind !== null}>
                       {t("servicePrompts.actions.preview", { defaultValue: "Preview" })}
                     </Button>
                     <Button
                       type="primary"
                       htmlType="submit"
                       loading={isSaving}
-                      disabled={!dirty || !draftIsCurrent}
+                      disabled={!dirty || !draftIsCurrent || activeKind !== null}
                     >
                       {t("servicePrompts.actions.save", { defaultValue: "Save changes" })}
                     </Button>
                     <Button
                       danger
                       loading={isResetting}
-                      disabled={detailQuery.data.source !== "user" || !draftIsCurrent}
+                      disabled={detailQuery.data.source !== "user" || !draftIsCurrent ||
+                        (activeKind !== null && activeKind !== "save" &&
+                          activeKind !== "reset")}
                       onClick={() => void resetPrompt(draft.revision)}
                     >
                       {t("servicePrompts.actions.reset", {
@@ -1209,8 +1559,10 @@ export const ServicePromptsSettings = () => {
                     </Button>
                   </div>
                 </Form>
+              </div>
+                ) : null}
               </section>
-            ) : null}
+            )}
           </div>
         </>
       )}

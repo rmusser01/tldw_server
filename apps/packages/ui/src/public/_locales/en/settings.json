@@ -6147,7 +6147,7 @@
     "message": "Saved customization is unavailable"
   },
   "servicePrompts_corrupt_description": {
-    "message": "The saved value cannot be read safely. Reset it conditionally to restore the server default."
+    "message": "The saved value cannot be read safely. Reset it to restore the server default."
   },
   "servicePrompts_corrupt_resetAction": {
     "message": "Reset corrupt customization"
@@ -6165,7 +6165,7 @@
     "message": "Reset {{name}}?"
   },
   "servicePrompts_reset_content": {
-    "message": "This will permanently remove the saved customization. V1 has no history or undo."
+    "message": "This will permanently remove the saved customization. There is no history or undo."
   },
   "servicePrompts_variables_label": {
     "message": "Required variables"
@@ -6186,7 +6186,7 @@
     "message": "Browser-local workflow prompts found"
   },
   "servicePrompts_migration_description": {
-    "message": "Review these values before Chat uses this server. Imported overrides belong to the connected server and account and are not included in Backup supported account data."
+    "message": "Review these browser-local values before using Chat with this server. Imported overrides are saved to the connected server and account. Portable backups do not include Service Prompt overrides."
   },
   "servicePrompts_migration_readFailed": {
     "message": "Unable to read browser-local workflow prompts."
@@ -6237,10 +6237,10 @@
     "message": "Discard unsaved changes and open another workflow prompt?"
   },
   "servicePrompts_backup_portableExclusion": {
-    "message": "Service Prompt overrides are server and account scoped and are not included in Backup supported account data."
+    "message": "Portable backups do not include server- and account-scoped Service Prompt overrides."
   },
   "chatbooksPlayground_backupAllExclusions": {
-    "message": "Service Prompt overrides are not included in this portable backup."
+    "message": "This portable backup does not include Service Prompt overrides."
   },
   "chatbooksPlayground_openwebuiSource": {
     "message": "OpenWebUI"
@@ -6265,5 +6265,26 @@
   },
   "servicePrompts_errors_reloadFailed": {
     "message": "Unable to reload the server value."
+  },
+  "servicePrompts_operations_saving": {
+    "message": "Saving workflow prompt…"
+  },
+  "servicePrompts_operations_saved": {
+    "message": "Workflow prompt saved."
+  },
+  "servicePrompts_operations_resetting": {
+    "message": "Resetting workflow prompt…"
+  },
+  "servicePrompts_operations_reset": {
+    "message": "Workflow prompt reset to the server default."
+  },
+  "servicePrompts_detailRegionLabel": {
+    "message": "Workflow prompt details"
+  },
+  "servicePrompts_migration_readFailedDescription": {
+    "message": "No browser-local values were changed. Retry the browser storage check."
+  },
+  "servicePrompts_migration_prepareFailed": {
+    "message": "Unable to prepare this import. The browser-local values were preserved."
   }
 }

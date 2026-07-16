@@ -95,7 +95,7 @@
     },
     "corrupt": {
       "title": "Saved customization is unavailable",
-      "description": "The saved value cannot be read safely. Reset it conditionally to restore the server default.",
+      "description": "The saved value cannot be read safely. Reset it to restore the server default.",
       "resetAction": "Reset corrupt customization"
     },
     "conflict": {
@@ -105,7 +105,13 @@
     },
     "reset": {
       "title": "Reset {{name}}?",
-      "content": "This will permanently remove the saved customization. V1 has no history or undo."
+      "content": "This will permanently remove the saved customization. There is no history or undo."
+    },
+    "operations": {
+      "saving": "Saving workflow prompt…",
+      "saved": "Workflow prompt saved.",
+      "resetting": "Resetting workflow prompt…",
+      "reset": "Workflow prompt reset to the server default."
     },
     "variables": {
       "label": "Required variables"
@@ -116,10 +122,13 @@
     },
     "listLabel": "Workflow prompt definitions",
     "editorLabel": "{{name}} editor",
+    "detailRegionLabel": "Workflow prompt details",
     "migration": {
       "title": "Browser-local workflow prompts found",
-      "description": "Review these values before Chat uses this server. Imported overrides belong to the connected server and account and are not included in Backup supported account data.",
+      "description": "Review these browser-local values before using Chat with this server. Imported overrides are saved to the connected server and account. Portable backups do not include Service Prompt overrides.",
       "readFailed": "Unable to read browser-local workflow prompts.",
+      "readFailedDescription": "No browser-local values were changed. Retry the browser storage check.",
+      "prepareFailed": "Unable to prepare this import. The browser-local values were preserved.",
       "repairLabel": "Repair {{name}}",
       "importAction": "Import to this server",
       "discardButton": "Discard local values",
@@ -139,7 +148,7 @@
       "changePrompt": "Discard unsaved changes and open another workflow prompt?"
     },
     "backup": {
-      "portableExclusion": "Service Prompt overrides are server and account scoped and are not included in Backup supported account data."
+      "portableExclusion": "Portable backups do not include server- and account-scoped Service Prompt overrides."
     }
   },
   "worldBooksNav": "World Books",
@@ -154,7 +163,7 @@
     "selectiveMode": "Selective export",
     "backupAllTitle": "Backup supported account data",
     "backupAllDescription": "Includes all restorable account records, stored media artifacts, embeddings, generated content, and pointer metadata tracked by tldw.",
-    "backupAllExclusions": "Service Prompt overrides are not included in this portable backup.",
+    "backupAllExclusions": "This portable backup does not include Service Prompt overrides.",
     "backupAllScope": "Backup all scope",
     "scopeLoadError": "Unable to load backup scope",
     "scopeTotal": "Total items",
