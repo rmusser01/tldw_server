@@ -85,15 +85,15 @@
 - Modify: `Docs/superpowers/plans/2026-07-15-pr-2741-final-review-rebase-merge-plan.md`
 - Modify: `backlog/tasks/task-12968.9 - Finish-PR-2741-review-rebase-and-merge.md`
 
-- [ ] **Step 1: Rebase onto the actual latest dev**
+- [x] **Step 1: Rebase onto the actual latest dev**
 
   Fetch `origin/dev`, record the old head and merge base, then rebase the branch. Use `git range-diff` to confirm intended patch equivalence and resolve only genuine conflicts.
 
-- [ ] **Step 2: Run fresh integrated verification**
+- [x] **Step 2: Run fresh integrated verification**
 
   Run the complete Research suite; focused Security suite; inventory Node/Python validators and authoritative contract; Ruff and Black on touched non-baseline files; Python 3.10 compilation; JSON/Node syntax and `git diff --check`; Bandit on touched Python scope.
 
-- [ ] **Step 3: Obtain independent final review**
+- [x] **Step 3: Obtain independent final review**
 
   Dispatch a correctness/spec reviewer and a code-quality/minimality reviewer against `origin/dev...HEAD`. Fix every valid Critical or Important finding and re-run affected gates.
 
