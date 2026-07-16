@@ -24,6 +24,7 @@ from tldw_Server_API.app.core.Slides.standalone_html_validation_pool import (
     StandaloneHtmlValidationPool,
 )
 from tldw_Server_API.app.core.Slides.standalone_html_validator import (
+    MAX_DOCUMENT_BYTES,
     validate_standalone_html,
 )
 
@@ -818,9 +819,71 @@ def _malformed_response(kind: str, slot, job) -> tuple[object, ...]:
             None,
             None,
         ),
+        "non_parser_location": (
+            pool_module._IPC_VERSION,
+            "error",
+            slot.epoch,
+            job.request_id,
+            "standalone_html_invalid_document",
+            422,
+            None,
+            "title_blank",
+            7,
+            11,
+        ),
+        "parser_line_only": (
+            pool_module._IPC_VERSION,
+            "error",
+            slot.epoch,
+            job.request_id,
+            "standalone_html_invalid_document",
+            422,
+            None,
+            "html_parse_error",
+            7,
+            None,
+        ),
+        "parser_column_only": (
+            pool_module._IPC_VERSION,
+            "error",
+            slot.epoch,
+            job.request_id,
+            "standalone_html_invalid_document",
+            422,
+            None,
+            "html_parse_error",
+            None,
+            11,
+        ),
+        "parser_line_out_of_range": (
+            pool_module._IPC_VERSION,
+            "error",
+            slot.epoch,
+            job.request_id,
+            "standalone_html_invalid_document",
+            422,
+            None,
+            "html_parse_error",
+            0,
+            11,
+        ),
+        "parser_column_out_of_range": (
+            pool_module._IPC_VERSION,
+            "error",
+            slot.epoch,
+            job.request_id,
+            "standalone_html_invalid_document",
+            422,
+            None,
+            "html_parse_error",
+            7,
+            1_000_001,
+        ),
     }
     if kind in errors:
         return errors[kind]
+    if kind in {"valid_result", "oversized_document"}:
+        return tuple(result)
     result_index, value = {
         "title_control": (4, "Bad\x00Title"),
         "title_whitespace": (4, " Deck "),
@@ -846,6 +909,12 @@ def _malformed_response(kind: str, slot, job) -> tuple[object, ...]:
         "budget_reason",
         "unavailable_status",
         "unavailable_reason",
+        "oversized_document",
+        "non_parser_location",
+        "parser_line_only",
+        "parser_column_only",
+        "parser_line_out_of_range",
+        "parser_column_out_of_range",
     ],
 )
 async def test_semantically_malformed_worker_tuples_replace_worker_and_release_capacity(
@@ -863,14 +932,79 @@ async def test_semantically_malformed_worker_tuples_replace_worker_and_release_c
 
     monkeypatch.setattr(pool, "_rpc_sync", malformed_rpc)
     try:
+        document = "x" * (MAX_DOCUMENT_BYTES + 1) if kind == "oversized_document" else _document("Malformed semantics")
         with pytest.raises(StandaloneHtmlValidationError) as caught:
-            await asyncio.wait_for(pool.validate(_document("Malformed semantics")), 2)
+            await asyncio.wait_for(pool.validate(document), 2)
         assert caught.value.code == "validator_unavailable"
         assert pool.active_count == 0
         assert pool.interactive_waiting == 0
         assert pool.worker_pids[0] != old_pid
         monkeypatch.setattr(pool, "_rpc_sync", original_rpc)
         assert (await pool.validate(_document("Recovered semantics"))).title == "Recovered semantics"
+    finally:
+        monkeypatch.setattr(pool, "_rpc_sync", original_rpc)
+        await pool.close()
+
+
+@pytest.mark.asyncio
+async def test_internally_consistent_success_at_document_ceiling_is_accepted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pool = StandaloneHtmlValidationPool(max_workers=1, mp_start_method="fork")
+    await pool.start()
+    old_pid = pool.worker_pids[0]
+    original_rpc = pool._rpc_sync
+
+    def valid_rpc(slot, job, watchdog_seconds):
+        del watchdog_seconds
+        return _malformed_response("valid_result", slot, job)
+
+    monkeypatch.setattr(pool, "_rpc_sync", valid_rpc)
+    try:
+        result = await asyncio.wait_for(pool.validate("x" * MAX_DOCUMENT_BYTES), 2)
+        assert result.html_bytes == MAX_DOCUMENT_BYTES
+        assert pool.worker_pids == (old_pid,)
+        assert pool.active_count == 0
+    finally:
+        monkeypatch.setattr(pool, "_rpc_sync", original_rpc)
+        await pool.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reason", ["html_parse_error", "css_parse_error"])
+async def test_parser_error_with_bounded_location_pair_is_accepted(
+    reason: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pool = StandaloneHtmlValidationPool(max_workers=1, mp_start_method="fork")
+    await pool.start()
+    old_pid = pool.worker_pids[0]
+    original_rpc = pool._rpc_sync
+
+    def parser_error_rpc(slot, job, watchdog_seconds):
+        del watchdog_seconds
+        return (
+            pool_module._IPC_VERSION,
+            "error",
+            slot.epoch,
+            job.request_id,
+            "standalone_html_invalid_document",
+            422,
+            None,
+            reason,
+            7,
+            11,
+        )
+
+    monkeypatch.setattr(pool, "_rpc_sync", parser_error_rpc)
+    try:
+        with pytest.raises(StandaloneHtmlValidationError) as caught:
+            await asyncio.wait_for(pool.validate(_document("Parser location")), 2)
+        assert caught.value.code == "standalone_html_invalid_document"
+        assert caught.value.reason == reason
+        assert (caught.value.line, caught.value.column) == (7, 11)
+        assert pool.worker_pids == (old_pid,)
+        assert pool.active_count == 0
     finally:
         monkeypatch.setattr(pool, "_rpc_sync", original_rpc)
         await pool.close()

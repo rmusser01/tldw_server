@@ -229,6 +229,8 @@ _SCRIPT_SINK_TOKEN_PATTERNS = (
     ("new", "xmlhttprequest", "("),
     ("navigator", ".", "sendbeacon", "("),
     ("navigator", ".", "serviceworker", ".", "register", "("),
+    ("globalthis", ".", "open", "("),
+    ("self", ".", "open", "("),
     ("window", ".", "open", "("),
     ("window", ".", "location", "="),
     ("location", "="),
@@ -262,15 +264,23 @@ _SCRIPT_GLOBAL_NAMES = frozenset(
         "xmlhttprequest",
     }
 )
-_SCRIPT_ALIASABLE_SINKS = frozenset(
-    {
-        "eventsource",
-        "fetch",
-        "sharedworker",
-        "websocket",
-        "worker",
-        "xmlhttprequest",
-    }
+_SCRIPT_ALIASABLE_SINK_PATTERNS = (
+    ("eventsource",),
+    ("fetch",),
+    ("sharedworker",),
+    ("websocket",),
+    ("worker",),
+    ("xmlhttprequest",),
+    ("globalthis", ".", "open"),
+    ("self", ".", "open"),
+    ("window", ".", "open"),
+    ("location", ".", "assign"),
+    ("location", ".", "replace"),
+    ("navigator", ".", "sendbeacon"),
+    ("navigator", ".", "serviceworker", ".", "register"),
+    ("history", ".", "pushstate"),
+    ("history", ".", "replacestate"),
+    ("caches", ".", "open"),
 )
 
 
@@ -623,12 +633,16 @@ def _script_has_simple_sink_alias(tokens: list[str]) -> bool:
     aliases: set[str] = set()
     for index in range(len(tokens) - 3):
         alias = tokens[index + 1]
+        rhs_start = index + 3
         if (
             tokens[index] in {"const", "let", "var"}
             and alias.isascii()
             and alias.replace("_", "a").replace("$", "a").isalnum()
             and tokens[index + 2] == "="
-            and tokens[index + 3] in _SCRIPT_ALIASABLE_SINKS
+            and any(
+                tuple(tokens[rhs_start : rhs_start + len(pattern)]) == pattern
+                for pattern in _SCRIPT_ALIASABLE_SINK_PATTERNS
+            )
         ):
             aliases.add(alias)
     return any(
@@ -1022,26 +1036,113 @@ def _parse_html(source: str) -> Any:
     raise AssertionError("unreachable")
 
 
-def _css_word_end(source: str, start: int) -> int:
+def _css_is_name_start(character: str) -> bool:
+    """Return whether one code point can start a CSS name."""
+    return character == "_" or (character.isascii() and character.isalpha()) or ord(character) >= 0x80
+
+
+def _css_is_name_character(character: str) -> bool:
+    """Return whether one code point can continue a CSS name."""
+    return _css_is_name_start(character) or (character.isascii() and character.isdigit()) or character == "-"
+
+
+def _css_valid_escape(source: str, start: int) -> bool:
+    """Recognize a CSS escape, including a terminal backslash."""
+    return (
+        start < len(source)
+        and source[start] == "\\"
+        and (start + 1 == len(source) or source[start + 1] not in "\n\r\f")
+    )
+
+
+def _css_escape_end(source: str, start: int) -> int:
+    """Consume one CSS escape while always advancing past its backslash."""
+    index = start + 1
+    if index >= len(source) or source[index] in "\n\r\f":
+        return index
+    hex_start = index
+    while index < len(source) and index - hex_start < 6 and source[index] in "0123456789abcdefABCDEF":
+        index += 1
+    if index > hex_start:
+        if index < len(source) and source[index] in _HTML_WHITESPACE:
+            index += 2 if source.startswith("\r\n", index) else 1
+        return index
+    return index + 1
+
+
+def _css_name_end(source: str, start: int) -> int:
+    """Return the end of one CSS name sequence."""
     index = start
     while index < len(source):
-        character = source[index]
-        if character == "\\" and index + 1 < len(source):
+        if _css_is_name_character(source[index]):
             index += 1
-            hex_start = index
-            while index < len(source) and index - hex_start < 6 and source[index] in "0123456789abcdefABCDEF":
-                index += 1
-            if index == hex_start:
-                index += 1
-            elif index < len(source) and source[index] in _HTML_WHITESPACE:
-                if source.startswith("\r\n", index):
-                    index += 2
-                else:
-                    index += 1
-            continue
-        if not (character.isalnum() or character in {"-", "_", "#", ".", "%"}):
+        elif _css_valid_escape(source, index):
+            index = _css_escape_end(source, index)
+        else:
             break
+    return index
+
+
+def _css_would_start_identifier(source: str, start: int) -> bool:
+    """Implement the CSS Syntax identifier-start lookahead."""
+    if start >= len(source):
+        return False
+    first = source[start]
+    if _css_is_name_start(first):
+        return True
+    if first == "\\":
+        return _css_valid_escape(source, start)
+    if first != "-" or start + 1 >= len(source):
+        return False
+    second = source[start + 1]
+    return _css_is_name_start(second) or second == "-" or _css_valid_escape(source, start + 1)
+
+
+def _css_would_start_number(source: str, start: int) -> bool:
+    """Implement the CSS Syntax number-start lookahead."""
+
+    def is_digit(index: int) -> bool:
+        return index < len(source) and source[index].isascii() and source[index].isdigit()
+
+    if start >= len(source):
+        return False
+    first = source[start]
+    if is_digit(start):
+        return True
+    if first == ".":
+        return is_digit(start + 1)
+    if first in {"+", "-"}:
+        return is_digit(start + 1) or (start + 1 < len(source) and source[start + 1] == "." and is_digit(start + 2))
+    return False
+
+
+def _css_numeric_token_end(source: str, start: int) -> int:
+    """Consume a number and its optional percentage or dimension suffix."""
+
+    def is_digit(index: int) -> bool:
+        return index < len(source) and source[index].isascii() and source[index].isdigit()
+
+    index = start
+    if source[index] in {"+", "-"}:
         index += 1
+    while is_digit(index):
+        index += 1
+    if index < len(source) and source[index] == "." and is_digit(index + 1):
+        index += 1
+        while is_digit(index):
+            index += 1
+    if index < len(source) and source[index] in {"e", "E"}:
+        exponent = index + 1
+        if exponent < len(source) and source[exponent] in {"+", "-"}:
+            exponent += 1
+        if is_digit(exponent):
+            index = exponent + 1
+            while is_digit(index):
+                index += 1
+    if _css_would_start_identifier(source, index):
+        return _css_name_end(source, index)
+    if index < len(source) and source[index] == "%":
+        return index + 1
     return index
 
 
@@ -1076,14 +1177,15 @@ def _css_ascii_identifier_lower(source: str, start: int, end: int) -> str:
 
 
 def _css_url_token_end(source: str, start: int) -> int:
+    """Return the end of an unquoted CSS URL token."""
     index = start
     while index < len(source):
-        if source[index] == "\\" and index + 1 < len(source):
-            index = _css_word_end(source, index)
+        if _css_valid_escape(source, index):
+            index = _css_escape_end(source, index)
             continue
+        if source[index] == ")":
+            return index + 1
         index += 1
-        if source[index - 1] == ")":
-            break
     return index
 
 
@@ -1133,13 +1235,32 @@ def _preflight_css(styles: list[str]) -> None:
                     index += 1
                 else:
                     _fail_invalid("css_unterminated_string")
-            elif character.isalnum() or character in {"-", "_", "#", ".", "\\"}:
+            elif (character == "@" and _css_would_start_identifier(source, index + 1)) or (
+                character == "#"
+                and index + 1 < len(source)
+                and (_css_is_name_character(source[index + 1]) or _css_valid_escape(source, index + 1))
+            ):
                 start = index
-                index = _css_word_end(source, index)
+                index = _css_name_end(source, index + 1)
+            elif _css_would_start_number(source, index):
+                start = index
+                index = _css_numeric_token_end(source, index)
+            elif _css_would_start_identifier(source, index):
+                start = index
+                index = _css_name_end(source, index)
                 if index < len(source) and source[index] == "(":
-                    _check_css_token_size(source, start, index + 1)
-                    if _css_ascii_identifier_lower(source, start, index) == "url":
-                        _check_css_token_size(source, start, _css_url_token_end(source, index + 1))
+                    argument_start = index + 1
+                    while argument_start < len(source) and source[argument_start] in _HTML_WHITESPACE:
+                        argument_start += 1
+                    if _css_ascii_identifier_lower(source, start, index) == "url" and (
+                        argument_start >= len(source) or source[argument_start] not in {"'", '"'}
+                    ):
+                        index = _css_url_token_end(source, index + 1)
+                    else:
+                        index += 1
+                        stack.append("(")
+                        if len(stack) > MAX_CSS_DEPTH:
+                            raise _BudgetExceeded("css_depth")
             else:
                 start = index
                 index += 1
@@ -1409,6 +1530,7 @@ def _validate_tree(root: Any, delivery_style: DeliveryStyle | None) -> tuple[str
         _fail_invalid("script_policy")
 
     slides: list[Any] = []
+    total_slide_elements = 0
     styles: list[str] = []
     notes_by_slide: dict[int, int] = {}
     for element, parent in all_elements:
@@ -1438,7 +1560,8 @@ def _validate_tree(root: Any, delivery_style: DeliveryStyle | None) -> tuple[str
         if "slide" in classes:
             if namespace != _HTML_NAMESPACE or tag != "section":
                 _fail_invalid("slide_structure")
-            if not _slide_has_excluded_ancestor(element, parents):
+            total_slide_elements += 1
+            if not classes & _EXCLUDED_CLASSES and not _slide_has_excluded_ancestor(element, parents):
                 slides.append(element)
                 notes_by_slide[id(element)] = 0
         if "notes" in classes and namespace == _HTML_NAMESPACE:
@@ -1450,7 +1573,7 @@ def _validate_tree(root: Any, delivery_style: DeliveryStyle | None) -> tuple[str
         if namespace == _HTML_NAMESPACE and tag == "style":
             styles.append(_iter_element_text(element))
 
-    if not 1 <= len(slides) <= MAX_SLIDES:
+    if total_slide_elements > MAX_SLIDES or not 1 <= len(slides) <= MAX_SLIDES:
         _fail_invalid("slide_count")
     for slide in slides:
         notes_count = notes_by_slide.get(id(slide), 0)
