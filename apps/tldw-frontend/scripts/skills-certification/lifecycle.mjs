@@ -123,11 +123,6 @@ export function createProcessRegistry({
     } catch (error) {
       errors.push(error);
     }
-    if (record.loggingErrors?.length) {
-      errors.push(
-        new AggregateError(record.loggingErrors, 'Skills certification process logging failed')
-      );
-    }
     try {
       await withTimeout(
         state.closePromise,
@@ -136,6 +131,11 @@ export function createProcessRegistry({
       );
     } catch (error) {
       errors.push(error);
+    }
+    if (record.loggingErrors?.length) {
+      errors.push(
+        new AggregateError(record.loggingErrors, 'Skills certification process logging failed')
+      );
     }
     if (!Number.isInteger(child?.pid) || child.pid <= 0) {
       errors.push(new Error('Cannot verify a process without a positive PID'));

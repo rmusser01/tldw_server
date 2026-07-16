@@ -889,6 +889,19 @@ describe('Skills certification runner', () => {
     );
   });
 
+  it('reports truthful cleanup when evidence creation fails before profile setup', async () => {
+    const test = harness({
+      createEvidence: vi.fn(() => {
+        throw new Error('evidence failed');
+      }),
+    });
+    const summary = await runSkillsCertification({ operations: test.operations });
+    expect(summary.failures.map((failure) => failure.category)).toContain('preflight');
+    expect(summary.failures.map((failure) => failure.category)).not.toContain('cleanup');
+    expect(summary.artifact_safety.passed).toBe(false);
+    expect(summary.cleanup).toEqual({ children_closed: true, runtime_deleted: true });
+  });
+
   it('passes a rollback-failed runtime descriptor to finalization and reports failed retry cleanup', async () => {
     const runtime = {
       baseRoot: '/runtime',

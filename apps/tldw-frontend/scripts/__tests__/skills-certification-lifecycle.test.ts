@@ -123,6 +123,24 @@ describe('Skills certification process registry', () => {
     await expect(loggingRegistry.teardown()).rejects.toThrow(/logging failed/i);
   });
 
+  it('treats a logging error arriving before close as a retryable stop failure', async () => {
+    const child = new FakeChild(4121);
+    const record = { ...command('late-log', child), loggingErrors: [], pid: child.pid };
+    const stopProcessTree = vi.fn(async () => {
+      record.loggingErrors.push(new Error('late log failure'));
+      child.emit('close', 0, null);
+    });
+    const registry = createProcessRegistry({
+      probeProcessTree: vi.fn(async () => false),
+      spawnLoggedProcess: vi.fn(() => record),
+      stopProcessTree,
+    });
+    const registered = registry.spawn(command('late-log', child), '/tmp/late.log');
+    await expect(registry.stop(registered)).rejects.toThrow(/logging failed/i);
+    await expect(registry.teardown()).rejects.toThrow(/logging failed/i);
+    expect(stopProcessTree).toHaveBeenCalledTimes(2);
+  });
+
   it('verifies a surviving process group after its parent has already closed', async () => {
     const child = new FakeChild(4112);
     const events: string[] = [];

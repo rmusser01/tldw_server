@@ -553,7 +553,10 @@ export async function runSkillsCertification({ operations: suppliedOperations = 
       finalSummary = buildCertificationSummary({
         ...summaryInput,
         artifact_safety: { passed: false },
-        cleanup: { children_closed: false, runtime_deleted: false },
+        cleanup: {
+          children_closed: teardownOutcome.status === 'fulfilled',
+          runtime_deleted: !profile,
+        },
       });
     }
     if (
