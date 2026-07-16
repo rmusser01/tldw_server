@@ -65,7 +65,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v4
         with:
-          path: Docs/site
+          path: Docs/_site
 
   deploy:
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/PG-Backend'

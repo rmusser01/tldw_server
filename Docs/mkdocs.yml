@@ -7,6 +7,7 @@ edit_uri: edit/main/
 
 # Only publish the curated set under Docs/Published
 docs_dir: Published
+site_dir: _site
 
 theme:
   name: material

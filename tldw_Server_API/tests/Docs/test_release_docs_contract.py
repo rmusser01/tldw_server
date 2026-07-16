@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 import subprocess  # nosec B404
 import sys
 from pathlib import Path
@@ -30,6 +31,32 @@ def _workflow(relative_path: str) -> dict[str, object]:
     )
     assert isinstance(loaded, dict)
     return loaded
+
+
+def _mkdocs_config() -> dict[str, object]:
+    loaded = yaml.safe_load((REPO_ROOT / "Docs/mkdocs.yml").read_text(encoding="utf-8"))
+    assert isinstance(loaded, dict)
+    return loaded
+
+
+def test_mkdocs_output_does_not_alias_canonical_site_sources() -> None:
+    config = _mkdocs_config()
+    config_dir = REPO_ROOT / "Docs"
+    configured_site_dir = str(config.get("site_dir", "site"))
+    canonical_source = (config_dir / "Site").resolve()
+    output = (config_dir / configured_site_dir).resolve()
+
+    assert configured_site_dir == "_site"
+    assert canonical_source.as_posix().casefold() != output.as_posix().casefold()
+
+
+def test_mkdocs_workflow_uploads_configured_site_output() -> None:
+    config = _mkdocs_config()
+    deploy = _workflow(".github/workflows/mkdocs.yml")
+    deploy_steps = deploy["jobs"]["build"]["steps"]
+    upload_step = next(step for step in deploy_steps if step["name"] == "Upload artifact")
+
+    assert upload_step["with"]["path"] == f"Docs/{config['site_dir']}"
 
 
 def test_docs_workflows_enforce_strict_build_and_boundary_paths() -> None:
@@ -81,6 +108,50 @@ def test_docs_site_guide_requires_strict_for_every_operator_build() -> None:
 
     assert build_lines
     assert all("mkdocs build --strict -f Docs/mkdocs.yml" in line for line in build_lines)
+
+
+def test_docs_site_guide_describes_dev_build_without_deployment() -> None:
+    guide = (REPO_ROOT / "Docs/Code_Documentation/Docs_Site_Guide.md").read_text(encoding="utf-8")
+
+    assert "pushes to `dev`, `main`, and `PG-Backend`" in guide
+    assert "`dev` builds are validated but are not deployed" in guide
+
+
+def test_strict_local_build_preserves_canonical_site_sources() -> None:
+    config = _mkdocs_config()
+    canonical_dir = (REPO_ROOT / "Docs/Site").resolve()
+    configured_site_dir = str(config.get("site_dir", "site"))
+    output = (REPO_ROOT / "Docs" / configured_site_dir).resolve()
+    canonical_files = (canonical_dir / "index.md", canonical_dir / "RELEASE_NOTES.md")
+    before = {path: path.read_bytes() for path in canonical_files}
+
+    assert configured_site_dir == "_site"
+    assert output.parent == (REPO_ROOT / "Docs").resolve()
+    assert canonical_dir.as_posix().casefold() != output.as_posix().casefold()
+    if output.exists():
+        shutil.rmtree(output)
+    try:
+        result = subprocess.run(  # nosec B603
+            [
+                sys.executable,
+                "-m",
+                "mkdocs",
+                "build",
+                "--strict",
+                "-f",
+                "Docs/mkdocs.yml",
+            ],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert output.is_dir()
+        assert before == {path: path.read_bytes() for path in canonical_files}
+    finally:
+        if output.exists():
+            shutil.rmtree(output)
 
 
 def test_readme_release_references_update_to_target_version() -> None:
@@ -221,11 +292,12 @@ def test_release_notes_entry_point_raises_for_missing_anchor() -> None:
 def test_docs_site_repo_policy_keeps_generated_site_untracked() -> None:
     gitignore_lines = (REPO_ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
 
-    assert "/Docs/site/" in gitignore_lines
-    assert "!Docs/site/**/*.json" not in gitignore_lines
+    assert "/Docs/_site/" in gitignore_lines
+    assert "/Docs/site/" not in gitignore_lines
+    assert "!Docs/_site/**/*.json" not in gitignore_lines
 
     result = subprocess.run(  # nosec B603 B607
-        ["git", "ls-files", "Docs/site"],
+        ["git", "ls-files", "Docs/_site"],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,

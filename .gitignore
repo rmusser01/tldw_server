@@ -181,7 +181,7 @@ venv.bak/
 
 # mkdocs documentation
 /site
-/Docs/site/
+/Docs/_site/
 
 
 

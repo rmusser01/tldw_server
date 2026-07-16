@@ -155,7 +155,7 @@ def test_only_reviewed_published_json_files_are_unignored_and_tracked() -> None:
 
     assert _git_check_ignore("Docs/Published/API-related/private_credentials.json").returncode == 0
     assert _git_check_ignore("unrelated.json").returncode == 0
-    assert _git_check_ignore("Docs/site/private_credentials.json").returncode == 0
+    assert _git_check_ignore("Docs/_site/private_credentials.json").returncode == 0
 
 
 @pytest.mark.parametrize(

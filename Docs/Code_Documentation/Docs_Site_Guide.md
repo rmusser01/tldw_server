@@ -94,7 +94,7 @@ mkdocs serve -f Docs/mkdocs.yml
 ```
 
 Build static site with the required zero-warning check (outputs to
-`Docs/site/`):
+`Docs/_site/`):
 
 ```
 mkdocs build --strict -f Docs/mkdocs.yml
@@ -185,7 +185,8 @@ If an external deploy fails:
 ## GitHub Pages Mirror
 
 - Workflow file: `.github/workflows/mkdocs.yml`
-- Triggers: pushes to `main` and `PG-Backend`, and manual runs
+- Triggers: pushes to `dev`, `main`, and `PG-Backend`, and manual runs;
+  `dev` builds are validated but are not deployed
 - Steps: checkout -> install -> refresh curated docs -> boundary check -> strict
   zero-warning build -> deploy to GitHub Pages
 - Repository Settings -> Pages: set Source = GitHub Actions
