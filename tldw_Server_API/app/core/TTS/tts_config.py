@@ -3,6 +3,7 @@
 #
 # Imports
 import os
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Optional
 
@@ -11,7 +12,7 @@ import yaml
 #
 # Third-party Imports
 from loguru import logger
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SerializeAsAny
 
 try:
     from pydantic import field_validator
@@ -29,6 +30,12 @@ from tldw_Server_API.app.core.config_utils import (
 )
 from tldw_Server_API.app.core.Utils.pydantic_compat import model_dump_compat
 
+from .gateway_config import (
+    GatewayConfig,
+    GatewaySpec,
+    canonicalize_gateway_id,
+    normalize_gateway_specs,
+)
 from .utils import parse_bool
 
 #
@@ -148,7 +155,8 @@ class LoggingConfig(BaseModel):
 class TTSConfig(BaseModel):
     """Complete TTS configuration"""
     provider_priority: list[str] = Field(default_factory=lambda: ["openai", "kokoro"])
-    providers: dict[str, ProviderConfig] = Field(default_factory=dict)
+    providers: dict[str, SerializeAsAny[ProviderConfig | GatewayConfig]] = Field(default_factory=dict)
+    gateways: dict[str, GatewayConfig] = Field(default_factory=dict)
     voice_mappings: VoiceMappingConfig = Field(default_factory=VoiceMappingConfig)
     format_preferences: dict[str, list[str]] = Field(default_factory=dict)
     performance: PerformanceConfig = Field(default_factory=PerformanceConfig)
@@ -163,6 +171,30 @@ class TTSConfig(BaseModel):
     default_voice: Optional[str] = None
     default_speed: float = 1.0
     local_device: str = "cpu"
+
+    @field_validator("providers", mode="before")
+    @classmethod
+    def parse_provider_configs(cls, value: Any) -> dict[str, ProviderConfig | GatewayConfig]:
+        """Select the gateway schema by key instead of relying on union guessing."""
+        if value is None:
+            return {}
+        if not isinstance(value, Mapping):
+            raise ValueError("providers must be a mapping")
+        parsed: dict[str, ProviderConfig | GatewayConfig] = {}
+        for name, raw_config in value.items():
+            if name == "openrouter":
+                parsed[name] = (
+                    raw_config
+                    if isinstance(raw_config, GatewayConfig)
+                    else GatewayConfig.model_validate(raw_config)
+                )
+            else:
+                parsed[name] = (
+                    raw_config
+                    if isinstance(raw_config, ProviderConfig)
+                    else ProviderConfig.model_validate(raw_config)
+                )
+        return parsed
 
 
 class TTSConfigManager:
@@ -195,6 +227,7 @@ class TTSConfigManager:
         self._config: Optional[TTSConfig] = None
         self._env_overrides: dict[str, Any] = {}
         self._sources: dict[str, Any] = {}
+        self._gateway_specs: Optional[Mapping[str, GatewaySpec]] = None
 
         # Load configurations
         self.reload()
@@ -218,6 +251,10 @@ class TTSConfigManager:
         )
 
         self._config = TTSConfig(**merged)
+        self._gateway_specs = normalize_gateway_specs(
+            self._config.providers,
+            self._config.gateways,
+        )
         sources = apply_default_sources(model_dump_compat(self._config), sources)
         self._sources = sources
         logger.info(f"TTS configuration loaded with {len(self._config.providers)} providers")
@@ -456,10 +493,25 @@ class TTSConfigManager:
             self.reload()
         return dict(self._sources)
 
-    def get_provider_config(self, provider: str) -> Optional[ProviderConfig]:
+    def get_provider_config(self, provider: str) -> Optional[ProviderConfig | GatewayConfig]:
         """Get configuration for a specific provider"""
         config = self.get_config()
         return config.providers.get(provider)
+
+    def get_gateway_specs(self) -> Mapping[str, GatewaySpec]:
+        """Return locally normalized gateway specs without discovery or I/O."""
+        if self._gateway_specs is None:
+            config = self.get_config()
+            self._gateway_specs = normalize_gateway_specs(config.providers, config.gateways)
+        return self._gateway_specs
+
+    def get_gateway_spec(self, backend: str) -> Optional[GatewaySpec]:
+        """Return one locally normalized gateway spec by slug or canonical ID."""
+        try:
+            canonical = canonicalize_gateway_id(backend)
+        except ValueError:
+            return None
+        return self.get_gateway_specs().get(canonical)
 
     def is_provider_enabled(self, provider: str) -> bool:
         """Check if a provider is enabled"""
@@ -484,27 +536,30 @@ class TTSConfigManager:
     @staticmethod
     def _redact_provider_secrets(config_dict: dict[str, Any]) -> dict[str, Any]:
         """Replace provider API keys in a serialized config dictionary."""
-        providers = config_dict.get("providers")
-        if not isinstance(providers, dict):
-            return config_dict
-
-        for provider_config in providers.values():
-            if not isinstance(provider_config, dict):
+        for section_name in ("providers", "gateways"):
+            providers = config_dict.get(section_name)
+            if not isinstance(providers, dict):
                 continue
-            if provider_config.get("api_key"):
-                provider_config["api_key"] = REDACTED_SECRET
+            for provider_config in providers.values():
+                if not isinstance(provider_config, dict):
+                    continue
+                if provider_config.get("api_key"):
+                    provider_config["api_key"] = REDACTED_SECRET
         return config_dict
 
     def _has_provider_secrets(self) -> bool:
         """Return whether the loaded config contains provider API keys."""
         config_dict = model_dump_compat(self.get_config())
-        providers = config_dict.get("providers")
-        if not isinstance(providers, dict):
-            return False
-        return any(
-            isinstance(provider_config, dict) and bool(provider_config.get("api_key"))
-            for provider_config in providers.values()
-        )
+        for section_name in ("providers", "gateways"):
+            providers = config_dict.get(section_name)
+            if not isinstance(providers, dict):
+                continue
+            if any(
+                isinstance(provider_config, dict) and bool(provider_config.get("api_key"))
+                for provider_config in providers.values()
+            ):
+                return True
+        return False
 
     def to_dict(self, *, include_secrets: bool = False) -> dict[str, Any]:
         """Convert configuration to dictionary"""
