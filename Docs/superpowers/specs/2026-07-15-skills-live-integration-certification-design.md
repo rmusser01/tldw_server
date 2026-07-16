@@ -333,7 +333,12 @@ same-port evidence restart are infrastructure handling, not test retries.
 
 ## Failure Classification
 
-The summary records one primary category and bounded redacted detail:
+The summary retains every applicable failure category with bounded redacted
+detail. It derives `primary_category` deterministically: `interrupted` wins when
+a signal was received; otherwise the first applicable category in the
+execution-phase order below wins. Artifact-safety and cleanup outcomes remain
+separate top-level fields so a later finalization failure cannot be hidden by an
+earlier workflow failure.
 
 - `preflight`;
 - `backend_startup`;
@@ -418,7 +423,8 @@ Focused tests cover:
    worker, zero retries, and dedicated output paths.
 3. Startup retries only confirmed bind conflicts and never changes URLs after
    the browser phase begins.
-4. The extension still runs after a WebUI behavior failure.
+4. The extension still runs after WebUI startup, browser-launch, and workflow
+   failures whenever the backend remains usable.
 5. A backend crash permits at most one same-port evidence restart and can never
    produce an overall pass.
 6. Preflight and cleanup failures still produce a final summary.
