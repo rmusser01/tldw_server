@@ -1868,6 +1868,7 @@ async def execute_discovery_plan(
                 try:
                     journal_guard.validate()
                 except DiscoveryExecutionError:
+                    # Validation is best-effort and must not mask cancellation.
                     pass
                 raise
             except Exception:
@@ -1878,6 +1879,7 @@ async def execute_discovery_plan(
                 try:
                     journal_guard.validate()
                 except DiscoveryExecutionError:
+                    # Validation is best-effort and must not mask the original failure.
                     pass
                 raise
             else:

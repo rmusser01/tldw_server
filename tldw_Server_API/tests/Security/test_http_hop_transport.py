@@ -933,3 +933,36 @@ async def test_explicit_log_hardening_protects_standalone_public_hop(
     assert response.status_code == 200
     assert (httpcore_logger.level, http11_logger.level) == (logging.INFO, logging.INFO)
     assert secret not in caplog.text
+
+
+def test_log_hardening_preserves_stricter_httpcore_log_levels(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app import main as app_main
+
+    httpcore_logger = logging.getLogger("httpcore")
+    http11_logger = logging.getLogger("httpcore.http11")
+    monkeypatch.setattr(httpcore_logger, "level", logging.WARNING)
+    monkeypatch.setattr(http11_logger, "level", logging.ERROR)
+
+    app_main.harden_httpcore_logging()
+
+    assert (httpcore_logger.level, http11_logger.level) == (logging.WARNING, logging.ERROR)
+
+
+def test_log_hardening_raises_inherited_debug_levels_to_info(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app import main as app_main
+
+    root_logger = logging.getLogger()
+    httpcore_logger = logging.getLogger("httpcore")
+    http11_logger = logging.getLogger("httpcore.http11")
+    monkeypatch.setattr(root_logger, "level", logging.DEBUG)
+    monkeypatch.setattr(httpcore_logger, "level", logging.NOTSET)
+    monkeypatch.setattr(http11_logger, "level", logging.NOTSET)
+
+    app_main.harden_httpcore_logging()
+
+    assert httpcore_logger.getEffectiveLevel() == logging.INFO
+    assert http11_logger.getEffectiveLevel() == logging.INFO

@@ -679,7 +679,9 @@ def harden_httpcore_logging() -> None:
     # HTTPcore DEBUG traces include complete response headers and raw parser
     # exceptions, which may contain cookies, signed URLs, or hostile bytes.
     for logger_name in ("httpcore", "httpcore.http11"):
-        logging.getLogger(logger_name).setLevel(logging.INFO)
+        httpcore_logger = logging.getLogger(logger_name)
+        if httpcore_logger.getEffectiveLevel() < logging.INFO:
+            httpcore_logger.setLevel(logging.INFO)
 
 
 def _redirect_external_loggers() -> None:
