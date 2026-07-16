@@ -51,6 +51,7 @@ class InputError(ValueError):
 _STANDALONE_HTML_MAX_DOCUMENT_BYTES = 1_048_576
 _STANDALONE_HTML_SNAPSHOT_MAX_BYTES = 2 * _STANDALONE_HTML_MAX_DOCUMENT_BYTES + 65_536
 _STANDALONE_HTML_MAX_VERSION_RETENTION = 25
+_STANDALONE_HTML_MAX_EMPTY_SLIDES_JSON_CHARS = 64
 _SNAPSHOT_SCHEMA_VERSION = 1
 
 
@@ -59,7 +60,7 @@ def decode_presentation_version_payload(payload_json: str) -> dict[str, Any]:
     payload: Any = None
     try:
         payload = json.loads(payload_json)
-    except (TypeError, json.JSONDecodeError):
+    except (TypeError, json.JSONDecodeError, RecursionError):
         pass
     if not isinstance(payload, dict):
         raise InputError("version_payload_invalid")
@@ -634,14 +635,19 @@ class SlidesDatabase:
     @staticmethod
     def _validate_presentation_candidate(candidate: Mapping[str, Any]) -> None:
         """Validate the complete discriminated row before it is persisted."""
+        slides_json = candidate.get("slides")
+        content_kind = candidate.get("content_kind")
+        if content_kind == "standalone_html" and (
+            not isinstance(slides_json, str) or len(slides_json) > _STANDALONE_HTML_MAX_EMPTY_SLIDES_JSON_CHARS
+        ):
+            raise InputError("standalone_html slides must be an empty JSON list")
         try:
-            parsed_slides = json.loads(candidate.get("slides"))
-        except (TypeError, json.JSONDecodeError) as exc:
+            parsed_slides = json.loads(slides_json)
+        except (TypeError, json.JSONDecodeError, RecursionError) as exc:
             raise InputError("slides must be a valid JSON list") from exc
         if not isinstance(parsed_slides, list):
             raise InputError("slides must be a valid JSON list")
 
-        content_kind = candidate.get("content_kind")
         standalone_fields = (
             "html_document",
             "html_sha256",
@@ -685,13 +691,25 @@ class SlidesDatabase:
             raise InputError("standalone_html generation_provenance_json is required")
         try:
             encoded_provenance = provenance_json.encode("utf-8")
+        except UnicodeEncodeError as exc:
+            raise InputError("standalone_html generation_provenance_json must be valid JSON") from exc
+        if len(encoded_provenance) > 4096:
+            raise InputError("standalone_html generation_provenance_json exceeds 4096 bytes")
+        try:
             provenance = json.loads(provenance_json)
-        except (UnicodeEncodeError, json.JSONDecodeError) as exc:
+        except (json.JSONDecodeError, RecursionError) as exc:
             raise InputError("standalone_html generation_provenance_json must be valid JSON") from exc
         if not isinstance(provenance, dict) or not provenance:
             raise InputError("standalone_html generation_provenance_json must be a nonempty object")
-        if len(encoded_provenance) > 4096:
-            raise InputError("standalone_html generation_provenance_json exceeds 4096 bytes")
+
+    @classmethod
+    def presentation_row_invariant_holds(cls, row: PresentationRow) -> bool:
+        """Check the persisted-row invariant without exposing invalid row data."""
+        try:
+            cls._validate_presentation_candidate(vars(row))
+        except InputError:
+            return False
+        return True
 
     @staticmethod
     def _fetch_presentation_by_id(
@@ -1105,6 +1123,16 @@ class SlidesDatabase:
     def get_presentation_by_id(self, presentation_id: str, *, include_deleted: bool = False) -> PresentationRow:
         conn = self.get_connection()
         return self._fetch_presentation_by_id(conn, presentation_id, include_deleted)
+
+    def probe_health(self) -> None:
+        """Verify that the presentation table is readable without loading content."""
+        failed = False
+        try:
+            self.get_connection().execute("SELECT 1 FROM presentations LIMIT 1").fetchone()
+        except sqlite3.Error:
+            failed = True
+        if failed:
+            raise SlidesDatabaseError("slides_health_probe_failed")
 
     def get_presentation_kind(
         self,

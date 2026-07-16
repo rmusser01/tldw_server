@@ -393,6 +393,38 @@ def test_slides_db_lookup_failure_blocks_slides_generation(monkeypatch):
     assert response.capabilities["artifact_text_generation"].mode == "allow"
 
 
+def test_slides_health_collector_uses_source_free_database_probe(monkeypatch):
+    fake_slides_deps = ModuleType("tldw_Server_API.app.api.v1.API_Deps.Slides_DB_Deps")
+
+    class _SlidesDB:
+        def __init__(self) -> None:
+            self.probe_calls = 0
+
+        def probe_health(self) -> None:
+            self.probe_calls += 1
+
+        def list_presentations(self, **_kwargs):
+            raise AssertionError("health must not load presentation detail rows")
+
+    db = _SlidesDB()
+
+    def fake_try_get_slides_db_for_user(current_user: object) -> _SlidesDB:
+        assert current_user is not None
+        return db
+
+    fake_slides_deps.try_get_slides_db_for_user = fake_try_get_slides_db_for_user
+    monkeypatch.setitem(
+        sys.modules,
+        "tldw_Server_API.app.api.v1.API_Deps.Slides_DB_Deps",
+        fake_slides_deps,
+    )
+
+    health = capabilities._collect_slides_health(user_id=42)
+
+    assert health == {"status": "ok"}
+    assert db.probe_calls == 1
+
+
 def test_capability_payload_does_not_leak_raw_errors_paths_or_secrets():
     response = build_research_workspace_capabilities(
         **_health_inputs(

@@ -102,6 +102,7 @@ from tldw_Server_API.app.core.Slides.slides_db import (
     ConflictError,
     InputError,
     SlidesDatabase,
+    SlidesDatabaseError,
     VisualStyleRow,
     decode_presentation_version_payload,
 )
@@ -283,6 +284,7 @@ _SLIDES_NONCRITICAL_EXCEPTIONS = (
     ValueError,
     json.JSONDecodeError,
 )
+_SLIDES_HEALTH_EXCEPTIONS = (*_SLIDES_NONCRITICAL_EXCEPTIONS, SlidesDatabaseError)
 
 _PRESENTATION_STUDIO_TRANSITIONS = {"fade", "cut", "wipe", "zoom"}
 _PRESENTATION_STUDIO_TIMING_MODES = {"auto", "manual"}
@@ -2005,6 +2007,9 @@ async def restore_presentation(
         raise _map_presentation_service_error(exc) from exc
     response.headers["ETag"] = _format_etag(row.version, row.content_kind)
     response.headers["Last-Modified"] = row.last_modified
+    if row.content_kind == STANDALONE_HTML:
+        response.headers["Cache-Control"] = "private, no-store"
+        response.headers["X-Content-Type-Options"] = "nosniff"
     return _build_presentation_response(row, additive=STANDALONE_HTML in accepted)
 
 
@@ -2958,10 +2963,8 @@ async def export_presentation(
 )
 async def slides_health(db: SlidesDatabase = Depends(get_slides_db_for_user)) -> SlidesHealthResponse:
     try:
-        _ = db.list_presentations(
-            limit=1, offset=0, include_deleted=True, sort_column="created_at", sort_direction="DESC"
-        )
-    except _SLIDES_NONCRITICAL_EXCEPTIONS as exc:
+        db.probe_health()
+    except _SLIDES_HEALTH_EXCEPTIONS as exc:
         logger.warning("slides health check failed")
         raise HTTPException(status_code=500, detail="slides_db_unavailable") from exc
     return SlidesHealthResponse(service="slides", status="ok")
