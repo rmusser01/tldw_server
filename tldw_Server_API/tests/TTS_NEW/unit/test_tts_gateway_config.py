@@ -143,6 +143,20 @@ def test_gateway_paths_are_strict_relative_paths(path):
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"speech_path": "   "},
+        {"models_path": "\t"},
+        {"discovery": {"models_path": " \t "}},
+    ],
+)
+def test_gateway_paths_reject_whitespace_only_values(overrides):
+    with pytest.raises(ValueError, match="speech_path|models_path"):
+        normalize_gateway_specs({}, {"company": _gateway(**overrides)})
+
+
+@pytest.mark.unit
 def test_build_gateway_url_preserves_base_authority_and_path():
     assert (
         str(build_gateway_url("https://speech.example/v1/", "audio/speech"))
