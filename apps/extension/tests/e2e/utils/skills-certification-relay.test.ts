@@ -54,9 +54,13 @@ const emitRequest = (
   request: ReturnType<typeof makeRequest>
 ) => context.emit("request", request)
 
-const successfulLifecycle = (context: ContextDouble, dryRun = true) => {
+const successfulLifecycle = (
+  context: ContextDouble,
+  dryRun = true,
+  createStatus = 201
+) => {
   const events = [
-    ["POST", "/api/v1/skills", 201],
+    ["POST", "/api/v1/skills", createStatus],
     [
       "POST",
       "/api/v1/skills/widget/execute",
@@ -268,11 +272,7 @@ describe("createSkillsRelayObserver", () => {
   it("rejects missing required mutation status", () => {
     const context = new ContextDouble()
     const observer = createSkillsRelayObserver(context as any, workerUrl)
-    successfulLifecycle(context)
-    const badCreate = observer.entries.find(
-      (entry) => entry.method === "POST" && entry.path === "/api/v1/skills"
-    )
-    if (badCreate) badCreate.status = 200
+    successfulLifecycle(context, true, 200)
 
     expect(() => observer.assertValid()).toThrow(
       /POST \/api\/v1\/skills status 201 x1/
@@ -333,6 +333,36 @@ describe("createSkillsRelayObserver", () => {
     ]) {
       expect(ledger).not.toContain(forbidden)
     }
+  })
+
+  it("returns fresh sanitized snapshots after callers mutate earlier entries", () => {
+    const context = new ContextDouble()
+    const observer = createSkillsRelayObserver(context as any, workerUrl)
+    const request = makeRequest({ url: "https://server.test/api/v1/skills" })
+    emitRequest(context, request)
+    respond(context, request, 200)
+
+    const entries = observer.entries
+    entries[0].method = "PATCH"
+    ;(entries[0] as any).api_key = "top-secret"
+    entries.push({
+      method: "POST",
+      path: "/api/v1/skills",
+      worker_owned: true,
+      outcome: "success",
+      status: 201
+    })
+
+    expect(observer.entries).toEqual([
+      {
+        method: "GET",
+        path: "/api/v1/skills",
+        worker_owned: true,
+        outcome: "success",
+        status: 200
+      }
+    ])
+    expect(JSON.stringify(observer.entries)).not.toContain("top-secret")
   })
 
   it("removes its listeners idempotently", () => {

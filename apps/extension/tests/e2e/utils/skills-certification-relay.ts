@@ -63,7 +63,7 @@ export function createSkillsRelayObserver(
   assertValid(): void
   dispose(): void
 } {
-  const entries: SkillsRelayEntry[] = []
+  const internalEntries: SkillsRelayEntry[] = []
   const tracked = new WeakMap<Request, InternalEntry>()
   const successfulExecuteDryRuns: boolean[] = []
 
@@ -76,7 +76,7 @@ export function createSkillsRelayObserver(
       worker_owned: request.serviceWorker()?.url() === expectedWorkerUrl,
       outcome: "pending"
     }
-    entries.push(entry)
+    internalEntries.push(entry)
     tracked.set(request, { entry, dryRun: isDryRun(request, path) })
   }
 
@@ -111,20 +111,20 @@ export function createSkillsRelayObserver(
 
   let disposed = false
   const assertValid = () => {
-    const pending = entries.find((entry) => entry.outcome === "pending")
+    const pending = internalEntries.find((entry) => entry.outcome === "pending")
     if (pending) {
       throw new Error(
         `Skills request is still pending: ${pending.method} ${pending.path}`
       )
     }
 
-    const invalid = entries.find((entry) => !entry.worker_owned)
+    const invalid = internalEntries.find((entry) => !entry.worker_owned)
     if (invalid)
       throw new Error(
         `Skills request was page-owned: ${invalid.method} ${invalid.path}`
       )
 
-    const failed = entries.find(
+    const failed = internalEntries.find(
       (entry) => entry.outcome === "failed" || entry.outcome === "http_error"
     )
     if (failed)
@@ -132,7 +132,7 @@ export function createSkillsRelayObserver(
         `Skills request failed or returned HTTP error: ${failed.method} ${failed.path}`
       )
 
-    const unexpected = entries.find(
+    const unexpected = internalEntries.find(
       (entry) => entry.path === UNEXPECTED_SKILLS_PATH
     )
     if (unexpected) {
@@ -141,7 +141,7 @@ export function createSkillsRelayObserver(
       )
     }
 
-    const terminalMutations = entries.filter(
+    const terminalMutations = internalEntries.filter(
       (entry) => entry.outcome === "success" && entry.method !== "GET"
     )
     const expected = [
@@ -182,7 +182,18 @@ export function createSkillsRelayObserver(
   }
 
   return {
-    entries,
+    get entries() {
+      return internalEntries.map((entry) => {
+        const snapshot: SkillsRelayEntry = {
+          method: entry.method,
+          path: entry.path,
+          worker_owned: entry.worker_owned,
+          outcome: entry.outcome
+        }
+        if (entry.status !== undefined) snapshot.status = entry.status
+        return snapshot
+      })
+    },
     assertValid,
     dispose: () => {
       if (disposed) return

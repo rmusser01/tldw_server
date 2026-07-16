@@ -205,6 +205,13 @@ describe("normalizeBuiltExtensionSeedConfig", () => {
       path.join(os.tmpdir(), "tldw-strict-profile-")
     )
     process.env.OPENAI_API_KEY = "must-not-reach-chromium"
+    process.env.ANTHROPIC_API_KEY = "must-not-reach-chromium"
+    process.env.SYSTEMROOT = "C:\\Windows"
+    process.env.WINDIR = "C:\\Windows"
+    process.env.COMSPEC = "C:\\Windows\\System32\\cmd.exe"
+    process.env.PATHEXT = ".COM;.EXE;.BAT;.CMD"
+    process.env.SSL_CERT_FILE = "/host/cert.pem"
+    process.env.LD_LIBRARY_PATH = "/host/lib"
 
     try {
       await launchWithBuiltExtension({ profileRoot })
@@ -218,15 +225,39 @@ describe("normalizeBuiltExtensionSeedConfig", () => {
         "staged-extension"
       )
 
-      expect(userDataDir).toMatch(new RegExp(`^${strictRoot}/user-data-`))
-      expect(homeDir).toMatch(new RegExp(`^${strictRoot}/home-`))
+      expect(path.dirname(userDataDir)).toBe(strictRoot)
+      expect(path.basename(userDataDir)).toMatch(/^user-data-/)
+      expect(path.dirname(homeDir)).toBe(strictRoot)
+      expect(path.basename(homeDir)).toMatch(/^home-/)
       expect(launchOptions.env).toMatchObject({
         HOME: homeDir,
+        USERPROFILE: homeDir,
         TMPDIR: path.join(strictRoot, "tmp"),
         TMP: path.join(strictRoot, "tmp"),
-        TEMP: path.join(strictRoot, "tmp")
+        TEMP: path.join(strictRoot, "tmp"),
+        APPDATA: path.join(strictRoot, "appdata"),
+        LOCALAPPDATA: path.join(strictRoot, "localappdata"),
+        XDG_CACHE_HOME: path.join(strictRoot, "xdg-cache"),
+        XDG_CONFIG_HOME: path.join(strictRoot, "xdg-config"),
+        SYSTEMROOT: "C:\\Windows",
+        WINDIR: "C:\\Windows",
+        COMSPEC: "C:\\Windows\\System32\\cmd.exe",
+        PATHEXT: ".COM;.EXE;.BAT;.CMD",
+        SSL_CERT_FILE: "/host/cert.pem",
+        LD_LIBRARY_PATH: "/host/lib"
       })
       expect(launchOptions.env).not.toHaveProperty("OPENAI_API_KEY")
+      expect(launchOptions.env).not.toHaveProperty("ANTHROPIC_API_KEY")
+      for (const directory of [
+        path.join(strictRoot, "tmp"),
+        path.join(strictRoot, "crash-dumps"),
+        path.join(strictRoot, "appdata"),
+        path.join(strictRoot, "localappdata"),
+        path.join(strictRoot, "xdg-cache"),
+        path.join(strictRoot, "xdg-config")
+      ]) {
+        expect(fs.existsSync(directory)).toBe(true)
+      }
       expect(launchOptions.args).toContain(
         `--crash-dumps-dir=${path.join(strictRoot, "crash-dumps")}`
       )
@@ -247,6 +278,7 @@ describe("normalizeBuiltExtensionSeedConfig", () => {
         expect.anything(),
         expect.objectContaining({ extensionPath: strictLaunchPath }),
       )
+      expect(path.relative(strictRoot, strictLaunchPath)).not.toMatch(/^\.\./)
     } finally {
       cleanup()
       fs.rmSync(profileRoot, { recursive: true, force: true })

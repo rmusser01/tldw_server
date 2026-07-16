@@ -130,6 +130,10 @@ function makeTempProfileDirs(profileRoot?: string) {
   if (profileRoot !== undefined) {
     fs.mkdirSync(path.join(root, 'tmp'), { recursive: true })
     fs.mkdirSync(path.join(root, 'crash-dumps'), { recursive: true })
+    fs.mkdirSync(path.join(root, 'appdata'), { recursive: true })
+    fs.mkdirSync(path.join(root, 'localappdata'), { recursive: true })
+    fs.mkdirSync(path.join(root, 'xdg-cache'), { recursive: true })
+    fs.mkdirSync(path.join(root, 'xdg-config'), { recursive: true })
   }
   const homeDir = fs.mkdtempSync(path.join(root, 'home-'))
   const userDataDir = fs.mkdtempSync(path.join(root, 'user-data-'))
@@ -145,7 +149,16 @@ const STRICT_CHROMIUM_ENV_KEYS = [
   'DBUS_SESSION_BUS_ADDRESS',
   'LANG',
   'LC_ALL',
-  'LC_CTYPE'
+  'LC_CTYPE',
+  'SYSTEMROOT',
+  'WINDIR',
+  'COMSPEC',
+  'PATHEXT',
+  'SSL_CERT_FILE',
+  'SSL_CERT_DIR',
+  'LD_LIBRARY_PATH',
+  'DYLD_LIBRARY_PATH',
+  'DYLD_FALLBACK_LIBRARY_PATH'
 ] as const
 
 function makeChromiumEnv(
@@ -161,7 +174,18 @@ function makeChromiumEnv(
     if (process.env[key] !== undefined) env[key] = process.env[key]
   }
   const tempDir = path.join(profileRoot, 'tmp')
-  return { ...env, HOME: homeDir, TMPDIR: tempDir, TMP: tempDir, TEMP: tempDir }
+  return {
+    ...env,
+    HOME: homeDir,
+    USERPROFILE: homeDir,
+    TMPDIR: tempDir,
+    TMP: tempDir,
+    TEMP: tempDir,
+    APPDATA: path.join(profileRoot, 'appdata'),
+    LOCALAPPDATA: path.join(profileRoot, 'localappdata'),
+    XDG_CACHE_HOME: path.join(profileRoot, 'xdg-cache'),
+    XDG_CONFIG_HOME: path.join(profileRoot, 'xdg-config')
+  }
 }
 
 function isExtensionBuildDir(dir: string): boolean {
