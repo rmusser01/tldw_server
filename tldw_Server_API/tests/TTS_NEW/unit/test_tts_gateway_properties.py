@@ -78,18 +78,16 @@ def test_fallback_target_count_is_bounded(targets):
 
 @given(
     st.lists(
-        st.text(
-            alphabet="abcXYZ019-/~",
-            min_size=1,
-            max_size=20,
-        ),
-        min_size=1,
+        st.sampled_from(["", "a", "XYZ", "/", "~", "~0", "x/y", "a~b"]),
+        min_size=0,
         max_size=6,
     )
 )
 @pytest.mark.unit
 def test_json_pointer_unescaping_round_trips_tokens(tokens):
-    pointer = "/" + "/".join(
-        token.replace("~", "~0").replace("/", "~1") for token in tokens
-    )
+    pointer = ""
+    if tokens:
+        pointer = "/" + "/".join(
+            token.replace("~", "~0").replace("/", "~1") for token in tokens
+        )
     assert decode_json_pointer(pointer) == tuple(tokens)

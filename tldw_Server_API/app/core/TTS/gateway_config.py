@@ -12,7 +12,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any
-from urllib.parse import unquote
+from urllib.parse import unquote, urlsplit
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -285,7 +285,7 @@ def canonicalize_gateway_id(value: str, *, builtin: bool = False) -> str:
     """Return the canonical backend ID for a built-in ID or custom slug."""
     if not isinstance(value, str):
         raise ValueError("gateway slug must be a string")
-    raw = value.strip()
+    raw = value
     if raw == "openrouter":
         return "openrouter"
     if raw.startswith("gateway:"):
@@ -333,11 +333,13 @@ def build_gateway_url(base_url: str, relative_path: str) -> httpx.URL:
 
 def decode_json_pointer(pointer: str) -> tuple[str, ...]:
     """Decode a strict RFC 6901 JSON Pointer into path tokens."""
-    if not isinstance(pointer, str) or not pointer.startswith("/"):
+    if not isinstance(pointer, str):
+        raise ValueError("JSON Pointer must be a string")
+    if not pointer:
+        return ()
+    if not pointer.startswith("/"):
         raise ValueError("JSON Pointer must start with '/'")
     raw_tokens = pointer[1:].split("/")
-    if not raw_tokens or any(not token for token in raw_tokens):
-        raise ValueError("JSON Pointer cannot contain empty tokens")
     decoded: list[str] = []
     for token in raw_tokens:
         index = 0
@@ -361,6 +363,10 @@ def _validate_request_options(pointers: tuple[str, ...]) -> frozenset[str]:
         raise ValueError("allowed_request_options cannot contain duplicates")
     for pointer in pointers:
         tokens = decode_json_pointer(pointer)
+        if not tokens:
+            raise ValueError(
+                "allowed_request_options cannot authorize the whole document"
+            )
         if any(token.casefold() in _RESERVED_OPTION_TOKENS for token in tokens):
             raise ValueError("allowed_request_options points to a reserved field")
     return frozenset(pointers)
@@ -387,9 +393,17 @@ def _validate_base_url(value: str, *, allow_insecure_http: bool) -> str:
         url = httpx.URL(value)
     except Exception as exc:
         raise ValueError("base_url must be a valid absolute URL") from exc
+    raw_components = urlsplit(value)
     if not url.is_absolute_url or not url.host:
         raise ValueError("base_url must be an absolute URL")
-    if url.userinfo or url.query or url.fragment:
+    if (
+        "@" in raw_components.netloc
+        or "?" in value
+        or "#" in value
+        or url.userinfo
+        or url.query
+        or url.fragment
+    ):
         raise ValueError("base_url cannot contain credentials, query, or fragment")
     if url.scheme not in {"https", "http"}:
         raise ValueError("base_url must use HTTPS")
