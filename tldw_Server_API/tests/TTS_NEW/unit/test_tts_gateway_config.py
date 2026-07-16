@@ -56,7 +56,19 @@ def test_canonical_gateway_ids_and_collisions():
 @pytest.mark.unit
 @pytest.mark.parametrize(
     "slug",
-    ["", "Upper", "-edge", "edge_underscore", "a" * 64],
+    [
+        "",
+        "Upper",
+        "-edge",
+        "edge_underscore",
+        "a" * 64,
+        " company",
+        "company ",
+        " gateway:company",
+        "gateway:company ",
+        " openrouter",
+        "openrouter ",
+    ],
 )
 def test_gateway_slug_uses_strict_lowercase_pattern(slug):
     with pytest.raises(ValueError, match="slug"):
@@ -71,7 +83,11 @@ def test_gateway_slug_uses_strict_lowercase_pattern(slug):
         "ftp://speech.example.com/v1",
         "https://user:pass@speech.example.com/v1",
         "https://speech.example.com/v1?tenant=x",
+        "https://speech.example.com/v1?",
         "https://speech.example.com/v1#fragment",
+        "https://speech.example.com/v1#",
+        "https://speech.example.com/v1?#",
+        "https://@speech.example.com/v1",
         "http://speech.example.com/v1",
         "http://8.8.8.8/v1",
     ],
@@ -249,7 +265,7 @@ def test_discovered_models_are_authorized_only_when_enabled():
 @pytest.mark.unit
 @pytest.mark.parametrize(
     "pointer",
-    ["provider/options", "//double", "/provider/~2bad", "/headers/x", "/api_key"],
+    ["provider/options", "/provider/~2bad", "/headers/x", "/api_key"],
 )
 def test_request_option_pointers_reject_malformed_and_reserved_fields(pointer):
     with pytest.raises(ValueError, match="allowed_request_options|JSON Pointer|reserved"):
@@ -265,6 +281,34 @@ def test_request_option_pointer_unescaping():
         "a/b",
         "~name",
     )
+
+
+@pytest.mark.unit
+def test_json_pointer_supports_root_and_empty_reference_tokens():
+    assert decode_json_pointer("") == ()
+    assert decode_json_pointer("/") == ("",)
+    assert decode_json_pointer("/valid/") == ("valid", "")
+    assert decode_json_pointer("//double") == ("", "double")
+
+
+@pytest.mark.unit
+def test_request_option_allows_empty_leaf_name_but_rejects_whole_document():
+    spec = normalize_gateway_specs(
+        {},
+        {
+            "company": _gateway(
+                allowed_request_options=["/provider/options/", "//extension"]
+            )
+        },
+    )["gateway:company"]
+    assert spec.allowed_request_options == frozenset(
+        {"/provider/options/", "//extension"}
+    )
+
+    with pytest.raises(ValueError, match="whole document"):
+        normalize_gateway_specs(
+            {}, {"company": _gateway(allowed_request_options=[""])}
+        )
 
 
 @pytest.mark.unit
