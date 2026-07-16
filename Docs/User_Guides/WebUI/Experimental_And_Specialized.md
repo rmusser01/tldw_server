@@ -42,7 +42,7 @@ If you are running local single-user mode, these pages may be hidden, irrelevant
 
 ## Related Docs
 
-- [VN API](../../API/VN.md)
+- [VN API](../../API-related/VN_PLATFORM_API.md)
 - [VN asset packs API](../../API-related/VN_ASSET_PACKS_API.md)
 - [VN platform API](../../API-related/VN_PLATFORM_API.md)
 - [VN play API](../../API-related/VN_PLAY_API.md)

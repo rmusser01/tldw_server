@@ -32,4 +32,4 @@ Speech workflows depend on backend capability. STT may require local models, acc
 - [Dictation strategy and settings](../WebUI_Extension/Dictation_Strategy_and_Settings.md)
 - [Audio transcription API](../../API-related/Audio_Transcription_API.md)
 - [TTS API](../../API-related/TTS_API.md)
-- [Audio chat API notes](../../API/Audio_Chat.md)
+- [Audio chat API notes](../../API-related/Audio_Transcription_API.md)

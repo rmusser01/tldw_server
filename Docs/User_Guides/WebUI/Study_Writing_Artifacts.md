@@ -33,4 +33,4 @@ Study and artifact pages often sit downstream of media, notes, knowledge, or cha
 - [Kanban board guide](../WebUI_Extension/Kanban_Board_Guide.md)
 - [Evaluations user guide](../Server/Evaluations_User_Guide.md)
 - [Benchmark creation and runs](../Server/Benchmark_Creation_API_WebUI_Extension_Guide.md)
-- [Slides API](../../API/Slides.md)
+- Slides/presentation API: no stable curated public guide yet.

@@ -56,8 +56,8 @@ This is the developer and contributor-facing map for understanding, changing, te
 - [Deployment docs](../Deployment/First_Time_Production_Setup.md)
 - [Sidecar workers](../Deployment/Sidecar_Workers.md)
 - [Resource requirements](../Deployment/resource-requirements.md)
-- [Monitoring metrics cheatsheet](../Deployment/Monitoring/Metrics_Cheatsheet.md)
-- [Environment variables](../Operations/Env_Vars.md)
+- [Monitoring metrics cheatsheet](../Monitoring/Metrics_Cheatsheet.md)
+- [Environment variables](../Env_Vars.md)
 
 ## Quality, Release, and Maintenance
 

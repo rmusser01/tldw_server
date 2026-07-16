@@ -78,7 +78,7 @@ Each palette (`light` and `dark`) is an object of **RGB triples as space-separat
 
 ### Shape, layout, components
 
-Enums are validated at import time. See [`apps/packages/ui/src/themes/types.ts`](../../apps/packages/ui/src/themes/types.ts) for the full TypeScript type.
+Enums are validated at import time. See [`apps/packages/ui/src/themes/types.ts`](https://github.com/rmusser01/tldw_server/blob/main/apps/packages/ui/src/themes/types.ts) for the full TypeScript type.
 
 ## Contrast requirements
 
@@ -101,9 +101,9 @@ User-authored themes aren't forced through these checks on import, but ignoring 
 
 ### Programmatically (whitelabel)
 
-1. Create a new file `apps/packages/ui/src/themes/my-brand-preset.ts` matching the shape of [`primer-preset.ts`](../../apps/packages/ui/src/themes/primer-preset.ts).
+1. Create a new file `apps/packages/ui/src/themes/my-brand-preset.ts` matching the shape of [`primer-preset.ts`](https://github.com/rmusser01/tldw_server/blob/main/apps/packages/ui/src/themes/primer-preset.ts).
 2. Export a `ThemeDefinition` with `builtin: true`.
-3. Import and register in [`presets.ts`](../../apps/packages/ui/src/themes/presets.ts):
+3. Import and register in [`presets.ts`](https://github.com/rmusser01/tldw_server/blob/main/apps/packages/ui/src/themes/presets.ts):
    ```ts
    import { myBrandTheme } from "./my-brand-preset"
 
@@ -125,7 +125,7 @@ User-authored themes aren't forced through these checks on import, but ignoring 
 
 To flip the default for *new* users to your brand:
 
-1. Bump `CURRENT_USER_PREFERENCE_MIGRATION` in [`user-preference-migration.ts`](../../apps/packages/ui/src/themes/user-preference-migration.ts).
+1. Bump `CURRENT_USER_PREFERENCE_MIGRATION` in [`user-preference-migration.ts`](https://github.com/rmusser01/tldw_server/blob/main/apps/packages/ui/src/themes/user-preference-migration.ts).
 2. Extend the migration function to write your preset ID for the new version.
 
 Migration preserves existing user selections — only installs with no stored preset get the new default.
@@ -138,9 +138,9 @@ Optional glow tokens (`--glow-primary`, `--glow-accent`, `--glow-success`) are d
 
 ## File reference
 
-- [`apps/packages/ui/src/themes/types.ts`](../../apps/packages/ui/src/themes/types.ts) — TypeScript type for `ThemeDefinition`
-- [`apps/packages/ui/src/themes/presets.ts`](../../apps/packages/ui/src/themes/presets.ts) — Built-in theme registry
-- [`apps/packages/ui/src/themes/primer-preset.ts`](../../apps/packages/ui/src/themes/primer-preset.ts) — Primer theme source
-- [`apps/packages/ui/src/themes/user-preference-migration.ts`](../../apps/packages/ui/src/themes/user-preference-migration.ts) — One-shot default migration
-- [`apps/packages/ui/src/themes/validation.ts`](../../apps/packages/ui/src/themes/validation.ts) — Import-time schema validation
-- [`apps/packages/ui/src/assets/tailwind-shared.css`](../../apps/packages/ui/src/assets/tailwind-shared.css) — Global CSS custom properties and `@font-face` rules
+- [`apps/packages/ui/src/themes/types.ts`](https://github.com/rmusser01/tldw_server/blob/main/apps/packages/ui/src/themes/types.ts) — TypeScript type for `ThemeDefinition`
+- [`apps/packages/ui/src/themes/presets.ts`](https://github.com/rmusser01/tldw_server/blob/main/apps/packages/ui/src/themes/presets.ts) — Built-in theme registry
+- [`apps/packages/ui/src/themes/primer-preset.ts`](https://github.com/rmusser01/tldw_server/blob/main/apps/packages/ui/src/themes/primer-preset.ts) — Primer theme source
+- [`apps/packages/ui/src/themes/user-preference-migration.ts`](https://github.com/rmusser01/tldw_server/blob/main/apps/packages/ui/src/themes/user-preference-migration.ts) — One-shot default migration
+- [`apps/packages/ui/src/themes/validation.ts`](https://github.com/rmusser01/tldw_server/blob/main/apps/packages/ui/src/themes/validation.ts) — Import-time schema validation
+- [`apps/packages/ui/src/assets/tailwind-shared.css`](https://github.com/rmusser01/tldw_server/blob/main/apps/packages/ui/src/assets/tailwind-shared.css) — Global CSS custom properties and `@font-face` rules

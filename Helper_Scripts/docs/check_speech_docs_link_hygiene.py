@@ -50,6 +50,36 @@ AUDITED_STT_TTS_BLOB_TARGETS = frozenset(
             "github.com",
             "/rmusser01/tldw_server/blob/main/Docs/STT-TTS/QWEN3_ASR_SETUP.md",
         ),
+        (
+            "https",
+            "github.com",
+            "/rmusser01/tldw_server/blob/main/Docs/STT-TTS/QWEN3_TTS_SETUP.md",
+        ),
+        (
+            "https",
+            "github.com",
+            "/rmusser01/tldw_server/blob/main/Docs/STT-TTS/TTS-SETUP-GUIDE.md",
+        ),
+        (
+            "https",
+            "github.com",
+            "/rmusser01/tldw_server/blob/main/Docs/STT-TTS/NEUTTS_TTS_SETUP.md",
+        ),
+        (
+            "https",
+            "github.com",
+            "/rmusser01/tldw_server/blob/main/Docs/STT-TTS/CHATTERBOX_SETUP.md",
+        ),
+        (
+            "https",
+            "github.com",
+            "/rmusser01/tldw_server/blob/main/Docs/STT-TTS/VIBEVOICE_GETTING_STARTED.md",
+        ),
+        (
+            "https",
+            "github.com",
+            "/rmusser01/tldw_server/blob/main/Docs/STT-TTS/LUXTTS_TTS_SETUP.md",
+        ),
     }
 )
 

@@ -46,10 +46,10 @@ Use these pages when you want recurring work, integrations, server operations, t
 
 - [Workflows examples](../WebUI_Extension/Workflows_Examples.md)
 - [Getting started with ACP](../Integrations_Experiments/Getting_Started_with_ACP.md)
-- [MCP Unified guide](../../MCP/Unified/Developer_Guide.md)
+- [MCP Unified guide](https://github.com/rmusser01/tldw_server/blob/main/Docs/MCP/Unified/Developer_Guide.md)
 - [Organization administration](../Server/Organization_Administration.md)
 - [Organizations and sharing](../Server/Organizations_and_Sharing.md)
 - [Usage module](../Server/Usage_Module.md)
-- [Metrics cheatsheet](../../Deployment/Monitoring/Metrics_Cheatsheet.md)
+- [Metrics cheatsheet](../../Monitoring/Metrics_Cheatsheet.md)
 - [Reminder and notifications API](../../API-related/Reminder_Notifications_API.md)
 - [Watchlists API](../../API-related/Watchlists_API.md)

@@ -67,7 +67,7 @@ This index maps WebUI and extension pages to user-facing capabilities. It is gro
 | `/prompt-studio` | Legacy alias | Redirects to `/prompts?tab=studio`. | Old Prompt Studio links. | [Study, writing, and artifacts](Study_Writing_Artifacts.md) |
 | `/chatbooks`, `/chatbooks-playground` | Advanced self-hosted | Import/export chatbooks and test chatbook content. | Backups, OpenWebUI imports, portable conversation bundles. | [Chatbook guide](../WebUI_Extension/Chatbook_User_Guide.md) |
 | `/writing-playground` | Advanced self-hosted | Draft and transform writing with templates and themes. | Writing sessions, manuscript support. | [Study, writing, and artifacts](Study_Writing_Artifacts.md) |
-| `/presentation-studio` and child routes | Advanced self-hosted | Create, edit, and export slide/presentation artifacts. | Deck generation, project editing. | [Slides API](../../API/Slides.md) |
+| `/presentation-studio` and child routes | Advanced self-hosted | Create, edit, and export slide/presentation artifacts. | Deck generation, project editing. | No stable curated public guide yet |
 | `/data-tables`, `/kanban`, `/repo2txt` | Advanced self-hosted | Generate/edit tables, manage boards, and export repository text. | Structured outputs, project boards, repository context capture. | [Study, writing, and artifacts](Study_Writing_Artifacts.md) |
 | `/content-review` | Advanced self-hosted | Review generated or queued content drafts. | Editorial workflows, moderation-assisted review. | [Study, writing, and artifacts](Study_Writing_Artifacts.md) |
 
@@ -79,7 +79,7 @@ This index maps WebUI and extension pages to user-facing capabilities. It is gro
 | `/scheduled-tasks`, `/scheduled-tasks/results` | Advanced self-hosted | Manage schedules and inspect scheduled run results. | Recurring jobs, automation review. | [Automation, admin, and operations](Automation_Admin_Operations.md) |
 | `/watchlists` | Experimental/labs | Monitor sources, runs, alert rules, and recurring topics. | Watchlists, reporting, alert-driven research. | [Watchlists API](../../API-related/Watchlists_API.md) |
 | `/workflow-editor` | Advanced self-hosted | Edit workflow definitions. | Multi-step processing, reusable automations. | [Workflow examples](../WebUI_Extension/Workflows_Examples.md) |
-| `/mcp-hub` | Advanced self-hosted | Configure MCP hub profiles, external servers, and tool access. | Tool setup, MCP operations. | [MCP guide](../../MCP/Unified/Developer_Guide.md) |
+| `/mcp-hub` | Advanced self-hosted | Configure MCP hub profiles, external servers, and tool access. | Tool setup, MCP operations. | [MCP guide](https://github.com/rmusser01/tldw_server/blob/main/Docs/MCP/Unified/Developer_Guide.md) |
 | `/acp-playground` | Advanced self-hosted | Test Agent Client Protocol sessions, tools, permissions, and workspaces. | ACP development, protocol experiments. | [Getting started with ACP](../Integrations_Experiments/Getting_Started_with_ACP.md) |
 | `/model-playground`, `/skills` | Advanced self-hosted | Test model behavior and inspect skills. | Model comparison, skill discovery. | [Automation, admin, and operations](Automation_Admin_Operations.md) |
 | `/notifications` | WebUI | View notification inbox and alerts. | Task alerts, automation status, background job notices. | [Notifications API](../../API-related/Reminder_Notifications_API.md) |
@@ -102,7 +102,7 @@ This index maps WebUI and extension pages to user-facing capabilities. It is gro
 
 | Page or feature | Surface/status | What it lets you do | Common uses | More docs |
 | --- | --- | --- | --- | --- |
-| `/vn-assets`, `/vn-scripts`, `/vn-play` | Experimental/labs | Manage visual novel assets, scripts, and play sessions. | VN authoring and runtime experiments. | [VN API](../../API/VN.md) |
+| `/vn-assets`, `/vn-scripts`, `/vn-play` | Experimental/labs | Manage visual novel assets, scripts, and play sessions. | VN authoring and runtime experiments. | [VN API](../../API-related/VN_PLATFORM_API.md) |
 | `/prototype-workspaces` | Experimental/labs | Use prototype collaboration/workspace routes. | Workspace experiments. | [Prototype workspaces](../Prototype_Workspaces.md) |
 | `/for/journalists`, `/for/osint`, `/for/researchers` | Public/hosted-oriented | Show persona-specific public landing pages. | Audience-specific entry points. | [Experimental and specialized](Experimental_And_Specialized.md) |
 | `/billing/*`, `/auth/*` | Hosted-only | Handle hosted billing and auth callbacks. | Hosted account flows. | Hosted-only surface |

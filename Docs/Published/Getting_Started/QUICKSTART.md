@@ -168,7 +168,7 @@ make install-local PYTHON=python3.12
 | API server | http://127.0.0.1:8000 |
 | API docs | http://127.0.0.1:8000/docs |
 
-The local profile does not include the WebUI by default. To add it, see the [Local Profile: Add the WebUI](../../README.md#local-profile-add-the-webui) section in the main README.
+The local profile does not include the WebUI by default. To add it, see the [Local Profile: Add the WebUI](https://github.com/rmusser01/tldw_server/blob/main/README.md#local-profile-add-the-webui) section in the main README.
 
 ### Manual alternative (no Make)
 

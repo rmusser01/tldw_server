@@ -14,7 +14,7 @@ Scope:
 - Use [TTS Provider Setup Guide](./TTS-SETUP-GUIDE.md) for deep provider runbooks and tuning.
 - Use [Persona Live Wake Phrase Guide](./Persona_Live_Wake_Phrases.md) for manually armed Persona Garden wake phrase setup and troubleshooting.
 
-See design doc: [`Docs/Design/STT_TTS_Audio_API_Design.md`](../../Design/STT_TTS_Audio_API_Design.md) for architecture details, provider priority/retry behavior, auth mode behavior, storage header semantics, and streaming protocol/error handling.
+See design doc: [`Docs/Design/STT_TTS_Audio_API_Design.md`](https://github.com/rmusser01/tldw_server/blob/main/Docs/Design/STT_TTS_Audio_API_Design.md) for architecture details, provider priority/retry behavior, auth mode behavior, storage header semantics, and streaming protocol/error handling.
 
 ## TL;DR Choices
 

@@ -104,7 +104,7 @@ Primary surfaces:
 | Manage bring-your-own-key provider access | Admin/user settings | [BYOK user guide](Server/BYOK_User_Guide.md) |
 | Understand usage reporting | Admin/API | [Usage module](Server/Usage_Module.md) |
 | Back up SQLite deployments | Server/admin | [Backups using Litestream](Server/Backups_Using_Litestream.md) |
-| Monitor the server | Admin/operator | [Metrics cheatsheet](../Deployment/Monitoring/Metrics_Cheatsheet.md) |
+| Monitor the server | Admin/operator | [Metrics cheatsheet](../Monitoring/Metrics_Cheatsheet.md) |
 
 ## API Reference Entry Points
 

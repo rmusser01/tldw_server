@@ -27,7 +27,7 @@ For the first-time OpenAI account-linking flow (operator prerequisites + user wa
 
 For Anthropic setup with Claude Code/Claude SDK and current support limits (API-key based today, no Anthropic OAuth BYOK flow yet), see:
 
-- [Anthropic Claude SDK Setup](Docs/User_Guides/Integrations_Experiments/Anthropic_ClaudeCode_ClaudeSDK_Setup.md)
+- [Anthropic Claude SDK Setup](../Integrations_Experiments/Anthropic_ClaudeCode_ClaudeSDK_Setup.md)
 
 ## Provider Allowlist
 

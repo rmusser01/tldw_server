@@ -1,5 +1,7 @@
 from pathlib import Path
 
+TTS_RUNBOOK_URL = "https://github.com/rmusser01/tldw_server/blob/main/Docs/STT-TTS/TTS-SETUP-GUIDE.md"
+
 
 def test_stt_tts_quickstart_declares_scope() -> None:
     for path in [
@@ -30,5 +32,6 @@ def test_tts_setup_guide_is_runbook_index() -> None:
         text = Path(path).read_text()
         assert "# TTS Provider Setup Guide (Runbook Index)" in text
         assert "intentionally avoids duplicating provider setup details" in text
-        assert "../../STT-TTS/TTS-SETUP-GUIDE.md" in text
+        assert TTS_RUNBOOK_URL in text
+        assert "../../STT-TTS/TTS-SETUP-GUIDE.md" not in text
         assert len(text.splitlines()) < 220

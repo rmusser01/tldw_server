@@ -6,6 +6,14 @@ import pytest
 
 SCRIPT = Path("Helper_Scripts/docs/check_speech_docs_link_hygiene.py")
 QWEN3_ASR_URL = "https://github.com/rmusser01/tldw_server/blob/main/Docs/STT-TTS/QWEN3_ASR_SETUP.md"
+TASK3_AUDITED_STT_TTS_URLS = (
+    "https://github.com/rmusser01/tldw_server/blob/main/Docs/STT-TTS/QWEN3_TTS_SETUP.md#runtime-modes",
+    "https://github.com/rmusser01/tldw_server/blob/main/Docs/STT-TTS/TTS-SETUP-GUIDE.md#commercial-providers",
+    "https://github.com/rmusser01/tldw_server/blob/main/Docs/STT-TTS/NEUTTS_TTS_SETUP.md#prerequisites",
+    "https://github.com/rmusser01/tldw_server/blob/main/Docs/STT-TTS/CHATTERBOX_SETUP.md#requirements",
+    "https://github.com/rmusser01/tldw_server/blob/main/Docs/STT-TTS/VIBEVOICE_GETTING_STARTED.md#1-prerequisites",
+    "https://github.com/rmusser01/tldw_server/blob/main/Docs/STT-TTS/LUXTTS_TTS_SETUP.md#prerequisites",
+)
 UNREVIEWED_STT_TTS_URL = (
     "https://github.com/rmusser01/tldw_server/blob/main/Docs/STT-TTS/NOT_A_REVIEWED_OR_EXISTING_GUIDE.md"
 )
@@ -52,6 +60,18 @@ def test_hygiene_allows_audited_qwen_stt_tts_blob(
         tmp_path,
         capsys,
     )
+
+    assert result == 0
+    assert "Speech docs link hygiene check passed." in output
+
+
+@pytest.mark.parametrize("url", TASK3_AUDITED_STT_TTS_URLS)
+def test_hygiene_allows_frozen_verified_task3_stt_tts_blobs(
+    url: str,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    result, output = _run_hygiene((url,), tmp_path, capsys)
 
     assert result == 0
     assert "Speech docs link hygiene check passed." in output

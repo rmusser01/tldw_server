@@ -149,6 +149,6 @@ Local audio setup can use host-side config and model files directly. After this 
 ## Optional Add-ons
 
 - Keep provider setup in the WebUI first-run wizard for the normal path; add provider API keys to `tldw_Server_API/Config_Files/.env` only for recovery, automation, or advanced deployments, then restart the server.
-- For deeper WebUI development details, see [Extension & Web UI Development Guide](../../apps/DEVELOPMENT.md) and [tldw-frontend README](../../apps/tldw-frontend/README.md).
-- For LAN, mobile, reverse-proxy, or custom-host browser access, see [Run the Web UI (WIP)](../../README.md#run-the-web-ui-wip).
+- For deeper WebUI development details, see [Extension & Web UI Development Guide](https://github.com/rmusser01/tldw_server/blob/main/apps/DEVELOPMENT.md) and [tldw-frontend README](https://github.com/rmusser01/tldw_server/blob/main/apps/tldw-frontend/README.md).
+- For LAN, mobile, reverse-proxy, or custom-host browser access, see [Local Profile: Add the WebUI](https://github.com/rmusser01/tldw_server/blob/main/README.md#local-profile-add-the-webui).
 - Install development extras with `source .venv/bin/activate && pip install -e ".[dev]"`.
