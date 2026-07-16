@@ -33,7 +33,9 @@ import re
 import sqlite3
 import threading
 import uuid
+from collections.abc import Mapping
 from contextlib import contextmanager, suppress
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from math import ceil
 from pathlib import Path
@@ -42,11 +44,8 @@ from typing import Any, Optional, Union
 #
 # Third-Party Libraries
 from loguru import logger
+from loguru import logger as logging
 
-from tldw_Server_API.app.core.DB_Management.sqlite_policy import (
-    begin_immediate_if_needed,
-    configure_sqlite_connection,
-)
 from tldw_Server_API.app.core.DB_Management.prompts_db_helpers import (
     build_structured_prompt_searchable_text,
     deserialize_prompt_record,
@@ -54,8 +53,10 @@ from tldw_Server_API.app.core.DB_Management.prompts_db_helpers import (
     normalize_text_for_search,
     serialize_prompt_definition,
 )
-from loguru import logger as logging
-
+from tldw_Server_API.app.core.DB_Management.sqlite_policy import (
+    begin_immediate_if_needed,
+    configure_sqlite_connection,
+)
 from tldw_Server_API.app.core.testing import is_test_mode
 
 #
@@ -105,6 +106,23 @@ class ConflictError(DatabaseError):
         return f"{base} ({', '.join(details)})" if details else base
 
 
+@dataclass(frozen=True)
+class ServicePromptOverrideRow:
+    """Raw persisted Service Prompt override state."""
+
+    definition_id: str
+    parts_json: str
+    revision: str
+
+
+class ServicePromptRevisionConflict(ConflictError):
+    """Report the revision observed during a failed conditional write."""
+
+    def __init__(self, current_revision: str | None):
+        super().__init__("Service Prompt override changed concurrently.")
+        self.current_revision = current_revision
+
+
 _PROMPTS_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     AttributeError,
     DatabaseError,
@@ -125,7 +143,7 @@ _SAFE_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 # --- Database Class ---
 class PromptsDatabase:
-    _CURRENT_SCHEMA_VERSION = 5
+    _CURRENT_SCHEMA_VERSION = 6
 
     _TABLES_SQL_V1 = """
     PRAGMA foreign_keys = ON;
@@ -274,6 +292,14 @@ class PromptsDatabase:
         ON PromptCollectionItems(collection_id, sort_order, prompt_id);
     CREATE INDEX IF NOT EXISTS idx_promptcollectionitems_prompt_id
         ON PromptCollectionItems(prompt_id);
+    """
+
+    _SERVICE_PROMPT_OVERRIDES_SQL_V6 = """
+    CREATE TABLE IF NOT EXISTS ServicePromptOverrides (
+        definition_id TEXT PRIMARY KEY,
+        parts_json TEXT NOT NULL,
+        revision TEXT NOT NULL
+    );
     """
 
     def __init__(self, db_path: Union[str, Path], client_id: str):
@@ -547,13 +573,192 @@ class PromptsDatabase:
                 logging.debug("Committed transaction.")
         except Exception as e:
             if not in_outer:
-                logging.error(f"Transaction failed, rolling back: {type(e).__name__} - {e}", exc_info=False)
+                logging.error(f"Transaction failed, rolling back: {type(e).__name__}", exc_info=False)
                 try:
                     conn.rollback()
                     logging.debug("Rollback successful.")
                 except sqlite3.Error as rb_err:
-                    logging.error(f"Rollback FAILED: {rb_err}", exc_info=True)
+                    logging.error(f"Rollback FAILED: {type(rb_err).__name__}", exc_info=False)
             raise
+
+    def get_service_prompt_override(
+        self,
+        definition_id: str,
+    ) -> ServicePromptOverrideRow | None:
+        """Return one raw Service Prompt override without parsing its content."""
+
+        try:
+            row = (
+                self.get_connection()
+                .execute(
+                    """
+                SELECT definition_id, parts_json, revision
+                FROM ServicePromptOverrides
+                WHERE definition_id = ?
+                """,
+                    (definition_id,),
+                )
+                .fetchone()
+            )
+        except sqlite3.Error:
+            raise DatabaseError("Failed to read Service Prompt override.") from None
+        if row is None:
+            return None
+        return ServicePromptOverrideRow(
+            definition_id=row["definition_id"],
+            parts_json=row["parts_json"],
+            revision=row["revision"],
+        )
+
+    def save_service_prompt_override(
+        self,
+        definition_id: str,
+        parts: Mapping[str, str],
+        expected_revision: str | None,
+    ) -> ServicePromptOverrideRow:
+        """Atomically insert or compare-and-swap one Service Prompt override."""
+
+        requested_parts = dict(parts)
+        try:
+            parts_json = json.dumps(
+                requested_parts,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+        except (TypeError, ValueError, RecursionError):
+            raise DatabaseError("Failed to serialize Service Prompt override.") from None
+
+        try:
+            with self.transaction() as conn:
+                row = conn.execute(
+                    """
+                    SELECT definition_id, parts_json, revision
+                    FROM ServicePromptOverrides
+                    WHERE definition_id = ?
+                    """,
+                    (definition_id,),
+                ).fetchone()
+                if row is not None:
+                    current = ServicePromptOverrideRow(
+                        definition_id=row["definition_id"],
+                        parts_json=row["parts_json"],
+                        revision=row["revision"],
+                    )
+                    try:
+                        current_parts = json.loads(current.parts_json)
+                    except (TypeError, ValueError, RecursionError):
+                        raise DatabaseError("Stored Service Prompt override could not be compared.") from None
+                    if current_parts == requested_parts:
+                        return current
+                    if current.revision != expected_revision:
+                        raise ServicePromptRevisionConflict(current.revision)
+
+                    revision = str(uuid.uuid4())
+                    updated = conn.execute(
+                        """
+                        UPDATE ServicePromptOverrides
+                        SET parts_json = ?, revision = ?
+                        WHERE definition_id = ? AND revision = ?
+                        """,
+                        (parts_json, revision, definition_id, expected_revision),
+                    )
+                    if updated.rowcount != 1:
+                        latest = conn.execute(
+                            """
+                            SELECT revision
+                            FROM ServicePromptOverrides
+                            WHERE definition_id = ?
+                            """,
+                            (definition_id,),
+                        ).fetchone()
+                        raise ServicePromptRevisionConflict(latest["revision"] if latest is not None else None)
+                    return ServicePromptOverrideRow(definition_id, parts_json, revision)
+
+                if expected_revision is not None:
+                    raise ServicePromptRevisionConflict(None)
+
+                revision = str(uuid.uuid4())
+                try:
+                    conn.execute(
+                        """
+                        INSERT INTO ServicePromptOverrides (definition_id, parts_json, revision)
+                        VALUES (?, ?, ?)
+                        """,
+                        (definition_id, parts_json, revision),
+                    )
+                except sqlite3.IntegrityError:
+                    raced = conn.execute(
+                        """
+                        SELECT definition_id, parts_json, revision
+                        FROM ServicePromptOverrides
+                        WHERE definition_id = ?
+                        """,
+                        (definition_id,),
+                    ).fetchone()
+                    if raced is None:
+                        raise DatabaseError("Failed to save Service Prompt override.") from None
+                    raced_row = ServicePromptOverrideRow(
+                        definition_id=raced["definition_id"],
+                        parts_json=raced["parts_json"],
+                        revision=raced["revision"],
+                    )
+                    try:
+                        raced_parts = json.loads(raced_row.parts_json)
+                    except (TypeError, ValueError, RecursionError):
+                        raise ServicePromptRevisionConflict(raced_row.revision) from None
+                    if raced_parts == requested_parts:
+                        return raced_row
+                    raise ServicePromptRevisionConflict(raced_row.revision) from None
+                return ServicePromptOverrideRow(definition_id, parts_json, revision)
+        except sqlite3.Error:
+            raise DatabaseError("Failed to save Service Prompt override.") from None
+
+    def reset_service_prompt_override(
+        self,
+        definition_id: str,
+        expected_revision: str | None,
+    ) -> None:
+        """Atomically delete one Service Prompt override without reading its content."""
+
+        try:
+            with self.transaction() as conn:
+                row = conn.execute(
+                    """
+                    SELECT definition_id, revision
+                    FROM ServicePromptOverrides
+                    WHERE definition_id = ?
+                    """,
+                    (definition_id,),
+                ).fetchone()
+                if row is None:
+                    if expected_revision is None:
+                        return None
+                    raise ServicePromptRevisionConflict(None)
+
+                current_revision = row["revision"]
+                if current_revision != expected_revision:
+                    raise ServicePromptRevisionConflict(current_revision)
+
+                deleted = conn.execute(
+                    """
+                    DELETE FROM ServicePromptOverrides
+                    WHERE definition_id = ? AND revision = ?
+                    """,
+                    (definition_id, expected_revision),
+                )
+                if deleted.rowcount != 1:
+                    latest = conn.execute(
+                        """
+                        SELECT revision
+                        FROM ServicePromptOverrides
+                        WHERE definition_id = ?
+                        """,
+                        (definition_id,),
+                    ).fetchone()
+                    raise ServicePromptRevisionConflict(latest["revision"] if latest is not None else None)
+                return None
+        except sqlite3.Error:
+            raise DatabaseError("Failed to reset Service Prompt override.") from None
 
     # --- Schema Initialization and Migration ---
     def _get_db_version(self, conn: sqlite3.Connection) -> int:
@@ -572,6 +777,7 @@ class PromptsDatabase:
     _SCHEMA_UPDATE_VERSION_SQL_V3 = "UPDATE schema_version SET version = 3 WHERE version = 2;"
     _SCHEMA_UPDATE_VERSION_SQL_V4 = "UPDATE schema_version SET version = 4 WHERE version = 3;"
     _SCHEMA_UPDATE_VERSION_SQL_V5 = "UPDATE schema_version SET version = 5 WHERE version = 4;"
+    _SCHEMA_UPDATE_VERSION_SQL_V6 = "UPDATE schema_version SET version = 6 WHERE version = 5;"
 
     def _apply_schema_v1(self, conn: sqlite3.Connection):
         logging.info(f"Applying initial schema (Version 1) to DB: {self.db_path_str}...")
@@ -734,6 +940,22 @@ class PromptsDatabase:
             logging.error(f"[Schema V5] Application failed: {e}", exc_info=True)
             raise DatabaseError(f"DB schema V5 setup failed: {e}") from e  # noqa: TRY003
 
+    def _apply_schema_v6(self, conn: sqlite3.Connection):
+        logging.info("Applying schema migration (Version 6)...")
+        try:
+            with self.transaction():
+                conn.execute(self._SERVICE_PROMPT_OVERRIDES_SQL_V6)
+                conn.execute(self._SCHEMA_UPDATE_VERSION_SQL_V6)
+                version_in_tx = conn.execute("SELECT version FROM schema_version LIMIT 1").fetchone()
+                if not version_in_tx or version_in_tx["version"] != 6:
+                    raise SchemaError("Schema V6 version update did not take effect within transaction.")  # noqa: TRY003
+                if not conn.execute("PRAGMA table_info(ServicePromptOverrides)").fetchall():
+                    raise SchemaError("Schema V6 validation failed: Service Prompt override table missing.")  # noqa: TRY003
+            logging.info("[Schema V6] Service Prompt overrides applied.")
+        except sqlite3.Error as e:
+            logging.error(f"[Schema V6] Application failed: {e}", exc_info=True)
+            raise DatabaseError(f"DB schema V6 setup failed: {e}") from e  # noqa: TRY003
+
     def _initialize_schema(self):
         conn = self.get_connection()
         try:
@@ -764,6 +986,10 @@ class PromptsDatabase:
                     continue
                 if current_db_version == 4:
                     self._apply_schema_v5(conn)
+                    current_db_version = self._get_db_version(conn)
+                    continue
+                if current_db_version == 5:
+                    self._apply_schema_v6(conn)
                     current_db_version = self._get_db_version(conn)
                     continue
                 raise SchemaError(  # noqa: TRY003

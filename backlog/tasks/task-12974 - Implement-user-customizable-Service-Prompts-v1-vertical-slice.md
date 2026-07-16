@@ -5,16 +5,18 @@ status: In Progress
 labels:
 - service-prompts
 - implementation
-priority: high
 references:
 - TASK-12973
 documentation:
 - Docs/superpowers/specs/2026-07-12-user-customizable-service-prompts-design.md
 - Docs/superpowers/plans/2026-07-15-user-customizable-service-prompts-v1.md
+priority: high
 modified_files:
 - apps/packages/ui/src/utils/__fixtures__/service-prompt-rendering.json
 - tldw_Server_API/app/core/Prompt_Management/service_prompts.py
 - tldw_Server_API/tests/Prompt_Management/test_service_prompts.py
+- tldw_Server_API/app/core/DB_Management/Prompts_DB.py
+- tldw_Server_API/tests/Prompt_Management/test_prompts_db_v2.py
 ---
 
 ## Description
@@ -43,6 +45,8 @@ Execute Tasks 1-7 from Docs/superpowers/plans/2026-07-15-user-customizable-servi
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Execution started in isolated worktree /Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/service-prompts-v1-plan on branch codex/service-prompts-v1-plan. .worktrees is gitignored; linked the existing project .venv and installed the existing Bun workspace dependencies without tracked lockfile changes. Focused pre-change baseline passed: 196 backend tests across Prompts DB, Translation error mapping, and router-group contracts; 10 frontend tests across Settings routing/index and chat-pipeline error recovery. CI shard edits remain explicitly out of scope per requester.
 Task 1 registry/validator/renderer/resolver TDD evidence (2026-07-16): RED command `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Prompt_Management/test_service_prompts.py -v` failed during collection with the expected missing `Prompt_Management.service_prompts` ModuleNotFoundError. The same command is GREEN after implementation: 47 passed, 2 existing warnings, 0 failures. Independent review identified ignored-fixture staging and two JSON decoder corruption edges; the fixture is force-staged, and regression tests first reproduced plain ValueError (over-limit integer) and RecursionError (excessive nesting) before both were normalized to revision-only ServicePromptCorruptOverride errors. Canonical default byte lengths/SHA-256 values match the five source strings. Ruff check/format checks pass, and Bandit reports zero findings for service_prompts.py. Task 1 deliberately calls the narrow get_service_prompt_override interface that Task 2 will add; no direct SQL or Prompts_DB.py changes were made.
+Task 1 review gates: independent specification review approved the actual a117c3a6a6 diff with no missing or extra requirements. Separate code-quality review found no Critical, Important, or Minor issues and approved correctness, Python 3.10 compatibility, security/error behavior, test quality, maintainability, and the absence of removable speculative complexity.
+Task 2 v6 Service Prompt override persistence TDD/review evidence (2026-07-16): schema RED used the exact focused command `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Prompt_Management/test_prompts_db_v2.py -k "schema or service_prompt" -v`; before production changes it produced 2 failed/1 passed (fresh DB remained schema 5, and reopening an actual v5 DB at target 6 failed with `Migration needed from 5 to 6, but no path defined`). Store RED with all behavior tests then produced 16 failed/1 passed, with get/save/reset cases failing on the missing narrow methods and the same schema gaps. Minimal implementation adds only the per-user `ServicePromptOverrides` v6 table, frozen raw row, revision conflict, raw read, atomic BEGIN IMMEDIATE save/CAS, and content-independent reset; no history/events/approval/second DB/repository abstraction or CI shard change. Independent review reproduced two boundary bugs: commit failures escaped raw sqlite errors (follow-up RED 2/2 failed with synthetic OperationalError), and reset materialized corrupt authored text. Transaction entry/body/commit are now wrapped in content-free DatabaseError, transaction/rollback logs are type-only, and reset reads only definition_id/revision. The approved-design safety invariant deliberately resolves the plan sketch reset return annotation to `None`: an undecodable TEXT regression first failed under DELETE RETURNING, then passed after conditional DELETE stopped reading parts_json. Final exact focused GREEN: 20 passed/17 deselected/2 warnings. Full DB file: 37 passed/2 warnings. Task 1 resolver regression: 47 passed/2 warnings. Ruff check passes on both Python files; every changed range passes Ruff format. Whole-file Ruff format remains pre-existing legacy debt on both files (the untouched HEAD versions also exit 1), so no unrelated mass reformat was applied. Bandit on Prompts_DB.py reports 0 findings; git diff --check passes. Independent re-review: READY, no Critical or Important findings; the same-connection defensive insert-race proxy fidelity note is Minor/non-blocking and accepted because BEGIN IMMEDIATE makes a faithful external race test artificial and flaky.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

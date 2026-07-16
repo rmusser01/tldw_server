@@ -2,18 +2,22 @@
 # Description:
 #
 # Imports
+import json
 import os
 import re
 import sqlite3
 import uuid
+from dataclasses import FrozenInstanceError
 from pathlib import Path
 
 import pytest
+from loguru import logger
 
 #
 # Local Imports
 from tldw_Server_API.app.core.DB_Management.Prompts_DB import (
     ConflictError,
+    DatabaseError,
     InputError,
     PromptsDatabase,
 )
@@ -59,6 +63,44 @@ def file_db(tmp_path):
     db.close_connection()
     if os.path.exists(db_file):
         os.remove(db_file)
+
+
+class _InsertRaceConnection:
+    """Inject one competing insert immediately before the store insert."""
+
+    def __init__(self, conn: sqlite3.Connection, parts_json: str, revision: str):
+        self._conn = conn
+        self._parts_json = parts_json
+        self._revision = revision
+        self._injected = False
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+    def execute(self, sql, parameters=()):
+        if not self._injected and sql.lstrip().upper().startswith("INSERT INTO SERVICEPROMPTOVERRIDES"):
+            self._injected = True
+            self._conn.execute(
+                """
+                INSERT INTO ServicePromptOverrides (definition_id, parts_json, revision)
+                VALUES (?, ?, ?)
+                """,
+                (parameters[0], self._parts_json, self._revision),
+            )
+        return self._conn.execute(sql, parameters)
+
+
+class _CommitFailingConnection:
+    """Fail commits after delegating all transaction body operations."""
+
+    def __init__(self, conn: sqlite3.Connection):
+        self._conn = conn
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+    def commit(self):
+        raise sqlite3.OperationalError("PROMPT_BODY_MUST_NOT_APPEAR")
 
 
 # --- Test PromptsDatabase Class ---
@@ -121,6 +163,364 @@ def test_schema_v1_migrates_to_v2_with_collections(tmp_path):
         ).fetchone() is not None
     finally:
         migrated_db.close_connection()
+
+
+def test_fresh_database_schema_v6_includes_service_prompt_overrides(memory_db):
+    conn = memory_db.get_connection()
+
+    version = conn.execute("SELECT version FROM schema_version").fetchone()["version"]
+    table = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='ServicePromptOverrides'").fetchone()
+
+    assert version == 6
+    assert table is not None
+
+
+def test_schema_v5_migrates_to_v6_preserving_prompt(tmp_path, monkeypatch):
+    db_file = tmp_path / "test_prompts_v5.db"
+    monkeypatch.setattr(PromptsDatabase, "_CURRENT_SCHEMA_VERSION", 5)
+    legacy_db = PromptsDatabase(db_path=db_file, client_id=TEST_CLIENT_ID)
+    try:
+        legacy_conn = legacy_db.get_connection()
+        assert legacy_conn.execute("SELECT version FROM schema_version").fetchone()["version"] == 5
+        assert (
+            legacy_conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='ServicePromptOverrides'"
+            ).fetchone()
+            is None
+        )
+        prompt_id, prompt_uuid, _ = legacy_db.add_prompt(
+            name="Prompt retained across v6 migration",
+            author="Tester",
+            details="Migration sentinel",
+        )
+    finally:
+        legacy_db.close_connection()
+
+    monkeypatch.setattr(PromptsDatabase, "_CURRENT_SCHEMA_VERSION", 6)
+    migrated_db = PromptsDatabase(db_path=db_file, client_id=TEST_CLIENT_ID)
+    try:
+        conn = migrated_db.get_connection()
+        version = conn.execute("SELECT version FROM schema_version").fetchone()["version"]
+        table = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='ServicePromptOverrides'"
+        ).fetchone()
+        prompt = migrated_db.get_prompt_by_id(prompt_id)
+
+        assert version == 6
+        assert table is not None
+        assert prompt is not None
+        assert prompt["uuid"] == prompt_uuid
+        assert prompt["name"] == "Prompt retained across v6 migration"
+    finally:
+        migrated_db.close_connection()
+
+
+def test_service_prompt_override_raw_read_is_absent_then_preserves_stored_row(memory_db):
+    definition_id = "chat.rag.answer"
+    assert memory_db.get_service_prompt_override(definition_id) is None
+
+    raw_parts_json = '{ "template" : "Raw stored prompt" }'
+    revision = str(uuid.uuid4())
+    conn = memory_db.get_connection()
+    conn.execute(
+        """
+        INSERT INTO ServicePromptOverrides (definition_id, parts_json, revision)
+        VALUES (?, ?, ?)
+        """,
+        (definition_id, raw_parts_json, revision),
+    )
+    conn.commit()
+
+    row = memory_db.get_service_prompt_override(definition_id)
+
+    assert row is not None
+    assert row.definition_id == definition_id
+    assert row.parts_json == raw_parts_json
+    assert row.revision == revision
+
+
+def test_service_prompt_override_first_insert_uses_deterministic_json_and_uuid(memory_db):
+    parts = {"user_template": "Translate {text}", "system": "Be exact."}
+
+    row = memory_db.save_service_prompt_override(
+        "media.text.translation",
+        parts,
+        expected_revision=None,
+    )
+
+    assert row.definition_id == "media.text.translation"
+    assert row.parts_json == json.dumps(parts, sort_keys=True, separators=(",", ":"))
+    assert str(uuid.UUID(row.revision, version=4)) == row.revision
+    assert memory_db.get_service_prompt_override("media.text.translation") == row
+    with pytest.raises(FrozenInstanceError):
+        row.revision = "changed"
+
+
+def test_service_prompt_override_identical_save_is_no_op(memory_db):
+    parts = {"template": "Answer from {context}: {question}"}
+    first = memory_db.save_service_prompt_override("chat.rag.answer", parts, None)
+
+    repeated = memory_db.save_service_prompt_override(
+        "chat.rag.answer",
+        dict(parts),
+        first.revision,
+    )
+
+    assert repeated == first
+
+
+def test_service_prompt_override_identical_stale_retry_returns_current_row(memory_db):
+    first = memory_db.save_service_prompt_override(
+        "chat.rag.answer",
+        {"template": "First {context} {question}"},
+        None,
+    )
+    current_parts = {"template": "Current {context} {question}"}
+    current = memory_db.save_service_prompt_override(
+        "chat.rag.answer",
+        current_parts,
+        first.revision,
+    )
+
+    retried = memory_db.save_service_prompt_override(
+        "chat.rag.answer",
+        current_parts,
+        first.revision,
+    )
+
+    assert retried == current
+
+
+def test_service_prompt_override_content_change_uses_cas_and_new_uuid(memory_db):
+    first = memory_db.save_service_prompt_override(
+        "chat.rag.answer",
+        {"template": "First {context} {question}"},
+        None,
+    )
+
+    updated = memory_db.save_service_prompt_override(
+        "chat.rag.answer",
+        {"template": "Updated {context} {question}"},
+        first.revision,
+    )
+
+    assert updated.revision != first.revision
+    assert str(uuid.UUID(updated.revision, version=4)) == updated.revision
+    assert memory_db.get_service_prompt_override("chat.rag.answer") == updated
+
+
+@pytest.mark.parametrize("expected_revision", [None, str(uuid.uuid4())])
+def test_service_prompt_override_changed_save_conflicts_with_current_revision(
+    memory_db,
+    expected_revision,
+):
+    current = memory_db.save_service_prompt_override(
+        "chat.rag.answer",
+        {"template": "Current {context} {question}"},
+        None,
+    )
+
+    with pytest.raises(ConflictError) as captured:
+        memory_db.save_service_prompt_override(
+            "chat.rag.answer",
+            {"template": "Rejected {context} {question}"},
+            expected_revision,
+        )
+
+    assert captured.type.__name__ == "ServicePromptRevisionConflict"
+    assert captured.value.current_revision == current.revision
+    assert str(captured.value) == "Service Prompt override changed concurrently."
+    assert memory_db.get_service_prompt_override("chat.rag.answer") == current
+
+
+@pytest.mark.parametrize(
+    ("competing_parts", "expect_conflict"),
+    [
+        ({"template": "Requested {context} {question}"}, False),
+        ({"template": "Competing {context} {question}"}, True),
+    ],
+)
+def test_service_prompt_override_insert_race_refetches_and_classifies(
+    memory_db,
+    monkeypatch,
+    competing_parts,
+    expect_conflict,
+):
+    definition_id = "chat.rag.answer"
+    requested_parts = {"template": "Requested {context} {question}"}
+    assert memory_db.get_service_prompt_override(definition_id) is None
+    race_revision = str(uuid.uuid4())
+    race_conn = _InsertRaceConnection(
+        memory_db.get_connection(),
+        json.dumps(competing_parts, sort_keys=True, separators=(",", ":")),
+        race_revision,
+    )
+    monkeypatch.setattr(memory_db, "get_connection", lambda: race_conn)
+
+    if expect_conflict:
+        with pytest.raises(ConflictError) as captured:
+            memory_db.save_service_prompt_override(definition_id, requested_parts, None)
+        assert captured.type.__name__ == "ServicePromptRevisionConflict"
+        assert captured.value.current_revision == race_revision
+    else:
+        row = memory_db.save_service_prompt_override(definition_id, requested_parts, None)
+        assert row.revision == race_revision
+        assert json.loads(row.parts_json) == requested_parts
+
+
+def test_service_prompt_override_absent_reset_without_revision_is_idempotent(memory_db):
+    assert memory_db.reset_service_prompt_override("chat.rag.answer", None) is None
+
+
+def test_service_prompt_override_matching_reset_deletes_row(memory_db):
+    current = memory_db.save_service_prompt_override(
+        "chat.rag.answer",
+        {"template": "Saved {context} {question}"},
+        None,
+    )
+
+    assert memory_db.reset_service_prompt_override("chat.rag.answer", current.revision) is None
+    assert memory_db.get_service_prompt_override("chat.rag.answer") is None
+
+
+def test_service_prompt_override_stale_and_already_reset_revision_conflict(memory_db):
+    current = memory_db.save_service_prompt_override(
+        "chat.rag.answer",
+        {"template": "Saved {context} {question}"},
+        None,
+    )
+
+    with pytest.raises(ConflictError) as stale:
+        memory_db.reset_service_prompt_override("chat.rag.answer", str(uuid.uuid4()))
+    assert stale.type.__name__ == "ServicePromptRevisionConflict"
+    assert stale.value.current_revision == current.revision
+
+    assert memory_db.reset_service_prompt_override("chat.rag.answer", current.revision) is None
+    with pytest.raises(ConflictError) as already_reset:
+        memory_db.reset_service_prompt_override("chat.rag.answer", current.revision)
+    assert already_reset.type.__name__ == "ServicePromptRevisionConflict"
+    assert already_reset.value.current_revision is None
+
+
+def test_service_prompt_override_corrupt_json_is_readable_and_resettable(memory_db):
+    definition_id = "chat.rag.answer"
+    assert memory_db.get_service_prompt_override(definition_id) is None
+    revision = str(uuid.uuid4())
+    corrupt_parts_json = '{"template": PROMPT_BODY_MUST_NOT_APPEAR'
+    conn = memory_db.get_connection()
+    conn.execute(
+        """
+        INSERT INTO ServicePromptOverrides (definition_id, parts_json, revision)
+        VALUES (?, ?, ?)
+        """,
+        (definition_id, corrupt_parts_json, revision),
+    )
+    conn.commit()
+
+    row = memory_db.get_service_prompt_override(definition_id)
+
+    assert row is not None
+    assert row.revision == revision
+    assert row.parts_json == corrupt_parts_json
+    assert memory_db.reset_service_prompt_override(definition_id, revision) is None
+    assert memory_db.get_service_prompt_override(definition_id) is None
+
+
+def test_service_prompt_override_undecodable_text_can_be_reset_without_reading_content(memory_db):
+    definition_id = "chat.rag.answer"
+    revision = str(uuid.uuid4())
+    conn = memory_db.get_connection()
+    conn.execute(
+        """
+        INSERT INTO ServicePromptOverrides (definition_id, parts_json, revision)
+        VALUES (?, CAST(X'80' AS TEXT), ?)
+        """,
+        (definition_id, revision),
+    )
+    conn.commit()
+
+    assert memory_db.reset_service_prompt_override(definition_id, revision) is None
+    assert (
+        conn.execute(
+            "SELECT COUNT(*) FROM ServicePromptOverrides WHERE definition_id = ?",
+            (definition_id,),
+        ).fetchone()[0]
+        == 0
+    )
+
+
+def test_service_prompt_override_failed_save_rolls_back_without_leaking_content(memory_db):
+    definition_id = "chat.rag.answer"
+    original = memory_db.save_service_prompt_override(
+        definition_id,
+        {"template": "Original {context} {question}"},
+        None,
+    )
+    conn = memory_db.get_connection()
+    conn.execute(
+        """
+        CREATE TRIGGER fail_service_prompt_override_update
+        AFTER UPDATE ON ServicePromptOverrides
+        BEGIN
+            SELECT RAISE(ABORT, 'PROMPT_BODY_MUST_NOT_APPEAR');
+        END
+        """
+    )
+    conn.commit()
+
+    with pytest.raises(DatabaseError) as captured:
+        memory_db.save_service_prompt_override(
+            definition_id,
+            {"template": "Rejected PROMPT_BODY_MUST_NOT_APPEAR"},
+            original.revision,
+        )
+
+    assert str(captured.value) == "Failed to save Service Prompt override."
+    assert "PROMPT_BODY_MUST_NOT_APPEAR" not in str(captured.value)
+    assert memory_db.get_service_prompt_override(definition_id) == original
+
+
+@pytest.mark.parametrize(
+    ("operation", "safe_message"),
+    [
+        ("save", "Failed to save Service Prompt override."),
+        ("reset", "Failed to reset Service Prompt override."),
+    ],
+)
+def test_service_prompt_override_commit_failure_is_wrapped_and_rolled_back(
+    memory_db,
+    monkeypatch,
+    operation,
+    safe_message,
+):
+    definition_id = "chat.rag.answer"
+    original = memory_db.save_service_prompt_override(
+        definition_id,
+        {"template": "Original {context} {question}"},
+        None,
+    )
+    failing_conn = _CommitFailingConnection(memory_db.get_connection())
+    monkeypatch.setattr(memory_db, "get_connection", lambda: failing_conn)
+
+    log_messages = []
+    sink_id = logger.add(log_messages.append, format="{message}")
+    try:
+        with pytest.raises(DatabaseError) as captured:
+            if operation == "save":
+                memory_db.save_service_prompt_override(
+                    definition_id,
+                    {"template": "Rejected {context} {question}"},
+                    original.revision,
+                )
+            else:
+                memory_db.reset_service_prompt_override(definition_id, original.revision)
+    finally:
+        logger.remove(sink_id)
+
+    assert str(captured.value) == safe_message
+    assert "PROMPT_BODY_MUST_NOT_APPEAR" not in str(captured.value)
+    assert all("PROMPT_BODY_MUST_NOT_APPEAR" not in str(message) for message in log_messages)
+    assert memory_db.get_service_prompt_override(definition_id) == original
 
 
 def test_initialization_empty_client_id():
