@@ -14,6 +14,12 @@ TASK3_AUDITED_STT_TTS_URLS = (
     "https://github.com/rmusser01/tldw_server/blob/main/Docs/STT-TTS/VIBEVOICE_GETTING_STARTED.md#1-prerequisites",
     "https://github.com/rmusser01/tldw_server/blob/main/Docs/STT-TTS/LUXTTS_TTS_SETUP.md#prerequisites",
 )
+TASK3_GETTING_STARTED_ENTRYPOINTS = (
+    Path("Docs/Getting_Started/First_Time_Audio_Setup_CPU.md"),
+    Path("Docs/Getting_Started/First_Time_Audio_Setup_GPU_Accelerated.md"),
+    Path("Docs/Published/Getting_Started/First_Time_Audio_Setup_CPU.md"),
+    Path("Docs/Published/Getting_Started/First_Time_Audio_Setup_GPU_Accelerated.md"),
+)
 UNREVIEWED_STT_TTS_URL = (
     "https://github.com/rmusser01/tldw_server/blob/main/Docs/STT-TTS/NOT_A_REVIEWED_OR_EXISTING_GUIDE.md"
 )
@@ -47,6 +53,28 @@ def _run_hygiene(
     return result, capsys.readouterr().out
 
 
+@pytest.mark.parametrize("entrypoint", TASK3_GETTING_STARTED_ENTRYPOINTS)
+def test_hygiene_monitors_task3_getting_started_entrypoints(
+    entrypoint: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module = _load_hygiene_module()
+    assert entrypoint in module.MONITORED_ENTRYPOINTS
+
+    target = tmp_path / entrypoint
+    target.parent.mkdir(parents=True)
+    target.write_text(UNREVIEWED_STT_TTS_URL, encoding="utf-8")
+    module.PROJECT_ROOT = tmp_path
+    module.MONITORED_ENTRYPOINTS = [entrypoint]
+    module.MONITORED_DIRS = []
+
+    assert module.main() == 1
+    output = capsys.readouterr().out
+    assert "unaudited_stt_tts_blob_target" in output
+    assert str(entrypoint) in output
+
+
 def test_hygiene_allows_audited_qwen_stt_tts_blob(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -60,6 +88,26 @@ def test_hygiene_allows_audited_qwen_stt_tts_blob(
         tmp_path,
         capsys,
     )
+
+    assert result == 0
+    assert "Speech docs link hygiene check passed." in output
+
+
+@pytest.mark.parametrize(
+    "line",
+    (
+        f"[Qwen setup]({QWEN3_ASR_URL}#manual-model-download)",
+        f"<{QWEN3_ASR_URL}?plain=1>",
+        f'Reference: "{QWEN3_ASR_URL}".',
+    ),
+    ids=("markdown-parentheses", "angle-brackets", "quoted-plain-url"),
+)
+def test_hygiene_allows_exact_audited_urls_with_delimiters(
+    line: str,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    result, output = _run_hygiene((line,), tmp_path, capsys)
 
     assert result == 0
     assert "Speech docs link hygiene check passed." in output
@@ -86,6 +134,56 @@ def test_hygiene_rejects_unreviewed_stt_tts_blob(
     assert result == 1
     assert "unaudited_stt_tts_blob_target" in output
     assert "NOT_A_REVIEWED_OR_EXISTING_GUIDE.md" in output
+
+
+@pytest.mark.parametrize(
+    ("line", "rejected_url"),
+    (
+        (
+            "[guide](http://github.com/rmusser01/tldw_server/blob/main/Docs/STT-TTS/QWEN3_ASR_SETUP.md)",
+            "http://github.com/rmusser01/tldw_server/blob/main/Docs/STT-TTS/QWEN3_ASR_SETUP.md",
+        ),
+        (
+            "<https://GitHub.com/rmusser01/tldw_server/blob/main/Docs/STT-TTS/QWEN3_ASR_SETUP.md>",
+            "https://GitHub.com/rmusser01/tldw_server/blob/main/Docs/STT-TTS/QWEN3_ASR_SETUP.md",
+        ),
+        (
+            "https://gItHuB.cOm/rmusser01/tldw_server/blob/main/Docs/STT-TTS/QWEN3_ASR_SETUP.md",
+            "https://gItHuB.cOm/rmusser01/tldw_server/blob/main/Docs/STT-TTS/QWEN3_ASR_SETUP.md",
+        ),
+        (
+            'Reference: "https://github.com/rmusser01/tldw_server/blob/main/Docs/%53TT-TTS/QWEN3_ASR_SETUP.md".',
+            "https://github.com/rmusser01/tldw_server/blob/main/Docs/%53TT-TTS/QWEN3_ASR_SETUP.md",
+        ),
+        (
+            "https://github.com/rmusser01/tldw_server/blob/main/Docs/STT-TTS/QWEN3_ASR_SETUP.md%2fPRIVATE.md",
+            "https://github.com/rmusser01/tldw_server/blob/main/Docs/STT-TTS/QWEN3_ASR_SETUP.md%2fPRIVATE.md",
+        ),
+        (
+            "HTTPS://github.com/rmusser01/tldw_server/blob/main/Docs/STT-TTS/QWEN3_ASR_SETUP.md",
+            "HTTPS://github.com/rmusser01/tldw_server/blob/main/Docs/STT-TTS/QWEN3_ASR_SETUP.md",
+        ),
+    ),
+    ids=(
+        "http-scheme-markdown",
+        "uppercase-host-angle-brackets",
+        "mixed-case-host",
+        "percent-encoded-segment-quoted",
+        "percent-encoded-path-suffix",
+        "uppercase-scheme",
+    ),
+)
+def test_hygiene_rejects_same_repo_candidate_normalization_bypasses(
+    line: str,
+    rejected_url: str,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    result, output = _run_hygiene((line,), tmp_path, capsys)
+
+    assert result == 1
+    assert "unaudited_stt_tts_blob_target" in output
+    assert rejected_url in output
 
 
 @pytest.mark.parametrize(
