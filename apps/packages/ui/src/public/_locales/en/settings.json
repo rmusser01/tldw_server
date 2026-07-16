@@ -27,7 +27,7 @@
     "message": "Back up and restore account data, with selective export available when you need a smaller archive."
   },
   "chatbooksPlayground_backupAllMode": {
-    "message": "Backup all account data"
+    "message": "Backup supported account data"
   },
   "chatbooksPlayground_backupAllScope": {
     "message": "Backup all scope"
@@ -5910,7 +5910,7 @@
     "message": "Selective export"
   },
   "chatbooksPlayground_backupAllTitle": {
-    "message": "Backup all account data"
+    "message": "Backup supported account data"
   },
   "chatbooksPlayground_backupAllDescription": {
     "message": "Includes all restorable account records, stored media artifacts, embeddings, generated content, and pointer metadata tracked by tldw."
@@ -5998,5 +5998,272 @@
   },
   "sidepanelSettings_local_title": {
     "message": "Sidepanel behavior"
+  },
+  "servicePrompts_title": {
+    "message": "Workflow prompts"
+  },
+  "servicePrompts_description": {
+    "message": "Review and customize the instructions used by supported content workflows."
+  },
+  "servicePrompts_definitions_chatRagAnswer_label": {
+    "message": "RAG answer"
+  },
+  "servicePrompts_definitions_chatRagAnswer_description": {
+    "message": "Controls how retrieved context and the current question are presented to the model."
+  },
+  "servicePrompts_definitions_chatRagQuestionRewrite_label": {
+    "message": "RAG follow-up rewrite"
+  },
+  "servicePrompts_definitions_chatRagQuestionRewrite_description": {
+    "message": "Controls how a conversational follow-up is rewritten into a standalone retrieval query."
+  },
+  "servicePrompts_definitions_chatWebSearchAnswer_label": {
+    "message": "Web-search answer"
+  },
+  "servicePrompts_definitions_chatWebSearchAnswer_description": {
+    "message": "Controls how normalized web-search results are presented for the final answer."
+  },
+  "servicePrompts_definitions_mediaTextTranslation_label": {
+    "message": "Text translation"
+  },
+  "servicePrompts_definitions_mediaTextTranslation_description": {
+    "message": "Controls the visible instructions used by synchronous text translation."
+  },
+  "servicePrompts_workflows_mainChatRag": {
+    "message": "Main chat RAG"
+  },
+  "servicePrompts_workflows_tabChatRag": {
+    "message": "Tab chat RAG"
+  },
+  "servicePrompts_workflows_documentChatRag": {
+    "message": "Document chat RAG"
+  },
+  "servicePrompts_workflows_sidepanelRag": {
+    "message": "Sidepanel RAG"
+  },
+  "servicePrompts_workflows_mainChatWebSearch": {
+    "message": "Main chat web search"
+  },
+  "servicePrompts_workflows_compareWebSearch": {
+    "message": "Compare web search"
+  },
+  "servicePrompts_workflows_textTranslation": {
+    "message": "Text translation"
+  },
+  "servicePrompts_parts_template": {
+    "message": "Template"
+  },
+  "servicePrompts_parts_system": {
+    "message": "System instructions"
+  },
+  "servicePrompts_parts_userTemplate": {
+    "message": "User template"
+  },
+  "servicePrompts_scope_server": {
+    "message": "Server"
+  },
+  "servicePrompts_scope_account": {
+    "message": "Account scope"
+  },
+  "servicePrompts_scope_workflows": {
+    "message": "Affected workflows"
+  },
+  "servicePrompts_scope_changedTitle": {
+    "message": "Server or account changed"
+  },
+  "servicePrompts_scope_changedDescription": {
+    "message": "Choose a workflow prompt again after the new server and account scope loads. The previous draft cannot be saved."
+  },
+  "servicePrompts_states_loadingScope": {
+    "message": "Loading server and account scope…"
+  },
+  "servicePrompts_states_loadingCatalog": {
+    "message": "Loading workflow prompts…"
+  },
+  "servicePrompts_states_loadingDetail": {
+    "message": "Loading workflow prompt…"
+  },
+  "servicePrompts_states_chooseTitle": {
+    "message": "Choose a workflow prompt"
+  },
+  "servicePrompts_states_chooseDescription": {
+    "message": "Select a definition to review its affected workflows and instructions."
+  },
+  "servicePrompts_states_packaged": {
+    "message": "Server default"
+  },
+  "servicePrompts_states_customized": {
+    "message": "Customized"
+  },
+  "servicePrompts_states_dirty": {
+    "message": "Unsaved"
+  },
+  "servicePrompts_actions_openLibrary": {
+    "message": "Open reusable Prompts workspace"
+  },
+  "servicePrompts_actions_retry": {
+    "message": "Retry"
+  },
+  "servicePrompts_actions_preview": {
+    "message": "Preview"
+  },
+  "servicePrompts_actions_save": {
+    "message": "Save changes"
+  },
+  "servicePrompts_actions_reset": {
+    "message": "Reset to default"
+  },
+  "servicePrompts_actions_resetConfirm": {
+    "message": "Reset"
+  },
+  "servicePrompts_errors_scopeTitle": {
+    "message": "Unable to resolve the connected server and account."
+  },
+  "servicePrompts_errors_scopeDescription": {
+    "message": "Check the connection and credentials, then try again."
+  },
+  "servicePrompts_errors_catalogTitle": {
+    "message": "Unable to load workflow prompts"
+  },
+  "servicePrompts_errors_catalogDescription": {
+    "message": "The connected server returned an error. No local values were changed."
+  },
+  "servicePrompts_errors_detailTitle": {
+    "message": "Unable to load this workflow prompt"
+  },
+  "servicePrompts_errors_saveFailed": {
+    "message": "Unable to save this workflow prompt."
+  },
+  "servicePrompts_errors_resetFailed": {
+    "message": "Unable to reset this workflow prompt."
+  },
+  "servicePrompts_unsupported_title": {
+    "message": "Workflow prompts require a server update"
+  },
+  "servicePrompts_unsupported_description": {
+    "message": "This older server does not support server-synced editing. Existing browser-local prompt behavior remains active until the server is updated."
+  },
+  "servicePrompts_corrupt_title": {
+    "message": "Saved customization is unavailable"
+  },
+  "servicePrompts_corrupt_description": {
+    "message": "The saved value cannot be read safely. Reset it conditionally to restore the server default."
+  },
+  "servicePrompts_corrupt_resetAction": {
+    "message": "Reset corrupt customization"
+  },
+  "servicePrompts_conflict_title": {
+    "message": "This prompt changed on the server."
+  },
+  "servicePrompts_conflict_description": {
+    "message": "Your complete local draft is preserved. Reload only when you are ready to replace it."
+  },
+  "servicePrompts_conflict_reload": {
+    "message": "Reload server value"
+  },
+  "servicePrompts_reset_title": {
+    "message": "Reset {{name}}?"
+  },
+  "servicePrompts_reset_content": {
+    "message": "This will permanently remove the saved customization. V1 has no history or undo."
+  },
+  "servicePrompts_variables_label": {
+    "message": "Required variables"
+  },
+  "servicePrompts_preview_label": {
+    "message": "Prompt preview"
+  },
+  "servicePrompts_preview_title": {
+    "message": "Local preview"
+  },
+  "servicePrompts_listLabel": {
+    "message": "Workflow prompt definitions"
+  },
+  "servicePrompts_editorLabel": {
+    "message": "{{name}} editor"
+  },
+  "servicePrompts_migration_title": {
+    "message": "Browser-local workflow prompts found"
+  },
+  "servicePrompts_migration_description": {
+    "message": "Review these values before Chat uses this server. Imported overrides belong to the connected server and account and are not included in Backup supported account data."
+  },
+  "servicePrompts_migration_readFailed": {
+    "message": "Unable to read browser-local workflow prompts."
+  },
+  "servicePrompts_migration_repairLabel": {
+    "message": "Repair {{name}}"
+  },
+  "servicePrompts_migration_importAction": {
+    "message": "Import to this server"
+  },
+  "servicePrompts_migration_discardButton": {
+    "message": "Discard local values"
+  },
+  "servicePrompts_migration_replaceTitle": {
+    "message": "Replace saved customizations?"
+  },
+  "servicePrompts_migration_replaceContent": {
+    "message": "Importing will replace saved customizations for: {{names}}."
+  },
+  "servicePrompts_migration_replaceAction": {
+    "message": "Replace and import"
+  },
+  "servicePrompts_migration_discardTitle": {
+    "message": "Discard browser-local workflow prompts?"
+  },
+  "servicePrompts_migration_discardContent": {
+    "message": "This permanently removes only the three mapped browser-local values."
+  },
+  "servicePrompts_migration_discardAction": {
+    "message": "Discard"
+  },
+  "servicePrompts_migration_importFailed": {
+    "message": "Import failed. The browser-local value was preserved."
+  },
+  "servicePrompts_migration_discardFailed": {
+    "message": "Discard failed. The browser-local value was preserved."
+  },
+  "servicePrompts_migration_remaining_one": {
+    "message": "{{count}} browser-local prompt still needs attention."
+  },
+  "servicePrompts_migration_remaining_other": {
+    "message": "{{count}} browser-local prompts still need attention."
+  },
+  "servicePrompts_unsaved_leave": {
+    "message": "Discard unsaved workflow prompt changes?"
+  },
+  "servicePrompts_unsaved_changePrompt": {
+    "message": "Discard unsaved changes and open another workflow prompt?"
+  },
+  "servicePrompts_backup_portableExclusion": {
+    "message": "Service Prompt overrides are server and account scoped and are not included in Backup supported account data."
+  },
+  "chatbooksPlayground_backupAllExclusions": {
+    "message": "Service Prompt overrides are not included in this portable backup."
+  },
+  "chatbooksPlayground_openwebuiSource": {
+    "message": "OpenWebUI"
+  },
+  "chatbooksPlayground_openwebuiSourceDatabase": {
+    "message": "OpenWebUI database"
+  },
+  "chatbooksPlayground_openwebuiSourceJson": {
+    "message": "OpenWebUI JSON"
+  },
+  "chatbooksPlayground_openwebuiConversationCountOne": {
+    "message": "{{count}} conversation"
+  },
+  "chatbooksPlayground_openwebuiConversationCount": {
+    "message": "{{count}} conversations"
+  },
+  "chatbooksPlayground_openwebuiAttachmentReferenceCountOne": {
+    "message": "{{count}} attachment ref"
+  },
+  "chatbooksPlayground_openwebuiAttachmentReferenceCount": {
+    "message": "{{count}} attachment refs"
+  },
+  "servicePrompts_errors_reloadFailed": {
+    "message": "Unable to reload the server value."
   }
 }

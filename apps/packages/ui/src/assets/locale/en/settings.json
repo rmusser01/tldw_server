@@ -19,6 +19,129 @@
   "setupRecovery": {
     "title": "Setup & Recovery"
   },
+  "servicePrompts": {
+    "title": "Workflow prompts",
+    "description": "Review and customize the instructions used by supported content workflows.",
+    "definitions": {
+      "chatRagAnswer": {
+        "label": "RAG answer",
+        "description": "Controls how retrieved context and the current question are presented to the model."
+      },
+      "chatRagQuestionRewrite": {
+        "label": "RAG follow-up rewrite",
+        "description": "Controls how a conversational follow-up is rewritten into a standalone retrieval query."
+      },
+      "chatWebSearchAnswer": {
+        "label": "Web-search answer",
+        "description": "Controls how normalized web-search results are presented for the final answer."
+      },
+      "mediaTextTranslation": {
+        "label": "Text translation",
+        "description": "Controls the visible instructions used by synchronous text translation."
+      }
+    },
+    "workflows": {
+      "mainChatRag": "Main chat RAG",
+      "tabChatRag": "Tab chat RAG",
+      "documentChatRag": "Document chat RAG",
+      "sidepanelRag": "Sidepanel RAG",
+      "mainChatWebSearch": "Main chat web search",
+      "compareWebSearch": "Compare web search",
+      "textTranslation": "Text translation"
+    },
+    "parts": {
+      "template": "Template",
+      "system": "System instructions",
+      "userTemplate": "User template"
+    },
+    "scope": {
+      "server": "Server",
+      "account": "Account scope",
+      "workflows": "Affected workflows",
+      "changedTitle": "Server or account changed",
+      "changedDescription": "Choose a workflow prompt again after the new server and account scope loads. The previous draft cannot be saved."
+    },
+    "states": {
+      "loadingScope": "Loading server and account scope…",
+      "loadingCatalog": "Loading workflow prompts…",
+      "loadingDetail": "Loading workflow prompt…",
+      "chooseTitle": "Choose a workflow prompt",
+      "chooseDescription": "Select a definition to review its affected workflows and instructions.",
+      "packaged": "Server default",
+      "customized": "Customized",
+      "dirty": "Unsaved"
+    },
+    "actions": {
+      "openLibrary": "Open reusable Prompts workspace",
+      "retry": "Retry",
+      "preview": "Preview",
+      "save": "Save changes",
+      "reset": "Reset to default",
+      "resetConfirm": "Reset"
+    },
+    "errors": {
+      "scopeTitle": "Unable to resolve the connected server and account.",
+      "scopeDescription": "Check the connection and credentials, then try again.",
+      "catalogTitle": "Unable to load workflow prompts",
+      "catalogDescription": "The connected server returned an error. No local values were changed.",
+      "detailTitle": "Unable to load this workflow prompt",
+      "saveFailed": "Unable to save this workflow prompt.",
+      "resetFailed": "Unable to reset this workflow prompt.",
+      "reloadFailed": "Unable to reload the server value."
+    },
+    "unsupported": {
+      "title": "Workflow prompts require a server update",
+      "description": "This older server does not support server-synced editing. Existing browser-local prompt behavior remains active until the server is updated."
+    },
+    "corrupt": {
+      "title": "Saved customization is unavailable",
+      "description": "The saved value cannot be read safely. Reset it conditionally to restore the server default.",
+      "resetAction": "Reset corrupt customization"
+    },
+    "conflict": {
+      "title": "This prompt changed on the server.",
+      "description": "Your complete local draft is preserved. Reload only when you are ready to replace it.",
+      "reload": "Reload server value"
+    },
+    "reset": {
+      "title": "Reset {{name}}?",
+      "content": "This will permanently remove the saved customization. V1 has no history or undo."
+    },
+    "variables": {
+      "label": "Required variables"
+    },
+    "preview": {
+      "label": "Prompt preview",
+      "title": "Local preview"
+    },
+    "listLabel": "Workflow prompt definitions",
+    "editorLabel": "{{name}} editor",
+    "migration": {
+      "title": "Browser-local workflow prompts found",
+      "description": "Review these values before Chat uses this server. Imported overrides belong to the connected server and account and are not included in Backup supported account data.",
+      "readFailed": "Unable to read browser-local workflow prompts.",
+      "repairLabel": "Repair {{name}}",
+      "importAction": "Import to this server",
+      "discardButton": "Discard local values",
+      "replaceTitle": "Replace saved customizations?",
+      "replaceContent": "Importing will replace saved customizations for: {{names}}.",
+      "replaceAction": "Replace and import",
+      "discardTitle": "Discard browser-local workflow prompts?",
+      "discardContent": "This permanently removes only the three mapped browser-local values.",
+      "discardAction": "Discard",
+      "importFailed": "Import failed. The browser-local value was preserved.",
+      "discardFailed": "Discard failed. The browser-local value was preserved.",
+      "remaining_one": "{{count}} browser-local prompt still needs attention.",
+      "remaining_other": "{{count}} browser-local prompts still need attention."
+    },
+    "unsaved": {
+      "leave": "Discard unsaved workflow prompt changes?",
+      "changePrompt": "Discard unsaved changes and open another workflow prompt?"
+    },
+    "backup": {
+      "portableExclusion": "Service Prompt overrides are server and account scoped and are not included in Backup supported account data."
+    }
+  },
   "worldBooksNav": "World Books",
   "chatDictionariesNav": "Chat Dictionaries",
   "chatbooksNav": "Chatbooks settings",
@@ -27,10 +150,11 @@
     "subtitle": "Back up and restore account data, with selective export available when you need a smaller archive.",
     "exportTitle": "Create backup",
     "exportMode": "Export mode",
-    "backupAllMode": "Backup all account data",
+    "backupAllMode": "Backup supported account data",
     "selectiveMode": "Selective export",
-    "backupAllTitle": "Backup all account data",
+    "backupAllTitle": "Backup supported account data",
     "backupAllDescription": "Includes all restorable account records, stored media artifacts, embeddings, generated content, and pointer metadata tracked by tldw.",
+    "backupAllExclusions": "Service Prompt overrides are not included in this portable backup.",
     "backupAllScope": "Backup all scope",
     "scopeLoadError": "Unable to load backup scope",
     "scopeTotal": "Total items",

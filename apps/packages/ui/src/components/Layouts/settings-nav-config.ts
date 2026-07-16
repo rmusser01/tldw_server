@@ -96,7 +96,7 @@ export const SETTINGS_ROUTE_NAV_ITEMS: SettingsNavRouteMeta[] = [
   {
     path: "/settings/prompt",
     group: "preferencesWorkflow",
-    labelToken: "settings:managePrompts.title",
+    labelToken: "settings:servicePrompts.title",
     icon: BookIcon,
     order: 8
   },

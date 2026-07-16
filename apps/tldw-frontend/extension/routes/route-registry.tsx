@@ -75,8 +75,8 @@ const OptionModal = createSettingsRoute(
   "ModelsBody"
 )
 const OptionPrompt = createSettingsRoute(
-  () => import("~/components/Option/Settings/WorkspaceLinks"),
-  "PromptWorkspaceSettings"
+  () => import("~/components/Option/Settings/ServicePromptsSettings"),
+  "ServicePromptsSettings"
 )
 const OptionShare = createSettingsRoute(
   () => import("~/components/Option/Share"),
@@ -286,7 +286,7 @@ export const ROUTE_DEFINITIONS: RouteDefinition[] = [
     element: <OptionPrompt />,
     nav: {
       group: "workspace",
-      labelToken: "settings:managePrompts.title",
+      labelToken: "settings:servicePrompts.title",
       icon: BookIcon,
       order: 6
     }
