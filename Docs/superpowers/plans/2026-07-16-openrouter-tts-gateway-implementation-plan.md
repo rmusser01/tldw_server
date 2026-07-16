@@ -213,7 +213,7 @@ git commit -m "feat(tts): validate named gateway configuration"
 
 **Tests:** Shared HTTP transport tests for httpx/aiohttp, mocked adapter tests, catalog cache tests, and property tests for option filtering.
 
-**Status:** In Progress
+**Status:** Complete
 
 ### Files
 
@@ -347,7 +347,7 @@ git commit -m "feat(tts): add OpenAI-compatible speech gateway adapter"
 
 **Tests:** Request resolution, gateway executor, endpoint integration, BYOK SQLite/unit, CORS, fallback/cancellation/resource cleanup, and circuit classification.
 
-**Status:** Not Started
+**Status:** In Progress
 
 ### Files
 
