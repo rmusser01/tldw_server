@@ -14,6 +14,7 @@ references:
 - Docs/Release_Checklist.md
 documentation:
 - Docs/superpowers/specs/2026-07-15-release-0.1.41-design.md
+- Docs/superpowers/plans/2026-07-15-release-0.1.41-implementation-plan.md
 modified_files:
 - CHANGELOG.md
 - README.md
@@ -22,6 +23,9 @@ modified_files:
 - Docs/mkdocs.yml
 - Docs/RELEASE_NOTES.md
 - Docs/Published/RELEASE_NOTES.md
+- Docs/superpowers/specs/2026-07-15-release-0.1.41-design.md
+- Docs/superpowers/plans/2026-07-15-release-0.1.41-implementation-plan.md
+- backlog/tasks/task-12973 - Prepare-and-cut-the-0.1.41-release-from-frozen-dev.md
 ---
 
 ## Description
@@ -41,6 +45,12 @@ Prepare release 0.1.41 from frozen origin/dev commit 4c2ad2070ed63992dac8a97a6c4
 - [ ] #7 Annotated v0.1.41 tag and GitHub Release point at the final main merge commit
 - [ ] #8 Release artifact workflows are verified and main is synchronized back into dev
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Docs/superpowers/plans/2026-07-15-release-0.1.41-implementation-plan.md
+<!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
 
