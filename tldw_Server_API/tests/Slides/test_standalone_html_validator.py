@@ -601,3 +601,100 @@ def test_html_depth_budget_counts_elements_not_comments_or_text() -> None:
 
     assert validate_standalone_html(_document(slides=with_text)).slide_count == 1
     assert validate_standalone_html(_document(slides=with_comment)).slide_count == 1
+
+
+def _raw_css_token(kind: str, size: int) -> str:
+    if kind == "comment":
+        return "/*" + ("x" * (size - 4)) + "*/"
+    if kind == "string":
+        return '"' + ("x" * (size - 2)) + '"'
+    if kind == "function":
+        return ("f" * (size - 1)) + "()"
+    if kind == "url":
+        return "url(" + ("/" * (size - 5)) + ")"
+    raise AssertionError("unknown CSS token fixture")
+
+
+@pytest.mark.parametrize("kind", ["comment", "string", "function", "url"])
+def test_css_raw_lexical_token_byte_boundaries(kind: str) -> None:
+    for size in (validator_module.MAX_CSS_TOKEN_BYTES - 1, validator_module.MAX_CSS_TOKEN_BYTES):
+        validator_module._preflight_css([_raw_css_token(kind, size)])
+
+    with pytest.raises(validator_module._BudgetExceeded) as caught:
+        validator_module._preflight_css([_raw_css_token(kind, validator_module.MAX_CSS_TOKEN_BYTES + 1)])
+    assert caught.value.reason == "css_token_bytes"
+
+
+@pytest.mark.parametrize(
+    "hidden_slide",
+    [
+        '<template><section class="slide"><h1>Hidden Template</h1></section></template>',
+        '<div class="deck-header"><section class="slide"><h1>Hidden Header</h1></section></div>',
+        '<div class="deck-footer"><section class="slide"><h1>Hidden Footer</h1></section></div>',
+    ],
+)
+def test_only_slides_under_excluded_ancestors_do_not_form_a_deck(hidden_slide: str) -> None:
+    error = _error(_document(slides=hidden_slide))
+    assert error.code == "standalone_html_invalid_document"
+    assert error.reason == "slide_count"
+
+
+@pytest.mark.parametrize(
+    "hidden_slide",
+    [
+        '<template><section class="slide"><h1>Hidden Template</h1></section></template>',
+        '<div class="deck-header"><section class="slide"><h1>Hidden Header</h1></section></div>',
+        '<div class="deck-footer"><section class="slide"><h1>Hidden Footer</h1></section></div>',
+        '<aside class="notes"><section class="slide"><h1>Hidden Notes</h1></section></aside>',
+        '<section class="slide"><h1>Hidden Nested</h1></section>',
+    ],
+)
+def test_hidden_or_nested_slides_do_not_affect_count_or_indexable_text(hidden_slide: str) -> None:
+    slides = f'<section class="slide"><h1>Visible</h1>{hidden_slide}</section>'
+    result = validate_standalone_html(_document(slides=slides))
+    assert result.slide_count == 1
+    assert result.indexable_text == "Visible"
+
+
+def test_slides_inside_ordinary_wrappers_remain_discoverable() -> None:
+    slides = '<main><div class="deck"><section class="slide"><h1>Visible</h1></section></div></main>'
+    result = validate_standalone_html(_document(slides=slides))
+    assert result.slide_count == 1
+    assert result.indexable_text == "Visible"
+
+
+@pytest.mark.parametrize(
+    "script",
+    [
+        'new window.Worker("worker.js")',
+        'new globalThis.WebSocket("wss://example.invalid")',
+        'window.fetch("/data")',
+        'globalThis.fetch("/data")',
+        'const request = fetch; request("/data")',
+        'let Socket = globalThis.WebSocket; new Socket("wss://example.invalid")',
+        'var request = window.fetch; request("/data")',
+    ],
+)
+def test_qualified_and_simply_aliased_script_sinks_are_rejected(script: str) -> None:
+    assert _error(_document(script=script)).reason == "script_policy"
+
+
+@pytest.mark.parametrize(
+    "script",
+    [
+        "const request = safeRequest; request();",
+        "const request = () => 1; request();",
+        "const workerName = 'Worker'; console.log(workerName);",
+    ],
+)
+def test_non_sink_aliases_remain_allowed(script: str) -> None:
+    assert validate_standalone_html(_document(script=script)).slide_count == 1
+
+
+def test_aliased_script_sink_error_remains_source_redacted() -> None:
+    secret = "TOP-SECRET-ALIASED-SCRIPT-SOURCE"
+    error = _error(_document(script=f'const request = fetch; request("{secret}")'))
+    rendered = "".join(traceback.format_exception(error))
+    assert secret not in rendered
+    assert secret not in str(error)
+    assert secret not in repr(error)

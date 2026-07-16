@@ -243,6 +243,35 @@ _SCRIPT_SINK_TOKEN_PATTERNS = (
     ("sessionstorage",),
     ("indexeddb",),
 )
+_SCRIPT_GLOBAL_QUALIFIERS = frozenset({"globalthis", "self", "window"})
+_SCRIPT_GLOBAL_NAMES = frozenset(
+    {
+        "caches",
+        "document",
+        "eventsource",
+        "fetch",
+        "history",
+        "indexeddb",
+        "localstorage",
+        "location",
+        "navigator",
+        "sessionstorage",
+        "sharedworker",
+        "websocket",
+        "worker",
+        "xmlhttprequest",
+    }
+)
+_SCRIPT_ALIASABLE_SINKS = frozenset(
+    {
+        "eventsource",
+        "fetch",
+        "sharedworker",
+        "websocket",
+        "worker",
+        "xmlhttprequest",
+    }
+)
 
 
 class _BudgetExceeded(RuntimeError):
@@ -572,11 +601,52 @@ def _contains_token_pattern(tokens: list[str], pattern: tuple[str, ...]) -> bool
     return any(tuple(tokens[index : index + width]) == pattern for index in range(len(tokens) - width + 1))
 
 
+def _normalize_script_global_qualifiers(tokens: list[str]) -> list[str]:
+    normalized: list[str] = []
+    index = 0
+    while index < len(tokens):
+        if (
+            index + 2 < len(tokens)
+            and tokens[index] in _SCRIPT_GLOBAL_QUALIFIERS
+            and tokens[index + 1] == "."
+            and tokens[index + 2] in _SCRIPT_GLOBAL_NAMES
+        ):
+            normalized.append(tokens[index + 2])
+            index += 3
+        else:
+            normalized.append(tokens[index])
+            index += 1
+    return normalized
+
+
+def _script_has_simple_sink_alias(tokens: list[str]) -> bool:
+    aliases: set[str] = set()
+    for index in range(len(tokens) - 3):
+        alias = tokens[index + 1]
+        if (
+            tokens[index] in {"const", "let", "var"}
+            and alias.isascii()
+            and alias.replace("_", "a").replace("$", "a").isalnum()
+            and tokens[index + 2] == "="
+            and tokens[index + 3] in _SCRIPT_ALIASABLE_SINKS
+        ):
+            aliases.add(alias)
+    return any(
+        token in aliases
+        and index + 1 < len(tokens)
+        and tokens[index + 1] == "("
+        and (index == 0 or tokens[index - 1] != ".")
+        for index, token in enumerate(tokens)
+    )
+
+
 def _script_has_obvious_sink(source: str) -> bool:
     if "sourcemappingurl" in source.lower():
         return True
-    tokens = _script_tokens(source)
-    return any(_contains_token_pattern(tokens, pattern) for pattern in _SCRIPT_SINK_TOKEN_PATTERNS)
+    tokens = _normalize_script_global_qualifiers(_script_tokens(source))
+    return _script_has_simple_sink_alias(tokens) or any(
+        _contains_token_pattern(tokens, pattern) for pattern in _SCRIPT_SINK_TOKEN_PATTERNS
+    )
 
 
 def _css_value_has_resource(value: str) -> bool:
@@ -952,6 +1022,76 @@ def _parse_html(source: str) -> Any:
     raise AssertionError("unreachable")
 
 
+def _css_word_end(source: str, start: int) -> int:
+    index = start
+    while index < len(source):
+        character = source[index]
+        if character == "\\" and index + 1 < len(source):
+            index += 1
+            hex_start = index
+            while index < len(source) and index - hex_start < 6 and source[index] in "0123456789abcdefABCDEF":
+                index += 1
+            if index == hex_start:
+                index += 1
+            elif index < len(source) and source[index] in _HTML_WHITESPACE:
+                if source.startswith("\r\n", index):
+                    index += 2
+                else:
+                    index += 1
+            continue
+        if not (character.isalnum() or character in {"-", "_", "#", ".", "%"}):
+            break
+        index += 1
+    return index
+
+
+def _css_ascii_identifier_lower(source: str, start: int, end: int) -> str:
+    characters: list[str] = []
+    index = start
+    while index < end and len(characters) <= 3:
+        character = source[index]
+        if character != "\\":
+            if not character.isascii() or not (character.isalnum() or character in {"-", "_"}):
+                return ""
+            characters.append(character.lower())
+            index += 1
+            continue
+        index += 1
+        hex_start = index
+        while index < end and index - hex_start < 6 and source[index] in "0123456789abcdefABCDEF":
+            index += 1
+        if index > hex_start:
+            codepoint = int(source[hex_start:index], 16)
+            if not 1 <= codepoint < 128:
+                return ""
+            characters.append(chr(codepoint).lower())
+            if index < end and source[index] in _HTML_WHITESPACE:
+                index += 2 if source.startswith("\r\n", index) else 1
+        elif index < end:
+            characters.append(source[index].lower())
+            index += 1
+        else:
+            return ""
+    return "".join(characters) if index == end else ""
+
+
+def _css_url_token_end(source: str, start: int) -> int:
+    index = start
+    while index < len(source):
+        if source[index] == "\\" and index + 1 < len(source):
+            index = _css_word_end(source, index)
+            continue
+        index += 1
+        if source[index - 1] == ")":
+            break
+    return index
+
+
+def _check_css_token_size(source: str, start: int, end: int) -> None:
+    if len(source[start:end].encode("utf-8")) > MAX_CSS_TOKEN_BYTES:
+        raise _BudgetExceeded("css_token_bytes")
+
+
 def _preflight_css(styles: list[str]) -> None:
     if len(styles) > MAX_STYLE_ELEMENTS:
         raise _BudgetExceeded("css_stylesheets")
@@ -995,13 +1135,11 @@ def _preflight_css(styles: list[str]) -> None:
                     _fail_invalid("css_unterminated_string")
             elif character.isalnum() or character in {"-", "_", "#", ".", "\\"}:
                 start = index
-                while index < len(source) and (
-                    source[index].isalnum() or source[index] in {"-", "_", "#", ".", "%", "\\"}
-                ):
-                    if source[index] == "\\" and index + 1 < len(source):
-                        index += 2
-                    else:
-                        index += 1
+                index = _css_word_end(source, index)
+                if index < len(source) and source[index] == "(":
+                    _check_css_token_size(source, start, index + 1)
+                    if _css_ascii_identifier_lower(source, start, index) == "url":
+                        _check_css_token_size(source, start, _css_url_token_end(source, index + 1))
             else:
                 start = index
                 index += 1
@@ -1029,8 +1167,7 @@ def _preflight_css(styles: list[str]) -> None:
             token_count += 1
             if token_count > MAX_CSS_TOKENS:
                 raise _BudgetExceeded("css_tokens")
-            if len(source[start:index].encode("utf-8")) > MAX_CSS_TOKEN_BYTES:
-                raise _BudgetExceeded("css_token_bytes")
+            _check_css_token_size(source, start, index)
     if stack:
         _fail_invalid("css_unbalanced_block")
 
@@ -1211,6 +1348,8 @@ def _semantic_text(slides: list[Any]) -> str:
             node_excluded = excluded or (
                 is_element and (tag in _EXCLUDED_ELEMENTS or bool(classes & _EXCLUDED_CLASSES))
             )
+            if is_element and node is not slide and "slide" in classes:
+                node_excluded = True
             starts_semantic = is_element and _namespace(node.tag) == _HTML_NAMESPACE and tag in _SEMANTIC_ELEMENTS
             node_active = not node_excluded and (active or starts_semantic)
             if starts_semantic and not active and not node_excluded:
@@ -1221,6 +1360,17 @@ def _semantic_text(slides: list[Any]) -> str:
             children = list(node) if is_element else []
             stack.extend((child, False, node_active, node_excluded) for child in reversed(children))
     return "".join(chunks)
+
+
+def _slide_has_excluded_ancestor(element: Any, parents: dict[int, Any | None]) -> bool:
+    ancestor = parents.get(id(element))
+    while ancestor is not None:
+        tag = _local_name(ancestor.tag)
+        classes = _class_tokens(ancestor)
+        if tag in _EXCLUDED_ELEMENTS or classes & _EXCLUDED_CLASSES or "slide" in classes:
+            return True
+        ancestor = parents.get(id(ancestor))
+    return False
 
 
 def _validate_tree(root: Any, delivery_style: DeliveryStyle | None) -> tuple[str, list[Any], list[str]]:
@@ -1236,6 +1386,7 @@ def _validate_tree(root: Any, delivery_style: DeliveryStyle | None) -> tuple[str
         all_elements.append((element, parent))
         children = [child for child in element if isinstance(getattr(child, "tag", None), str)]
         stack.extend((child, element) for child in reversed(children))
+    parents = {id(element): parent for element, parent in all_elements}
 
     heads = [element for element, _ in all_elements if _is_html_element(element, "head")]
     bodies = [element for element, _ in all_elements if _is_html_element(element, "body")]
@@ -1287,8 +1438,9 @@ def _validate_tree(root: Any, delivery_style: DeliveryStyle | None) -> tuple[str
         if "slide" in classes:
             if namespace != _HTML_NAMESPACE or tag != "section":
                 _fail_invalid("slide_structure")
-            slides.append(element)
-            notes_by_slide[id(element)] = 0
+            if not _slide_has_excluded_ancestor(element, parents):
+                slides.append(element)
+                notes_by_slide[id(element)] = 0
         if "notes" in classes and namespace == _HTML_NAMESPACE:
             if parent is None or not _is_html_element(parent, "section") or "slide" not in _class_tokens(parent):
                 _fail_invalid("notes_structure")

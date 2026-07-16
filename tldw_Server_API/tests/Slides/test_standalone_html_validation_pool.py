@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import multiprocessing
 import os
 import signal
+import struct
 import subprocess
 import sys
 import textwrap
@@ -82,6 +84,36 @@ def _diagnostic_error(
         line=7,
         column=11,
     )
+
+
+_SERIALIZATION_SECRET = "TOP-SECRET-POSTRETURN"
+
+
+class _ExplodingResult:
+    @property
+    def title(self) -> str:
+        raise RuntimeError(_SERIALIZATION_SECRET)
+
+
+def _exploding_result_validator(
+    _document_source: str | bytes,
+    *,
+    delivery_style: str | None = None,
+) -> _ExplodingResult:
+    del delivery_style
+    return _ExplodingResult()
+
+
+def _partial_response_worker_main(
+    connection,
+    _validator,
+    require_isolated_imports: bool = False,
+) -> None:
+    del _validator, require_isolated_imports
+    connection.send((pool_module._IPC_VERSION, "ready", True))
+    connection.recv()
+    os.write(connection.fileno(), struct.pack("!i", 4_096) + b"partial")
+    time.sleep(60)
 
 
 def test_spawn_worker_ready_handshake_has_no_eager_slides_imports() -> None:
@@ -556,3 +588,289 @@ async def test_close_fails_closed_when_worker_cannot_be_confirmed_reaped(
     assert pool._closing is False
     with pytest.raises(ProcessLookupError):
         os.kill(pid, 0)
+
+
+@pytest.mark.asyncio
+async def test_watchdog_bounds_blocked_send_and_joins_rpc_work(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pool = StandaloneHtmlValidationPool(
+        max_workers=1,
+        watchdog_seconds=0.05,
+        mp_start_method="fork",
+    )
+    await pool.start()
+    old_pid = pool.worker_pids[0]
+    rpc_finished = threading.Event()
+    original_rpc = pool._rpc_sync
+
+    def tracked_rpc(*args, **kwargs):
+        try:
+            return original_rpc(*args, **kwargs)
+        finally:
+            rpc_finished.set()
+
+    monkeypatch.setattr(pool, "_rpc_sync", tracked_rpc)
+    os.kill(old_pid, signal.SIGSTOP)
+    started = time.monotonic()
+    try:
+        with pytest.raises(StandaloneHtmlValidationError) as caught:
+            await asyncio.wait_for(pool.validate(b"x" * 1_000_000), 1)
+        elapsed = time.monotonic() - started
+        assert caught.value.code == "standalone_html_validator_timeout"
+        assert elapsed < 0.75
+        assert rpc_finished.is_set()
+        assert pool.worker_pids[0] != old_pid
+        assert (await pool.validate(_document("Recovered send"))).title == "Recovered send"
+    finally:
+        try:
+            os.kill(old_pid, signal.SIGCONT)
+        except ProcessLookupError:
+            pass
+        await asyncio.wait_for(pool.close(), 3)
+
+
+@pytest.mark.asyncio
+async def test_watchdog_bounds_partial_receive_and_joins_rpc_work(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_worker_main = pool_module._validator_worker_main
+    monkeypatch.setattr(pool_module, "_validator_worker_main", _partial_response_worker_main)
+    pool = StandaloneHtmlValidationPool(
+        max_workers=1,
+        watchdog_seconds=0.05,
+        mp_start_method="fork",
+    )
+    await pool.start()
+    old_pid = pool.worker_pids[0]
+    monkeypatch.setattr(pool_module, "_validator_worker_main", original_worker_main)
+    rpc_finished = threading.Event()
+    original_rpc = pool._rpc_sync
+
+    def tracked_rpc(*args, **kwargs):
+        try:
+            return original_rpc(*args, **kwargs)
+        finally:
+            rpc_finished.set()
+
+    monkeypatch.setattr(pool, "_rpc_sync", tracked_rpc)
+    started = time.monotonic()
+    try:
+        with pytest.raises(StandaloneHtmlValidationError) as caught:
+            await asyncio.wait_for(pool.validate(_document("Partial response")), 1)
+        elapsed = time.monotonic() - started
+        assert caught.value.code == "standalone_html_validator_timeout"
+        assert elapsed < 0.75
+        assert rpc_finished.is_set()
+        assert pool.worker_pids[0] != old_pid
+        assert (await pool.validate(_document("Recovered receive"))).title == "Recovered receive"
+    finally:
+        monkeypatch.setattr(pool_module, "_validator_worker_main", original_worker_main)
+        await asyncio.wait_for(pool.close(), 3)
+
+
+def test_child_result_projection_failure_is_source_redacted(capfd: pytest.CaptureFixture[str]) -> None:
+    context = multiprocessing.get_context("fork")
+    parent_connection, child_connection = context.Pipe(duplex=True)
+    process = context.Process(
+        target=pool_module._validator_worker_main,
+        args=(child_connection, _exploding_result_validator, False),
+    )
+    process.start()
+    child_connection.close()
+    response: object = None
+    try:
+        assert parent_connection.poll(2)
+        ready = parent_connection.recv()
+        assert ready[:2] == (pool_module._IPC_VERSION, "ready")
+        assert isinstance(ready[2], bool)
+        parent_connection.send((pool_module._IPC_VERSION, "validate", 1, 1, _document(), None))
+        if parent_connection.poll(2):
+            try:
+                response = parent_connection.recv()
+            except EOFError:
+                pass
+        if response is not None:
+            parent_connection.send((pool_module._IPC_VERSION, "close"))
+        process.join(2)
+        assert not process.is_alive()
+    finally:
+        parent_connection.close()
+        if process.is_alive():
+            process.terminate()
+            process.join(2)
+    captured = capfd.readouterr()
+    public = f"{response!r} {captured.out} {captured.err}"
+    assert _SERIALIZATION_SECRET not in public
+    if response is not None:
+        assert response[4] == "validator_unavailable"
+
+
+@pytest.mark.asyncio
+async def test_close_cancellation_finishes_terminal_cleanup_and_is_idempotent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pool = StandaloneHtmlValidationPool(max_workers=2, mp_start_method="fork")
+    await pool.start()
+    pids = pool.worker_pids
+    started = threading.Event()
+    release = threading.Event()
+    original_terminate = pool._terminate_slot_sync
+
+    def delayed_terminate(slot):
+        started.set()
+        release.wait(2)
+        return original_terminate(slot)
+
+    monkeypatch.setattr(pool, "_terminate_slot_sync", delayed_terminate)
+    close_task = asyncio.create_task(pool.close())
+    assert await asyncio.to_thread(started.wait, 2)
+    close_task.cancel()
+    close_task.cancel()
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(close_task, 3)
+
+    assert pool._closed is True
+    assert pool._closing is False
+    assert pool._slots == []
+    assert pool.worker_pids == ()
+    assert pool.active_count == 0
+    assert pool.interactive_waiting == 0
+    assert pool.generation_slots_in_use == 0
+    await pool.close()
+    for pid in pids:
+        with pytest.raises(ProcessLookupError):
+            os.kill(pid, 0)
+
+
+def _malformed_response(kind: str, slot, job) -> tuple[object, ...]:
+    document_bytes = job.document if isinstance(job.document, bytes) else job.document.encode("utf-8")
+    result = [
+        pool_module._IPC_VERSION,
+        "result",
+        slot.epoch,
+        job.request_id,
+        "Deck",
+        1,
+        len(document_bytes),
+        hashlib.sha256(document_bytes).hexdigest(),
+        "Ready",
+    ]
+    errors = {
+        "invalid_status": (
+            pool_module._IPC_VERSION,
+            "error",
+            slot.epoch,
+            job.request_id,
+            "standalone_html_invalid_document",
+            503,
+            None,
+            "html_parse_error",
+            None,
+            None,
+        ),
+        "invalid_retry": (
+            pool_module._IPC_VERSION,
+            "error",
+            slot.epoch,
+            job.request_id,
+            "standalone_html_invalid_document",
+            422,
+            1,
+            "html_parse_error",
+            None,
+            None,
+        ),
+        "budget_reason": (
+            pool_module._IPC_VERSION,
+            "error",
+            slot.epoch,
+            job.request_id,
+            "standalone_html_validation_budget_exceeded",
+            422,
+            None,
+            "html_parse_error",
+            None,
+            None,
+        ),
+        "unavailable_status": (
+            pool_module._IPC_VERSION,
+            "error",
+            slot.epoch,
+            job.request_id,
+            "validator_unavailable",
+            422,
+            None,
+            None,
+            None,
+            None,
+        ),
+        "unavailable_reason": (
+            pool_module._IPC_VERSION,
+            "error",
+            slot.epoch,
+            job.request_id,
+            "validator_unavailable",
+            503,
+            None,
+            "html_parse_error",
+            None,
+            None,
+        ),
+    }
+    if kind in errors:
+        return errors[kind]
+    result_index, value = {
+        "title_control": (4, "Bad\x00Title"),
+        "title_whitespace": (4, " Deck "),
+        "title_nfc": (4, "Cafe\u0301"),
+        "byte_mismatch": (6, len(document_bytes) - 1),
+        "digest_mismatch": (7, "0" * 64),
+    }[kind]
+    result[result_index] = value
+    return tuple(result)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "kind",
+    [
+        "title_control",
+        "title_whitespace",
+        "title_nfc",
+        "byte_mismatch",
+        "digest_mismatch",
+        "invalid_status",
+        "invalid_retry",
+        "budget_reason",
+        "unavailable_status",
+        "unavailable_reason",
+    ],
+)
+async def test_semantically_malformed_worker_tuples_replace_worker_and_release_capacity(
+    kind: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pool = StandaloneHtmlValidationPool(max_workers=1, mp_start_method="fork")
+    await pool.start()
+    old_pid = pool.worker_pids[0]
+    original_rpc = pool._rpc_sync
+
+    def malformed_rpc(slot, job, watchdog_seconds):
+        del watchdog_seconds
+        return _malformed_response(kind, slot, job)
+
+    monkeypatch.setattr(pool, "_rpc_sync", malformed_rpc)
+    try:
+        with pytest.raises(StandaloneHtmlValidationError) as caught:
+            await asyncio.wait_for(pool.validate(_document("Malformed semantics")), 2)
+        assert caught.value.code == "validator_unavailable"
+        assert pool.active_count == 0
+        assert pool.interactive_waiting == 0
+        assert pool.worker_pids[0] != old_pid
+        monkeypatch.setattr(pool, "_rpc_sync", original_rpc)
+        assert (await pool.validate(_document("Recovered semantics"))).title == "Recovered semantics"
+    finally:
+        monkeypatch.setattr(pool, "_rpc_sync", original_rpc)
+        await pool.close()
