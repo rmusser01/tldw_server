@@ -3,12 +3,21 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 from dataclasses import replace
 from typing import Any
 
+import httpx
 import pytest
 
-from tldw_Server_API.app.core.http_client import RetryPolicy
+from tldw_Server_API.app.core.exceptions import NetworkError
+from tldw_Server_API.app.core.http_client import (
+    RetryPolicy,
+    create_async_client,
+)
+from tldw_Server_API.app.core.http_client import (
+    afetch_json as central_afetch_json,
+)
 from tldw_Server_API.app.core.TTS import gateway_catalog as catalog_module
 from tldw_Server_API.app.core.TTS.gateway_catalog import (
     MAX_DISCOVERY_BYTES,
@@ -118,6 +127,49 @@ async def test_fresh_hit_uses_one_safe_bounded_discovery_request(monkeypatch):
     assert "GET" in calls[0]["retry"].retry_on_methods
     assert calls[0]["require_json_ct"] is True
     assert calls[0]["max_bytes"] == MAX_DISCOVERY_BYTES
+    assert calls[0]["allow_redirects"] is False
+
+
+@pytest.mark.asyncio
+async def test_discovery_does_not_follow_cross_origin_redirects(monkeypatch):
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.host == "93.184.216.34":
+            return httpx.Response(
+                302,
+                request=request,
+                headers={"Location": "http://93.184.216.35/models"},
+            )
+        return httpx.Response(
+            200,
+            request=request,
+            headers={"Content-Type": "application/json"},
+            json={"data": [{"id": "Leaked/Redirect-Target"}]},
+        )
+
+    client = create_async_client(transport=httpx.MockTransport(handler))
+
+    async def fetch_with_mock_transport(**kwargs: Any) -> Any:
+        return await central_afetch_json(client=client, **kwargs)
+
+    monkeypatch.setattr(catalog_module, "afetch_json", fetch_with_mock_transport)
+    spec = replace(_spec(), base_url="http://93.184.216.34/v1/")
+    try:
+        result = await GatewayCatalog(max_entries=2, clock=FakeClock()).get(
+            spec,
+            credential_scope_token="scope",
+            api_key="redirect-secret",
+        )
+    finally:
+        await client.aclose()
+
+    assert result.discovery_status == "unavailable"
+    assert len(requests) == 1
+    assert requests[0].url.host == "93.184.216.34"
+    assert requests[0].headers["Authorization"] == "Bearer redirect-secret"
+    assert requests[0].headers["X-Route"] == "company-route"
 
 
 @pytest.mark.asyncio
@@ -199,7 +251,7 @@ async def test_discovery_error_uses_stale_entry_only_inside_stale_window(monkeyp
 
     async def fake_fetch_json(**_kwargs: Any) -> Any:
         if failing:
-            raise RuntimeError("upstream body containing secret")
+            raise NetworkError("upstream body containing secret")
         return {"data": [{"id": "Vendor/Cached"}]}
 
     monkeypatch.setattr(catalog_module, "afetch_json", fake_fetch_json)
@@ -299,7 +351,7 @@ async def test_shared_refresh_failure_is_sanitized_and_inflight_is_reusable(monk
         started.set()
         await release.wait()
         if should_fail:
-            raise RuntimeError("secret upstream error")
+            raise NetworkError("secret upstream error")
         return {"data": [{"id": "Vendor/Recovered"}]}
 
     monkeypatch.setattr(catalog_module, "afetch_json", fake_fetch_json)
@@ -321,6 +373,102 @@ async def test_shared_refresh_failure_is_sanitized_and_inflight_is_reusable(monk
     recovered = await catalog.get(spec, credential_scope_token="scope", api_key="key")
     assert recovered.models[0] == "Vendor/Recovered"
     assert calls == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error_type", [RuntimeError, TypeError, ValueError])
+async def test_programmer_errors_propagate_instead_of_using_stale_cache(
+    monkeypatch,
+    error_type: type[Exception],
+):
+    failing = False
+
+    async def fake_fetch_json(**_kwargs: Any) -> Any:
+        if failing:
+            raise error_type("programmer-secret")
+        return {"data": [{"id": "Vendor/Cached"}]}
+
+    monkeypatch.setattr(catalog_module, "afetch_json", fake_fetch_json)
+    clock = FakeClock()
+    catalog = GatewayCatalog(max_entries=2, clock=clock)
+    spec = _spec()
+    await catalog.get(spec, credential_scope_token="scope", api_key="key")
+
+    failing = True
+    clock.advance(11)
+    with pytest.raises(error_type, match="programmer-secret"):
+        await catalog.get(spec, credential_scope_token="scope", api_key="key")
+
+    assert catalog._inflight == {}
+
+
+@pytest.mark.asyncio
+async def test_programmer_error_reaches_all_active_waiters(monkeypatch):
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def fake_fetch_json(**_kwargs: Any) -> Any:
+        started.set()
+        await release.wait()
+        raise RuntimeError("shared-programmer-error")
+
+    monkeypatch.setattr(catalog_module, "afetch_json", fake_fetch_json)
+    catalog = GatewayCatalog(max_entries=2, clock=FakeClock())
+    spec = _spec()
+    first = asyncio.create_task(catalog.get(spec, credential_scope_token="scope", api_key="key"))
+    await started.wait()
+    second = asyncio.create_task(catalog.get(spec, credential_scope_token="scope", api_key="key"))
+    await asyncio.sleep(0)
+    release.set()
+
+    results = await asyncio.gather(first, second, return_exceptions=True)
+
+    assert all(isinstance(result, RuntimeError) for result in results)
+    assert all(str(result) == "shared-programmer-error" for result in results)
+    assert catalog._inflight == {}
+
+
+@pytest.mark.asyncio
+async def test_cancelled_sole_waiter_does_not_leave_unretrieved_refresh_error(
+    monkeypatch,
+):
+    started = asyncio.Event()
+    release = asyncio.Event()
+    refresh_finished = asyncio.Event()
+    loop_contexts: list[dict[str, Any]] = []
+    loop = asyncio.get_running_loop()
+    previous_handler = loop.get_exception_handler()
+
+    async def fake_fetch_json(**_kwargs: Any) -> Any:
+        started.set()
+        await release.wait()
+        try:
+            raise RuntimeError("orphaned-secret-error")
+        finally:
+            refresh_finished.set()
+
+    monkeypatch.setattr(catalog_module, "afetch_json", fake_fetch_json)
+    catalog = GatewayCatalog(max_entries=2, clock=FakeClock())
+    spec = _spec()
+    loop.set_exception_handler(lambda _loop, context: loop_contexts.append(dict(context)))
+    try:
+        caller = asyncio.create_task(catalog.get(spec, credential_scope_token="scope", api_key="key"))
+        await started.wait()
+        caller.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await caller
+        release.set()
+        await refresh_finished.wait()
+        for _ in range(3):
+            await asyncio.sleep(0)
+            gc.collect()
+
+        rendered = repr((catalog._cache, catalog._inflight, loop_contexts))
+        assert catalog._inflight == {}
+        assert not any(context.get("message") == "Task exception was never retrieved" for context in loop_contexts)
+        assert "orphaned-secret-error" not in rendered
+    finally:
+        loop.set_exception_handler(previous_handler)
 
 
 @pytest.mark.asyncio
@@ -494,6 +642,34 @@ async def test_malformed_or_oversized_payload_is_safe_unavailable(monkeypatch, p
     assert result.models == ("Configured/Default", "Configured/Overlay")
     assert result.discovery_status == "unavailable"
     assert result.discovered_model_count is None
+
+
+@pytest.mark.asyncio
+async def test_malformed_refresh_uses_stale_models(monkeypatch):
+    malformed = False
+
+    async def fake_fetch_json(**_kwargs: Any) -> Any:
+        if malformed:
+            return {"data": [{"id": 42}]}
+        return {"data": [{"id": "Vendor/Cached"}]}
+
+    monkeypatch.setattr(catalog_module, "afetch_json", fake_fetch_json)
+    clock = FakeClock()
+    catalog = GatewayCatalog(max_entries=2, clock=clock)
+    spec = _spec()
+    await catalog.get(spec, credential_scope_token="scope", api_key="key")
+
+    malformed = True
+    clock.advance(11)
+    result = await catalog.get(spec, credential_scope_token="scope", api_key="key")
+
+    assert result.models[0] == "Vendor/Cached"
+    assert result.discovery_status == "stale"
+
+
+def test_malformed_payload_raises_dedicated_discovery_error():
+    with pytest.raises(catalog_module.GatewayDiscoveryPayloadError):
+        catalog_module._parse_discovered_models({"data": [{"id": 42}]})
 
 
 @pytest.mark.asyncio
