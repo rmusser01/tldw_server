@@ -26,7 +26,7 @@ from tldw_Server_API.app.core.Utils.pydantic_compat import model_dump_compat
 # Local Imports
 from .adapters.base import AudioFormat, ProviderStatus, TTSAdapter, TTSCapabilities
 from .chatterbox_catalog import CHATTERBOX_MODEL_PROVIDER_ALIASES
-from .gateway_config import GatewaySpec, normalize_gateway_specs
+from .gateway_config import GatewaySpec, canonicalize_gateway_id, normalize_gateway_specs
 from .tts_config import get_tts_config_manager
 from .tts_exceptions import (
     TTSError,
@@ -144,6 +144,17 @@ def _build_tts_provider_aliases() -> dict[str, TTSProvider]:
 
 
 _TTS_PROVIDER_ALIASES: dict[str, TTSProvider] = _build_tts_provider_aliases()
+
+
+def canonicalize_tts_backend(value: str) -> str:
+    """Resolve a legacy provider alias or canonical gateway identity."""
+    if not isinstance(value, str) or not value:
+        raise ValueError("TTS backend must be a non-empty string")
+    for token in _provider_alias_tokens(value):
+        legacy_provider = _TTS_PROVIDER_ALIASES.get(token)
+        if legacy_provider is not None:
+            return legacy_provider.value
+    return canonicalize_gateway_id(value)
 
 
 def _apply_provider_aliases(provider_key: str, cfg: dict[str, Any]) -> dict[str, Any]:

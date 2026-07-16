@@ -104,10 +104,10 @@ class VoiceSettings:
 class TTSRequest:
     """Unified TTS request format"""
     text: str
-    voice: Optional[str] = None
+    voice: Optional[str] = cast(Optional[str], _TTS_REQUEST_UNSET)
     language: Optional[str] = cast(Optional[str], _TTS_REQUEST_UNSET)
-    format: AudioFormat = AudioFormat.MP3
-    target_sample_rate: Optional[int] = None
+    format: AudioFormat = cast(AudioFormat, _TTS_REQUEST_UNSET)
+    target_sample_rate: Optional[int] = cast(Optional[int], _TTS_REQUEST_UNSET)
     speed: float = cast(float, _TTS_REQUEST_UNSET)
     pitch: float = 1.0
     volume: float = 1.0
@@ -134,34 +134,57 @@ class TTSRequest:
     # Structured voice settings (e.g., ElevenLabs)
     voice_settings: Optional[VoiceSettings] = None
     # Additional provider-specific parameters
-    extra_params: dict[str, Any] = field(default_factory=dict)
+    extra_params: dict[str, Any] = cast(dict[str, Any], _TTS_REQUEST_UNSET)
     # Additive request aliases/state kept last to preserve positional compatibility.
     lang_code: Optional[str] = cast(Optional[str], _TTS_REQUEST_UNSET)
     supplied_fields: Optional[frozenset[str]] = None
     supplied_field_values: Optional[dict[str, Any]] = None
+    backend: Optional[str] = None
+    allow_fallback: bool = True
 
     def __post_init__(self):
         if self.supplied_fields is None:
             supplied_fields: set[str] = set()
-            if self.speed is not _TTS_REQUEST_UNSET:
-                supplied_fields.add("speed")
-            if self.language is not _TTS_REQUEST_UNSET:
-                supplied_fields.add("language")
-            if self.lang_code is not _TTS_REQUEST_UNSET:
-                supplied_fields.add("lang_code")
+            for name in (
+                "voice",
+                "speed",
+                "language",
+                "lang_code",
+                "target_sample_rate",
+                "format",
+                "extra_params",
+            ):
+                if getattr(self, name) is not _TTS_REQUEST_UNSET:
+                    supplied_fields.add(name)
         else:
             supplied_fields = set(self.supplied_fields)
+        if self.voice is _TTS_REQUEST_UNSET:
+            self.voice = None
         if self.speed is _TTS_REQUEST_UNSET:
             self.speed = 1.0
         if self.language is _TTS_REQUEST_UNSET:
             self.language = "en"
         if self.lang_code is _TTS_REQUEST_UNSET:
             self.lang_code = None
+        if self.format is _TTS_REQUEST_UNSET:
+            self.format = AudioFormat.MP3
+        if self.target_sample_rate is _TTS_REQUEST_UNSET:
+            self.target_sample_rate = None
+        if self.extra_params is _TTS_REQUEST_UNSET:
+            self.extra_params = {}
         self.supplied_fields = frozenset(supplied_fields)
         if self.supplied_field_values is None:
             self.supplied_field_values = {
                 name: getattr(self, name)
-                for name in ("speed", "language", "lang_code")
+                for name in (
+                    "voice",
+                    "speed",
+                    "language",
+                    "lang_code",
+                    "target_sample_rate",
+                    "format",
+                    "extra_params",
+                )
                 if name in supplied_fields
             }
         else:

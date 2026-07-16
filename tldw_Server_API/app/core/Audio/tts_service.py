@@ -208,7 +208,9 @@ def _sanitize_speech_request(
         tts_config = get_tts_config()
         validator = TTSInputValidator({"strict_validation": tts_config.strict_validation})
 
-        provider_hint = _infer_tts_provider_from_model(getattr(request_data, "model", None))
+        provider_hint = None
+        if getattr(request_data, "backend", None) is None:
+            provider_hint = _infer_tts_provider_from_model(getattr(request_data, "model", None))
         fields_set = getattr(request_data, "model_fields_set", None)
         if fields_set is None:
             fields_set = getattr(request_data, "__pydantic_fields_set__", None)

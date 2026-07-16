@@ -11,8 +11,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from loguru import logger
 from starlette import status
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_request_user, RequireRole, TokenScopeGuard, User
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    RequireRole,
+    TokenScopeGuard,
+    User,
+    check_rate_limit,
+    get_request_user,
+)
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import try_get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import (
     UsageEventLogger,
@@ -20,17 +26,20 @@ from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import (
 )
 from tldw_Server_API.app.api.v1.schemas.audio_schemas import OpenAISpeechRequest
 from tldw_Server_API.app.core.Audio.error_payloads import _http_error_detail
-from tldw_Server_API.app.core.Audio.tts_service import _raise_for_tts_error
-from tldw_Server_API.app.core.Audio.tts_service import _sanitize_speech_request
+from tldw_Server_API.app.core.Audio.tts_service import _raise_for_tts_error, _sanitize_speech_request
 from tldw_Server_API.app.core.AuthNZ.exceptions import QuotaExceededError, StorageError
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Logging.log_context import ensure_request_id
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
+from tldw_Server_API.app.core.Storage.generated_file_helpers import (
+    save_and_register_tts_audio,
+)
+from tldw_Server_API.app.core.TTS.adapter_registry import canonicalize_tts_backend
 from tldw_Server_API.app.core.TTS.tts_exceptions import (
-    TTSError,
     TTSAuthenticationError,
+    TTSError,
     TTSProviderBusyError,
     TTSProviderNotConfiguredError,
 )
@@ -42,9 +51,6 @@ from tldw_Server_API.app.core.TTS.utils import (
     tts_history_text_length,
 )
 from tldw_Server_API.app.core.Utils.pydantic_compat import model_dump_compat
-from tldw_Server_API.app.core.Storage.generated_file_helpers import (
-    save_and_register_tts_audio,
-)
 
 _AUDIO_TTS_NONCRITICAL_EXCEPTIONS = (
     OSError,
@@ -94,6 +100,39 @@ def _audio_shim_attr(name: str):
     if name in defaults:
         return defaults[name]
     raise NameError(name)
+
+
+def _resolve_tts_backend_mirror(
+    request_data: OpenAISpeechRequest,
+    request: Request,
+) -> Optional[str]:
+    """Resolve the body/header backend mirror before provider or credential lookup."""
+    body_backend = getattr(request_data, "backend", None)
+    header_backend = request.headers.get("X-TLDW-TTS-Backend")
+    if body_backend is None and header_backend is None:
+        return None
+    try:
+        canonical_body = canonicalize_tts_backend(body_backend) if body_backend is not None else None
+        canonical_header = canonicalize_tts_backend(header_backend) if header_backend is not None else None
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error_code": "invalid_tts_backend",
+                "message": "TTS backend identity is malformed.",
+            },
+        ) from exc
+    if canonical_body is not None and canonical_header is not None and canonical_body != canonical_header:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error_code": "invalid_tts_backend",
+                "message": "TTS backend body and header values conflict.",
+            },
+        )
+    backend = canonical_body or canonical_header
+    request_data.backend = backend
+    return backend
 
 
 def _tts_history_config() -> dict[str, Any]:
@@ -341,6 +380,7 @@ async def create_speech_job(
 ):
     """Submit a long-form TTS job and return job id."""
     request_id = ensure_request_id(request)
+    _resolve_tts_backend_mirror(request_data, request)
     provider_hint = _audio_shim_attr("_sanitize_speech_request")(request_data, request_id=request_id)
 
     user_id_int, tts_overrides, _byok = await _audio_shim_attr("_resolve_tts_byok")(
@@ -476,6 +516,7 @@ async def create_speech(
     """
     request_id = ensure_request_id(request)
 
+    _resolve_tts_backend_mirror(request_data, request)
     provider_hint = _audio_shim_attr("_sanitize_speech_request")(request_data, request_id=request_id)
     history_cfg = _tts_history_config()
     history_enabled = bool(media_db) and history_cfg.get("enabled", False)
@@ -983,6 +1024,7 @@ async def create_speech_metadata(
     usage_log: UsageEventLogger = Depends(get_usage_event_logger),
 ):
     request_id = ensure_request_id(request)
+    _resolve_tts_backend_mirror(request_data, request)
     provider_hint = _audio_shim_attr("_sanitize_speech_request")(request_data, request_id=request_id)
     tts_provider_hint = provider_hint
     user_id_int, tts_overrides, byok_tts_resolution = await _audio_shim_attr("_resolve_tts_byok")(
