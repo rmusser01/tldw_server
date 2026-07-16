@@ -1,10 +1,10 @@
 ---
 id: TASK-12972
 title: Allow trusted configured local LLM endpoints through scoped egress policy
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-07-15 19:34'
-updated_date: '2026-07-16 01:40'
+updated_date: '2026-07-16 02:01'
 labels:
   - browser-extension
 dependencies: []
@@ -27,15 +27,15 @@ Fix the mismatch where guarded setup accepts LAN-hosted llama.cpp and third-part
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Configured local LLM endpoints on loopback, RFC1918, IPv6 ULA, approved CGNAT/overlay, and ordinary public-unicast addresses can use only their exact configured origin and port without disabling global private blocking or opening a global port.
-- [ ] #2 Only the authorized setup route and a fresh server-config/environment resolver create scope; reserved request fields, request app config, URL/BYOK overrides, and adapter final URLs cannot create or widen it.
-- [ ] #3 fetch, afetch, synchronous stream_response, retries, redirects, DNS pins, and TLS certificate pinning retain the same scope, accepted DNS set, and machine-readable EgressPolicyError reason code.
-- [ ] #4 The scoped address classifier denies metadata and all non-allowed special-use classes, honors the global denylist, rejects DNS changes and origin-changing redirects, and leaves no-scope egress behavior unchanged.
-- [ ] #5 Setup creates scope only after its write guard; canonical setup readiness fields are used, discovery runs at most once per provider, transient failures are not cached, and explicit/manual model behavior follows the documented readiness matrix.
-- [ ] #6 Focused backend/frontend tests, Bandit on touched Python paths, ADR/configuration/user documentation, and migration guidance pass without adding a global SSRF exception.
-- [ ] #7 Every registered configured-local adapter wrapper and configured custom OpenAI alias resolves trusted context at its common adapter boundary, so Chat and all direct registry callers use the checked scoped path; numbered custom slots gain transport coverage without new catalog/setup surfaces.
-- [ ] #8 The exact enabled and blocked backend metadata records drive WebUI selection correctly; saved-provider events generation-invalidate both cache layers, and pre-save in-flight responses cannot repopulate stale models.
-- [ ] #9 Shared model discovery, visibility, and cache invalidation behavior is verified in both the Next.js WebUI and packaged browser extension surfaces.
+- [x] #1 Configured local LLM endpoints on loopback, RFC1918, IPv6 ULA, approved CGNAT/overlay, and ordinary public-unicast addresses can use only their exact configured origin and port without disabling global private blocking or opening a global port.
+- [x] #2 Only the authorized setup route and a fresh server-config/environment resolver create scope; reserved request fields, request app config, URL/BYOK overrides, and adapter final URLs cannot create or widen it.
+- [x] #3 fetch, afetch, synchronous stream_response, retries, redirects, DNS pins, and TLS certificate pinning retain the same scope, accepted DNS set, and machine-readable EgressPolicyError reason code.
+- [x] #4 The scoped address classifier denies metadata and all non-allowed special-use classes, honors the global denylist, rejects DNS changes and origin-changing redirects, and leaves no-scope egress behavior unchanged.
+- [x] #5 Setup creates scope only after its write guard; canonical setup readiness fields are used, discovery runs at most once per provider, transient failures are not cached, and explicit/manual model behavior follows the documented readiness matrix.
+- [x] #6 Focused backend/frontend tests, Bandit on touched Python paths, ADR/configuration/user documentation, and migration guidance pass without adding a global SSRF exception.
+- [x] #7 Every registered configured-local adapter wrapper and configured custom OpenAI alias resolves trusted context at its common adapter boundary, so Chat and all direct registry callers use the checked scoped path; numbered custom slots gain transport coverage without new catalog/setup surfaces.
+- [x] #8 The exact enabled and blocked backend metadata records drive WebUI selection correctly; saved-provider events generation-invalidate both cache layers, and pre-save in-flight responses cannot repopulate stale models.
+- [x] #9 Shared model discovery, visibility, and cache invalidation behavior is verified in both the Next.js WebUI and packaged browser extension surfaces.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -72,14 +72,22 @@ Stage 5 touched paths: apps/packages/ui/src/services/tldw/TldwModels.ts; apps/pa
 2026-07-15 verification evidence correction: the focused cache suite passed 35/35. The exact planned four-file complete shared command from Stage 5 Task 5.1 passed 50/50 under the WebUI configuration and 50/50 under the extension configuration; the preceding 51/51 count included one additional chat-model test outside that planned command. No implementation or test result changed. TASK-12972 and Stage 5 remain In Progress.
 
 2026-07-15 final Stage 5 cache-race correction: strict focused RED failed 3 tests with 34 passing under both WebUI and extension configurations. A delayed clear-A echo after clear B replayed A and invalidated B ownership; clear-before-first-hydration returned a seeded stale record without reaching backend; and the outer cache independently accepted A/B/A replay. Inner seen tokens, locally pending tokens, and outer seen tokens now use bounded 64-entry insertion-order histories while lastAppliedInvalidationToken remains the active tombstone guard. A clear before hydration starts consumes the initial hydration slot; in-flight hydration retains the generation guard. Focused GREEN passed 37/37 in both configs. The exact planned four-file suites passed 52/52 WebUI and 52/52 extension. Full frontend TypeScript passed; pinned ESLint passed with 0 errors and 11 pre-existing warnings. Backend remains unchanged, so prior 492-test and zero-finding Bandit evidence remains valid. TASK-12972 and Stage 5 remain In Progress pending re-review.
+
+2026-07-15 final completion verification on committed implementation HEAD 61b46c7075: backend focused union 492/492 passed with 4 warnings; exact planned WebUI suite 52/52 passed; exact browser-extension suite 52/52 passed; full frontend TypeScript passed; pinned ESLint reported 0 errors and 11 pre-existing warnings; Bandit scanned 25,013 production Python LOC with 0 findings and 0 errors; git diff --check passed. Independent final specification, quality, and whole-branch reviews approved with no remaining findings. Live LAN UAT was skipped because no safe external local-model server/route was available. Follow-up TASK-12972.1 retains the deferred Novita/Poe/Together central-egress work.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Implemented exact-origin scoped egress for trusted configured local LLM endpoints without relaxing global SSRF or port policy. Fresh server-owned endpoint provenance now flows through checked sync, async, streaming, redirect, DNS-pin, and TLS-pin paths; setup, readiness, discovery, manual-model metadata, and configured-local adapters agree. The shared model service invalidates race-safely across contexts, so newly saved LAN-hosted providers become visible in both the Next.js WebUI and packaged browser extension. Added ADR/configuration/user guidance, comprehensive regressions, and follow-up TASK-12972.1 for intentionally deferred public custom adapters.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

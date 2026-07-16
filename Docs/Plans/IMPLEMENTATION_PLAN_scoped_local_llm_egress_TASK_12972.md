@@ -371,7 +371,7 @@ Correction TDD evidence: the focused RED run produced 9 expected failures and 77
 
 **Tests:** Shared frontend model/cache/route contract under both WebUI and extension Vitest configurations, plus all focused backend tests.
 
-**Status:** In Progress
+**Status:** Complete
 
 ### Task 5.1: Write the backend-to-WebUI/extension regression
 
@@ -440,7 +440,7 @@ Correction TDD evidence: the focused RED run produced 9 expected failures and 77
 ### Task 5.4: Finalize task and commit
 
 - [x] Update TASK-12972 through Backlog MCP/CLI with touched files, exact test/Bandit results, skips, ADR/docs, and final summary.
-- [ ] Confirm every acceptance criterion and Definition of Done item before marking complete.
+- [x] Confirm every acceptance criterion and Definition of Done item before marking complete.
 - [x] Commit frontend, docs, and task finalization with `docs(llm): document scoped local provider egress (TASK-12972)`.
 
 Stage 5 TDD evidence: the first focused RED run failed 4 tests with 36 passing for stale inner persistence, missing inner invalidation, stale outer repopulation, and the absent saved-provider event. A later self-review regression for invalidation during asynchronous config lookup failed 1/1 before the ownership guard. The final shared suites pass 45 tests under the WebUI configuration and the same 45 tests under `vitest.extension.config.ts`.
@@ -451,23 +451,23 @@ Cross-context cache correction: two-context regressions failed 5 tests with 30 p
 
 Final cache-race correction: focused RED failed 3 tests with 34 passing under both frontend configurations. A delayed clear-A storage echo could be reapplied after clear B became active, invalidating B's generation and ownership; clearing before the first persistent read could still hydrate a stale normal record; and the outer cache independently accepted an A/B/A token replay. Inner seen tokens, locally pending tokens, and outer seen tokens now use bounded 64-entry insertion-order histories while `lastAppliedInvalidationToken` remains the active tombstone guard. A clear with no hydration in progress consumes the initial hydration slot; an already-running hydration retains its generation guard. Focused GREEN passed 37/37, the exact planned four-file suites passed 52/52 under both WebUI and extension configurations, full frontend TypeScript passed, and pinned ESLint reported 0 errors with 11 pre-existing warnings. Stage 5 remains In Progress for independent re-review.
 
-Final implementation verification: the complete Stages 1–4 backend union passes 492 tests with 5 warnings. Bandit scanned 25,013 lines across every touched Python production path with 0 findings and 0 errors; Python compilation passed. Pinned ESLint reports 0 errors (baseline warnings only). The shared-package TypeScript check, run with the repository's 8 GB heap setting, retains unrelated repository baseline failures but reports no diagnostics in Stage 5 touched paths. Ruff reports only audited pre-existing rule codes on the full touched-file scan and passes when those baseline codes are excluded. `git diff --check` passes. Live LAN UAT was skipped because no safe external local-model server and route were available in the environment. TASK-12972.1 records the public Novita/Poe/Together transport follow-up. Stage 5 and TASK-12972 remain In Progress pending independent specification and quality reviews.
+Final implementation verification on committed HEAD `61b46c7075`: the complete Stages 1–4 backend union passes 492 tests with 4 warnings. The exact planned four-file frontend suite passes 52/52 under the WebUI configuration and 52/52 under the browser-extension configuration. Full frontend TypeScript passes with incremental output disabled. Pinned ESLint reports 0 errors and 11 pre-existing warnings. Bandit scanned 25,013 lines across every touched Python production path with 0 findings and 0 errors. `git diff --check` passes. Live LAN UAT was skipped because no safe external local-model server and route were available in the environment. TASK-12972.1 records the public Novita/Poe/Together transport follow-up. Independent final specification, quality, and whole-branch reviews approved the implementation with no remaining findings.
 
 ---
 
 ## Definition-of-done audit
 
-- [ ] Global private blocking and global port defaults are unchanged.
-- [ ] Only exact fresh server-configured origins or an authorized setup payload receive scope.
-- [ ] Reserved request keys, URL overrides, request app config, BYOK values, and adapter final URLs cannot manufacture scope.
-- [ ] Custom BYOK/request endpoint provenance is derived after request parsing, carries no URL, and forces ordinary no-scope egress.
-- [ ] Address classification, retries, redirects, DNS pins, and TLS pins fail closed with stable reason codes.
-- [ ] Chat and every direct registry caller inherit scoped behavior from the configured-local adapter boundary; setup, readiness, discovery, sync, and streaming use the intended checked paths.
-- [ ] Every local adapter wrapper and configured custom alias has table-driven scope propagation coverage.
-- [ ] Discovery runs once per provider and transient failures are not cached.
-- [ ] Explicit local models survive optional discovery and exact metadata becomes visible immediately after config updates.
-- [ ] A saved provider emits the existing config-update event and clears both model caches; a failed save does not.
-- [ ] Pre-save in-flight fetches cannot repopulate either cache or clear ownership of a post-save fetch.
-- [ ] The shared model service and quick-chat route are verified through both WebUI and browser-extension test configurations; no client-specific discovery bypass exists.
-- [ ] Focused backend/frontend tests pass, Bandit introduces no findings, and `git diff --check` is clean.
-- [ ] ADR, configuration docs, local setup guide, Backlog notes, and the human-authored PR `Change summary` gate are complete.
+- [x] Global private blocking and global port defaults are unchanged.
+- [x] Only exact fresh server-configured origins or an authorized setup payload receive scope.
+- [x] Reserved request keys, URL overrides, request app config, BYOK values, and adapter final URLs cannot manufacture scope.
+- [x] Custom BYOK/request endpoint provenance is derived after request parsing, carries no URL, and forces ordinary no-scope egress.
+- [x] Address classification, retries, redirects, DNS pins, and TLS pins fail closed with stable reason codes.
+- [x] Chat and every direct registry caller inherit scoped behavior from the configured-local adapter boundary; setup, readiness, discovery, sync, and streaming use the intended checked paths.
+- [x] Every local adapter wrapper and configured custom alias has table-driven scope propagation coverage.
+- [x] Discovery runs once per provider and transient failures are not cached.
+- [x] Explicit local models survive optional discovery and exact metadata becomes visible immediately after config updates.
+- [x] A saved provider emits the existing config-update event and clears both model caches; a failed save does not.
+- [x] Pre-save in-flight fetches cannot repopulate either cache or clear ownership of a post-save fetch.
+- [x] The shared model service and quick-chat route are verified through both WebUI and browser-extension test configurations; no client-specific discovery bypass exists.
+- [x] Focused backend/frontend tests pass, Bandit introduces no findings, and `git diff --check` is clean.
+- [x] ADR, configuration docs, local setup guide, and Backlog notes are complete; the required human-authored PR `Change summary` remains an explicit merge gate if a PR is created.
