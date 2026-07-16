@@ -76,6 +76,8 @@ const setupBuiltExtensionLaunchTest = async () => {
 
 afterEach(() => {
   process.env = { ...originalEnv }
+  vi.useRealTimers()
+  vi.unstubAllGlobals()
   vi.resetModules()
   vi.restoreAllMocks()
 })
@@ -361,6 +363,53 @@ describe("normalizeBuiltExtensionSeedConfig", () => {
       )
 
       expect(context.close).toHaveBeenCalledTimes(1)
+    } finally {
+      cleanup()
+    }
+  })
+
+  it("executes the bounded diagnostics readiness probe", async () => {
+    const { cleanup, launchWithBuiltExtension, page } =
+      await setupBuiltExtensionLaunchTest()
+
+    try {
+      await launchWithBuiltExtension()
+      const [probe, timeoutMs] = page.evaluate.mock.calls[0] as [
+        (timeoutMs: number) => Promise<unknown>,
+        number,
+      ]
+      let lastError: { message: string } | undefined
+      const sendMessage = vi.fn(
+        (
+          _message: unknown,
+          callback: (response: unknown) => void,
+        ) => callback({ ok: true }),
+      )
+      vi.stubGlobal("chrome", {
+        runtime: {
+          sendMessage,
+          get lastError() {
+            return lastError
+          },
+        },
+      })
+
+      expect(timeoutMs).toBe(5_000)
+      await expect(probe(timeoutMs)).resolves.toEqual({ ok: true })
+      expect(sendMessage).toHaveBeenCalledWith(
+        { type: "tldw:diagnostics" },
+        expect.any(Function),
+      )
+
+      lastError = { message: "no receiver" }
+      await expect(probe(timeoutMs)).resolves.toBeNull()
+
+      lastError = undefined
+      sendMessage.mockImplementation(() => undefined)
+      vi.useFakeTimers()
+      const timedOutProbe = probe(timeoutMs)
+      await vi.advanceTimersByTimeAsync(timeoutMs)
+      await expect(timedOutProbe).resolves.toBeNull()
     } finally {
       cleanup()
     }
