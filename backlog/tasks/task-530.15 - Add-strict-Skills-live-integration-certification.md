@@ -12,8 +12,10 @@ priority: high
 parent_task_id: TASK-530
 documentation:
 - Docs/superpowers/specs/2026-07-15-skills-live-integration-certification-design.md
+- Docs/superpowers/plans/2026-07-15-skills-live-integration-certification.md
 modified_files:
 - Docs/superpowers/specs/2026-07-15-skills-live-integration-certification-design.md
+- Docs/superpowers/plans/2026-07-15-skills-live-integration-certification.md
 - backlog/tasks/task-530.15 - Add-strict-Skills-live-integration-certification.md
 ---
 
