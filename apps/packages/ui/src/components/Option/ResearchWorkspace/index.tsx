@@ -68,6 +68,11 @@ import {
   type TransferSourcesModalLaunchRequest
 } from "./TransferSourcesModal"
 import { useSourceListViewState } from "./use-source-list-view-state"
+import { useSourceSavedViews } from "./SourcesPane/use-source-saved-views"
+import {
+  SourceViewOverlayHost,
+  type SourceViewOverlayRequest
+} from "./SourcesPane/SourceViewControls"
 import {
   filterSources as applyAdvancedSourceFilters,
   sortSources as applySourceSort
@@ -1402,8 +1407,16 @@ const ResearchWorkspaceBody: React.FC = () => {
   const {
     sourceListViewState,
     patchSourceListViewState,
+    applySourceListViewState,
     resetAdvancedSourceFilters
   } = useSourceListViewState()
+  const sourceSavedViewsController = useSourceSavedViews(
+    workspaceId,
+    sourceListViewState,
+    applySourceListViewState
+  )
+  const [sourceViewOverlayRequest, setSourceViewOverlayRequest] =
+    React.useState<SourceViewOverlayRequest | null>(null)
   const organizationIndex = React.useMemo(
     () =>
       createWorkspaceOrganizationIndex({
@@ -3382,7 +3395,10 @@ const ResearchWorkspaceBody: React.FC = () => {
           onOpenTransferSources={openTransferSourcesModal}
           sourceListViewState={sourceListViewState}
           onPatchSourceListViewState={patchSourceListViewState}
+          onApplySourceListViewState={applySourceListViewState}
           onResetAdvancedSourceFilters={resetAdvancedSourceFilters}
+          sourceSavedViewsController={sourceSavedViewsController}
+          onOpenSourceViewOverlay={setSourceViewOverlayRequest}
           statusGuardrailsEnabled={statusGuardrailsEnabled}
           statusProjectionError={workspaceStatusProjectionError}
           researchWorkspaceCapabilities={researchWorkspaceCapabilities}
@@ -4277,6 +4293,12 @@ const ResearchWorkspaceBody: React.FC = () => {
         open={transferSourcesRequest !== null}
         request={transferSourcesRequest}
         onCancel={closeTransferSourcesModal}
+      />
+
+      <SourceViewOverlayHost
+        controller={sourceSavedViewsController}
+        request={sourceViewOverlayRequest}
+        onRequestHandled={() => setSourceViewOverlayRequest(null)}
       />
 
       <WorkspaceShortcutsModal

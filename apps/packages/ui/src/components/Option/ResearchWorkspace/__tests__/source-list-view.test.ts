@@ -17,6 +17,7 @@ const sources: WorkspaceSource[] = [
     type: "pdf",
     status: "ready",
     reviewState: "needs_review",
+    statusDetails: { lifecycleState: "queryable" },
     addedAt: new Date("2026-03-10T00:00:00.000Z"),
     sourceCreatedAt: new Date("2026-03-01T00:00:00.000Z"),
     pageCount: 8,
@@ -29,6 +30,7 @@ const sources: WorkspaceSource[] = [
     type: "website",
     status: "error",
     reviewState: "unset",
+    statusDetails: { lifecycleState: "failed" },
     addedAt: new Date("2026-03-12T00:00:00.000Z"),
     url: "https://example.com"
   },
@@ -39,6 +41,7 @@ const sources: WorkspaceSource[] = [
     type: "audio",
     status: "processing",
     reviewState: "reviewed",
+    statusDetails: { lifecycleState: "partially_queryable" },
     addedAt: new Date("2026-03-11T00:00:00.000Z"),
     duration: 90
   }
@@ -49,6 +52,7 @@ const baseViewState: SourceListViewState = {
   typeFilters: [],
   statusFilters: [],
   reviewStateFilters: [],
+  lifecycleStateFilters: [],
   dateField: "addedAt",
   dateFrom: null,
   dateTo: null,
@@ -103,6 +107,35 @@ describe("source-list-view", () => {
     )
   })
 
+  it("filters partially queryable sources by lifecycle without conflating status", () => {
+    const state: SourceListViewState = {
+      ...baseViewState,
+      lifecycleStateFilters: ["partially_queryable"]
+    }
+
+    expect(filterSources(sources, state).map((source) => source.id)).toEqual(["s3"])
+  })
+
+  it("treats missing and unrecognized lifecycle values as unknown", () => {
+    const state: SourceListViewState = {
+      ...baseViewState,
+      lifecycleStateFilters: ["unknown"]
+    }
+    const unknownSources: WorkspaceSource[] = [
+      { ...sources[0], id: "missing-lifecycle", statusDetails: {} },
+      {
+        ...sources[1],
+        id: "future-lifecycle",
+        statusDetails: { lifecycleState: "future_state" }
+      }
+    ]
+
+    expect(filterSources(unknownSources, state).map((source) => source.id)).toEqual([
+      "missing-lifecycle",
+      "future-lifecycle"
+    ])
+  })
+
   it("provides needs-review and unreviewed filter presets", () => {
     expect(SOURCE_REVIEW_FILTER_PRESETS.needsReview).toEqual({
       reviewStateFilters: ["needs_review"]
@@ -138,6 +171,12 @@ describe("source-list-view", () => {
         statusFilters: ["ready"]
       })
     ).toBe(true)
+    expect(
+      hasActiveSourceFilters({
+        ...baseViewState,
+        lifecycleStateFilters: ["partially_queryable"]
+      })
+    ).toBe(true)
   })
 
   it("builds a compact summary string for collapsed controls", () => {
@@ -146,6 +185,7 @@ describe("source-list-view", () => {
       typeFilters: ["pdf"],
       statusFilters: ["ready"],
       reviewStateFilters: ["needs_review"],
+      lifecycleStateFilters: ["partially_queryable"],
       sort: "added_desc"
     }
 
@@ -154,6 +194,7 @@ describe("source-list-view", () => {
     expect(summary).toContain("Type=PDF")
     expect(summary).toContain("Status=Ready")
     expect(summary).toContain("Review=Needs review")
+    expect(summary).toContain("Lifecycle=Partially queryable")
     expect(summary).toContain("Sort: Added date")
   })
 })

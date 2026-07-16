@@ -845,4 +845,136 @@ describe("workspace API domain contract", () => {
     )
   })
 
+  it("lists source saved views through the encoded workspace envelope", async () => {
+    const invalidView = {
+      id: "view-1",
+      workspace_id: "workspace with spaces",
+      name: "Needs review",
+      schema_version: 2,
+      version: 3,
+      created_at: "2026-07-10T00:00:00Z",
+      updated_at: "2026-07-10T01:00:00Z",
+      state: null,
+      valid: false,
+      invalid_reason: "unsupported_schema_version"
+    } as const
+    mocks.bgRequest.mockResolvedValue({ items: [invalidView] })
+
+    const response = await workspaceApiMethods.listWorkspaceSourceViews(
+      "workspace with spaces"
+    )
+
+    expect(response).toEqual({ items: [invalidView] })
+    expect(response.items[0]?.valid).toBe(false)
+    expect(response.items[0]?.invalid_reason).toBe("unsupported_schema_version")
+    expect(mocks.bgRequest).toHaveBeenCalledWith({
+      path: "/api/v1/workspaces/workspace%20with%20spaces/source-views",
+      method: "GET",
+      abortSignal: expect.any(AbortSignal)
+    })
+  })
+
+  it("creates and updates source saved views with exact canonical bodies", async () => {
+    const state = {
+      type_filters: ["pdf"],
+      status_filters: [],
+      review_state_filters: ["needs_review"],
+      lifecycle_state_filters: [],
+      date_field: "added_at",
+      date_from: null,
+      date_to: null,
+      require_url: false,
+      require_file_size: false,
+      require_duration: false,
+      require_page_count: false,
+      file_size_min: null,
+      file_size_max: null,
+      duration_min: null,
+      duration_max: null,
+      page_count_min: null,
+      page_count_max: null,
+      sort: "name_asc"
+    } as const
+    const response = {
+      id: "view with spaces",
+      workspace_id: "workspace with spaces",
+      name: "Review PDFs",
+      schema_version: 1,
+      version: 1,
+      created_at: "2026-07-10T00:00:00Z",
+      updated_at: "2026-07-10T00:00:00Z",
+      state,
+      valid: true,
+      invalid_reason: null
+    } as const
+    mocks.bgRequest.mockResolvedValue(response)
+
+    expect(
+      await workspaceApiMethods.createWorkspaceSourceView(
+        "workspace with spaces",
+        { name: "Review PDFs", schema_version: 1, state }
+      )
+    ).toEqual(response)
+    expect(mocks.bgRequest).toHaveBeenNthCalledWith(1, {
+      path: "/api/v1/workspaces/workspace%20with%20spaces/source-views",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: { name: "Review PDFs", schema_version: 1, state },
+      expectedStatuses: [409]
+    })
+
+    await workspaceApiMethods.updateWorkspaceSourceView(
+      "workspace with spaces",
+      "view with spaces",
+      {
+        version: 2,
+        name: "Review PDFs",
+        schema_version: 1,
+        state
+      }
+    )
+    expect(mocks.bgRequest).toHaveBeenNthCalledWith(2, {
+      path: "/api/v1/workspaces/workspace%20with%20spaces/source-views/view%20with%20spaces",
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: {
+        version: 2,
+        name: "Review PDFs",
+        schema_version: 1,
+        state
+      },
+      expectedStatuses: [404, 409]
+    })
+  })
+
+  it("deletes source saved views without a request body", async () => {
+    mocks.bgRequest.mockResolvedValue(undefined)
+
+    await workspaceApiMethods.deleteWorkspaceSourceView(
+      "workspace with spaces",
+      "view with spaces"
+    )
+
+    expect(mocks.bgRequest).toHaveBeenCalledWith({
+      path: "/api/v1/workspaces/workspace%20with%20spaces/source-views/view%20with%20spaces",
+      method: "DELETE",
+      expectedStatuses: [404]
+    })
+  })
+
+  it.each(["", "   ", "view/child", " / "])(
+    "rejects invalid source saved view id %j before requesting",
+    async (viewId) => {
+      await expect(
+        workspaceApiMethods.updateWorkspaceSourceView("ws-1", viewId, {
+          version: 1,
+          name: "Name"
+        })
+      ).rejects.toThrow(/viewId/)
+      await expect(
+        workspaceApiMethods.deleteWorkspaceSourceView("ws-1", viewId)
+      ).rejects.toThrow(/viewId/)
+      expect(mocks.bgRequest).not.toHaveBeenCalled()
+    }
+  )
 })

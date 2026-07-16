@@ -235,6 +235,46 @@ def build_source_review_rls_sql() -> list[str]:
     ]
 
 
+def build_workspace_source_saved_view_rls_sql() -> list[str]:
+    """Build the guarded owner-and-active-workspace saved-view policy."""
+    return [
+        """
+        DO $workspace_source_saved_views_rls$
+        BEGIN
+          IF to_regclass('workspace_source_saved_views') IS NULL THEN
+            RETURN;
+          END IF;
+          EXECUTE 'ALTER TABLE IF EXISTS workspace_source_saved_views ENABLE ROW LEVEL SECURITY';
+          EXECUTE 'ALTER TABLE IF EXISTS workspace_source_saved_views FORCE ROW LEVEL SECURITY';
+          EXECUTE 'DROP POLICY IF EXISTS workspace_source_saved_views_tenant_isolation ON workspace_source_saved_views';
+          EXECUTE $saved_view_policy$
+            CREATE POLICY workspace_source_saved_views_tenant_isolation
+              ON workspace_source_saved_views
+              USING (
+                owner_user_id = current_setting('app.current_user_id', true)
+                AND EXISTS (
+                  SELECT 1 FROM workspaces w
+                  WHERE w.id = workspace_source_saved_views.workspace_id
+                    AND w.client_id = current_setting('app.current_user_id', true)
+                    AND w.deleted = false
+                )
+              )
+              WITH CHECK (
+                owner_user_id = current_setting('app.current_user_id', true)
+                AND EXISTS (
+                  SELECT 1 FROM workspaces w
+                  WHERE w.id = workspace_source_saved_views.workspace_id
+                    AND w.client_id = current_setting('app.current_user_id', true)
+                    AND w.deleted = false
+                )
+              )
+          $saved_view_policy$;
+        END
+        $workspace_source_saved_views_rls$;
+        """.strip()
+    ]
+
+
 def build_chacha_rls_sql() -> list[str]:
     """RLS for ChaChaNotes (notes, character_cards) using client_id scoping."""
     stmts: list[str] = []
@@ -275,6 +315,7 @@ def build_chacha_rls_sql() -> list[str]:
         """
     )
     stmts.extend(build_source_review_rls_sql())
+    stmts.extend(build_workspace_source_saved_view_rls_sql())
     return stmts
 
 

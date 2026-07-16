@@ -24,6 +24,10 @@ import type {
   WorkspacePersonaMemoryMode,
   WorkspaceSourceReviewState
 } from "@/types/workspace"
+import type {
+  WorkspaceSourceSavedViewInvalidReason,
+  WorkspaceSourceSavedViewStateV1
+} from "@/types/workspace-source-saved-view"
 import {
   normalizeEffectiveWorkspaceAssistantDefault,
   normalizeWorkspaceAssistantDefaults
@@ -241,6 +245,82 @@ export interface WorkspaceSourceStatusListResponse {
   workspace_id: string
   sources: WorkspaceSourceStatusApiResponse[]
   summary: WorkspaceSourceStatusSummary
+}
+
+interface WorkspaceSourceSavedViewResponseBase {
+  id: string
+  workspace_id: string
+  name: string
+  schema_version: number
+  version: number
+  created_at: string
+  updated_at: string
+}
+
+export interface WorkspaceSourceSavedViewValidResponse extends WorkspaceSourceSavedViewResponseBase {
+  state: WorkspaceSourceSavedViewStateV1
+  valid: true
+  invalid_reason: null
+}
+
+export interface WorkspaceSourceSavedViewInvalidResponse extends WorkspaceSourceSavedViewResponseBase {
+  state: null
+  valid: false
+  invalid_reason: WorkspaceSourceSavedViewInvalidReason
+}
+
+export type WorkspaceSourceSavedViewResponse =
+  | WorkspaceSourceSavedViewValidResponse
+  | WorkspaceSourceSavedViewInvalidResponse
+
+export interface WorkspaceSourceSavedViewListResponse {
+  items: WorkspaceSourceSavedViewResponse[]
+}
+
+export interface WorkspaceSourceSavedViewCreateRequest {
+  name: string
+  schema_version: 1
+  state: WorkspaceSourceSavedViewStateV1
+}
+
+export type WorkspaceSourceSavedViewPatchRequest =
+  | { version: number; name: string }
+  | {
+      version: number
+      schema_version: 1
+      state: WorkspaceSourceSavedViewStateV1
+    }
+  | {
+      version: number
+      name: string
+      schema_version: 1
+      state: WorkspaceSourceSavedViewStateV1
+    }
+
+export interface WorkspaceSourceSavedViewNameExistsDetail {
+  code: "source_view_name_exists"
+  view_id: string
+  version: number
+}
+
+export interface WorkspaceSourceSavedViewLimitReachedDetail {
+  code: "source_view_limit_reached"
+  limit: 100
+}
+
+export interface WorkspaceSourceSavedViewVersionConflictDetail {
+  code: "source_view_version_conflict"
+  view_id: string
+  current_version: number
+}
+
+export type WorkspaceSourceSavedViewConflictDetail =
+  | WorkspaceSourceSavedViewNameExistsDetail
+  | WorkspaceSourceSavedViewLimitReachedDetail
+  | WorkspaceSourceSavedViewVersionConflictDetail
+
+export interface WorkspaceSourceSavedViewConflictResponse {
+  detail: WorkspaceSourceSavedViewConflictDetail
 }
 
 export type WorkspaceCapabilityServiceState =
@@ -1604,6 +1684,57 @@ export const workspaceApiMethods = {
     return await bgRequest<WorkspaceSourceApiResponse[]>({
       path: workspacePath(workspaceId, "/sources"),
       method: "GET"
+    })
+  },
+
+  async listWorkspaceSourceViews(
+    workspaceId: string
+  ): Promise<WorkspaceSourceSavedViewListResponse> {
+    return await bgRequest<WorkspaceSourceSavedViewListResponse>({
+      path: workspacePath(workspaceId, "/source-views"),
+      method: "GET",
+      // Reconciliation must not join an older in-flight list request.
+      abortSignal: new AbortController().signal
+    })
+  },
+
+  async createWorkspaceSourceView(
+    workspaceId: string,
+    data: WorkspaceSourceSavedViewCreateRequest
+  ): Promise<WorkspaceSourceSavedViewResponse> {
+    return await bgRequest<WorkspaceSourceSavedViewResponse>({
+      path: workspacePath(workspaceId, "/source-views"),
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: data,
+      expectedStatuses: [409]
+    })
+  },
+
+  async updateWorkspaceSourceView(
+    workspaceId: string,
+    viewId: string,
+    data: WorkspaceSourceSavedViewPatchRequest
+  ): Promise<WorkspaceSourceSavedViewResponse> {
+    const encodedViewId = encodeWorkspacePathSegment(viewId, "viewId")
+    return await bgRequest<WorkspaceSourceSavedViewResponse>({
+      path: workspacePath(workspaceId, `/source-views/${encodedViewId}`),
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: data,
+      expectedStatuses: [404, 409]
+    })
+  },
+
+  async deleteWorkspaceSourceView(
+    workspaceId: string,
+    viewId: string
+  ): Promise<void> {
+    const encodedViewId = encodeWorkspacePathSegment(viewId, "viewId")
+    await bgRequest<unknown>({
+      path: workspacePath(workspaceId, `/source-views/${encodedViewId}`),
+      method: "DELETE",
+      expectedStatuses: [404]
     })
   },
 
