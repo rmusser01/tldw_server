@@ -1,4 +1,5 @@
 import hashlib
+import types
 
 import pytest
 
@@ -107,6 +108,106 @@ def test_tls_pinning_scoped_validation_uses_original_accepted_ips(monkeypatch):
     assert captured["url"] == "https://192.168.1.50:11434"
     assert captured["configured_endpoint"] is scope
     assert captured["dns_pin_cache"] == {"192.168.1.50": ("192.168.1.50",)}
+
+
+@requires_httpx
+def test_tls_pinning_connects_to_accepted_ip_with_original_sni(monkeypatch):
+    import socket as _socket
+    import ssl as _ssl
+
+    from tldw_Server_API.app.core import http_client as hc
+
+    captured: dict[str, object] = {}
+
+    class FakeSSLSocket:
+        def getpeercert(self, binary_form=False):
+            return b"accepted-ip-cert" if binary_form else None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):  # noqa: ARG002
+            return False
+
+    class FakeSSLContext:
+        minimum_version = None
+
+        def wrap_socket(self, sock, server_hostname=None):  # noqa: ARG002
+            captured["server_hostname"] = server_hostname
+            return FakeSSLSocket()
+
+    class FakeSocket:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):  # noqa: ARG002
+            return False
+
+    monkeypatch.setattr(_ssl, "create_default_context", lambda *args, **kwargs: FakeSSLContext())
+    monkeypatch.setattr(
+        _socket,
+        "create_connection",
+        lambda address, timeout=None: captured.update(address=address) or FakeSocket(),
+    )
+    monkeypatch.setattr(hc, "_validate_egress_or_raise", lambda *_args, **_kwargs: None)
+    pin = hashlib.sha256(b"accepted-ip-cert").hexdigest()
+
+    hc._check_cert_pinning(
+        "models.internal",
+        11434,
+        {pin},
+        "1.2",
+        accepted_resolved_ips=("192.0.2.10",),
+    )
+
+    assert captured["address"] == ("192.0.2.10", 11434)
+    assert captured["server_hostname"] == "models.internal"
+
+
+@requires_httpx
+def test_checked_fetch_connects_to_vetted_ip_and_preserves_http_identity(monkeypatch):
+    import httpx
+
+    from tldw_Server_API.app.core import http_client as hc
+    from tldw_Server_API.app.core.Security import egress as egress_mod
+    from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
+
+    original_url = "https://models.internal:11434/v1/models"
+    scope = ConfiguredEndpointScope.from_url(original_url)
+    observed: dict[str, object] = {}
+
+    def allow(_url, **_kwargs):
+        return types.SimpleNamespace(
+            allowed=True,
+            reason=None,
+            reason_code=None,
+            resolved_ips=("192.0.2.10",),
+        )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed["transport_url"] = str(request.url)
+        observed["host"] = request.headers.get("host")
+        observed["sni"] = request.extensions.get("sni_hostname")
+        return httpx.Response(200, request=request)
+
+    monkeypatch.setattr(egress_mod, "evaluate_url_policy", allow)
+    client = hc.create_client(transport=httpx.MockTransport(handler))
+    try:
+        response = hc.fetch(
+            method="GET",
+            url=original_url,
+            client=client,
+            configured_endpoint=scope,
+        )
+    finally:
+        client.close()
+
+    assert observed == {
+        "transport_url": "https://192.0.2.10:11434/v1/models",
+        "host": "models.internal:11434",
+        "sni": "models.internal",
+    }
+    assert str(response.request.url) == original_url
 
 
 @requires_httpx

@@ -295,9 +295,6 @@ describe("fetchChatModels", () => {
     stale.resolve([
       { id: "llama/stale", name: "Stale", provider: "llama", type: "chat" }
     ])
-    await expect(preUpdate).resolves.toEqual([
-      expect.objectContaining({ model: "tldw:llama/stale" })
-    ])
 
     const postUpdateFollower = fetchChatModels({ returnEmpty: true })
     expect(mocks.getChatModels).toHaveBeenCalledTimes(2)
@@ -305,7 +302,8 @@ describe("fetchChatModels", () => {
     fresh.resolve([
       { id: "llama/fresh", name: "Fresh", provider: "llama", type: "chat" }
     ])
-    await expect(Promise.all([postUpdate, postUpdateFollower])).resolves.toEqual([
+    await expect(Promise.all([preUpdate, postUpdate, postUpdateFollower])).resolves.toEqual([
+      [expect.objectContaining({ model: "tldw:llama/fresh" })],
       [expect.objectContaining({ model: "tldw:llama/fresh" })],
       [expect.objectContaining({ model: "tldw:llama/fresh" })]
     ])

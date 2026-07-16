@@ -1,10 +1,10 @@
 ---
 id: TASK-12972
 title: Allow trusted configured local LLM endpoints through scoped egress policy
-status: Done
+status: In Progress
 assignee: []
 created_date: '2026-07-15 19:34'
-updated_date: '2026-07-16 02:20'
+updated_date: '2026-07-16 03:18'
 labels:
   - browser-extension
 dependencies: []
@@ -78,6 +78,10 @@ Stage 5 touched paths: apps/packages/ui/src/services/tldw/TldwModels.ts; apps/pa
 2026-07-15 post-completion live smoke: the requester supplied a llama.cpp server at 127.0.0.1:9099. GET /v1/models discovered Qwen3.6-27B-Uncensored-HauhauCS-Aggressive-Q8_K_P.gguf. The new checked exact-origin transport completed a non-streaming chat with HTTP 200 and choices present, then a streaming chat with HTTP 200, seven events, and a [DONE] terminator. This validates live loopback discovery and checked sync/stream transport. The original non-loopback/LAN case remains covered by automated tests rather than live UAT because the supplied server is bound to loopback.
 
 2026-07-15 draft PR opened: https://github.com/rmusser01/tldw_server/pull/2743. The PR remains draft and is not merge-ready until the requester supplies the required human-authored Change summary.
+
+2026-07-15 PR #2743 review audit reopened the task. Collected 13 findings across Qodo and CodeRabbit. Verified fix candidates: unexpected setup-validation exceptions need operator logging; malformed configured URLs need controlled handling; invalidation listeners need per-listener isolation; endpoint provenance must distinguish key ownership from endpoint ownership; all HEAD-to-GET fallbacks need fresh policy/TLS validation; checked transports and TLS-pin sockets must connect to vetted DNS answers; setup must reject 429/5xx manual fallback; fallback tests and scanner-sensitive patch lines need correction; stale outer-cache generations must return current data; native Kobold must raise HTTP status and close responses. Two findings will receive evidence-based pushback: first-run scope creation already runs after localhost-or-remote-admin setup authorization, and the endpoint-only discovery routine has no second consumer warranting a new core abstraction.
+
+2026-07-15 PR #2743 review fixes verified locally. Implemented 11 actionable Qodo/CodeRabbit findings plus two small inherited chat endpoint lint defects; retained two evidence-based pushbacks where extraction had no second consumer and the requested LAN-only restriction contradicted the authorized exact-origin design. Final backend affected matrix passed 519/519 with 5 warnings. Scoped Ruff correctness checks passed. Bandit scanned 12,668 production Python LOC with 0 findings and 0 errors. The prior shared WebUI and browser-extension suites each passed 53/53 and full frontend TypeScript passed. Live llama.cpp UAT at 127.0.0.1:9099 passed checked synchronous chat (HTTP 200, choices present) and checked streaming chat (HTTP 200, 22 events, [DONE]); logical request URLs remained intact. PR is ready, not draft. Task remains In Progress until the review replies are posted, threads resolved, and refreshed CI is checked.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

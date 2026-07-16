@@ -77,6 +77,57 @@ def test_stream_response_scoped_lan_lifetime_and_borrowed_client(monkeypatch):
 
 
 @requires_httpx
+def test_stream_response_connects_to_vetted_ip_and_preserves_http_identity(monkeypatch):
+    from tldw_Server_API.app.core import http_client as hc
+    from tldw_Server_API.app.core.Security import egress as egress_mod
+    from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
+    import httpx
+    import types
+
+    original_url = "https://models.internal:11434/v1/chat/completions"
+    scope = ConfiguredEndpointScope.from_url(original_url)
+    observed: dict[str, object] = {}
+
+    class StreamingBody(httpx.SyncByteStream):
+        def __iter__(self):
+            yield b"ok"
+
+    def allow(_url, **_kwargs):
+        return types.SimpleNamespace(
+            allowed=True,
+            reason=None,
+            reason_code=None,
+            resolved_ips=("192.0.2.10",),
+        )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed["transport_url"] = str(request.url)
+        observed["host"] = request.headers.get("host")
+        observed["sni"] = request.extensions.get("sni_hostname")
+        return httpx.Response(200, request=request, stream=StreamingBody())
+
+    monkeypatch.setattr(egress_mod, "evaluate_url_policy", allow)
+    client = hc.create_client(transport=httpx.MockTransport(handler))
+    try:
+        with hc.stream_response(
+            method="POST",
+            url=original_url,
+            client=client,
+            configured_endpoint=scope,
+        ) as response:
+            assert b"".join(response.iter_bytes()) == b"ok"
+            assert str(response.request.url) == original_url
+    finally:
+        client.close()
+
+    assert observed == {
+        "transport_url": "https://192.0.2.10:11434/v1/chat/completions",
+        "host": "models.internal:11434",
+        "sni": "models.internal",
+    }
+
+
+@requires_httpx
 def test_stream_response_owns_client_and_forces_redirects_off(monkeypatch):
     from tldw_Server_API.app.core import http_client as hc
 

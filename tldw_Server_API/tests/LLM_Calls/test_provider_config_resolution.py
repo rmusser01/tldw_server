@@ -162,6 +162,20 @@ def test_public_custom_subclasses_are_not_configured_local_endpoints(
         assert resolution.resolve_trusted_provider_endpoint(provider) is None
 
 
+def test_malformed_configured_endpoint_is_treated_as_unconfigured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.LLM_Calls import provider_config_resolution as resolution
+
+    monkeypatch.setattr(
+        resolution,
+        "load_settings",
+        lambda: {"llama_api": {"api_ip": "http://[::1"}},
+    )
+
+    assert resolution.resolve_trusted_provider_endpoint("llama.cpp") is None
+
+
 def test_local_adapter_boundary_discards_request_context_and_pairs_fresh_endpoint(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -1,7 +1,4 @@
 import pytest
-from unittest.mock import MagicMock, patch
-
-from tldw_Server_API.app.core.Chat.chat_orchestrator import chat_api_call
 
 
 class DummyResponse:
@@ -13,7 +10,7 @@ class DummyResponse:
         return None
 
     def json(self):
-        return {}
+        return self._payload
 
     def close(self):
         return None
@@ -44,30 +41,27 @@ def test_local_like_adapters_coerce_numeric_types(provider_name, cfg_section, ur
 
     captured_payload = {}
 
-    def fake_post(url, headers=None, json=None, timeout=None):
+    def fake_fetch(*, json=None, **_kwargs):
         captured_payload.clear()
         if json:
             captured_payload.update(json)
-        return DummyResponse({})
-
-    with patch(
-        "tldw_Server_API.app.core.LLM_Calls.providers.local_adapters.load_settings",
-        return_value=fake_settings,
-    ), patch(
-        "tldw_Server_API.app.core.LLM_Calls.providers.local_adapters._hc_create_client"
-    ) as mock_client_cls:
-        mock_client = MagicMock()
-        mock_client.post.side_effect = fake_post
-        mock_client.close.return_value = None
-        mock_client_cls.return_value = mock_client
-
-        chat_api_call(
-            api_endpoint=provider_name,
-            api_key=None,
-            messages_payload=[{"role": "user", "content": "hello"}],
-            streaming=False,
-            model="dummy",
+        return DummyResponse(
+            {"choices": [{"message": {"role": "assistant", "content": "ok"}}]}
         )
+
+    from tldw_Server_API.app.core.LLM_Calls.adapter_registry import ChatProviderRegistry
+
+    adapter = ChatProviderRegistry().get_adapter(provider_name)
+    assert adapter is not None
+    adapter.http_fetcher = fake_fetch
+    adapter.chat(
+        {
+            "messages": [{"role": "user", "content": "hello"}],
+            "stream": False,
+            "model": "dummy",
+            "app_config": fake_settings,
+        }
+    )
 
     assert "top_p" in captured_payload and isinstance(captured_payload["top_p"], float)
     # top_k is not part of strict OpenAI spec but most local servers accept it; check when present
@@ -77,6 +71,9 @@ def test_local_like_adapters_coerce_numeric_types(provider_name, cfg_section, ur
 
 @pytest.mark.unit
 def test_kobold_coerces_numeric_types():
+    from tldw_Server_API.app.core.LLM_Calls.providers.local_adapters import _kobold_request
+    from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
+
     fake_settings = {
         "kobold_api": {
             "api_ip": "http://localhost:5000/api/v1/generate",
@@ -88,34 +85,38 @@ def test_kobold_coerces_numeric_types():
     }
 
     captured_payload = {}
+    lifecycle = {"status_checked": False, "closed": False}
 
     class Dummy:
         status_code = 200
 
+        def raise_for_status(self):
+            lifecycle["status_checked"] = True
+
         def json(self):
             return {"results": [{"text": "ok"}]}
 
-    def fake_fetch(method, url, headers=None, json=None, retry=None):
+        def close(self):
+            lifecycle["closed"] = True
+
+    def fake_fetch(method, url, headers=None, json=None, retry=None, **_kwargs):
         captured_payload.clear()
         if json:
             captured_payload.update(json)
         return Dummy()
 
-    with patch(
-        "tldw_Server_API.app.core.LLM_Calls.providers.local_adapters.load_settings",
-        return_value=fake_settings,
-    ), patch(
-        "tldw_Server_API.app.core.LLM_Calls.providers.local_adapters._hc_fetch",
-        side_effect=fake_fetch,
-    ):
-        chat_api_call(
-            api_endpoint="kobold",
-            api_key=None,
-            messages_payload=[{"role": "user", "content": "hello"}],
-            streaming=False,
-        )
+    endpoint = fake_settings["kobold_api"]["api_ip"]
+    _kobold_request(
+        input_data=[{"role": "user", "content": "hello"}],
+        streaming=False,
+        app_config=fake_settings,
+        http_fetcher=fake_fetch,
+        configured_endpoint_base_url=endpoint,
+        configured_endpoint_scope=ConfiguredEndpointScope.from_url(endpoint),
+    )
 
     assert isinstance(captured_payload.get("top_p"), float)
     assert captured_payload.get("top_p") == 0.92
     assert isinstance(captured_payload.get("top_k"), int)
     assert captured_payload.get("top_k") == 80
+    assert lifecycle == {"status_checked": True, "closed": True}

@@ -105,10 +105,11 @@ def resolve_trusted_provider_endpoint(provider_name: str) -> TrustedProviderEndp
 
     if base_url is None:
         return None
-    return TrustedProviderEndpoint(
-        base_url=base_url.rstrip("/"),
-        scope=ConfiguredEndpointScope.from_url(base_url),
-    )
+    try:
+        scope = ConfiguredEndpointScope.from_url(base_url)
+    except ValueError:
+        return None
+    return TrustedProviderEndpoint(base_url=base_url.rstrip("/"), scope=scope)
 
 _KNOWN_API_KEY_PLACEHOLDERS = {
     "REPLACE-ME",

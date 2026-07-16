@@ -928,7 +928,11 @@ def _kobold_request(
             json=payload,
             retry=policy,
         )
-        response_data = response.json()
+        try:
+            response.raise_for_status()
+            response_data = response.json()
+        finally:
+            response.close()
 
         if response_data and 'results' in response_data and len(response_data['results']) > 0:
             # Kobold /generate usually returns a list of results, each with 'text'

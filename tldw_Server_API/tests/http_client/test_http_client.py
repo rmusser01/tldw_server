@@ -119,7 +119,11 @@ def test_scoped_fetch_retry_preserves_scope_and_initial_dns_pin(monkeypatch):
 
 @requires_httpx
 @pytest.mark.asyncio
-async def test_async_httpx_head_range_fallback_preserves_egress_denial(monkeypatch):
+@pytest.mark.parametrize("denial_source", ["policy", "certificate"])
+async def test_async_client_head_range_fallback_preserves_egress_denial(
+    monkeypatch,
+    denial_source,
+):
     from tldw_Server_API.app.core import http_client as hc
     from tldw_Server_API.app.core.exceptions import EgressPolicyError
 
@@ -127,16 +131,30 @@ async def test_async_httpx_head_range_fallback_preserves_egress_denial(monkeypat
         async def aclose(self):
             return None
 
-    async def allow_egress(*_args, **_kwargs):
-        return None
+    validations = 0
+    get_calls = 0
 
-    async def deny_range_fallback(*, method, **_kwargs):
+    async def validate_fallback(*_args, **_kwargs):
+        nonlocal validations
+        validations += 1
+        if validations >= 4 and denial_source == "policy":
+            raise EgressPolicyError("pin denied", reason_code="tls_pin_mismatch")
+
+    def validate_certificate(*_args, **_kwargs):
+        if denial_source == "certificate":
+            raise EgressPolicyError("pin denied", reason_code="tls_pin_mismatch")
+
+    async def fail_head(*, method, **_kwargs):
+        nonlocal get_calls
         if method == "HEAD":
             raise OSError("HEAD failed")
-        raise EgressPolicyError("pin denied", reason_code="tls_pin_mismatch")
+        get_calls += 1
+        raise AssertionError("GET I/O must not start after fallback validation is denied")
 
-    monkeypatch.setattr(hc, "_avalidate_egress_or_raise", allow_egress)
-    monkeypatch.setattr(hc, "_httpx_arequest_io", deny_range_fallback)
+    async_request_io = "_httpx_arequest_io"
+    monkeypatch.setattr(hc, "_avalidate_egress_or_raise", validate_fallback)
+    monkeypatch.setattr(hc, "_check_cert_pins_for_url", validate_certificate)
+    monkeypatch.setattr(hc, async_request_io, fail_head)
     monkeypatch.setattr(hc, "create_async_client", lambda **_kwargs: DummyAsyncClient())
 
     with pytest.raises(EgressPolicyError) as exc:
@@ -148,23 +166,42 @@ async def test_async_httpx_head_range_fallback_preserves_egress_denial(monkeypat
         )
 
     assert exc.value.reason_code == "tls_pin_mismatch"
+    assert get_calls == 0
 
 
 @pytest.mark.asyncio
-async def test_async_aiohttp_head_range_fallback_preserves_egress_denial(monkeypatch):
+@pytest.mark.parametrize("denial_source", ["policy", "certificate"])
+async def test_async_session_head_range_fallback_preserves_egress_denial(
+    monkeypatch,
+    denial_source,
+):
     from tldw_Server_API.app.core import http_client as hc
     from tldw_Server_API.app.core.exceptions import EgressPolicyError
 
-    async def allow_egress(*_args, **_kwargs):
-        return None
+    validations = 0
+    get_calls = 0
 
-    async def deny_range_fallback(*, method, **_kwargs):
+    async def validate_fallback(*_args, **_kwargs):
+        nonlocal validations
+        validations += 1
+        if validations >= 3 and denial_source == "policy":
+            raise EgressPolicyError("address denied", reason_code="address_forbidden")
+
+    def validate_certificate(*_args, **_kwargs):
+        if denial_source == "certificate":
+            raise EgressPolicyError("pin denied", reason_code="tls_pin_mismatch")
+
+    async def fail_head(*, method, **_kwargs):
+        nonlocal get_calls
         if method == "HEAD":
             raise OSError("HEAD failed")
-        raise EgressPolicyError("address denied", reason_code="address_forbidden")
+        get_calls += 1
+        raise AssertionError("GET I/O must not start after fallback validation is denied")
 
-    monkeypatch.setattr(hc, "_avalidate_egress_or_raise", allow_egress)
-    monkeypatch.setattr(hc, "_aiohttp_request_io", deny_range_fallback)
+    aio_request_io = "_aiohttp_request_io"
+    monkeypatch.setattr(hc, "_avalidate_egress_or_raise", validate_fallback)
+    monkeypatch.setattr(hc, "_check_cert_pins_for_url", validate_certificate)
+    monkeypatch.setattr(hc, aio_request_io, fail_head)
 
     with pytest.raises(EgressPolicyError) as exc:
         await hc._afetch_aiohttp(
@@ -174,11 +211,17 @@ async def test_async_aiohttp_head_range_fallback_preserves_egress_denial(monkeyp
             retry=hc.RetryPolicy(attempts=1),
         )
 
-    assert exc.value.reason_code == "address_forbidden"
+    expected_reason = "address_forbidden" if denial_source == "policy" else "tls_pin_mismatch"
+    assert exc.value.reason_code == expected_reason
+    assert get_calls == 0
 
 
 @requires_httpx
-def test_sync_httpx_head_range_fallback_preserves_egress_denial(monkeypatch):
+@pytest.mark.parametrize("denial_source", ["policy", "certificate"])
+def test_sync_client_head_range_fallback_preserves_egress_denial(
+    monkeypatch,
+    denial_source,
+):
     from tldw_Server_API.app.core import http_client as hc
     from tldw_Server_API.app.core.exceptions import EgressPolicyError
 
@@ -186,13 +229,30 @@ def test_sync_httpx_head_range_fallback_preserves_egress_denial(monkeypatch):
         def close(self):
             return None
 
-    def deny_range_fallback(*, method, **_kwargs):
+    validations = 0
+    get_calls = 0
+
+    def validate_fallback(*_args, **_kwargs):
+        nonlocal validations
+        validations += 1
+        if validations >= 4 and denial_source == "policy":
+            raise EgressPolicyError("origin denied", reason_code="origin_mismatch")
+
+    def validate_certificate(*_args, **_kwargs):
+        if denial_source == "certificate":
+            raise EgressPolicyError("pin denied", reason_code="tls_pin_mismatch")
+
+    def fail_head(*, method, **_kwargs):
+        nonlocal get_calls
         if method == "HEAD":
             raise OSError("HEAD failed")
-        raise EgressPolicyError("origin denied", reason_code="origin_mismatch")
+        get_calls += 1
+        raise AssertionError("GET I/O must not start after fallback validation is denied")
 
-    monkeypatch.setattr(hc, "_validate_egress_or_raise", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(hc, "_httpx_request_io", deny_range_fallback)
+    sync_request_io = "_httpx_request_io"
+    monkeypatch.setattr(hc, "_validate_egress_or_raise", validate_fallback)
+    monkeypatch.setattr(hc, "_check_cert_pins_for_url", validate_certificate)
+    monkeypatch.setattr(hc, sync_request_io, fail_head)
     monkeypatch.setattr(hc, "create_client", lambda **_kwargs: DummySyncClient())
 
     with pytest.raises(EgressPolicyError) as exc:
@@ -203,7 +263,9 @@ def test_sync_httpx_head_range_fallback_preserves_egress_denial(monkeypatch):
             retry=hc.RetryPolicy(attempts=1),
         )
 
-    assert exc.value.reason_code == "origin_mismatch"
+    expected_reason = "origin_mismatch" if denial_source == "policy" else "tls_pin_mismatch"
+    assert exc.value.reason_code == expected_reason
+    assert get_calls == 0
 
 
 @requires_httpx

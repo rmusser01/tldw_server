@@ -5,12 +5,16 @@ import pytest
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import ResolvedByokCredentials
 
 
-def _credentials(source: str) -> ResolvedByokCredentials:
+def _credentials(
+    source: str,
+    *,
+    base_url: str | None = None,
+) -> ResolvedByokCredentials:
     return ResolvedByokCredentials(
         provider="custom-openai-api",
         api_key="key",
         app_config=None,
-        credential_fields={},
+        credential_fields={"base_url": base_url} if base_url else {},
         source=source,
         allowlisted=True,
     )
@@ -19,9 +23,9 @@ def _credentials(source: str) -> ResolvedByokCredentials:
 @pytest.mark.parametrize(
     ("source", "expected"),
     [
-        ("user", "byok"),
-        ("team", "byok"),
-        ("org", "byok"),
+        ("user", "server_config"),
+        ("team", "server_config"),
+        ("org", "server_config"),
         ("server", "server_config"),
         ("fallback", "server_config"),
     ],
@@ -36,6 +40,17 @@ def test_endpoint_provenance_is_url_free_and_derived_from_byok_source(
 
     assert value == expected
     assert "://" not in value
+
+
+def test_byok_owned_endpoint_sets_byok_provenance() -> None:
+    from tldw_Server_API.app.api.v1.endpoints.chat import _derive_endpoint_provenance
+
+    value = _derive_endpoint_provenance(
+        _credentials("user", base_url="http://user-owned:18080/v1"),
+        request_override=False,
+    )
+
+    assert value == "byok"
 
 
 def test_request_override_takes_provenance_precedence() -> None:
@@ -86,14 +101,15 @@ def test_untrusted_private_provenance_value_is_discarded() -> None:
 
 
 @pytest.mark.parametrize(
-    ("source", "override_key", "expected"),
+    ("source", "byok_base_url", "override_key", "expected"),
     [
-        ("user", None, "byok"),
-        ("team", None, "byok"),
-        ("org", None, "byok"),
-        ("server", None, "server_config"),
-        ("user", "base_url", "request_override"),
-        ("server", "api_base_url", "request_override"),
+        ("user", None, None, "server_config"),
+        ("team", None, None, "server_config"),
+        ("org", None, None, "server_config"),
+        ("user", "http://user-owned:18080/v1", None, "byok"),
+        ("server", None, None, "server_config"),
+        ("user", None, "base_url", "request_override"),
+        ("server", None, "api_base_url", "request_override"),
     ],
 )
 def test_chat_endpoint_sets_post_parse_url_free_provenance(
@@ -102,6 +118,7 @@ def test_chat_endpoint_sets_post_parse_url_free_provenance(
     setup_dependencies,
     monkeypatch: pytest.MonkeyPatch,
     source: str,
+    byok_base_url: str | None,
     override_key: str | None,
     expected: str,
 ) -> None:
@@ -112,7 +129,7 @@ def test_chat_endpoint_sets_post_parse_url_free_provenance(
             provider=provider,
             api_key="key",
             app_config=None,
-            credential_fields={},
+            credential_fields={"base_url": byok_base_url} if byok_base_url else {},
             source=source,
             allowlisted=True,
         )

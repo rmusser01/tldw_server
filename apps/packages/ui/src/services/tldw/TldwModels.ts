@@ -270,7 +270,13 @@ export class TldwModelsService {
       this.storageLoaded = true
     }
     this.invalidateCacheState()
-    this.invalidationListeners.forEach((listener) => listener(normalizedToken))
+    this.invalidationListeners.forEach((listener) => {
+      try {
+        listener(normalizedToken)
+      } catch (error) {
+        console.error("Model cache invalidation listener failed:", error)
+      }
+    })
     return true
   }
 

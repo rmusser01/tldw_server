@@ -625,6 +625,30 @@ describe("TldwModelsService caching", () => {
     expect(remoteInvalidations).toHaveLength(1)
   })
 
+  it("isolates invalidation listener failures and still persists the tombstone", async () => {
+    const { TldwModelsService } = await importService()
+    const service = new TldwModelsService()
+    const observedTokens: string[] = []
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined)
+    service.subscribeInvalidation(() => {
+      throw new Error("listener failed")
+    })
+    service.subscribeInvalidation((token) => observedTokens.push(token))
+
+    await expect(service.clearCache()).resolves.toBeUndefined()
+
+    expect(observedTokens).toHaveLength(1)
+    expect(mocks.storageSet).toHaveBeenCalledWith(
+      "tldwModelsCache",
+      expect.objectContaining({
+        models: null,
+        invalidationToken: observedTokens[0]
+      })
+    )
+    expect(consoleError).toHaveBeenCalled()
+    consoleError.mockRestore()
+  })
+
   it("ignores a delayed first-clear echo after a second clear owns the cache", async () => {
     const firstTombstoneStarted = deferred<void>()
     const releaseFirstTombstone = deferred<void>()

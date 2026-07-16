@@ -31,7 +31,7 @@ from email.utils import parsedate_to_datetime  # noqa: E402
 from pathlib import Path  # noqa: E402
 from types import SimpleNamespace  # noqa: E402
 from typing import Any, Protocol, TypedDict  # noqa: E402
-from urllib.parse import urljoin, urlparse  # noqa: E402
+from urllib.parse import urljoin, urlparse, urlsplit, urlunsplit  # noqa: E402
 
 from loguru import logger  # noqa: E402
 
@@ -974,6 +974,74 @@ def _accepted_ips_for_url(
     return dns_pin_cache.get(_normalize_dns_pin_host(_parse_host_from_url(url)), ())
 
 
+def _prepare_pinned_transport_target(
+    url: str,
+    headers: dict[str, str] | None,
+    accepted_resolved_ips: tuple[str, ...],
+) -> tuple[str, dict[str, str] | None, str | None]:
+    """Bind transport I/O to a vetted IP while preserving HTTP and TLS identity."""
+    if not accepted_resolved_ips:
+        return url, headers, None
+
+    parsed = urlsplit(url)
+    original_host = parsed.hostname or ""
+    if not original_host:
+        raise EgressPolicyError(
+            "Validated URL has no host",
+            reason_code="invalid_url",
+        )
+
+    accepted_ip = accepted_resolved_ips[0]
+    try:
+        import ipaddress
+
+        ip_value = ipaddress.ip_address(accepted_ip)
+    except ValueError as exc:
+        raise EgressPolicyError(
+            "Validated URL resolved to an invalid address",
+            reason_code="address_invalid",
+        ) from exc
+
+    try:
+        original_ip = ipaddress.ip_address(original_host)
+    except ValueError:
+        try:
+            identity_host = original_host.encode("idna").decode("ascii")
+        except UnicodeError as exc:
+            raise EgressPolicyError(
+                "Validated URL has an invalid host",
+                reason_code="invalid_url",
+            ) from exc
+    else:
+        identity_host = original_ip.compressed
+
+    transport_host = f"[{ip_value.compressed}]" if ip_value.version == 6 else ip_value.compressed
+    if parsed.port is not None:
+        transport_host = f"{transport_host}:{parsed.port}"
+    if "@" in parsed.netloc:
+        transport_host = f"{parsed.netloc.rsplit('@', 1)[0]}@{transport_host}"
+    transport_url = urlunsplit(
+        (parsed.scheme, transport_host, parsed.path, parsed.query, parsed.fragment)
+    )
+
+    original_authority = f"[{identity_host}]" if ":" in identity_host else identity_host
+    if parsed.port is not None:
+        original_authority = f"{original_authority}:{parsed.port}"
+    prepared_headers = {
+        key: value
+        for key, value in (headers or {}).items()
+        if key.lower() != "host"
+    }
+    prepared_headers["Host"] = original_authority
+    return transport_url, prepared_headers, identity_host
+
+
+def _restore_httpx_response_url(response: Any, original_url: str) -> None:
+    """Keep the caller-visible request URL and redirect base on the logical origin."""
+    with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+        response.request.url = httpx.URL(original_url)
+
+
 def _pins_for_host(
     pins_map: dict[str, set[str]] | None,
     host: str,
@@ -1772,7 +1840,8 @@ def _check_cert_pinning(
             ctx.minimum_version = _tls_min_version_from_str(min_ver)
         except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
             ctx.minimum_version = ssl.TLSVersion.TLSv1_2
-        with socket.create_connection((host, port), timeout=DEFAULT_CONNECT_TIMEOUT) as sock, \
+        connect_host = accepted_resolved_ips[0] if accepted_resolved_ips else host
+        with socket.create_connection((connect_host, port), timeout=DEFAULT_CONNECT_TIMEOUT) as sock, \
              ctx.wrap_socket(sock, server_hostname=host) as ssock:
             der = ssock.getpeercert(binary_form=True)
         if not der:
@@ -1793,6 +1862,33 @@ def _check_cert_pinning(
             f"TLS pinning verification failed: {e}",
             reason_code="tls_pin_error",
         ) from e
+
+
+def _check_cert_pins_for_url(
+    url: str,
+    pins_map: dict[str, set[str]] | None,
+    *,
+    configured_endpoint: ConfiguredEndpointScope | None,
+    dns_pin_cache: dict[str, tuple[str, ...]],
+) -> None:
+    """Apply configured certificate pins to one already-validated request hop."""
+    if not pins_map:
+        return
+    parsed = urlsplit(url)
+    host = (parsed.hostname or "").lower()
+    if parsed.scheme.lower() != "https" or not host:
+        return
+    pins = _pins_for_host(pins_map, host)
+    if not pins:
+        return
+    _check_cert_pinning(
+        host,
+        parsed.port or 443,
+        pins,
+        TLS_MIN_VERSION,
+        configured_endpoint=configured_endpoint,
+        accepted_resolved_ips=_accepted_ips_for_url(dns_pin_cache, url),
+    )
 
 
 # --------------------------------------------------------------------------------------
@@ -2002,8 +2098,30 @@ def _httpx_request_io(
     files: Any | None = None,
     timeout: float | httpx.Timeout | None = None,
     follow_redirects: bool = False,
+    accepted_resolved_ips: tuple[str, ...] = (),
 ) -> httpx.Response:
     method_upper = str(method).upper()
+    transport_url, headers, sni_hostname = _prepare_pinned_transport_target(
+        url,
+        headers,
+        accepted_resolved_ips,
+    )
+    if accepted_resolved_ips:
+        response = client.request(
+            method_upper,
+            transport_url,
+            headers=headers,
+            cookies=cookies,
+            params=params,
+            json=json,
+            data=data,
+            files=files,
+            timeout=timeout,
+            follow_redirects=follow_redirects,
+            extensions={"sni_hostname": sni_hostname},
+        )
+        _restore_httpx_response_url(response, url)
+        return response
     if method_upper == "POST" and hasattr(client, "post"):
         return client.post(
             url,
@@ -2052,8 +2170,30 @@ async def _httpx_arequest_io(
     timeout: float | httpx.Timeout | None = None,
     follow_redirects: bool = False,
     verify: bool | str | ssl.SSLContext | None = None,
+    accepted_resolved_ips: tuple[str, ...] = (),
 ) -> httpx.Response:
     method_upper = str(method).upper()
+    transport_url, headers, sni_hostname = _prepare_pinned_transport_target(
+        url,
+        headers,
+        accepted_resolved_ips,
+    )
+    if accepted_resolved_ips:
+        response = await client.request(
+            method_upper,
+            transport_url,
+            headers=headers,
+            cookies=cookies,
+            params=params,
+            json=json,
+            data=data,
+            files=files,
+            timeout=timeout,
+            follow_redirects=follow_redirects,
+            extensions={"sni_hostname": sni_hostname},
+        )
+        _restore_httpx_response_url(response, url)
+        return response
     if method_upper == "POST" and hasattr(client, "post") and verify is None:
         with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
             logger.debug("afetch io: using AsyncClient.post")
@@ -2108,7 +2248,14 @@ async def _aiohttp_request_io(
     timeout: Any | None = None,
     proxies: str | dict[str, str] | None = None,
     ssl_override: Any | None = None,
+    accepted_resolved_ips: tuple[str, ...] = (),
 ) -> _AiohttpResponse:
+    original_url = url
+    url, headers, server_hostname = _prepare_pinned_transport_target(
+        url,
+        headers,
+        accepted_resolved_ips,
+    )
     req_timeout = _aiohttp_timeout_from_value(timeout)
     proxy = _resolve_proxy_for_url(url, proxies)
     req_kwargs: dict[str, Any] = {
@@ -2122,6 +2269,8 @@ async def _aiohttp_request_io(
         req_kwargs["proxy"] = proxy
     if ssl_override is not None:
         req_kwargs["ssl"] = ssl_override
+    if server_hostname and urlsplit(original_url).scheme.lower() == "https":
+        req_kwargs["server_hostname"] = server_hostname
     if files is not None:
         _rewind_files(files)
         req_kwargs["data"] = _build_aiohttp_form(data, files)
@@ -2132,7 +2281,11 @@ async def _aiohttp_request_io(
             req_kwargs["data"] = data
     async with session.request(str(method).upper(), url, **req_kwargs) as resp:
         body = await resp.read()
-        return _AiohttpResponse(resp, body)
+        wrapped = _AiohttpResponse(resp, body)
+        if accepted_resolved_ips:
+            wrapped.url = original_url
+            wrapped.request.url = original_url
+        return wrapped
 
 
 @asynccontextmanager
@@ -2148,7 +2301,19 @@ async def _httpx_stream_io(
     files: Any | None = None,
     timeout: float | httpx.Timeout | None = None,
     chunk_size: int | None = None,
+    accepted_resolved_ips: tuple[str, ...] = (),
 ) -> AsyncIterator[tuple[httpx.Response, AsyncIterator[bytes]]]:
+    original_url = url
+    url, headers, sni_hostname = _prepare_pinned_transport_target(
+        url,
+        headers,
+        accepted_resolved_ips,
+    )
+    extensions = (
+        {"sni_hostname": sni_hostname}
+        if sni_hostname
+        else None
+    )
     async with client.stream(
         str(method).upper(),
         url,
@@ -2159,7 +2324,10 @@ async def _httpx_stream_io(
         files=files,
         timeout=timeout,
         follow_redirects=False,
+        extensions=extensions,
     ) as resp:
+        if accepted_resolved_ips:
+            _restore_httpx_response_url(resp, original_url)
         if chunk_size is None:
             yield resp, resp.aiter_bytes()
         else:
@@ -2181,7 +2349,14 @@ async def _aiohttp_stream_io(
     proxies: str | dict[str, str] | None = None,
     ssl_override: Any | None = None,
     chunk_size: int | None = None,
+    accepted_resolved_ips: tuple[str, ...] = (),
 ) -> AsyncIterator[tuple[Any, AsyncIterator[bytes]]]:
+    original_url = url
+    url, headers, server_hostname = _prepare_pinned_transport_target(
+        url,
+        headers,
+        accepted_resolved_ips,
+    )
     req_timeout = _aiohttp_timeout_from_value(timeout)
     proxy = _resolve_proxy_for_url(url, proxies)
     req_kwargs: dict[str, Any] = {
@@ -2194,6 +2369,8 @@ async def _aiohttp_stream_io(
         req_kwargs["proxy"] = proxy
     if ssl_override is not None:
         req_kwargs["ssl"] = ssl_override
+    if server_hostname and urlsplit(original_url).scheme.lower() == "https":
+        req_kwargs["server_hostname"] = server_hostname
     if files is not None:
         _rewind_files(files)
         req_kwargs["data"] = _build_aiohttp_form(data, files)
@@ -2376,6 +2553,10 @@ async def _afetch_httpx(
                 timeout=timeout,
                 follow_redirects=False,
                 verify=verify,
+                accepted_resolved_ips=_accepted_ips_for_url(
+                    dns_pin_cache,
+                    target_url,
+                ),
             )
             return r, "ok"  # noqa: TRY300
         except EgressPolicyError:
@@ -2452,6 +2633,17 @@ async def _afetch_httpx(
                             if not _head_get_range_tried:
                                 _head_get_range_tried = True
                                 try:
+                                    await _avalidate_egress_or_raise(
+                                        cur_url,
+                                        dns_pin_cache=dns_pin_cache,
+                                        configured_endpoint=configured_endpoint,
+                                    )
+                                    _check_cert_pins_for_url(
+                                        cur_url,
+                                        cert_pinning or _get_client_cert_pins(ac),
+                                        configured_endpoint=configured_endpoint,
+                                        dns_pin_cache=dns_pin_cache,
+                                    )
                                     req_headers = _inject_trace_headers(headers)
                                     req_headers = _strip_sensitive_headers_for_cross_origin(
                                         req_headers, original_url=url, target_url=cur_url
@@ -2477,6 +2669,10 @@ async def _afetch_httpx(
                                         timeout=_head_fb_to,
                                         follow_redirects=False,
                                         verify=verify,
+                                        accepted_resolved_ips=_accepted_ips_for_url(
+                                            dns_pin_cache,
+                                            cur_url,
+                                        ),
                                     )
                                     with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                                         tm.set_attributes({"http.status_code": int(r2.status_code)})
@@ -2735,6 +2931,10 @@ async def _afetch_aiohttp(
                 timeout=timeout,
                 proxies=proxies,
                 ssl_override=ssl_override,
+                accepted_resolved_ips=_accepted_ips_for_url(
+                    dns_pin_cache,
+                    target_url,
+                ),
             )
             return resp, "ok"  # noqa: TRY300
         except EgressPolicyError:
@@ -2775,6 +2975,17 @@ async def _afetch_aiohttp(
                     if method_upper == "HEAD" and not _head_get_range_tried:
                         _head_get_range_tried = True
                         try:
+                            await _avalidate_egress_or_raise(
+                                cur_url,
+                                dns_pin_cache=dns_pin_cache,
+                                configured_endpoint=configured_endpoint,
+                            )
+                            _check_cert_pins_for_url(
+                                cur_url,
+                                cert_pinning or _get_client_cert_pins(session),
+                                configured_endpoint=configured_endpoint,
+                                dns_pin_cache=dns_pin_cache,
+                            )
                             req_headers = _inject_trace_headers(headers)
                             req_headers = _strip_sensitive_headers_for_cross_origin(
                                 req_headers, original_url=url, target_url=cur_url
@@ -2794,6 +3005,10 @@ async def _afetch_aiohttp(
                                 timeout=_head_fb_to,
                                 proxies=proxies,
                                 ssl_override=ssl_override,
+                                accepted_resolved_ips=_accepted_ips_for_url(
+                                    dns_pin_cache,
+                                    cur_url,
+                                ),
                             )
                             with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                                 tm.set_attributes({"http.status_code": int(r2_wrap.status_code)})
@@ -3000,7 +3215,8 @@ async def apost(
     """
     if httpx is None:  # pragma: no cover
         raise RuntimeError("httpx is not available")  # noqa: TRY003
-    await _avalidate_egress_or_raise(url)
+    dns_pin_cache: dict[str, tuple[str, ...]] = {}
+    await _avalidate_egress_or_raise(url, dns_pin_cache=dns_pin_cache)
     _validate_proxies_or_raise(proxies)
 
     need_close = False
@@ -3010,14 +3226,18 @@ async def apost(
         need_close = True
 
     try:
-        resp = await ac.post(
-            url,
+        resp = await _httpx_arequest_io(
+            client=ac,
+            method="POST",
+            url=url,
             headers=headers,
             params=params,
             json=json,
             data=data,
             files=files,
             timeout=timeout,
+            follow_redirects=False,
+            accepted_resolved_ips=_accepted_ips_for_url(dns_pin_cache, url),
         )
         return resp
     finally:
@@ -3116,6 +3336,10 @@ def _fetch_httpx_response(
                 files=files,
                 timeout=timeout,
                 follow_redirects=False,
+                accepted_resolved_ips=_accepted_ips_for_url(
+                    dns_pin_cache,
+                    target_url,
+                ),
             )
             return r, "ok"  # noqa: TRY300
         except EgressPolicyError:
@@ -3172,6 +3396,17 @@ def _fetch_httpx_response(
                             if not _head_get_range_tried:
                                 _head_get_range_tried = True
                                 try:
+                                    _validate_egress_or_raise(
+                                        cur_url,
+                                        dns_pin_cache=dns_pin_cache,
+                                        configured_endpoint=configured_endpoint,
+                                    )
+                                    _check_cert_pins_for_url(
+                                        cur_url,
+                                        cert_pinning or _get_client_cert_pins(sc),
+                                        configured_endpoint=configured_endpoint,
+                                        dns_pin_cache=dns_pin_cache,
+                                    )
                                     req_headers = _inject_trace_headers(headers)
                                     req_headers = _strip_sensitive_headers_for_cross_origin(
                                         req_headers, original_url=url, target_url=cur_url
@@ -3196,6 +3431,10 @@ def _fetch_httpx_response(
                                         files=files,
                                         timeout=_head_fb_to,
                                         follow_redirects=False,
+                                        accepted_resolved_ips=_accepted_ips_for_url(
+                                            dns_pin_cache,
+                                            cur_url,
+                                        ),
                                     )
                                     with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                                         tm.set_attributes({"http.status_code": int(r2.status_code)})
@@ -3375,7 +3614,17 @@ def stream_response(
                 configured_endpoint=configured_endpoint,
                 accepted_resolved_ips=_accepted_ips_for_url(dns_pin_cache, url),
             )
-        with sc.stream(str(method).upper(), url, **options) as response:
+        transport_url, transport_headers, sni_hostname = _prepare_pinned_transport_target(
+            url,
+            options.get("headers"),
+            _accepted_ips_for_url(dns_pin_cache, url),
+        )
+        options["headers"] = transport_headers
+        if sni_hostname:
+            options["extensions"] = {"sni_hostname": sni_hostname}
+        with sc.stream(str(method).upper(), transport_url, **options) as response:
+            if transport_url != url:
+                _restore_httpx_response_url(response, url)
             yield response
     finally:
         if owns_client:
@@ -3793,7 +4042,8 @@ async def _astream_bytes_httpx(
         raise RuntimeError("httpx is not available")  # noqa: TRY003
     retry = retry or RetryPolicy()
     _validate_retry_files_seekable(files, retry)
-    await _avalidate_egress_or_raise(url)
+    dns_pin_cache: dict[str, tuple[str, ...]] = {}
+    await _avalidate_egress_or_raise(url, dns_pin_cache=dns_pin_cache)
     _validate_proxies_or_raise(proxies)
 
     need_close = False
@@ -3807,6 +4057,7 @@ async def _astream_bytes_httpx(
     try:
         sleep_s = 0.0
         for attempt in range(1, attempts + 1):
+            await _avalidate_egress_or_raise(url, dns_pin_cache=dns_pin_cache)
             yielded_any = False
             req_headers = _inject_trace_headers(headers)
             resp = None
@@ -3818,7 +4069,16 @@ async def _astream_bytes_httpx(
                         if u.scheme.lower() == "https":
                             host = (u.host or "").lower()
                             if host in pins_map:
-                                _check_cert_pinning(host, int(u.port or 443), pins_map[host], TLS_MIN_VERSION)
+                                _check_cert_pinning(
+                                    host,
+                                    int(u.port or 443),
+                                    pins_map[host],
+                                    TLS_MIN_VERSION,
+                                    accepted_resolved_ips=_accepted_ips_for_url(
+                                        dns_pin_cache,
+                                        url,
+                                    ),
+                                )
                 except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS as e:
                     raise NetworkError(e.__class__.__name__) from e
 
@@ -3833,6 +4093,10 @@ async def _astream_bytes_httpx(
                     files=files,
                     timeout=timeout,
                     chunk_size=chunk_size,
+                    accepted_resolved_ips=_accepted_ips_for_url(
+                        dns_pin_cache,
+                        url,
+                    ),
                 ) as (resp, byte_iter):
                     try:
                         resp.raise_for_status()
@@ -3998,7 +4262,8 @@ async def _astream_bytes_aiohttp(
         raise RuntimeError("aiohttp is not available")  # noqa: TRY003
     retry = retry or RetryPolicy()
     _validate_retry_files_seekable(files, retry)
-    await _avalidate_egress_or_raise(url)
+    dns_pin_cache: dict[str, tuple[str, ...]] = {}
+    await _avalidate_egress_or_raise(url, dns_pin_cache=dns_pin_cache)
     _validate_proxies_or_raise(proxies)
 
     session = client or _get_aiohttp_session()
@@ -4007,6 +4272,7 @@ async def _astream_bytes_aiohttp(
     try:
         sleep_s = 0.0
         for attempt in range(1, attempts + 1):
+            await _avalidate_egress_or_raise(url, dns_pin_cache=dns_pin_cache)
             yielded_any = False
             resp = None
             req_headers = _inject_trace_headers(headers)
@@ -4023,7 +4289,16 @@ async def _astream_bytes_aiohttp(
                             host = (parsed.hostname or "").lower()
                             port = parsed.port or (443 if (parsed.scheme or "").lower() == "https" else 80)
                         if host in pins_map:
-                            _check_cert_pinning(host, port, pins_map[host], TLS_MIN_VERSION)
+                            _check_cert_pinning(
+                                host,
+                                port,
+                                pins_map[host],
+                                TLS_MIN_VERSION,
+                                accepted_resolved_ips=_accepted_ips_for_url(
+                                    dns_pin_cache,
+                                    url,
+                                ),
+                            )
                 except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS as e:
                     raise NetworkError(e.__class__.__name__) from e
 
@@ -4041,6 +4316,10 @@ async def _astream_bytes_aiohttp(
                     proxies=proxies,
                     ssl_override=ssl_ctx,
                     chunk_size=chunk_size,
+                    accepted_resolved_ips=_accepted_ips_for_url(
+                        dns_pin_cache,
+                        url,
+                    ),
                 ) as (resp, byte_iter):
                     if resp.status >= 400:
                         should, rsn = _should_retry(method, resp.status, None, retry)
@@ -4266,7 +4545,16 @@ async def _astream_sse_httpx(
                             if u.scheme.lower() == "https":
                                 host = (u.host or "").lower()
                                 if host in pins_map:
-                                    _check_cert_pinning(host, int(u.port or 443), pins_map[host], TLS_MIN_VERSION)
+                                    _check_cert_pinning(
+                                        host,
+                                        int(u.port or 443),
+                                        pins_map[host],
+                                        TLS_MIN_VERSION,
+                                        accepted_resolved_ips=_accepted_ips_for_url(
+                                            dns_pin_cache,
+                                            cur_url,
+                                        ),
+                                    )
                     except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS as e:
                         raise NetworkError(e.__class__.__name__) from e
 
@@ -4282,6 +4570,10 @@ async def _astream_sse_httpx(
                         data=data,
                         timeout=timeout,
                         chunk_size=None,
+                        accepted_resolved_ips=_accepted_ips_for_url(
+                            dns_pin_cache,
+                            cur_url,
+                        ),
                     ) as (resp, byte_iter):
                         # Handle redirect response codes before reading any bytes
                         if resp.status_code in (301, 302, 303, 307, 308):
@@ -4405,7 +4697,16 @@ async def _astream_sse_aiohttp(
                             host = (parsed.hostname or "").lower()
                             port = parsed.port or (443 if (parsed.scheme or "").lower() == "https" else 80)
                         if host in pins_map:
-                            _check_cert_pinning(host, port, pins_map[host], TLS_MIN_VERSION)
+                            _check_cert_pinning(
+                                host,
+                                port,
+                                pins_map[host],
+                                TLS_MIN_VERSION,
+                                accepted_resolved_ips=_accepted_ips_for_url(
+                                    dns_pin_cache,
+                                    cur_url,
+                                ),
+                            )
                 except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS as e:
                     raise NetworkError(e.__class__.__name__) from e
 
@@ -4425,6 +4726,10 @@ async def _astream_sse_aiohttp(
                     proxies=proxies,
                     ssl_override=ssl_ctx,
                     chunk_size=None,
+                    accepted_resolved_ips=_accepted_ips_for_url(
+                        dns_pin_cache,
+                        cur_url,
+                    ),
                 ) as (resp, byte_iter):
                     if resp.status in (301, 302, 303, 307, 308):
                         if redirects >= DEFAULT_MAX_REDIRECTS:
@@ -4432,7 +4737,7 @@ async def _astream_sse_aiohttp(
                         location = resp.headers.get("location")
                         if not location:
                             raise NetworkError("Redirect without Location header")  # noqa: TRY003
-                        next_url = _resolve_redirect_url(str(resp.url), location)
+                        next_url = _resolve_redirect_url(cur_url, location)
                         if not next_url:
                             raise NetworkError("Invalid redirect Location header")  # noqa: TRY003
                         redirects += 1
@@ -4578,7 +4883,8 @@ def download(
 ) -> Path:
     if httpx is None:  # pragma: no cover
         raise RuntimeError("httpx is not available")  # noqa: TRY003
-    _validate_egress_or_raise(url)
+    dns_pin_cache: dict[str, tuple[str, ...]] = {}
+    _validate_egress_or_raise(url, dns_pin_cache=dns_pin_cache)
     _validate_proxies_or_raise(proxies)
     t0 = time.time()
     dest_path = Path(dest)
@@ -4598,6 +4904,7 @@ def download(
 
     try:
         for attempt in range(1, attempts + 1):
+            _validate_egress_or_raise(url, dns_pin_cache=dns_pin_cache)
             req_headers = _inject_trace_headers(headers)
             # Basic resume support
             existing = 0
@@ -4623,10 +4930,35 @@ def download(
                         if u.scheme.lower() == "https":
                             host = (u.host or "").lower()
                             if host in pins_map:
-                                _check_cert_pinning(host, int(u.port or 443), pins_map[host], TLS_MIN_VERSION)
+                                _check_cert_pinning(
+                                    host,
+                                    int(u.port or 443),
+                                    pins_map[host],
+                                    TLS_MIN_VERSION,
+                                    accepted_resolved_ips=_accepted_ips_for_url(
+                                        dns_pin_cache,
+                                        url,
+                                    ),
+                                )
                 except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS as e:
                     raise DownloadError(str(e))  # noqa: B904
-                with sc.stream("GET", url, headers=req_headers, params=params, timeout=timeout) as resp:
+                transport_url, transport_headers, sni_hostname = _prepare_pinned_transport_target(
+                    url,
+                    req_headers,
+                    _accepted_ips_for_url(dns_pin_cache, url),
+                )
+                stream_options: dict[str, Any] = {
+                    "headers": transport_headers,
+                    "params": params,
+                    "timeout": timeout,
+                }
+                if sni_hostname:
+                    stream_options["extensions"] = {
+                        "sni_hostname": sni_hostname
+                    }
+                with sc.stream("GET", transport_url, **stream_options) as resp:
+                    if transport_url != url:
+                        _restore_httpx_response_url(resp, url)
                     if resp.status_code in (200, 206):
                         # Optional content-type enforcement
                         if require_content_type:

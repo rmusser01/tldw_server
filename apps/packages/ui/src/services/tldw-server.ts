@@ -365,6 +365,14 @@ export const fetchChatModels = async ({
 
     const cachedChatModels = await tldwModels.getCachedChatModels()
     const resolved = dedupeChatModelsByModel(cachedChatModels.map(mapTldwModelToUi))
+    if (fetchGeneration !== chatModelsCacheGeneration) {
+      return await fetchChatModels({
+        returnEmpty,
+        forceRefresh,
+        refreshOpenRouter,
+        allowNetwork
+      })
+    }
     if (
       resolved.length > 0 &&
       fetchGeneration === chatModelsCacheGeneration
@@ -400,6 +408,18 @@ export const fetchChatModels = async ({
       }
 
       const resolved = dedupeChatModelsByModel(combined)
+      if (fetchGeneration !== chatModelsCacheGeneration) {
+        const currentFetch = chatModelsInFlight
+        if (currentFetch && currentFetch !== fetchPromise) {
+          return await currentFetch
+        }
+        return await fetchChatModels({
+          returnEmpty,
+          forceRefresh,
+          refreshOpenRouter,
+          allowNetwork
+        })
+      }
       if (
         resolved.length > 0 &&
         fetchGeneration === chatModelsCacheGeneration
@@ -415,6 +435,18 @@ export const fetchChatModels = async ({
     chatModelsInFlight = fetchPromise
     return await fetchPromise
   } catch (e) {
+    if (fetchGeneration !== chatModelsCacheGeneration) {
+      const currentFetch = chatModelsInFlight
+      if (currentFetch && currentFetch !== fetchPromise) {
+        return await currentFetch
+      }
+      return await fetchChatModels({
+        returnEmpty,
+        forceRefresh,
+        refreshOpenRouter,
+        allowNetwork
+      })
+    }
     console.error("Failed to fetch chat models:", e)
     if (chatModelsCache?.value?.length) {
       return chatModelsCache.value

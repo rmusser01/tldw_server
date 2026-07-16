@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from loguru import logger
 from pydantic import BaseModel, Field
 
 from tldw_Server_API.app.api.v1.schemas.setup_schemas import SetupProviderValidationResponse
@@ -180,7 +181,11 @@ async def validate_local_openai_endpoint(
             failure_category=FAILURE_LOCAL_PROVIDER_UNREACHABLE,
             message="Local provider endpoint is unreachable.",
         )
-    except Exception:  # noqa: BLE001 - setup validation returns only sanitized failures.
+    except Exception as exc:  # noqa: BLE001 - setup validation returns only sanitized failures.
+        logger.bind(provider_key=payload.provider_key).error(
+            "Unexpected local OpenAI endpoint validation failure ({})",
+            exc.__class__.__name__,
+        )
         return _failed_response(
             payload,
             failure_category=FAILURE_LOCAL_PROVIDER_UNREACHABLE,
@@ -193,6 +198,12 @@ async def validate_local_openai_endpoint(
                 payload,
                 failure_category=FAILURE_AUTH_FAILED,
                 message="Local provider rejected the supplied credentials.",
+            )
+        if response.status_code == 429 or response.status_code >= 500:
+            return _failed_response(
+                payload,
+                failure_category=FAILURE_LOCAL_PROVIDER_UNREACHABLE,
+                message="Local provider endpoint is temporarily unavailable.",
             )
         if response.status_code >= 400:
             return _manual_model_fallback_response(payload)
@@ -257,7 +268,11 @@ async def validate_native_kobold_endpoint(
             failure_category=FAILURE_LOCAL_PROVIDER_UNREACHABLE,
             message="Local provider endpoint is unreachable.",
         )
-    except Exception:  # noqa: BLE001 - setup validation returns only sanitized failures.
+    except Exception as exc:  # noqa: BLE001 - setup validation returns only sanitized failures.
+        logger.bind(provider_key=payload.provider_key).error(
+            "Unexpected native Kobold endpoint validation failure ({})",
+            exc.__class__.__name__,
+        )
         return _failed_response(
             payload,
             failure_category=FAILURE_LOCAL_PROVIDER_UNREACHABLE,

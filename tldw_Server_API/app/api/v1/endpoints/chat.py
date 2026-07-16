@@ -129,7 +129,7 @@ from tldw_Server_API.app.core.Character_Chat.modules.persona_exemplar_selector i
 from tldw_Server_API.app.core.Character_Chat.modules.persona_exemplar_telemetry import (
     compute_persona_exemplar_telemetry,
 )
-from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
+from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError, ChatBadRequestError
 from tldw_Server_API.app.core.Chat.chat_exceptions import (
     ChatDatabaseError,
     ChatErrorCode,
@@ -153,7 +153,6 @@ from tldw_Server_API.app.core.Chat.chat_service import (
     moderate_input_messages,
     perform_chat_api_call,
     perform_chat_api_call_async,
-    prepare_structured_response_request,
     queue_is_active,
     resolve_input_moderation_chat_type,
     resolve_moderation_chat_type,
@@ -308,7 +307,8 @@ def _derive_endpoint_provenance(
     """Return the URL-free ownership class for a resolved provider endpoint."""
     if request_override:
         return "request_override"
-    if credentials.uses_byok:
+    byok_base_url = credentials.credential_fields.get("base_url")
+    if isinstance(byok_base_url, str) and byok_base_url.strip():
         return "byok"
     return "server_config"
 

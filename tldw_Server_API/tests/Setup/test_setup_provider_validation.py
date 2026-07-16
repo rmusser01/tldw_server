@@ -251,6 +251,48 @@ async def test_unreachable_local_endpoint_maps_to_unreachable(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "validator",
+    [validate_local_openai_endpoint, validate_native_kobold_endpoint],
+)
+async def test_unexpected_local_validation_error_is_logged_without_secrets(
+    monkeypatch,
+    validator,
+):
+    raw_secret = "secret-local-token"
+    raw_url = "http://secret-host.invalid:18080/v1"
+    fake_client = _FakeAsyncClient(error=RuntimeError(f"boom {raw_secret} {raw_url}"))
+    _patch_validation_fetch(monkeypatch, fake_client)
+    logged: list[tuple[dict, tuple]] = []
+
+    monkeypatch.setattr(
+        provider_validation.logger,
+        "bind",
+        lambda **context: type(
+            "_CapturedLogger",
+            (),
+            {"error": lambda self, _message, *args: logged.append((context, args))},
+        )(),
+    )
+
+    response = await validator(
+        LocalEndpointValidationRequest(
+            provider_key="koboldcpp" if validator is validate_native_kobold_endpoint else "llamacpp",
+            base_url=raw_url,
+            api_key=raw_secret,
+        )
+    )
+
+    assert response.status == "failed"
+    assert response.failure_category == "local_provider_unreachable"
+    assert logged
+    assert logged[0][0]["provider_key"] in {"koboldcpp", "llamacpp"}
+    serialized_log = repr(logged)
+    assert raw_secret not in serialized_log
+    assert raw_url not in serialized_log
+
+
+@pytest.mark.asyncio
 async def test_openai_models_shape_maps_to_ready(monkeypatch):
     fake_client = _FakeAsyncClient(
         response=_FakeResponse(
@@ -462,6 +504,29 @@ async def test_models_endpoint_not_found_accepts_manual_model_fallback(monkeypat
     assert response.can_gate_first_chat is True
     assert response.failure_category == "model_discovery_unavailable"
     assert "manual-local-model" not in response.model_dump_json()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status_code", [429, 500, 503])
+async def test_models_endpoint_transient_failure_does_not_accept_manual_fallback(
+    monkeypatch,
+    status_code,
+):
+    fake_client = _FakeAsyncClient(
+        response=_FakeResponse(status_code, {"error": "temporarily unavailable"})
+    )
+    _patch_validation_fetch(monkeypatch, fake_client)
+
+    response = await validate_local_openai_endpoint(
+        LocalEndpointValidationRequest(
+            provider_key="custom_openai",
+            base_url="http://127.0.0.1:8000/v1",
+            model="manual-local-model",
+        )
+    )
+
+    assert response.status == "failed"
+    assert response.failure_category == "local_provider_unreachable"
 
 
 @pytest.mark.asyncio
