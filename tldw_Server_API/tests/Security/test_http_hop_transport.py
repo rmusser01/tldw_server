@@ -271,7 +271,7 @@ async def test_builds_request_framing_only_from_explicit_contract() -> None:
         body=b"payload",
         headers=(
             ("accept", "application/json"),
-            ("authorization", "Bearer explicit-route-secret"),
+            ("x-request-id", "explicit-route-id"),
         ),
     )
 
@@ -283,7 +283,7 @@ async def test_builds_request_framing_only_from_explicit_contract() -> None:
     assert _header_values(request_bytes, b"content-length") == [b"7"]
     assert _header_values(request_bytes, b"transfer-encoding") == []
     assert _header_values(request_bytes, b"accept-encoding") == [b"gzip, deflate"]
-    assert _header_values(request_bytes, b"authorization") == [b"Bearer explicit-route-secret"]
+    assert _header_values(request_bytes, b"x-request-id") == [b"explicit-route-id"]
     assert request_bytes.endswith(b"\r\n\r\npayload")
 
 
@@ -727,7 +727,7 @@ async def test_public_http_hop_uses_real_socket_without_following_redirect(
             _request(
                 port=port,
                 target="/smoke",
-                headers=(("authorization", "Bearer explicit-loopback"),),
+                headers=(("x-request-id", "loopback-smoke"),),
             )
         )
         await asyncio.wait_for(served.wait(), timeout=1.0)
@@ -740,7 +740,8 @@ async def test_public_http_hop_uses_real_socket_without_following_redirect(
     assert len(requests) == 1
     assert requests[0].startswith(b"GET /smoke HTTP/1.1\r\n")
     assert _header_values(requests[0], b"host") == [f"api.example.com:{port}".encode("ascii")]
-    assert _header_values(requests[0], b"authorization") == [b"Bearer explicit-loopback"]
+    assert _header_values(requests[0], b"authorization") == []
+    assert _header_values(requests[0], b"x-request-id") == [b"loopback-smoke"]
 
 
 async def test_ambient_http_client_state_is_ignored(
@@ -806,7 +807,7 @@ async def test_ambient_http_client_state_is_ignored(
     assert not hostile_path.exists()
 
 
-async def test_concurrent_failure_does_not_share_streams_counters_or_credentials() -> None:
+async def test_concurrent_failure_does_not_share_streams_counters_or_request_headers() -> None:
     first_stream = BlockingReadStream(
         server_addr=("8.8.8.8", 80),
         response=(b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\nConnection: close\r\n\r\none",),
@@ -821,7 +822,7 @@ async def test_concurrent_failure_does_not_share_streams_counters_or_credentials
         _execute(
             _request(
                 target="/first",
-                headers=(("authorization", "Bearer first-secret"),),
+                headers=(("x-request-id", "first-route"),),
                 limits=http_hop.HTTPHopLimits(max_wire_bytes=3),
             ),
             ("8.8.8.8",),
@@ -832,7 +833,7 @@ async def test_concurrent_failure_does_not_share_streams_counters_or_credentials
         _execute(
             _request(
                 target="/second",
-                headers=(("authorization", "Bearer second-secret"),),
+                headers=(("x-request-id", "second-route"),),
                 limits=http_hop.HTTPHopLimits(max_wire_bytes=5),
             ),
             ("8.8.8.8",),
@@ -866,16 +867,43 @@ async def test_concurrent_failure_does_not_share_streams_counters_or_credentials
     assert first_stream.closed is second_stream.closed is True
     first_request = b"".join(first_stream.writes)
     second_request = b"".join(second_stream.writes)
-    assert _header_values(first_request, b"authorization") == [b"Bearer first-secret"]
-    assert _header_values(second_request, b"authorization") == [b"Bearer second-secret"]
-    assert b"second-secret" not in first_request
-    assert b"first-secret" not in second_request
+    assert _header_values(first_request, b"x-request-id") == [b"first-route"]
+    assert _header_values(second_request, b"x-request-id") == [b"second-route"]
+    assert b"second-route" not in first_request
+    assert b"first-route" not in second_request
 
 
-async def test_public_http_hop_enforces_wire_log_floor_independently_of_app_startup(
+async def test_public_http_hop_preserves_caller_httpcore_log_levels(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stream = RecordingStream(
+        server_addr=("8.8.8.8", 80),
+        response=_OK_RESPONSE,
+    )
+    backend = RecordingBackend(stream)
+
+    async def resolver(_host: str, _port: int, _timeout_seconds: float) -> Sequence[str]:
+        return ("8.8.8.8",)
+
+    monkeypatch.setattr(http_hop, "_default_resolver", resolver)
+    monkeypatch.setattr(http_hop.httpcore, "AnyIOBackend", lambda: backend)
+    httpcore_logger = logging.getLogger("httpcore")
+    http11_logger = logging.getLogger("httpcore.http11")
+    monkeypatch.setattr(httpcore_logger, "level", logging.WARNING)
+    monkeypatch.setattr(http11_logger, "level", logging.DEBUG)
+
+    response = await http_hop.request_http_hop(_request())
+
+    assert response.status_code == 200
+    assert (httpcore_logger.level, http11_logger.level) == (logging.WARNING, logging.DEBUG)
+
+
+async def test_explicit_log_hardening_protects_standalone_public_hop(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
+    from tldw_Server_API.app import main as app_main
+
     secret = "STANDALONE-SECRET"
     stream = RecordingStream(
         server_addr=("8.8.8.8", 80),
@@ -892,16 +920,16 @@ async def test_public_http_hop_enforces_wire_log_floor_independently_of_app_star
 
     monkeypatch.setattr(http_hop, "_default_resolver", resolver)
     monkeypatch.setattr(http_hop.httpcore, "AnyIOBackend", lambda: backend)
-    root_logger = logging.getLogger()
     httpcore_logger = logging.getLogger("httpcore")
     http11_logger = logging.getLogger("httpcore.http11")
-    caplog.set_level(logging.DEBUG, logger=root_logger.name)
-    caplog.set_level(logging.WARNING, logger=httpcore_logger.name)
-    caplog.set_level(logging.DEBUG, logger=http11_logger.name)
-    caplog.clear()
+    monkeypatch.setattr(httpcore_logger, "level", logging.DEBUG)
+    monkeypatch.setattr(http11_logger, "level", logging.DEBUG)
+    caplog.set_level(logging.DEBUG)
 
+    app_main.harden_httpcore_logging()
+    caplog.clear()
     response = await http_hop.request_http_hop(_request())
 
     assert response.status_code == 200
-    assert (httpcore_logger.level, http11_logger.level) == (logging.WARNING, logging.INFO)
+    assert (httpcore_logger.level, http11_logger.level) == (logging.INFO, logging.INFO)
     assert secret not in caplog.text

@@ -395,6 +395,10 @@ def _validated_date(value: object) -> date:
 
 
 def _normalize_query(query: str) -> str:
+    try:
+        query.encode("utf-8")
+    except UnicodeEncodeError:
+        raise PlanningError("query_contains_invalid_unicode") from None
     return " ".join(unicodedata.normalize("NFKC", query).split()).casefold()
 
 

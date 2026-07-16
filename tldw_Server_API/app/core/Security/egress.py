@@ -412,14 +412,18 @@ def resolve_host_ips(host: str, timeout_s: float = 2.0) -> tuple[str, ...]:
             return ()
 
         addrs: list[str] = []
-        for _family, _stype, _proto, _canon, sockaddr in infos:
+        for info in infos:
             try:
+                _family, _stype, _proto, _canon, sockaddr = info
+                if not isinstance(sockaddr, tuple) or not sockaddr:
+                    return ()
                 # sockaddr[0] is the IP for both AF_INET and AF_INET6
                 ip = sockaddr[0]
-                if isinstance(ip, str):
-                    addrs.append(ip)
-            except (IndexError, TypeError):
-                continue
+            except (IndexError, KeyError, TypeError, ValueError):
+                return ()
+            if not isinstance(ip, str):
+                return ()
+            addrs.append(ip)
         # Preserve order but deduplicate
         return tuple(dict.fromkeys(addrs))
     except (OSError, TypeError, ValueError) as exc:

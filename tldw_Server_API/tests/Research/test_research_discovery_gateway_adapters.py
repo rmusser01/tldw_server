@@ -9,6 +9,7 @@ import importlib
 import json
 import socket
 import urllib.request
+import xml.etree.ElementTree as ElementTree
 from dataclasses import FrozenInstanceError, replace
 from pathlib import Path
 from types import MappingProxyType
@@ -1850,8 +1851,28 @@ async def test_malformed_or_ipv6_literal_result_url_is_safely_suppressed(raw_url
     assert len(dispatch.calls) == 1
 
 
+@pytest.mark.parametrize(
+    "first_href",
+    (
+        "https://arxiv.org/pdf/not-an-arxiv-id",
+        "https://arxiv.org/pdf/9999.99999",
+    ),
+)
+def test_arxiv_pdf_scanner_skips_unusable_candidate_and_uses_later_match(first_href: str) -> None:
+    entry = ElementTree.fromstring(
+        f"""
+        <entry xmlns="http://www.w3.org/2005/Atom">
+          <link rel="related" title="pdf" type="application/pdf" href="{first_href}" />
+          <link rel="related" title="pdf" type="application/pdf" href="https://arxiv.org/pdf/2601.01234" />
+        </entry>
+        """
+    )
+
+    assert _gateway_adapters_module()._arxiv_pdf_url(entry, "2601.01234") == ("https://arxiv.org/pdf/2601.01234")
+
+
 @pytest.mark.asyncio
-async def test_crossref_uses_only_the_first_pdf_link_even_when_unsafe() -> None:
+async def test_crossref_skips_unsafe_pdf_link_and_uses_later_safe_candidate() -> None:
     payload = _fixture_payload("crossref")
     payload["message"]["items"][0]["link"] = [
         {
@@ -1866,7 +1887,27 @@ async def test_crossref_uses_only_the_first_pdf_link_even_when_unsafe() -> None:
 
     result, dispatch, _group = await _invoke("crossref", [_json_bytes(payload)])
 
-    assert result.candidates[0].record["pdf_url"] is None
+    assert result.candidates[0].record["pdf_url"] == "https://example.org/second.pdf"
+    assert "fixture-secret" not in repr(result)
+    assert len(dispatch.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_zenodo_skips_unsafe_pdf_file_and_uses_later_safe_candidate() -> None:
+    payload = _fixture_payload("zenodo")
+    payload["hits"]["hits"][0]["files"].insert(
+        0,
+        {
+            "key": "unsafe.pdf",
+            "links": {"self": "https://example.org/unsafe.pdf?token=fixture-secret"},
+        },
+    )
+
+    result, dispatch, _group = await _invoke("zenodo", [_json_bytes(payload)])
+
+    assert result.candidates[0].record["pdf_url"] == (
+        "https://zenodo.org/api/records/1001/files/shared-discovery.pdf/content"
+    )
     assert "fixture-secret" not in repr(result)
     assert len(dispatch.calls) == 1
 

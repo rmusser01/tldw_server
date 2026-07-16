@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import gc
 import inspect
+import weakref
 from dataclasses import FrozenInstanceError, replace
 from urllib.parse import urlencode
 
@@ -62,6 +64,8 @@ from tldw_Server_API.app.core.Research.discovery.registry import (
     foundation_registry,
 )
 from tldw_Server_API.app.core.Security.http_hop import HTTPHopLimits
+
+pytestmark = pytest.mark.unit
 
 
 def _semantic_scholar_plan():
@@ -2603,6 +2607,70 @@ async def test_real_wait_timeout_latches_with_static_clock_and_preserves_prior_c
         "aggregate_deadline_exceeded",
         "aggregate_deadline_exceeded",
     )
+
+
+@pytest.mark.asyncio
+async def test_cancellation_resistant_gateway_cannot_stall_caller_cancellation() -> None:
+    registry, plan = _semantic_scholar_plan()
+    group = plan.dispatch_groups[0]
+    started = asyncio.Event()
+    release = asyncio.Event()
+    gateway_task_ref: weakref.ReferenceType[asyncio.Task[object]] | None = None
+
+    async def gateway(route, intent, *, is_policy_active):
+        nonlocal gateway_task_ref
+        task = asyncio.current_task()
+        assert task is not None
+        gateway_task_ref = weakref.ref(task)
+        started.set()
+        while not release.is_set():
+            try:
+                await asyncio.sleep(0)
+            except asyncio.CancelledError:
+                continue
+        return _gateway_response(route, intent)
+
+    async def adapter(bound_group, dispatch):
+        await dispatch(bound_group.intents[0])
+        raise AssertionError("cancelled dispatch must not return to the adapter")
+
+    execution = asyncio.create_task(
+        execute_discovery_plan(
+            plan,
+            registry=registry,
+            adapters={group.adapter_id: adapter},
+            gateway=gateway,
+            policy_is_active=lambda _route_id, _digest: True,
+            dispatch_id_factory=lambda: "dispatch-cancellation-resistant-gateway",
+        )
+    )
+    await asyncio.wait_for(started.wait(), timeout=0.5)
+
+    execution.cancel("caller-stop")
+    done, _pending = await asyncio.wait({execution}, timeout=0.5)
+    completed_promptly = execution in done
+
+    cancellation_args: tuple[object, ...] | None = None
+    try:
+        await asyncio.wait_for(execution, timeout=0.5)
+    except asyncio.CancelledError as error:
+        cancellation_args = error.args
+
+    del done, _pending, execution
+    gc.collect()
+    assert gateway_task_ref is not None
+    gateway_task = gateway_task_ref()
+    assert gateway_task is not None
+
+    release.set()
+    await asyncio.wait_for(gateway_task, timeout=0.5)
+    del gateway_task
+    await asyncio.sleep(0)
+    gc.collect()
+
+    assert completed_promptly
+    assert cancellation_args == ("caller-stop",)
+    assert gateway_task_ref() is None
 
 
 @pytest.mark.asyncio

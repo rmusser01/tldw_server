@@ -91,6 +91,8 @@ _ADAPTER_ERROR_CODES = frozenset(
 )
 _DELTA_SECONDS_RE = re.compile(r"[0-9]+\Z")
 _CANONICAL_UNSIGNED_DECIMAL_RE = re.compile(r"(?:0|[1-9][0-9]*)\Z")
+_GATEWAY_CANCEL_DRAIN_SECONDS = 0.1
+_DETACHED_GATEWAY_TASKS: set[asyncio.Task[DiscoveryGatewayResponse]] = set()
 
 
 class ExecutionState(str, Enum):
@@ -121,6 +123,21 @@ class DiscoveryExecutionError(ValueError):
             raise TypeError("execution_error_code_must_be_nonempty_string")
         self.code = code
         super().__init__(code)
+
+
+def _consume_gateway_task_result(task: asyncio.Task[DiscoveryGatewayResponse]) -> None:
+    """Consume one detached gateway result so late completion stays quiet."""
+    _DETACHED_GATEWAY_TASKS.discard(task)
+    try:
+        task.result()
+    except BaseException:  # noqa: BLE001 - detached child failures stay private.
+        pass
+
+
+def _detach_gateway_task(task: asyncio.Task[DiscoveryGatewayResponse]) -> None:
+    """Keep one cancellation-resistant child alive until its result is consumed."""
+    _DETACHED_GATEWAY_TASKS.add(task)
+    task.add_done_callback(_consume_gateway_task_result)
 
 
 def _valid_retry_after(value: object) -> bool:
@@ -1349,18 +1366,26 @@ class _GroupExecutionController:
         *,
         tolerate_cancellation: bool = False,
     ) -> None:
-        """Cancel one child and consume its terminal result without leaking it."""
+        """Bound cancellation cleanup and consume the child when it terminates."""
+        loop = gateway_task.get_loop()
+        deadline = loop.time() + _GATEWAY_CANCEL_DRAIN_SECONDS
         while not gateway_task.done():
             gateway_task.cancel()
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                _detach_gateway_task(gateway_task)
+                return
             try:
-                await asyncio.wait({gateway_task})
+                done, _pending = await asyncio.wait({gateway_task}, timeout=remaining)
             except asyncio.CancelledError:
                 if not tolerate_cancellation:
+                    _detach_gateway_task(gateway_task)
                     raise
-        try:
-            gateway_task.result()
-        except BaseException:  # noqa: BLE001 - cancelled child must be consumed.
-            pass
+                continue
+            if not done:
+                _detach_gateway_task(gateway_task)
+                return
+        _consume_gateway_task_result(gateway_task)
 
     def _integrity_route(self) -> AccessRoute:
         """Return a fresh route after journal and bound-plan validation."""

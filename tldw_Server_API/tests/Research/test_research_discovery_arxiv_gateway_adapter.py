@@ -952,7 +952,7 @@ async def test_entry_id_url_rejects_foreign_encoded_or_malformed_forms(id_url: s
 
 
 @pytest.mark.asyncio
-async def test_pdf_is_derived_only_from_first_exact_matching_safe_declaration() -> None:
+async def test_pdf_uses_first_exact_matching_safe_declaration() -> None:
     unsafe_first = (
         '<link href="https://attacker.example/private.pdf?token=fixture-secret" '
         'rel="related" title="pdf" type="application/pdf" />'
@@ -969,7 +969,7 @@ async def test_pdf_is_derived_only_from_first_exact_matching_safe_declaration() 
 
     record = _normalized(result.candidates[0])
     assert record["url"] == "https://arxiv.org/abs/2601.00001v2"
-    assert record["pdf_url"] is None
+    assert record["pdf_url"] == "https://arxiv.org/pdf/2601.00001v2"
     assert "fixture-secret" not in repr(record)
 
 

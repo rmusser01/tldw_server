@@ -287,6 +287,63 @@ test("rejects digest drift and duplicate ledger rows", () => {
 });
 
 
+test("reports a null manifest items container without throwing", () => {
+  const { manifest, ledger } = validDocuments();
+  manifest.items = null;
+  let report;
+
+  assert.doesNotThrow(() => {
+    report = validateInventoryDocuments(manifest, ledger, {
+      freeze: freezeFor(manifest),
+      requiredSources: {},
+      schemaValidated: true,
+    });
+  });
+  assert.ok(report.errors.includes("manifest items must be an array"));
+});
+
+
+test("reports null manifest item entries without throwing", () => {
+  const { manifest, ledger } = validDocuments();
+  manifest.items = [null];
+  let report;
+
+  assert.doesNotThrow(() => {
+    report = validateInventoryDocuments(manifest, ledger, {
+      freeze: freezeFor(manifest),
+      requiredSources: {},
+      schemaValidated: true,
+    });
+  });
+  assert.ok(report.errors.includes("manifest item 1 must be an object"));
+});
+
+
+test("does not retain target definitions with non-array inventory IDs", () => {
+  const { manifest, ledger } = validDocuments();
+  ledger.target_definitions = [{
+    canonical_target_id: "example_source",
+    display_name: "Example Source",
+    inventory_ids: { invalid: true },
+  }];
+  refreshLedgerDigest(ledger);
+  let report;
+
+  assert.doesNotThrow(() => {
+    report = validateInventoryDocuments(manifest, ledger, {
+      freeze: freezeFor(manifest),
+      requiredSources: {},
+      schemaValidated: true,
+    });
+  });
+  assert.ok(
+    report.errors.includes(
+      "target definition example_source requires unique inventory_ids",
+    ),
+  );
+});
+
+
 test("requires current source-route-surface certification before mapped rows close", () => {
   const { manifest, ledger } = validDocuments();
   const row = mapExampleRow(manifest, ledger);

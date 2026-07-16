@@ -7,6 +7,7 @@ from collections.abc import Sequence
 
 import pytest
 
+from tldw_Server_API.app.core import exceptions as core_exceptions
 from tldw_Server_API.app.core.Security import http_hop
 
 pytestmark = pytest.mark.unit
@@ -32,6 +33,12 @@ def test_request_contract_is_immutable_and_uses_bounded_defaults() -> None:
     assert request.headers == (("accept", "application/json"),)
     with pytest.raises(dataclasses.FrozenInstanceError):
         request.port = 8443  # type: ignore[misc]
+
+
+def test_http_hop_error_is_the_centralized_core_exception() -> None:
+    assert http_hop.HTTPHopError is core_exceptions.HTTPHopError
+    assert http_hop.HTTPHopErrorCode is core_exceptions.HTTPHopErrorCode
+    assert isinstance(http_hop.HTTPHopError("invalid_request"), core_exceptions.HTTPHopError)
 
 
 @pytest.mark.parametrize(
@@ -163,9 +170,21 @@ def test_request_rejects_ambiguous_headers(headers: tuple[tuple[str, str], ...])
     assert exc.value.code == "invalid_request"
 
 
-def test_explicit_authorization_is_part_of_the_request_contract() -> None:
+def test_plaintext_http_rejects_explicit_authorization() -> None:
+    with pytest.raises(http_hop.HTTPHopError) as exc:
+        _request(
+            scheme="http",
+            port=80,
+            headers=(("authorization", "Bearer explicit-route-secret"),),
+        )
+
+    assert exc.value.code == "invalid_request"
+
+
+def test_https_accepts_explicit_authorization() -> None:
     request = _request(headers=(("authorization", "Bearer explicit-route-secret"),))
 
+    assert request.scheme == "https"
     assert request.headers == (("authorization", "Bearer explicit-route-secret"),)
 
 
@@ -201,7 +220,7 @@ def test_limits_reject_parser_ceiling_above_decompressed_ceiling() -> None:
 
 
 def test_request_enforces_target_header_count_header_bytes_and_body_limits() -> None:
-    limits = http_hop.HTTPHopLimits(
+    tight_limits = http_hop.HTTPHopLimits(
         max_request_target_bytes=4,
         max_request_header_bytes=8,
         max_request_headers=1,
@@ -209,13 +228,41 @@ def test_request_enforces_target_header_count_header_bytes_and_body_limits() -> 
     )
 
     for overrides in (
-        {"target": "/tool", "headers": (), "limits": limits},
-        {"headers": (("x-a", "1"), ("x-b", "2")), "limits": limits},
-        {"headers": (("x-long", "value"),), "limits": limits},
-        {"method": "POST", "headers": (), "body": b"abc", "limits": limits},
+        {"target": "/tool", "headers": (), "limits": tight_limits},
+        {"headers": (("x-a", "1"), ("x-b", "2")), "limits": tight_limits},
+        {
+            "headers": (("x-long", "value"),),
+            "limits": dataclasses.replace(tight_limits, max_request_headers=16),
+        },
+        {"method": "POST", "headers": (), "body": b"abc", "limits": tight_limits},
     ):
         with pytest.raises(http_hop.HTTPHopError) as exc:
             _request(**overrides)
+        assert exc.value.code == "invalid_request"
+
+
+def test_complete_transport_header_limits_accept_only_exact_or_larger_boundaries() -> None:
+    expected_headers = [
+        (b"Host", b"api.example.com"),
+        (b"Connection", b"close"),
+        (b"Accept-Encoding", b"gzip, deflate"),
+        (b"Content-Length", b"0"),
+    ]
+    exact_bytes = sum(len(name) + 2 + len(value) + 2 for name, value in expected_headers)
+    exact_limits = http_hop.HTTPHopLimits(
+        max_request_headers=len(expected_headers),
+        max_request_header_bytes=exact_bytes,
+    )
+
+    request = _request(method="POST", headers=(), body=b"", limits=exact_limits)
+    assert http_hop._transport_headers(request) == expected_headers
+
+    for limits in (
+        dataclasses.replace(exact_limits, max_request_headers=len(expected_headers) - 1),
+        dataclasses.replace(exact_limits, max_request_header_bytes=exact_bytes - 1),
+    ):
+        with pytest.raises(http_hop.HTTPHopError) as exc:
+            _request(method="POST", headers=(), body=b"", limits=limits)
         assert exc.value.code == "invalid_request"
 
 

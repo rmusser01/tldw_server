@@ -33,6 +33,63 @@ class NetworkError(Exception):
     """Raised for network transport errors (connect/read timeouts, DNS, TLS, etc.)."""
 
 
+HTTPHopErrorCode = Literal[
+    "invalid_request",
+    "dns_resolution_failed",
+    "dns_timeout",
+    "dns_address_denied",
+    "connect_timeout",
+    "read_timeout",
+    "write_timeout",
+    "total_timeout",
+    "peer_verification_failed",
+    "tls_error",
+    "protocol_error",
+    "response_headers_too_large",
+    "response_too_large",
+    "decompressed_response_too_large",
+    "parser_input_too_large",
+    "unsupported_content_encoding",
+    "invalid_content_encoding",
+    "transport_error",
+]
+
+_HTTP_HOP_ERROR_MESSAGES: dict[HTTPHopErrorCode, str] = {
+    "invalid_request": "The outbound request is invalid.",
+    "dns_resolution_failed": "The destination could not be resolved.",
+    "dns_timeout": "Destination resolution timed out.",
+    "dns_address_denied": "The destination address is not allowed.",
+    "connect_timeout": "The destination connection timed out.",
+    "read_timeout": "The destination response timed out.",
+    "write_timeout": "The outbound request timed out.",
+    "total_timeout": "The outbound request exceeded its time limit.",
+    "peer_verification_failed": "The connected destination could not be verified.",
+    "tls_error": "The secure destination connection failed.",
+    "protocol_error": "The destination returned an invalid response.",
+    "response_headers_too_large": "The destination response headers are too large.",
+    "response_too_large": "The destination response is too large.",
+    "decompressed_response_too_large": "The decoded destination response is too large.",
+    "parser_input_too_large": "The destination response exceeds the parser limit.",
+    "unsupported_content_encoding": "The destination used an unsupported content encoding.",
+    "invalid_content_encoding": "The destination returned invalid encoded content.",
+    "transport_error": "The destination request failed.",
+}
+
+
+class HTTPHopError(Exception):
+    """A stable, sanitized failure from the one-hop HTTP boundary."""
+
+    def __init__(self, code: HTTPHopErrorCode, *, retryable: bool = False) -> None:
+        message = _HTTP_HOP_ERROR_MESSAGES.get(code)
+        if message is None:
+            raise ValueError("Unsupported HTTP hop error code")
+        if not isinstance(retryable, bool):
+            raise TypeError("retryable must be a boolean")
+        self.code = code
+        self.retryable = retryable
+        super().__init__(message)
+
+
 class AudioQuotaStoreUnavailable(AuthNZDatabaseError):
     """Raised when canonical audio daily-minute quota storage is unavailable."""
 

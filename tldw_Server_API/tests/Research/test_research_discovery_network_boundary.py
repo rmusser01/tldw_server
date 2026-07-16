@@ -147,11 +147,11 @@ _EXPECTED_IMPORT_DIGESTS = {
     "tldw_Server_API/app/core/Security/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
 }
 _EXPECTED_AST_DIGESTS = {
-    "contracts.py": "c1902b635f746f0e8eee4eb496a6319117b9162e68bce287853fdd3813e441ca",
+    "contracts.py": "f0d47f95cbd919b0834c0426deb32e2569bb0f7867082f16f74515ef5e96f70e",
     "registry.py": "260df2717fcf7cdd91a926dda694bf0517611f0d6378049448581637b4a3def3",
-    "planner.py": "624bb0fb001d068e94bc29b26dc835f63410dcedd4d6748b8da97129c4d92342",
-    "executor.py": "04db380c056c461eacb76549bda87cc2668745a09737448903189122a0a5bcb6",
-    "gateway_adapters.py": "2edc3b14b1a478a911aca78775705bc942a30f43790e103d96d6b9e2729382fa",
+    "planner.py": "dd58f49265b86e44cf1c00746218f42a01ec4b16743d06052fdd42a668df961d",
+    "executor.py": "f443e9d69db48379c9675078fb30175168e88da4433d3b842e5387fa9567c2ee",
+    "gateway_adapters.py": "9dbcc2dde32f0c4ebede032ae73f68677638e03c53799998af0535ef55d4c656",
     "gateway.py": "f1a55ba9a36fb667a13ccd5426c6e0b5a04894bb5de7a33bbd0f60d7a7e7fc06",
     "identity.py": "f59640d8f793fd3ebd11df49d333f73ebee9e59efb549393116bee2a241f5f06",
     "catalog.py": "6f89e526a0cee3f934fc04da6adc5698800842e9f798ac45e35847d859e08ba6",
@@ -165,13 +165,13 @@ _EXPECTED_AST_DIGESTS = {
     "tldw_Server_API/app/core/Security/__init__.py": "3543b4693a36a1098850b8bc928887694ed59a6deb7d3dfd0339de01f55a77b6",
 }
 _EXPECTED_FAMILY_RAW_DIGESTS = {
-    "biorxiv_medrxiv.py": "023de2769bfeb4e3705237a0c192e1597692ff9688bb0493bda4d6fc3f6fe23c",
+    "biorxiv_medrxiv.py": "ee77fb9bc5da1cb93dc88baea86c9cd5b6a6e961d02faec97faa66cbcf383af9",
 }
 _EXPECTED_FAMILY_IMPORT_DIGESTS = {
-    "biorxiv_medrxiv.py": "32bfd0a86b35eeb7017f6035b391061dce15931de2071f33b0a8d64b49c11123",
+    "biorxiv_medrxiv.py": "a9a057e486c28731299b0997b04862a6e81dc6454d73d4fc94d0806d6831ebf3",
 }
 _EXPECTED_FAMILY_AST_DIGESTS = {
-    "biorxiv_medrxiv.py": "e24806a4a6853b44104d1634b9c229e2fc9d2bcf9668cb3d7ce847e5e2c5a371",
+    "biorxiv_medrxiv.py": "21f46f0468fc0a83877d6cc4f1bb8830bdc48bbe4c10ee1c1db90d9144e67f95",
 }
 _EXPECTED_FAMILY_LOCAL_IMPORTS = {
     "contracts": {

@@ -896,13 +896,13 @@ def _arxiv_pdf_url(entry: ElementTree.Element, arxiv_id: str) -> str | None:
         href = attributes.get("href")
         pdf_id = _arxiv_identifier_from_url(href, path_kind="pdf") if type(href) is str else None
         if pdf_id is None:
-            return None
+            continue
         if _ARXIV_VERSION_RE.search(arxiv_id) is None:
             identifiers_match = _ARXIV_VERSION_RE.sub("", pdf_id).casefold() == arxiv_id.casefold()
         else:
             identifiers_match = pdf_id.casefold() == arxiv_id.casefold()
         if not identifiers_match:
-            return None
+            continue
         return f"https://arxiv.org/pdf/{pdf_id}"
     return None
 
@@ -1065,7 +1065,8 @@ def _crossref_record(raw: Any, guard: _ParseGuard) -> dict[str, Any]:
             raise _PayloadInvalid
         if content_type and content_type.lower() == "application/pdf":
             pdf_url = _safe_url(None if link_url is _MISSING else link_url)
-            break
+            if pdf_url is not None:
+                break
     return _base_record(
         title=title,
         authors=tuple(authors),
@@ -1104,7 +1105,8 @@ def _zenodo_record(raw: Any, guard: _ParseGuard) -> dict[str, Any]:
         if key is not None and key.lower().endswith(".pdf"):
             file_links = _require_dict(file_record.get("links", _MISSING))
             pdf_url = _safe_url(file_links.get("self"))
-            break
+            if pdf_url is not None:
+                break
     provider_ids = {"zenodo_id": str(record_id)}
     if doi is not None:
         provider_ids["doi"] = doi

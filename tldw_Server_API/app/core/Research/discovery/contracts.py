@@ -13,6 +13,7 @@ from typing import Any
 _IDENTIFIER_RE = re.compile(r"[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*\Z")
 _DIGEST_RE = re.compile(r"[0-9a-f]{64}\Z")
 _QUERY_NAME_RE = re.compile(r"[A-Za-z0-9_.\[\]-]+\Z")
+_BAD_PERCENT_ESCAPE_RE = re.compile(r"%(?![0-9A-Fa-f]{2})")
 _MISSING = object()
 MAX_PAGINATION_CURSOR = 2_147_483_647
 CREDENTIALED_ROUTE_SKIP_REASON = "credentialed_route_not_authorized_for_foundation"
@@ -1201,8 +1202,11 @@ def _valid_path(path: object) -> bool:
     return (
         isinstance(path, str)
         and path.startswith("/")
+        and path.isascii()
+        and all("!" <= character <= "~" for character in path)
         and "?" not in path
         and "#" not in path
         and "\\" not in path
         and "\x00" not in path
+        and _BAD_PERCENT_ESCAPE_RE.search(path) is None
     )

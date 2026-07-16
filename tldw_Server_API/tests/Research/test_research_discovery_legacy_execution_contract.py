@@ -7,7 +7,7 @@ import copy
 import json
 import re
 from contextlib import suppress
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from itertools import count
 from pathlib import Path
 from typing import Any
@@ -259,9 +259,9 @@ async def test_all_eight_sources_match_frozen_execution_contract(
     """The real V1 service stack retains its stable all-source projection."""
     catalog, adapters, resolver, db, db_factory_calls, service = _build_service(tmp_path, monkeypatch)
 
-    search_started_at = datetime.now(UTC)
+    search_started_at = datetime.now(timezone.utc)
     response = await service.search(**GOLDEN_REQUEST)
-    search_finished_at = datetime.now(UTC)
+    search_finished_at = datetime.now(timezone.utc)
     snapshot = db.get_discovery_snapshot(response.discovery_id, owner_user_id="legacy-owner")
     assert snapshot is not None
 

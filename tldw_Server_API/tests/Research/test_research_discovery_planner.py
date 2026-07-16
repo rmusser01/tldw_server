@@ -61,6 +61,8 @@ from tldw_Server_API.app.core.Research.discovery.registry import (
     foundation_registry,
 )
 
+pytestmark = pytest.mark.unit
+
 _FOUNDATION_SOURCE_IDS = (
     "openalex",
     "semantic_scholar",
@@ -714,6 +716,18 @@ def test_raw_string_selects_structured_mode_and_preserves_foundation_behavior() 
         "search_query",
         "all:causal inference",
     )
+
+
+def test_raw_structured_query_with_lone_surrogate_raises_stable_planning_error() -> None:
+    with pytest.raises(PlanningError) as exc_info:
+        compile_discovery_plan(
+            _request(("arxiv",), query="\ud800"),
+            registry=foundation_registry(),
+            readiness=foundation_readiness(ExecutionMode.OFFLINE_FIXTURE),
+            budget=_budget(),
+        )
+
+    assert exc_info.value.code == "query_contains_invalid_unicode"
 
 
 @pytest.mark.parametrize("incompatible_state", ("missing", "credentialed", "disabled"))

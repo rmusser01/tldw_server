@@ -10,7 +10,7 @@ from dataclasses import replace
 from datetime import date
 from html.parser import HTMLParser
 from types import MappingProxyType
-from typing import Any
+from typing import Any, cast
 from urllib.parse import quote_from_bytes
 
 from .contracts import (
@@ -751,9 +751,7 @@ def _details_authors(record: dict[str, Any], guard: _ParseGuard) -> tuple[str, .
     authors: list[str] = []
     for part in parts:
         guard.checkpoint()
-        author = _plain_text(part, max_chars=_MAX_AUTHOR_CHARS, required=True)
-        if author is None:
-            raise _PayloadInvalid
+        author = cast(str, _plain_text(part, max_chars=_MAX_AUTHOR_CHARS, required=True))
         authors.append(author)
     return tuple(authors)
 

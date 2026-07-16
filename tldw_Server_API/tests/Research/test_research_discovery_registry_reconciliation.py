@@ -29,6 +29,8 @@ from tldw_Server_API.app.core.Research.discovery.registry import (
     foundation_registry,
 )
 
+pytestmark = pytest.mark.unit
+
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _LEDGER_PATH = (
     _REPO_ROOT / "Docs" / "Design" / "research_source_inventory" / "research-source-coverage-ledger-2026-07-13.json"

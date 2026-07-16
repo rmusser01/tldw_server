@@ -673,6 +673,15 @@ class _StderrInterceptor:
     def __getattr__(self, name):
         return getattr(self._stream, name)
 
+
+def harden_httpcore_logging() -> None:
+    """Keep HTTPcore wire traces above DEBUG at supported entrypoint setup."""
+    # HTTPcore DEBUG traces include complete response headers and raw parser
+    # exceptions, which may contain cookies, signed URLs, or hostile bytes.
+    for logger_name in ("httpcore", "httpcore.http11"):
+        logging.getLogger(logger_name).setLevel(logging.INFO)
+
+
 def _redirect_external_loggers() -> None:
     """Ensure third-party loggers route through our Loguru interceptor."""
     try:
@@ -715,9 +724,7 @@ def _redirect_external_loggers() -> None:
     except _LOGGING_SETUP_EXCEPTIONS as exc:
         _safe_debug(f"Failed to set aiosqlite log level: {exc}")
     try:
-        # HTTPcore DEBUG traces include complete response headers and raw parser
-        # exceptions, which may contain cookies, signed URLs, or hostile bytes.
-        logging.getLogger("httpcore").setLevel(logging.INFO)
+        harden_httpcore_logging()
     except _LOGGING_SETUP_EXCEPTIONS as exc:
         _safe_debug(f"Failed to set httpcore log level: {exc}")
 

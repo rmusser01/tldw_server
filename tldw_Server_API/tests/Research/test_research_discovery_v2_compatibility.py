@@ -48,6 +48,8 @@ from tldw_Server_API.app.core.Research.discovery.planner import (
 from tldw_Server_API.app.core.Research.discovery.registry import foundation_readiness, foundation_registry
 from tldw_Server_API.app.core.Security.http_hop import HTTPHopLimits
 
+pytestmark = pytest.mark.unit
+
 _FIXTURE_ROOT = Path(__file__).parents[1] / "fixtures" / "research_discovery_gateway_adapters"
 _COMPATIBILITY_CONTRACT_PATH = (
     Path(__file__).resolve().parents[3]

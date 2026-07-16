@@ -640,9 +640,15 @@ async def test_app_logging_suppresses_httpcore_wire_secrets(
 ) -> None:
     from tldw_Server_API.app import main as app_main
 
-    app_main._redirect_external_loggers()
     messages: list[str] = []
+    httpcore_logger = logging.getLogger("httpcore")
     http11_logger = logging.getLogger("httpcore.http11")
+    monkeypatch.setattr(httpcore_logger, "level", logging.DEBUG)
+    monkeypatch.setattr(http11_logger, "level", logging.DEBUG)
+
+    app_main._redirect_external_loggers()
+
+    assert (httpcore_logger.level, http11_logger.level) == (logging.INFO, logging.INFO)
 
     def capture(_level: int, message: object, _args: object, *args: object, **kwargs: object) -> None:
         del args, kwargs

@@ -59,6 +59,54 @@ def test_authoritative_schema_checker_rejects_invalid_formats() -> None:
     assert any("captured_at_utc" in error for error in errors)
 
 
+def test_date_time_format_requires_strict_rfc3339_syntax() -> None:
+    """RFC 3339 timezone, case, and leap-second forms are handled strictly."""
+    valid_values = (
+        "2026-07-13T12:00:00Z",
+        "2026-07-13t12:00:00z",
+        "2026-07-13T12:00:00.123+05:30",
+        "2016-12-31T23:59:60Z",
+        "2016-12-31T15:59:60-08:00",
+        "2017-01-01T00:59:60+01:00",
+    )
+    invalid_values = (
+        "20260713T120000+00:00",
+        "2026-07-13T12:00:00",
+        "2026-07-13T24:00:00Z",
+        "2026-07-13T12:00:61Z",
+        "2026-07-13T12:00:00+24:00",
+        "٢٠٢٦-٠٧-١٣T١٢:٠٠:٠٠Z",
+    )
+
+    assert all(INVENTORY_FORMAT_CHECKER.conforms(value, "date-time") for value in valid_values)
+    assert not any(INVENTORY_FORMAT_CHECKER.conforms(value, "date-time") for value in invalid_values)
+
+
+def test_uri_format_rejects_whitespace_and_invalid_ports() -> None:
+    """Absolute URIs require clean text and a valid optional port."""
+    valid_values = (
+        "https://example.test/path",
+        "https://example.test:8443/path?query=yes#fragment",
+        "https://example.test/%7Euser?q=a%20b",
+    )
+    invalid_values = (
+        " https://example.test/path",
+        "https://example.test/path ",
+        "https://example.test /path",
+        "https://example.test:not-a-port/path",
+        "https://example.test:99999/path",
+        "https://example.test/%ZZ",
+        "https://exámple.test/path",
+        "https://example.test/\x01",
+        "https://example.test/{bad}",
+        "https://example.test/[bad]",
+        "https://example.test/a#b#c",
+    )
+
+    assert all(INVENTORY_FORMAT_CHECKER.conforms(value, "uri") for value in valid_values)
+    assert not any(INVENTORY_FORMAT_CHECKER.conforms(value, "uri") for value in invalid_values)
+
+
 def test_certification_artifacts_are_typed_and_substantive() -> None:
     """Empty hash targets cannot masquerade as fixture certification evidence."""
     schema = _load(SCHEMA_PATH)

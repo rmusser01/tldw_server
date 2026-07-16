@@ -728,6 +728,9 @@ export function validateInventoryDocuments(
   } = {},
 ) {
   const errors = [...schemaErrors];
+  if (!Array.isArray(manifest?.items)) {
+    errors.push("manifest items must be an array");
+  }
   const manifestItems = Array.isArray(manifest?.items) ? manifest.items : [];
   const ledgerRows = Array.isArray(ledger?.rows) ? ledger.rows : [];
   const trustedReviewers = new Set(trustedReviewerIds);
@@ -776,7 +779,7 @@ export function validateInventoryDocuments(
     );
   }
   const categoryPlacements = manifestItems.reduce(
-    (total, item) => total + (Array.isArray(item.seed_categories) ? item.seed_categories.length : 0),
+    (total, item) => total + (Array.isArray(item?.seed_categories) ? item.seed_categories.length : 0),
     0,
   );
   if (manifest?.expected_category_placement_count !== categoryPlacements) {
@@ -792,6 +795,10 @@ export function validateInventoryDocuments(
   const manifestTuples = new Set();
   for (const [index, item] of manifestItems.entries()) {
     const rowNumber = index + 1;
+    if (item === null || typeof item !== "object" || Array.isArray(item)) {
+      errors.push(`manifest item ${rowNumber} must be an object`);
+      continue;
+    }
     const expectedId = `sourclip-${manifest?.source?.captured_on}-${String(rowNumber).padStart(4, "0")}`;
     if (item.inventory_id !== expectedId) {
       errors.push(`manifest position ${rowNumber} inventory_id must be ${expectedId}`);
@@ -881,10 +888,12 @@ export function validateInventoryDocuments(
     if (!isNonEmptyString(definition?.display_name)) {
       errors.push(`target definition ${targetId} requires display_name`);
     }
-    if (!Array.isArray(definition?.inventory_ids)
-      || definition.inventory_ids.length === 0
-      || new Set(definition.inventory_ids).size !== definition.inventory_ids.length) {
+    const inventoryIds = definition?.inventory_ids;
+    if (!Array.isArray(inventoryIds)
+      || inventoryIds.length === 0
+      || new Set(inventoryIds).size !== inventoryIds.length) {
       errors.push(`target definition ${targetId} requires unique inventory_ids`);
+      continue;
     }
     targetDefinitionsById.set(targetId, definition);
   }
@@ -1265,7 +1274,7 @@ export function validateInventoryDocuments(
     .filter(([, state]) => !state.mapping_satisfied)
     .map(([inventoryId]) => inventoryId);
 
-  for (const item of manifestItems) {
+  for (const item of manifestById.values()) {
     if (!ledgerById.has(item.inventory_id)) {
       errors.push(`ledger is missing inventory_id ${item.inventory_id}`);
     }

@@ -459,6 +459,29 @@ class TestEgressPolicy:
         )
         assert calls == [("dns.example", 0.25)]
 
+    @pytest.mark.parametrize(
+        "malformed",
+        (
+            (egress.socket.AF_INET, egress.socket.SOCK_STREAM, 0, "", ()),
+            (egress.socket.AF_INET, egress.socket.SOCK_STREAM, 0, "", (123, 443)),
+        ),
+    )
+    def test_public_resolver_rejects_mixed_valid_and_malformed_answers(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        malformed: tuple[object, ...],
+    ) -> None:
+        monkeypatch.setattr(
+            egress,
+            "_getaddrinfo_with_timeout",
+            lambda *_args, **_kwargs: [
+                (egress.socket.AF_INET, egress.socket.SOCK_STREAM, 0, "", ("8.8.8.8", 443)),
+                malformed,
+            ],
+        )
+
+        assert egress.resolve_host_ips("dns.example") == ()
+
     def test_dns_timeout_limits_outstanding_resolver_threads(
         self: "TestEgressPolicy",
         monkeypatch: pytest.MonkeyPatch,

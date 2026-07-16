@@ -44,6 +44,8 @@ from tldw_Server_API.app.core.Security.http_hop import (
     request_http_hop,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _route_and_intent() -> tuple[AccessRoute, DispatchIntent]:
     limits = RouteLimits(
@@ -495,7 +497,12 @@ async def test_dynamic_template_paths_dispatch_canonical_values(kind: str, path:
 async def test_dynamic_template_path_attacks_reject_before_policy_or_hop(kind: str, path: str) -> None:
     route, intent = _interval_path_route_and_intent() if kind == "interval" else _doi_path_route_and_intent()
 
-    await _assert_rejected_before_policy_or_hop(route, replace(intent, path=path))
+    try:
+        invalid_intent = replace(intent, path=path)
+    except ValueError as error:
+        assert str(error) == "invalid_intent_path"
+    else:
+        await _assert_rejected_before_policy_or_hop(route, invalid_intent)
 
 
 @pytest.mark.asyncio

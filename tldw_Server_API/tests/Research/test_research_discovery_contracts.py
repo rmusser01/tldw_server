@@ -63,6 +63,8 @@ from tldw_Server_API.app.core.Research.discovery.identity import (
     stable_result_id,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def test_digest_bound_request_policy_contracts_are_public() -> None:
     expected_names = (
@@ -392,6 +394,47 @@ def _policy(*, digest: str = "") -> RoutePolicy:
         ),
         policy_digest=digest,
     )
+
+
+_INVALID_TRANSPORT_PATHS = (
+    "/has space",
+    "/has\tcontrol",
+    "/has\r\ncontrol",
+    "/has\x1fcontrol",
+    "/has\x7fcontrol",
+    "/café",
+    "/bad%",
+    "/bad%2",
+    "/bad%GG",
+)
+
+
+@pytest.mark.parametrize("path", _INVALID_TRANSPORT_PATHS)
+def test_route_policy_rejects_non_transport_safe_static_paths(path: str) -> None:
+    with pytest.raises(ValueError, match="invalid_policy_paths"):
+        replace(_policy(), paths=(path,), policy_digest="")
+
+
+def test_route_policy_accepts_valid_percent_escapes() -> None:
+    policy = replace(_policy(), paths=("/works/%20archive/%7E",), policy_digest="")
+
+    assert policy.paths == ("/works/%20archive/%7E",)
+
+
+@pytest.mark.parametrize("path", _INVALID_TRANSPORT_PATHS)
+def test_dispatch_intent_rejects_non_transport_safe_paths(path: str) -> None:
+    policy = _policy()
+
+    with pytest.raises(ValueError, match="invalid_intent_path"):
+        DispatchIntent(
+            route_id="example_api_direct",
+            policy_digest=policy.policy_digest,
+            operation_kind=OperationKind.SEARCH,
+            method="GET",
+            path=path,
+            query_pairs=(),
+            limits=policy.limits,
+        )
 
 
 def _route() -> AccessRoute:

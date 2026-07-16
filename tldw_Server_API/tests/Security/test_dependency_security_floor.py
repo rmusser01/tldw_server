@@ -2,10 +2,15 @@ import ast
 import re
 from pathlib import Path
 
+import pytest
+
 try:
     import tomllib
 except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
     import tomli as tomllib
+
+
+pytestmark = pytest.mark.unit
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
