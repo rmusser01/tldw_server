@@ -10,8 +10,6 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Literal
 
-import httpx
-
 from tldw_Server_API.app.core.exceptions import (
     DownloadError,
     EgressPolicyError,
@@ -31,21 +29,20 @@ MAX_DISCOVERY_MODEL_ID_LENGTH = 512
 DiscoveryStatus = Literal["fresh", "stale", "disabled", "unavailable"]
 CatalogSource = Literal["discovery", "stale_cache", "static"]
 CacheKey = tuple[str, str, str]
+
+
+class GatewayDiscoveryPayloadError(Exception):
+    """Raised when an upstream model catalog violates the bounded shape."""
+
+
 _DISCOVERY_ERRORS = (
-    ConnectionError,
     DownloadError,
     EgressPolicyError,
+    GatewayDiscoveryPayloadError,
     JSONDecodeError,
     NetworkError,
-    OSError,
     RetryExhaustedError,
-    RuntimeError,
     StreamingProtocolError,
-    TimeoutError,
-    TypeError,
-    UnicodeDecodeError,
-    ValueError,
-    httpx.HTTPError,
 )
 
 
@@ -70,6 +67,12 @@ class _CacheEntry:
     fresh_until: float
     stale_until: float
     discovered_models: tuple[str, ...]
+
+
+def _retrieve_owned_task_exception(task: asyncio.Task[Any]) -> None:
+    """Retrieve an owned task failure without retaining or logging its details."""
+    if not task.cancelled():
+        task.exception()
 
 
 class GatewayCatalog:
@@ -116,6 +119,7 @@ class GatewayCatalog:
             refresh = self._inflight.get(key)
             if refresh is None:
                 refresh = asyncio.create_task(self._refresh(key, spec, api_key))
+                refresh.add_done_callback(_retrieve_owned_task_exception)
                 self._inflight[key] = refresh
 
         return await asyncio.shield(refresh)
@@ -183,6 +187,7 @@ class GatewayCatalog:
             retry=RetryPolicy(),
             require_json_ct=True,
             max_bytes=MAX_DISCOVERY_BYTES,
+            allow_redirects=False,
         )
         return _parse_discovered_models(payload)
 
@@ -250,19 +255,19 @@ class GatewayCatalog:
 def _parse_discovered_models(payload: Any) -> tuple[str, ...]:
     """Validate and bound the standard OpenAI model-list response shape."""
     if not isinstance(payload, Mapping):
-        raise ValueError("invalid discovery payload")
+        raise GatewayDiscoveryPayloadError("invalid discovery payload")
     data = payload.get("data")
     if not isinstance(data, list) or len(data) > MAX_DISCOVERY_MODELS:
-        raise ValueError("invalid discovery payload")
+        raise GatewayDiscoveryPayloadError("invalid discovery payload")
 
     models: list[str] = []
     seen: set[str] = set()
     for item in data:
         if not isinstance(item, Mapping):
-            raise ValueError("invalid discovery payload")
+            raise GatewayDiscoveryPayloadError("invalid discovery payload")
         model_id = item.get("id")
         if not isinstance(model_id, str) or not model_id.strip() or len(model_id) > MAX_DISCOVERY_MODEL_ID_LENGTH:
-            raise ValueError("invalid discovery payload")
+            raise GatewayDiscoveryPayloadError("invalid discovery payload")
         if model_id not in seen:
             models.append(model_id)
             seen.add(model_id)
@@ -275,4 +280,5 @@ __all__ = [
     "MAX_DISCOVERY_MODELS",
     "GatewayCatalog",
     "GatewayCatalogResult",
+    "GatewayDiscoveryPayloadError",
 ]
