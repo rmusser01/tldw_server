@@ -22,4 +22,4 @@
 **Goal**: Publish the rewritten branch safely and close every addressed review thread.
 **Success Criteria**: One `--force-with-lease` push succeeds; replies identify fixes or verified non-actions; threads are resolved; PR mergeability and CI state are rechecked.
 **Tests**: GitHub PR head/base/mergeability, unresolved-thread count, and check-rollup queries.
-**Status**: In Progress
+**Status**: Complete
