@@ -4,13 +4,37 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SRC_DIR="${TLDW_DOCS_SOURCE_DIR:-$ROOT_DIR/Docs}"
 DEST_DIR="${TLDW_DOCS_PUBLISHED_DIR:-$ROOT_DIR/Docs/Published}"
-STAGE_DIR="${DEST_DIR}.stage"
-BACKUP_DIR="${DEST_DIR}.backup"
 
-if [[ "$SRC_DIR" != /* || "$DEST_DIR" != /* || "$DEST_DIR" == "/" || "$SRC_DIR" == "$DEST_DIR" ]]; then
-  echo "Docs source and destination must be distinct, safe absolute paths" >&2
+if [[ "$SRC_DIR" != /* || "$DEST_DIR" != /* || "$DEST_DIR" == "/" ]]; then
+  echo "Docs source and destination must be safe absolute paths" >&2
   exit 1
 fi
+if [[ ! -d "$SRC_DIR" ]]; then
+  echo "Missing required docs directory: $SRC_DIR" >&2
+  exit 1
+fi
+
+SRC_DIR="$(cd "$SRC_DIR" && pwd -P)"
+if [[ -d "$DEST_DIR" ]]; then
+  DEST_DIR="$(cd "$DEST_DIR" && pwd -P)"
+else
+  DEST_NAME="${DEST_DIR##*/}"
+  DEST_PARENT="${DEST_DIR%/*}"
+  [[ -n "$DEST_PARENT" && -d "$DEST_PARENT" ]] || {
+    echo "Missing docs destination parent: $DEST_PARENT" >&2
+    exit 1
+  }
+  DEST_PARENT="$(cd "$DEST_PARENT" && pwd -P)"
+  DEST_DIR="${DEST_PARENT%/}/$DEST_NAME"
+fi
+
+if [[ "$DEST_DIR" == "/" || "$SRC_DIR" == "$DEST_DIR" || "$SRC_DIR" == "$DEST_DIR"/* ]]; then
+  echo "Docs destination must not equal or contain the source path" >&2
+  exit 1
+fi
+
+STAGE_DIR="${DEST_DIR}.stage"
+BACKUP_DIR="${DEST_DIR}.backup"
 
 cleanup() {
   local status=$?

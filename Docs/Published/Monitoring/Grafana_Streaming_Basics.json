@@ -1,0 +1,65 @@
+{
+  "title": "Streaming Basics",
+  "uid": "streaming-basics",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "tags": [
+    "streaming",
+    "sse",
+    "ws"
+  ],
+  "templating": {
+    "list": []
+  },
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "SSE enqueue to yield p95 (ms)",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(sse_enqueue_to_yield_ms_bucket[5m])))",
+          "legendFormat": "p95",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "SSE queue high watermark",
+      "targets": [
+        {
+          "expr": "max(sse_queue_high_watermark)",
+          "legendFormat": "high-watermark",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "WS send latency p95 (ms)",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(ws_send_latency_ms_bucket[5m])))",
+          "legendFormat": "p95",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "WS ping totals",
+      "targets": [
+        {
+          "expr": "sum by (endpoint) (increase(ws_pings_total[5m]))",
+          "legendFormat": "{{endpoint}}",
+          "refId": "A"
+        }
+      ]
+    }
+  ]
+}

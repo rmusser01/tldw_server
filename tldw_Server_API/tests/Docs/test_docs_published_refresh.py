@@ -22,6 +22,28 @@ def _tree_manifest(root: Path) -> dict[str, str]:
     }
 
 
+def _copy_docs_source(destination: Path) -> Path:
+    shutil.copytree(
+        REPO_ROOT / "Docs",
+        destination,
+        ignore=shutil.ignore_patterns("Published", "site"),
+    )
+    return destination
+
+
+def _tracked_published_files() -> set[str]:
+    result = subprocess.run(  # nosec B603 B607
+        ["git", "ls-files", "Docs/Published"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    prefix = "Docs/Published/"
+    return {path.removeprefix(prefix) for path in result.stdout.splitlines() if path.startswith(prefix)}
+
+
 def _refresh(
     *,
     source: Path | None = None,
@@ -70,6 +92,68 @@ def test_refresh_replaces_clean_and_stale_destinations_deterministically(
     assert _tree_manifest(clean) == _tree_manifest(REPO_ROOT / "Docs" / "Published")
 
 
+def test_refresh_output_matches_tracked_published_files(tmp_path: Path) -> None:
+    destination = tmp_path / "published"
+
+    result = _refresh(destination=destination)
+
+    assert result.returncode == 0, result.stderr
+    assert set(_tree_manifest(destination)) == _tracked_published_files()
+
+
+def test_refresh_rejects_destination_equal_to_source_before_mutation(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "Docs"
+    source.mkdir()
+    sentinel = source / "sentinel.md"
+    sentinel.write_text("keep me\n", encoding="utf-8")
+
+    result = _refresh(source=source, destination=source)
+
+    assert result.returncode != 0
+    assert sentinel.read_text(encoding="utf-8") == "keep me\n"
+    assert not source.with_name(f"{source.name}.stage").exists()
+    assert not source.with_name(f"{source.name}.backup").exists()
+
+
+def test_refresh_rejects_destination_ancestor_of_source_before_mutation(
+    tmp_path: Path,
+) -> None:
+    destination = tmp_path / "public-root"
+    source = _copy_docs_source(destination / "Docs")
+    sentinel = destination / "sentinel.md"
+    sentinel.write_text("keep me\n", encoding="utf-8")
+    source_sentinel = source / "source-sentinel.md"
+    source_sentinel.write_text("keep source\n", encoding="utf-8")
+
+    result = _refresh(source=source, destination=destination)
+
+    assert result.returncode != 0
+    assert sentinel.read_text(encoding="utf-8") == "keep me\n"
+    assert source_sentinel.read_text(encoding="utf-8") == "keep source\n"
+    assert not destination.with_name(f"{destination.name}.stage").exists()
+    assert not destination.with_name(f"{destination.name}.backup").exists()
+
+
+def test_refresh_rejects_canonical_symlink_equivalent_paths_before_mutation(
+    tmp_path: Path,
+) -> None:
+    destination = _copy_docs_source(tmp_path / "Docs")
+    source = tmp_path / "docs-link"
+    source.symlink_to(destination, target_is_directory=True)
+    sentinel = destination / "sentinel.md"
+    sentinel.write_text("keep me\n", encoding="utf-8")
+
+    result = _refresh(source=source, destination=destination)
+
+    assert result.returncode != 0
+    assert source.is_symlink()
+    assert sentinel.read_text(encoding="utf-8") == "keep me\n"
+    assert not destination.with_name(f"{destination.name}.stage").exists()
+    assert not destination.with_name(f"{destination.name}.backup").exists()
+
+
 def test_refresh_removes_unknown_stale_file(tmp_path: Path) -> None:
     destination = tmp_path / "published"
     destination.mkdir()
@@ -107,12 +191,7 @@ def test_refresh_omits_code_documentation_readme_with_sibling_index(
 
 
 def test_refresh_recursively_omits_readme_with_sibling_index(tmp_path: Path) -> None:
-    source = tmp_path / "Docs"
-    shutil.copytree(
-        REPO_ROOT / "Docs",
-        source,
-        ignore=shutil.ignore_patterns("Published", "site"),
-    )
+    source = _copy_docs_source(tmp_path / "Docs")
     collision = source / "Code_Documentation" / "Synthetic_Collision"
     collision.mkdir()
     (collision / "index.md").write_text("# Landing\n", encoding="utf-8")
