@@ -1,7 +1,7 @@
 # Skills Live Integration Certification Design
 
 Date: 2026-07-15
-Status: Approved design, pending written-spec review
+Status: Ready for user written-spec review
 Backlog: TASK-530.15
 
 ## Summary
@@ -435,6 +435,9 @@ Focused tests cover:
 9. The extension launcher places profile directories under the supplied root.
 10. Relay normalization handles exact worker URLs, page-owned requests,
     responses, request failures, redirects, and terminal mutation counts.
+11. A combined workflow, artifact-safety, and cleanup failure retains every
+    category, applies the documented primary-category rule, and keeps the two
+    finalization outcomes separately visible.
 
 ## Existing Regression Gates
 
