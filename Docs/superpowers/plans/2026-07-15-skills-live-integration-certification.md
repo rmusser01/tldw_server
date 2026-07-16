@@ -121,13 +121,26 @@ expect(backendEnv).not.toHaveProperty("OPENAI_API_KEY")
 expect(backendEnv).not.toHaveProperty("ANTHROPIC_API_KEY")
 expect(backendEnv).not.toHaveProperty("TESTING")
 expect(backendEnv).not.toHaveProperty("TEST_MODE")
+for (const childEnv of [
+  backendEnv,
+  frontendEnv,
+  webuiPlaywrightEnv,
+  extensionBuildEnv,
+  extensionPlaywrightEnv,
+]) {
+  expect(childEnv).not.toHaveProperty("OPENAI_API_KEY")
+  expect(childEnv).not.toHaveProperty("ANTHROPIC_API_KEY")
+  expect(childEnv).not.toHaveProperty("HOST_PROVIDER_SECRET")
+}
 ```
 
 Also assert:
 
 - the copied INI blanks values whose normalized key ends in `api_key`, `token`, `secret`, or `password`, then writes only the synthetic single-user key;
 - `.env` contains only single-user auth and isolated absolute paths;
-- backend, frontend, WebUI Playwright, extension build, and extension Playwright commands use fixed working directories and explicit argument arrays;
+- backend, frontend, WebUI Playwright, extension build, extension Playwright,
+  and package-local Chromium probe commands use fixed working directories and
+  explicit argument arrays;
 - WebUI and extension Playwright commands point at their dedicated configs;
 - the extension command sets `TLDW_E2E_SKIP_EXTENSION_BUILD=1`, because the runner tracks the production Chrome build separately;
 - fixed names are exactly `skills-cert-web` and `skills-cert-extension`;
@@ -165,10 +178,20 @@ Implementation requirements:
 2. Create `Config_Files`, auth DB, `Databases/user_databases`, `home`, `tmp`, and extension-profile directories.
 3. Copy the repository `config.txt`, scrub credential-valued INI keys, and patch `[Setup]` to enabled/completed plus `[AuthNZ]` to single-user.
 4. Write an explicit `.env` with `AUTH_MODE`, `SINGLE_USER_API_KEY`, `DATABASE_URL`, `USER_DB_BASE_DIR`, and allowed-root variables. Add no provider configuration.
-5. Build backend environment values from a fixed allowlist containing executable, locale, virtualenv, and certificate prerequisites. Replace `HOME` and `TMPDIR` with profile paths.
-6. Build frontend and browser-test environments separately. Pass the synthetic key only where connection seeding requires it; never serialize it into command arguments or result JSON.
+5. Start every child environment from one fixed safe-base allowlist containing
+   only executable, locale, virtualenv, certificate, browser-runtime, and
+   platform prerequisites. Never spread the runner's `process.env` into any
+   auth-init, backend, frontend, build, probe, or Playwright child.
+6. Build backend, frontend, build, probe, and browser-test environments
+   separately. Replace backend `HOME`/`TMPDIR` with profile paths. Pass the
+   synthetic key only where connection seeding requires it; never serialize it
+   into command arguments or result JSON.
 7. Resolve Python from the active `VIRTUAL_ENV`, then the worktree-local `.venv`
    as a fallback, and fail preflight if neither executable exists.
+8. Build one finite probe command per frontend package. Each command imports
+   that package's `@playwright/test`, launches headless Chromium without an app
+   URL, closes it, and exits nonzero on failure. Never install or download a
+   browser from the certification command.
 
 - [ ] **Step 4: Run profile tests GREEN**
 
@@ -338,10 +361,15 @@ Pass `profileRoot` to `launchWithBuiltExtension()` and assert that:
 ```ts
 expect(userDataDir).toMatch(`${profileRoot}/user-data-`)
 expect(browserHome).toMatch(`${profileRoot}/home-`)
+expect(browserTmp).toBe(`${profileRoot}/tmp`)
+expect(crashDumpsDir).toBe(`${profileRoot}/crash-dumps`)
 expect(preparedExtensionRoot).toMatch(`${profileRoot}/user-data-`)
+expect(chromiumEnv).not.toHaveProperty("OPENAI_API_KEY")
 ```
 
-The default path remains unchanged for existing tests.
+The default path and environment behavior remain unchanged for existing tests.
+The isolated environment and crash path apply only when `profileRoot` is
+supplied.
 
 - [ ] **Step 2: Add failing relay-unit tests**
 
@@ -384,7 +412,17 @@ type LaunchOptions = {
 }
 ```
 
-Change `makeTempProfileDirs()` to create its `home-*` and `user-data-*` directories beneath `profileRoot` when supplied. `prepareExtensionLaunchPath()` already places the copied extension beneath `userDataDir`; do not add another copy layer.
+Change `makeTempProfileDirs()` to create its `home-*`, `user-data-*`, `tmp`, and
+`crash-dumps` directories beneath `profileRoot` when supplied.
+`prepareExtensionLaunchPath()` already places the copied extension beneath
+`userDataDir`; do not add another copy layer.
+
+For the strict `profileRoot` path only, build Chromium's environment from a
+small browser-safe allowlist, override `HOME`, `TMPDIR`, `TMP`, and `TEMP` with
+the isolated directories, and replace the literal `/tmp` crash argument with
+`--crash-dumps-dir=<profileRoot>/crash-dumps`. This provides defense in depth
+even though the runner also allowlists the extension Playwright child. Preserve
+the existing environment behavior when `profileRoot` is omitted.
 
 - [ ] **Step 5: Implement the relay observer**
 
@@ -431,7 +469,8 @@ git commit -m "test(extension): prove Skills relay ownership"
 
 - [ ] **Step 1: Implement one shared UI lifecycle helper**
 
-The helper accepts only a `Page`, the calling spec's Playwright `expect`, fixed
+The helper accepts only a `Page`, the calling spec's Playwright `expect`, an
+`initialExpectation` of `empty-library-and-trash` or `target-absent`, fixed
 skill name, fixed arguments, expected rendered prompt, and a `step()` callback.
 Import `Page` and assertion types with `import type`; do not import a runtime
 `expect` from the frontend package because the extension owns a separate
@@ -449,8 +488,11 @@ export const SKILLS_CERT_RENDERED = "Organize bounded certification input into v
 
 Named phases must cover:
 
-1. confirm Library empty, open Trash and confirm it is empty, then return to
-   Library;
+1. for `empty-library-and-trash`, confirm Library empty, open Trash and confirm
+   it is empty, then return to Library; for `target-absent`, exact-search the
+   supplied name in Library, confirm that target is absent, open Trash and
+   confirm that exact target is absent there, then return to Library and clear
+   the search;
 2. open `New Skill`, fill `Name`, `Description`, and `Instructions`, then save;
 3. confirm `Skill created` and the exact name;
 4. fill `Search skills` and await a GET list request whose `q` equals the exact name;
@@ -483,6 +525,8 @@ The test must:
 
 - require `TLDW_SKILLS_CERT_SKILL_NAME`, server URL, API key, and result path;
 - call existing `seedAuth()` before navigation with `allowOffline: false`;
+- call the shared lifecycle with
+  `initialExpectation: "empty-library-and-trash"`;
 - never call `page.route()` or fulfill a response;
 - capture uncaught `pageerror` events and failed Skills requests;
 - write `{ status: "running" }` at test-body entry so a missing result distinguishes browser launch from workflow failure;
@@ -567,6 +611,8 @@ await launchWithBuiltExtension({
 Import the shared lifecycle from
 `../../../tldw-frontend/e2e/utils/skills-live-certification`, pass the extension
 package's own runtime `expect`, then run it with `skills-cert-extension`.
+Use `initialExpectation: "target-absent"` so a leftover WebUI target cannot
+block independent extension evidence.
 
 - [ ] **Step 3: Preserve multiple extension failure categories**
 
@@ -632,20 +678,22 @@ git commit -m "test(extension): certify live Skills lifecycle"
 Inject a small `operations` object containing the concrete side effects used by `runSkillsCertification()`. Cover:
 
 1. initial Library and Trash must both report `total: 0`;
-2. confirmed startup bind conflicts allocate fresh backend/WebUI ports at most three times before browser execution;
-3. non-bind startup failures are never retried;
-4. URLs cannot change after the first browser child starts;
-5. WebUI startup failure still attempts the extension when backend health passes;
-6. missing WebUI surface result after a nonzero Playwright exit maps to `webui_launch` and still attempts the extension;
-7. WebUI workflow failure maps to `webui_workflow` and still attempts the extension;
-8. one same-port backend restart is allowed before extension evidence, but the overall result stays failed;
-9. a second crash or failed same-port restart records extension `not_run_infrastructure`;
-10. extension build failure maps to `extension_build`;
-11. extension result categories are retained without being collapsed;
-12. direct detail `404` and Trash exclusion postconditions run after each attempted surface;
-13. skipped, flaky, zero-test, missing, or malformed Playwright JSON reports fail;
-14. preflight, workflow, postcondition, cleanup, and artifact failures still reach final summary construction;
-15. every spawned auth-init, backend, frontend, build, and Playwright child passes through the process registry.
+2. both package-local Chromium probes are tracked, close successfully, and
+   fail the run as `preflight` rather than skipping when unavailable;
+3. confirmed startup bind conflicts allocate fresh backend/WebUI ports at most three times before browser execution;
+4. non-bind startup failures are never retried;
+5. URLs cannot change after the first browser child starts;
+6. WebUI startup failure still attempts the extension when backend health passes;
+7. missing WebUI surface result after a nonzero Playwright exit maps to `webui_launch` and still attempts the extension;
+8. WebUI workflow failure maps to `webui_workflow` and still attempts the extension;
+9. one same-port backend restart is allowed before extension evidence, but the overall result stays failed;
+10. a second crash or failed same-port restart records extension `not_run_infrastructure`;
+11. extension build failure maps to `extension_build`;
+12. extension result categories are retained without being collapsed;
+13. direct detail `404` and Trash exclusion postconditions run after each attempted surface;
+14. skipped, flaky, zero-test, missing, or malformed Playwright JSON reports fail;
+15. preflight, workflow, postcondition, cleanup, and artifact failures still reach final summary construction;
+16. every spawned probe, auth-init, backend, frontend, build, and Playwright child passes through the process registry.
 
 - [ ] **Step 2: Run the runner tests and verify RED**
 
@@ -663,6 +711,7 @@ Expected: FAIL because `run.mjs` does not exist.
 ```text
 install SIGINT/SIGTERM handlers
   -> create evidence and disposable profile
+  -> run tracked WebUI-package and extension-package Chromium launch probes
   -> run tracked AuthNZ initializer
   -> startup attempt (backend, health, frontend)
        -> retry only a confirmed bind conflict, max 3, before browser execution
@@ -683,6 +732,10 @@ finally:
   -> delete contaminated evidence
   -> set exit code
 ```
+
+The binary-only Chromium probes do not navigate to an application and do not
+lock endpoint URLs. URL immutability begins when the first WebUI or extension
+certification browser child starts.
 
 The extension does not depend on the frontend process. A frontend startup or WebUI browser/workflow failure must not short-circuit extension build/run while backend health remains usable.
 
@@ -724,6 +777,7 @@ Document only:
 
 - invocation from `apps/tldw-frontend`;
 - required local `.venv`, Bun dependencies, and Playwright Chromium;
+- tracked package-local Chromium probes that fail preflight rather than skip;
 - one disposable backend and production Chrome build;
 - evidence location;
 - zero-skip and cleanup exit contract;
