@@ -32,6 +32,7 @@ from .adapter_registry import (
     TTSAdapterFactory,
     TTSAdapterRegistry,
     TTSProvider,
+    canonicalize_tts_backend,
     close_tts_factory,
     get_tts_factory,
 )
@@ -2570,11 +2571,31 @@ class TTSServiceV2:
         model_id = str(getattr(request, "model", "") or "").strip().lower()
         raw_explicit_fields = getattr(request, "model_fields_set", None)
         if raw_explicit_fields is None:
+            raw_explicit_fields = getattr(request, "__pydantic_fields_set__", None)
+        if raw_explicit_fields is None:
             raw_explicit_fields = getattr(request, "__fields_set__", set())
         explicit_fields = set(raw_explicit_fields or ())
-        supplied_common_fields = frozenset(
-            explicit_fields & {"speed", "language", "lang_code"}
-        )
+        supplied_common_fields = {
+            "format" if name == "response_format" else name
+            for name in explicit_fields
+            if name
+            in {
+                "voice",
+                "speed",
+                "language",
+                "lang_code",
+                "target_sample_rate",
+                "response_format",
+                "extra_params",
+            }
+        }
+        raw_backend = getattr(request, "backend", None)
+        backend = None
+        if raw_backend is not None:
+            try:
+                backend = canonicalize_tts_backend(raw_backend)
+            except ValueError as exc:
+                raise TTSValidationError("Invalid TTS backend identity") from exc
         response_format = request.response_format
         output_format = getattr(request, "output_format", None)
         if output_format:
@@ -2592,11 +2613,19 @@ class TTSServiceV2:
         # Optional language code mapping (lang_code primary; Chatterbox language alias next; extra_params.language override)
         raw_lang_code = getattr(request, "lang_code", None)
         raw_language = getattr(request, "language", None)
-        source_lang_code = self._normalize_language_code(raw_lang_code)
-        source_language = self._normalize_language_code(raw_language)
-        language = source_lang_code
-        if language is None and model_id.startswith("chatterbox"):
-            language = source_language
+        if backend is not None:
+            lang_code_supplied = "lang_code" in explicit_fields
+            language_supplied = "language" in explicit_fields
+            if lang_code_supplied and language_supplied and raw_lang_code != raw_language:
+                raise TTSValidationError("Gateway lang_code and language values conflict")
+            source_lang_code = raw_lang_code if lang_code_supplied else None
+            language = source_lang_code if lang_code_supplied else raw_language if language_supplied else None
+        else:
+            source_lang_code = self._normalize_language_code(raw_lang_code)
+            source_language = self._normalize_language_code(raw_language)
+            language = source_lang_code
+            if language is None and model_id.startswith("chatterbox"):
+                language = source_language
         # Optional voice reference decoding (base64)
         voice_ref_bytes = None
         if getattr(request, 'voice_reference', None):
@@ -2608,7 +2637,9 @@ class TTSServiceV2:
                     details={"error": str(exc)}
                 ) from exc
         # Provider-specific extras passthrough
-        extras = getattr(request, 'extra_params', None) or {}
+        raw_extra_params = getattr(request, 'extra_params', None)
+        supplied_extra_params = copy.deepcopy(raw_extra_params)
+        extras = raw_extra_params or {}
         target_sample_rate: Optional[int] = None
         seed: Optional[int] = None
         try:
@@ -2634,25 +2665,26 @@ class TTSServiceV2:
                     except _TTS_NONCRITICAL_EXCEPTIONS:
                         continue
 
-            extra_language = extras.get("language")
-            if isinstance(extra_language, str):
-                normalized_extra_language = self._normalize_language_code(extra_language)
-                if normalized_extra_language:
-                    language = normalized_extra_language
-                    extras["language"] = normalized_extra_language
-            elif extra_language is not None:
-                try:
-                    coerced_language = str(extra_language)
-                except _TTS_NONCRITICAL_EXCEPTIONS:
-                    coerced_language = None
-                if coerced_language:
-                    normalized_extra_language = self._normalize_language_code(coerced_language)
+            if backend is None:
+                extra_language = extras.get("language")
+                if isinstance(extra_language, str):
+                    normalized_extra_language = self._normalize_language_code(extra_language)
                     if normalized_extra_language:
                         language = normalized_extra_language
                         extras["language"] = normalized_extra_language
+                elif extra_language is not None:
+                    try:
+                        coerced_language = str(extra_language)
+                    except _TTS_NONCRITICAL_EXCEPTIONS:
+                        coerced_language = None
+                    if coerced_language:
+                        normalized_extra_language = self._normalize_language_code(coerced_language)
+                        if normalized_extra_language:
+                            language = normalized_extra_language
+                            extras["language"] = normalized_extra_language
             if getattr(request, "reference_duration_min", None) is not None:
                 extras["reference_duration_min"] = request.reference_duration_min
-            if target_sample_rate is not None:
+            if target_sample_rate is not None and backend is None:
                 extras["target_sample_rate"] = target_sample_rate
                 # Alias for providers that currently look up `sample_rate` in extra params.
                 extras["sample_rate"] = target_sample_rate
@@ -2673,6 +2705,10 @@ class TTSServiceV2:
                 "speed": request.speed,
                 "language": raw_language,
                 "lang_code": raw_lang_code,
+                "voice": request.voice,
+                "target_sample_rate": getattr(request, "target_sample_rate", None),
+                "format": response_format,
+                "extra_params": supplied_extra_params,
             }.items()
             if name in supplied_common_fields
         }
@@ -2686,8 +2722,10 @@ class TTSServiceV2:
             stream=request.stream if hasattr(request, 'stream') else True,
             language=language,
             lang_code=source_lang_code,
-            supplied_fields=supplied_common_fields,
+            supplied_fields=frozenset(supplied_common_fields),
             supplied_field_values=supplied_common_values,
+            backend=backend,
+            allow_fallback=bool(getattr(request, "allow_fallback", True)),
             voice_reference=voice_ref_bytes,
             seed=seed,
             # Additional parameters can be added via extra_params

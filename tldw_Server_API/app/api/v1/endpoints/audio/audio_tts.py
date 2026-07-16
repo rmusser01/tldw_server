@@ -39,6 +39,7 @@ from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_his
 from tldw_Server_API.app.core.Storage.generated_file_helpers import (
     save_and_register_tts_audio,
 )
+from tldw_Server_API.app.core.TTS.adapter_registry import canonicalize_tts_backend
 from tldw_Server_API.app.core.TTS.tts_exceptions import (
     TTSAuthenticationError,
     TTSError,
@@ -111,6 +112,39 @@ def _audio_shim_attr(name: str):
     if name in defaults:
         return defaults[name]
     raise NameError(name)
+
+
+def _resolve_tts_backend_mirror(
+    request_data: OpenAISpeechRequest,
+    request: Request,
+) -> Optional[str]:
+    """Resolve the body/header backend mirror before provider or credential lookup."""
+    body_backend = getattr(request_data, "backend", None)
+    header_backend = request.headers.get("X-TLDW-TTS-Backend")
+    if body_backend is None and header_backend is None:
+        return None
+    try:
+        canonical_body = canonicalize_tts_backend(body_backend) if body_backend is not None else None
+        canonical_header = canonicalize_tts_backend(header_backend) if header_backend is not None else None
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error_code": "invalid_tts_backend",
+                "message": "TTS backend identity is malformed.",
+            },
+        ) from exc
+    if canonical_body is not None and canonical_header is not None and canonical_body != canonical_header:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error_code": "invalid_tts_backend",
+                "message": "TTS backend body and header values conflict.",
+            },
+        )
+    backend = canonical_body or canonical_header
+    request_data.backend = backend
+    return backend
 
 
 def _tts_history_config() -> dict[str, Any]:
@@ -491,6 +525,7 @@ async def create_speech_job(
 ):
     """Submit a long-form TTS job and return job id."""
     request_id = ensure_request_id(request)
+    _resolve_tts_backend_mirror(request_data, request)
     provider_hint = _audio_shim_attr("_sanitize_speech_request")(request_data, request_id=request_id)
     speech_request_payload = model_dump_compat(request_data)
     if contains_tts_credential_fields(speech_request_payload):
@@ -645,6 +680,7 @@ async def create_speech(
     """
     request_id = ensure_request_id(request)
 
+    _resolve_tts_backend_mirror(request_data, request)
     provider_hint = _audio_shim_attr("_sanitize_speech_request")(request_data, request_id=request_id)
     history_cfg = _tts_history_config()
     history_enabled = bool(media_db) and history_cfg.get("enabled", False)
@@ -1156,6 +1192,7 @@ async def create_speech_metadata(
     usage_log: UsageEventLogger = Depends(get_usage_event_logger),
 ):
     request_id = ensure_request_id(request)
+    _resolve_tts_backend_mirror(request_data, request)
     provider_hint = _audio_shim_attr("_sanitize_speech_request")(request_data, request_id=request_id)
     tts_provider_hint = provider_hint
     user_id_int, tts_overrides, byok_tts_resolution = await _audio_shim_attr("_resolve_tts_byok")(

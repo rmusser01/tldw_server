@@ -385,7 +385,7 @@ def test_api_conversion_supplied_markers_survive_dict_roundtrip() -> None:
     restored = TTSRequest(**converted.dict())
 
     assert restored.dict() == converted.dict()
-    assert restored.supplied_fields == frozenset({"speed", "lang_code"})
+    assert restored.supplied_fields == frozenset({"voice", "speed", "lang_code"})
 
 
 @pytest.mark.unit
@@ -544,6 +544,7 @@ def test_regional_language_raw_values_survive_dict_roundtrip() -> None:
         "lang_code",
     }
     assert restored.supplied_field_values == {
+        "voice": "GuideVoice",
         "language": "en-GB",
         "lang_code": "pt-BR",
     }
