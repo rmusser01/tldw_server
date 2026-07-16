@@ -2,6 +2,7 @@ import builtins
 import importlib
 import importlib.util
 import io
+import json
 import zipfile
 
 import pytest
@@ -12,13 +13,12 @@ from tldw_Server_API.app.core.Slides.slides_export import (
     _normalize_pdf_options,
     _sanitize_markdown,
     export_presentation_bundle,
+    export_presentation_json,
     export_presentation_markdown,
 )
 from tldw_Server_API.app.core.Slides.visual_style_resolver import resolve_builtin_visual_style
 
-_SAMPLE_PNG_B64 = (
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8Xw8AAn8B9XgU1b0AAAAASUVORK5CYII="
-)
+_SAMPLE_PNG_B64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8Xw8AAn8B9XgU1b0AAAAASUVORK5CYII="
 
 
 def _build_assets(tmp_path):
@@ -84,7 +84,7 @@ def test_export_bundle_includes_assets(tmp_path):
         index_html = zf.read("index.html").decode("utf-8")
         assert "assets/custom.css" in index_html
         assert "data:image/png;base64," in index_html
-        assert "alt=\"Logo\"" in index_html
+        assert 'alt="Logo"' in index_html
 
 
 def test_export_bundle_escapes_settings_for_inline_script(tmp_path):
@@ -177,8 +177,8 @@ def test_export_bundle_stamps_style_hooks_and_includes_builtin_pack_css(tmp_path
     assert 'data-visual-style="notebooklm-blueprint"' in index_html
     assert 'data-style-pack="technical_grid"' in index_html
     assert '[data-style-pack="technical_grid"]' in custom_css
-    assert '--surface: #0f172a;' in custom_css
-    assert 'url(' not in custom_css.lower()
+    assert "--surface: #0f172a;" in custom_css
+    assert "url(" not in custom_css.lower()
 
 
 def test_export_bundle_missing_assets(tmp_path):
@@ -449,7 +449,7 @@ def test_export_bundle_resolves_output_asset_ref(tmp_path, monkeypatch):
     with zipfile.ZipFile(io.BytesIO(bundle)) as zf:
         index_html = zf.read("index.html").decode("utf-8")
         assert "data:image/png;base64," in index_html
-        assert "alt=\"Cover\"" in index_html
+        assert 'alt="Cover"' in index_html
 
 
 def test_export_markdown_resolves_output_asset_ref(monkeypatch):
@@ -501,3 +501,22 @@ def test_normalize_pdf_options_requires_width_height():
 def test_normalize_pdf_options_rejects_invalid_format():
     with pytest.raises(SlidesExportInputError):
         _normalize_pdf_options({"format": "!!bad!!"})
+
+
+def test_export_json_preserves_html_discriminator_and_unicode_source():
+    payload = {
+        "id": "html-deck",
+        "content_kind": "standalone_html",
+        "title": "\u4e09",
+        "html_document": "<!doctype html><title>\u4e09</title>",
+        "html_sha256": "a" * 64,
+        "html_bytes": 38,
+        "html_slide_count": 1,
+    }
+
+    exported = export_presentation_json(payload)
+
+    assert json.loads(exported) == payload
+    assert '"content_kind": "standalone_html"' in exported
+    assert "\u4e09" in exported
+    assert "\\u4e09" not in exported

@@ -401,14 +401,14 @@ def _render_image_html(image: dict[str, Any]) -> str:
     if isinstance(height, int):
         attrs += f' height="{height}"'
     src = f"data:{image['mime']};base64,{image['data_b64']}"
-    return f"<img src=\"{src}\"{attrs} />"
+    return f'<img src="{src}"{attrs} />'
 
 
 def _render_images_html(images: list[dict[str, Any]]) -> str:
     if not images:
         return ""
     rendered = "\n".join(_render_image_html(image) for image in images)
-    return f"<div class=\"slide-images\">\n{rendered}\n</div>"
+    return f'<div class="slide-images">\n{rendered}\n</div>'
 
 
 def _render_image_markdown(image: dict[str, Any]) -> str:
@@ -594,9 +594,7 @@ def _render_timeline_block(block: dict[str, Any]) -> str:
         return ""
     return (
         '<div class="visual-block visual-block--timeline" data-visual-block-type="timeline">'
-        '<ol class="visual-block-list">'
-        + "".join(rendered_items)
-        + "</ol></div>"
+        '<ol class="visual-block-list">' + "".join(rendered_items) + "</ol></div>"
     )
 
 
@@ -626,9 +624,7 @@ def _render_comparison_matrix_block(block: dict[str, Any]) -> str:
         return ""
     return (
         '<div class="visual-block visual-block--comparison" data-visual-block-type="comparison_matrix">'
-        '<table class="visual-block-table"><tbody>'
-        + "".join(rendered_rows)
-        + "</tbody></table></div>"
+        '<table class="visual-block-table"><tbody>' + "".join(rendered_rows) + "</tbody></table></div>"
     )
 
 
@@ -653,9 +649,7 @@ def _render_process_flow_block(block: dict[str, Any]) -> str:
         return ""
     return (
         '<div class="visual-block visual-block--process" data-visual-block-type="process_flow">'
-        '<ol class="visual-block-list">'
-        + "".join(rendered_steps)
-        + "</ol></div>"
+        '<ol class="visual-block-list">' + "".join(rendered_steps) + "</ol></div>"
     )
 
 
@@ -687,9 +681,7 @@ def _render_stat_group_block(block: dict[str, Any]) -> str:
         return ""
     return (
         '<div class="visual-block visual-block--stats" data-visual-block-type="stat_group">'
-        '<dl class="visual-block-stats">'
-        + "".join(rendered_items)
-        + "</dl></div>"
+        '<dl class="visual-block-stats">' + "".join(rendered_items) + "</dl></div>"
     )
 
 
@@ -872,12 +864,12 @@ def _render_sections(
         suppress_content = rendered_all_blocks and _content_is_structured_fallback(content, fallback_text)
         content_html = _sanitize_markdown(str(content or "")) if content and not suppress_content else ""
         body_html = "".join(part for part in (content_html, visual_blocks_html, images_html) if part)
-        notes_html = f"<aside class=\"notes\">{escape(str(notes))}</aside>" if notes else ""
+        notes_html = f'<aside class="notes">{escape(str(notes))}</aside>' if notes else ""
 
         section = (
-            f"      <section data-layout=\"{layout}\">\n"
+            f'      <section data-layout="{layout}">\n'
             f"        {title_html}\n"
-            f"        <div class=\"content\">{body_html}</div>\n"
+            f'        <div class="content">{body_html}</div>\n'
             f"        {notes_html}\n"
             f"      </section>"
         )
@@ -895,7 +887,7 @@ def _render_index_html(
     visual_style_snapshot: dict[str, Any] | None = None,
     asset_resolver: SlideAssetResolver | None = None,
 ) -> str:
-    css_link = "  <link rel=\"stylesheet\" href=\"assets/custom.css\">\n" if include_custom_css else ""
+    css_link = '  <link rel="stylesheet" href="assets/custom.css">\n' if include_custom_css else ""
     title_html = escape(title or "Presentation")
     sections_html = _render_sections(slides, asset_resolver=asset_resolver)
     reveal_attrs = _render_style_shell_attrs(visual_style_snapshot)
@@ -903,20 +895,20 @@ def _render_index_html(
         "<!DOCTYPE html>\n"
         "<html>\n"
         "<head>\n"
-        "  <meta charset=\"utf-8\">\n"
+        '  <meta charset="utf-8">\n'
         f"  <title>{title_html}</title>\n"
-        "  <link rel=\"stylesheet\" href=\"assets/reveal/reveal.css\">\n"
-        f"  <link rel=\"stylesheet\" href=\"assets/reveal/theme/{escape(theme)}.css\">\n"
+        '  <link rel="stylesheet" href="assets/reveal/reveal.css">\n'
+        f'  <link rel="stylesheet" href="assets/reveal/theme/{escape(theme)}.css">\n'
         f"{css_link}"
         "</head>\n"
         "<body>\n"
-        f"  <div class=\"reveal\"{reveal_attrs}>\n"
-        "    <div class=\"slides\">\n"
+        f'  <div class="reveal"{reveal_attrs}>\n'
+        '    <div class="slides">\n'
         f"{sections_html}\n"
         "    </div>\n"
         "  </div>\n"
-        "  <script src=\"assets/reveal/reveal.js\"></script>\n"
-        "  <script src=\"assets/reveal/plugin/notes/notes.js\"></script>\n"
+        '  <script src="assets/reveal/reveal.js"></script>\n'
+        '  <script src="assets/reveal/plugin/notes/notes.js"></script>\n'
         "  <script>\n"
         f"    const settings = {settings_json};\n"
         "    settings.plugins = [ RevealNotes ];\n"
@@ -1110,4 +1102,4 @@ def export_presentation_pdf(
 
 
 def export_presentation_json(payload: dict[str, Any]) -> str:
-    return json.dumps(payload, ensure_ascii=True, indent=2)
+    return json.dumps(payload, ensure_ascii=False, indent=2)
