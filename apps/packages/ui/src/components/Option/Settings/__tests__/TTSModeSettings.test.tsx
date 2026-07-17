@@ -673,7 +673,7 @@ describe("TTSModeSettings explicit backend discovery", () => {
     getTTSSettingsMock.mockResolvedValue(
       buildTtsSettings({
         ttsProvider: "tldw",
-        tldwTtsBackend: "gateway:Company",
+        tldwTtsBackend: "gateway:company",
         tldwTtsModel: "Vendor/Exact-Case",
         tldwTtsVoice: "Narrator"
       })
@@ -692,9 +692,26 @@ describe("TTSModeSettings explicit backend discovery", () => {
     })
     expect(
       fetchTldwTtsModelsMock.mock.calls.some(
-        ([backend]) => backend === "gateway:Company"
+        ([backend]) => backend === "gateway:company"
       )
     ).toBe(false)
+
+    const saveButton = screen.getByRole("button", { name: "saved" })
+    expect(saveButton).toBeDisabled()
+
+    fireEvent.click(
+      screen.getByLabelText("generalSettings.tts.ttsAutoPlay.label")
+    )
+    fireEvent.click(screen.getByRole("button", { name: "save" }))
+
+    await waitFor(() => {
+      expect(setTTSSettingsMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tldwTtsBackend: "gateway:company",
+          ttsAutoPlay: true
+        })
+      )
+    })
   })
 
   it("shows display names while retaining canonical backend values", async () => {
@@ -744,19 +761,44 @@ describe("TTSModeSettings explicit backend discovery", () => {
   })
 
   it("shows sanitized possible fallback targets without authority details", async () => {
+    fetchTtsProvidersMock.mockResolvedValue({
+      ...explicitBackendCatalog,
+      providers: {
+        ...explicitBackendCatalog.providers,
+        "gateway:Company": {
+          ...explicitBackendCatalog.providers["gateway:Company"],
+          fallback: {
+            available: true,
+            targets: [
+              "openrouter",
+              "gateway:backup",
+              "https://private-gateway.invalid",
+              "credential:user-api-key",
+              " gateway:spaced",
+              "gateway:spaced ",
+              "OpenRouter",
+              "gateway:Backup",
+              "gateway:bad_slug",
+              `gateway:${"a".repeat(64)}`
+            ]
+          }
+        }
+      }
+    })
     renderSettings()
 
     await selectAntOption("tldw TTS backend", "Company Speech")
 
-    expect(
-      await screen.findByText(
-        "Possible fallback targets: openrouter, gateway:backup"
-      )
-    ).toBeInTheDocument()
-    expect(
-      screen.queryByText("https://private-gateway.invalid")
-    ).not.toBeInTheDocument()
-    expect(screen.queryByText("user-api-key")).not.toBeInTheDocument()
+    const disclosure = await screen.findByText(/^Possible fallback targets:/)
+    expect(disclosure).toHaveTextContent(
+      /^Possible fallback targets: openrouter, gateway:backup$/
+    )
+    expect(disclosure).not.toHaveTextContent("private-gateway")
+    expect(disclosure).not.toHaveTextContent("credential")
+    expect(disclosure).not.toHaveTextContent("spaced")
+    expect(disclosure).not.toHaveTextContent("OpenRouter")
+    expect(disclosure).not.toHaveTextContent("Backup")
+    expect(disclosure).not.toHaveTextContent("bad_slug")
   })
 
   it("returns to automatic inference and persists an empty backend", async () => {
