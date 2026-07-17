@@ -43,6 +43,7 @@ describe("tts defaults service", () => {
     const settings = await getTTSSettings()
 
     expect(settings.ttsProvider).toBe(DEFAULT_TTS_PROVIDER)
+    expect(settings.tldwTtsBackend).toBe("")
     expect(settings.tldwTtsModel).toBe(DEFAULT_TLDW_TTS_MODEL)
     expect(settings.tldwTtsVoice).toBe(DEFAULT_TLDW_TTS_VOICE)
   })
@@ -57,6 +58,24 @@ describe("tts defaults service", () => {
     expect(settings.ttsProvider).toBe("browser")
     expect(settings.tldwTtsModel).toBe("kokoro")
     expect(settings.tldwTtsVoice).toBe("af_heart")
+  })
+
+  it("round-trips an explicit backend and preserves empty legacy inference", async () => {
+    const baseSettings = await getTTSSettings()
+
+    await setTTSSettings({
+      ...baseSettings,
+      tldwTtsBackend: "gateway:company-proxy"
+    })
+    expect((await getTTSSettings()).tldwTtsBackend).toBe(
+      "gateway:company-proxy"
+    )
+
+    await setTTSSettings({
+      ...(await getTTSSettings()),
+      tldwTtsBackend: ""
+    })
+    expect((await getTTSSettings()).tldwTtsBackend).toBe("")
   })
 
   it("round-trips provider validation status metadata", async () => {

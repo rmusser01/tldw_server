@@ -288,8 +288,11 @@ export function useMediaReadAlongSession(args: UseMediaReadAlongSessionArgs) {
         sourceEnd: part.sourceEnd,
         settingsSignature: session.settingsSignature
       })
+      const cacheable = session.providerContext.cacheSettings?.cacheable !== false
 
-      const cached = await getMediaReadAlongAudioCacheEntry(key.id)
+      const cached = cacheable
+        ? await getMediaReadAlongAudioCacheEntry(key.id)
+        : undefined
       if (signal.aborted || !isCurrentLoad()) {
         throw readAlongAbortError()
       }
@@ -310,35 +313,37 @@ export function useMediaReadAlongSession(args: UseMediaReadAlongSessionArgs) {
         throw readAlongAbortError()
       }
       const blob = new Blob([generated.buffer], { type: generated.mimeType })
-      const saved = await saveMediaReadAlongAudioCacheEntry(
-        {
-          id: key.id,
-          createdAt: Date.now(),
-          lastUsedAt: Date.now(),
-          mediaId: key.mediaId,
-          mediaKind: key.mediaKind,
-          segmentId: key.segmentId,
-          settingsSignature: key.settingsSignature,
-          textHash: key.textHash,
-          blob,
-          mimeType: generated.mimeType,
-          format: generated.format,
-          sizeBytes: blob.size
-        },
-        {
-          signal,
-          shouldContinue: isCurrentLoad
+      if (cacheable) {
+        const saved = await saveMediaReadAlongAudioCacheEntry(
+          {
+            id: key.id,
+            createdAt: Date.now(),
+            lastUsedAt: Date.now(),
+            mediaId: key.mediaId,
+            mediaKind: key.mediaKind,
+            segmentId: key.segmentId,
+            settingsSignature: key.settingsSignature,
+            textHash: key.textHash,
+            blob,
+            mimeType: generated.mimeType,
+            format: generated.format,
+            sizeBytes: blob.size
+          },
+          {
+            signal,
+            shouldContinue: isCurrentLoad
+          }
+        )
+        if (signal.aborted || !isCurrentLoad()) {
+          throw readAlongAbortError()
         }
-      )
-      if (signal.aborted || !isCurrentLoad()) {
-        throw readAlongAbortError()
-      }
-      if (!saved) {
-        session.cacheDisabled = true
-        mutateState(session.token, (previous) => ({
-          ...previous,
-          cacheDisabled: true
-        }))
+        if (!saved) {
+          session.cacheDisabled = true
+          mutateState(session.token, (previous) => ({
+            ...previous,
+            cacheDisabled: true
+          }))
+        }
       }
 
       return {

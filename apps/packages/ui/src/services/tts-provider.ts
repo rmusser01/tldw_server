@@ -7,6 +7,7 @@ import {
   getRemoveReasoningTagTTS,
   getSpeechPlaybackSpeed,
   getTTSProvider,
+  getTldwTTSBackend,
   getTldwTTSModel,
   getTldwTTSResponseFormat,
   getTldwTTSSpeed,
@@ -37,6 +38,8 @@ export type TtsProviderOverrides = {
   elevenLabsSpeed?: number
   tldwModel?: string
   tldwVoice?: string
+  tldwBackend?: string
+  tldwAllowFallback?: boolean
   tldwResponseFormat?: string
   tldwSpeed?: number
   tldwLanguage?: string
@@ -58,6 +61,8 @@ export type TtsSynthesisResult = {
   buffer: ArrayBuffer
   format: string
   mimeType: string
+  actualBackend?: string
+  fallbackUsed?: boolean
 }
 
 export type TtsSynthesizeOptions = {
@@ -72,6 +77,8 @@ export type TtsFormatInfo = {
 
 export type TtsCacheSettings = {
   provider: string
+  backend?: string | null
+  cacheable?: boolean
   model?: string | null
   voice?: string | null
   speed?: number | null
@@ -273,7 +280,8 @@ export const resolveTtsProviderContext = async (
           signal: _options?.signal
         }),
         format: "mp3",
-        mimeType: "audio/mpeg"
+        mimeType: "audio/mpeg",
+        fallbackUsed: false
       })
     }
   }
@@ -307,11 +315,18 @@ export const resolveTtsProviderContext = async (
           signal: _options?.signal
         }),
         format: "mp3",
-        mimeType: "audio/mpeg"
+        mimeType: "audio/mpeg",
+        fallbackUsed: false
       })
     }
   }
 
+  const backendPreference =
+    overrides?.tldwBackend !== undefined
+      ? overrides.tldwBackend
+      : await getTldwTTSBackend()
+  const requestedBackend = String(backendPreference || "").trim()
+  const allowFallback = overrides?.tldwAllowFallback ?? true
   const baseModel = await getTldwTTSModel()
   const baseVoice = await getTldwTTSVoice()
   const rawResponseFormat =
@@ -343,14 +358,16 @@ export const resolveTtsProviderContext = async (
     formatInfo,
     cacheSettings: {
       provider,
+      backend: requestedBackend || undefined,
+      cacheable: !requestedBackend,
       model,
       voice,
       speed,
       format: responseFormat,
       language
     },
-    synthesize: async (segment: string, options?: TtsSynthesizeOptions) => ({
-      buffer: await tldwClient.synthesizeSpeech(segment, {
+    synthesize: async (segment: string, options?: TtsSynthesizeOptions) => {
+      const result = await tldwClient.synthesizeSpeechDetailed(segment, {
         model,
         voice,
         responseFormat,
@@ -358,11 +375,18 @@ export const resolveTtsProviderContext = async (
         language,
         normalizationOptions,
         extraParams,
+        backend: requestedBackend || undefined,
+        allowFallback,
         stream: false,
         signal: options?.signal
-      }),
-      format: responseFormat,
-      mimeType
-    })
+      })
+      return {
+        buffer: result.buffer,
+        format: responseFormat,
+        mimeType,
+        actualBackend: result.actualBackend,
+        fallbackUsed: result.fallbackUsed
+      }
+    }
   }
 }

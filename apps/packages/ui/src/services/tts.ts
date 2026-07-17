@@ -154,6 +154,11 @@ const TLDW_TTS_MODEL_SETTING = defineSetting(
   DEFAULT_TLDW_TTS_MODEL,
   (value) => coerceString(value, DEFAULT_TLDW_TTS_MODEL)
 )
+const TLDW_TTS_BACKEND_SETTING = defineSetting(
+  "tldwTtsBackend",
+  "",
+  (value) => coerceOptionalString(value) || ""
+)
 const TLDW_TTS_VOICE_SETTING = defineSetting(
   "tldwTtsVoice",
   DEFAULT_TLDW_TTS_VOICE,
@@ -391,6 +396,13 @@ export const setTldwTTSModel = async (model: string) => {
   await setSetting(TLDW_TTS_MODEL_SETTING, model)
 }
 
+export const getTldwTTSBackend = async () =>
+  getSetting(TLDW_TTS_BACKEND_SETTING)
+
+export const setTldwTTSBackend = async (backend: string) => {
+  await setSetting(TLDW_TTS_BACKEND_SETTING, backend)
+}
+
 export const getTldwTTSVoice = async () => getSetting(TLDW_TTS_VOICE_SETTING)
 
 export const setTldwTTSVoice = async (voice: string) => {
@@ -508,6 +520,7 @@ export const getTTSSettings = async () => {
     ttsAutoPlay,
     playbackSpeed,
     // tldw_server TTS
+    tldwTtsBackend,
     tldwTtsModel,
     tldwTtsVoice,
     tldwTtsResponseFormat,
@@ -546,6 +559,7 @@ export const getTTSSettings = async () => {
     isTTSAutoPlayEnabled(),
     getSpeechPlaybackSpeed(),
     // tldw_server TTS
+    getTldwTTSBackend(),
     getTldwTTSModel(),
     getTldwTTSVoice(),
     getTldwTTSResponseFormat(),
@@ -584,6 +598,7 @@ export const getTTSSettings = async () => {
     openAITTSKeyTestedAt,
     ttsAutoPlay,
     playbackSpeed,
+    tldwTtsBackend,
     tldwTtsModel,
     tldwTtsVoice,
     tldwTtsResponseFormat,
@@ -621,6 +636,7 @@ export const setTTSSettings = async ({
   openAITTSKeyTestedAt,
   ttsAutoPlay,
   playbackSpeed,
+  tldwTtsBackend,
   tldwTtsModel,
   tldwTtsVoice,
   tldwTtsResponseFormat,
@@ -655,6 +671,7 @@ export const setTTSSettings = async ({
   openAITTSKeyTestedAt?: string
   ttsAutoPlay: boolean
   playbackSpeed: number
+  tldwTtsBackend?: string
   tldwTtsModel: string
   tldwTtsVoice: string
   tldwTtsResponseFormat: string
@@ -701,6 +718,9 @@ export const setTTSSettings = async ({
     setTldwTTSNormalizePhones(tldwTtsNormalizePhones),
     setTldwTTSNormalizePlurals(tldwTtsNormalizePlurals)
   ]
+  if (tldwTtsBackend !== undefined) {
+    updates.push(setTldwTTSBackend(tldwTtsBackend))
+  }
   if (elevenLabsKeyValid !== undefined) {
     updates.push(setElevenLabsKeyValid(elevenLabsKeyValid))
   }

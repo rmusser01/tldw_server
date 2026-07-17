@@ -180,6 +180,7 @@ export const useTTS = () => {
       const savedSegments: TtsClipSegment[] = []
       let clipFormat: string | undefined
       let clipMimeType: string | undefined
+      const requestedBackend = context.cacheSettings?.backend || undefined
       const providerMeta = shouldSaveClip ? await resolveProviderMeta(provider) : {}
 
       if (!supported) {
@@ -279,6 +280,11 @@ export const useTTS = () => {
           const mimeValue = currentAudioData.mimeType || "audio/mpeg"
           if (!clipFormat) clipFormat = formatValue
           if (!clipMimeType) clipMimeType = mimeValue
+          const hasGatewayMetadata = Boolean(
+            requestedBackend ||
+              currentAudioData.actualBackend ||
+              currentAudioData.fallbackUsed
+          )
           savedSegments.push({
             id: `${clipId}:${i}`,
             index: i,
@@ -286,7 +292,13 @@ export const useTTS = () => {
             format: formatValue,
             mimeType: mimeValue,
             blob,
-            sizeBytes: blob.size
+            sizeBytes: blob.size,
+            ...(hasGatewayMetadata
+              ? {
+                  actualBackend: currentAudioData.actualBackend,
+                  fallbackUsed: Boolean(currentAudioData.fallbackUsed)
+                }
+              : {})
           })
         }
         const url = URL.createObjectURL(blob)
@@ -364,6 +376,19 @@ export const useTTS = () => {
           (sum, segment) => sum + segment.sizeBytes,
           0
         )
+        const actualBackends = Array.from(
+          new Set(
+            savedSegments
+              .map((segment) => segment.actualBackend)
+              .filter((backend): backend is string => Boolean(backend))
+          )
+        )
+        const fallbackUsed = savedSegments.some(
+          (segment) => segment.fallbackUsed
+        )
+        const hasGatewayMetadata = Boolean(
+          requestedBackend || actualBackends.length || fallbackUsed
+        )
         try {
           await saveTtsClip({
             id: clipId,
@@ -374,6 +399,9 @@ export const useTTS = () => {
             format: clipFormat || context.formatInfo?.resolved,
             mimeType: clipMimeType,
             playbackSpeed,
+            ...(requestedBackend ? { requestedBackend } : {}),
+            ...(actualBackends.length ? { actualBackends } : {}),
+            ...(hasGatewayMetadata ? { fallbackUsed } : {}),
             utterance: processedUtterance,
             textPreview: preview,
             totalBytes,
