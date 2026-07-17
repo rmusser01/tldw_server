@@ -7,7 +7,8 @@ import type { TtsClip } from "@/db/dexie/types"
 
 const testState = vi.hoisted(() => ({
   context: null as TtsProviderContext | null,
-  savedClip: null as TtsClip | null
+  savedClip: null as TtsClip | null,
+  notifyError: vi.fn()
 }))
 
 vi.mock("react-i18next", () => ({
@@ -17,7 +18,7 @@ vi.mock("react-i18next", () => ({
 }))
 
 vi.mock("@/hooks/useAntdNotification", () => ({
-  useAntdNotification: () => ({ error: vi.fn() })
+  useAntdNotification: () => ({ error: testState.notifyError })
 }))
 
 vi.mock("@/config/platform", () => ({ isChromiumTarget: false }))
@@ -167,5 +168,56 @@ describe("useTTS gateway metadata", () => {
     expect(testState.savedClip?.fallbackUsed).toBeUndefined()
     expect(testState.savedClip?.segments[0].actualBackend).toBeUndefined()
     expect(testState.savedClip?.segments[0].fallbackUsed).toBeUndefined()
+  })
+
+  it("does not retry or persist when prefetched synthesis fails", async () => {
+    const prefetchError = new Error("prefetch failed")
+    let secondAttempts = 0
+    const synthesize = vi.fn(async (segment: string) => {
+      if (segment === "First.") {
+        return audioResult("gateway:company-proxy")
+      }
+      if (segment === "Second.") {
+        secondAttempts += 1
+        if (secondAttempts === 1) throw prefetchError
+        return audioResult("openrouter", true)
+      }
+      return audioResult("gateway:company-proxy")
+    })
+    testState.context = {
+      provider: "tldw",
+      utterance: "First. Second. Third.",
+      playbackSpeed: 1,
+      supported: true,
+      normalizeText: (text) => text,
+      cacheSettings: {
+        provider: "tldw",
+        backend: "gateway:company-proxy",
+        cacheable: false,
+        model: "Vendor/Model",
+        voice: "Narrator",
+        format: "mp3"
+      },
+      formatInfo: { requested: "mp3", resolved: "mp3", isFallback: false },
+      synthesize
+    }
+    const { result } = renderHook(() => useTTS())
+
+    await act(async () => {
+      await result.current.speak({ utterance: "ignored", saveClip: true })
+    })
+
+    expect(synthesize.mock.calls.map(([segment]) => segment)).toEqual([
+      "First.",
+      "Second."
+    ])
+    expect(testState.notifyError).toHaveBeenCalledWith({
+      message: "Error",
+      description: "prefetch failed"
+    })
+    expect(testState.savedClip).toBeNull()
+    expect(URL.createObjectURL).toHaveBeenCalledTimes(1)
+    expect(URL.revokeObjectURL).toHaveBeenCalledOnce()
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:tts")
   })
 })
