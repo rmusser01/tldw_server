@@ -76,6 +76,101 @@ _POSTGRES_ARCHIVE_BATCH_READ_INDEX_SPECS = (
 _POSTGRES_ARCHIVE_SEQUENCE = "jobs_archive_archive_id_seq"
 _POSTGRES_ARCHIVE_MIGRATION_LOCK = "tldw.jobs_archive.archive_id.v1"
 
+_SLIDES_ARCHIVE_INDEXES_PG = {
+    "idx_jobs_archive_slides_scope": (
+        False,
+        (
+            "domain",
+            "queue",
+            "job_type",
+            "idempotency_key",
+            "owner_user_id",
+            "archived_at desc",
+        ),
+        "idempotency_key is not null",
+    ),
+    "idx_jobs_archive_uuid_unique": (
+        True,
+        ("uuid",),
+        "uuid is not null",
+    ),
+}
+
+
+def _normalize_pg_index_expression(value: Any) -> str:
+    normalized = " ".join(str(value or "").replace('"', "").lower().split())
+    while normalized.startswith("(") and normalized.endswith(")"):
+        normalized = normalized[1:-1].strip()
+    return normalized
+
+
+def _pg_archive_index_matches(
+    cur: Any,
+    *,
+    index_name: str,
+    unique: bool,
+    columns: tuple[str, ...],
+    predicate: str,
+) -> bool:
+    """Return whether one archive index has the exact required catalog shape."""
+    cur.execute(
+        """
+        SELECT index_state.indisvalid AS is_valid,
+               index_state.indisready AS is_ready,
+               index_state.indisunique AS is_unique,
+               index_state.indnatts AS total_attributes,
+               ARRAY(
+                 SELECT pg_get_indexdef(index_state.indexrelid, position, TRUE)
+                 FROM generate_series(1, index_state.indnkeyatts) AS positions(position)
+                 ORDER BY position
+               ) AS key_columns,
+               pg_get_expr(index_state.indpred, index_state.indrelid, TRUE) AS predicate
+        FROM pg_class AS index_class
+        JOIN pg_index AS index_state ON index_state.indexrelid=index_class.oid
+        JOIN pg_class AS table_class ON table_class.oid=index_state.indrelid
+        JOIN pg_namespace AS namespace ON namespace.oid=index_class.relnamespace
+        WHERE namespace.nspname=current_schema()
+          AND index_class.relname=%s
+          AND table_class.relname='jobs_archive'
+        """,
+        (index_name,),
+    )
+    row = cur.fetchone()
+    if row is None:
+        return False
+    if isinstance(row, dict):
+        is_valid = row["is_valid"]
+        is_ready = row["is_ready"]
+        is_unique = row["is_unique"]
+        total_attributes = row["total_attributes"]
+        actual_columns = row["key_columns"]
+        actual_predicate = row["predicate"]
+    else:
+        is_valid, is_ready, is_unique, total_attributes, actual_columns, actual_predicate = row
+    return (
+        bool(is_valid)
+        and bool(is_ready)
+        and bool(is_unique) is unique
+        and int(total_attributes) == len(columns)
+        and tuple(_normalize_pg_index_expression(item) for item in (actual_columns or ())) == columns
+        and _normalize_pg_index_expression(actual_predicate) == predicate
+    )
+
+
+def slides_archive_indexes_ready_pg(cur: Any) -> bool:
+    """Return whether both PostgreSQL archive indexes exactly match the contract."""
+    return all(
+        _pg_archive_index_matches(
+            cur,
+            index_name=index_name,
+            unique=unique,
+            columns=columns,
+            predicate=predicate,
+        )
+        for index_name, (unique, columns, predicate) in _SLIDES_ARCHIVE_INDEXES_PG.items()
+    )
+
+
 JOBS_POSTGRES_DDL = """
 CREATE TABLE IF NOT EXISTS jobs (
   id SERIAL PRIMARY KEY,
@@ -221,6 +316,34 @@ CREATE INDEX IF NOT EXISTS idx_jobs_archive_migration
     id,
     COALESCE(uuid, '')
   );
+
+CREATE OR REPLACE FUNCTION enforce_slides_generation_uuid_immutable()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF (
+    NEW.domain='slides' AND NEW.queue='default'
+    AND NEW.job_type='presentation.generate'
+    AND (NEW.uuid IS NULL OR BTRIM(NEW.uuid)='')
+  ) OR (
+    OLD.domain='slides' AND OLD.queue='default'
+    AND OLD.job_type='presentation.generate'
+    AND NEW.uuid IS DISTINCT FROM OLD.uuid
+  ) THEN
+    RAISE EXCEPTION 'presentation.generate UUID is required and immutable';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_jobs_slides_generation_uuid_immutable ON jobs;
+CREATE TRIGGER trg_jobs_slides_generation_uuid_immutable
+BEFORE UPDATE ON jobs
+FOR EACH ROW EXECUTE FUNCTION enforce_slides_generation_uuid_immutable();
+
+DROP TRIGGER IF EXISTS trg_jobs_archive_slides_generation_uuid_immutable ON jobs_archive;
+CREATE TRIGGER trg_jobs_archive_slides_generation_uuid_immutable
+BEFORE UPDATE ON jobs_archive
+FOR EACH ROW EXECUTE FUNCTION enforce_slides_generation_uuid_immutable();
 
 -- Source-free standalone-HTML key metadata. No secret or digest material is
 -- persisted in the shared Jobs database.
@@ -945,29 +1068,19 @@ def ensure_jobs_tables_pg(db_url: str) -> str:
                     _configure_pg_archive_migration_session(k, local=False)
                     _ensure_pg_archive_batch_read_indexes(k)
                     archive_batch_read_indexes_verified = True
-                    for index_name in (
-                        "idx_jobs_archive_slides_scope",
-                        "idx_jobs_archive_uuid_unique",
-                    ):
-                        k.execute(
-                            """
-                            SELECT indisvalid, indisready FROM pg_index
-                            WHERE indexrelid=TO_REGCLASS(%s)
-                            """,
-                            (index_name,),
-                        )
-                        index_state = k.fetchone()
-                        if index_state and not (index_state[0] and index_state[1]):
-                            if index_name == "idx_jobs_archive_slides_scope":
-                                k.execute(
-                                    "DROP INDEX CONCURRENTLY IF EXISTS "
-                                    "idx_jobs_archive_slides_scope"
-                                )
-                            else:
-                                k.execute(
-                                    "DROP INDEX CONCURRENTLY IF EXISTS "
-                                    "idx_jobs_archive_uuid_unique"
-                                )
+                    for index_name, (unique, columns, predicate) in _SLIDES_ARCHIVE_INDEXES_PG.items():
+                        if _pg_archive_index_matches(
+                            k,
+                            index_name=index_name,
+                            unique=unique,
+                            columns=columns,
+                            predicate=predicate,
+                        ):
+                            continue
+                        if index_name == "idx_jobs_archive_slides_scope":
+                            k.execute("DROP INDEX CONCURRENTLY IF EXISTS idx_jobs_archive_slides_scope")
+                        else:
+                            k.execute("DROP INDEX CONCURRENTLY IF EXISTS idx_jobs_archive_uuid_unique")
                     # Ready vs scheduled scans
                     k.execute(
                         "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_jobs_status_available_at ON jobs(status, available_at)"
@@ -1199,8 +1312,18 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
                             _sql.Identifier(role),
                         )
                     )
+                    cur.execute(
+                        _sql.SQL(
+                            "GRANT INSERT ON TABLE "
+                            "{}.slides_standalone_key_registry TO {}"
+                        ).format(
+                            _sql.Identifier(schema_name),
+                            _sql.Identifier(role),
+                        )
+                    )
                 except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
                     pass
+
             def _enable_rls(table: str) -> None:
                 with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
                     cur.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")

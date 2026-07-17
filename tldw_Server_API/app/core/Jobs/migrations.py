@@ -83,6 +83,26 @@ _SQLITE_ARCHIVE_BATCH_READ_INDEX_SPECS = (
     ),
 )
 
+_SLIDES_ARCHIVE_INDEXES = {
+    "idx_jobs_archive_slides_scope": (
+        False,
+        (
+            ("domain", False),
+            ("queue", False),
+            ("job_type", False),
+            ("idempotency_key", False),
+            ("owner_user_id", False),
+            ("archived_at", True),
+        ),
+        "idempotency_key is not null",
+    ),
+    "idx_jobs_archive_uuid_unique": (
+        True,
+        (("uuid", False),),
+        "uuid is not null",
+    ),
+}
+
 JOBS_SQLITE_DDL = """
 CREATE TABLE IF NOT EXISTS jobs (
   id INTEGER PRIMARY KEY,
@@ -634,6 +654,60 @@ def _ensure_sqlite_dependency_snapshot_columns(conn: sqlite3.Connection) -> None
             "SQLite Jobs dependency snapshot migration failed"
         ) from exc
 
+
+def _sqlite_archive_index_matches(
+    conn: sqlite3.Connection,
+    *,
+    index_name: str,
+    unique: bool,
+    columns: tuple[tuple[str, bool], ...],
+    predicate: str,
+) -> bool:
+    row = conn.execute(
+        "SELECT tbl_name, sql FROM sqlite_master WHERE type='index' AND name=?",
+        (index_name,),
+    ).fetchone()
+    if row is None or row[0] != "jobs_archive" or not row[1]:
+        return False
+    listed = next(
+        (item for item in conn.execute("PRAGMA index_list('jobs_archive')") if item[1] == index_name),
+        None,
+    )
+    if listed is None or bool(listed[2]) is not unique or not bool(listed[4]):
+        return False
+    key_rows = tuple(
+        item
+        for item in conn.execute(
+            "SELECT * FROM pragma_index_xinfo(?)",
+            (index_name,),
+        )
+        if bool(item[5])
+    )
+    key_columns = tuple((item[2], bool(item[3])) for item in key_rows)
+    key_collations = tuple(str(item[4] or "").upper() for item in key_rows)
+    normalized_sql = " ".join(str(row[1]).lower().split())
+    actual_predicate = normalized_sql.rsplit(" where ", 1)[1] if " where " in normalized_sql else ""
+    return (
+        key_columns == columns
+        and all(collation == "BINARY" for collation in key_collations)
+        and actual_predicate == predicate
+    )
+
+
+def slides_archive_indexes_ready_sqlite(conn: sqlite3.Connection) -> bool:
+    """Return whether both standalone archive indexes have their exact definitions."""
+    return all(
+        _sqlite_archive_index_matches(
+            conn,
+            index_name=index_name,
+            unique=unique,
+            columns=columns,
+            predicate=predicate,
+        )
+        for index_name, (unique, columns, predicate) in _SLIDES_ARCHIVE_INDEXES.items()
+    )
+
+
 def _audit_and_index_slides_generation(conn: sqlite3.Connection) -> None:
     """Audit legacy generation correlations before adding archive indexes."""
     duplicate_row = conn.execute(
@@ -697,6 +771,19 @@ def _audit_and_index_slides_generation(conn: sqlite3.Connection) -> None:
     elif invalid_count or conflict_count:
         diagnostic_code = "ambiguous_generation_legacy_row"
         diagnostic_count = invalid_count + conflict_count
+    for index_name, (unique, columns, predicate) in _SLIDES_ARCHIVE_INDEXES.items():
+        if not _sqlite_archive_index_matches(
+            conn,
+            index_name=index_name,
+            unique=unique,
+            columns=columns,
+            predicate=predicate,
+        ):
+            if index_name == "idx_jobs_archive_slides_scope":
+                conn.execute("DROP INDEX IF EXISTS idx_jobs_archive_slides_scope")
+            else:
+                conn.execute("DROP INDEX IF EXISTS idx_jobs_archive_uuid_unique")
+
     conn.execute(
         """
         UPDATE slides_standalone_reconciliation
@@ -714,6 +801,44 @@ def _audit_and_index_slides_generation(conn: sqlite3.Connection) -> None:
           domain, queue, job_type, idempotency_key, owner_user_id, archived_at DESC
         )
         WHERE idempotency_key IS NOT NULL
+        """
+    )
+    conn.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS trg_jobs_slides_generation_uuid_immutable
+        BEFORE UPDATE ON jobs
+        FOR EACH ROW
+        WHEN (
+          NEW.domain='slides' AND NEW.queue='default'
+            AND NEW.job_type='presentation.generate'
+            AND (NEW.uuid IS NULL OR TRIM(NEW.uuid)='')
+        ) OR (
+          OLD.domain='slides' AND OLD.queue='default'
+            AND OLD.job_type='presentation.generate'
+            AND NEW.uuid IS NOT OLD.uuid
+        )
+        BEGIN
+          SELECT RAISE(ABORT, 'presentation.generate job UUID is immutable');
+        END
+        """
+    )
+    conn.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS trg_jobs_archive_slides_generation_uuid_immutable
+        BEFORE UPDATE ON jobs_archive
+        FOR EACH ROW
+        WHEN (
+          NEW.domain='slides' AND NEW.queue='default'
+            AND NEW.job_type='presentation.generate'
+            AND (NEW.uuid IS NULL OR TRIM(NEW.uuid)='')
+        ) OR (
+          OLD.domain='slides' AND OLD.queue='default'
+            AND OLD.job_type='presentation.generate'
+            AND NEW.uuid IS NOT OLD.uuid
+        )
+        BEGIN
+          SELECT RAISE(ABORT, 'presentation.generate archive UUID is immutable');
+        END
         """
     )
     if duplicate_count == 0:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any
 
@@ -230,6 +231,10 @@ def create_job_admission(
     max_queued_quota: int,
     submits_per_minute_quota: int,
     counters_enabled: bool,
+    begin_immediate: bool = False,
+    pre_admission_lookup: Callable[
+        [sqlite3.Connection], dict[str, Any] | None
+    ] | None = None,
 ) -> AdmissionResult:
     """Create or replay a queued job admission inside a SQLite transaction."""
 
@@ -239,10 +244,14 @@ def create_job_admission(
     available_at_sql = _sqlite_timestamp(available_at) if available_at else None
 
     quota_enabled = bool(command.owner_user_id and (max_queued_quota or submits_per_minute_quota))
-    if quota_enabled:
+    if quota_enabled or begin_immediate:
         conn.execute("BEGIN IMMEDIATE")
 
     with conn:
+        if pre_admission_lookup is not None:
+            existing = pre_admission_lookup(conn)
+            if existing is not None:
+                return AdmissionResult.existing(row=existing)
         idempotent_replay = False
         if quota_enabled and command.idempotency_key:
             row = conn.execute(
