@@ -243,6 +243,7 @@ class AudioProcessor:
         strict: bool = False,
         timeout_seconds: float | None = None,
         ffmpeg_path: str | None = None,
+        max_output_bytes: int | None = None,
     ) -> bytes:
         """
         Convert audio to target format and sample rate.
@@ -255,6 +256,7 @@ class AudioProcessor:
             strict: Raise when conversion fails instead of returning original bytes
             timeout_seconds: Optional finite positive ffmpeg subprocess timeout
             ffmpeg_path: Optional pinned absolute ffmpeg executable identity
+            max_output_bytes: Optional positive bound for converted output bytes
 
         Returns:
             Converted audio bytes
@@ -270,6 +272,12 @@ class AudioProcessor:
                 invalid_timeout = True
             if invalid_timeout:
                 raise ValueError("timeout_seconds must be a finite positive number")
+        if max_output_bytes is not None and (
+            isinstance(max_output_bytes, bool)
+            or not isinstance(max_output_bytes, int)
+            or max_output_bytes <= 0
+        ):
+            raise ValueError("max_output_bytes must be a positive integer")
 
         def conversion_failure(error: Exception) -> bytes:
             logger.error("Audio conversion failed ({})", type(error).__name__)
@@ -302,7 +310,11 @@ class AudioProcessor:
             else getattr(self, 'ffmpeg_path', None)
         )
         try:
-            use_ffmpeg = timeout_seconds is not None or not self.librosa_available
+            use_ffmpeg = (
+                timeout_seconds is not None
+                or max_output_bytes is not None
+                or not self.librosa_available
+            )
             if use_ffmpeg:
                 if effective_ffmpeg_path is None and timeout_seconds is None:
                     discovered = shutil.which('ffmpeg')
@@ -342,6 +354,8 @@ class AudioProcessor:
                 if target_sample_rate:
                     cmd.extend(['-ar', str(target_sample_rate)])
 
+                if max_output_bytes is not None:
+                    cmd.extend(['-fs', str(max_output_bytes + 1)])
                 cmd.append(output_path)
                 run_options: dict[str, Any] = {
                     'capture_output': True,
@@ -356,7 +370,14 @@ class AudioProcessor:
                     raise RuntimeError(f"ffmpeg conversion failed: {result.stderr}")
 
             with open(output_path, 'rb') as f:
-                return f.read()
+                converted = (
+                    f.read(max_output_bytes + 1)
+                    if max_output_bytes is not None
+                    else f.read()
+                )
+            if max_output_bytes is not None and len(converted) > max_output_bytes:
+                raise ValueError("converted audio exceeds max_output_bytes")
+            return converted
 
         except subprocess.TimeoutExpired as e:
             return conversion_failure(e)
@@ -377,6 +398,7 @@ class AudioProcessor:
         strict: bool = False,
         timeout_seconds: float | None = None,
         ffmpeg_path: str | None = None,
+        max_output_bytes: int | None = None,
     ) -> bytes:
         """
         Async-friendly wrapper around convert_audio.
@@ -396,6 +418,7 @@ class AudioProcessor:
                 strict=strict,
                 timeout_seconds=timeout_seconds,
                 ffmpeg_path=ffmpeg_path,
+                max_output_bytes=max_output_bytes,
             ),
         )
 

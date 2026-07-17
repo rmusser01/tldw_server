@@ -46,6 +46,7 @@ CredentialResolver = Callable[..., Awaitable[ResolvedByokCredentials]]
 EventHook = Callable[[str, Mapping[str, Any]], Any]
 
 _CIRCUIT_FAILURE_CATEGORIES = frozenset({"network_error", "timeout", "upstream_5xx"})
+_CIRCUIT_STATES = frozenset({"closed", "open", "half_open"})
 _LOCAL_PREFLIGHT_ERRORS = (
     TTSProviderNotConfiguredError,
     TTSProviderUnavailableError,
@@ -419,7 +420,7 @@ class GatewaySpeechExecutor:
                     backend_id=route.backend_id,
                     attempt=attempt_count,
                     category=None,
-                    circuit="closed",
+                    circuit=self._circuit_state(prepared.breaker),
                 )
                 try:
                     first = await response_stream.__anext__()
@@ -519,7 +520,7 @@ class GatewaySpeechExecutor:
                     backend_id=route.backend_id,
                     attempt=attempt_count,
                     category=failure_category,
-                    circuit="closed",
+                    circuit=self._circuit_state(prepared.breaker),
                     fallback=advance,
                     conversion=prepared.conversion_needed,
                     latency=latency,
@@ -709,6 +710,7 @@ class GatewaySpeechExecutor:
                 strict=True,
                 timeout_seconds=conversion.timeout_seconds,
                 ffmpeg_path=attempt.spec.ffmpeg_path,
+                max_output_bytes=conversion.max_output_bytes,
             )
         except asyncio.CancelledError:
             raise
@@ -828,6 +830,14 @@ class GatewaySpeechExecutor:
         )
 
     @staticmethod
+    def _circuit_state(breaker: Any) -> str:
+        try:
+            state = breaker.state
+        except Exception:  # noqa: BLE001 - diagnostic state must not alter synthesis.
+            return "unknown"
+        return state if isinstance(state, str) and state in _CIRCUIT_STATES else "unknown"
+
+    @staticmethod
     async def _release_circuit(
         breaker: Any,
         *,
@@ -909,10 +919,18 @@ class GatewaySpeechExecutor:
             }
         }
         logger.bind(**safe_payload).debug("Gateway TTS execution event: {}", name)
-        if self._event_hook is not None:
+        if self._event_hook is None:
+            return
+        try:
             result = self._event_hook(name, safe_payload)
             if inspect.isawaitable(result):
                 await result
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - observer failures cannot alter synthesis.
+            logger.bind(event=name, error_type=type(exc).__name__).warning(
+                "Gateway TTS event hook failed"
+            )
 
 
 __all__ = ["GatewayAttempt", "GatewaySpeechExecutor"]

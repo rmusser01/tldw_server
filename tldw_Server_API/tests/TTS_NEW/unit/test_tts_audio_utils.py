@@ -1,4 +1,5 @@
 import asyncio
+import builtins
 import subprocess
 import sys
 import threading
@@ -205,6 +206,94 @@ def test_convert_audio_timeout_is_forwarded_to_ffmpeg(monkeypatch, tmp_path):
     assert seen["command"][0] == pinned_path
     assert seen["kwargs"]["timeout"] == 1.25
     assert not list(scratch.iterdir())
+
+
+@pytest.mark.parametrize("strict", [False, True])
+def test_convert_audio_output_limit_caps_ffmpeg_read_and_cleans_files(
+    monkeypatch,
+    tmp_path,
+    strict,
+):
+    """Bounded conversion reads one sentinel byte and preserves strict semantics."""
+    processor = audio_utils.AudioProcessor.__new__(audio_utils.AudioProcessor)
+    processor.ffmpeg_available = True
+    processor.librosa_available = True
+    pinned_path = _make_executable(tmp_path / "ffmpeg")
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    max_output_bytes = 8
+    seen: dict[str, object] = {}
+    read_sizes: list[int] = []
+    monkeypatch.setattr(audio_utils.tempfile, "tempdir", str(scratch))
+
+    def fake_run(command, **kwargs):
+        seen["command"] = command
+        Path(command[-1]).write_bytes(b"x" * (max_output_bytes + 2))
+        return types.SimpleNamespace(returncode=0, stderr="")
+
+    class TrackingReader:
+        def __init__(self, path, mode):
+            self._file = builtins.open(path, mode)
+
+        def __enter__(self):
+            self._file.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            return self._file.__exit__(*args)
+
+        def read(self, size=-1):
+            read_sizes.append(size)
+            return self._file.read(size)
+
+    monkeypatch.setattr(audio_utils.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        audio_utils,
+        "open",
+        lambda path, mode: TrackingReader(path, mode),
+        raising=False,
+    )
+
+    if strict:
+        with pytest.raises(RuntimeError, match="^Audio conversion failed$") as exc_info:
+            processor.convert_audio(
+                b"original",
+                strict=True,
+                ffmpeg_path=pinned_path,
+                max_output_bytes=max_output_bytes,
+            )
+        assert isinstance(exc_info.value.__cause__, ValueError)
+    else:
+        assert processor.convert_audio(
+            b"original",
+            ffmpeg_path=pinned_path,
+            max_output_bytes=max_output_bytes,
+        ) == b"original"
+
+    command = seen["command"]
+    fs_index = command.index("-fs")
+    assert command[fs_index + 1] == str(max_output_bytes + 1)
+    assert read_sizes == [max_output_bytes + 1]
+    assert not list(scratch.iterdir())
+
+
+@pytest.mark.parametrize("max_output_bytes", [0, -1, True, 1.5, "8"])
+def test_convert_audio_rejects_invalid_output_limit_before_work(
+    monkeypatch,
+    max_output_bytes,
+):
+    """Invalid output limits fail before conversion allocates resources."""
+    processor = audio_utils.AudioProcessor.__new__(audio_utils.AudioProcessor)
+    processor.ffmpeg_available = True
+    processor.librosa_available = False
+    monkeypatch.setattr(
+        audio_utils.tempfile,
+        "NamedTemporaryFile",
+        lambda *args, **kwargs: pytest.fail("conversion work must not start"),
+    )
+
+    with pytest.raises(ValueError, match="max_output_bytes must be a positive integer"):
+        processor.convert_audio(b"audio", max_output_bytes=max_output_bytes)
 
 
 def test_convert_audio_timeout_maps_and_sanitizes_timeout_expired(monkeypatch, tmp_path):
@@ -421,6 +510,7 @@ async def test_convert_audio_async_forwards_timeout_and_strict(monkeypatch):
         strict=True,
         timeout_seconds=2.5,
         ffmpeg_path="/opt/pinned/ffmpeg",
+        max_output_bytes=4096,
     )
 
     assert result == b"converted"
@@ -432,6 +522,7 @@ async def test_convert_audio_async_forwards_timeout_and_strict(monkeypatch):
         "strict": True,
         "timeout_seconds": 2.5,
         "ffmpeg_path": "/opt/pinned/ffmpeg",
+        "max_output_bytes": 4096,
     }
 
 
