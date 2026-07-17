@@ -419,15 +419,15 @@ git commit -m "feat(slides): snapshot bounded generation sources (TASK-12115)"
 - Test: `tldw_Server_API/tests/Slides/test_standalone_html_provider.py`
 - Test: `tldw_Server_API/tests/Slides/test_standalone_html_generation.py`
 
-- [ ] **Step 1: Write failing endpoint/payload tests**
+- [x] **Step 1: Write failing endpoint/payload tests**
 
 For every catalog adapter, require exact endpoint identity, provider-specific payload shape, system/user separation, `stream: false`, no tools/cookies/application credentials/extra headers/extra body/router metadata, fixed token ceiling, and model equality. Prove all endpoint/base URL/proxy overrides are ignored or rejected before network I/O.
 
-- [ ] **Step 2: Write failing raw-response tests**
+- [x] **Step 2: Write failing raw-response tests**
 
 Use an in-process mock transport to cover `trust_env=False`, `follow_redirects=False`, `Accept-Encoding: identity`, conflicting/gzip/br/deflate rejection before body reads, declared/missing/chunked/dishonest 8 MiB ceilings, success JSON lexical budgets, duplicate keys/nonfinite/lone surrogates, exactly one complete outer Markdown fence stripped, nested/additional fences or surrounding prose rejected, fixed non-2xx errors with discarded bounded bodies, cancellation, timeout, connection failure, and 1 MiB extracted-document enforcement. Assert provider body/source never appears in logs or exception text.
 
-- [ ] **Step 3: Run tests and confirm failure**
+- [x] **Step 3: Run tests and confirm failure**
 
 ```bash
 source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate
@@ -436,15 +436,17 @@ python -m pytest -q \
   tldw_Server_API/tests/Slides/test_standalone_html_generation.py
 ```
 
-- [ ] **Step 4: Implement one isolated async call path**
+- [x] **Step 4: Implement one isolated async call path**
 
 Construct `httpx.AsyncClient` locally with no shared eager error hook, environment trust, redirects, or decompression ambiguity. Stream raw bytes through the bounded provider JSON preflight, strictly decode, and extract only the catalog codec's text field. Strip exactly one complete outer Markdown fence when present; reject additional fences or any surrounding prose. Return document bytes to the authoritative validator. Recheck the current enable/egress flag and exact stored tuple immediately before opening the request.
 
-- [ ] **Step 5: Re-run tests and prove one-call semantics**
+- [x] **Step 5: Re-run tests and prove one-call semantics**
 
 Run Step 3. Add an assertion that one normal worker attempt performs exactly one completion call and no fallback.
 
-- [ ] **Step 6: Commit**
+Final Task 6 verification: the initial assertion-level run was RED with 60 failures; follow-up race tests separately proved the client-entry and lazy-stream scheduling gaps before their fixes. The final focused provider/generation suite passed 123 tests, and the full standalone HTML regression family passed 761 tests. Black, Ruff, `py_compile`, and `git diff --check` passed. Production-only Bandit scanned 518 LOC with 0 findings or errors. A fresh independent full-range specification and quality review returned READY with no Critical, Important, or Minor findings. Task 6 is recorded in commits `6e1220fe3b` and `a37a484718`.
+
+- [x] **Step 6: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/Slides/standalone_html_provider.py tldw_Server_API/tests/Slides/test_standalone_html_provider.py tldw_Server_API/tests/Slides/test_standalone_html_generation.py "backlog/tasks/task-12115 - Add-first-class-standalone-HTML-JS-presentation-generation.md"
