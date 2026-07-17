@@ -21,6 +21,23 @@ def _has_httpx():
 requires_httpx = pytest.mark.skipif(not _has_httpx(), reason="httpx not installed")
 
 
+def _counting_async_stream(httpx, chunks: list[bytes]):
+    class _CountingAsyncStream(httpx.AsyncByteStream):
+        def __init__(self) -> None:
+            self.yielded = 0
+            self.close_count = 0
+
+        async def __aiter__(self):
+            for chunk in chunks:
+                self.yielded += 1
+                yield chunk
+
+        async def aclose(self) -> None:
+            self.close_count += 1
+
+    return _CountingAsyncStream()
+
+
 @requires_httpx
 def test_egress_denied_private_ip(monkeypatch):
     from tldw_Server_API.app.core.http_client import fetch_json
@@ -261,6 +278,128 @@ async def test_async_json_max_bytes_guard_uses_actual_body_despite_short_content
             )
     finally:
         await client.aclose()
+
+
+@requires_httpx
+@pytest.mark.asyncio
+@pytest.mark.parametrize("declared_length", [None, "2"])
+async def test_async_json_max_bytes_stops_chunked_body_early(declared_length):
+    import httpx
+
+    from tldw_Server_API.app.core.exceptions import JSONDecodeError
+    from tldw_Server_API.app.core.http_client import afetch_json, create_async_client
+
+    sensitive_chunk = b"sensitive-upstream-body"
+    chunks = [b'{"data":"', sensitive_chunk, b"x" * 32, b'"}']
+    stream = _counting_async_stream(httpx, chunks)
+    headers = {"Content-Type": "application/json"}
+    if declared_length is not None:
+        headers["Content-Length"] = declared_length
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            request=request,
+            headers=headers,
+            stream=stream,
+        )
+
+    client = create_async_client(transport=httpx.MockTransport(handler))
+    try:
+        with pytest.raises(JSONDecodeError) as exc_info:
+            await afetch_json(
+                method="GET",
+                url="http://93.184.216.34/large-json",
+                client=client,
+                max_bytes=16,
+            )
+    finally:
+        await client.aclose()
+
+    assert stream.yielded < len(chunks)
+    assert stream.close_count == 1
+    assert sensitive_chunk.decode() not in str(exc_info.value)
+
+
+@requires_httpx
+@pytest.mark.asyncio
+async def test_async_json_max_bytes_rejects_declared_oversize_before_body():
+    import httpx
+
+    from tldw_Server_API.app.core.exceptions import JSONDecodeError
+    from tldw_Server_API.app.core.http_client import afetch_json, create_async_client
+
+    stream = _counting_async_stream(httpx, [b'{"ok":true}'])
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            request=request,
+            headers={
+                "Content-Type": "application/json",
+                "Content-Length": "4096",
+            },
+            stream=stream,
+        )
+
+    client = create_async_client(transport=httpx.MockTransport(handler))
+    try:
+        with pytest.raises(JSONDecodeError, match="max_bytes"):
+            await afetch_json(
+                method="GET",
+                url="http://93.184.216.34/declared-large-json",
+                client=client,
+                max_bytes=16,
+            )
+    finally:
+        await client.aclose()
+
+    assert stream.yielded == 0
+    assert stream.close_count == 1
+
+
+@requires_httpx
+@pytest.mark.asyncio
+async def test_bounded_json_cross_origin_redirect_strips_sensitive_headers():
+    import httpx
+
+    from tldw_Server_API.app.core.http_client import afetch_json, create_async_client
+
+    seen_headers: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "93.184.216.34":
+            return httpx.Response(
+                302,
+                request=request,
+                headers={
+                    "Location": "http://93.184.216.35/final-json",
+                },
+            )
+        seen_headers.update(request.headers)
+        return httpx.Response(200, request=request, json={"ok": True})
+
+    client = create_async_client(transport=httpx.MockTransport(handler))
+    try:
+        payload = await afetch_json(
+            method="GET",
+            url="http://93.184.216.34/start-json",
+            client=client,
+            headers={
+                "Authorization": "Bearer must-not-forward",
+                "X-Api-Key": "must-not-forward",
+                "User-Agent": "gateway-test-client",
+            },
+            max_bytes=1024,
+            allow_redirects=True,
+        )
+    finally:
+        await client.aclose()
+
+    assert payload == {"ok": True}
+    assert "authorization" not in seen_headers
+    assert "x-api-key" not in seen_headers
+    assert seen_headers["user-agent"] == "gateway-test-client"
 
 
 @requires_httpx

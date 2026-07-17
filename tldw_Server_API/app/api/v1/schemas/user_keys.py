@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
 
@@ -17,6 +17,8 @@ def _default_offset_pagination_aliases(response):
 
 
 class UserProviderKeyUpsertRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     provider: str = Field(..., description="Provider name (e.g., 'openai').")
     api_key: str = Field(..., description="Provider API key.")
     credential_fields: dict[str, Any] | None = Field(
@@ -30,6 +32,8 @@ class UserProviderKeyUpsertRequest(BaseModel):
 
 
 class ProviderKeyTestRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     provider: str = Field(..., description="Provider name (e.g., 'openai').")
     model: str | None = Field(
         default=None,
@@ -67,6 +71,8 @@ class ProviderKeyTestResponse(BaseModel):
 
 
 class SharedProviderKeyUpsertRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     scope_type: Literal["org", "team"]
     scope_id: int
     provider: str
@@ -85,6 +91,8 @@ class SharedProviderKeyResponse(BaseModel):
 
 
 class SharedProviderKeyTestRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     scope_type: Literal["org", "team"]
     scope_id: int
     provider: str

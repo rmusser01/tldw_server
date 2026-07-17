@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import base64
+import hashlib
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
@@ -26,6 +28,13 @@ def _encrypted_row(payload: dict) -> dict:
 
 def _decrypted_payload_from_row(row: dict) -> dict:
     return decrypt_byok_payload(loads_envelope(row["encrypted_blob"]))
+
+
+def _assert_opaque_scope_token(token: str | None) -> None:
+    assert token is not None
+    assert len(token) == 64
+    assert token == token.lower()
+    int(token, 16)
 
 
 def _gateway_spec(
@@ -132,7 +141,7 @@ async def test_gateway_resolution_uses_only_user_key_and_opaque_scope(
     assert resolved.app_config is None
     assert resolved.credential_scope_token
     assert "user-secret" not in resolved.credential_scope_token
-    assert "404" not in resolved.credential_scope_token
+    _assert_opaque_scope_token(resolved.credential_scope_token)
     assert "voice-lab" not in resolved.credential_scope_token
     assert resolved.credential_scope_token not in repr(resolved)
 
@@ -167,7 +176,7 @@ async def test_gateway_user_record_is_authoritative_and_never_falls_through_to_a
 
 
 @pytest.mark.asyncio
-async def test_gateway_admin_scope_uses_backend_and_config_generation_only(
+async def test_gateway_admin_scope_tracks_config_and_key_rotation(
     gateway_byok_encryption,
 ):
     from tldw_Server_API.app.core.AuthNZ import byok_runtime
@@ -175,20 +184,113 @@ async def test_gateway_admin_scope_uses_backend_and_config_generation_only(
     first = await byok_runtime.resolve_gateway_byok_credentials(
         "gateway:voice-lab",
         user_id=None,
-        gateway_spec=_gateway_spec(config_generation="generation-one"),
+        gateway_spec=_gateway_spec(
+            api_key="admin-secret-one",
+            config_generation="generation-one",
+        ),
     )
-    second = await byok_runtime.resolve_gateway_byok_credentials(
+    same = await byok_runtime.resolve_gateway_byok_credentials(
         "gateway:voice-lab",
         user_id=None,
-        gateway_spec=_gateway_spec(config_generation="generation-two"),
+        gateway_spec=_gateway_spec(
+            api_key="admin-secret-one",
+            config_generation="generation-one",
+        ),
+    )
+    rotated_key = await byok_runtime.resolve_gateway_byok_credentials(
+        "gateway:voice-lab",
+        user_id=None,
+        gateway_spec=_gateway_spec(
+            api_key="admin-secret-two",
+            config_generation="generation-one",
+        ),
+    )
+    changed_config = await byok_runtime.resolve_gateway_byok_credentials(
+        "gateway:voice-lab",
+        user_id=None,
+        gateway_spec=_gateway_spec(
+            api_key="admin-secret-one",
+            config_generation="generation-two",
+        ),
     )
 
     assert first.source == "server_default"
-    assert first.api_key == "admin-secret"
+    assert first.api_key == "admin-secret-one"
     assert first.credential_scope_token
-    assert first.credential_scope_token != second.credential_scope_token
-    assert "admin-secret" not in first.credential_scope_token
+    assert first.credential_scope_token == same.credential_scope_token
+    assert first.credential_scope_token != rotated_key.credential_scope_token
+    assert first.credential_scope_token != changed_config.credential_scope_token
+    key_fingerprint = hashlib.sha256(
+        b"admin-secret-one",
+        usedforsecurity=True,
+    ).hexdigest()
+    assert key_fingerprint not in first.credential_scope_token
+    assert "admin-secret-one" not in first.credential_scope_token
     assert "voice-lab" not in first.credential_scope_token
+    assert first.credential_scope_token not in repr(first)
+
+
+@pytest.mark.asyncio
+async def test_gateway_repository_driver_error_fails_closed_without_admin_fallback(
+    monkeypatch,
+    gateway_byok_encryption,
+):
+    import aiosqlite
+
+    from tldw_Server_API.app.core.AuthNZ import byok_runtime
+
+    log_calls: list[tuple[str, tuple[object, ...]]] = []
+
+    class _Logger:
+        def debug(self, message: str, *args: object) -> None:
+            log_calls.append((message, args))
+
+    class _FailingRepo:
+        async def fetch_secret_for_user(self, _user_id: int, _provider: str):
+            raise aiosqlite.Error("sensitive database detail")
+
+    async def _fake_get_user_repo():
+        return _FailingRepo()
+
+    monkeypatch.setattr(byok_runtime, "logger", _Logger())
+    monkeypatch.setattr(byok_runtime, "_get_user_repo", _fake_get_user_repo)
+
+    resolved = await byok_runtime.resolve_gateway_byok_credentials(
+        "gateway:voice-lab",
+        user_id=9,
+        gateway_spec=_gateway_spec(api_key="admin-must-not-be-used"),
+    )
+
+    assert resolved.source == "none"
+    assert resolved.api_key is None
+    assert resolved.credential_scope_token is None
+    assert log_calls
+    assert log_calls[-1][1] == ("gateway:voice-lab", "Error")
+    assert "sensitive database detail" not in repr(log_calls)
+
+
+@pytest.mark.asyncio
+async def test_gateway_repository_cancellation_propagates(
+    monkeypatch,
+    gateway_byok_encryption,
+):
+    from tldw_Server_API.app.core.AuthNZ import byok_runtime
+
+    class _CancelledRepo:
+        async def fetch_secret_for_user(self, _user_id: int, _provider: str):
+            raise asyncio.CancelledError
+
+    async def _fake_get_user_repo():
+        return _CancelledRepo()
+
+    monkeypatch.setattr(byok_runtime, "_get_user_repo", _fake_get_user_repo)
+
+    with pytest.raises(asyncio.CancelledError):
+        await byok_runtime.resolve_gateway_byok_credentials(
+            "gateway:voice-lab",
+            user_id=9,
+            gateway_spec=_gateway_spec(api_key="admin-must-not-be-used"),
+        )
 
 
 @pytest.mark.asyncio
@@ -241,8 +343,8 @@ async def test_gateway_scope_changes_on_rotation_and_is_distinct_between_records
 
     assert first.credential_scope_token != other_user.credential_scope_token
     assert first.credential_scope_token != rotated.credential_scope_token
-    assert "101" not in first.credential_scope_token
-    assert "202" not in other_user.credential_scope_token
+    _assert_opaque_scope_token(first.credential_scope_token)
+    _assert_opaque_scope_token(other_user.credential_scope_token)
 
 
 @pytest.mark.asyncio
@@ -303,7 +405,7 @@ async def test_gateway_scope_ignores_usage_timestamps_but_changes_with_ciphertex
     assert first.credential_scope_token != after_rotation.credential_scope_token
     assert "first-key" not in first.credential_scope_token
     assert "rotated-key" not in after_rotation.credential_scope_token
-    assert "44" not in first.credential_scope_token
+    _assert_opaque_scope_token(first.credential_scope_token)
 
 
 @pytest.mark.asyncio

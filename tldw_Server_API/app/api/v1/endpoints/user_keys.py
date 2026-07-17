@@ -4,6 +4,7 @@ import base64
 import copy
 import hashlib
 import json
+import re
 import secrets
 import time
 from collections.abc import Mapping
@@ -87,22 +88,72 @@ _OPENAI_SOURCE_OAUTH = "oauth"
 _OPENAI_CREDENTIAL_VERSION = 2
 _OPENAI_DEFAULT_OAUTH_STATE_TTL_MINUTES = 10
 _TTS_GATEWAY_VERIFICATION_METADATA_KEY = "tts_gateway_verification_status"
-_TTS_GATEWAY_AUTHORITY_KEY_CONCEPTS = (
-    "url",
-    "uri",
-    "host",
-    "endpoint",
-    "header",
-    "authorization",
-    "authentication",
-    "authscheme",
-    "authtype",
-    "credential",
-    "apikey",
-    "bearer",
-    "password",
-    "secret",
-    "token",
+_TTS_GATEWAY_EXACT_AUTHORITY_KEYS = frozenset(
+    {
+        "accesstoken",
+        "apiendpoint",
+        "apikey",
+        "apibaseuri",
+        "apibaseurl",
+        "apiuri",
+        "apiurl",
+        "auth",
+        "authheaders",
+        "authscheme",
+        "authentication",
+        "authorization",
+        "baseuri",
+        "baseurl",
+        "bearer",
+        "credential",
+        "credentials",
+        "endpoint",
+        "endpointuri",
+        "endpointurl",
+        "header",
+        "headers",
+        "host",
+        "hostname",
+        "httpheaders",
+        "password",
+        "requestheaders",
+        "secret",
+        "token",
+        "uri",
+        "url",
+    }
+)
+_TTS_GATEWAY_AUTHORITY_TOKEN_PAIRS = frozenset(
+    {
+        ("access", "token"),
+        ("api", "endpoint"),
+        ("api", "host"),
+        ("api", "key"),
+        ("api", "uri"),
+        ("api", "url"),
+        ("auth", "header"),
+        ("auth", "headers"),
+        ("auth", "scheme"),
+        ("auth", "type"),
+        ("authorization", "header"),
+        ("authorization", "headers"),
+        ("base", "uri"),
+        ("base", "url"),
+        ("bearer", "authority"),
+        ("bearer", "token"),
+        ("client", "secret"),
+        ("credential", "source"),
+        ("custom", "url"),
+        ("discovery", "uri"),
+        ("http", "header"),
+        ("http", "headers"),
+        ("request", "header"),
+        ("request", "headers"),
+        ("service", "endpoint"),
+    }
+)
+_CAMEL_CASE_BOUNDARY = re.compile(
+    r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])"
 )
 
 
@@ -303,14 +354,21 @@ def _row_metadata(row: dict[str, Any] | None) -> dict[str, Any] | None:
 def _metadata_contains_gateway_authority(value: Any) -> bool:
     if isinstance(value, Mapping):
         for key, child in value.items():
+            key_text = str(key)
             canonical_key = "".join(
                 character
-                for character in str(key).casefold()
+                for character in key_text.casefold()
                 if character.isalnum()
             )
-            if canonical_key == "auth" or any(
-                concept in canonical_key
-                for concept in _TTS_GATEWAY_AUTHORITY_KEY_CONCEPTS
+            separated_key = _CAMEL_CASE_BOUNDARY.sub(" ", key_text)
+            tokens = tuple(
+                token.casefold()
+                for token in re.findall(r"[A-Za-z0-9]+", separated_key)
+            )
+            token_pairs = set(zip(tokens, tokens[1:]))
+            if (
+                canonical_key in _TTS_GATEWAY_EXACT_AUTHORITY_KEYS
+                or bool(token_pairs & _TTS_GATEWAY_AUTHORITY_TOKEN_PAIRS)
             ):
                 return True
             if _metadata_contains_gateway_authority(child):
@@ -1044,7 +1102,14 @@ async def list_user_provider_keys(
             )
             continue
 
-        if resolve_server_default_key(provider):
+        if provider.startswith("gateway:"):
+            gateway_spec = get_byok_gateway_spec(provider)
+            server_default_key = _coerce_nonempty_string(
+                getattr(gateway_spec, "api_key", None)
+            )
+        else:
+            server_default_key = resolve_server_default_key(provider)
+        if server_default_key:
             items.append(
                 UserProviderKeyStatusItem(
                     provider=provider,

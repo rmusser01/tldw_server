@@ -105,6 +105,42 @@ def test_gateway_specs_augment_byok_allowlist_without_discovery(monkeypatch):
     }
 
 
+def test_gateway_config_failure_preserves_static_allowlist_and_fails_dynamic_closed(
+    monkeypatch,
+):
+    from tldw_Server_API.app.core.AuthNZ import byok_helpers
+
+    log_calls: list[tuple[str, tuple[object, ...]]] = []
+
+    class _Logger:
+        def warning(self, message: str, *args: object) -> None:
+            log_calls.append((message, args))
+
+    def _fail_gateway_specs():
+        raise RuntimeError("sensitive gateway config detail")
+
+    monkeypatch.setattr(
+        byok_helpers,
+        "get_settings",
+        lambda: SimpleNamespace(
+            BYOK_ALLOWED_PROVIDERS=[
+                "openai",
+                "anthropic",
+                "gateway:voice-lab",
+            ]
+        ),
+    )
+    monkeypatch.setattr(byok_helpers, "logger", _Logger(), raising=False)
+    monkeypatch.setattr(byok_helpers, "get_byok_gateway_specs", _fail_gateway_specs)
+
+    assert byok_helpers.resolve_byok_allowlist() == {"openai", "anthropic"}
+    assert byok_helpers.is_provider_allowlisted("openai") is True
+    assert byok_helpers.is_provider_allowlisted("gateway:voice-lab") is False
+    assert log_calls
+    assert all(call[1] == ("RuntimeError",) for call in log_calls)
+    assert "sensitive gateway config detail" not in repr(log_calls)
+
+
 @pytest.mark.parametrize(
     "credential_fields",
     [
@@ -245,6 +281,114 @@ async def test_gateway_credential_probe_unavailable_is_stored_unverified(monkeyp
         )
         == "stored-unverified"
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("declared_length", [None, "2"])
+async def test_gateway_credential_probe_stops_oversized_chunked_discovery_early(
+    monkeypatch,
+    declared_length,
+):
+    import httpx
+
+    from tldw_Server_API.app.core.AuthNZ import byok_testing
+    from tldw_Server_API.app.core.http_client import afetch_json, create_async_client
+
+    chunks = [b'{"data":["', b"x" * 700_000, b"y" * 700_000, b'"]}']
+
+    class _CountingStream(httpx.AsyncByteStream):
+        def __init__(self) -> None:
+            self.yielded = 0
+            self.close_count = 0
+
+        async def __aiter__(self):
+            for chunk in chunks:
+                self.yielded += 1
+                yield chunk
+
+        async def aclose(self) -> None:
+            self.close_count += 1
+
+    stream = _CountingStream()
+    headers = {"Content-Type": "application/json"}
+    if declared_length is not None:
+        headers["Content-Length"] = declared_length
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            request=request,
+            headers=headers,
+            stream=stream,
+        )
+
+    client = create_async_client(transport=httpx.MockTransport(handler))
+
+    async def _central_fetch(**kwargs):
+        return await afetch_json(client=client, **kwargs)
+
+    monkeypatch.setattr(byok_testing, "afetch_json", _central_fetch)
+    try:
+        result = await byok_testing.probe_gateway_credentials(
+            spec=_probe_spec(),
+            api_key="user-key",
+        )
+    finally:
+        await client.aclose()
+
+    assert result == "stored-unverified"
+    assert stream.yielded < len(chunks)
+    assert stream.close_count == 1
+
+
+@pytest.mark.asyncio
+async def test_gateway_credential_probe_classifies_rejection_before_reading_body(
+    monkeypatch,
+):
+    import httpx
+
+    from tldw_Server_API.app.core.AuthNZ import byok_testing
+    from tldw_Server_API.app.core.http_client import afetch_json, create_async_client
+
+    class _CountingStream(httpx.AsyncByteStream):
+        def __init__(self) -> None:
+            self.yielded = 0
+            self.close_count = 0
+
+        async def __aiter__(self):
+            self.yielded += 1
+            yield b'{"error":"sensitive upstream body"}'
+
+        async def aclose(self) -> None:
+            self.close_count += 1
+
+    stream = _CountingStream()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            401,
+            request=request,
+            headers={"Content-Type": "application/json"},
+            stream=stream,
+        )
+
+    client = create_async_client(transport=httpx.MockTransport(handler))
+
+    async def _central_fetch(**kwargs):
+        return await afetch_json(client=client, **kwargs)
+
+    monkeypatch.setattr(byok_testing, "afetch_json", _central_fetch)
+    try:
+        result = await byok_testing.probe_gateway_credentials(
+            spec=_probe_spec(),
+            api_key="rejected-key",
+        )
+    finally:
+        await client.aclose()
+
+    assert result == "rejected"
+    assert stream.yielded == 0
+    assert stream.close_count == 1
     assert (
         await byok_testing.probe_gateway_credentials(
             spec=_probe_spec(discovery_enabled=False),
