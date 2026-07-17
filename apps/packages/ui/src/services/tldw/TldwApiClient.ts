@@ -1604,18 +1604,27 @@ export class TldwApiClientBase {
   }
 
   async requestWithCurrentConfig<T = any>(
-    init: any,
+    init: any | ((config: TldwConfig) => any),
     requireAuth = true
   ): Promise<T> {
-    const cfg = await this.ensureConfigForRequest(requireAuth && !init?.noAuth)
+    const usesConfigFactory = typeof init === "function"
+    const staticInit = usesConfigFactory ? null : init
+    const cfg = await this.ensureConfigForRequest(
+      requireAuth && !staticInit?.noAuth
+    )
+    const resolvedInit = typeof init === "function" ? init(cfg) : init
     if (getCurrentBrowserSurface() !== "webui-page") {
-      return await bgRequest<T>(init)
+      return await bgRequest<T>(
+        usesConfigFactory
+          ? { ...resolvedInit, configSnapshot: cfg }
+          : resolvedInit
+      )
     }
 
-    const response = await tldwRequest(init, {
+    const response = await tldwRequest(resolvedInit, {
       getConfig: async () => cfg
     })
-    if (!response?.ok) {
+    if (!response?.ok && !resolvedInit?.returnResponse) {
       const message =
         typeof response?.error === "string" && response.error.trim()
           ? response.error
@@ -1628,7 +1637,7 @@ export class TldwApiClientBase {
       error.details = response?.data
       throw error
     }
-    return response.data as T
+    return (resolvedInit?.returnResponse ? response : response.data) as T
   }
 
   async fetchWithAuth(

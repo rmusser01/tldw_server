@@ -212,7 +212,7 @@ const isSensitiveKey = (key: string): boolean => {
 }
 
 // Redact known sensitive fields (stack/trace/sql/query/secret/headers/etc.) recursively.
-const sanitizeResponseData = (
+export const sanitizeResponseData = (
   value: unknown,
   seen: WeakSet<object> = new WeakSet()
 ): unknown => {
@@ -416,6 +416,7 @@ export interface BgRequestInit<
   returnResponse?: boolean
   preferDirect?: boolean
   suppressBackendUnavailableEvent?: boolean
+  configSnapshot?: unknown
 }
 
 // In-flight coalescing for idempotent GET requests: when several callers issue
@@ -438,7 +439,8 @@ export async function bgRequest<
     !init.returnResponse &&
     !init.responseType &&
     !init.preferDirect &&
-    !init.suppressBackendUnavailableEvent
+    !init.suppressBackendUnavailableEvent &&
+    init.configSnapshot === undefined
   if (!coalescable) {
     return bgRequestImpl<T, P, M>(init)
   }
@@ -498,7 +500,8 @@ async function bgRequestImpl<
     responseType,
     returnResponse,
     preferDirect = false,
-    suppressBackendUnavailableEvent = false
+    suppressBackendUnavailableEvent = false,
+    configSnapshot
   } = init
   const path = normalizeKnownPathQuirks(rawPath)
   const isAbsoluteUrl = typeof path === "string" && /^https?:/i.test(path)
@@ -590,7 +593,12 @@ async function bgRequestImpl<
         abortSignal,
         responseType
       },
-      { getConfig: () => storage.get("tldwConfig").catch(() => null) }
+      {
+        getConfig: () =>
+          configSnapshot !== undefined
+            ? Promise.resolve(configSnapshot)
+            : storage.get("tldwConfig").catch(() => null)
+      }
     )
   }
   const resolveArrayBufferResponse = async (
@@ -643,7 +651,12 @@ async function bgRequestImpl<
         abortSignal,
         responseType
       },
-      { getConfig: () => storage.get("tldwConfig").catch(() => null) }
+      {
+        getConfig: () =>
+          configSnapshot !== undefined
+            ? Promise.resolve(configSnapshot)
+            : storage.get("tldwConfig").catch(() => null)
+      }
     )
     if (!resp?.ok) {
       const msg = formatErrorMessage(
@@ -843,7 +856,12 @@ async function bgRequestImpl<
       abortSignal,
       responseType
     },
-    { getConfig: () => storage.get("tldwConfig").catch(() => null) }
+    {
+      getConfig: () =>
+        configSnapshot !== undefined
+          ? Promise.resolve(configSnapshot)
+          : storage.get("tldwConfig").catch(() => null)
+    }
   )
   if (!resp?.ok) {
     const msg = formatErrorMessage(

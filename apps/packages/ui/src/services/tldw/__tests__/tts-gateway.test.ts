@@ -36,10 +36,19 @@ const makeClient = (options?: {
       headers: {}
     }
   })
+  const requestWithCurrentConfig = vi.fn(
+    async (initOrFactory: any) => {
+      const init =
+        typeof initOrFactory === "function"
+          ? initOrFactory(config)
+          : initOrFactory
+      return request(init)
+    }
+  )
   const client = {
     ensureConfigForRequest: vi.fn(async () => config),
     request,
-    requestWithCurrentConfig: request
+    requestWithCurrentConfig
   }
   return {
     client,
@@ -309,7 +318,7 @@ describe("tldw gateway speech client", () => {
       status: 0,
       details: {
         detail: "The speech request was cancelled",
-        access_token: "[redacted-secret]"
+        access_token: "[REDACTED]"
       }
     })
     expect(JSON.stringify(error)).not.toContain(rawSecret)
@@ -334,7 +343,18 @@ describe("tldw gateway speech client", () => {
         details: {
           detail: "Try again later",
           api_key: rawSecret,
-          retry_after: 3
+          retry_after: 3,
+          stack: rawSecret,
+          trace: rawSecret,
+          sql: rawSecret,
+          query: rawSecret,
+          path: rawSecret,
+          headers: { Authorization: rawSecret },
+          internalid: rawSecret,
+          session: rawSecret,
+          private: rawSecret,
+          access_key: rawSecret,
+          refresh_token: rawSecret
         }
       }
     })
@@ -347,8 +367,19 @@ describe("tldw gateway speech client", () => {
       status: 429,
       details: {
         detail: "Try again later",
-        api_key: "[redacted-secret]",
-        retry_after: 3
+        api_key: "[REDACTED]",
+        retry_after: 3,
+        stack: "[REDACTED]",
+        trace: "[REDACTED]",
+        sql: "[REDACTED]",
+        query: "[REDACTED]",
+        path: "[REDACTED]",
+        headers: "[REDACTED]",
+        internalid: "[REDACTED]",
+        session: "[REDACTED]",
+        private: "[REDACTED]",
+        access_key: "[REDACTED]",
+        refresh_token: "[REDACTED]"
       }
     })
     expect(error.message).toContain("Rate limited")
@@ -375,6 +406,31 @@ describe("tldw gateway speech client", () => {
       input: "Legacy body",
       text: "Legacy body",
       model: "Keep/Exact-Case"
+    })
+  })
+
+  it("rejects explicit-backend support from a failed capability envelope", async () => {
+    const { client, request } = makeClient({
+      config: {
+        serverUrl: "https://failed-envelope.example.test",
+        authMode: "single-user",
+        apiKey: "failed-envelope-secret"
+      },
+      capability: {
+        ok: false,
+        status: 503,
+        data: { supports_explicit_backend: true }
+      }
+    })
+
+    await detailed(client, "Failed envelope", {
+      backend: "openrouter",
+      allowFallback: false
+    })
+
+    expect(speechCalls(request)[0].body).toEqual({
+      input: "Failed envelope",
+      text: "Failed envelope"
     })
   })
 
@@ -489,14 +545,21 @@ describe("tldw gateway speech client", () => {
       }
       throw new Error("generic GET transport must not be used")
     })
-    const requestWithCurrentConfig = vi.fn(async () => capability)
+    const scopeConfig: TestConfig = {
+      serverUrl: "https://same-scope.example.test",
+      authMode: "multi-user",
+      accessToken: "same-scope-secret",
+      orgId: 3
+    }
+    const requestWithCurrentConfig = vi.fn(async (initOrFactory: any) => {
+      const init =
+        typeof initOrFactory === "function"
+          ? initOrFactory(scopeConfig)
+          : initOrFactory
+      return init.path === "/api/v1/audio/providers" ? capability : request(init)
+    })
     const client = {
-      ensureConfigForRequest: vi.fn(async () => ({
-        serverUrl: "https://same-scope.example.test",
-        authMode: "multi-user",
-        accessToken: "same-scope-secret",
-        orgId: 3
-      })),
+      ensureConfigForRequest: vi.fn(async () => scopeConfig),
       request,
       requestWithCurrentConfig
     }
@@ -540,21 +603,32 @@ describe("tldw gateway speech client", () => {
       capability: Promise<unknown>
     ) => {
       const speechRequests: Array<Record<string, any>> = []
+      const scopeConfig: TestConfig = {
+        serverUrl,
+        authMode: "multi-user",
+        accessToken: `scope-${orgId}-secret`,
+        orgId
+      }
       return {
         speechRequests,
         client: {
-          ensureConfigForRequest: vi.fn(async () => ({
-            serverUrl,
-            authMode: "multi-user",
-            accessToken: `scope-${orgId}-secret`,
-            orgId
-          })),
+          ensureConfigForRequest: vi.fn(async () => scopeConfig),
           request: vi.fn(async (init: Record<string, any>) => {
             if (init.path === "/api/v1/audio/providers") return globallyCoalesced
             speechRequests.push(init)
             return { ok: true, status: 200, data: audioBytes(), headers: {} }
           }),
-          requestWithCurrentConfig: vi.fn(async () => capability)
+          requestWithCurrentConfig: vi.fn(
+            async (initOrFactory: any) => {
+              const init =
+                typeof initOrFactory === "function"
+                  ? initOrFactory(scopeConfig)
+                  : initOrFactory
+              if (init.path === "/api/v1/audio/providers") return capability
+              speechRequests.push(init)
+              return { ok: true, status: 200, data: audioBytes(), headers: {} }
+            }
+          )
         }
       }
     }
@@ -609,20 +683,30 @@ describe("tldw gateway speech client", () => {
       releaseCapability = resolve
     })
     const speechRequests: Array<Record<string, any>> = []
-    const requestWithCurrentConfig = vi
-      .fn()
-      .mockImplementationOnce(async () => firstCapability)
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        data: { supports_explicit_backend: false }
-      })
+    let capabilityCallsForRace = 0
+    const request = vi.fn(async (init: Record<string, any>) => {
+      speechRequests.push(init)
+      return { ok: true, status: 200, data: audioBytes(), headers: {} }
+    })
+    const requestWithCurrentConfig = vi.fn(
+      async (initOrFactory: any) => {
+        const init =
+          typeof initOrFactory === "function"
+            ? initOrFactory(config)
+            : initOrFactory
+        if (init.path !== "/api/v1/audio/providers") return request(init)
+        capabilityCallsForRace += 1
+        if (capabilityCallsForRace === 1) return firstCapability
+        return {
+          ok: true,
+          status: 200,
+          data: { supports_explicit_backend: false }
+        }
+      }
+    )
     const client = {
       ensureConfigForRequest: vi.fn(async () => config),
-      request: vi.fn(async (init: Record<string, any>) => {
-        speechRequests.push(init)
-        return { ok: true, status: 200, data: audioBytes(), headers: {} }
-      }),
+      request,
       requestWithCurrentConfig
     }
 
@@ -642,9 +726,129 @@ describe("tldw gateway speech client", () => {
     await first
     await detailed(client, "Stable new scope", { backend: "openrouter" })
 
-    expect(requestWithCurrentConfig).toHaveBeenCalledTimes(2)
+    expect(capabilityCallsForRace).toBe(2)
     expect(speechRequests[0].body).not.toHaveProperty("backend")
     expect(speechRequests[1].body).not.toHaveProperty("backend")
+  })
+
+  it("omits negotiated fields when dispatch scope changes after fresh discovery", async () => {
+    const scopeA: TestConfig = {
+      serverUrl: "https://dispatch-fresh-a.example.test",
+      authMode: "multi-user",
+      accessToken: "dispatch-fresh-a-secret",
+      orgId: 51
+    }
+    const scopeB: TestConfig = {
+      serverUrl: "https://dispatch-fresh-b.example.test",
+      authMode: "multi-user",
+      accessToken: "dispatch-fresh-b-secret",
+      orgId: 52
+    }
+    const ensureConfigForRequest = vi
+      .fn()
+      .mockResolvedValueOnce(scopeA)
+      .mockResolvedValueOnce(scopeA)
+      .mockResolvedValueOnce(scopeA)
+      .mockResolvedValue(scopeB)
+    const speechRequests: Array<Record<string, any>> = []
+    const sendSpeech = async (init: Record<string, any>) => {
+      speechRequests.push(init)
+      return { ok: true, status: 200, data: audioBytes(), headers: {} }
+    }
+    const request = vi.fn(sendSpeech)
+    const requestWithCurrentConfig = vi.fn(
+      async (initOrFactory: any) => {
+        const init =
+          typeof initOrFactory === "function"
+            ? initOrFactory(scopeB)
+            : initOrFactory
+        return (
+        init.path === "/api/v1/audio/providers"
+          ? {
+              ok: true,
+              status: 200,
+              data: { supports_explicit_backend: true }
+            }
+          : sendSpeech(init)
+        )
+      }
+    )
+    const client = {
+      ensureConfigForRequest,
+      request,
+      requestWithCurrentConfig
+    }
+
+    await detailed(client, "Fresh dispatch race", { backend: "openrouter" })
+
+    expect(speechRequests[0].body).not.toHaveProperty("backend")
+    expect(requestWithCurrentConfig).toHaveBeenCalledWith(
+      expect.any(Function),
+      true
+    )
+  })
+
+  it("omits cached negotiated fields when dispatch resolves a different scope", async () => {
+    const scopeA: TestConfig = {
+      serverUrl: "https://dispatch-cache-a.example.test",
+      authMode: "multi-user",
+      accessToken: "dispatch-cache-a-secret",
+      orgId: 61
+    }
+    const scopeB: TestConfig = {
+      serverUrl: "https://dispatch-cache-b.example.test",
+      authMode: "multi-user",
+      accessToken: "dispatch-cache-b-secret",
+      orgId: 62
+    }
+    let config = scopeA
+    const speechRequests: Array<Record<string, any>> = []
+    const sendSpeech = async (init: Record<string, any>) => {
+      speechRequests.push(init)
+      return { ok: true, status: 200, data: audioBytes(), headers: {} }
+    }
+    const request = vi.fn(sendSpeech)
+    const requestWithCurrentConfig = vi.fn(
+      async (initOrFactory: any) => {
+        const init =
+          typeof initOrFactory === "function"
+            ? initOrFactory(config)
+            : initOrFactory
+        return (
+        init.path === "/api/v1/audio/providers"
+          ? {
+              ok: true,
+              status: 200,
+              data: { supports_explicit_backend: true }
+            }
+          : sendSpeech(init)
+        )
+      }
+    )
+    const client = {
+      ensureConfigForRequest: vi.fn(async () => config),
+      request,
+      requestWithCurrentConfig
+    }
+
+    await detailed(client, "Prime scope A", { backend: "openrouter" })
+    const second = detailed(client, "Cached dispatch race", {
+      backend: "openrouter"
+    })
+    config = scopeB
+    await second
+
+    expect(
+      requestWithCurrentConfig.mock.calls.filter(
+        ([init]) => init.path === "/api/v1/audio/providers"
+      )
+    ).toHaveLength(1)
+    expect(speechRequests[0].body.backend).toBe("openrouter")
+    expect(speechRequests[1].body).not.toHaveProperty("backend")
+    expect(requestWithCurrentConfig).toHaveBeenLastCalledWith(
+      expect.any(Function),
+      true
+    )
   })
 
   it("partitions capability support by sanitized server, auth mode, and organization", async () => {
