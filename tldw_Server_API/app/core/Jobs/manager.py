@@ -3009,12 +3009,6 @@ class JobManager:
         Returns:
             A dict representing the created (or existing, if idempotent) job row.
         """
-        # Queue name policy
-        allowed_queues = self._get_allowed_queues(domain)
-        if queue not in allowed_queues:
-            raise ValueError(
-                f"Queue '{queue}' not allowed for domain '{domain}'. Allowed: {allowed_queues}"
-            )  # noqa: TRY003
         slides_generation = _is_slides_generation_scope(domain, queue, job_type)
         if slides_generation:
             if not isinstance(owner_user_id, str) or not owner_user_id.strip():
@@ -3027,6 +3021,13 @@ class JobManager:
             )
             if existing is not None:
                 return existing
+
+        # Queue name policy
+        allowed_queues = self._get_allowed_queues(domain)
+        if queue not in allowed_queues:
+            raise ValueError(
+                f"Queue '{queue}' not allowed for domain '{domain}'. Allowed: {allowed_queues}"
+            )  # noqa: TRY003
 
         # Fair-share scheduling: enforce per-user concurrency limits and adjust priority
         if owner_user_id and _fair_share_enabled():
