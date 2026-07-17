@@ -4,7 +4,7 @@ import json
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
-from threading import Barrier
+from threading import Barrier, Event
 
 import pytest
 
@@ -24,15 +24,27 @@ def _insert_archive(
     owner: str | None = "owner-1",
     idempotency_key: str | None = "idem-1",
     payload: str = "{}",
+    result: str | None = None,
 ) -> None:
     conn.execute(
         """
         INSERT INTO jobs_archive (
             id, uuid, domain, queue, job_type, owner_user_id,
-            idempotency_key, payload, status, archived_at
-        ) VALUES (?, ?, 'slides', 'default', 'presentation.generate', ?, ?, ?, 'completed', ?)
+            idempotency_key, payload, result, status, archived_at
+        ) VALUES (?, ?, 'slides', 'default', 'presentation.generate', ?, ?, ?, ?, 'completed', ?)
         """,
-        (job_id, job_uuid, owner, idempotency_key, payload, NOW.isoformat()),
+        (job_id, job_uuid, owner, idempotency_key, payload, result, NOW.isoformat()),
+    )
+
+
+def _copy_job_to_archive(conn: sqlite3.Connection, *, job_id: int) -> None:
+    active_columns = {row[1] for row in conn.execute("PRAGMA table_info(jobs)")}
+    copied_columns = [row[1] for row in conn.execute("PRAGMA table_info(jobs_archive)") if row[1] in active_columns]
+    columns_sql = ", ".join(f'"{column}"' for column in copied_columns)
+    conn.execute(
+        f"INSERT INTO jobs_archive ({columns_sql}) "  # nosec B608 - trusted schema metadata
+        f"SELECT {columns_sql} FROM jobs WHERE id=?",  # nosec B608 - trusted schema metadata
+        (job_id,),
     )
 
 
@@ -119,6 +131,19 @@ def test_sqlite_generation_uuid_is_immutable_in_active_and_archive_rows(tmp_path
             with pytest.raises(sqlite3.IntegrityError):
                 conn.execute("UPDATE jobs_archive SET uuid=? WHERE uuid='archive-uuid'", (replacement,))
 
+        for column, replacement in (
+            ("domain", "other"),
+            ("queue", "other"),
+            ("job_type", "other"),
+        ):
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(f"UPDATE jobs SET {column}=? WHERE uuid='active-uuid'", (replacement,))
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(
+                    f"UPDATE jobs_archive SET {column}=? WHERE uuid='archive-uuid'",
+                    (replacement,),
+                )
+
         conn.execute("UPDATE jobs SET priority=6 WHERE uuid='active-uuid'")
         conn.execute("UPDATE jobs_archive SET priority=6 WHERE uuid='archive-uuid'")
         conn.execute(
@@ -128,6 +153,34 @@ def test_sqlite_generation_uuid_is_immutable_in_active_and_archive_rows(tmp_path
             """
         )
         conn.execute("UPDATE jobs SET uuid='' WHERE domain='unrelated'")
+
+
+def test_sqlite_forward_migration_adds_archive_terminal_projection_before_audit(tmp_path):
+    db_path = ensure_jobs_tables(tmp_path / "slides-archive-forward.db")
+    removed_columns = (
+        "batch_group",
+        "completion_token",
+        "failure_streak_code",
+        "failure_streak_count",
+        "quarantined_at",
+        "request_id",
+        "trace_id",
+        "failure_timeline",
+        "error_code",
+    )
+    with sqlite3.connect(db_path) as conn:
+        for column in removed_columns:
+            conn.execute(f"ALTER TABLE jobs_archive DROP COLUMN {column}")
+
+    ensure_jobs_tables(db_path)
+
+    with sqlite3.connect(db_path) as conn:
+        archive_columns = {row[1] for row in conn.execute("PRAGMA table_info(jobs_archive)")}
+        assert set(removed_columns) <= archive_columns
+        diagnostic = conn.execute(
+            "SELECT diagnostic_code FROM slides_standalone_reconciliation WHERE singleton_id=1"
+        ).fetchone()[0]
+        assert diagnostic is None
 
 
 def test_sqlite_wrong_definition_archive_indexes_fail_readiness_and_are_repaired(tmp_path):
@@ -284,15 +337,11 @@ def test_sqlite_exact_archive_collision_is_idempotent_and_deletes_active_row(
             "UPDATE jobs SET status='completed', completed_at='2000-01-01 00:00:00' WHERE id=?",
             (int(job["id"]),),
         )
-        _insert_archive(
-            conn,
-            job_id=int(job["id"]),
-            job_uuid=str(job["uuid"]),
-            owner="owner-1",
-            idempotency_key="idempotent-archive",
-            payload=json.dumps(payload),
-        )
+        _copy_job_to_archive(conn, job_id=int(job["id"]))
         conn.commit()
+
+    reopened = JobManager(db_path)
+    assert reopened.get_slides_generation_readiness()["ready"] is True
 
     monkeypatch.setenv("JOBS_ARCHIVE_BEFORE_DELETE", "true")
     statements: list[str] = []
@@ -329,6 +378,56 @@ def test_sqlite_exact_archive_collision_is_idempotent_and_deletes_active_row(
             ).fetchone()[0]
             == 0
         )
+
+
+def test_sqlite_archive_collision_with_different_terminal_result_is_unsafe(
+    tmp_path,
+    monkeypatch,
+):
+    db_path = ensure_jobs_tables(tmp_path / "slides-result-collision.db")
+    manager = JobManager(db_path)
+    payload = {"receipt_id": "receipt-1"}
+    job = manager.create_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        payload=payload,
+        owner_user_id="owner-1",
+        idempotency_key="result-collision",
+    )
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            UPDATE jobs
+            SET status='completed', result='{"artifact":"active"}',
+                completed_at='2000-01-01 00:00:00'
+            WHERE id=?
+            """,
+            (int(job["id"]),),
+        )
+        _insert_archive(
+            conn,
+            job_id=int(job["id"]),
+            job_uuid=str(job["uuid"]),
+            owner="owner-1",
+            idempotency_key="result-collision",
+            payload=json.dumps(payload),
+            result='{"artifact":"archive"}',
+        )
+        conn.commit()
+
+    monkeypatch.setenv("JOBS_ARCHIVE_BEFORE_DELETE", "true")
+    with pytest.raises(ValueError, match="unsafe presentation.generate archive collision"):
+        manager.prune_jobs(
+            older_than_days=1,
+            domain="slides",
+            queue="default",
+            job_type="presentation.generate",
+        )
+
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM jobs WHERE uuid=?", (job["uuid"],)).fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM jobs_archive WHERE uuid=?", (job["uuid"],)).fetchone()[0] == 1
 
 
 def test_sqlite_unsafe_archive_collision_poisons_readiness_and_preserves_active(
@@ -381,6 +480,149 @@ def test_sqlite_unsafe_archive_collision_poisons_readiness_and_preserves_active(
             ).fetchone()[0]
             == 1
         )
+
+    reopened = JobManager(db_path)
+    reopened_readiness = reopened.get_slides_generation_readiness()
+    assert reopened_readiness["ready"] is False
+    assert reopened_readiness["diagnostic_code"] == "ambiguous_generation_legacy_row"
+
+
+def test_sqlite_unsafe_archive_poison_commits_before_waiting_create_rechecks(
+    tmp_path,
+    monkeypatch,
+):
+    db_path = ensure_jobs_tables(tmp_path / "slides-poison-create-race.db")
+    prune_manager = JobManager(db_path)
+    create_manager = JobManager(db_path)
+    job = prune_manager.create_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        payload={"receipt_id": "active"},
+        owner_user_id="owner-1",
+        idempotency_key="unsafe-archive",
+    )
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "UPDATE jobs SET status='completed', completed_at='2000-01-01 00:00:00' WHERE id=?",
+            (int(job["id"]),),
+        )
+        _insert_archive(
+            conn,
+            job_id=int(job["id"]),
+            job_uuid=str(job["uuid"]),
+            owner="other-owner",
+            idempotency_key="other-key",
+            payload='{"receipt_id":"archive"}',
+        )
+        conn.commit()
+
+    collision_seen = Event()
+    allow_poison = Event()
+    create_waiting = Event()
+    original_collision_check = prune_manager._idempotent_slides_archive_collisions
+
+    def pause_on_collision(*args, **kwargs):
+        try:
+            return original_collision_check(*args, **kwargs)
+        except ValueError:
+            collision_seen.set()
+            assert allow_poison.wait(timeout=5)
+            raise
+
+    class SignalingConnection:
+        def __init__(self, inner):
+            self._inner = inner
+
+        def execute(self, sql, *args, **kwargs):
+            if str(sql).strip().upper() == "BEGIN IMMEDIATE":
+                create_waiting.set()
+            return self._inner.execute(sql, *args, **kwargs)
+
+        def __enter__(self):
+            self._inner.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            return self._inner.__exit__(*args)
+
+        def __getattr__(self, name):
+            return getattr(self._inner, name)
+
+    original_create_connect = create_manager._connect
+    monkeypatch.setattr(prune_manager, "_idempotent_slides_archive_collisions", pause_on_collision)
+    monkeypatch.setattr(
+        create_manager,
+        "_connect",
+        lambda: SignalingConnection(original_create_connect()),
+    )
+    monkeypatch.setenv("JOBS_ARCHIVE_BEFORE_DELETE", "true")
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        prune_future = executor.submit(
+            prune_manager.prune_jobs,
+            older_than_days=1,
+            domain="slides",
+            queue="default",
+            job_type="presentation.generate",
+        )
+        assert collision_seen.wait(timeout=5)
+        create_future = executor.submit(
+            create_manager.create_job,
+            domain="slides",
+            queue="default",
+            job_type="presentation.generate",
+            payload={"receipt_id": "new"},
+            owner_user_id="owner-2",
+            idempotency_key="must-not-slip-through",
+        )
+        assert create_waiting.wait(timeout=5)
+        allow_poison.set()
+        with pytest.raises(ValueError, match="unsafe presentation.generate archive collision"):
+            prune_future.result(timeout=5)
+        with pytest.raises(ValueError, match="coordination is unavailable"):
+            create_future.result(timeout=5)
+
+    with sqlite3.connect(db_path) as conn:
+        assert (
+            conn.execute("SELECT COUNT(*) FROM jobs WHERE idempotency_key='must-not-slip-through'").fetchone()[0] == 0
+        )
+
+
+def test_sqlite_archive_preserves_terminal_error_projection(tmp_path, monkeypatch):
+    db_path = ensure_jobs_tables(tmp_path / "slides-archive-terminal-error.db")
+    manager = JobManager(db_path)
+    job = manager.create_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        payload={"receipt_id": "receipt-1"},
+        owner_user_id="owner-1",
+        idempotency_key="terminal-error",
+    )
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            UPDATE jobs
+            SET status='failed', error_code='provider_failed',
+                error_message='safe failure', completed_at='2000-01-01 00:00:00'
+            WHERE id=?
+            """,
+            (int(job["id"]),),
+        )
+        conn.commit()
+
+    monkeypatch.setenv("JOBS_ARCHIVE_BEFORE_DELETE", "true")
+    assert manager.prune_jobs(older_than_days=1, domain="slides") == 1
+    archived = manager.resolve_slides_generation_job(
+        job_uuid=str(job["uuid"]),
+        owner_user_id="owner-1",
+        idempotency_key="terminal-error",
+    )
+    assert archived is not None
+    assert archived["archived"] is True
+    assert archived["status"] == "failed"
+    assert archived["error_code"] == "provider_failed"
 
 
 def test_sqlite_two_managers_create_one_generation_correlation(tmp_path):
@@ -1101,6 +1343,71 @@ def test_sqlite_completed_sweep_requires_and_stores_reconciler_reference_count(t
     proof = jm.load_slides_dormant_sweep_proof(key_id="old-key")
     assert proof is not None
     assert proof["unexpired_reference_count"] == 3
+
+
+def test_sqlite_same_revision_takeover_invalidates_prior_fenced_sweep(tmp_path):
+    now = datetime.now(UTC) - timedelta(minutes=1)
+    db_path = ensure_jobs_tables(tmp_path / "slides-sweep-takeover.db")
+    first = JobManager(db_path)
+    second = JobManager(db_path)
+    activated_at = now - timedelta(days=90)
+    retired_at = now - timedelta(days=40)
+    assert first.compare_and_swap_slides_current_key(
+        expected_current_key_id=None,
+        expected_config_revision=None,
+        new_current_key_id="old-key",
+        new_config_revision="revision-a",
+        changed_at=activated_at,
+    )
+    assert first.compare_and_swap_slides_current_key(
+        expected_current_key_id="old-key",
+        expected_config_revision="revision-a",
+        new_current_key_id="new-key",
+        new_config_revision="revision-b",
+        changed_at=retired_at,
+    )
+    lease = first.acquire_slides_reconciliation_lease(
+        holder_uuid="holder-a",
+        lease_seconds=1,
+        config_revision="revision-b",
+        now=now,
+    )
+    assert lease is not None
+    assert first.checkpoint_slides_reconciliation(
+        holder_uuid="holder-a",
+        fencing_token=lease["fencing_token"],
+        config_revision="revision-b",
+        cursor=None,
+        startup_complete_epoch="revision-b",
+        last_complete_epoch=now.timestamp(),
+        lag=0,
+        now=now + timedelta(milliseconds=500),
+        completed=True,
+        sweep_key_id="old-key",
+        sweep_started_at=retired_at + timedelta(days=32),
+        unexpired_reference_count=0,
+    )
+    prior_proof = first.load_slides_dormant_sweep_proof(key_id="old-key")
+    assert prior_proof is not None
+    assert prior_proof["fencing_token"] == lease["fencing_token"]
+
+    takeover = second.acquire_slides_reconciliation_lease(
+        holder_uuid="holder-b",
+        lease_seconds=30,
+        config_revision="revision-b",
+        now=now + timedelta(seconds=2),
+    )
+    assert takeover is not None
+    assert takeover["fencing_token"] > prior_proof["fencing_token"]
+    assert second.load_slides_dormant_sweep_proof(key_id="old-key") is None
+    assert (
+        second.compare_and_swap_remove_slides_key(
+            key_id="old-key",
+            expected_retired_at=retired_at,
+            expected_config_revision="revision-b",
+        )
+        is None
+    )
 
 
 def test_sqlite_key_removal_atomically_requires_current_zero_reference_proof(tmp_path):

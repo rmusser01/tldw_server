@@ -12,6 +12,8 @@ from typing import Any
 
 from tldw_Server_API.app.core.testing import is_truthy as _is_truthy
 
+from .migrations import SLIDES_ARCHIVE_EXACT_FIELDS
+
 _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
     AttributeError,
@@ -282,6 +284,7 @@ CREATE TABLE IF NOT EXISTS jobs_archive (
   worker_id TEXT,
   acquired_at TIMESTAMPTZ,
   error_message TEXT,
+  error_code TEXT,
   last_error TEXT,
   cancel_requested_at TIMESTAMPTZ,
   cancelled_at TIMESTAMPTZ,
@@ -327,7 +330,12 @@ BEGIN
   ) OR (
     OLD.domain='slides' AND OLD.queue='default'
     AND OLD.job_type='presentation.generate'
-    AND NEW.uuid IS DISTINCT FROM OLD.uuid
+    AND (
+      NEW.uuid IS DISTINCT FROM OLD.uuid
+      OR NEW.domain IS DISTINCT FROM OLD.domain
+      OR NEW.queue IS DISTINCT FROM OLD.queue
+      OR NEW.job_type IS DISTINCT FROM OLD.job_type
+    )
   ) THEN
     RAISE EXCEPTION 'presentation.generate UUID is required and immutable';
   END IF;
@@ -863,14 +871,35 @@ def _audit_slides_generation_pg(cur) -> tuple[str | None, int]:
         """
     )
     conflict_count = int((cur.fetchone() or [0])[0] or 0)
+    projection_mismatch = " OR ".join(
+        f"active.{field} IS DISTINCT FROM archived.{field}"
+        for field in SLIDES_ARCHIVE_EXACT_FIELDS
+    )
+    cur.execute(
+        f"""
+        SELECT COUNT(*)
+        FROM jobs active
+        JOIN jobs_archive archived ON archived.uuid = active.uuid
+        WHERE active.uuid IS NOT NULL AND BTRIM(active.uuid) <> ''
+          AND (
+            (active.domain='slides' AND active.queue='default'
+             AND active.job_type='presentation.generate')
+            OR
+            (archived.domain='slides' AND archived.queue='default'
+             AND archived.job_type='presentation.generate')
+          )
+          AND ({projection_mismatch})
+        """  # nosec B608 - field names come from a closed module constant
+    )
+    cross_table_count = int((cur.fetchone() or [0])[0] or 0)
     diagnostic_code: str | None = None
     diagnostic_count = 0
     if duplicate_count:
         diagnostic_code = "duplicate_archive_uuid"
         diagnostic_count = duplicate_count
-    elif invalid_count or conflict_count:
+    elif invalid_count or conflict_count or cross_table_count:
         diagnostic_code = "ambiguous_generation_legacy_row"
-        diagnostic_count = invalid_count + conflict_count
+        diagnostic_count = invalid_count + conflict_count + cross_table_count
     cur.execute(
         """
         UPDATE slides_standalone_reconciliation
@@ -1043,6 +1072,14 @@ def ensure_jobs_tables_pg(db_url: str) -> str:
                     f.execute("ALTER TABLE jobs_archive ADD COLUMN IF NOT EXISTS result_compressed BYTEA")
                     f.execute("ALTER TABLE jobs_archive ADD COLUMN IF NOT EXISTS batch_group TEXT")
                     f.execute("ALTER TABLE jobs_archive ADD COLUMN IF NOT EXISTS owner_user_id TEXT")
+                    f.execute("ALTER TABLE jobs_archive ADD COLUMN IF NOT EXISTS completion_token TEXT")
+                    f.execute("ALTER TABLE jobs_archive ADD COLUMN IF NOT EXISTS failure_streak_code TEXT")
+                    f.execute("ALTER TABLE jobs_archive ADD COLUMN IF NOT EXISTS failure_streak_count INTEGER")
+                    f.execute("ALTER TABLE jobs_archive ADD COLUMN IF NOT EXISTS quarantined_at TIMESTAMPTZ")
+                    f.execute("ALTER TABLE jobs_archive ADD COLUMN IF NOT EXISTS request_id TEXT")
+                    f.execute("ALTER TABLE jobs_archive ADD COLUMN IF NOT EXISTS trace_id TEXT")
+                    f.execute("ALTER TABLE jobs_archive ADD COLUMN IF NOT EXISTS failure_timeline JSONB")
+                    f.execute("ALTER TABLE jobs_archive ADD COLUMN IF NOT EXISTS error_code TEXT")
                 except required_migration_exceptions:
                     pass
             except required_migration_exceptions:
@@ -1319,6 +1356,20 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
                         ).format(
                             _sql.Identifier(schema_name),
                             _sql.Identifier(role),
+                        )
+                    )
+                    cur.execute(
+                        psycopg.sql.SQL("GRANT INSERT ON {}.job_events TO {}").format(
+                            psycopg.sql.Identifier(schema_name),
+                            psycopg.sql.Identifier(role),
+                        )
+                    )
+                    cur.execute(
+                        psycopg.sql.SQL(
+                            "GRANT USAGE, SELECT ON SEQUENCE {}.job_events_id_seq TO {}"
+                        ).format(
+                            psycopg.sql.Identifier(schema_name),
+                            psycopg.sql.Identifier(role),
                         )
                     )
                 except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:

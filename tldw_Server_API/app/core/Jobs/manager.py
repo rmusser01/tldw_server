@@ -55,6 +55,7 @@ from .metrics import (
     set_queue_gauges,
 )
 from .migrations import (
+    SLIDES_ARCHIVE_EXACT_FIELDS,
     SQLITE_ARCHIVE_CURSOR_OUTPUT_SQL,
     SQLITE_ARCHIVE_CURSOR_TIME_SQL,
     _ensure_sqlite_archive_batch_read_indexes,
@@ -861,7 +862,10 @@ class JobManager:
                             """
                             UPDATE slides_standalone_reconciliation
                             SET holder_uuid=%s, lease_expires_at=%s,
-                                fencing_token=fencing_token + 1
+                                fencing_token=fencing_token + 1,
+                                sweep_key_id=NULL, sweep_started_at=NULL,
+                                sweep_completed_at=NULL, sweep_complete=FALSE,
+                                unexpired_reference_count=0
                             WHERE singleton_id=1
                               AND fencing_token=%s
                               AND config_revision IS NOT DISTINCT FROM %s
@@ -936,7 +940,10 @@ class JobManager:
                 result = conn.execute(
                     """
                     UPDATE slides_standalone_reconciliation
-                    SET holder_uuid=?, lease_expires_at=?, fencing_token=fencing_token + 1
+                    SET holder_uuid=?, lease_expires_at=?, fencing_token=fencing_token + 1,
+                        sweep_key_id=NULL, sweep_started_at=NULL,
+                        sweep_completed_at=NULL, sweep_complete=0,
+                        unexpired_reference_count=0
                     WHERE singleton_id=1 AND fencing_token=?
                       AND config_revision IS ? AND holder_uuid IS ?
                     """,
@@ -1221,6 +1228,52 @@ class JobManager:
             "archive_indexes_ready": index_ready,
         }
 
+    def _slides_generation_ready_in_connection(
+        self,
+        conn: Any,
+        *,
+        cursor: Any | None = None,
+    ) -> bool:
+        """Check standalone readiness on the already-serialized create connection."""
+        if self.backend == "postgres":
+            if cursor is None:
+                raise RuntimeError("PostgreSQL readiness check requires a cursor")
+            cursor.execute(
+                "SELECT diagnostic_code FROM slides_standalone_reconciliation "
+                "WHERE singleton_id=1"
+            )
+            row = cursor.fetchone()
+            diagnostic = row.get("diagnostic_code") if isinstance(row, dict) else (row[0] if row else None)
+            return row is not None and diagnostic is None and slides_archive_indexes_ready_pg(cursor)
+        row = conn.execute(
+            "SELECT diagnostic_code FROM slides_standalone_reconciliation WHERE singleton_id=1"
+        ).fetchone()
+        return row is not None and row[0] is None and slides_archive_indexes_ready_sqlite(conn)
+
+    def _lookup_ready_slides_generation_job_in_connection(
+        self,
+        conn: Any,
+        *,
+        owner_user_id: str,
+        idempotency_key: str,
+        cursor: Any | None = None,
+    ) -> dict[str, Any] | None:
+        """Check readiness and resolve one correlation under the same fence."""
+
+        if not self._slides_generation_ready_in_connection(
+            conn,
+            cursor=cursor,
+        ):
+            raise SlidesGenerationJobsUnavailableError(
+                "presentation.generate Jobs coordination is unavailable"
+            )
+        return self._lookup_slides_generation_job_in_connection(
+            conn,
+            owner_user_id=owner_user_id,
+            idempotency_key=idempotency_key,
+            cursor=cursor,
+        )
+
     def _record_slides_generation_diagnostic(
         self,
         conn: Any,
@@ -1433,10 +1486,7 @@ class JobManager:
     ) -> set[str]:
         """Validate matching UUID collisions and return exact re-archive UUIDs."""
         scoped_suffix = " AND domain='slides' AND queue='default' " "AND job_type='presentation.generate'"
-        query = (
-            "SELECT uuid, domain, queue, job_type, owner_user_id, "
-            f"idempotency_key, payload FROM jobs{where_clause}{scoped_suffix}"  # nosec B608
-        )
+        query = f"SELECT * FROM jobs{where_clause}{scoped_suffix}"  # nosec B608
         if self.backend == "postgres":
             if cursor is None:
                 raise RuntimeError("PostgreSQL archive validation requires a cursor")
@@ -1469,18 +1519,9 @@ class JobManager:
             if len(archived_rows) != 1:
                 raise SlidesGenerationJobsUnavailableError("unsafe presentation.generate archive collision")
             archived = self._normalize_archived_job(archived_rows[0])
-            active_payload = self._maybe_decrypt_json(self._parse_json_value(active.get("payload")))
-            identity_fields = (
-                "uuid",
-                "owner_user_id",
-                "domain",
-                "queue",
-                "job_type",
-                "idempotency_key",
-            )
-            if any(archived.get(field) != active.get(field) for field in identity_fields) or (
-                archived.get("payload") != active_payload
-            ):
+            active["payload"] = self._maybe_decrypt_json(self._parse_json_value(active.get("payload")))
+            active["result"] = self._maybe_decrypt_json(self._parse_json_value(active.get("result")))
+            if any(archived.get(field) != active.get(field) for field in SLIDES_ARCHIVE_EXACT_FIELDS):
                 raise SlidesGenerationJobsUnavailableError("unsafe presentation.generate archive collision")
             exact_collisions.add(job_uuid)
         return exact_collisions
@@ -3050,7 +3091,7 @@ class JobManager:
                         else None
                     ),
                     pre_admission_lookup=(
-                        lambda cur: self._lookup_slides_generation_job_in_connection(
+                        lambda cur: self._lookup_ready_slides_generation_job_in_connection(
                             conn,
                             owner_user_id=str(owner_user_id),
                             idempotency_key=str(idempotency_key),
@@ -3124,7 +3165,7 @@ class JobManager:
                             counters_enabled=JobManager._is_truthy(os.getenv("JOBS_COUNTERS_ENABLED", "")),
                             begin_immediate=slides_generation,
                             pre_admission_lookup=(
-                                lambda active_conn: self._lookup_slides_generation_job_in_connection(
+                                lambda active_conn: self._lookup_ready_slides_generation_job_in_connection(
                                     active_conn,
                                     owner_user_id=str(owner_user_id),
                                     idempotency_key=str(idempotency_key),
@@ -8021,6 +8062,7 @@ class JobManager:
             candidate_params,
         )
         if archive_enabled:
+            archive_projection = ", ".join(("id", *SLIDES_ARCHIVE_EXACT_FIELDS))
             exact_collisions = self._idempotent_slides_archive_collisions(
                 None,
                 where_clause=candidate_where_clause,
@@ -8068,8 +8110,8 @@ class JobManager:
             )
             archive_insert_sql = (
                 f"WITH locked_jobs AS (SELECT * FROM jobs{archive_where_clause} FOR UPDATE) "  # nosec B608
-                "INSERT INTO jobs_archive (id, uuid, domain, queue, job_type, owner_user_id, project_id, batch_group, idempotency_key, payload, result, status, priority, max_retries, retry_count, available_at, started_at, leased_until, lease_id, worker_id, acquired_at, error_message, last_error, cancel_requested_at, cancelled_at, cancellation_reason, progress_percent, progress_message, created_at, updated_at, completed_at) "
-                "SELECT id, uuid, domain, queue, job_type, owner_user_id, project_id, batch_group, idempotency_key, payload, result, status, priority, max_retries, retry_count, available_at, started_at, CASE WHEN status IN ('completed','failed','cancelled','quarantined') THEN NULL ELSE leased_until END, CASE WHEN status IN ('completed','failed','cancelled','quarantined') THEN NULL ELSE lease_id END, CASE WHEN status IN ('completed','failed','cancelled','quarantined') THEN NULL ELSE worker_id END, acquired_at, error_message, last_error, cancel_requested_at, cancelled_at, cancellation_reason, progress_percent, progress_message, created_at, updated_at, completed_at FROM locked_jobs"
+                f"INSERT INTO jobs_archive ({archive_projection}) "
+                f"SELECT {archive_projection} FROM locked_jobs"
                 + archive_returning
             )
             cur.execute(archive_insert_sql, archive_params)
@@ -8200,7 +8242,9 @@ class JobManager:
             and queue in (None, _SLIDES_GENERATION_QUEUE)
             and job_type in (None, _SLIDES_GENERATION_JOB_TYPE)
         )
+        archive_projection = ", ".join(("id", *SLIDES_ARCHIVE_EXACT_FIELDS))
         conn = self._connect()
+        slides_diagnostic_persisted = False
         _test_mode = _is_test_mode()
         deleted = 0
         try:
@@ -8262,9 +8306,9 @@ class JobManager:
                                 )
                             return count
 
-                        # Each locked batch archives before deletion when enabled.
-                        # The batch helper also validates and suppresses only exact
-                        # idempotent standalone-HTML archive collisions.
+                        # Each locked batch copies the exact archive projection
+                        # before deletion when enabled. The helper also validates
+                        # and suppresses only exact idempotent Slides collisions.
                         from psycopg.rows import dict_row  # type: ignore
 
                         with conn.cursor(
@@ -8414,11 +8458,16 @@ class JobManager:
                                         "optimization",
                                     ),
                                 )
-                        exact_collisions = self._idempotent_slides_archive_collisions(
-                            conn,
-                            where_clause=where_clause,
-                            params=tuple(params),
-                        )
+                        try:
+                            exact_collisions = self._idempotent_slides_archive_collisions(
+                                conn,
+                                where_clause=where_clause,
+                                params=tuple(params),
+                            )
+                        except SlidesGenerationJobsUnavailableError:
+                            # The surrounding transaction rolls back before the
+                            # outer handler persists the bounded diagnostic.
+                            raise
                         archive_where_clause = where_clause
                         archive_params = list(params)
                         if exact_collisions:
@@ -8440,7 +8489,8 @@ class JobManager:
                             else ""
                         )
                         archive_insert_sql = (
-                            f"INSERT INTO jobs_archive (id, uuid, domain, queue, job_type, owner_user_id, project_id, batch_group, idempotency_key, payload, result, status, priority, max_retries, retry_count, available_at, started_at, leased_until, lease_id, worker_id, acquired_at, error_message, last_error, cancel_requested_at, cancelled_at, cancellation_reason, progress_percent, progress_message, created_at, updated_at, completed_at) SELECT id, uuid, domain, queue, job_type, owner_user_id, project_id, batch_group, idempotency_key, payload, result, status, priority, max_retries, retry_count, available_at, started_at, CASE WHEN status IN ('completed','failed','cancelled','quarantined') THEN NULL ELSE leased_until END, CASE WHEN status IN ('completed','failed','cancelled','quarantined') THEN NULL ELSE lease_id END, CASE WHEN status IN ('completed','failed','cancelled','quarantined') THEN NULL ELSE worker_id END, acquired_at, error_message, last_error, cancel_requested_at, cancelled_at, cancellation_reason, progress_percent, progress_message, created_at, updated_at, completed_at FROM jobs{archive_where_clause}"  # nosec B608
+                            f"INSERT INTO jobs_archive ({archive_projection}) "  # nosec B608
+                            f"SELECT {archive_projection} FROM jobs{archive_where_clause}"  # nosec B608
                             + archive_returning
                         )
                         archive_insert_cursor = conn.execute(
@@ -8596,13 +8646,14 @@ class JobManager:
             return int(deleted)
 
         except SlidesGenerationJobsUnavailableError:
-            with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
-                with contextlib.closing(self._connect()) as diagnostic_conn:
-                    self._record_slides_generation_diagnostic(
-                        diagnostic_conn,
-                        code="ambiguous_generation_legacy_row",
-                        count=1,
-                    )
+            if not slides_diagnostic_persisted:
+                with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
+                    with contextlib.closing(self._connect()) as diagnostic_conn:
+                        self._record_slides_generation_diagnostic(
+                            diagnostic_conn,
+                            code="ambiguous_generation_legacy_row",
+                            count=1,
+                        )
             raise
         finally:
             conn.close()

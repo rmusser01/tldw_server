@@ -83,6 +83,47 @@ _SQLITE_ARCHIVE_BATCH_READ_INDEX_SPECS = (
     ),
 )
 
+SLIDES_ARCHIVE_EXACT_FIELDS = (
+    "uuid",
+    "domain",
+    "queue",
+    "job_type",
+    "owner_user_id",
+    "project_id",
+    "batch_group",
+    "idempotency_key",
+    "payload",
+    "result",
+    "status",
+    "priority",
+    "max_retries",
+    "retry_count",
+    "available_at",
+    "started_at",
+    "leased_until",
+    "lease_id",
+    "worker_id",
+    "acquired_at",
+    "error_message",
+    "error_code",
+    "last_error",
+    "cancel_requested_at",
+    "cancelled_at",
+    "cancellation_reason",
+    "completion_token",
+    "failure_streak_code",
+    "failure_streak_count",
+    "quarantined_at",
+    "progress_percent",
+    "progress_message",
+    "request_id",
+    "trace_id",
+    "failure_timeline",
+    "created_at",
+    "updated_at",
+    "completed_at",
+)
+
 _SLIDES_ARCHIVE_INDEXES = {
     "idx_jobs_archive_slides_scope": (
         False,
@@ -199,6 +240,7 @@ CREATE TABLE IF NOT EXISTS jobs_archive (
   worker_id TEXT,
   acquired_at TEXT,
   error_message TEXT,
+  error_code TEXT,
   last_error TEXT,
   cancel_requested_at TEXT,
   cancelled_at TEXT,
@@ -762,15 +804,35 @@ def _audit_and_index_slides_generation(conn: sqlite3.Connection) -> None:
         """
     ).fetchone()
     conflict_count = int(conflicting_row[0] or 0) if conflicting_row else 0
+    projection_mismatch = " OR ".join(
+        f"active.{field} IS NOT archived.{field}" for field in SLIDES_ARCHIVE_EXACT_FIELDS
+    )
+    cross_table_row = conn.execute(
+        f"""
+        SELECT COUNT(*)
+        FROM jobs active
+        JOIN jobs_archive archived ON archived.uuid = active.uuid
+        WHERE active.uuid IS NOT NULL AND TRIM(active.uuid) <> ''
+          AND (
+            (active.domain='slides' AND active.queue='default'
+             AND active.job_type='presentation.generate')
+            OR
+            (archived.domain='slides' AND archived.queue='default'
+             AND archived.job_type='presentation.generate')
+          )
+          AND ({projection_mismatch})
+        """  # nosec B608 - field names come from a closed module constant
+    ).fetchone()
+    cross_table_count = int(cross_table_row[0] or 0) if cross_table_row else 0
 
     diagnostic_code: str | None = None
     diagnostic_count = 0
     if duplicate_count:
         diagnostic_code = "duplicate_archive_uuid"
         diagnostic_count = duplicate_count
-    elif invalid_count or conflict_count:
+    elif invalid_count or conflict_count or cross_table_count:
         diagnostic_code = "ambiguous_generation_legacy_row"
-        diagnostic_count = invalid_count + conflict_count
+        diagnostic_count = invalid_count + conflict_count + cross_table_count
     for index_name, (unique, columns, predicate) in _SLIDES_ARCHIVE_INDEXES.items():
         if not _sqlite_archive_index_matches(
             conn,
@@ -803,9 +865,10 @@ def _audit_and_index_slides_generation(conn: sqlite3.Connection) -> None:
         WHERE idempotency_key IS NOT NULL
         """
     )
+    conn.execute("DROP TRIGGER IF EXISTS trg_jobs_slides_generation_uuid_immutable")
     conn.execute(
         """
-        CREATE TRIGGER IF NOT EXISTS trg_jobs_slides_generation_uuid_immutable
+        CREATE TRIGGER trg_jobs_slides_generation_uuid_immutable
         BEFORE UPDATE ON jobs
         FOR EACH ROW
         WHEN (
@@ -815,16 +878,22 @@ def _audit_and_index_slides_generation(conn: sqlite3.Connection) -> None:
         ) OR (
           OLD.domain='slides' AND OLD.queue='default'
             AND OLD.job_type='presentation.generate'
-            AND NEW.uuid IS NOT OLD.uuid
+            AND (
+              NEW.uuid IS NOT OLD.uuid
+              OR NEW.domain IS NOT OLD.domain
+              OR NEW.queue IS NOT OLD.queue
+              OR NEW.job_type IS NOT OLD.job_type
+            )
         )
         BEGIN
           SELECT RAISE(ABORT, 'presentation.generate job UUID is immutable');
         END
         """
     )
+    conn.execute("DROP TRIGGER IF EXISTS trg_jobs_archive_slides_generation_uuid_immutable")
     conn.execute(
         """
-        CREATE TRIGGER IF NOT EXISTS trg_jobs_archive_slides_generation_uuid_immutable
+        CREATE TRIGGER trg_jobs_archive_slides_generation_uuid_immutable
         BEFORE UPDATE ON jobs_archive
         FOR EACH ROW
         WHEN (
@@ -834,7 +903,12 @@ def _audit_and_index_slides_generation(conn: sqlite3.Connection) -> None:
         ) OR (
           OLD.domain='slides' AND OLD.queue='default'
             AND OLD.job_type='presentation.generate'
-            AND NEW.uuid IS NOT OLD.uuid
+            AND (
+              NEW.uuid IS NOT OLD.uuid
+              OR NEW.domain IS NOT OLD.domain
+              OR NEW.queue IS NOT OLD.queue
+              OR NEW.job_type IS NOT OLD.job_type
+            )
         )
         BEGIN
           SELECT RAISE(ABORT, 'presentation.generate archive UUID is immutable');
@@ -937,8 +1011,6 @@ def ensure_jobs_tables(db_path: Path | None = None) -> Path:
                 f"{_sqlite_archive_migration_busy_timeout_ms()}"
             )
             conn.executescript(JOBS_SQLITE_DDL)
-            _audit_and_index_slides_generation(conn)
-            conn.commit()
             with contextlib.suppress(_JOBS_DB_EXCEPTIONS):
                 conn.execute("ALTER TABLE jobs ADD COLUMN batch_group TEXT")
             with contextlib.suppress(_JOBS_DB_EXCEPTIONS):
@@ -947,6 +1019,19 @@ def ensure_jobs_tables(db_path: Path | None = None) -> Path:
                 conn.execute(
                     "ALTER TABLE jobs_archive ADD COLUMN owner_user_id TEXT"
                 )
+            for column_sql in (
+                "completion_token TEXT",
+                "failure_streak_code TEXT",
+                "failure_streak_count INTEGER",
+                "quarantined_at TEXT",
+                "request_id TEXT",
+                "trace_id TEXT",
+                "failure_timeline TEXT",
+                "error_code TEXT",
+            ):
+                with contextlib.suppress(_JOBS_DB_EXCEPTIONS):
+                    conn.execute(f"ALTER TABLE jobs_archive ADD COLUMN {column_sql}")  # nosec B608
+            _audit_and_index_slides_generation(conn)
             _ensure_sqlite_dependency_snapshot_columns(conn)
             conn.commit()
             _ensure_sqlite_archive_locators(conn)
@@ -954,7 +1039,6 @@ def ensure_jobs_tables(db_path: Path | None = None) -> Path:
             archive_locator_verified = True
             with contextlib.suppress(_JOBS_DB_EXCEPTIONS):
                 conn.execute(SQLITE_ARCHIVE_CURSOR_INDEX_SQL)
-            conn.commit()
         try:
             logger.info(f"Ensured Jobs schema at {Path(db_path).resolve()}")
         except _JOBS_PATH_EXCEPTIONS:
