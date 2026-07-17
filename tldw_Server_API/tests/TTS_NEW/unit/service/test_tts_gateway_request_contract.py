@@ -50,11 +50,22 @@ async def _submit_job_and_convert(
     async def _resolve_tts_byok(**_kwargs):
         return 1, {}, None
 
+    def _preflight_gateway_speech(**kwargs):
+        return SimpleNamespace(
+            backend=kwargs["backend"],
+            model=kwargs["model"],
+            voice=kwargs["voice"] if kwargs["voice_supplied"] else "af_heart",
+            response_format=kwargs["response_format"],
+            allow_fallback=bool(kwargs["allow_fallback"]),
+            conversion_required=False,
+        )
+
     shim_map = {
         "_sanitize_speech_request": lambda *_args, **_kwargs: None,
         "_resolve_tts_byok": _resolve_tts_byok,
     }
     monkeypatch.setattr(audio_tts, "_audio_shim_attr", shim_map.__getitem__)
+    monkeypatch.setattr(audio_tts, "preflight_gateway_speech", _preflight_gateway_speech)
     job_manager = _CapturingJobManager()
 
     await audio_tts.create_speech_job(
@@ -167,7 +178,42 @@ async def test_malformed_backend_header_fails_before_sanitization_or_credentials
 
 
 @pytest.mark.asyncio
-async def test_speech_job_minimal_gateway_payload_preserves_omitted_fields(
+async def test_explicit_speech_rejects_authority_extra_params_before_synthesis(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        audio_tts,
+        "_audio_shim_attr",
+        lambda name: (lambda *_args, **_kwargs: None)
+        if name == "_sanitize_speech_request"
+        else MagicMock(),
+    )
+    tts_service = MagicMock()
+
+    with pytest.raises(HTTPException) as exc_info:
+        await audio_tts.create_speech(
+            OpenAISpeechRequest(
+                backend="gateway:company-proxy",
+                model="Vendor/Expressive-TTS",
+                input="Hello",
+                stream=False,
+                extra_params={
+                    "provider_overrides": {"apiKey": "distinctive-private-secret"}
+                },
+            ),
+            _http_request(),
+            tts_service=tts_service,
+            current_user=SimpleNamespace(id="1"),
+            media_db=None,
+            usage_log=MagicMock(),
+        )
+
+    assert exc_info.value.status_code == 422
+    tts_service.generate_speech.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_speech_job_minimal_gateway_payload_persists_resolved_route(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     queued, reconstructed, converted = await _submit_job_and_convert(
@@ -183,12 +229,22 @@ async def test_speech_job_minimal_gateway_payload_preserves_omitted_fields(
         "backend": "gateway:company-proxy",
         "model": "Vendor/Expressive-TTS",
         "input": "Hello",
+        "voice": "af_heart",
+        "allow_fallback": True,
         "stream": False,
     }
-    assert reconstructed.model_fields_set == {"backend", "model", "input", "stream"}
+    assert reconstructed.model_fields_set == {
+        "backend",
+        "model",
+        "input",
+        "voice",
+        "allow_fallback",
+        "stream",
+    }
     assert converted.supplied_fields.isdisjoint(
-        {"voice", "speed", "language", "lang_code", "target_sample_rate", "format", "extra_params"}
+        {"speed", "language", "lang_code", "target_sample_rate", "format", "extra_params"}
     )
+    assert "voice" in converted.supplied_fields
     assert converted.voice == "af_heart"
     assert converted.speed == 1.0
     assert converted.format is AudioFormat.MP3

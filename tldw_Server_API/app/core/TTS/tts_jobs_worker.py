@@ -27,6 +27,7 @@ from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
 from tldw_Server_API.app.core.Jobs.worker_utils import coerce_int as _coerce_int
 from tldw_Server_API.app.core.Jobs.worker_utils import jobs_manager_from_env as _jobs_manager
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
+from tldw_Server_API.app.core.TTS.gateway_preflight import gateway_route_provenance
 from tldw_Server_API.app.core.TTS.tts_exceptions import TTSError, is_retryable_error
 from tldw_Server_API.app.core.TTS.tts_service_v2 import get_tts_service_v2
 from tldw_Server_API.app.core.TTS.utils import (
@@ -88,7 +89,10 @@ def _open_media_db_for_history(user_id: str) -> Any | None:
         return None
 
 
-def _sanitize_params_json(request: OpenAISpeechRequest) -> dict[str, Any]:
+def _sanitize_params_json(
+    request: OpenAISpeechRequest,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     params_json: dict[str, Any] = {"speed": request.speed}
     if request.extra_params:
         try:
@@ -100,6 +104,16 @@ def _sanitize_params_json(request: OpenAISpeechRequest) -> dict[str, Any]:
             params_json["extra_params"] = extra_params
     if request.lang_code:
         params_json["lang_code"] = request.lang_code
+    route = gateway_route_provenance(
+        requested_backend=request.backend,
+        requested_model=request.model,
+        metadata=metadata,
+    )
+    if route:
+        if route["requested_backend"] != route["actual_backend"]:
+            params_json["requested_backend"] = route["requested_backend"]
+        params_json["fallback_used"] = route["fallback_used"]
+        params_json["conversion_used"] = route["conversion_used"]
     return params_json
 
 
@@ -122,7 +136,6 @@ async def _handle_tts_job(job: dict[str, Any]) -> dict[str, Any]:
     if job_type and job_type != TTS_JOB_TYPE:
         raise TTSJobError(f"unsupported job_type: {job_type}", retryable=False)
 
-    user_id = _resolve_user_id(job, payload)
     speech_payload = payload.get("speech_request")
     if not isinstance(speech_payload, dict):
         raise TTSJobError("missing speech_request payload", retryable=False)
@@ -134,8 +147,10 @@ async def _handle_tts_job(job: dict[str, Any]) -> dict[str, Any]:
     except Exception as exc:
         raise TTSJobError(f"invalid speech_request: {exc}", retryable=False) from exc
 
-    provider_hint = payload.get("provider_hint")
-    provider_overrides = payload.get("provider_overrides")
+    explicit_backend = request.backend is not None
+    user_id = _resolve_user_id(job, {} if explicit_backend else payload)
+    provider_hint = None if explicit_backend else payload.get("provider_hint")
+    provider_overrides = None if explicit_backend else payload.get("provider_overrides")
 
     jm = JobManager()
     tts_service = await get_tts_service_v2()
@@ -173,7 +188,12 @@ async def _handle_tts_job(job: dict[str, Any]) -> dict[str, Any]:
         metadata = getattr(request, "_tts_metadata", None)
         if not isinstance(metadata, dict):
             metadata = {}
-        provider = metadata.get("provider") or provider_hint
+        provider = (
+            metadata.get("actual_backend")
+            or metadata.get("actual_provider")
+            or metadata.get("provider")
+            or provider_hint
+        )
         model = metadata.get("model") or request.model
         voice_name = metadata.get("voice") or request.voice
         voice_id = metadata.get("voice_id")
@@ -192,7 +212,7 @@ async def _handle_tts_job(job: dict[str, Any]) -> dict[str, Any]:
         generation_time_ms = int(max(0.0, (asyncio.get_event_loop().time() - start_ts) * 1000))
         text_length = tts_history_text_length(request.input)
         text_value = request.input if history_cfg.get("store_text", True) else None
-        params_json = _sanitize_params_json(request)
+        params_json = _sanitize_params_json(request, metadata)
         voice_info = _build_voice_info(request, metadata)
 
         final_status = status
@@ -265,7 +285,7 @@ async def _handle_tts_job(job: dict[str, Any]) -> dict[str, Any]:
             speech_iter = tts_service.generate_speech(
                 request,
                 provider=provider_hint,
-                fallback=True,
+                fallback=not explicit_backend,
                 provider_overrides=provider_overrides,
                 user_id=int(user_id),
             )
@@ -320,12 +340,21 @@ async def _handle_tts_job(job: dict[str, Any]) -> dict[str, Any]:
                     _record_history("failed", error_message="write_failed")
                 raise TTSJobError("write_failed", retryable=True) from exc
 
+            request_metadata = getattr(request, "_tts_metadata", None)
+            if not isinstance(request_metadata, dict):
+                request_metadata = {}
+            route = gateway_route_provenance(
+                requested_backend=request.backend,
+                requested_model=request.model,
+                metadata=request_metadata,
+            )
             metadata = {
                 "artifact_type": "tts_audio",
-                "provider": provider_hint,
-                "model": request.model,
-                "voice": request.voice,
+                "provider": route.get("actual_backend", provider_hint),
+                "model": route.get("actual_model", request.model),
+                "voice": request_metadata.get("voice") or request.voice,
                 "format": request.response_format,
+                **route,
             }
             row = cdb.create_output_artifact(
                 type_="tts_audio",
@@ -348,6 +377,7 @@ async def _handle_tts_job(job: dict[str, Any]) -> dict[str, Any]:
             "storage_path": row.storage_path,
             "format": row.format,
             "bytes": len(audio_bytes),
+            **route,
         }
     finally:
         if history_db is not None:

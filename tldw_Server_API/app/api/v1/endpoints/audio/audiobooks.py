@@ -21,8 +21,8 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from fastapi.responses import PlainTextResponse
 from loguru import logger
 from starlette import status
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_request_user, User
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, check_rate_limit, get_request_user
 from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import get_collections_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
@@ -67,6 +67,12 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.PDF.PDF_Processing_Lib 
 )
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.testing import is_truthy
+from tldw_Server_API.app.core.TTS.gateway_config import canonicalize_gateway_id
+from tldw_Server_API.app.core.TTS.gateway_preflight import (
+    preflight_gateway_speech,
+    reject_gateway_persistence_authority,
+)
+from tldw_Server_API.app.core.TTS.tts_config import get_tts_config_manager
 
 router = APIRouter(prefix="/audiobooks", tags=["audiobooks"])
 
@@ -157,6 +163,158 @@ def _apply_default_audiobook_tts_hints(payload: dict[str, Any]) -> None:
         if inherited_has_tts_hint or _record_has_tts_hint(item):
             continue
         item["tts_model"] = "kokoro"
+
+
+def _audiobook_gateway_base_format(output: Any) -> str:
+    formats = output.get("formats") if isinstance(output, dict) else None
+    normalized = [str(item).strip().lower() for item in (formats or [])]
+    generated = [item for item in normalized if item != "m4b"]
+    if len(generated) > 1 and "wav" in generated:
+        return "wav"
+    if generated:
+        return generated[0]
+    return "wav"
+
+
+def _preflight_audiobook_gateway_routes(payload: dict[str, Any]) -> None:
+    """Resolve every explicit audiobook gateway route using local config only."""
+    top_backend = payload.get("tts_backend")
+    items = payload.get("items") if isinstance(payload.get("items"), list) else None
+    if top_backend is None and not any(
+        isinstance(item, dict)
+        and (
+            item.get("tts_backend") is not None
+            or any(
+                isinstance(chapter, dict) and chapter.get("tts_backend") is not None
+                for chapter in (item.get("chapters") or [])
+            )
+        )
+        for item in (items or [])
+    ) and not any(
+        isinstance(chapter, dict) and chapter.get("tts_backend") is not None
+        for chapter in (payload.get("chapters") or [])
+    ):
+        return
+
+    try:
+        reject_gateway_persistence_authority(payload)
+        specs = get_tts_config_manager().get_gateway_specs()
+
+        def resolve_record(
+            record: dict[str, Any],
+            *,
+            inherited_backend: str | None,
+            inherited_model: str | None,
+            inherited_voice: str | None,
+            inherited_fallback: bool | None,
+            output: Any,
+        ) -> tuple[str | None, str | None, str | None, bool | None]:
+            explicit_backend = record.get("tts_backend")
+            backend = explicit_backend or inherited_backend
+            if backend is None:
+                return None, record.get("tts_model") or inherited_model, inherited_voice, inherited_fallback
+            backend_changed = bool(
+                inherited_backend
+                and canonicalize_gateway_id(backend)
+                != canonicalize_gateway_id(inherited_backend)
+            )
+            model = record.get("tts_model") or inherited_model
+            fallback_value = record.get("tts_allow_fallback")
+            if fallback_value is None:
+                fallback_value = True if inherited_fallback is None else inherited_fallback
+            explicit_voice = record.get("tts_voice")
+            voice = explicit_voice
+            if voice is None and not backend_changed:
+                voice = inherited_voice
+            resolved = preflight_gateway_speech(
+                backend=backend,
+                model=model,
+                voice=voice,
+                voice_supplied=voice is not None,
+                response_format=_audiobook_gateway_base_format(output),
+                allow_fallback=bool(fallback_value),
+                supplied_fields=frozenset(),
+                gateway_specs=specs,
+            )
+            record["tts_backend"] = resolved.backend
+            record["tts_model"] = resolved.model
+            record["tts_voice"] = resolved.voice
+            record["tts_allow_fallback"] = resolved.allow_fallback
+            return resolved.backend, resolved.model, resolved.voice, bool(fallback_value)
+
+        default_output = payload.get("output")
+        if default_output is None and items:
+            default_output = next(
+                (item.get("output") for item in items if isinstance(item, dict) and item.get("output")),
+                None,
+            )
+        top_identity = resolve_record(
+            payload,
+            inherited_backend=None,
+            inherited_model=None,
+            inherited_voice=None,
+            inherited_fallback=None,
+            output=default_output,
+        )
+
+        records = items if items is not None else [payload]
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            if record is payload:
+                identity = top_identity
+                output = default_output
+            else:
+                output = record.get("output") or default_output
+                identity = resolve_record(
+                    record,
+                    inherited_backend=top_identity[0],
+                    inherited_model=top_identity[1],
+                    inherited_voice=top_identity[2],
+                    inherited_fallback=top_identity[3],
+                    output=output,
+                )
+            for chapter in record.get("chapters") or []:
+                if not isinstance(chapter, dict):
+                    continue
+                chapter_backend = chapter.get("tts_backend") or identity[0]
+                if chapter_backend is None:
+                    continue
+                backend_changed = bool(
+                    identity[0]
+                    and canonicalize_gateway_id(chapter_backend)
+                    != canonicalize_gateway_id(identity[0])
+                )
+                chapter_fallback = chapter.get("tts_allow_fallback")
+                if chapter_fallback is None:
+                    chapter_fallback = identity[3]
+                chapter_voice = chapter.get("voice")
+                if chapter_voice is None and not backend_changed:
+                    chapter_voice = identity[2]
+                supplied = set()
+                if chapter_voice is not None:
+                    supplied.add("voice")
+                if chapter.get("speed") is not None:
+                    supplied.add("speed")
+                resolved = preflight_gateway_speech(
+                    backend=chapter_backend,
+                    model=identity[1],
+                    voice=chapter_voice,
+                    voice_supplied=chapter_voice is not None,
+                    response_format=_audiobook_gateway_base_format(output),
+                    allow_fallback=bool(chapter_fallback),
+                    supplied_fields=frozenset(supplied),
+                    speed=chapter.get("speed"),
+                    gateway_specs=specs,
+                )
+                chapter["tts_backend"] = resolved.backend
+                chapter["tts_allow_fallback"] = resolved.allow_fallback
+                chapter["voice"] = resolved.voice
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
 
 
 def _resolve_subtitle_ttl_hours(request: SubtitleExportRequest) -> int | None:
@@ -581,6 +739,7 @@ async def create_audiobook_job(
 
     payload = request.model_dump()
     _apply_default_audiobook_tts_hints(payload)
+    _preflight_audiobook_gateway_routes(payload)
     payload["project_id"] = project_id
     if request.items:
         # Preserve per-item subtitle overrides only when explicitly set.
