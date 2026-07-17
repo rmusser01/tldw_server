@@ -26,6 +26,10 @@ import {
   type ServicePromptCatalogItem,
   type ServicePromptDetail
 } from "@/services/tldw/domains/service-prompts"
+import {
+  requestSettingsNavigation,
+  SETTINGS_NAVIGATION_REQUEST_EVENT
+} from "@/utils/settings-return"
 
 const mocks = vi.hoisted(() => ({
   confirmDanger: vi.fn(),
@@ -312,6 +316,22 @@ const DelayedRouteLink = () => {
   )
 }
 
+const ProgrammaticSettingsNavigation = ({ destination }: {
+  destination: string
+}) => {
+  const navigate = useNavigate()
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        if (requestSettingsNavigation(destination)) navigate(destination)
+      }}
+    >
+      Programmatic settings navigation
+    </button>
+  )
+}
+
 const openPrompt = async (name: string) => {
   fireEvent.click(await screen.findByRole("button", { name }))
   await screen.findByRole("heading", { name })
@@ -502,6 +522,111 @@ describe("ServicePromptsSettings", () => {
       }
     }
   })
+
+  it.each([
+    {
+      destination: "/settings/chat",
+      host: "BrowserRouter",
+      initialUrl: "/settings/prompt?prompt=chat.rag.answer"
+    },
+    {
+      destination: "/prompts",
+      host: "HashRouter",
+      initialUrl: "/options.html#/settings/prompt?prompt=chat.rag.answer"
+    }
+  ] as const)(
+    "guards and tokenizes programmatic Settings navigation in $host",
+    async ({ destination, host, initialUrl }) => {
+      window.history.replaceState({
+        hostMarker: "programmatic-source",
+        servicePromptHistoryForwardDestination: "https://stale.test/route"
+      }, "", initialUrl)
+      const Router = host === "HashRouter" ? HashRouter : BrowserRouter
+      const client = createClient()
+      render(
+        <Router>
+          <QueryClientProvider client={client}>
+            <App>
+              <Routes>
+                <Route
+                  path="/settings/prompt"
+                  element={(
+                    <>
+                      <ServicePromptsSettings />
+                      <ProgrammaticSettingsNavigation destination={destination} />
+                    </>
+                  )}
+                />
+                <Route path="*" element={<p>Programmatic outside route</p>} />
+              </Routes>
+            </App>
+          </QueryClientProvider>
+        </Router>
+      )
+      await screen.findByRole("heading", { name: "RAG answer" })
+
+      fireEvent.change(screen.getByRole("textbox", { name: "Template" }), {
+        target: { value: "Declined programmatic {context} {question}" }
+      })
+      vi.mocked(window.confirm).mockReturnValue(false)
+      fireEvent.click(screen.getByRole("button", {
+        name: "Programmatic settings navigation"
+      }))
+      expect(screen.getByRole("heading", { name: "RAG answer" }))
+        .toBeInTheDocument()
+
+      vi.mocked(window.confirm).mockReturnValue(true)
+      fireEvent.click(screen.getByRole("button", {
+        name: "Programmatic settings navigation"
+      }))
+      expect(await screen.findByText("Programmatic outside route"))
+        .toBeInTheDocument()
+      const destinationToken = window.history.state
+        .servicePromptHistoryEntryToken as string
+      expect(destinationToken).toEqual(expect.any(String))
+      expect(window.history.state).not.toHaveProperty(
+        "servicePromptHistoryForwardDestination"
+      )
+      const historyLength = window.history.length
+
+      await act(async () => {
+        window.history.back()
+        await new Promise((resolve) => setTimeout(resolve, 0))
+      })
+      await screen.findByRole("heading", { name: "RAG answer" })
+      expect(window.history.state).toMatchObject({
+        hostMarker: "programmatic-source",
+        servicePromptHistoryForwardEntryToken: destinationToken
+      })
+      expect(window.history.state).not.toHaveProperty(
+        "servicePromptHistoryForwardDestination"
+      )
+
+      const dirtyUrl = window.location.href
+      const authoredValue = "Programmatic forward dirty {context} {question}"
+      const editor = screen.getByRole("textbox", { name: "Template" })
+      fireEvent.change(editor, { target: { value: authoredValue } })
+      editor.focus()
+      vi.mocked(window.confirm).mockReturnValue(false)
+
+      await act(async () => {
+        window.history.forward()
+        await new Promise((resolve) => setTimeout(resolve, 0))
+      })
+      await waitFor(() => expect(window.location.href).toBe(dirtyUrl))
+      const restored = await screen.findByRole("textbox", { name: "Template" })
+      expect(restored).toHaveValue(authoredValue)
+      await waitFor(() => expect(restored).toHaveFocus())
+      expect(window.history.length).toBe(historyLength)
+      expect(JSON.stringify(window.history.state)).not.toContain(authoredValue)
+      for (const storage of [window.localStorage, window.sessionStorage]) {
+        for (let index = 0; index < storage.length; index += 1) {
+          expect(storage.getItem(storage.key(index)!) ?? "")
+            .not.toContain(authoredValue)
+        }
+      }
+    }
+  )
 
   it("uses escaped server English metadata for an unknown catalog ID", async () => {
     const unknown = {
@@ -1341,6 +1466,77 @@ describe("ServicePromptsSettings", () => {
     settingsLink.remove()
   })
 
+  it("guards same-extension anchors and ignores different extension hosts", async () => {
+    renderSettings()
+    await openPrompt("RAG answer")
+    fireEvent.change(screen.getByRole("textbox", { name: "Template" }), {
+      target: { value: "Dirty {context} {question}" }
+    })
+
+    const NativeURL = globalThis.URL
+    const browserHref = window.location.href
+    const extensionHref =
+      "moz-extension://profile/options.html#/settings/prompt?prompt=chat.rag.answer"
+    class OpaqueExtensionURL extends NativeURL {
+      constructor(input: string | URL, base?: string | URL) {
+        super(
+          String(input) === browserHref && base === undefined
+            ? extensionHref
+            : input,
+          base
+        )
+      }
+
+      get origin() {
+        return this.protocol === "moz-extension:"
+          ? window.location.origin
+          : super.origin
+      }
+    }
+    vi.stubGlobal("URL", OpaqueExtensionURL)
+
+    try {
+      vi.mocked(window.confirm).mockReturnValue(false)
+      const sameHostLink = document.createElement("a")
+      sameHostLink.href = "moz-extension://profile/options.html#/settings/chat"
+      document.body.append(sameHostLink)
+      const sameHostClick = new MouseEvent("click", {
+        bubbles: true,
+        cancelable: true,
+        button: 0
+      })
+      sameHostLink.dispatchEvent(sameHostClick)
+      sameHostLink.remove()
+
+      expect(sameHostClick.defaultPrevented).toBe(true)
+      expect(window.confirm).toHaveBeenCalledOnce()
+
+      vi.mocked(window.confirm).mockClear()
+      vi.mocked(window.confirm).mockReturnValue(true)
+      const otherHostLink = document.createElement("a")
+      otherHostLink.href = "moz-extension://other/options.html#/settings/chat"
+      document.body.append(otherHostLink)
+      const otherHostClick = new MouseEvent("click", {
+        bubbles: true,
+        cancelable: true,
+        button: 0
+      })
+      otherHostLink.dispatchEvent(otherHostClick)
+      otherHostLink.remove()
+
+      expect(otherHostClick.defaultPrevented).toBe(false)
+      expect(window.confirm).not.toHaveBeenCalled()
+      expect(window.history.state).not.toHaveProperty(
+        "servicePromptHistoryForwardEntryToken"
+      )
+      const unload = new Event("beforeunload", { cancelable: true })
+      window.dispatchEvent(unload)
+      expect(unload.defaultPrevented).toBe(true)
+    } finally {
+      vi.stubGlobal("URL", NativeURL)
+    }
+  })
+
   it("ignores ineligible anchors while dirty", async () => {
     renderSettings()
     await openPrompt("RAG answer")
@@ -1405,6 +1601,10 @@ describe("ServicePromptsSettings", () => {
     view.unmount()
     expect(removeWindow).toHaveBeenCalledWith("beforeunload", expect.any(Function))
     expect(removeWindow).toHaveBeenCalledWith("popstate", expect.any(Function))
+    expect(removeWindow).toHaveBeenCalledWith(
+      SETTINGS_NAVIGATION_REQUEST_EVENT,
+      expect.any(Function)
+    )
     expect(removeDocument).toHaveBeenCalledWith(
       "click",
       expect.any(Function),
@@ -1803,6 +2003,94 @@ describe("ServicePromptsSettings", () => {
   )
 
   it.each([
+    {
+      acceptsLeave: false,
+      resolvedScope: scopeOne,
+      restoresDraft: true,
+      scopeCase: "matching scope"
+    },
+    {
+      acceptsLeave: false,
+      resolvedScope: scopeTwo,
+      restoresDraft: false,
+      scopeCase: "mismatched scope"
+    },
+    {
+      acceptsLeave: true,
+      resolvedScope: scopeOne,
+      restoresDraft: false,
+      scopeCase: "accepted leave"
+    }
+  ] as const)(
+    "handles the claimed RAM handoff through scope rejection and Retry for $scopeCase",
+    async ({ acceptsLeave, resolvedScope, restoresDraft }) => {
+      mocks.resolveScope
+        .mockResolvedValueOnce(scopeOne)
+        .mockResolvedValueOnce(scopeOne)
+        .mockRejectedValueOnce(new Error("scope unavailable"))
+        .mockResolvedValueOnce(resolvedScope)
+      window.history.replaceState(
+        { __N: true, key: "next-root", hostMarker: "preserved" },
+        "",
+        "/settings/prompt"
+      )
+      installNextStyleHistory()
+      renderSettings()
+      await openPrompt("RAG answer")
+      fireEvent.click(screen.getByRole("link", {
+        name: "Chat settings test route"
+      }))
+      await screen.findByText("Outside workflow prompt route")
+      await act(async () => {
+        window.history.back()
+        await new Promise((resolve) => setTimeout(resolve, 0))
+      })
+      await screen.findByRole("heading", { name: "RAG answer" })
+
+      const dirtyUrl = window.location.href
+      const authoredValue = "Retry scope dirty {context} {question}"
+      fireEvent.change(screen.getByRole("textbox", { name: "Template" }), {
+        target: { value: authoredValue }
+      })
+      vi.mocked(window.confirm).mockReturnValue(false)
+
+      await act(async () => {
+        window.history.forward()
+        await new Promise((resolve) => setTimeout(resolve, 0))
+      })
+      expect(await screen.findByText(
+        "Unable to resolve the connected server and account."
+      )).toBeInTheDocument()
+      expect(window.location.href).toBe(dirtyUrl)
+
+      const hiddenUnload = new Event("beforeunload", { cancelable: true })
+      window.dispatchEvent(hiddenUnload)
+      expect(hiddenUnload.defaultPrevented).toBe(true)
+
+      if (acceptsLeave) {
+        vi.mocked(window.confirm).mockReturnValue(true)
+        window.dispatchEvent(new PopStateEvent("popstate", {
+          state: window.history.state
+        }))
+      }
+      fireEvent.click(screen.getByRole("button", { name: "Retry" }))
+      const restored = await screen.findByRole("textbox", { name: "Template" })
+      if (restoresDraft) {
+        expect(restored).toHaveValue(authoredValue)
+        expect(screen.getByText("Unsaved")).toBeInTheDocument()
+      } else {
+        expect(restored).toHaveValue("Context: {context}\nQuestion: {question}")
+        expect(restored).not.toHaveValue(authoredValue)
+        expect(screen.queryByText("Unsaved")).not.toBeInTheDocument()
+        const cleanUnload = new Event("beforeunload", { cancelable: true })
+        window.dispatchEvent(cleanUnload)
+        expect(cleanUnload.defaultPrevented).toBe(false)
+      }
+      expect(JSON.stringify(window.history.state)).not.toContain(authoredValue)
+    }
+  )
+
+  it.each([
     { focusCase: "stable editor ID", expectedFocus: "editor" },
     { focusCase: "no saved ID", expectedFocus: "detail" },
     { focusCase: "a stale saved ID", expectedFocus: "detail" }
@@ -1841,9 +2129,12 @@ describe("ServicePromptsSettings", () => {
     expect(window.history.state).toMatchObject({
       __N: true,
       hostMarker: "preserved",
-      servicePromptHistoryForwardDestination: outsideUrl,
+      servicePromptHistoryForwardEntryToken: expect.any(String),
       servicePromptHistoryIndex: 1
     })
+    expect(window.history.state).not.toHaveProperty(
+      "servicePromptHistoryForwardDestination"
+    )
 
     const dirtyUrl = window.location.href
     const authoredValue = "Outside forward dirty {context} {question}"

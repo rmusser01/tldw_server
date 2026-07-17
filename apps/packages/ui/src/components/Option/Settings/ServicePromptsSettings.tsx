@@ -24,6 +24,11 @@ import {
   type ServicePromptCatalogItem,
   type ServicePromptDetail
 } from "@/services/tldw/domains/service-prompts"
+import {
+  resolveSettingsNavigationUrl,
+  SETTINGS_NAVIGATION_REQUEST_EVENT,
+  type SettingsNavigationRequestDetail
+} from "@/utils/settings-return"
 
 type Draft = {
   scopeKey: string
@@ -204,21 +209,12 @@ const getHistoryIndex = (state: unknown): number | null => {
   if (!state || typeof state !== "object") return null
   const historyState = state as {
     idx?: unknown
-    servicePromptHistoryForwardDestination?: unknown
     servicePromptHistoryIndex?: unknown
   }
   if (typeof historyState.servicePromptHistoryIndex === "number") {
     return historyState.servicePromptHistoryIndex
   }
   return typeof historyState.idx === "number" ? historyState.idx : null
-}
-
-const getHistoryForwardDestination = (state: unknown): string | null => {
-  if (!state || typeof state !== "object") return null
-  const destination = (state as {
-    servicePromptHistoryForwardDestination?: unknown
-  }).servicePromptHistoryForwardDestination
-  return typeof destination === "string" ? destination : null
 }
 
 const getHistoryEntryToken = (state: unknown): string | null => {
@@ -272,7 +268,6 @@ export const ServicePromptsSettings = () => {
   const dirtyRef = React.useRef(false)
   const historyIndexRef = React.useRef(0)
   const historyInitializedRef = React.useRef(false)
-  const historyForwardDestinationRef = React.useRef<string | null>(null)
   const historyForwardEntryTokenRef = React.useRef<string | null>(null)
   const pendingHistoryDestinationRef = React.useRef<{
     token: string
@@ -339,23 +334,17 @@ export const ServicePromptsSettings = () => {
   const isSaving = activeKind === "save"
   const isResetting = activeKind === "reset"
 
-  const replaceHistoryForwardDestination = React.useCallback(
-    (destination: string | null, token: string | null = null) => {
+  const replaceHistoryForwardEntryToken = React.useCallback(
+    (token: string | null) => {
       const existing = window.history.state ?? {}
       const next = { ...existing }
-      if (destination === null) {
-        delete next.servicePromptHistoryForwardDestination
+      delete next.servicePromptHistoryForwardDestination
+      if (token === null) {
         delete next.servicePromptHistoryForwardEntryToken
       } else {
-        next.servicePromptHistoryForwardDestination = destination
-        if (token) {
-          next.servicePromptHistoryForwardEntryToken = token
-        } else {
-          delete next.servicePromptHistoryForwardEntryToken
-        }
+        next.servicePromptHistoryForwardEntryToken = token
       }
       window.history.replaceState(next, "", window.location.href)
-      historyForwardDestinationRef.current = destination
       historyForwardEntryTokenRef.current = token
     },
     []
@@ -372,6 +361,24 @@ export const ServicePromptsSettings = () => {
     pendingHistoryDestinationRef.current = null
   }, [])
 
+  const prepareHistoryNavigation = React.useCallback((destination: string) => {
+    if (dirtyRef.current) {
+      const leave = window.confirm(t("servicePrompts.unsaved.leave", {
+        defaultValue: "Discard unsaved workflow prompt changes?"
+      }))
+      if (!leave) return false
+      dirtyRef.current = false
+      setDirty(false)
+    }
+    clearPendingHistoryRestore()
+    claimedHistoryRestoreRef.current = null
+    const token = createHistoryEntryToken()
+    pendingHistoryDestinationRef.current = { token, url: destination }
+    replaceHistoryForwardEntryToken(token)
+    queueMicrotask(stampPendingHistoryDestination)
+    return true
+  }, [replaceHistoryForwardEntryToken, stampPendingHistoryDestination, t])
+
   React.useEffect(() => {
     scopeRef.current = scope
   }, [scope])
@@ -387,10 +394,12 @@ export const ServicePromptsSettings = () => {
   React.useEffect(() => {
     if (historyRestoreCheckedRef.current || !selectedId) return
     historyRestoreCheckedRef.current = true
-    claimedHistoryRestoreRef.current = claimPendingHistoryRestore(
+    const restore = claimPendingHistoryRestore(
       window.location.href,
       selectedId
     )
+    claimedHistoryRestoreRef.current = restore
+    if (restore) dirtyRef.current = true
   }, [selectedId])
 
   React.useEffect(() => {
@@ -399,6 +408,8 @@ export const ServicePromptsSettings = () => {
     claimedHistoryRestoreRef.current = null
     if (restore.url !== window.location.href ||
       restore.definitionId !== selectedId || restore.scopeKey !== scope.scopeKey) {
+      dirtyRef.current = false
+      setDirty(false)
       return
     }
     historyFocusRef.current = { element: null, id: restore.focusId }
@@ -420,13 +431,13 @@ export const ServicePromptsSettings = () => {
       historyInitializedRef.current = true
     }
     historyUrlRef.current = window.location.href
-    historyForwardDestinationRef.current = getHistoryForwardDestination(existing)
     historyForwardEntryTokenRef.current = getHistoryForwardEntryToken(existing)
-    window.history.replaceState(
-      { ...existing, servicePromptHistoryIndex: historyIndexRef.current },
-      "",
-      window.location.href
-    )
+    const next = {
+      ...existing,
+      servicePromptHistoryIndex: historyIndexRef.current
+    }
+    delete next.servicePromptHistoryForwardDestination
+    window.history.replaceState(next, "", window.location.href)
   }, [selectedId])
 
   React.useEffect(() => {
@@ -441,7 +452,6 @@ export const ServicePromptsSettings = () => {
       })
       .catch((error) => {
         if (controller.signal.aborted || isAbortError(error)) return
-        claimedHistoryRestoreRef.current = null
         setScopeError(error)
         setScopeLoading(false)
       })
@@ -454,6 +464,7 @@ export const ServicePromptsSettings = () => {
       clearPendingHistoryRestore()
       claimedHistoryRestoreRef.current = null
       pendingHistoryDestinationRef.current = null
+      dirtyRef.current = false
       abortActiveOperation()
       if (oldScope) {
         const queryKey = ["service-prompts", oldScope.scopeKey]
@@ -632,32 +643,29 @@ export const ServicePromptsSettings = () => {
         element.hasAttribute("download")) {
         return
       }
-      const destination = new URL(element.href, window.location.href)
-      if (destination.origin !== window.location.origin) return
-      if (dirtyRef.current) {
-        const leave = window.confirm(t("servicePrompts.unsaved.leave", {
-          defaultValue: "Discard unsaved workflow prompt changes?"
-        }))
-        if (!leave) {
-          event.preventDefault()
-          return
-        }
-        dirtyRef.current = false
-        setDirty(false)
+      const destination = resolveSettingsNavigationUrl(
+        element.href,
+        window.location.href
+      )
+      if (!destination) return
+      if (!prepareHistoryNavigation(destination)) event.preventDefault()
+    }
+    const settingsNavigationRequest = (event: Event) => {
+      const requestedDestination = (
+        event as CustomEvent<SettingsNavigationRequestDetail>
+      ).detail?.destination
+      const destination = typeof requestedDestination === "string"
+        ? resolveSettingsNavigationUrl(requestedDestination, window.location.href)
+        : null
+      if (!destination || !prepareHistoryNavigation(destination)) {
+        event.preventDefault()
       }
-      clearPendingHistoryRestore()
-      claimedHistoryRestoreRef.current = null
-      const token = createHistoryEntryToken()
-      pendingHistoryDestinationRef.current = { token, url: destination.href }
-      replaceHistoryForwardDestination(destination.href, token)
-      queueMicrotask(stampPendingHistoryDestination)
     }
     const popstate = (event: PopStateEvent) => {
       if (suppressPopstateRef.current) {
         suppressPopstateRef.current = false
         const index = getHistoryIndex(event.state)
         if (index !== null) historyIndexRef.current = index
-        historyForwardDestinationRef.current = getHistoryForwardDestination(event.state)
         historyForwardEntryTokenRef.current = getHistoryForwardEntryToken(event.state)
         const focusTarget = historyFocusRef.current
         const restoreFocus = (allowFallback: boolean) => {
@@ -684,7 +692,6 @@ export const ServicePromptsSettings = () => {
       if (!dirtyRef.current) {
         const index = getHistoryIndex(event.state)
         if (index !== null) historyIndexRef.current = index
-        historyForwardDestinationRef.current = getHistoryForwardDestination(event.state)
         historyForwardEntryTokenRef.current = getHistoryForwardEntryToken(event.state)
         return
       }
@@ -693,20 +700,19 @@ export const ServicePromptsSettings = () => {
       }))
       if (leave) {
         clearPendingHistoryRestore()
+        claimedHistoryRestoreRef.current = null
         dirtyRef.current = false
         setDirty(false)
         const index = getHistoryIndex(event.state)
         if (index !== null) historyIndexRef.current = index
-        historyForwardDestinationRef.current = getHistoryForwardDestination(event.state)
         historyForwardEntryTokenRef.current = getHistoryForwardEntryToken(event.state)
         return
       }
       const targetIndex = getHistoryIndex(event.state)
       const forwardEntryToken = historyForwardEntryTokenRef.current
       const delta = targetIndex === null
-        ? forwardEntryToken
-          ? getHistoryEntryToken(event.state) === forwardEntryToken ? -1 : 1
-          : historyForwardDestinationRef.current === window.location.href ? -1 : 1
+        ? forwardEntryToken &&
+          getHistoryEntryToken(event.state) === forwardEntryToken ? -1 : 1
         : historyIndexRef.current - targetIndex
       const activeElement = document.activeElement instanceof HTMLElement
         ? document.activeElement
@@ -735,11 +741,19 @@ export const ServicePromptsSettings = () => {
 
     window.addEventListener("beforeunload", beforeUnload)
     window.addEventListener("popstate", popstate)
+    window.addEventListener(
+      SETTINGS_NAVIGATION_REQUEST_EVENT,
+      settingsNavigationRequest
+    )
     document.addEventListener("click", anchorClick, true)
     return () => {
       stampPendingHistoryDestination()
       window.removeEventListener("beforeunload", beforeUnload)
       window.removeEventListener("popstate", popstate)
+      window.removeEventListener(
+        SETTINGS_NAVIGATION_REQUEST_EVENT,
+        settingsNavigationRequest
+      )
       document.removeEventListener("click", anchorClick, true)
     }
   }, [
@@ -748,7 +762,7 @@ export const ServicePromptsSettings = () => {
     fieldErrors,
     operationError,
     preview,
-    replaceHistoryForwardDestination,
+    prepareHistoryNavigation,
     stampPendingHistoryDestination,
     t
   ])
@@ -774,6 +788,7 @@ export const ServicePromptsSettings = () => {
     clearPendingHistoryRestore()
     claimedHistoryRestoreRef.current = null
     pendingHistoryDestinationRef.current = null
+    dirtyRef.current = false
     abortActiveOperation()
     if (scope && selectedId) {
       const oldDetailKey = [
@@ -797,7 +812,7 @@ export const ServicePromptsSettings = () => {
     setOperationError(null)
     const next = new URLSearchParams(searchParams)
     next.set("prompt", id)
-    replaceHistoryForwardDestination(null)
+    replaceHistoryForwardEntryToken(null)
     historyIndexRef.current += 1
     setSearchParams(next)
   }

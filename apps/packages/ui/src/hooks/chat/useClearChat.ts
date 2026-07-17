@@ -10,6 +10,7 @@ import { useStoreMessage } from "@/store"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
 import { useStoreChatModelSettings } from "@/store/model"
 import { cleanupAntOverlays } from "@/utils/cleanup-ant-overlays"
+import { requestSettingsNavigation } from "@/utils/settings-return"
 import { updatePageTitle } from "@/utils/update-page-title"
 
 type UseClearChatOptions = {
@@ -89,11 +90,13 @@ export const useClearChat = ({ textareaRef }: UseClearChatOptions = {}) => {
   )
 
   return React.useCallback(() => {
+    const destination = resolveClearChatPath()
+    if (!requestSettingsNavigation(destination)) return
     if (typeof window !== "undefined") {
       Modal.destroyAll()
       cleanupAntOverlays()
     }
-    navigate(resolveClearChatPath())
+    navigate(destination)
     const resetBaseState = (base: ResettableChatBase) => {
       base.setMessages([])
       base.setHistory([])

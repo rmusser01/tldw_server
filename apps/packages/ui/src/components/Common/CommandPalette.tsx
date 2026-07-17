@@ -38,6 +38,7 @@ import { getCommandPaletteTarget } from "@/routes/route-metadata"
 import { RESEARCH_WORKSPACE_PATH } from "@/routes/route-paths"
 import { searchSettings } from "@/data/settings-index"
 import { cn } from "@/libs/utils"
+import { requestSettingsNavigation } from "@/utils/settings-return"
 
 type CommandShortcut = { key: string; modifiers: ShortcutModifier[] }
 
@@ -231,7 +232,6 @@ export function CommandPalette({
         targetPath,
         action: () => {
           navigate(targetPath)
-          setOpen(false)
         }
       }
     }
@@ -332,7 +332,7 @@ export function CommandPalette({
             "Go to Health & Diagnostics"
           ),
           icon: <Activity className="size-4" />,
-          action: () => { navigate("/settings/health"); setOpen(false) },
+          action: () => navigate("/settings/health"),
           targetPath: "/settings/health",
           category: "navigation" as const,
           keywords: ["status", "connection", "diagnostic"],
@@ -524,7 +524,7 @@ export function CommandPalette({
         ? t(setting.descriptionKey, setting.defaultDescription)
         : setting.defaultDescription,
       icon: <Settings className="size-4" />,
-      action: () => { navigate(setting.route); setOpen(false) },
+      action: () => navigate(setting.route),
       targetPath: setting.route,
       category: "setting" as const,
       keywords: setting.keywords,
@@ -646,6 +646,15 @@ export function CommandPalette({
     selected?.scrollIntoView({ block: "nearest" })
   }, [selectedIndex])
 
+  const executeCommand = useCallback((command: CommandItem) => {
+    if (command.targetPath) {
+      const allowed = requestSettingsNavigation(command.targetPath)
+      closePalette()
+      if (!allowed) return
+    }
+    command.action()
+  }, [closePalette])
+
   // Handle keyboard navigation
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === "Tab") {
@@ -705,16 +714,13 @@ export function CommandPalette({
         break
       case "Enter":
         e.preventDefault()
-        filteredCommands[selectedIndex]?.action()
+        if (filteredCommands[selectedIndex]) {
+          executeCommand(filteredCommands[selectedIndex])
+        }
         break
       // Escape is handled by useShortcut hook to avoid duplicate handlers
     }
-  }, [filteredCommands, selectedIndex])
-
-  // Execute command
-  const executeCommand = useCallback((cmd: CommandItem) => {
-    cmd.action()
-  }, [])
+  }, [executeCommand, filteredCommands, selectedIndex])
 
   if (!open) return null
   if (typeof document === "undefined") return null
