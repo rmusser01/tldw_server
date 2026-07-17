@@ -1,15 +1,15 @@
-import pytest
-from fastapi import Depends, Request, status
 from unittest.mock import MagicMock
 
-from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
-from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
-from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
-from tldw_Server_API.app.core.TTS.utils import compute_tts_history_text_hash
-from tldw_Server_API.app.core.config import settings
-from tldw_Server_API.app.api.v1.endpoints.audio import audio_history
+import pytest
+from fastapi import Depends, Request, status
 
+from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
+from tldw_Server_API.app.api.v1.endpoints.audio import audio_history
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.core.config import settings
+from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
+from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
+from tldw_Server_API.app.core.TTS.utils import compute_tts_history_text_hash
 
 pytestmark = [pytest.mark.unit]
 
@@ -110,6 +110,45 @@ def test_history_list_favorite_delete(test_client, auth_headers):
         payload = resp.json()
         ids = {item["id"] for item in payload["items"]}
         assert entry_two not in ids
+    finally:
+        _clear_media_db_override(fastapi_app, dep_keys)
+        db.close_connection()
+
+
+def test_history_detail_round_trips_gateway_route_provenance(test_client, auth_headers):
+    db = MediaDatabase(db_path=":memory:", client_id="tts_history_gateway_route")
+    entry_id = db.create_tts_history_entry(
+        user_id="1",
+        text_hash="gateway_route_hash",
+        text="Fallback narration",
+        text_length=18,
+        provider="gateway:backup",
+        model="Vendor/Backup-TTS",
+        voice_name="narrator",
+        format="mp3",
+        params_json={
+            "speed": 1.0,
+            "requested_backend": "gateway:company",
+            "fallback_used": True,
+            "conversion_used": False,
+        },
+        status="success",
+    )
+
+    fastapi_app = test_client.app
+    dep_keys = _set_media_db_override(fastapi_app, db)
+    try:
+        response = test_client.get(f"/api/v1/audio/history/{entry_id}", headers=auth_headers)
+        assert response.status_code == status.HTTP_200_OK
+        payload = response.json()
+        assert payload["provider"] == "gateway:backup"
+        assert payload["model"] == "Vendor/Backup-TTS"
+        assert payload["params_json"] == {
+            "speed": 1.0,
+            "requested_backend": "gateway:company",
+            "fallback_used": True,
+            "conversion_used": False,
+        }
     finally:
         _clear_media_db_override(fastapi_app, dep_keys)
         db.close_connection()
