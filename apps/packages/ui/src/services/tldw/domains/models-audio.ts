@@ -62,6 +62,207 @@ export interface TldwApiClientCore {
   upload<T>(init: any, requireAuth?: boolean): Promise<T>
 }
 
+export type TldwSpeechOptions = {
+  voice?: string
+  model?: string
+  responseFormat?: string
+  speed?: number
+  language?: string
+  normalizationOptions?: Record<string, unknown>
+  extraParams?: Record<string, unknown>
+  backend?: string
+  allowFallback?: boolean
+  stream?: boolean
+  signal?: AbortSignal
+}
+
+export type TldwSpeechDetailedResult = {
+  buffer: ArrayBuffer
+  actualBackend?: string
+  fallbackUsed: boolean
+}
+
+const TTS_CAPABILITY_TTL_MS = 30_000
+const ttsCapabilityCache = new Map<
+  string,
+  { supported: boolean; expiresAt: number }
+>()
+
+const sanitizeServerUrlForScope = (value: unknown): string => {
+  const raw = typeof value === "string" ? value.trim() : ""
+  if (!raw) return "same-origin"
+  try {
+    const url = new URL(raw)
+    url.username = ""
+    url.password = ""
+    url.search = ""
+    url.hash = ""
+    const path = url.pathname.replace(/\/+$/, "")
+    return `${url.protocol}//${url.host}${path}`
+  } catch {
+    let hash = 2166136261
+    for (let index = 0; index < raw.length; index += 1) {
+      hash = Math.imul(hash ^ raw.charCodeAt(index), 16777619)
+    }
+    return `invalid:${(hash >>> 0).toString(16)}`
+  }
+}
+
+const getTtsCapabilityScope = (config: unknown): string => {
+  const record = (config && typeof config === "object"
+    ? config
+    : {}) as Record<string, unknown>
+  const authMode = record.authMode === "multi-user" ? "multi-user" : "single-user"
+  const orgId = record.orgId == null ? "none" : String(record.orgId)
+  return `${sanitizeServerUrlForScope(record.serverUrl)}|${authMode}|${orgId}`
+}
+
+const supportsExplicitTtsBackend = async (
+  client: TldwApiClientCore,
+  config: unknown
+): Promise<boolean> => {
+  const scope = getTtsCapabilityScope(config)
+  const now = Date.now()
+  const cached = ttsCapabilityCache.get(scope)
+  if (cached && cached.expiresAt > now) return cached.supported
+
+  let supported = false
+  try {
+    const response = await client.request<unknown>({
+      path: "/api/v1/audio/providers",
+      method: "GET"
+    })
+    const payload =
+      response &&
+      typeof response === "object" &&
+      "data" in response &&
+      (response as Record<string, unknown>).data &&
+      typeof (response as Record<string, unknown>).data === "object"
+        ? ((response as Record<string, unknown>).data as Record<string, unknown>)
+        : (response as Record<string, unknown> | null)
+    supported = payload?.supports_explicit_backend === true
+  } catch {
+    supported = false
+  }
+  ttsCapabilityCache.set(scope, {
+    supported,
+    expiresAt: now + TTS_CAPABILITY_TTL_MS
+  })
+  return supported
+}
+
+const normalizeArrayBuffer = async (value: unknown): Promise<ArrayBuffer | null> => {
+  if (!value) return null
+  if (value instanceof ArrayBuffer) return value
+  if (typeof SharedArrayBuffer !== "undefined" && value instanceof SharedArrayBuffer) {
+    return new Uint8Array(value).slice(0).buffer
+  }
+  if (ArrayBuffer.isView(value)) {
+    const view = value as ArrayBufferView
+    if (
+      typeof SharedArrayBuffer !== "undefined" &&
+      view.buffer instanceof SharedArrayBuffer
+    ) {
+      const copy = new Uint8Array(view.byteLength)
+      copy.set(new Uint8Array(view.buffer, view.byteOffset, view.byteLength))
+      return copy.buffer
+    }
+    if (view.buffer instanceof ArrayBuffer) {
+      return view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength)
+    }
+  }
+  if (typeof Blob !== "undefined" && value instanceof Blob) {
+    return await value.arrayBuffer()
+  }
+  const tag = Object.prototype.toString.call(value)
+  if (tag === "[object ArrayBuffer]" && typeof (value as any).slice === "function") {
+    return (value as any).slice(0)
+  }
+  if (Array.isArray(value) && value.every((entry) => typeof entry === "number")) {
+    return new Uint8Array(value).buffer
+  }
+  if (typeof value === "object") {
+    const record = value as Record<string, any>
+    if (
+      typeof record.type === "string" &&
+      record.type.toLowerCase() === "buffer" &&
+      Array.isArray(record.data)
+    ) {
+      return new Uint8Array(record.data).buffer
+    }
+    if (
+      typeof record.ok === "boolean" &&
+      Object.prototype.hasOwnProperty.call(record, "data")
+    ) {
+      const nested = await normalizeArrayBuffer(record.data)
+      if (nested) return nested
+    }
+    if (
+      typeof record.byteLength === "number" &&
+      typeof record.slice === "function"
+    ) {
+      try {
+        const sliced = record.slice(0)
+        if (
+          typeof SharedArrayBuffer !== "undefined" &&
+          sliced instanceof SharedArrayBuffer
+        ) {
+          return new Uint8Array(sliced).slice(0).buffer
+        }
+        return sliced
+      } catch {
+        // ignore and continue
+      }
+    }
+    if (typeof record.arrayBuffer === "function") {
+      return await record.arrayBuffer()
+    }
+    if (record.data !== undefined) {
+      const nested = await normalizeArrayBuffer(record.data)
+      if (nested) return nested
+    }
+    if (record.buffer !== undefined) {
+      const nested = await normalizeArrayBuffer(record.buffer)
+      if (nested) return nested
+    }
+    if (typeof record.length === "number") {
+      const maybeArray = Array.from(record as ArrayLike<unknown>)
+      if (maybeArray.length > 0 && maybeArray.every((entry) => typeof entry === "number")) {
+        return new Uint8Array(maybeArray).buffer
+      }
+    }
+  }
+  return null
+}
+
+const readResponseHeader = (headers: unknown, name: string): string | undefined => {
+  if (!headers) return undefined
+  const getter = (headers as { get?: (key: string) => unknown }).get
+  if (typeof getter === "function") {
+    const value = getter.call(headers, name) ?? getter.call(headers, name.toLowerCase())
+    if (value != null) return String(value)
+  }
+  if (Array.isArray(headers)) {
+    for (const entry of headers) {
+      if (
+        Array.isArray(entry) &&
+        String(entry[0]).toLowerCase() === name.toLowerCase()
+      ) {
+        return entry[1] == null ? undefined : String(entry[1])
+      }
+    }
+    return undefined
+  }
+  if (typeof headers === "object") {
+    for (const [key, value] of Object.entries(headers as Record<string, unknown>)) {
+      if (key.toLowerCase() === name.toLowerCase()) {
+        return value == null ? undefined : String(value)
+      }
+    }
+  }
+  return undefined
+}
+
 export const modelsAudioMethods = {
   // ── LLM Models & Providers ──
 
@@ -743,19 +944,22 @@ export const modelsAudioMethods = {
   async synthesizeSpeech(
     this: TldwApiClientCore,
     text: string,
-    options?: {
-      voice?: string
-      model?: string
-      responseFormat?: string
-      speed?: number
-      language?: string
-      normalizationOptions?: Record<string, any>
-      extraParams?: Record<string, any>
-      stream?: boolean
-      signal?: AbortSignal
-    }
+    options?: TldwSpeechOptions
   ): Promise<ArrayBuffer> {
-    await this.ensureConfigForRequest(true)
+    const result = await modelsAudioMethods.synthesizeSpeechDetailed.call(
+      this,
+      text,
+      options
+    )
+    return result.buffer
+  },
+
+  async synthesizeSpeechDetailed(
+    this: TldwApiClientCore,
+    text: string,
+    options?: TldwSpeechOptions
+  ): Promise<TldwSpeechDetailedResult> {
+    const config = await this.ensureConfigForRequest(true)
     const body: Record<string, any> = { input: text, text }
     if (options?.voice) body.voice = options.voice
     if (options?.model) body.model = options.model
@@ -767,6 +971,13 @@ export const modelsAudioMethods = {
     }
     if (options?.extraParams) body.extra_params = options.extraParams
     if (options?.stream != null) body.stream = options.stream
+    if (
+      options?.backend &&
+      await supportsExplicitTtsBackend(this, config)
+    ) {
+      body.backend = options.backend
+      body.allow_fallback = options.allowFallback ?? true
+    }
     const accept = (() => {
       switch ((options?.responseFormat || "").trim().toLowerCase()) {
         case "wav":
@@ -790,99 +1001,32 @@ export const modelsAudioMethods = {
           return "audio/mpeg"
       }
     })()
-    const data = await this.request<any>({
+    const response = await this.request<any>({
       path: "/api/v1/audio/speech",
       method: "POST",
       headers: { Accept: accept },
       body,
       responseType: "arrayBuffer",
-      abortSignal: options?.signal
+      abortSignal: options?.signal,
+      returnResponse: true
     })
-
-    const normalizeArrayBuffer = async (value: unknown): Promise<ArrayBuffer | null> => {
-      if (!value) return null
-      if (value instanceof ArrayBuffer) return value
-      if (typeof SharedArrayBuffer !== "undefined" && value instanceof SharedArrayBuffer) {
-        return new Uint8Array(value).slice(0).buffer
-      }
-      if (ArrayBuffer.isView(value)) {
-        const view = value as ArrayBufferView
-        if (
-          typeof SharedArrayBuffer !== "undefined" &&
-          view.buffer instanceof SharedArrayBuffer
-        ) {
-          const copy = new Uint8Array(view.byteLength)
-          copy.set(new Uint8Array(view.buffer, view.byteOffset, view.byteLength))
-          return copy.buffer
-        }
-        if (view.buffer instanceof ArrayBuffer) {
-          return view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength)
-        }
-      }
-      if (typeof Blob !== "undefined" && value instanceof Blob) {
-        return await value.arrayBuffer()
-      }
-      const tag = Object.prototype.toString.call(value)
-      if (tag === "[object ArrayBuffer]" && typeof (value as any).slice === "function") {
-        return (value as any).slice(0)
-      }
-      if (Array.isArray(value) && value.every((entry) => typeof entry === "number")) {
-        return new Uint8Array(value).buffer
-      }
-      if (typeof value === "object") {
-        const record = value as Record<string, any>
-        if (
-          typeof record.type === "string" &&
-          record.type.toLowerCase() === "buffer" &&
-          Array.isArray(record.data)
-        ) {
-          return new Uint8Array(record.data).buffer
-        }
-        if (
-          typeof record.ok === "boolean" &&
-          Object.prototype.hasOwnProperty.call(record, "data")
-        ) {
-          const nested = await normalizeArrayBuffer(record.data)
-          if (nested) return nested
-        }
-        if (
-          typeof record.byteLength === "number" &&
-          typeof record.slice === "function"
-        ) {
-          try {
-            const sliced = record.slice(0)
-            if (
-              typeof SharedArrayBuffer !== "undefined" &&
-              sliced instanceof SharedArrayBuffer
-            ) {
-              return new Uint8Array(sliced).slice(0).buffer
-            }
-            return sliced
-          } catch {
-            // ignore and continue
-          }
-        }
-        if (typeof record.arrayBuffer === "function") {
-          return await record.arrayBuffer()
-        }
-        if (record.data !== undefined) {
-          const nested = await normalizeArrayBuffer(record.data)
-          if (nested) return nested
-        }
-        if (record.buffer !== undefined) {
-          const nested = await normalizeArrayBuffer(record.buffer)
-          if (nested) return nested
-        }
-        if (typeof record.length === "number") {
-          const maybeArray = Array.from(record as ArrayLike<unknown>)
-          if (maybeArray.length > 0 && maybeArray.every((entry) => typeof entry === "number")) {
-            return new Uint8Array(maybeArray).buffer
-          }
-        }
-      }
-      return null
+    const responseRecord =
+      response &&
+      typeof response === "object" &&
+      !ArrayBuffer.isView(response) &&
+      !(response instanceof ArrayBuffer) &&
+      !(typeof Blob !== "undefined" && response instanceof Blob) &&
+      (Object.prototype.hasOwnProperty.call(response, "data") ||
+        Object.prototype.hasOwnProperty.call(response, "headers") ||
+        Object.prototype.hasOwnProperty.call(response, "ok"))
+        ? (response as Record<string, any>)
+        : null
+    if (responseRecord?.ok === false) {
+      throw new Error(
+        responseRecord.error || `TTS request failed: ${responseRecord.status ?? 0}`
+      )
     }
-
+    const data = responseRecord ? responseRecord.data : response
     const normalized = await normalizeArrayBuffer(data)
     if (!normalized) {
       // eslint-disable-next-line no-console
@@ -920,7 +1064,19 @@ export const modelsAudioMethods = {
       }
       throw new Error("TTS returned an invalid audio buffer.")
     }
-    return normalized
+    const actualBackend = readResponseHeader(
+      responseRecord?.headers,
+      "X-TLDW-TTS-Backend"
+    )?.trim() || undefined
+    const fallbackHeader = readResponseHeader(
+      responseRecord?.headers,
+      "X-TLDW-TTS-Fallback-Used"
+    )
+    return {
+      buffer: normalized,
+      actualBackend,
+      fallbackUsed: fallbackHeader?.trim().toLowerCase() === "true"
+    }
   },
 
   async createTtsJob(payload: {
