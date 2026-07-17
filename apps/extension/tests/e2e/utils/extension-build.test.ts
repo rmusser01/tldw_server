@@ -394,15 +394,21 @@ describe("normalizeBuiltExtensionSeedConfig", () => {
         },
       })
 
-      expect(timeoutMs).toBe(5_000)
+      expect(timeoutMs).toBe(30_000)
       await expect(probe(timeoutMs)).resolves.toEqual({ ok: true })
       expect(sendMessage).toHaveBeenCalledWith(
         { type: "tldw:diagnostics" },
         expect.any(Function),
       )
 
-      lastError = { message: "no receiver" }
-      await expect(probe(timeoutMs)).resolves.toBeNull()
+      let attempts = 0
+      sendMessage.mockImplementation((_message, callback) => {
+        attempts += 1
+        lastError = attempts === 1 ? { message: "no receiver" } : undefined
+        callback({ ok: true })
+      })
+      await expect(probe(timeoutMs)).resolves.toEqual({ ok: true })
+      expect(attempts).toBe(2)
 
       lastError = undefined
       sendMessage.mockImplementation(() => undefined)

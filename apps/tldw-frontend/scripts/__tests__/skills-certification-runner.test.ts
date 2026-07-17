@@ -139,6 +139,17 @@ describe('Skills certification runner', () => {
     }
   });
 
+  it('bounds every runner-owned Skills API request with an abort signal', async () => {
+    const test = harness();
+
+    await runSkillsCertification({ operations: test.operations });
+
+    expect(test.operations.fetch).toHaveBeenCalled();
+    expect(
+      test.operations.fetch.mock.calls.every(([, init]) => init?.signal instanceof AbortSignal)
+    ).toBe(true);
+  });
+
   it('tracks both package-local Chromium probes and treats a missing browser as preflight', async () => {
     const test = harness({
       runChild: vi.fn(async (registry, command) => {
@@ -709,20 +720,26 @@ describe('Skills certification runner', () => {
     expect(test.registry.stop).toHaveBeenCalledTimes(4);
   });
 
-  it('does not restart a backend when no WebUI browser child was attempted', async () => {
+  it('restarts the same backend after frontend startup failure to collect extension evidence', async () => {
     let healthCalls = 0;
     const test = harness({
       waitForHttpOk: vi.fn(async (url) => {
         if (url.includes(':3100')) throw new Error('frontend unavailable');
-        if (++healthCalls > 1) throw new Error('backend unavailable');
+        if (++healthCalls === 2) throw new Error('backend unavailable');
       }),
     });
-    await runSkillsCertification({ operations: test.operations });
+    const summary = await runSkillsCertification({ operations: test.operations });
     expect(
       test.registry.spawn.mock.calls
         .map(([command]) => command.name)
         .filter((name) => name === 'backend')
-    ).toHaveLength(1);
+    ).toHaveLength(2);
+    expect(test.registry.stop).toHaveBeenCalledTimes(1);
+    expect(test.registry.spawn.mock.calls.map(([command]) => command.name)).toContain(
+      'extension-playwright'
+    );
+    expect(summary.surfaces.extension.state).toBe('passed');
+    expect(summary.status).toBe('failed');
   });
 
   it('stops the prior backend before its one same-port evidence restart and blocks a second crash', async () => {

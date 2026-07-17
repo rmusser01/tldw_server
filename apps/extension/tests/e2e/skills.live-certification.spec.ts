@@ -49,12 +49,10 @@ const boundedDetail = (
   categories: Array.from(categories).slice(0, 4)
 })
 
-test("certifies the complete live Skills extension lifecycle", async ({}, testInfo) => {
+test("certifies the complete live Skills extension lifecycle", async () => {
   let phase: Phase = "extension_launch"
   const categories = new Set<Phase>()
   const errors: unknown[] = []
-  let originalError: unknown
-  let hasOriginalError = false
   let context: BrowserContext | undefined
   let page: Page | undefined
   let relayObserver: ReturnType<typeof createSkillsRelayObserver> | undefined
@@ -65,15 +63,7 @@ test("certifies the complete live Skills extension lifecycle", async ({}, testIn
   const onPageError = (): void => {
     pageErrorCount += 1
   }
-  const retainOriginalError = (error: unknown): void => {
-    if (!hasOriginalError) {
-      originalError = error
-      hasOriginalError = true
-    }
-    categories.add(phase)
-    errors.push(error)
-  }
-  const retainFinalizationError = (error: unknown): void => {
+  const retainError = (error: unknown): void => {
     categories.add(phase)
     errors.push(error)
   }
@@ -147,6 +137,8 @@ test("certifies the complete live Skills extension lifecycle", async ({}, testIn
       name: skillName,
       arguments: SKILLS_CERT_ARGUMENTS,
       expectedRenderedPrompt: SKILLS_CERT_RENDERED,
+      waitForResponse: (predicate) =>
+        launch.context.waitForEvent("response", predicate),
       step: test.step
     })
 
@@ -156,23 +148,13 @@ test("certifies the complete live Skills extension lifecycle", async ({}, testIn
       )
     }
   } catch (error) {
-    retainOriginalError(error)
+    retainError(error)
   } finally {
     if (pageErrorCount > 0 && !categories.has("extension_workflow")) {
       phase = "extension_workflow"
-      retainFinalizationError(
+      retainError(
         new Error("Extension page reported errors during the Skills workflow")
       )
-    }
-
-    if (errors.length > 0 && page && !page.isClosed()) {
-      try {
-        await page.screenshot({
-          path: testInfo.outputPath("skills-live-certification-failure.png")
-        })
-      } catch (error) {
-        retainFinalizationError(error)
-      }
     }
 
     phase = "extension_launch"
@@ -180,7 +162,7 @@ test("certifies the complete live Skills extension lifecycle", async ({}, testIn
       try {
         await context.close()
       } catch (error) {
-        retainFinalizationError(error)
+        retainError(error)
       }
     }
 
@@ -189,7 +171,7 @@ test("certifies the complete live Skills extension lifecycle", async ({}, testIn
       try {
         page.off("pageerror", onPageError)
       } catch (error) {
-        retainFinalizationError(error)
+        retainError(error)
       }
     }
 
@@ -197,7 +179,7 @@ test("certifies the complete live Skills extension lifecycle", async ({}, testIn
       try {
         relayObserver.dispose()
       } catch (error) {
-        retainFinalizationError(error)
+        retainError(error)
       }
     }
 
@@ -205,7 +187,7 @@ test("certifies the complete live Skills extension lifecycle", async ({}, testIn
       try {
         relayObserver.assertValid()
       } catch (error) {
-        retainFinalizationError(error)
+        retainError(error)
       }
     }
 
@@ -213,22 +195,20 @@ test("certifies the complete live Skills extension lifecycle", async ({}, testIn
       try {
         writeSanitizedJson(ledgerPath, relayObserver?.entries ?? [])
       } catch (error) {
-        retainFinalizationError(error)
+        retainError(error)
       }
 
       try {
         writeSanitizedJson(
           resultPath,
-          buildResultPayload(
-            hasOriginalError || errors.length > 0 ? "failed" : "passed"
-          )
+          buildResultPayload(errors.length > 0 ? "failed" : "passed")
         )
       } catch (error) {
-        retainFinalizationError(error)
+        retainError(error)
         try {
           writeSanitizedJson(resultPath, buildResultPayload("failed"))
         } catch (fallbackError) {
-          retainFinalizationError(fallbackError)
+          retainError(fallbackError)
         }
       }
     }

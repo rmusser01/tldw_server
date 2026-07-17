@@ -73,7 +73,7 @@ function normalizedIniKey(key) {
     .replace(/^_+|_+$/g, '');
 }
 
-function scrubCredentialValues(text) {
+function scrubHostConfigurationValues(text) {
   return text
     .split(/\r?\n/)
     .map((line) => {
@@ -82,7 +82,7 @@ function scrubCredentialValues(text) {
         return line;
       }
       const key = normalizedIniKey(match[2]);
-      if (!/(?:^|_)api(?:_[a-z0-9]+)*_key(?:_|$)|api_?key$|(?:token|secret|password)$/.test(key)) {
+      if (!/(?:^|_)api(?:_[a-z0-9]+)*_key(?:_|$)|api_?key$|api_ip$|(?:token|secret|password)$/.test(key)) {
         return line;
       }
       return `${match[1]}${match[2]}${match[3]}`;
@@ -208,6 +208,7 @@ export function createSkillsCertificationProfile({ repoRoot, temporaryBase, remo
     databaseDir: path.join(root, 'Databases'),
     usersDbPath: path.join(root, 'Databases/users.db'),
     userDatabasesDir: path.join(root, 'Databases/user_databases'),
+    systemLogPath: path.join(root, 'Databases/system_logs.jsonl'),
     homeDir: path.join(root, 'home'),
     tmpDir: path.join(root, 'tmp'),
     extensionProfileDir: path.join(root, 'extension-profile'),
@@ -229,11 +230,23 @@ export function createSkillsCertificationProfile({ repoRoot, temporaryBase, remo
     });
 
     const sourceConfigPath = path.join(resolvedRepoRoot, 'tldw_Server_API/Config_Files/config.txt');
-    let configText = scrubCredentialValues(readFileSync(sourceConfigPath, 'utf8'));
+    let configText = scrubHostConfigurationValues(readFileSync(sourceConfigPath, 'utf8'));
     configText = patchIniValue(configText, 'Setup', 'enable_first_time_setup', 'true');
     configText = patchIniValue(configText, 'Setup', 'setup_completed', 'true');
     configText = patchIniValue(configText, 'AuthNZ', 'auth_mode', 'single_user');
     configText = patchIniValue(configText, 'AuthNZ', 'single_user_api_key', SKILLS_CERT_API_KEY);
+    configText = patchIniValue(
+      configText,
+      'TTS-Settings',
+      'USER_DB_BASE_DIR',
+      profile.userDatabasesDir
+    );
+    configText = patchIniValue(
+      configText,
+      'Logging',
+      'system_log_file_path',
+      profile.systemLogPath
+    );
     writeFileSync(profile.configPath, configText, 'utf8');
     writeProfileEnv(profile);
 
@@ -265,14 +278,23 @@ export function buildSkillsCertificationEnvironments({ profile, ports, baseEnv =
 
   const backendUrl = `http://127.0.0.1:${ports.backend}`;
   const webUrl = `http://127.0.0.1:${ports.web}`;
+  const jobsDbPath = path.join(profile.databaseDir, 'jobs.db');
   const backendSettings = {
     AUTH_MODE: 'single_user',
     DATABASE_URL: sqliteUrl(profile.usersDbPath),
     HOME: profile.homeDir,
+    JOBS_DB_PATH: jobsDbPath,
+    JOBS_DB_URL: sqliteUrl(jobsDbPath),
+    MCP_MODULES:
+      'skills=tldw_Server_API.app.core.MCP_unified.modules.implementations.skills_module:SkillsModule',
+    MCP_MODULES_CONFIG: path.join(profile.configDir, 'mcp-modules-disabled.yaml'),
+    MEDIA_DB_PATH: path.join(profile.userDatabasesDir, '1', 'Media_DB_v2.db'),
     SINGLE_USER_API_KEY: SKILLS_CERT_API_KEY,
+    SYSTEM_LOG_FILE_PATH: profile.systemLogPath,
     TEMP: profile.tmpDir,
     TLDW_CONFIG_FILE: profile.configPath,
     TLDW_ENV_FILE: profile.envPath,
+    TLDW_ENV_FILE_EXCLUSIVE: '1',
     TLDW_USER_DB_BASE_DIR_ALLOWED_ROOTS: profile.databaseDir,
     TMP: profile.tmpDir,
     TMPDIR: profile.tmpDir,

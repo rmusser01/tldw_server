@@ -5,10 +5,7 @@
 import json
 import os
 import re
-from pathlib import Path
 from typing import Any, Literal, Optional, Union
-
-from dotenv import load_dotenv
 
 #
 # 3rd-party imports
@@ -30,23 +27,6 @@ from tldw_Server_API.app.core.LLM_Calls.routing.models import RoutingOverride
 
 DEFAULT_LLM_PROVIDER = "openai"
 model_config = ConfigDict(extra="allow", from_attributes=True)
-
-# Config Loading
-# Prefer the canonical Config_Files/.env location, then fall back to local .env variants.
-try:
-    api_root = Path(__file__).resolve().parents[4]
-    candidate_env_paths = [
-        api_root / "Config_Files" / ".env",
-        api_root / "Config_Files" / ".ENV",
-        Path(".env").resolve(),
-        Path(".ENV").resolve(),
-    ]
-    for env_path in candidate_env_paths:
-        if env_path.exists():
-            load_dotenv(dotenv_path=str(env_path), override=False)
-except Exception as dotenv_error:
-    # Fall back silently if dotenv loading fails; environment may be pre-populated
-    _ = dotenv_error
 
 # Use load_and_log_configs which returns a proper dict
 from tldw_Server_API.app.core.config import load_and_log_configs

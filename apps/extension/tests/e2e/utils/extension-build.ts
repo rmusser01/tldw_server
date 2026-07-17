@@ -126,21 +126,43 @@ async function waitForBackgroundReady(page: any) {
   const response = await page.evaluate(
     (timeoutMs: number) =>
       new Promise<unknown>((resolve) => {
-        const timeout = setTimeout(() => resolve(null), timeoutMs)
-        try {
-          chrome.runtime.sendMessage(
-            { type: "tldw:diagnostics" },
-            (value) => {
-              clearTimeout(timeout)
-              resolve(chrome.runtime.lastError ? null : value)
-            },
-          )
-        } catch {
+        const deadline = Date.now() + timeoutMs
+        let settled = false
+        let retryTimer: ReturnType<typeof setTimeout> | undefined
+        const finish = (value: unknown) => {
+          if (settled) return
+          settled = true
           clearTimeout(timeout)
-          resolve(null)
+          if (retryTimer) clearTimeout(retryTimer)
+          resolve(value)
         }
+        const retry = () => {
+          const remaining = deadline - Date.now()
+          if (remaining <= 0) finish(null)
+          else retryTimer = setTimeout(attempt, Math.min(100, remaining))
+        }
+        const attempt = () => {
+          try {
+            chrome.runtime.sendMessage(
+              { type: "tldw:diagnostics" },
+              (value) => {
+                const ready =
+                  !chrome.runtime.lastError &&
+                  value !== null &&
+                  typeof value === "object" &&
+                  (value as { ok?: unknown }).ok === true
+                if (ready) finish(value)
+                else retry()
+              },
+            )
+          } catch {
+            retry()
+          }
+        }
+        const timeout = setTimeout(() => finish(null), timeoutMs)
+        attempt()
       }),
-    5_000,
+    30_000,
   )
 
   if (
@@ -148,7 +170,7 @@ async function waitForBackgroundReady(page: any) {
     typeof response !== "object" ||
     (response as { ok?: unknown }).ok !== true
   ) {
-    throw new Error("Extension background worker did not become ready within 5000ms")
+    throw new Error("Extension background worker did not become ready within 30000ms")
   }
 }
 

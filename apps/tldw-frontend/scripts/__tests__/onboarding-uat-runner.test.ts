@@ -355,6 +355,30 @@ describe("onboarding UAT runner helpers", () => {
     }
   })
 
+  it("accepts explicit redaction markers in secret carrier formats", () => {
+    const artifacts = createRunArtifacts({
+      frontendRoot,
+      runId: "unit-redacted-secret-check",
+      preserve: false,
+    })
+
+    try {
+      writeFileSync(
+        artifacts.logs.runner,
+        [
+          "ANTHROPIC_API_KEY=[REDACTED]",
+          "x-api-key: [REDACTED]",
+          '"authorization": "[REDACTED]"',
+        ].join("\n"),
+        "utf8"
+      )
+
+      expect(() => assertNoSecretLeaks(artifacts.root)).not.toThrow()
+    } finally {
+      cleanupRunArtifacts(artifacts)
+    }
+  })
+
   it("detects raw and JSON-shaped secret-like artifact leaks", () => {
     const artifacts = createRunArtifacts({
       frontendRoot,

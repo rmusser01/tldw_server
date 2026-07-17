@@ -42,11 +42,16 @@ database.password = host-database-password
 search_engine_api_key_baidu = host-baidu-api-key
 api_secret_key = host-api-secret-key
 # commented_api_key = host-comment-secret
+llama_api_IP = http://192.168.2.235:5000/v1
+custom_openai_api_ip = https://api.example.test/v1
 provider_name = retained-provider
 max_tokens = 4096
 
 [TTS-Settings]
 USER_DB_BASE_DIR = /host/user-databases
+
+[Logging]
+system_log_file_path = Databases/system_logs.jsonl
 `;
 
 function writeExecutable(filePath: string) {
@@ -150,6 +155,9 @@ describe('Skills certification profile', () => {
       expect(existsSync(directory)).toBe(true);
     }
     expect(path.dirname(profile.usersDbPath)).toBe(profile.databaseDir);
+    expect(profile.systemLogPath).toBe(
+      path.join(profile.databaseDir, 'system_logs.jsonl')
+    );
     expect(JSON.stringify(profile)).not.toContain(SKILLS_CERT_API_KEY);
   });
 
@@ -190,7 +198,7 @@ describe('Skills certification profile', () => {
     }
   });
 
-  it('scrubs copied credentials before setting completed single-user auth', () => {
+  it('scrubs copied credentials and provider endpoints before setting completed single-user auth', () => {
     const fixture = createFixture();
     const profile = createProfile(fixture);
     const configText = readFileSync(profile.configPath, 'utf8');
@@ -207,8 +215,13 @@ describe('Skills certification profile', () => {
     expect(configText).toMatch(/^search_engine_api_key_baidu =\s*$/m);
     expect(configText).toMatch(/^api_secret_key =\s*$/m);
     expect(configText).toContain('# commented_api_key =');
+    expect(configText).toMatch(/^llama_api_IP =\s*$/m);
+    expect(configText).toMatch(/^custom_openai_api_ip =\s*$/m);
     expect(configText).toContain('provider_name = retained-provider');
     expect(configText).toContain('max_tokens = 4096');
+    expect(configText).toContain(`USER_DB_BASE_DIR = ${profile.userDatabasesDir}`);
+    expect(configText).toContain(`system_log_file_path = ${profile.systemLogPath}`);
+    expect(configText).not.toContain('system_log_file_path = Databases/system_logs.jsonl');
     expect(configText).not.toContain('host-provider-secret');
     expect(configText).not.toContain('host-anthropic-token');
     expect(configText).not.toContain('host-service-secret');
@@ -216,6 +229,8 @@ describe('Skills certification profile', () => {
     expect(configText).not.toContain('host-baidu-api-key');
     expect(configText).not.toContain('host-api-secret-key');
     expect(configText).not.toContain('host-comment-secret');
+    expect(configText).not.toContain('192.168.2.235');
+    expect(configText).not.toContain('api.example.test');
     expect(configText).not.toContain('copied-auth-key');
   });
 
@@ -304,6 +319,24 @@ describe('Skills certification profile', () => {
     expect(environments.backendEnv.HOME).toBe(profile.homeDir);
     expect(environments.backendEnv.TMPDIR).toBe(profile.tmpDir);
     expect(environments.backendEnv.USER_DB_BASE_DIR).toBe(profile.userDatabasesDir);
+    expect(environments.backendEnv.TLDW_ENV_FILE_EXCLUSIVE).toBe('1');
+    expect(environments.authInitEnv.TLDW_ENV_FILE_EXCLUSIVE).toBe('1');
+    expect(environments.backendEnv.JOBS_DB_PATH).toBe(
+      path.join(profile.databaseDir, 'jobs.db')
+    );
+    expect(environments.backendEnv.JOBS_DB_URL).toBe(
+      `sqlite:///${path.join(profile.databaseDir, 'jobs.db')}`
+    );
+    expect(environments.backendEnv.MEDIA_DB_PATH).toBe(
+      path.join(profile.userDatabasesDir, '1', 'Media_DB_v2.db')
+    );
+    expect(environments.backendEnv.SYSTEM_LOG_FILE_PATH).toBe(profile.systemLogPath);
+    expect(environments.backendEnv.MCP_MODULES_CONFIG).toBe(
+      path.join(profile.configDir, 'mcp-modules-disabled.yaml')
+    );
+    expect(environments.backendEnv.MCP_MODULES).toBe(
+      'skills=tldw_Server_API.app.core.MCP_unified.modules.implementations.skills_module:SkillsModule'
+    );
     expect(environments.backendEnv.SINGLE_USER_API_KEY).toBe(SKILLS_CERT_API_KEY);
     expect(environments.frontendEnv.NEXT_PUBLIC_X_API_KEY).toBe(SKILLS_CERT_API_KEY);
     expect(environments.webuiPlaywrightEnv.TLDW_E2E_API_KEY).toBe(SKILLS_CERT_API_KEY);

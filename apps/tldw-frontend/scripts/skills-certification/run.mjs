@@ -24,6 +24,7 @@ import {
 
 const frontendRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const repoRoot = path.resolve(frontendRoot, '../..');
+const directRequestTimeoutMs = 30_000;
 const failureDetailLimit = 500;
 const reportStats = ['expected', 'skipped', 'flaky', 'unexpected'];
 
@@ -137,7 +138,6 @@ export async function runSkillsCertification({ operations: suppliedOperations = 
   let commands;
   let backendUsable = false;
   let backendRecord;
-  let webuiAttempted = false;
   let webReady = false;
   let finalSummary;
 
@@ -161,6 +161,11 @@ export async function runSkillsCertification({ operations: suppliedOperations = 
   };
   const runFinite = async (command) =>
     operations.runChild(registry, command, logPath(command.name));
+  const fetchDirect = (url, init = {}) =>
+    operations.fetch(url, {
+      ...init,
+      signal: AbortSignal.timeout(directRequestTimeoutMs),
+    });
   const health = async () =>
     operations.waitForHttpOk(apiUrl(backendUrl, '/api/v1/health'), {
       headers: { 'X-API-KEY': SKILLS_CERT_API_KEY },
@@ -171,7 +176,7 @@ export async function runSkillsCertification({ operations: suppliedOperations = 
       ['/api/v1/skills/trash?limit=1&offset=0', (body) => body?.total === 0],
     ]) {
       try {
-        const response = await operations.fetch(apiUrl(backendUrl, route), {
+        const response = await fetchDirect(apiUrl(backendUrl, route), {
           headers: { 'X-API-KEY': SKILLS_CERT_API_KEY },
         });
         if (response.status !== 200 || !invariant(await responseJson(response))) {
@@ -187,7 +192,7 @@ export async function runSkillsCertification({ operations: suppliedOperations = 
     let passed = true;
     const detailRoute = `/api/v1/skills/${encodeURIComponent(name)}`;
     try {
-      const detail = await operations.fetch(apiUrl(backendUrl, detailRoute), {
+      const detail = await fetchDirect(apiUrl(backendUrl, detailRoute), {
         headers: { 'X-API-KEY': SKILLS_CERT_API_KEY },
       });
       if (detail.status !== 404) {
@@ -200,7 +205,7 @@ export async function runSkillsCertification({ operations: suppliedOperations = 
     }
     const trashRoute = '/api/v1/skills/trash?limit=500&offset=0';
     try {
-      const trash = await operations.fetch(apiUrl(backendUrl, trashRoute), {
+      const trash = await fetchDirect(apiUrl(backendUrl, trashRoute), {
         headers: { 'X-API-KEY': SKILLS_CERT_API_KEY },
       });
       const body = await responseJson(trash);
@@ -354,7 +359,6 @@ export async function runSkillsCertification({ operations: suppliedOperations = 
     if (backendUsable) await directInitial();
     if (backendUsable && webReady) {
       urlLocked = true;
-      webuiAttempted = true;
       const webResultPath = path.join(evidence.webuiDir, 'result.json');
       const webReportPath = path.join(evidence.webuiDir, 'report.json');
       let outcome;
@@ -402,7 +406,7 @@ export async function runSkillsCertification({ operations: suppliedOperations = 
       await directPostcondition(SKILLS_CERT_NAMES.webui, 'webui');
     }
 
-    if (backendUsable && webuiAttempted) {
+    if (backendUsable) {
       try {
         await health();
       } catch {
