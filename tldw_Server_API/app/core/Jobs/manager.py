@@ -10,7 +10,7 @@ import sqlite3
 import time
 import uuid as _uuid
 from contextvars import ContextVar
-from datetime import datetime
+from datetime import datetime, timedelta
 from datetime import timezone as _tz
 from pathlib import Path
 from typing import Any, ClassVar
@@ -128,6 +128,31 @@ class JobPayloadDecryptionError(RuntimeError):
     def __init__(self, field_name: str) -> None:
         super().__init__(f"Encrypted job {field_name} could not be decrypted")
         self.field_name = field_name
+
+
+_SLIDES_GENERATION_DOMAIN = "slides"
+_SLIDES_GENERATION_QUEUE = "default"
+_SLIDES_GENERATION_JOB_TYPE = "presentation.generate"
+
+
+def _is_slides_generation_scope(domain: object, queue: object, job_type: object) -> bool:
+    return (
+        domain == _SLIDES_GENERATION_DOMAIN
+        and queue == _SLIDES_GENERATION_QUEUE
+        and job_type == _SLIDES_GENERATION_JOB_TYPE
+    )
+
+
+def _require_aware_utc(value: datetime | None, *, field_name: str) -> datetime:
+    if value is None:
+        value = datetime.now(tz=_tz.utc)
+    if value.tzinfo is None or value.utcoffset() != timedelta(0):
+        raise ValueError(f"{field_name} must be an aware UTC timestamp")
+    return value
+
+
+def _sqlite_utc(value: datetime) -> str:
+    return value.astimezone(_tz.utc).isoformat(timespec="microseconds")
 
 
 # Module-level fair-share scheduler instance (lazy singleton)
@@ -734,6 +759,1032 @@ class JobManager:
             with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
                 conn.rollback()
         return cur
+
+    @staticmethod
+    def _normalize_slides_reconciliation_row(row: Any) -> dict[str, Any]:
+        data = dict(row)
+        for field_name in (
+            "lease_expires_at",
+            "diagnostic_at",
+            "sweep_started_at",
+            "sweep_completed_at",
+        ):
+            value = _parse_dt(data.get(field_name))
+            if value is not None:
+                if value.tzinfo is None:
+                    value = value.replace(tzinfo=_tz.utc)
+                else:
+                    value = value.astimezone(_tz.utc)
+            data[field_name] = value
+        data["fencing_token"] = int(data.get("fencing_token") or 0)
+        data["lag"] = int(data.get("lag") or 0)
+        data["diagnostic_count"] = int(data.get("diagnostic_count") or 0)
+        data["sweep_complete"] = bool(data.get("sweep_complete"))
+        data["unexpired_reference_count"] = int(data.get("unexpired_reference_count") or 0)
+        return data
+
+    @staticmethod
+    def _validate_slides_coordination_identity(*, holder_uuid: str, config_revision: str) -> None:
+        if not isinstance(holder_uuid, str) or not holder_uuid.strip() or len(holder_uuid) > 128:
+            raise ValueError("holder_uuid must be a bounded nonblank identifier")
+        if not isinstance(config_revision, str) or not config_revision or len(config_revision) > 512:
+            raise ValueError("config_revision must be a bounded opaque token")
+
+    def get_slides_reconciliation_state(self) -> dict[str, Any]:
+        """Read the singleton standalone-generation coordination state."""
+        conn = self._connect()
+        try:
+            if self.backend == "postgres":
+                with conn, self._pg_cursor(conn) as cur:
+                    cur.execute("SELECT * FROM slides_standalone_reconciliation WHERE singleton_id=1")
+                    row = cur.fetchone()
+            else:
+                row = conn.execute("SELECT * FROM slides_standalone_reconciliation WHERE singleton_id=1").fetchone()
+            if row is None:
+                raise RuntimeError("standalone reconciliation singleton is missing")
+            return self._normalize_slides_reconciliation_row(row)
+        finally:
+            conn.close()
+
+    def acquire_slides_reconciliation_lease(
+        self,
+        *,
+        holder_uuid: str,
+        lease_seconds: int,
+        config_revision: str,
+        now: datetime | None = None,
+    ) -> dict[str, Any] | None:
+        """Acquire an expired/unheld singleton lease and advance its fence."""
+        self._validate_slides_coordination_identity(
+            holder_uuid=holder_uuid,
+            config_revision=config_revision,
+        )
+        if isinstance(lease_seconds, bool) or int(lease_seconds) <= 0:
+            raise ValueError("lease_seconds must be positive")
+        now_utc = _require_aware_utc(now, field_name="now")
+        expires_at = now_utc + timedelta(seconds=int(lease_seconds))
+        conn = self._connect()
+        try:
+            if self.backend == "postgres":
+                with conn, self._pg_cursor(conn) as cur:
+                    cur.execute("SELECT DISTINCT config_revision " "FROM slides_standalone_key_registry")
+                    registry_revisions = {item["config_revision"] for item in cur.fetchall()}
+                    if registry_revisions and registry_revisions != {config_revision}:
+                        return None
+                    cur.execute("SELECT * FROM slides_standalone_reconciliation " "WHERE singleton_id=1 FOR UPDATE")
+                    row = cur.fetchone()
+                    if row is None:
+                        return None
+                    observed = dict(row)
+                    observed_expiry = _parse_dt(observed.get("lease_expires_at"))
+                    if observed_expiry is not None and observed_expiry.tzinfo is None:
+                        observed_expiry = observed_expiry.replace(tzinfo=_tz.utc)
+                    same_revision = observed.get("config_revision") == config_revision
+                    if same_revision and observed_expiry is not None and observed_expiry > now_utc:
+                        return None
+                    if same_revision:
+                        cur.execute(
+                            """
+                            UPDATE slides_standalone_reconciliation
+                            SET holder_uuid=%s, lease_expires_at=%s,
+                                fencing_token=fencing_token + 1
+                            WHERE singleton_id=1
+                              AND fencing_token=%s
+                              AND config_revision IS NOT DISTINCT FROM %s
+                              AND holder_uuid IS NOT DISTINCT FROM %s
+                            RETURNING *
+                            """,
+                            (
+                                holder_uuid,
+                                expires_at,
+                                int(observed.get("fencing_token") or 0),
+                                observed.get("config_revision"),
+                                observed.get("holder_uuid"),
+                            ),
+                        )
+                    else:
+                        cur.execute(
+                            """
+                            UPDATE slides_standalone_reconciliation
+                            SET holder_uuid=%s, lease_expires_at=%s,
+                                fencing_token=fencing_token + 1,
+                                config_revision=%s, cursor=NULL,
+                                startup_complete_epoch=NULL, last_complete_epoch=NULL,
+                                lag=0, sweep_key_id=NULL, sweep_started_at=NULL,
+                                sweep_completed_at=NULL, sweep_complete=FALSE,
+                                unexpired_reference_count=0
+                            WHERE singleton_id=1
+                              AND fencing_token=%s
+                              AND config_revision IS NOT DISTINCT FROM %s
+                              AND holder_uuid IS NOT DISTINCT FROM %s
+                            RETURNING *
+                            """,
+                            (
+                                holder_uuid,
+                                expires_at,
+                                config_revision,
+                                int(observed.get("fencing_token") or 0),
+                                observed.get("config_revision"),
+                                observed.get("holder_uuid"),
+                            ),
+                        )
+                    updated = cur.fetchone()
+                    return self._normalize_slides_reconciliation_row(updated) if updated is not None else None
+
+            conn.execute("BEGIN IMMEDIATE")
+            registry_revisions = {
+                item[0]
+                for item in conn.execute(
+                    "SELECT DISTINCT config_revision " "FROM slides_standalone_key_registry"
+                ).fetchall()
+            }
+            if registry_revisions and registry_revisions != {config_revision}:
+                conn.rollback()
+                return None
+            row = conn.execute("SELECT * FROM slides_standalone_reconciliation WHERE singleton_id=1").fetchone()
+            if row is None:
+                conn.rollback()
+                return None
+            observed = dict(row)
+            observed_expiry = _parse_dt(observed.get("lease_expires_at"))
+            if observed_expiry is not None and observed_expiry.tzinfo is None:
+                observed_expiry = observed_expiry.replace(tzinfo=_tz.utc)
+            same_revision = observed.get("config_revision") == config_revision
+            if same_revision and observed_expiry is not None and observed_expiry > now_utc:
+                conn.rollback()
+                return None
+            common_where = (
+                int(observed.get("fencing_token") or 0),
+                observed.get("config_revision"),
+                observed.get("holder_uuid"),
+            )
+            if same_revision:
+                result = conn.execute(
+                    """
+                    UPDATE slides_standalone_reconciliation
+                    SET holder_uuid=?, lease_expires_at=?, fencing_token=fencing_token + 1
+                    WHERE singleton_id=1 AND fencing_token=?
+                      AND config_revision IS ? AND holder_uuid IS ?
+                    """,
+                    (holder_uuid, _sqlite_utc(expires_at), *common_where),
+                )
+            else:
+                result = conn.execute(
+                    """
+                    UPDATE slides_standalone_reconciliation
+                    SET holder_uuid=?, lease_expires_at=?, fencing_token=fencing_token + 1,
+                        config_revision=?, cursor=NULL, startup_complete_epoch=NULL,
+                        last_complete_epoch=NULL, lag=0, sweep_key_id=NULL,
+                        sweep_started_at=NULL, sweep_completed_at=NULL,
+                        sweep_complete=0, unexpired_reference_count=0
+                    WHERE singleton_id=1 AND fencing_token=?
+                      AND config_revision IS ? AND holder_uuid IS ?
+                    """,
+                    (
+                        holder_uuid,
+                        _sqlite_utc(expires_at),
+                        config_revision,
+                        *common_where,
+                    ),
+                )
+            if result.rowcount != 1:
+                conn.rollback()
+                return None
+            updated = conn.execute("SELECT * FROM slides_standalone_reconciliation WHERE singleton_id=1").fetchone()
+            conn.commit()
+            return self._normalize_slides_reconciliation_row(updated)
+        except Exception:
+            with contextlib.suppress(Exception):
+                conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def renew_slides_reconciliation_lease(
+        self,
+        *,
+        holder_uuid: str,
+        fencing_token: int,
+        config_revision: str,
+        lease_seconds: int,
+        now: datetime | None = None,
+    ) -> bool:
+        """Renew a still-live lease using holder, fence, and revision CAS."""
+        self._validate_slides_coordination_identity(
+            holder_uuid=holder_uuid,
+            config_revision=config_revision,
+        )
+        if isinstance(fencing_token, bool) or int(fencing_token) <= 0:
+            raise ValueError("fencing_token must be positive")
+        if isinstance(lease_seconds, bool) or int(lease_seconds) <= 0:
+            raise ValueError("lease_seconds must be positive")
+        now_utc = _require_aware_utc(now, field_name="now")
+        expires_at = now_utc + timedelta(seconds=int(lease_seconds))
+        conn = self._connect()
+        try:
+            if self.backend == "postgres":
+                with conn, self._pg_cursor(conn) as cur:
+                    cur.execute(
+                        """
+                        UPDATE slides_standalone_reconciliation
+                        SET lease_expires_at=%s
+                        WHERE singleton_id=1 AND holder_uuid=%s AND fencing_token=%s
+                          AND config_revision=%s AND lease_expires_at > %s
+                        """,
+                        (expires_at, holder_uuid, int(fencing_token), config_revision, now_utc),
+                    )
+                    return cur.rowcount == 1
+            with conn:
+                result = conn.execute(
+                    """
+                    UPDATE slides_standalone_reconciliation
+                    SET lease_expires_at=?
+                    WHERE singleton_id=1 AND holder_uuid=? AND fencing_token=?
+                      AND config_revision=? AND lease_expires_at > ?
+                    """,
+                    (
+                        _sqlite_utc(expires_at),
+                        holder_uuid,
+                        int(fencing_token),
+                        config_revision,
+                        _sqlite_utc(now_utc),
+                    ),
+                )
+                return result.rowcount == 1
+        finally:
+            conn.close()
+
+    def checkpoint_slides_reconciliation(
+        self,
+        *,
+        holder_uuid: str,
+        fencing_token: int,
+        config_revision: str,
+        cursor: str | None,
+        startup_complete_epoch: str | None,
+        last_complete_epoch: float | None,
+        lag: int,
+        now: datetime | None = None,
+        completed: bool = False,
+        sweep_key_id: str | None = None,
+        sweep_started_at: datetime | None = None,
+    ) -> bool:
+        """Publish fenced reconciliation progress or one completed full sweep."""
+        self._validate_slides_coordination_identity(
+            holder_uuid=holder_uuid,
+            config_revision=config_revision,
+        )
+        if isinstance(fencing_token, bool) or int(fencing_token) <= 0:
+            raise ValueError("fencing_token must be positive")
+        if startup_complete_epoch not in (None, config_revision):
+            raise ValueError("startup_complete_epoch must exactly match config_revision")
+        if cursor is not None and (not isinstance(cursor, str) or len(cursor) > 1024):
+            raise ValueError("cursor must be a bounded string")
+        if isinstance(lag, bool) or not isinstance(lag, int) or lag < 0:
+            raise ValueError("lag must be a nonnegative integer")
+        if last_complete_epoch is not None and float(last_complete_epoch) < 0:
+            raise ValueError("last_complete_epoch must be nonnegative")
+        now_utc = _require_aware_utc(now, field_name="now")
+        if sweep_started_at is not None:
+            sweep_started_at = _require_aware_utc(
+                sweep_started_at,
+                field_name="sweep_started_at",
+            )
+        if completed:
+            cursor = None
+            lag = 0
+            if last_complete_epoch is None:
+                last_complete_epoch = now_utc.timestamp()
+        update_sweep = sweep_key_id is not None
+        sweep_complete = bool(completed and update_sweep)
+        conn = self._connect()
+        try:
+            if self.backend == "postgres":
+                with conn, self._pg_cursor(conn) as cur:
+                    cur.execute(
+                        """
+                        UPDATE slides_standalone_reconciliation
+                        SET cursor=%s, startup_complete_epoch=%s,
+                            last_complete_epoch=%s, lag=%s,
+                            sweep_key_id=CASE WHEN %s THEN %s ELSE sweep_key_id END,
+                            sweep_started_at=CASE WHEN %s THEN %s ELSE sweep_started_at END,
+                            sweep_completed_at=CASE WHEN %s THEN %s ELSE sweep_completed_at END,
+                            sweep_complete=CASE WHEN %s THEN %s ELSE sweep_complete END,
+                            unexpired_reference_count=CASE WHEN %s THEN 0 ELSE unexpired_reference_count END
+                        WHERE singleton_id=1 AND holder_uuid=%s AND fencing_token=%s
+                          AND config_revision=%s AND lease_expires_at > %s
+                        """,
+                        (
+                            cursor,
+                            startup_complete_epoch,
+                            last_complete_epoch,
+                            lag,
+                            update_sweep,
+                            sweep_key_id,
+                            update_sweep,
+                            sweep_started_at,
+                            update_sweep,
+                            now_utc if completed else None,
+                            update_sweep,
+                            sweep_complete,
+                            update_sweep,
+                            holder_uuid,
+                            int(fencing_token),
+                            config_revision,
+                            now_utc,
+                        ),
+                    )
+                    return cur.rowcount == 1
+            with conn:
+                result = conn.execute(
+                    """
+                    UPDATE slides_standalone_reconciliation
+                    SET cursor=?, startup_complete_epoch=?, last_complete_epoch=?, lag=?,
+                        sweep_key_id=CASE WHEN ? THEN ? ELSE sweep_key_id END,
+                        sweep_started_at=CASE WHEN ? THEN ? ELSE sweep_started_at END,
+                        sweep_completed_at=CASE WHEN ? THEN ? ELSE sweep_completed_at END,
+                        sweep_complete=CASE WHEN ? THEN ? ELSE sweep_complete END,
+                        unexpired_reference_count=CASE WHEN ? THEN 0 ELSE unexpired_reference_count END
+                    WHERE singleton_id=1 AND holder_uuid=? AND fencing_token=?
+                      AND config_revision=? AND lease_expires_at > ?
+                    """,
+                    (
+                        cursor,
+                        startup_complete_epoch,
+                        last_complete_epoch,
+                        lag,
+                        int(update_sweep),
+                        sweep_key_id,
+                        int(update_sweep),
+                        _sqlite_utc(sweep_started_at) if sweep_started_at else None,
+                        int(update_sweep),
+                        _sqlite_utc(now_utc) if completed else None,
+                        int(update_sweep),
+                        int(sweep_complete),
+                        int(update_sweep),
+                        holder_uuid,
+                        int(fencing_token),
+                        config_revision,
+                        _sqlite_utc(now_utc),
+                    ),
+                )
+                return result.rowcount == 1
+        finally:
+            conn.close()
+
+    def release_slides_reconciliation_lease(
+        self,
+        *,
+        holder_uuid: str,
+        fencing_token: int,
+        config_revision: str,
+        now: datetime | None = None,
+    ) -> bool:
+        """Release the unchanged lease, including an expired non-taken-over lease."""
+        self._validate_slides_coordination_identity(
+            holder_uuid=holder_uuid,
+            config_revision=config_revision,
+        )
+        if isinstance(fencing_token, bool) or int(fencing_token) <= 0:
+            raise ValueError("fencing_token must be positive")
+        _require_aware_utc(now, field_name="now")
+        conn = self._connect()
+        try:
+            if self.backend == "postgres":
+                with conn, self._pg_cursor(conn) as cur:
+                    cur.execute(
+                        """
+                        UPDATE slides_standalone_reconciliation
+                        SET holder_uuid=NULL, lease_expires_at=NULL
+                        WHERE singleton_id=1 AND holder_uuid=%s AND fencing_token=%s
+                          AND config_revision=%s
+                        """,
+                        (holder_uuid, int(fencing_token), config_revision),
+                    )
+                    return cur.rowcount == 1
+            with conn:
+                result = conn.execute(
+                    """
+                    UPDATE slides_standalone_reconciliation
+                    SET holder_uuid=NULL, lease_expires_at=NULL
+                    WHERE singleton_id=1 AND holder_uuid=? AND fencing_token=?
+                      AND config_revision=?
+                    """,
+                    (holder_uuid, int(fencing_token), config_revision),
+                )
+                return result.rowcount == 1
+        finally:
+            conn.close()
+
+    def get_slides_generation_readiness(self) -> dict[str, Any]:
+        """Return standalone-only migration/index readiness diagnostics."""
+        state = self.get_slides_reconciliation_state()
+        conn = self._connect()
+        try:
+            if self.backend == "postgres":
+                with conn, self._pg_cursor(conn) as cur:
+                    cur.execute(
+                        """
+                        SELECT index_class.relname AS indexname,
+                               index_state.indisvalid,
+                               index_state.indisready,
+                               index_state.indisunique
+                        FROM pg_class AS index_class
+                        JOIN pg_index AS index_state
+                          ON index_state.indexrelid=index_class.oid
+                        JOIN pg_namespace AS namespace
+                          ON namespace.oid=index_class.relnamespace
+                        WHERE namespace.nspname=current_schema()
+                          AND index_class.relname IN (
+                            'idx_jobs_archive_slides_scope',
+                            'idx_jobs_archive_uuid_unique'
+                          )
+                        """
+                    )
+                    index_states = {
+                        row["indexname"]: (
+                            bool(row["indisvalid"]),
+                            bool(row["indisready"]),
+                            bool(row["indisunique"]),
+                        )
+                        for row in cur.fetchall()
+                    }
+                    index_ready = index_states.get("idx_jobs_archive_slides_scope") == (
+                        True,
+                        True,
+                        False,
+                    ) and index_states.get("idx_jobs_archive_uuid_unique") == (True, True, True)
+            else:
+                indexes = {
+                    row[0]
+                    for row in conn.execute(
+                        """
+                        SELECT name FROM sqlite_master
+                        WHERE type='index' AND name IN (
+                          'idx_jobs_archive_slides_scope',
+                          'idx_jobs_archive_uuid_unique'
+                        )
+                        """
+                    ).fetchall()
+                }
+                index_ready = indexes == {
+                    "idx_jobs_archive_slides_scope",
+                    "idx_jobs_archive_uuid_unique",
+                }
+        finally:
+            conn.close()
+        return {
+            "ready": state.get("diagnostic_code") is None and index_ready,
+            "diagnostic_code": state.get("diagnostic_code"),
+            "diagnostic_count": state.get("diagnostic_count", 0),
+            "diagnostic_at": state.get("diagnostic_at"),
+            "archive_indexes_ready": index_ready,
+        }
+
+    def _record_slides_generation_diagnostic(
+        self,
+        conn: Any,
+        *,
+        code: str,
+        count: int,
+    ) -> None:
+        """Persist a bounded standalone-only archive diagnostic before failing closed."""
+        if self.backend == "postgres":
+            with self._pg_cursor(conn) as cur:
+                cur.execute(
+                    """
+                    UPDATE slides_standalone_reconciliation
+                    SET diagnostic_code=CASE
+                          WHEN diagnostic_code='duplicate_archive_uuid'
+                          THEN diagnostic_code ELSE %s END,
+                        diagnostic_count=CASE
+                          WHEN diagnostic_code='duplicate_archive_uuid'
+                          THEN diagnostic_count ELSE %s END,
+                        diagnostic_at=CASE
+                          WHEN diagnostic_code='duplicate_archive_uuid'
+                          THEN diagnostic_at ELSE NOW() END
+                    WHERE singleton_id=1
+                    """,
+                    (code, max(1, int(count))),
+                )
+        else:
+            conn.execute(
+                """
+                UPDATE slides_standalone_reconciliation
+                SET diagnostic_code=CASE
+                      WHEN diagnostic_code='duplicate_archive_uuid'
+                      THEN diagnostic_code ELSE ? END,
+                    diagnostic_count=CASE
+                      WHEN diagnostic_code='duplicate_archive_uuid'
+                      THEN diagnostic_count ELSE ? END,
+                    diagnostic_at=CASE
+                      WHEN diagnostic_code='duplicate_archive_uuid'
+                      THEN diagnostic_at ELSE DATETIME('now') END
+                WHERE singleton_id=1
+                """,
+                (code, max(1, int(count))),
+            )
+        conn.commit()
+
+    def resolve_slides_generation_job(
+        self,
+        *,
+        job_uuid: str,
+        owner_user_id: str,
+        idempotency_key: str,
+        job_id: int | None = None,
+    ) -> dict[str, Any] | None:
+        """Resolve one generation correlation by immutable UUID and full scope."""
+        if not all(isinstance(value, str) and value.strip() for value in (job_uuid, owner_user_id, idempotency_key)):
+            return None
+        if not self.get_slides_generation_readiness()["ready"]:
+            return None
+        conn = self._connect()
+        try:
+            if self.backend == "postgres":
+                with conn, self._pg_cursor(conn) as cur:
+                    job_id_param = int(job_id) if job_id is not None else None
+                    params = (
+                        job_uuid,
+                        owner_user_id,
+                        idempotency_key,
+                        job_id_param,
+                        job_id_param,
+                    )
+                    cur.execute(
+                        "SELECT * FROM jobs WHERE uuid=%s AND owner_user_id=%s "
+                        "AND domain='slides' AND queue='default' "
+                        "AND job_type='presentation.generate' AND idempotency_key=%s "
+                        "AND (%s IS NULL OR id=%s)",
+                        params,
+                    )
+                    row = cur.fetchone()
+                    archived = False
+                    if row is None:
+                        cur.execute(
+                            "SELECT * FROM jobs_archive WHERE uuid=%s AND owner_user_id=%s "
+                            "AND domain='slides' AND queue='default' "
+                            "AND job_type='presentation.generate' AND idempotency_key=%s "
+                            "AND (%s IS NULL OR id=%s)",
+                            params,
+                        )
+                        row = cur.fetchone()
+                        archived = row is not None
+            else:
+                job_id_param = int(job_id) if job_id is not None else None
+                params = (
+                    job_uuid,
+                    owner_user_id,
+                    idempotency_key,
+                    job_id_param,
+                    job_id_param,
+                )
+                row = conn.execute(
+                    "SELECT * FROM jobs WHERE uuid=? AND owner_user_id=? "
+                    "AND domain='slides' AND queue='default' "
+                    "AND job_type='presentation.generate' AND idempotency_key=? "
+                    "AND (? IS NULL OR id=?)",
+                    params,
+                ).fetchone()
+                archived = False
+                if row is None:
+                    row = conn.execute(
+                        "SELECT * FROM jobs_archive WHERE uuid=? AND owner_user_id=? "
+                        "AND domain='slides' AND queue='default' "
+                        "AND job_type='presentation.generate' AND idempotency_key=? "
+                        "AND (? IS NULL OR id=?)",
+                        params,
+                    ).fetchone()
+                    archived = row is not None
+            if row is None:
+                return None
+            result = dict(row)
+            if archived:
+                result = self._normalize_archived_job(result)
+            result["payload"] = self._maybe_decrypt_json(self._parse_json_value(result.get("payload")))
+            result["result"] = self._maybe_decrypt_json(self._parse_json_value(result.get("result")))
+            result["archived"] = archived
+            return result
+        finally:
+            conn.close()
+
+    def _normalize_archived_job(self, row: Any) -> dict[str, Any]:
+        """Decode one archived Jobs row without relying on its reusable numeric id."""
+        result = dict(row)
+        if result.get("payload") is None:
+            result["payload"] = self._decode_archive_blob(result.get("payload_compressed"))
+        if result.get("result") is None:
+            result["result"] = self._decode_archive_blob(result.get("result_compressed"))
+        result["payload"] = self._maybe_decrypt_json(self._parse_json_value(result.get("payload")))
+        result["result"] = self._maybe_decrypt_json(self._parse_json_value(result.get("result")))
+        result["archived"] = True
+        return result
+
+    @staticmethod
+    def _normalize_slides_key_record(row: Any) -> dict[str, Any]:
+        record = dict(row)
+        for field_name in ("activated_at", "retired_at"):
+            value = _parse_dt(record.get(field_name))
+            if value is not None:
+                if value.tzinfo is None:
+                    value = value.replace(tzinfo=_tz.utc)
+                else:
+                    value = value.astimezone(_tz.utc)
+            record[field_name] = value
+        return record
+
+    @classmethod
+    def _slides_key_state_from_rows(cls, rows: list[Any]) -> dict[str, Any]:
+        records = [cls._normalize_slides_key_record(row) for row in rows]
+        revisions = {record["config_revision"] for record in records}
+        if len(revisions) > 1:
+            raise RuntimeError("standalone key registry has conflicting revisions")
+        return {
+            "records": records,
+            "config_revision": next(iter(revisions), None),
+        }
+
+    def load_slides_digest_key_registry(self) -> dict[str, Any]:
+        """Load source-free digest-key IDs, states, timestamps, and revision."""
+        conn = self._connect()
+        try:
+            if self.backend == "postgres":
+                with conn, self._pg_cursor(conn) as cur:
+                    cur.execute(
+                        "SELECT * FROM slides_standalone_key_registry "
+                        "ORDER BY CASE state WHEN 'current' THEN 0 ELSE 1 END, key_id"
+                    )
+                    rows = list(cur.fetchall())
+            else:
+                rows = list(
+                    conn.execute(
+                        "SELECT * FROM slides_standalone_key_registry "
+                        "ORDER BY CASE state WHEN 'current' THEN 0 ELSE 1 END, key_id"
+                    ).fetchall()
+                )
+            return self._slides_key_state_from_rows(rows)
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _validate_slides_key_cas_values(*, key_id: str, config_revision: str, changed_at: datetime) -> datetime:
+        if not isinstance(key_id, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,31}", key_id):
+            raise ValueError("digest key ID is invalid")
+        if not isinstance(config_revision, str) or not config_revision or len(config_revision) > 512:
+            raise ValueError("config revision is invalid")
+        return _require_aware_utc(changed_at, field_name="changed_at")
+
+    def compare_and_swap_slides_current_key(
+        self,
+        *,
+        expected_current_key_id: str | None,
+        expected_config_revision: str | None,
+        new_current_key_id: str,
+        new_config_revision: str,
+        changed_at: datetime,
+    ) -> dict[str, Any] | None:
+        """Rotate source-free key metadata under one transactional CAS."""
+        changed_at = self._validate_slides_key_cas_values(
+            key_id=new_current_key_id,
+            config_revision=new_config_revision,
+            changed_at=changed_at,
+        )
+        conn = self._connect()
+        try:
+            if self.backend == "postgres":
+                with conn, self._pg_cursor(conn) as cur:
+                    cur.execute("SELECT * FROM slides_standalone_reconciliation " "WHERE singleton_id=1 FOR UPDATE")
+                    reconciliation = cur.fetchone()
+                    if reconciliation is None:
+                        return None
+                    reconciliation_revision = reconciliation.get("config_revision")
+                    cur.execute("SELECT * FROM slides_standalone_key_registry ORDER BY key_id FOR UPDATE")
+                    rows = list(cur.fetchall())
+                    before = self._slides_key_state_from_rows(rows)
+                    current = next(
+                        (row for row in before["records"] if row["state"] == "current"),
+                        None,
+                    )
+                    current_id = current["key_id"] if current else None
+                    if current_id == new_current_key_id and before["config_revision"] == new_config_revision:
+                        if reconciliation_revision != new_config_revision:
+                            return None
+                        return {"state": before, "applied_here": False}
+                    if (
+                        current_id != expected_current_key_id
+                        or before["config_revision"] != expected_config_revision
+                        or reconciliation_revision != expected_config_revision
+                    ):
+                        return None
+                    if current_id and current_id != new_current_key_id:
+                        cur.execute(
+                            """
+                            UPDATE slides_standalone_key_registry
+                            SET state='retiring', retired_at=%s
+                            WHERE key_id=%s AND state='current'
+                            """,
+                            (changed_at, current_id),
+                        )
+                    cur.execute(
+                        "SELECT 1 FROM slides_standalone_key_registry WHERE key_id=%s",
+                        (new_current_key_id,),
+                    )
+                    if cur.fetchone():
+                        cur.execute(
+                            """
+                            UPDATE slides_standalone_key_registry
+                            SET state='current', activated_at=%s, retired_at=NULL
+                            WHERE key_id=%s
+                            """,
+                            (changed_at, new_current_key_id),
+                        )
+                    else:
+                        cur.execute(
+                            """
+                            INSERT INTO slides_standalone_key_registry(
+                              key_id, state, activated_at, retired_at, config_revision
+                            ) VALUES (%s, 'current', %s, NULL, %s)
+                            """,
+                            (new_current_key_id, changed_at, new_config_revision),
+                        )
+                    cur.execute(
+                        "UPDATE slides_standalone_key_registry SET config_revision=%s",
+                        (new_config_revision,),
+                    )
+                    if reconciliation_revision != new_config_revision:
+                        cur.execute(
+                            """
+                            UPDATE slides_standalone_reconciliation
+                            SET holder_uuid=NULL, lease_expires_at=NULL,
+                                fencing_token=fencing_token + 1,
+                                config_revision=%s, cursor=NULL,
+                                startup_complete_epoch=NULL, last_complete_epoch=NULL,
+                                lag=0, sweep_key_id=NULL, sweep_started_at=NULL,
+                                sweep_completed_at=NULL, sweep_complete=FALSE,
+                                unexpired_reference_count=0
+                            WHERE singleton_id=1
+                              AND config_revision IS NOT DISTINCT FROM %s
+                            """,
+                            (new_config_revision, expected_config_revision),
+                        )
+                        if cur.rowcount != 1:
+                            return None
+                    cur.execute(
+                        "SELECT * FROM slides_standalone_key_registry "
+                        "ORDER BY CASE state WHEN 'current' THEN 0 ELSE 1 END, key_id"
+                    )
+                    after = self._slides_key_state_from_rows(list(cur.fetchall()))
+                    return {"state": after, "applied_here": True}
+
+            conn.execute("BEGIN IMMEDIATE")
+            reconciliation = conn.execute(
+                "SELECT * FROM slides_standalone_reconciliation WHERE singleton_id=1"
+            ).fetchone()
+            if reconciliation is None:
+                conn.rollback()
+                return None
+            reconciliation_revision = reconciliation["config_revision"]
+            rows = list(conn.execute("SELECT * FROM slides_standalone_key_registry ORDER BY key_id").fetchall())
+            before = self._slides_key_state_from_rows(rows)
+            current = next(
+                (row for row in before["records"] if row["state"] == "current"),
+                None,
+            )
+            current_id = current["key_id"] if current else None
+            if current_id == new_current_key_id and before["config_revision"] == new_config_revision:
+                conn.rollback()
+                if reconciliation_revision != new_config_revision:
+                    return None
+                return {"state": before, "applied_here": False}
+            if (
+                current_id != expected_current_key_id
+                or before["config_revision"] != expected_config_revision
+                or reconciliation_revision != expected_config_revision
+            ):
+                conn.rollback()
+                return None
+            changed_sql = _sqlite_utc(changed_at)
+            if current_id and current_id != new_current_key_id:
+                conn.execute(
+                    """
+                    UPDATE slides_standalone_key_registry
+                    SET state='retiring', retired_at=?
+                    WHERE key_id=? AND state='current'
+                    """,
+                    (changed_sql, current_id),
+                )
+            exists = conn.execute(
+                "SELECT 1 FROM slides_standalone_key_registry WHERE key_id=?",
+                (new_current_key_id,),
+            ).fetchone()
+            if exists:
+                conn.execute(
+                    """
+                    UPDATE slides_standalone_key_registry
+                    SET state='current', activated_at=?, retired_at=NULL
+                    WHERE key_id=?
+                    """,
+                    (changed_sql, new_current_key_id),
+                )
+            else:
+                conn.execute(
+                    """
+                    INSERT INTO slides_standalone_key_registry(
+                      key_id, state, activated_at, retired_at, config_revision
+                    ) VALUES (?, 'current', ?, NULL, ?)
+                    """,
+                    (new_current_key_id, changed_sql, new_config_revision),
+                )
+            conn.execute(
+                "UPDATE slides_standalone_key_registry SET config_revision=?",
+                (new_config_revision,),
+            )
+            if reconciliation_revision != new_config_revision:
+                reconciled = conn.execute(
+                    """
+                    UPDATE slides_standalone_reconciliation
+                    SET holder_uuid=NULL, lease_expires_at=NULL,
+                        fencing_token=fencing_token + 1,
+                        config_revision=?, cursor=NULL,
+                        startup_complete_epoch=NULL, last_complete_epoch=NULL,
+                        lag=0, sweep_key_id=NULL, sweep_started_at=NULL,
+                        sweep_completed_at=NULL, sweep_complete=0,
+                        unexpired_reference_count=0
+                    WHERE singleton_id=1 AND config_revision IS ?
+                    """,
+                    (new_config_revision, expected_config_revision),
+                )
+                if reconciled.rowcount != 1:
+                    conn.rollback()
+                    return None
+            after_rows = list(
+                conn.execute(
+                    "SELECT * FROM slides_standalone_key_registry "
+                    "ORDER BY CASE state WHEN 'current' THEN 0 ELSE 1 END, key_id"
+                ).fetchall()
+            )
+            conn.commit()
+            return {
+                "state": self._slides_key_state_from_rows(after_rows),
+                "applied_here": True,
+            }
+        except Exception:
+            with contextlib.suppress(Exception):
+                conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def compare_and_swap_remove_slides_key(
+        self,
+        *,
+        key_id: str,
+        expected_retired_at: datetime,
+        expected_config_revision: str | None,
+    ) -> dict[str, Any] | None:
+        """Remove one unchanged retiring key metadata row."""
+        expected_retired_at = _require_aware_utc(
+            expected_retired_at,
+            field_name="expected_retired_at",
+        )
+        conn = self._connect()
+        try:
+            if self.backend == "postgres":
+                with conn, self._pg_cursor(conn) as cur:
+                    cur.execute(
+                        "SELECT singleton_id FROM slides_standalone_reconciliation " "WHERE singleton_id=1 FOR UPDATE"
+                    )
+                    cur.execute(
+                        "SELECT * FROM slides_standalone_key_registry WHERE key_id=%s FOR UPDATE",
+                        (key_id,),
+                    )
+                    row = cur.fetchone()
+                    if row is None:
+                        return self.load_slides_digest_key_registry()
+                    record = self._normalize_slides_key_record(row)
+                    if (
+                        record["state"] != "retiring"
+                        or record["retired_at"] != expected_retired_at
+                        or record["config_revision"] != expected_config_revision
+                    ):
+                        return None
+                    cur.execute(
+                        "DELETE FROM slides_standalone_key_registry WHERE key_id=%s",
+                        (key_id,),
+                    )
+                    cur.execute(
+                        "SELECT * FROM slides_standalone_key_registry "
+                        "ORDER BY CASE state WHEN 'current' THEN 0 ELSE 1 END, key_id"
+                    )
+                    return self._slides_key_state_from_rows(list(cur.fetchall()))
+
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT * FROM slides_standalone_key_registry WHERE key_id=?",
+                (key_id,),
+            ).fetchone()
+            if row is None:
+                rows = list(conn.execute("SELECT * FROM slides_standalone_key_registry").fetchall())
+                conn.rollback()
+                return self._slides_key_state_from_rows(rows)
+            record = self._normalize_slides_key_record(row)
+            if (
+                record["state"] != "retiring"
+                or record["retired_at"] != expected_retired_at
+                or record["config_revision"] != expected_config_revision
+            ):
+                conn.rollback()
+                return None
+            conn.execute(
+                "DELETE FROM slides_standalone_key_registry WHERE key_id=?",
+                (key_id,),
+            )
+            rows = list(
+                conn.execute(
+                    "SELECT * FROM slides_standalone_key_registry "
+                    "ORDER BY CASE state WHEN 'current' THEN 0 ELSE 1 END, key_id"
+                ).fetchall()
+            )
+            conn.commit()
+            return self._slides_key_state_from_rows(rows)
+        except Exception:
+            with contextlib.suppress(Exception):
+                conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def _count_slides_key_references(self, key_id: str) -> int:
+        """Count exact scoped active/archive UUID payload references to a key ID."""
+        conn = self._connect()
+        try:
+            if self.backend == "postgres":
+                with conn, self._pg_cursor(conn) as cur:
+                    cur.execute(
+                        """
+                        SELECT payload, NULL::bytea AS payload_compressed
+                        FROM jobs
+                        WHERE domain='slides' AND queue='default'
+                          AND job_type='presentation.generate'
+                          AND uuid IS NOT NULL AND BTRIM(uuid) <> ''
+                        UNION ALL
+                        SELECT payload, payload_compressed
+                        FROM jobs_archive
+                        WHERE domain='slides' AND queue='default'
+                          AND job_type='presentation.generate'
+                          AND uuid IS NOT NULL AND BTRIM(uuid) <> ''
+                        """
+                    )
+                    rows = list(cur.fetchall())
+            else:
+                rows = list(
+                    conn.execute(
+                        """
+                        SELECT payload, NULL AS payload_compressed
+                        FROM jobs
+                        WHERE domain='slides' AND queue='default'
+                          AND job_type='presentation.generate'
+                          AND uuid IS NOT NULL AND TRIM(uuid) <> ''
+                        UNION ALL
+                        SELECT payload, payload_compressed
+                        FROM jobs_archive
+                        WHERE domain='slides' AND queue='default'
+                          AND job_type='presentation.generate'
+                          AND uuid IS NOT NULL AND TRIM(uuid) <> ''
+                        """
+                    ).fetchall()
+                )
+            count = 0
+            for row in rows:
+                data = dict(row)
+                payload = data.get("payload")
+                if payload is None:
+                    payload = self._decode_archive_blob(data.get("payload_compressed"))
+                payload = self._maybe_decrypt_json(self._parse_json_value(payload))
+                if isinstance(payload, dict) and payload.get("digest_key_id") == key_id:
+                    count += 1
+            return count
+        finally:
+            conn.close()
+
+    def load_slides_dormant_sweep_proof(self, *, key_id: str) -> dict[str, Any] | None:
+        """Load a completed fenced proof with a fresh exact Jobs reference count."""
+        state = self.get_slides_reconciliation_state()
+        if not state.get("sweep_complete") or state.get("sweep_key_id") != key_id:
+            return None
+        started_at = state.get("sweep_started_at")
+        completed_at = state.get("sweep_completed_at")
+        if started_at is None or completed_at is None or state.get("config_revision") is None:
+            return None
+        return {
+            "key_id": key_id,
+            "config_revision": state["config_revision"],
+            "fencing_token": state["fencing_token"],
+            "sweep_started_at": started_at,
+            "sweep_completed_at": completed_at,
+            "complete": True,
+            "unexpired_reference_count": self._count_slides_key_references(key_id),
+        }
 
     # --- Acquire ordering policy (env-driven overrides) ---
     def _priority_dir_for(self, domain: str | None, backend: str) -> str:
@@ -1712,7 +2763,15 @@ class JobManager:
         # Queue name policy
         allowed_queues = self._get_allowed_queues(domain)
         if queue not in allowed_queues:
-            raise ValueError(f"Queue '{queue}' not allowed for domain '{domain}'. Allowed: {allowed_queues}")  # noqa: TRY003
+            raise ValueError(
+                f"Queue '{queue}' not allowed for domain '{domain}'. Allowed: {allowed_queues}"
+            )  # noqa: TRY003
+        slides_generation = _is_slides_generation_scope(domain, queue, job_type)
+        if slides_generation:
+            if not isinstance(owner_user_id, str) or not owner_user_id.strip():
+                raise ValueError("presentation.generate jobs require owner_user_id")
+            if not isinstance(idempotency_key, str) or not idempotency_key.strip():
+                raise ValueError("presentation.generate jobs require idempotency_key")
 
         # Fair-share scheduling: enforce per-user concurrency limits and adjust priority
         if owner_user_id and _fair_share_enabled():
@@ -4119,6 +5178,156 @@ class JobManager:
                         (json.dumps(res_obj) if res_obj is not None else None, int(job_id)),
                     )
                     return (cur.rowcount or 0) > 0
+        finally:
+            conn.close()
+
+    def terminalize_job_from_worker(
+        self,
+        *,
+        job_id: int,
+        job_uuid: str,
+        owner_user_id: str,
+        domain: str,
+        queue: str,
+        job_type: str,
+        worker_id: str,
+        lease_id: str,
+        completion_token: str,
+        status: str,
+        error_code: str,
+        error_message: str,
+    ) -> str:
+        """Apply one exact worker terminal CAS without numeric-ID fallback."""
+        if not _is_slides_generation_scope(domain, queue, job_type):
+            return "CONFLICT"
+        if status not in {"failed", "cancelled"}:
+            raise ValueError("terminal status must be failed or cancelled")
+        if not isinstance(error_code, str) or re.fullmatch(r"[a-z][a-z0-9_.-]{0,127}", error_code) is None:
+            raise ValueError("terminal error_code is invalid")
+        if not isinstance(error_message, str) or len(error_message) > 1024:
+            raise ValueError("terminal error_message exceeds 1024 characters")
+        correlations = (
+            job_uuid,
+            owner_user_id,
+            domain,
+            queue,
+            job_type,
+            worker_id,
+            lease_id,
+            completion_token,
+        )
+        if not all(isinstance(value, str) and value for value in correlations):
+            raise ValueError("terminal correlation values must be nonblank strings")
+
+        conn = self._connect()
+        try:
+            if self.backend == "postgres":
+                with conn, self._pg_cursor(conn) as cur:
+                    cur.execute(
+                        """
+                        UPDATE jobs
+                        SET status=%s, error_code=%s, error_message=%s,
+                            completion_token=%s, completed_at=NOW(), leased_until=NULL,
+                            cancelled_at=CASE WHEN %s='cancelled' THEN NOW() ELSE cancelled_at END,
+                            cancellation_reason=CASE WHEN %s='cancelled' THEN %s ELSE cancellation_reason END
+                        WHERE id=%s AND status='processing' AND uuid=%s
+                          AND owner_user_id IS NOT DISTINCT FROM %s
+                          AND domain=%s AND queue=%s AND job_type=%s
+                          AND worker_id=%s AND lease_id=%s
+                          AND leased_until > NOW()
+                          AND (completion_token IS NULL OR completion_token=%s)
+                        RETURNING id
+                        """,
+                        (
+                            status,
+                            error_code,
+                            error_message,
+                            completion_token,
+                            status,
+                            status,
+                            error_message,
+                            int(job_id),
+                            job_uuid,
+                            owner_user_id,
+                            domain,
+                            queue,
+                            job_type,
+                            worker_id,
+                            lease_id,
+                            completion_token,
+                        ),
+                    )
+                    if cur.fetchone() is not None:
+                        return "APPLIED"
+                    cur.execute("SELECT * FROM jobs WHERE id=%s", (int(job_id),))
+                    row = cur.fetchone()
+            else:
+                now_utc = self._clock.now_utc().astimezone(_tz.utc)
+                now_sql = now_utc.strftime("%Y-%m-%d %H:%M:%S")
+                with conn:
+                    updated = conn.execute(
+                        """
+                        UPDATE jobs
+                        SET status=?, error_code=?, error_message=?, completion_token=?,
+                            completed_at=?, leased_until=NULL,
+                            cancelled_at=CASE WHEN ?='cancelled' THEN ? ELSE cancelled_at END,
+                            cancellation_reason=CASE WHEN ?='cancelled' THEN ? ELSE cancellation_reason END
+                        WHERE id=? AND status='processing' AND uuid=?
+                          AND owner_user_id IS ?
+                          AND domain=? AND queue=? AND job_type=?
+                          AND worker_id=? AND lease_id=?
+                          AND leased_until > ?
+                          AND (completion_token IS NULL OR completion_token=?)
+                        """,
+                        (
+                            status,
+                            error_code,
+                            error_message,
+                            completion_token,
+                            now_sql,
+                            status,
+                            now_sql,
+                            status,
+                            error_message,
+                            int(job_id),
+                            job_uuid,
+                            owner_user_id,
+                            domain,
+                            queue,
+                            job_type,
+                            worker_id,
+                            lease_id,
+                            now_sql,
+                            completion_token,
+                        ),
+                    )
+                    if updated.rowcount == 1:
+                        return "APPLIED"
+                    row = conn.execute(
+                        "SELECT * FROM jobs WHERE id=?",
+                        (int(job_id),),
+                    ).fetchone()
+            if row is None:
+                return "MISSING"
+            stored = dict(row)
+            exact_correlation = (
+                stored.get("uuid") == job_uuid
+                and stored.get("owner_user_id") == owner_user_id
+                and stored.get("domain") == domain
+                and stored.get("queue") == queue
+                and stored.get("job_type") == job_type
+                and stored.get("worker_id") == worker_id
+                and stored.get("lease_id") == lease_id
+            )
+            identical_terminal = (
+                stored.get("status") == status
+                and stored.get("completion_token") == completion_token
+                and stored.get("error_code") == error_code
+                and stored.get("error_message") == error_message
+            )
+            if exact_correlation and identical_terminal:
+                return "IDEMPOTENT"
+            return "CONFLICT"
         finally:
             conn.close()
 
@@ -6934,6 +8143,21 @@ class JobManager:
                                 drop_json = JobManager._is_truthy(os.getenv("JOBS_ARCHIVE_COMPRESS_DROP_JSON", ""))
                                 for archive_rowid, pl, rs in inserted_archive_rows:
                                     try:
+                                        if not job_uuid:
+                                            if _is_slides_generation_scope(row_domain, row_queue, row_type):
+                                                conn.execute(
+                                                    """
+                                                    UPDATE slides_standalone_reconciliation
+                                                    SET diagnostic_code=CASE
+                                                          WHEN diagnostic_code='duplicate_archive_uuid'
+                                                          THEN diagnostic_code
+                                                          ELSE 'ambiguous_generation_legacy_row' END,
+                                                        diagnostic_count=diagnostic_count + 1,
+                                                        diagnostic_at=DATETIME('now')
+                                                    WHERE singleton_id=1
+                                                    """
+                                                )
+                                            continue
                                         p64 = None
                                         r64 = None
                                         if isinstance(pl, str) and pl:
@@ -6950,6 +8174,18 @@ class JobManager:
                                                 (p64, r64, int(archive_rowid)),
                                             )
                                         else:
+                                            compressed = conn.execute(
+                                                """
+                                                UPDATE jobs_archive
+                                                SET payload_compressed=?, result_compressed=?
+                                                WHERE uuid=? AND 1=(
+                                                  SELECT COUNT(*) FROM jobs_archive
+                                                  WHERE uuid=?
+                                                )
+                                                """,
+                                                (p64, r64, job_uuid, job_uuid),
+                                            )
+                                        if compressed.rowcount != 1:
                                             conn.execute(
                                                 "UPDATE jobs_archive SET payload_compressed=?, result_compressed=? WHERE rowid=?",
                                                 (p64, r64, int(archive_rowid)),

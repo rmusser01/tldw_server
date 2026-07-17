@@ -210,6 +210,50 @@ CREATE INDEX IF NOT EXISTS idx_jobs_archive_migration
     COALESCE(uuid, '')
   );
 
+-- Source-free standalone-HTML digest-key metadata. Secrets and digests never
+-- belong in the shared Jobs store.
+CREATE TABLE IF NOT EXISTS slides_standalone_key_registry (
+  key_id TEXT PRIMARY KEY,
+  state TEXT NOT NULL CHECK (state IN ('current','retiring')),
+  activated_at TEXT NOT NULL,
+  retired_at TEXT,
+  config_revision TEXT NOT NULL,
+  CHECK (
+    (state = 'current' AND retired_at IS NULL)
+    OR (state = 'retiring' AND retired_at IS NOT NULL)
+  )
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_slides_standalone_one_current_key
+  ON slides_standalone_key_registry(state)
+  WHERE state = 'current';
+
+-- Singleton fencing/reconciliation state. Diagnostic state is deliberately
+-- bounded to a code, count, and timestamp and contains no source material.
+CREATE TABLE IF NOT EXISTS slides_standalone_reconciliation (
+  singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
+  holder_uuid TEXT,
+  lease_expires_at TEXT,
+  fencing_token INTEGER NOT NULL DEFAULT 0 CHECK (fencing_token >= 0),
+  cursor TEXT,
+  config_revision TEXT,
+  startup_complete_epoch TEXT,
+  last_complete_epoch REAL,
+  lag INTEGER NOT NULL DEFAULT 0 CHECK (lag >= 0),
+  diagnostic_code TEXT CHECK (
+    diagnostic_code IS NULL
+    OR diagnostic_code IN ('duplicate_archive_uuid','ambiguous_generation_legacy_row')
+  ),
+  diagnostic_count INTEGER NOT NULL DEFAULT 0 CHECK (diagnostic_count >= 0),
+  diagnostic_at TEXT,
+  sweep_key_id TEXT,
+  sweep_started_at TEXT,
+  sweep_completed_at TEXT,
+  sweep_complete INTEGER NOT NULL DEFAULT 0 CHECK (sweep_complete IN (0,1)),
+  unexpired_reference_count INTEGER NOT NULL DEFAULT 0
+    CHECK (unexpired_reference_count >= 0)
+);
+INSERT OR IGNORE INTO slides_standalone_reconciliation(singleton_id) VALUES (1);
+
 -- Append-only outbox for job events (CDC/event bus)
 CREATE TABLE IF NOT EXISTS job_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -590,6 +634,135 @@ def _ensure_sqlite_dependency_snapshot_columns(conn: sqlite3.Connection) -> None
             "SQLite Jobs dependency snapshot migration failed"
         ) from exc
 
+def _audit_and_index_slides_generation(conn: sqlite3.Connection) -> None:
+    """Audit legacy generation correlations before adding archive indexes."""
+    duplicate_row = conn.execute(
+        """
+        SELECT COALESCE(SUM(candidate_count), 0)
+        FROM (
+          SELECT COUNT(*) AS candidate_count
+          FROM jobs_archive
+          WHERE uuid IS NOT NULL
+          GROUP BY uuid
+          HAVING COUNT(*) > 1
+        )
+        """
+    ).fetchone()
+    duplicate_count = int(duplicate_row[0] or 0) if duplicate_row else 0
+    invalid_row = conn.execute(
+        """
+        SELECT COUNT(*) FROM (
+          SELECT uuid, owner_user_id, idempotency_key
+          FROM jobs
+          WHERE domain='slides' AND queue='default' AND job_type='presentation.generate'
+          UNION ALL
+          SELECT uuid, owner_user_id, idempotency_key
+          FROM jobs_archive
+          WHERE domain='slides' AND queue='default' AND job_type='presentation.generate'
+        ) scoped
+        WHERE uuid IS NULL OR TRIM(uuid) = ''
+           OR owner_user_id IS NULL OR TRIM(owner_user_id) = ''
+           OR idempotency_key IS NULL OR TRIM(idempotency_key) = ''
+        """
+    ).fetchone()
+    invalid_count = int(invalid_row[0] or 0) if invalid_row else 0
+    conflicting_row = conn.execute(
+        """
+        SELECT COUNT(*) FROM (
+          SELECT owner_user_id, domain, queue, job_type, idempotency_key
+          FROM (
+            SELECT owner_user_id, domain, queue, job_type, idempotency_key, uuid
+            FROM jobs
+            WHERE domain='slides' AND queue='default' AND job_type='presentation.generate'
+            UNION ALL
+            SELECT owner_user_id, domain, queue, job_type, idempotency_key, uuid
+            FROM jobs_archive
+            WHERE domain='slides' AND queue='default' AND job_type='presentation.generate'
+          ) scoped
+          WHERE uuid IS NOT NULL AND TRIM(uuid) <> ''
+            AND owner_user_id IS NOT NULL AND TRIM(owner_user_id) <> ''
+            AND idempotency_key IS NOT NULL AND TRIM(idempotency_key) <> ''
+          GROUP BY owner_user_id, domain, queue, job_type, idempotency_key
+          HAVING COUNT(DISTINCT uuid) > 1
+        ) conflicts
+        """
+    ).fetchone()
+    conflict_count = int(conflicting_row[0] or 0) if conflicting_row else 0
+
+    diagnostic_code: str | None = None
+    diagnostic_count = 0
+    if duplicate_count:
+        diagnostic_code = "duplicate_archive_uuid"
+        diagnostic_count = duplicate_count
+    elif invalid_count or conflict_count:
+        diagnostic_code = "ambiguous_generation_legacy_row"
+        diagnostic_count = invalid_count + conflict_count
+    conn.execute(
+        """
+        UPDATE slides_standalone_reconciliation
+        SET diagnostic_code=?, diagnostic_count=?,
+            diagnostic_at=CASE WHEN ? IS NULL THEN NULL ELSE DATETIME('now') END
+        WHERE singleton_id=1
+        """,
+        (diagnostic_code, diagnostic_count, diagnostic_code),
+    )
+
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_jobs_archive_slides_scope
+        ON jobs_archive(
+          domain, queue, job_type, idempotency_key, owner_user_id, archived_at DESC
+        )
+        WHERE idempotency_key IS NOT NULL
+        """
+    )
+    if duplicate_count == 0:
+        try:
+            conn.execute(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_archive_uuid_unique
+                ON jobs_archive(uuid)
+                WHERE uuid IS NOT NULL
+                """
+            )
+        except sqlite3.IntegrityError:
+            raced_row = conn.execute(
+                """
+                SELECT COALESCE(SUM(candidate_count), 0)
+                FROM (
+                  SELECT COUNT(*) AS candidate_count
+                  FROM jobs_archive
+                  WHERE uuid IS NOT NULL
+                  GROUP BY uuid
+                  HAVING COUNT(*) > 1
+                )
+                """
+            ).fetchone()
+            conn.execute(
+                """
+                UPDATE slides_standalone_reconciliation
+                SET diagnostic_code='duplicate_archive_uuid', diagnostic_count=?,
+                    diagnostic_at=DATETIME('now')
+                WHERE singleton_id=1
+                """,
+                (int(raced_row[0] or 1) if raced_row else 1,),
+            )
+
+    conn.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS trg_jobs_slides_generation_uuid_required
+        BEFORE INSERT ON jobs
+        FOR EACH ROW
+        WHEN NEW.domain='slides'
+          AND NEW.queue='default'
+          AND NEW.job_type='presentation.generate'
+          AND (NEW.uuid IS NULL OR TRIM(NEW.uuid)='')
+        BEGIN
+          SELECT RAISE(ABORT, 'presentation.generate jobs require an immutable UUID');
+        END
+        """
+    )
+
 
 def ensure_jobs_tables(db_path: Path | None = None) -> Path:
     """Ensure the jobs table exists in the given SQLite database.
@@ -604,6 +777,7 @@ def ensure_jobs_tables(db_path: Path | None = None) -> Path:
         # Anchor default path to project root to avoid CWD effects
         try:
             from tldw_Server_API.app.core.Utils.Utils import get_project_root as _gpr
+
             db_path = (Path(_gpr()) / "Databases" / "jobs.db").resolve()
         except _JOBS_PATH_EXCEPTIONS:
             db_path = (Path(__file__).resolve().parents[5] / "Databases" / "jobs.db").resolve()
@@ -612,6 +786,7 @@ def ensure_jobs_tables(db_path: Path | None = None) -> Path:
             db_path = Path(db_path)
             if not db_path.is_absolute():
                 from tldw_Server_API.app.core.Utils.Utils import get_project_root as _gpr
+
                 db_path = (Path(_gpr()) / db_path).resolve()
         except _JOBS_PATH_EXCEPTIONS:
             db_path = Path(db_path)
@@ -637,6 +812,7 @@ def ensure_jobs_tables(db_path: Path | None = None) -> Path:
                 f"{_sqlite_archive_migration_busy_timeout_ms()}"
             )
             conn.executescript(JOBS_SQLITE_DDL)
+            _audit_and_index_slides_generation(conn)
             conn.commit()
             with contextlib.suppress(_JOBS_DB_EXCEPTIONS):
                 conn.execute("ALTER TABLE jobs ADD COLUMN batch_group TEXT")

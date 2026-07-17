@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import re
 import secrets
 import sqlite3
 from collections.abc import Awaitable
@@ -26,10 +27,38 @@ except ImportError:
     _WORKER_SDK_BACKEND_EXCEPTIONS = (sqlite3.Error,)
 
 CancelCheck = Callable[[dict[str, Any]], Awaitable[bool]]
-JobHandler = Callable[[dict[str, Any]], Awaitable[dict[str, Any] | None]]
 CompletionCallback = Callable[
     [dict[str, Any], dict[str, Any]],
     Awaitable[None],
+]
+
+
+class WorkerTerminalizationConflict(Exception):
+    """Raised when the exact terminal CAS cannot bind to the acquired job."""
+
+
+@dataclass(frozen=True, slots=True)
+class WorkerTerminalOutcome:
+    """Closed handler-returned terminal outcome for failed or cancelled work."""
+
+    status: str
+    error_code: str
+    message: str
+
+    def __post_init__(self) -> None:
+        if self.status not in {"failed", "cancelled"}:
+            raise ValueError("terminal status must be failed or cancelled")
+        if re.fullmatch(r"[a-z][a-z0-9_.-]{0,127}", self.error_code) is None:
+            raise ValueError("terminal error_code is invalid")
+        if not isinstance(self.message, str) or len(self.message) > 1024:
+            raise ValueError("terminal message exceeds 1024 characters")
+        if any(ord(character) < 32 for character in self.message):
+            raise ValueError("terminal message contains control characters")
+
+
+JobHandler = Callable[
+    [dict[str, Any]],
+    Awaitable[dict[str, Any] | WorkerTerminalOutcome | None],
 ]
 
 _WORKER_SDK_NONCRITICAL_EXCEPTIONS = (
@@ -375,6 +404,27 @@ class WorkerSDK:
                     # Handler failures are expected control-flow for retry/fail semantics.
                     _finalize_failure(exc)
                     continue
+                if isinstance(result, WorkerTerminalOutcome):
+                    try:
+                        terminal_result = self.jm.terminalize_job_from_worker(
+                            job_id=job_id,
+                            job_uuid=str(job.get("uuid") or ""),
+                            owner_user_id=str(job.get("owner_user_id") or ""),
+                            domain=str(job.get("domain") or ""),
+                            queue=str(job.get("queue") or ""),
+                            job_type=str(job.get("job_type") or ""),
+                            worker_id=self.cfg.worker_id,
+                            lease_id=str(lease_id_str or ""),
+                            completion_token=str(lease_id_str or ""),
+                            status=result.status,
+                            error_code=result.error_code,
+                            error_message=result.message,
+                        )
+                    except _WORKER_SDK_NONCRITICAL_EXCEPTIONS as exc:
+                        raise WorkerTerminalizationConflict(f"terminal CAS failed for job {job_id}") from exc
+                    if terminal_result not in {"APPLIED", "IDEMPOTENT"}:
+                        raise WorkerTerminalizationConflict(f"terminal CAS returned {terminal_result} for job {job_id}")
+                    continue
                 if result is None:
                     # No result; treat as success with empty result
                     result = {}
@@ -403,6 +453,8 @@ class WorkerSDK:
                         callback_name="completed",
                     )
             except asyncio.CancelledError:
+                raise
+            except WorkerTerminalizationConflict:
                 raise
             except _WORKER_SDK_NONCRITICAL_EXCEPTIONS as e:
                 _finalize_failure(e)

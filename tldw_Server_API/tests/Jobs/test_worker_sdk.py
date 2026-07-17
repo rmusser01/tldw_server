@@ -4,6 +4,7 @@ import sqlite3
 
 import pytest
 
+from tldw_Server_API.app.core.Jobs import worker_sdk as worker_sdk_module
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.migrations import ensure_jobs_tables
 from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
@@ -916,3 +917,139 @@ async def test_run_handler_cancelled_error_propagates(monkeypatch, tmp_path):
     assert fail_calls == []
     stored = jm.get_job(int(job["id"]))
     assert stored["status"] == "processing"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("terminal_status", "error_code"),
+    [("failed", "slides_render_failed"), ("cancelled", "slides_render_cancelled")],
+)
+async def test_run_terminal_outcome_uses_exact_terminalizer_without_complete_or_generic_fail(
+    monkeypatch,
+    tmp_path,
+    terminal_status,
+    error_code,
+):
+    db_path = tmp_path / f"jobs_wsdk_terminal_{terminal_status}.db"
+    ensure_jobs_tables(db_path)
+    jm = JobManager(db_path)
+    job = jm.create_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        payload={},
+        owner_user_id="owner-1",
+        idempotency_key=f"idem-{terminal_status}",
+    )
+    sdk = WorkerSDK(
+        jm,
+        WorkerConfig(
+            domain="slides",
+            queue="default",
+            worker_id="slides-worker",
+            lease_seconds=5,
+            renew_threshold_seconds=1,
+            renew_jitter_seconds=0,
+        ),
+    )
+    sdk._sleep = DummySleep(asyncio.sleep)
+    complete_calls = []
+    fail_calls = []
+    terminal_calls = []
+    original_terminalize = jm.terminalize_job_from_worker
+
+    monkeypatch.setattr(jm, "complete_job", lambda *args, **kwargs: complete_calls.append((args, kwargs)))
+    monkeypatch.setattr(jm, "fail_job", lambda *args, **kwargs: fail_calls.append((args, kwargs)))
+
+    def spy_terminalize(**kwargs):
+        terminal_calls.append(kwargs)
+        return original_terminalize(**kwargs)
+
+    monkeypatch.setattr(jm, "terminalize_job_from_worker", spy_terminalize)
+
+    async def handler(job_row):
+        sdk.stop()
+        return worker_sdk_module.WorkerTerminalOutcome(
+            status=terminal_status,
+            error_code=error_code,
+            message="bounded worker-safe detail",
+        )
+
+    await asyncio.wait_for(sdk.run(handler=handler, job_type="presentation.generate"), timeout=1)
+
+    assert complete_calls == []
+    assert fail_calls == []
+    assert len(terminal_calls) == 1
+    terminal_call = terminal_calls[0]
+    assert terminal_call["job_uuid"] == job["uuid"]
+    assert terminal_call["owner_user_id"] == "owner-1"
+    assert terminal_call["domain"] == "slides"
+    assert terminal_call["queue"] == "default"
+    assert terminal_call["job_type"] == "presentation.generate"
+    stored = jm.get_job(int(job["id"]))
+    assert stored["status"] == terminal_status
+    assert stored["error_code"] == error_code
+    assert stored["error_message"] == "bounded worker-safe detail"
+
+
+@pytest.mark.asyncio
+async def test_terminal_cas_conflict_raises_dedicated_error_without_numeric_fallback(monkeypatch, tmp_path):
+    db_path = tmp_path / "jobs_wsdk_terminal_conflict.db"
+    ensure_jobs_tables(db_path)
+    jm = JobManager(db_path)
+    jm.create_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        payload={},
+        owner_user_id="owner-1",
+        idempotency_key="idem-conflict",
+    )
+    sdk = WorkerSDK(
+        jm,
+        WorkerConfig(domain="slides", queue="default", worker_id="slides-worker"),
+    )
+    sdk._sleep = DummySleep(asyncio.sleep)
+    complete_calls = []
+    fail_calls = []
+    monkeypatch.setattr(jm, "complete_job", lambda *args, **kwargs: complete_calls.append((args, kwargs)))
+    monkeypatch.setattr(jm, "fail_job", lambda *args, **kwargs: fail_calls.append((args, kwargs)))
+    monkeypatch.setattr(jm, "terminalize_job_from_worker", lambda **_kwargs: "CONFLICT")
+
+    async def handler(_job_row):
+        return worker_sdk_module.WorkerTerminalOutcome(
+            status="failed",
+            error_code="slides_render_failed",
+            message="safe",
+        )
+
+    with pytest.raises(worker_sdk_module.WorkerTerminalizationConflict):
+        await asyncio.wait_for(sdk.run(handler=handler, job_type="presentation.generate"), timeout=1)
+
+    assert complete_calls == []
+    assert fail_calls == []
+
+
+@pytest.mark.parametrize("status", ["completed", "queued", "processing", "retry"])
+def test_worker_terminal_outcome_rejects_open_ended_statuses(status):
+    with pytest.raises(ValueError):
+        worker_sdk_module.WorkerTerminalOutcome(
+            status=status,
+            error_code="slides_render_failed",
+            message="safe",
+        )
+
+
+def test_worker_terminal_outcome_rejects_unbounded_or_unsafe_detail():
+    with pytest.raises(ValueError):
+        worker_sdk_module.WorkerTerminalOutcome(
+            status="failed",
+            error_code="slides_render_failed",
+            message="x" * 1025,
+        )
+    with pytest.raises(ValueError):
+        worker_sdk_module.WorkerTerminalOutcome(
+            status="failed",
+            error_code="bad code with spaces",
+            message="safe",
+        )

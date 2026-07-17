@@ -222,6 +222,49 @@ CREATE INDEX IF NOT EXISTS idx_jobs_archive_migration
     COALESCE(uuid, '')
   );
 
+-- Source-free standalone-HTML key metadata. No secret or digest material is
+-- persisted in the shared Jobs database.
+CREATE TABLE IF NOT EXISTS slides_standalone_key_registry (
+  key_id TEXT PRIMARY KEY,
+  state TEXT NOT NULL CHECK (state IN ('current','retiring')),
+  activated_at TIMESTAMPTZ NOT NULL,
+  retired_at TIMESTAMPTZ,
+  config_revision TEXT NOT NULL,
+  CHECK (
+    (state = 'current' AND retired_at IS NULL)
+    OR (state = 'retiring' AND retired_at IS NOT NULL)
+  )
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_slides_standalone_one_current_key
+  ON slides_standalone_key_registry(state)
+  WHERE state = 'current';
+
+CREATE TABLE IF NOT EXISTS slides_standalone_reconciliation (
+  singleton_id SMALLINT PRIMARY KEY CHECK (singleton_id = 1),
+  holder_uuid TEXT,
+  lease_expires_at TIMESTAMPTZ,
+  fencing_token BIGINT NOT NULL DEFAULT 0 CHECK (fencing_token >= 0),
+  cursor TEXT,
+  config_revision TEXT,
+  startup_complete_epoch TEXT,
+  last_complete_epoch DOUBLE PRECISION,
+  lag BIGINT NOT NULL DEFAULT 0 CHECK (lag >= 0),
+  diagnostic_code TEXT CHECK (
+    diagnostic_code IS NULL
+    OR diagnostic_code IN ('duplicate_archive_uuid','ambiguous_generation_legacy_row')
+  ),
+  diagnostic_count BIGINT NOT NULL DEFAULT 0 CHECK (diagnostic_count >= 0),
+  diagnostic_at TIMESTAMPTZ,
+  sweep_key_id TEXT,
+  sweep_started_at TIMESTAMPTZ,
+  sweep_completed_at TIMESTAMPTZ,
+  sweep_complete BOOLEAN NOT NULL DEFAULT FALSE,
+  unexpired_reference_count BIGINT NOT NULL DEFAULT 0
+    CHECK (unexpired_reference_count >= 0)
+);
+INSERT INTO slides_standalone_reconciliation(singleton_id) VALUES (1)
+ON CONFLICT (singleton_id) DO NOTHING;
+
 -- Job dependencies (DAG edges)
 CREATE TABLE IF NOT EXISTS job_dependencies (
   job_uuid TEXT NOT NULL,
@@ -644,6 +687,128 @@ def _ensure_pg_dependency_snapshot_columns(cur: Any) -> None:
         "depends_on_cancellation_reason FROM job_dependencies LIMIT 0"
     )
 
+def _audit_slides_generation_pg(cur) -> tuple[str | None, int]:
+    """Persist bounded legacy diagnostics before archive index creation."""
+    cur.execute(
+        """
+        SELECT COALESCE(SUM(candidate_count), 0) FROM (
+          SELECT COUNT(*) AS candidate_count
+          FROM jobs_archive
+          WHERE uuid IS NOT NULL
+          GROUP BY uuid
+          HAVING COUNT(*) > 1
+        ) duplicates
+        """
+    )
+    duplicate_count = int((cur.fetchone() or [0])[0] or 0)
+    cur.execute(
+        """
+        SELECT COUNT(*) FROM (
+          SELECT uuid, owner_user_id, idempotency_key
+          FROM jobs
+          WHERE domain='slides' AND queue='default' AND job_type='presentation.generate'
+          UNION ALL
+          SELECT uuid, owner_user_id, idempotency_key
+          FROM jobs_archive
+          WHERE domain='slides' AND queue='default' AND job_type='presentation.generate'
+        ) scoped
+        WHERE uuid IS NULL OR BTRIM(uuid) = ''
+           OR owner_user_id IS NULL OR BTRIM(owner_user_id) = ''
+           OR idempotency_key IS NULL OR BTRIM(idempotency_key) = ''
+        """
+    )
+    invalid_count = int((cur.fetchone() or [0])[0] or 0)
+    cur.execute(
+        """
+        SELECT COUNT(*) FROM (
+          SELECT owner_user_id, domain, queue, job_type, idempotency_key
+          FROM (
+            SELECT owner_user_id, domain, queue, job_type, idempotency_key, uuid
+            FROM jobs
+            WHERE domain='slides' AND queue='default' AND job_type='presentation.generate'
+            UNION ALL
+            SELECT owner_user_id, domain, queue, job_type, idempotency_key, uuid
+            FROM jobs_archive
+            WHERE domain='slides' AND queue='default' AND job_type='presentation.generate'
+          ) scoped
+          WHERE uuid IS NOT NULL AND BTRIM(uuid) <> ''
+            AND owner_user_id IS NOT NULL AND BTRIM(owner_user_id) <> ''
+            AND idempotency_key IS NOT NULL AND BTRIM(idempotency_key) <> ''
+          GROUP BY owner_user_id, domain, queue, job_type, idempotency_key
+          HAVING COUNT(DISTINCT uuid) > 1
+        ) conflicts
+        """
+    )
+    conflict_count = int((cur.fetchone() or [0])[0] or 0)
+    diagnostic_code: str | None = None
+    diagnostic_count = 0
+    if duplicate_count:
+        diagnostic_code = "duplicate_archive_uuid"
+        diagnostic_count = duplicate_count
+    elif invalid_count or conflict_count:
+        diagnostic_code = "ambiguous_generation_legacy_row"
+        diagnostic_count = invalid_count + conflict_count
+    cur.execute(
+        """
+        UPDATE slides_standalone_reconciliation
+        SET diagnostic_code=%s, diagnostic_count=%s,
+            diagnostic_at=CASE WHEN %s IS NULL THEN NULL ELSE NOW() END
+        WHERE singleton_id=1
+        """,
+        (diagnostic_code, diagnostic_count, diagnostic_code),
+    )
+    return diagnostic_code, diagnostic_count
+
+
+def _record_duplicate_archive_uuid_pg(dsn: str) -> None:
+    """Translate a concurrent unique-index race into standalone diagnostics."""
+    import psycopg
+
+    with psycopg.connect(dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT COALESCE(SUM(candidate_count), 1) FROM (
+              SELECT COUNT(*) AS candidate_count
+              FROM jobs_archive
+              WHERE uuid IS NOT NULL
+              GROUP BY uuid
+              HAVING COUNT(*) > 1
+            ) duplicates
+            """
+        )
+        count = int((cur.fetchone() or [1])[0] or 1)
+        cur.execute(
+            """
+            UPDATE slides_standalone_reconciliation
+            SET diagnostic_code='duplicate_archive_uuid', diagnostic_count=%s,
+                diagnostic_at=NOW()
+            WHERE singleton_id=1
+            """,
+            (count,),
+        )
+
+
+def _record_slides_audit_failure_pg(dsn: str) -> None:
+    """Persist a bounded fail-closed diagnostic when the archive audit errors."""
+    import psycopg
+
+    with psycopg.connect(dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE slides_standalone_reconciliation
+            SET diagnostic_code=CASE
+                  WHEN diagnostic_code='duplicate_archive_uuid'
+                  THEN diagnostic_code ELSE 'ambiguous_generation_legacy_row' END,
+                diagnostic_count=CASE
+                  WHEN diagnostic_code='duplicate_archive_uuid'
+                  THEN diagnostic_count ELSE GREATEST(diagnostic_count, 1) END,
+                diagnostic_at=CASE
+                  WHEN diagnostic_code='duplicate_archive_uuid'
+                  THEN diagnostic_at ELSE NOW() END
+            WHERE singleton_id=1
+            """
+        )
+
 
 def ensure_jobs_tables_pg(db_url: str) -> str:
     """Ensure the jobs table exists in the given PostgreSQL database.
@@ -729,6 +894,26 @@ def ensure_jobs_tables_pg(db_url: str) -> str:
                 f.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS error_class TEXT")
                 f.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS error_stack JSONB")
                 f.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS batch_group TEXT")
+                f.execute(
+                    """
+                    DO $$
+                    BEGIN
+                      IF NOT EXISTS (
+                        SELECT 1 FROM pg_constraint
+                        WHERE conname='jobs_slides_generation_uuid_required'
+                          AND conrelid='jobs'::regclass
+                      ) THEN
+                        ALTER TABLE jobs ADD CONSTRAINT jobs_slides_generation_uuid_required
+                        CHECK (
+                          domain <> 'slides' OR queue <> 'default'
+                          OR job_type <> 'presentation.generate'
+                          OR (uuid IS NOT NULL AND BTRIM(uuid) <> '')
+                        ) NOT VALID;
+                      END IF;
+                    END
+                    $$
+                    """
+                )
                 # Forward-migrate archive table compressed columns (if table exists)
                 try:
                     f.execute("ALTER TABLE jobs_archive ADD COLUMN IF NOT EXISTS payload_compressed BYTEA")
@@ -741,6 +926,17 @@ def ensure_jobs_tables_pg(db_url: str) -> str:
                 # Best-effort; existing installs may restrict optional columns.
                 pass
         _ensure_pg_archive_locators(_dsn)
+        # Audit before creating the standalone archive indexes.
+        slides_diagnostic: str | None = None
+        try:
+            with psycopg.connect(_dsn) as audit_conn, audit_conn.cursor() as audit_cur:
+                slides_diagnostic, _ = _audit_slides_generation_pg(audit_cur)
+        except psycopg.Error:
+            # Standalone readiness remains unavailable, but generic Jobs setup
+            # must not be coupled to the optional audit path.
+            slides_diagnostic = "ambiguous_generation_legacy_row"
+            with contextlib.suppress(psycopg.Error):
+                _record_slides_audit_failure_pg(_dsn)
         # Create hot-path indexes concurrently (outside transaction) when possible
         archive_batch_read_indexes_verified = False
         try:
@@ -749,10 +945,37 @@ def ensure_jobs_tables_pg(db_url: str) -> str:
                     _configure_pg_archive_migration_session(k, local=False)
                     _ensure_pg_archive_batch_read_indexes(k)
                     archive_batch_read_indexes_verified = True
+                    for index_name in (
+                        "idx_jobs_archive_slides_scope",
+                        "idx_jobs_archive_uuid_unique",
+                    ):
+                        k.execute(
+                            """
+                            SELECT indisvalid, indisready FROM pg_index
+                            WHERE indexrelid=TO_REGCLASS(%s)
+                            """,
+                            (index_name,),
+                        )
+                        index_state = k.fetchone()
+                        if index_state and not (index_state[0] and index_state[1]):
+                            if index_name == "idx_jobs_archive_slides_scope":
+                                k.execute(
+                                    "DROP INDEX CONCURRENTLY IF EXISTS "
+                                    "idx_jobs_archive_slides_scope"
+                                )
+                            else:
+                                k.execute(
+                                    "DROP INDEX CONCURRENTLY IF EXISTS "
+                                    "idx_jobs_archive_uuid_unique"
+                                )
                     # Ready vs scheduled scans
-                    k.execute("CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_jobs_status_available_at ON jobs(status, available_at)")
+                    k.execute(
+                        "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_jobs_status_available_at ON jobs(status, available_at)"
+                    )
                     # Composite unique for idempotency (NULLs are allowed and do not conflict)
-                    k.execute("CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_jobs_idempotent_unique ON jobs(domain, queue, job_type, idempotency_key)")
+                    k.execute(
+                        "CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_jobs_idempotent_unique ON jobs(domain, queue, job_type, idempotency_key)"
+                    )
                     # Optional partial index to speed common hot-path queries
                     with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
                         k.execute("CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_jobs_hot ON jobs(domain, queue, job_type, priority, available_at, created_at) WHERE status IN ('queued','processing')")
@@ -768,6 +991,30 @@ def ensure_jobs_tables_pg(db_url: str) -> str:
                     except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
                         # Older PG versions or permission issues: non-fatal
                         pass
+                    k.execute(
+                        """
+                        CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_jobs_archive_slides_scope
+                        ON jobs_archive(
+                          domain, queue, job_type, idempotency_key, owner_user_id, archived_at DESC
+                        )
+                        WHERE idempotency_key IS NOT NULL
+                        """
+                    )
+                    if slides_diagnostic != "duplicate_archive_uuid":
+                        try:
+                            k.execute(
+                                """
+                                CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_jobs_archive_uuid_unique
+                                ON jobs_archive(uuid)
+                                WHERE uuid IS NOT NULL
+                                """
+                            )
+                        except psycopg.Error as exc:
+                            if getattr(exc, "sqlstate", None) != "23505":
+                                raise
+                            with contextlib.suppress(psycopg.Error):
+                                k.execute("DROP INDEX CONCURRENTLY IF EXISTS idx_jobs_archive_uuid_unique")
+                            _record_duplicate_archive_uuid_pg(_dsn)
         except (
             psycopg.Error,
             *_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS,
@@ -778,6 +1025,11 @@ def ensure_jobs_tables_pg(db_url: str) -> str:
                 raise RuntimeError(
                     "PostgreSQL Jobs archive batch-read index migration failed"
                 ) from exc
+            if isinstance(exc, psycopg.Error):
+                # Optional standalone index/readiness setup must not break
+                # generic Jobs after the required archive indexes are ready.
+                with contextlib.suppress(psycopg.Error):
+                    _record_slides_audit_failure_pg(_dsn)
             # Best-effort; not fatal
             pass
         # Ensure job_events exists (idempotent helper) for deployments created before inlined DDL
@@ -791,6 +1043,7 @@ def ensure_jobs_tables_pg(db_url: str) -> str:
             import os as _os
 
             import psycopg  # noqa: F401
+
             if _is_truthy(_os.getenv("JOBS_PG_RLS_ENABLE", "")):
                 with psycopg.connect(_dsn, autocommit=True) as _c_rls, _c_rls.cursor() as _p:
                     with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
