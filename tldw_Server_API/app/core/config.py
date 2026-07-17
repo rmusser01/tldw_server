@@ -187,6 +187,7 @@ _CONFIG_SOURCE_METADATA: dict[str, Any] = {
 _LOGGER_READY = False
 _STARTUP_LOG_BUFFER: list[tuple[str, str, dict[str, Any]]] = []
 _ENV_FILE_ENV_VAR = "TLDW_ENV_FILE"
+_ENV_FILE_EXCLUSIVE_ENV_VAR = "TLDW_ENV_FILE_EXCLUSIVE"
 
 
 def _buffered_log(level: str, message: str, **kwargs: Any) -> None:
@@ -238,6 +239,16 @@ def get_tldw_env_file_path() -> Path | None:
     return _resolve_path(Path(raw_path.strip()))
 
 
+def is_tldw_env_file_exclusive() -> bool:
+    """Return whether only the explicit ``TLDW_ENV_FILE`` may be loaded."""
+    return os.getenv(_ENV_FILE_EXCLUSIVE_ENV_VAR, "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
 def _candidate_env_paths(project_root: Path, repo_root: Path | None = None) -> list[Path]:
     """Return .env candidates in load precedence order.
 
@@ -248,6 +259,13 @@ def _candidate_env_paths(project_root: Path, repo_root: Path | None = None) -> l
     explicit_env_file = get_tldw_env_file_path()
     if explicit_env_file:
         candidates.append(explicit_env_file)
+        if is_tldw_env_file_exclusive():
+            if not explicit_env_file.is_file():
+                raise FileNotFoundError(
+                    "TLDW_ENV_FILE_EXCLUSIVE requires TLDW_ENV_FILE to reference "
+                    f"an existing file: {explicit_env_file}"
+                )
+            return candidates
 
     candidates.extend(
         [
