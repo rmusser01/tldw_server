@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Any, NoReturn
 
 import httpx
+from anyio import fail_after
 
 from tldw_Server_API.app.core.Slides.standalone_html_config import (
     CLOSED_ADAPTER_CATALOG,
@@ -316,6 +317,57 @@ def _verify_current_target(
     _fail("standalone_html_endpoint_not_allowed")
 
 
+def _load_current_config(
+    loader: Callable[[], SlidesStandaloneHtmlConfig],
+) -> SlidesStandaloneHtmlConfig:
+    current: object = None
+    loader_failed = False
+    try:
+        current = loader()
+    except Exception:  # noqa: BLE001 - redact every loader failure at this boundary.
+        loader_failed = True
+    if loader_failed or not isinstance(current, SlidesStandaloneHtmlConfig):
+        _fail("standalone_html_endpoint_not_allowed")
+    return current
+
+
+def _validated_runtime_limits(config: SlidesStandaloneHtmlConfig) -> tuple[int, int]:
+    response_limit = config.output_limits.max_provider_response_bytes
+    document_limit = config.output_limits.max_document_bytes
+    if type(response_limit) is not int or response_limit <= 0 or type(document_limit) is not int or document_limit <= 0:
+        _fail("standalone_html_provider_request_invalid")
+
+    limits = config.provider_limits
+    if (
+        not isinstance(limits.max_output_tokens, int)
+        or isinstance(limits.max_output_tokens, bool)
+        or not 1 <= limits.max_output_tokens <= MAX_OUTPUT_TOKENS
+        or not all(
+            isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value > 0
+            for value in (
+                limits.connect_timeout_seconds,
+                limits.read_timeout_seconds,
+                limits.overall_timeout_seconds,
+            )
+        )
+    ):
+        _fail("standalone_html_provider_request_invalid")
+    return (
+        min(response_limit, MAX_PROVIDER_RESPONSE_BYTES),
+        min(document_limit, MAX_DOCUMENT_BYTES),
+    )
+
+
+def _provider_timeout(config: SlidesStandaloneHtmlConfig) -> httpx.Timeout:
+    limits = config.provider_limits
+    return httpx.Timeout(
+        connect=limits.connect_timeout_seconds,
+        read=limits.read_timeout_seconds,
+        write=limits.connect_timeout_seconds,
+        pool=limits.connect_timeout_seconds,
+    )
+
+
 def _build_request(
     target: ResolvedExecutionTarget,
     *,
@@ -416,57 +468,80 @@ def _document_bytes(text: str, *, max_document_bytes: int) -> bytes:
 async def _request_once(
     *,
     target: ResolvedExecutionTarget,
-    headers: dict[str, str],
-    payload: dict[str, Any],
-    config: SlidesStandaloneHtmlConfig,
-    response_limit: int,
-    document_limit: int,
+    system_prompt: str,
+    user_content: str,
+    provider_api_key: str | None,
+    initial_config: SlidesStandaloneHtmlConfig,
+    current_config_loader: Callable[[], SlidesStandaloneHtmlConfig],
 ) -> bytes:
-    timeout = httpx.Timeout(
-        connect=config.provider_limits.connect_timeout_seconds,
-        read=config.provider_limits.read_timeout_seconds,
-        write=config.provider_limits.connect_timeout_seconds,
-        pool=config.provider_limits.connect_timeout_seconds,
-    )
     async with _AsyncClient(
-        timeout=timeout,
+        timeout=_provider_timeout(initial_config),
         trust_env=False,
         follow_redirects=False,
     ) as client:
-        async with client.stream(
-            "POST",
-            target.endpoint_identity,
-            headers=headers,
-            json=payload,
-        ) as response:
-            _validate_content_encoding(response.headers)
-            declared_length = _declared_content_length(response.headers)
-            if declared_length is not None and declared_length > response_limit:
-                _fail("standalone_html_provider_response_too_large")
-
-            success = 200 <= response.status_code < 300
-            body = bytearray() if success else None
-            preflight = _ProviderJsonPreflight() if success else None
-            received = 0
-            async for chunk in response.aiter_raw():
-                received += len(chunk)
-                if received > response_limit:
-                    _fail("standalone_html_provider_response_too_large")
-                if preflight is not None:
-                    preflight.feed(chunk)
-                    body.extend(chunk)
-
-            if declared_length is not None and received != declared_length:
-                _fail("standalone_html_provider_response_invalid")
-            if not success:
-                _fail(
-                    "standalone_html_provider_http_error",
-                    status_code=response.status_code,
+        current = _load_current_config(current_config_loader)
+        response_limit, document_limit = _validated_runtime_limits(current)
+        limits = current.provider_limits
+        with fail_after(limits.overall_timeout_seconds):
+            headers, payload = _build_request(
+                target,
+                system_prompt=system_prompt,
+                user_content=user_content,
+                provider_api_key=provider_api_key,
+                max_output_tokens=limits.max_output_tokens,
+            )
+            request_timeout = _provider_timeout(current)
+            current = _verify_current_target(target, current)
+            async with client.stream(
+                "POST",
+                target.endpoint_identity,
+                headers=headers,
+                json=payload,
+                timeout=request_timeout,
+            ) as response:
+                return await _consume_response(
+                    response,
+                    target=target,
+                    response_limit=response_limit,
+                    document_limit=document_limit,
                 )
-            preflight.finish()
-            decoded = _strict_json_loads(bytes(body))
-            text = _extract_text(decoded, target)
-            return _document_bytes(text, max_document_bytes=document_limit)
+
+
+async def _consume_response(
+    response: httpx.Response,
+    *,
+    target: ResolvedExecutionTarget,
+    response_limit: int,
+    document_limit: int,
+) -> bytes:
+    _validate_content_encoding(response.headers)
+    declared_length = _declared_content_length(response.headers)
+    if declared_length is not None and declared_length > response_limit:
+        _fail("standalone_html_provider_response_too_large")
+
+    success = 200 <= response.status_code < 300
+    body = bytearray() if success else None
+    preflight = _ProviderJsonPreflight() if success else None
+    received = 0
+    async for chunk in response.aiter_raw():
+        received += len(chunk)
+        if received > response_limit:
+            _fail("standalone_html_provider_response_too_large")
+        if preflight is not None:
+            preflight.feed(chunk)
+            body.extend(chunk)
+
+    if declared_length is not None and received != declared_length:
+        _fail("standalone_html_provider_response_invalid")
+    if not success:
+        _fail(
+            "standalone_html_provider_http_error",
+            status_code=response.status_code,
+        )
+    preflight.finish()
+    decoded = _strict_json_loads(bytes(body))
+    text = _extract_text(decoded, target)
+    return _document_bytes(text, max_document_bytes=document_limit)
 
 
 async def generate_standalone_html(
@@ -488,63 +563,24 @@ async def generate_standalone_html(
         or not callable(current_config_loader)
     ):
         _fail("standalone_html_provider_request_invalid")
-    current: object = None
-    loader_failed = False
-    try:
-        current = current_config_loader()
-    except Exception:  # noqa: BLE001 - redact every loader failure at this boundary.
-        loader_failed = True
-    if loader_failed:
-        _fail("standalone_html_endpoint_not_allowed")
+    current = _load_current_config(current_config_loader)
     current = _verify_current_target(stored_target, current)
-
-    response_limit = current.output_limits.max_provider_response_bytes
-    document_limit = current.output_limits.max_document_bytes
-    if type(response_limit) is not int or response_limit <= 0 or type(document_limit) is not int or document_limit <= 0:
-        _fail("standalone_html_provider_request_invalid")
-    response_limit = min(response_limit, MAX_PROVIDER_RESPONSE_BYTES)
-    document_limit = min(document_limit, MAX_DOCUMENT_BYTES)
-
-    limits = current.provider_limits
-    if (
-        not isinstance(limits.max_output_tokens, int)
-        or isinstance(limits.max_output_tokens, bool)
-        or not 1 <= limits.max_output_tokens <= MAX_OUTPUT_TOKENS
-        or not all(
-            isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value > 0
-            for value in (
-                limits.connect_timeout_seconds,
-                limits.read_timeout_seconds,
-                limits.overall_timeout_seconds,
-            )
-        )
-    ):
-        _fail("standalone_html_provider_request_invalid")
-    headers, payload = _build_request(
-        stored_target,
-        system_prompt=system_prompt,
-        user_content=user_content,
-        provider_api_key=provider_api_key,
-        max_output_tokens=limits.max_output_tokens,
-    )
+    _validated_runtime_limits(current)
 
     try:
-        return await asyncio.wait_for(
-            _request_once(
-                target=stored_target,
-                headers=headers,
-                payload=payload,
-                config=current,
-                response_limit=response_limit,
-                document_limit=document_limit,
-            ),
-            timeout=limits.overall_timeout_seconds,
+        return await _request_once(
+            target=stored_target,
+            system_prompt=system_prompt,
+            user_content=user_content,
+            provider_api_key=provider_api_key,
+            initial_config=current,
+            current_config_loader=current_config_loader,
         )
     except asyncio.CancelledError:
         raise
     except StandaloneHtmlProviderError:
         raise
-    except (asyncio.TimeoutError, httpx.TimeoutException):
+    except (TimeoutError, httpx.TimeoutException):
         failure_code = "standalone_html_provider_timeout"
     except (httpx.HTTPError, OSError):
         failure_code = "standalone_html_provider_unavailable"
