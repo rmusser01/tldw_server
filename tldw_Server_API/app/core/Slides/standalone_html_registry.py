@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import binascii
 import hashlib
@@ -309,6 +310,109 @@ class DigestKeyRegistryStore(Protocol):
     ) -> DigestKeyRegistryState | None:
         """Remove one unchanged retiring key or report a compare-and-swap conflict."""
         ...
+
+
+class JobManagerDigestKeyRegistryStore:
+    """Async source-free registry adapter over one injected synchronous JobManager."""
+
+    __slots__ = ("_job_manager",)
+
+    def __init__(self, job_manager: Any) -> None:
+        self._job_manager = job_manager
+
+    @staticmethod
+    def _state(raw: object) -> DigestKeyRegistryState:
+        if not isinstance(raw, Mapping):
+            raise DigestKeyRegistryError("Jobs key registry returned invalid state")
+        raw_records = raw.get("records", ())
+        if not isinstance(raw_records, (list, tuple)):
+            raise DigestKeyRegistryError("Jobs key registry returned invalid records")
+        records: list[DigestKeyMetadata] = []
+        for raw_record in raw_records:
+            if not isinstance(raw_record, Mapping):
+                raise DigestKeyRegistryError("Jobs key registry returned an invalid record")
+            try:
+                records.append(
+                    DigestKeyMetadata(
+                        key_id=raw_record["key_id"],
+                        state=DigestKeyState(raw_record["state"]),
+                        activated_at=raw_record["activated_at"],
+                        retired_at=raw_record.get("retired_at"),
+                    )
+                )
+            except (KeyError, TypeError, ValueError) as exc:
+                raise DigestKeyRegistryError("Jobs key registry returned an invalid record") from exc
+        return DigestKeyRegistryState(
+            records=tuple(records),
+            config_epoch=raw.get("config_revision"),
+        )
+
+    async def load_digest_key_registry(self) -> DigestKeyRegistryState:
+        raw = await asyncio.to_thread(self._job_manager.load_slides_digest_key_registry)
+        return self._state(raw)
+
+    async def compare_and_swap_current_key(
+        self,
+        *,
+        expected_current_key_id: str | None,
+        expected_config_epoch: str | None,
+        new_current_key_id: str,
+        new_config_epoch: str,
+        changed_at: datetime,
+    ) -> CurrentKeyCasResult | None:
+        raw = await asyncio.to_thread(
+            self._job_manager.compare_and_swap_slides_current_key,
+            expected_current_key_id=expected_current_key_id,
+            expected_config_revision=expected_config_epoch,
+            new_current_key_id=new_current_key_id,
+            new_config_revision=new_config_epoch,
+            changed_at=changed_at,
+        )
+        if raw is None:
+            return None
+        if not isinstance(raw, Mapping) or not isinstance(raw.get("applied_here"), bool):
+            raise DigestKeyRegistryError("Jobs current-key CAS returned invalid state")
+        return CurrentKeyCasResult(
+            state=self._state(raw.get("state")),
+            applied_here=raw["applied_here"],
+        )
+
+    async def load_dormant_sweep_proof(self, *, key_id: str) -> DormantSweepProof | None:
+        raw = await asyncio.to_thread(
+            self._job_manager.load_slides_dormant_sweep_proof,
+            key_id=key_id,
+        )
+        if raw is None:
+            return None
+        if not isinstance(raw, Mapping):
+            raise DigestKeyRegistryError("Jobs dormant sweep returned invalid proof")
+        try:
+            return DormantSweepProof(
+                key_id=raw["key_id"],
+                config_epoch=raw["config_revision"],
+                fencing_token=raw["fencing_token"],
+                sweep_started_at=raw["sweep_started_at"],
+                sweep_completed_at=raw["sweep_completed_at"],
+                complete=raw["complete"],
+                unexpired_reference_count=raw["unexpired_reference_count"],
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise DigestKeyRegistryError("Jobs dormant sweep returned invalid proof") from exc
+
+    async def compare_and_swap_remove_key(
+        self,
+        *,
+        key_id: str,
+        expected_retired_at: datetime,
+        expected_config_epoch: str | None,
+    ) -> DigestKeyRegistryState | None:
+        raw = await asyncio.to_thread(
+            self._job_manager.compare_and_swap_remove_slides_key,
+            key_id=key_id,
+            expected_retired_at=expected_retired_at,
+            expected_config_revision=expected_config_epoch,
+        )
+        return None if raw is None else self._state(raw)
 
 
 def _strict_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
