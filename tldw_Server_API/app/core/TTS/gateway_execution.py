@@ -65,7 +65,7 @@ class GatewayAttempt:
     requested_format: AudioFormat
     source_format: AudioFormat
     credential: ResolvedByokCredentials = field(repr=False)
-    spec: GatewaySpec
+    spec: GatewaySpec = field(repr=False)
 
 
 @dataclass(frozen=True)
