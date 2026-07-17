@@ -1,4 +1,5 @@
 import { bgRequest } from "@/services/background-proxy"
+import { sanitizeServerErrorMessage } from "@/utils/server-error-message"
 import { buildQuery } from "../client-utils"
 import { getNormalizedTldwModels } from "../model-normalization"
 import { appendPathQuery } from "../path-utils"
@@ -84,10 +85,52 @@ export type TldwSpeechDetailedResult = {
 }
 
 const TTS_CAPABILITY_TTL_MS = 30_000
+const TTS_CAPABILITY_MAX_SCOPES = 64
 const ttsCapabilityCache = new Map<
   string,
   { supported: boolean; expiresAt: number }
 >()
+const ttsCapabilityInFlight = new Map<
+  string,
+  Promise<{ supported: boolean; cacheable: boolean }>
+>()
+let lastFallbackClock = 0
+
+const monotonicNow = (): number => {
+  if (
+    typeof performance !== "undefined" &&
+    typeof performance.now === "function"
+  ) {
+    const value = performance.now()
+    if (Number.isFinite(value)) return value
+  }
+  lastFallbackClock = Math.max(lastFallbackClock, Date.now())
+  return lastFallbackClock
+}
+
+const pruneTtsCapabilityCache = (now: number): void => {
+  for (const [scope, entry] of ttsCapabilityCache) {
+    if (entry.expiresAt <= now) ttsCapabilityCache.delete(scope)
+  }
+}
+
+const cacheTtsCapability = (
+  scope: string,
+  supported: boolean,
+  now: number
+): void => {
+  pruneTtsCapabilityCache(now)
+  ttsCapabilityCache.delete(scope)
+  while (ttsCapabilityCache.size >= TTS_CAPABILITY_MAX_SCOPES) {
+    const oldest = ttsCapabilityCache.keys().next().value
+    if (oldest === undefined) break
+    ttsCapabilityCache.delete(oldest)
+  }
+  ttsCapabilityCache.set(scope, {
+    supported,
+    expiresAt: now + TTS_CAPABILITY_TTL_MS
+  })
+}
 
 const sanitizeServerUrlForScope = (value: unknown): string => {
   const raw = typeof value === "string" ? value.trim() : ""
@@ -123,33 +166,68 @@ const supportsExplicitTtsBackend = async (
   config: unknown
 ): Promise<boolean> => {
   const scope = getTtsCapabilityScope(config)
-  const now = Date.now()
+  const now = monotonicNow()
+  pruneTtsCapabilityCache(now)
   const cached = ttsCapabilityCache.get(scope)
-  if (cached && cached.expiresAt > now) return cached.supported
-
-  let supported = false
-  try {
-    const response = await client.request<unknown>({
-      path: "/api/v1/audio/providers",
-      method: "GET"
-    })
-    const payload =
-      response &&
-      typeof response === "object" &&
-      "data" in response &&
-      (response as Record<string, unknown>).data &&
-      typeof (response as Record<string, unknown>).data === "object"
-        ? ((response as Record<string, unknown>).data as Record<string, unknown>)
-        : (response as Record<string, unknown> | null)
-    supported = payload?.supports_explicit_backend === true
-  } catch {
-    supported = false
+  if (cached) {
+    ttsCapabilityCache.delete(scope)
+    ttsCapabilityCache.set(scope, cached)
+    return cached.supported
   }
-  ttsCapabilityCache.set(scope, {
-    supported,
-    expiresAt: now + TTS_CAPABILITY_TTL_MS
-  })
-  return supported
+
+  const existing = ttsCapabilityInFlight.get(scope)
+  if (existing) return (await existing).supported
+
+  const query = (async (): Promise<{
+    supported: boolean
+    cacheable: boolean
+  }> => {
+    const beforeConfig = await client.ensureConfigForRequest(true)
+    if (getTtsCapabilityScope(beforeConfig) !== scope) {
+      return { supported: false, cacheable: false }
+    }
+
+    let supported = false
+    try {
+      const response = await client.requestWithCurrentConfig<unknown>({
+        path: "/api/v1/audio/providers",
+        method: "GET",
+        returnResponse: true
+      })
+      const payload =
+        response &&
+        typeof response === "object" &&
+        "data" in response &&
+        (response as Record<string, unknown>).data &&
+        typeof (response as Record<string, unknown>).data === "object"
+          ? ((response as Record<string, unknown>).data as Record<string, unknown>)
+          : (response as Record<string, unknown> | null)
+      supported = payload?.supports_explicit_backend === true
+    } catch {
+      supported = false
+    }
+
+    const afterConfig = await client.ensureConfigForRequest(true)
+    const cacheable = getTtsCapabilityScope(afterConfig) === scope
+    return {
+      supported: cacheable ? supported : false,
+      cacheable
+    }
+  })()
+
+  const shouldTrack = ttsCapabilityInFlight.size < TTS_CAPABILITY_MAX_SCOPES
+  if (shouldTrack) ttsCapabilityInFlight.set(scope, query)
+  try {
+    const result = await query
+    if (result.cacheable) {
+      cacheTtsCapability(scope, result.supported, monotonicNow())
+    }
+    return result.supported
+  } finally {
+    if (ttsCapabilityInFlight.get(scope) === query) {
+      ttsCapabilityInFlight.delete(scope)
+    }
+  }
 }
 
 const normalizeArrayBuffer = async (value: unknown): Promise<ArrayBuffer | null> => {
@@ -234,6 +312,95 @@ const normalizeArrayBuffer = async (value: unknown): Promise<ArrayBuffer | null>
     }
   }
   return null
+}
+
+type TldwSpeechTransportError = Error & {
+  status?: number
+  code?: string
+  details?: unknown
+}
+
+const SENSITIVE_ERROR_KEY =
+  /(?:authorization|cookie|credential|password|secret|token|api[_-]?key)/i
+
+const sanitizeSpeechErrorDetails = (
+  value: unknown,
+  depth = 0
+): unknown => {
+  if (value == null || typeof value === "number" || typeof value === "boolean") {
+    return value
+  }
+  if (typeof value === "string") {
+    return sanitizeServerErrorMessage(value, "")
+  }
+  if (depth >= 3) return "[truncated]"
+  if (Array.isArray(value)) {
+    return value
+      .slice(0, 20)
+      .map((entry) => sanitizeSpeechErrorDetails(entry, depth + 1))
+  }
+  if (typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .slice(0, 20)
+        .map(([key, entry]) => [
+          key,
+          SENSITIVE_ERROR_KEY.test(key)
+            ? "[redacted-secret]"
+            : sanitizeSpeechErrorDetails(entry, depth + 1)
+        ])
+    )
+  }
+  return String(value)
+}
+
+const readErrorMetadata = (
+  response: Record<string, any>,
+  key: "code" | "name"
+): string | undefined => {
+  const details = response.details ?? response.data
+  const nested =
+    details && typeof details === "object"
+      ? (details as Record<string, unknown>)[key]
+      : undefined
+  const value = response[key] ?? nested
+  if (typeof value !== "string") return undefined
+  const trimmed = value.trim()
+  return /^[A-Za-z][A-Za-z0-9_.-]{0,79}$/.test(trimmed)
+    ? trimmed
+    : undefined
+}
+
+const createSpeechTransportError = (
+  response: Record<string, any>
+): TldwSpeechTransportError => {
+  const status =
+    typeof response.status === "number" && Number.isFinite(response.status)
+      ? response.status
+      : undefined
+  const fallback = `TTS request failed: ${status ?? 0}`
+  const rawMessage =
+    typeof response.error === "string" && response.error.trim()
+      ? response.error
+      : fallback
+  const message = sanitizeServerErrorMessage(rawMessage, fallback)
+  const suppliedName = readErrorMetadata(response, "name")
+  const suppliedCode = readErrorMetadata(response, "code")
+  const isAbort =
+    suppliedName === "AbortError" ||
+    suppliedCode === "REQUEST_ABORTED" ||
+    rawMessage.toLowerCase().includes("abort")
+  const error = new Error(message) as TldwSpeechTransportError
+  error.name = isAbort ? "AbortError" : suppliedName || error.name
+  error.status = isAbort ? status ?? 0 : status
+  error.code = isAbort ? "REQUEST_ABORTED" : suppliedCode
+  const rawDetails = Object.prototype.hasOwnProperty.call(response, "details")
+    ? response.details
+    : response.data
+  if (rawDetails !== undefined) {
+    error.details = sanitizeSpeechErrorDetails(rawDetails)
+  }
+  return error
 }
 
 const readResponseHeader = (headers: unknown, name: string): string | undefined => {
@@ -1032,9 +1199,7 @@ export const modelsAudioMethods = {
         ? (response as Record<string, any>)
         : null
     if (responseRecord?.ok === false) {
-      throw new Error(
-        responseRecord.error || `TTS request failed: ${responseRecord.status ?? 0}`
-      )
+      throw createSpeechTransportError(responseRecord)
     }
     const data = responseRecord ? responseRecord.data : response
     const normalized = await normalizeArrayBuffer(data)
