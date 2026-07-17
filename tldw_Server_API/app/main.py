@@ -2168,7 +2168,10 @@ else:
             "allow_origin_regex": _cors_allow_origin_regex,
             "allow_credentials": _cors_allow_credentials,
             "allowed_origins": _cors_allowed_openapi_origins,
-            "expose_headers": "X-Request-ID, traceparent, X-Trace-Id",
+            "expose_headers": (
+                "X-Request-ID, traceparent, X-Trace-Id, "
+                "X-TLDW-TTS-Backend, X-TLDW-TTS-Fallback-Used"
+            ),
         }
     except _STARTUP_GUARD_EXCEPTIONS:
         pass
@@ -2180,7 +2183,13 @@ else:
         allow_credentials=_cors_allow_credentials,
         allow_methods=["*"],  # Must include OPTIONS, GET, POST, DELETE etc.
         allow_headers=["*"],
-        expose_headers=["X-Request-ID", "traceparent", "X-Trace-Id"],
+        expose_headers=[
+            "X-Request-ID",
+            "traceparent",
+            "X-Trace-Id",
+            "X-TLDW-TTS-Backend",
+            "X-TLDW-TTS-Fallback-Used",
+        ],
     )
 
     # Ensure OpenAPI schema is consumable across common local origins (helpful when docs are
