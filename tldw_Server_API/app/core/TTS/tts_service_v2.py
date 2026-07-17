@@ -1402,13 +1402,23 @@ class TTSServiceV2:
                 voices_by_provider[provider] = voices
         return voices_by_provider
 
-    async def get_gateway_provider_catalog(self, *, user_id: int) -> dict[str, dict[str, Any]]:
+    async def get_gateway_provider_catalog(
+        self,
+        *,
+        user_id: int,
+        backend: str | None = None,
+    ) -> dict[str, dict[str, Any]]:
         """Return safe per-user catalog overlays for enabled explicit gateways."""
         manager = self.gateway_config_manager
         resolver = self.gateway_credential_resolver
         if manager is None or resolver is None:
             return {}
         specs = manager.get_gateway_specs()
+        if backend is not None:
+            spec = specs.get(backend)
+            if spec is None or not spec.enabled:
+                return {}
+            specs = {backend: spec}
         providers: dict[str, dict[str, Any]] = {}
         for backend_id, spec in specs.items():
             if not spec.enabled:
@@ -1531,7 +1541,10 @@ class TTSServiceV2:
         model: str | None = None,
     ) -> list[dict[str, Any]] | None:
         """Return configured voices for one canonical gateway and exact model."""
-        providers = await self.get_gateway_provider_catalog(user_id=user_id)
+        providers = await self.get_gateway_provider_catalog(
+            user_id=user_id,
+            backend=backend,
+        )
         provider = providers.get(backend)
         if provider is None:
             return None
