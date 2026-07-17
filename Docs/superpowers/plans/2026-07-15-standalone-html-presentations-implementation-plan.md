@@ -466,15 +466,15 @@ git commit -m "feat(slides): isolate HTML provider transport (TASK-12115)"
 - Create: `tldw_Server_API/tests/Jobs/test_jobs_slides_generation_coordination_sqlite.py`
 - Create: `tldw_Server_API/tests/Jobs/test_jobs_slides_generation_coordination_postgres.py`
 
-- [ ] **Step 1: Write failing Jobs migration and UUID-authority tests**
+- [x] **Step 1: Write failing Jobs migration and UUID-authority tests**
 
 Cover SQLite/PostgreSQL archive scope indexes, unique nonnull immutable UUID audit, duplicate/ambiguous legacy diagnostics that disable only standalone generation, owner/domain/queue/type-scoped active/archive UUID lookup, UUID-only archive compression/mutation, numeric-ID reuse rejection, and required nonnull UUID for new `presentation.generate` jobs.
 
-- [ ] **Step 2: Write failing shared coordination and terminal-outcome tests**
+- [x] **Step 2: Write failing shared coordination and terminal-outcome tests**
 
 Require shared Jobs-store tables for source-free key ID/state/timestamps and one reconciliation row containing lease holder/expiry, monotonically increasing fencing token, continuation cursor, deployment/config epoch, startup-complete epoch, last-complete epoch, and lag. Cover two-manager takeover, stale-token renew/checkpoint/release rejection, SQLite/PostgreSQL parity, secret absence from raw rows, and `WorkerTerminalOutcome(failed|cancelled)` skipping normal `complete_job` through one expected-state/lease/UUID/owner/domain/type CAS.
 
-- [ ] **Step 3: Run tests and confirm failure**
+- [x] **Step 3: Run tests and confirm failure**
 
 ```bash
 source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate
@@ -485,19 +485,21 @@ python -m pytest -q \
   tldw_Server_API/tests/Jobs/test_jobs_slides_generation_coordination_postgres.py
 ```
 
-- [ ] **Step 4: Implement migrations and scoped manager APIs**
+- [x] **Step 4: Implement migrations and scoped manager APIs**
 
 Audit before creating indexes; never auto-deduplicate. Add the two source-free shared tables and transactional manager methods. SQLite uses `BEGIN IMMEDIATE`; PostgreSQL uses row locking/atomic `UPDATE ... RETURNING`. Every coordination mutation compares holder plus fencing token, and every startup epoch is tied to the immutable deployment/config revision.
 
-- [ ] **Step 5: Implement WorkerSDK terminal outcomes and the registry adapter**
+- [x] **Step 5: Implement WorkerSDK terminal outcomes and the registry adapter**
 
 Add the closed outcome branch before `complete_job`, preserving typed retry behavior. Make `standalone_html_registry.py` call the shared JobManager metadata APIs; it stores key IDs/state/timestamps only and never creates a local database.
 
-- [ ] **Step 6: Run SQLite and PostgreSQL tests**
+- [x] **Step 6: Run SQLite and PostgreSQL tests**
 
 Run Step 3. If the repository PostgreSQL fixture reports unavailable, record that skip; do not invent a database setup.
 
-- [ ] **Step 7: Commit**
+Final Task 7 verification: assertion-level TDD and adversarial review regressions reproduced each migration, fencing, terminal-CAS, archive, readiness, and admission-ordering gap before correction. The exact four-file suite passed 94 tests with 21 repository-managed PostgreSQL fixture/runtime skips and 3 warnings across 115 collected tests. Ruff, Black, `py_compile`, Bandit, and Git diff checks passed; Bandit reported zero findings across 12,025 production lines. The final immutable package review returned `Ready to merge: Yes` with no blockers. Task 7 is recorded in commits `30fabc2bfd`, `178ef50ebb`, `f2aad07ec7`, `076742ba27`, `d2533d9d81`, and `7495834658`.
+
+- [x] **Step 7: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/Slides/standalone_html_registry.py tldw_Server_API/app/core/Jobs/worker_sdk.py tldw_Server_API/app/core/Jobs/manager.py tldw_Server_API/app/core/Jobs/migrations.py tldw_Server_API/app/core/Jobs/pg_migrations.py tldw_Server_API/tests/Jobs/test_worker_sdk.py tldw_Server_API/tests/Jobs/test_jobs_finalize_idempotency_sqlite.py tldw_Server_API/tests/Jobs/test_jobs_slides_generation_coordination_sqlite.py tldw_Server_API/tests/Jobs/test_jobs_slides_generation_coordination_postgres.py "backlog/tasks/task-12115 - Add-first-class-standalone-HTML-JS-presentation-generation.md"

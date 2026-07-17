@@ -79,6 +79,14 @@ modified_files:
 - tldw_Server_API/app/core/Slides/standalone_html_provider.py
 - tldw_Server_API/tests/Slides/test_standalone_html_provider.py
 - tldw_Server_API/tests/Slides/test_standalone_html_generation.py
+- tldw_Server_API/app/core/Jobs/worker_sdk.py
+- tldw_Server_API/app/core/Jobs/manager.py
+- tldw_Server_API/app/core/Jobs/migrations.py
+- tldw_Server_API/app/core/Jobs/pg_migrations.py
+- tldw_Server_API/tests/Jobs/test_worker_sdk.py
+- tldw_Server_API/tests/Jobs/test_jobs_finalize_idempotency_sqlite.py
+- tldw_Server_API/tests/Jobs/test_jobs_slides_generation_coordination_sqlite.py
+- tldw_Server_API/tests/Jobs/test_jobs_slides_generation_coordination_postgres.py
 ---
 
 ## Description
@@ -224,4 +232,9 @@ Final verification: the combined Task 4 configuration, registry, and typed-loade
 
 Final verification: the 14-file affected matrix passed 589/589 with 11 existing warnings. Ruff passed the scoped files; Black left all five entirely new files unchanged after formatting; git diff --check passed. Production-only Bandit reported 0 findings across the full touched scope (report /tmp/bandit_task12115_task5_final.json). Fresh independent specification/security review returned APPROVED with no remaining P0-P2 findings. Task 5 is complete; overall TASK-12115 remains In Progress for Task 6+.
 2026-07-16 Task 6 closure: implemented one isolated asynchronous provider transport shared by the six closed standalone-HTML adapters. The path uses exact fixed endpoint identities and closed provider codecs, local HTTPX with trust_env/redirects disabled, identity-only raw streaming, fixed response/JSON/document budgets, source-free typed failures, exactly one call with no fallback, and immediate post-client-entry feature/egress/tuple revalidation. Fresh connect/read/overall/token/output limits come from one attempt snapshot; Python-3.10-compatible AnyIO timeout scoping enters HTTPX's lazy stream in the verified task without an extra scheduling turn. Interactive HTML execution remains disabled. Assertion-level TDD began with 60 failures, and later RED tests reproduced both client-entry and lazy-stream races plus stale overall-timeout behavior. Final root verification passed 123 focused provider/generation tests and 761 full standalone-HTML tests. Black, Ruff, py_compile, and git diff --check passed. Production-only Bandit scanned 518 LOC with 0 findings and 0 errors. Fresh independent full-range specification/quality review reported no Critical, Important, or Minor findings and READY. Commits: 6e1220fe3b and a37a484718. Overall TASK-12115 remains In Progress for Task 7+.
+2026-07-16 Task 7 closure: implemented UUID-authoritative Slides generation coordination across active/archive Jobs, shared HMAC-key registry reconciliation, fenced lease and terminal CAS behavior, exact-once counters/events, fail-closed migration/readiness audits, immutable generation scope, serialized replay before every admission rejection, and PostgreSQL/SQLite pruning and archive parity. Interactive execution remains disabled.
+
+TDD and verification: the final queue-policy winner race reproduced first for active and archive rows (2 failed) and passed after rejection-path serialized replay (2 passed). The exact four-file Task 7 suite passed 94 tests with 21 repository-managed PostgreSQL fixture/runtime skips and 3 warnings across 115 collected tests. Ruff, Black, py_compile, git diff checks, and production Bandit were clean; Bandit reported 0 findings and 0 errors across 12,025 LOC at /tmp/bandit_task12115_root_final5.json. Immutable package review (SHA-256 d5feeba87cf09072b73a939ee9a59cb7c3c3f7a120705db95ac30c78f4517b41) returned Ready to merge: Yes with no blockers.
+
+Task 7 commits: 30fabc2bfd, 178ef50ebb, f2aad07ec7, 076742ba27, d2533d9d81, 7495834658. Overall TASK-12115 remains In Progress for Tasks 8+.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
