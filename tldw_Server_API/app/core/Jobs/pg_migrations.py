@@ -12,7 +12,11 @@ from typing import Any
 
 from tldw_Server_API.app.core.testing import is_truthy as _is_truthy
 
-from .migrations import SLIDES_ARCHIVE_EXACT_FIELDS
+from .migrations import (
+    SLIDES_ARCHIVE_COMPRESSED_FIELDS,
+    SLIDES_ARCHIVE_EXACT_FIELDS,
+    normalize_slides_archive_projection,
+)
 
 _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -170,6 +174,36 @@ def slides_archive_indexes_ready_pg(cur: Any) -> bool:
             predicate=predicate,
         )
         for index_name, (unique, columns, predicate) in _SLIDES_ARCHIVE_INDEXES_PG.items()
+    )
+
+
+def slides_archive_projection_ready_pg(cur: Any) -> bool:
+    """Return whether active/archive tables expose the complete exact projection."""
+    cur.execute(
+        """
+        SELECT table_name, column_name
+        FROM information_schema.columns
+        WHERE table_schema=current_schema()
+          AND table_name IN ('jobs', 'jobs_archive')
+        """
+    )
+    columns: dict[str, set[str]] = {"jobs": set(), "jobs_archive": set()}
+    for row in cur.fetchall() or ():
+        if isinstance(row, dict):
+            table_name = row["table_name"]
+            column_name = row["column_name"]
+        else:
+            table_name, column_name = row
+        columns.setdefault(str(table_name), set()).add(str(column_name))
+    return (
+        {"id", *SLIDES_ARCHIVE_EXACT_FIELDS} <= columns["jobs"]
+        and {
+            "id",
+            "archived_at",
+            *SLIDES_ARCHIVE_EXACT_FIELDS,
+            *SLIDES_ARCHIVE_COMPRESSED_FIELDS,
+        }
+        <= columns["jobs_archive"]
     )
 
 
@@ -822,6 +856,34 @@ def _audit_slides_generation_pg(cur) -> tuple[str | None, int]:
     """Persist bounded legacy diagnostics before archive index creation."""
     cur.execute(
         """
+        SELECT singleton_id
+        FROM slides_standalone_reconciliation
+        WHERE singleton_id=1
+        FOR UPDATE
+        """
+    )
+    if cur.fetchone() is None:
+        return "ambiguous_generation_legacy_row", 1
+    if not slides_archive_projection_ready_pg(cur):
+        cur.execute(
+            """
+            UPDATE slides_standalone_reconciliation
+            SET diagnostic_code=CASE
+                  WHEN diagnostic_code='duplicate_archive_uuid'
+                  THEN diagnostic_code ELSE 'ambiguous_generation_legacy_row' END,
+                diagnostic_count=CASE
+                  WHEN diagnostic_code='duplicate_archive_uuid'
+                  THEN diagnostic_count ELSE GREATEST(diagnostic_count, 1) END,
+                diagnostic_at=CASE
+                  WHEN diagnostic_code='duplicate_archive_uuid'
+                  THEN diagnostic_at ELSE NOW() END
+            WHERE singleton_id=1
+            """
+        )
+        return "ambiguous_generation_legacy_row", 1
+
+    cur.execute(
+        """
         SELECT COALESCE(SUM(candidate_count), 0) FROM (
           SELECT COUNT(*) AS candidate_count
           FROM jobs_archive
@@ -871,13 +933,17 @@ def _audit_slides_generation_pg(cur) -> tuple[str | None, int]:
         """
     )
     conflict_count = int((cur.fetchone() or [0])[0] or 0)
-    projection_mismatch = " OR ".join(
-        f"active.{field} IS DISTINCT FROM archived.{field}"
-        for field in SLIDES_ARCHIVE_EXACT_FIELDS
+    active_projection = ", ".join(
+        f"active.{field} AS active_{field}" for field in SLIDES_ARCHIVE_EXACT_FIELDS
+    )
+    archived_projection = ", ".join(
+        f"archived.{field} AS archived_{field}" for field in SLIDES_ARCHIVE_EXACT_FIELDS
     )
     cur.execute(
         f"""
-        SELECT COUNT(*)
+        SELECT {active_projection}, {archived_projection},
+               archived.payload_compressed AS archived_payload_compressed,
+               archived.result_compressed AS archived_result_compressed
         FROM jobs active
         JOIN jobs_archive archived ON archived.uuid = active.uuid
         WHERE active.uuid IS NOT NULL AND BTRIM(active.uuid) <> ''
@@ -888,10 +954,45 @@ def _audit_slides_generation_pg(cur) -> tuple[str | None, int]:
             (archived.domain='slides' AND archived.queue='default'
              AND archived.job_type='presentation.generate')
           )
-          AND ({projection_mismatch})
-        """  # nosec B608 - field names come from a closed module constant
+        """  # nosec B608 - field names and aliases come from a closed module constant
     )
-    cross_table_count = int((cur.fetchone() or [0])[0] or 0)
+    projection_size = len(SLIDES_ARCHIVE_EXACT_FIELDS)
+    cross_table_count = 0
+    for row in cur.fetchall() or ():
+        if isinstance(row, dict):
+            active_values = {
+                field: row.get(f"active_{field}")
+                for field in SLIDES_ARCHIVE_EXACT_FIELDS
+            }
+            archived_values = {
+                field: row.get(f"archived_{field}")
+                for field in SLIDES_ARCHIVE_EXACT_FIELDS
+            }
+            archived_values["payload_compressed"] = row.get(
+                "archived_payload_compressed"
+            )
+            archived_values["result_compressed"] = row.get(
+                "archived_result_compressed"
+            )
+        else:
+            active_values = dict(
+                zip(SLIDES_ARCHIVE_EXACT_FIELDS, row[:projection_size])
+            )
+            archived_values = dict(
+                zip(
+                    SLIDES_ARCHIVE_EXACT_FIELDS,
+                    row[projection_size : 2 * projection_size],
+                )
+            )
+            archived_values["payload_compressed"] = row[2 * projection_size]
+            archived_values["result_compressed"] = row[2 * projection_size + 1]
+        active = normalize_slides_archive_projection(active_values)
+        archived = normalize_slides_archive_projection(archived_values)
+        if any(
+            active.get(field) != archived.get(field)
+            for field in SLIDES_ARCHIVE_EXACT_FIELDS
+        ):
+            cross_table_count += 1
     diagnostic_code: str | None = None
     diagnostic_count = 0
     if duplicate_count:
@@ -940,26 +1041,33 @@ def _record_duplicate_archive_uuid_pg(dsn: str) -> None:
         )
 
 
+def _mark_slides_audit_failure_pg(cur) -> None:
+    """Mark standalone readiness fail-closed on the caller's transaction."""
+    cur.execute(
+        """
+        UPDATE slides_standalone_reconciliation
+        SET diagnostic_code=CASE
+              WHEN diagnostic_code='duplicate_archive_uuid'
+              THEN diagnostic_code ELSE 'ambiguous_generation_legacy_row' END,
+            diagnostic_count=CASE
+              WHEN diagnostic_code='duplicate_archive_uuid'
+              THEN diagnostic_count ELSE GREATEST(diagnostic_count, 1) END,
+            diagnostic_at=CASE
+              WHEN diagnostic_code='duplicate_archive_uuid'
+              THEN diagnostic_at ELSE NOW() END
+        WHERE singleton_id=1
+        """
+    )
+    if cur.rowcount != 1:
+        raise RuntimeError("standalone audit readiness singleton is unavailable")
+
+
 def _record_slides_audit_failure_pg(dsn: str) -> None:
     """Persist a bounded fail-closed diagnostic when the archive audit errors."""
     import psycopg
 
     with psycopg.connect(dsn) as conn, conn.cursor() as cur:
-        cur.execute(
-            """
-            UPDATE slides_standalone_reconciliation
-            SET diagnostic_code=CASE
-                  WHEN diagnostic_code='duplicate_archive_uuid'
-                  THEN diagnostic_code ELSE 'ambiguous_generation_legacy_row' END,
-                diagnostic_count=CASE
-                  WHEN diagnostic_code='duplicate_archive_uuid'
-                  THEN diagnostic_count ELSE GREATEST(diagnostic_count, 1) END,
-                diagnostic_at=CASE
-                  WHEN diagnostic_code='duplicate_archive_uuid'
-                  THEN diagnostic_at ELSE NOW() END
-            WHERE singleton_id=1
-            """
-        )
+        _mark_slides_audit_failure_pg(cur)
 
 
 def ensure_jobs_tables_pg(db_url: str) -> str:
@@ -1087,16 +1195,20 @@ def ensure_jobs_tables_pg(db_url: str) -> str:
                 pass
         _ensure_pg_archive_locators(_dsn)
         # Audit before creating the standalone archive indexes.
-        slides_diagnostic: str | None = None
-        try:
-            with psycopg.connect(_dsn) as audit_conn, audit_conn.cursor() as audit_cur:
+        slides_diagnostic: str | None = "ambiguous_generation_legacy_row"
+        with psycopg.connect(_dsn) as audit_conn, audit_conn.cursor() as audit_cur:
+            _mark_slides_audit_failure_pg(audit_cur)
+            audit_cur.execute("SAVEPOINT slides_generation_audit")
+            try:
                 slides_diagnostic, _ = _audit_slides_generation_pg(audit_cur)
-        except psycopg.Error:
-            # Standalone readiness remains unavailable, but generic Jobs setup
-            # must not be coupled to the optional audit path.
-            slides_diagnostic = "ambiguous_generation_legacy_row"
-            with contextlib.suppress(psycopg.Error):
-                _record_slides_audit_failure_pg(_dsn)
+            except psycopg.Error:
+                audit_cur.execute("ROLLBACK TO SAVEPOINT slides_generation_audit")
+                audit_cur.execute("RELEASE SAVEPOINT slides_generation_audit")
+            except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
+                audit_cur.execute("ROLLBACK TO SAVEPOINT slides_generation_audit")
+                audit_cur.execute("RELEASE SAVEPOINT slides_generation_audit")
+            else:
+                audit_cur.execute("RELEASE SAVEPOINT slides_generation_audit")
         # Create hot-path indexes concurrently (outside transaction) when possible
         archive_batch_read_indexes_verified = False
         try:

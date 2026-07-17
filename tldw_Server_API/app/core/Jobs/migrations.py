@@ -7,10 +7,14 @@ database path. This scaffolds the future core JobManager backend.
 
 from __future__ import annotations
 
+import base64
 import contextlib
+import gzip
+import json
 import os
 import sqlite3
 from pathlib import Path
+from typing import Any
 
 from loguru import logger
 
@@ -83,6 +87,10 @@ _SQLITE_ARCHIVE_BATCH_READ_INDEX_SPECS = (
     ),
 )
 
+
+class _SlidesAuditSafetyError(Exception):
+    """Raised when standalone readiness cannot be made durably fail-closed."""
+
 SLIDES_ARCHIVE_EXACT_FIELDS = (
     "uuid",
     "domain",
@@ -123,6 +131,74 @@ SLIDES_ARCHIVE_EXACT_FIELDS = (
     "updated_at",
     "completed_at",
 )
+
+SLIDES_ARCHIVE_COMPRESSED_FIELDS = ("payload_compressed", "result_compressed")
+
+
+def _parse_slides_archive_json(value: Any) -> Any:
+    """Normalize a stored JSON value without requiring a Jobs manager instance."""
+    if isinstance(value, memoryview):
+        value = value.tobytes()
+    if isinstance(value, (bytes, bytearray)):
+        try:
+            value = bytes(value).decode("utf-8")
+        except UnicodeDecodeError:
+            return bytes(value)
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except (TypeError, ValueError):
+            return value
+    return value
+
+
+def _decode_slides_archive_blob(value: Any) -> Any:
+    """Decode the SQLite/PostgreSQL archive compression formats."""
+    if value is None:
+        return None
+    if isinstance(value, memoryview):
+        value = value.tobytes()
+    try:
+        if isinstance(value, (bytes, bytearray)):
+            return _parse_slides_archive_json(gzip.decompress(bytes(value)).decode("utf-8"))
+        if isinstance(value, str) and value.startswith("gzip64:"):
+            compressed = base64.b64decode(value[len("gzip64:") :])
+            return _parse_slides_archive_json(gzip.decompress(compressed).decode("utf-8"))
+    except (OSError, TypeError, ValueError, UnicodeError):
+        return _parse_slides_archive_json(value)
+    return _parse_slides_archive_json(value)
+
+
+def normalize_slides_archive_projection(row: Any) -> dict[str, Any]:
+    """Return one logical exactness projection, decoding archived JSON blobs."""
+    normalized = dict(row)
+    for field in ("payload", "result"):
+        value = normalized.get(field)
+        if value is None:
+            value = _decode_slides_archive_blob(normalized.get(f"{field}_compressed"))
+        else:
+            value = _parse_slides_archive_json(value)
+        normalized[field] = value
+    return normalized
+
+
+def slides_archive_projection_ready_sqlite(conn: sqlite3.Connection) -> bool:
+    """Return whether active/archive tables expose the complete exact projection."""
+    try:
+        active_columns = {row[1] for row in conn.execute("PRAGMA table_info(jobs)")}
+        archive_columns = {row[1] for row in conn.execute("PRAGMA table_info(jobs_archive)")}
+    except sqlite3.Error:
+        return False
+    return (
+        {"id", *SLIDES_ARCHIVE_EXACT_FIELDS} <= active_columns
+        and {
+            "id",
+            "archived_at",
+            *SLIDES_ARCHIVE_EXACT_FIELDS,
+            *SLIDES_ARCHIVE_COMPRESSED_FIELDS,
+        }
+        <= archive_columns
+    )
 
 _SLIDES_ARCHIVE_INDEXES = {
     "idx_jobs_archive_slides_scope": (
@@ -752,6 +828,24 @@ def slides_archive_indexes_ready_sqlite(conn: sqlite3.Connection) -> bool:
 
 def _audit_and_index_slides_generation(conn: sqlite3.Connection) -> None:
     """Audit legacy generation correlations before adding archive indexes."""
+    if not slides_archive_projection_ready_sqlite(conn):
+        conn.execute(
+            """
+            UPDATE slides_standalone_reconciliation
+            SET diagnostic_code=CASE
+                  WHEN diagnostic_code='duplicate_archive_uuid'
+                  THEN diagnostic_code ELSE 'ambiguous_generation_legacy_row' END,
+                diagnostic_count=CASE
+                  WHEN diagnostic_code='duplicate_archive_uuid'
+                  THEN diagnostic_count ELSE MAX(diagnostic_count, 1) END,
+                diagnostic_at=CASE
+                  WHEN diagnostic_code='duplicate_archive_uuid'
+                  THEN diagnostic_at ELSE DATETIME('now') END
+            WHERE singleton_id=1
+            """
+        )
+        return
+
     duplicate_row = conn.execute(
         """
         SELECT COALESCE(SUM(candidate_count), 0)
@@ -804,12 +898,12 @@ def _audit_and_index_slides_generation(conn: sqlite3.Connection) -> None:
         """
     ).fetchone()
     conflict_count = int(conflicting_row[0] or 0) if conflicting_row else 0
-    projection_mismatch = " OR ".join(
-        f"active.{field} IS NOT archived.{field}" for field in SLIDES_ARCHIVE_EXACT_FIELDS
-    )
-    cross_table_row = conn.execute(
+    active_projection = ", ".join(f"active.{field}" for field in SLIDES_ARCHIVE_EXACT_FIELDS)
+    archived_projection = ", ".join(f"archived.{field}" for field in SLIDES_ARCHIVE_EXACT_FIELDS)
+    cross_table_rows = conn.execute(
         f"""
-        SELECT COUNT(*)
+        SELECT {active_projection}, {archived_projection},
+               archived.payload_compressed, archived.result_compressed
         FROM jobs active
         JOIN jobs_archive archived ON archived.uuid = active.uuid
         WHERE active.uuid IS NOT NULL AND TRIM(active.uuid) <> ''
@@ -820,10 +914,28 @@ def _audit_and_index_slides_generation(conn: sqlite3.Connection) -> None:
             (archived.domain='slides' AND archived.queue='default'
              AND archived.job_type='presentation.generate')
           )
-          AND ({projection_mismatch})
         """  # nosec B608 - field names come from a closed module constant
-    ).fetchone()
-    cross_table_count = int(cross_table_row[0] or 0) if cross_table_row else 0
+    ).fetchall()
+    projection_size = len(SLIDES_ARCHIVE_EXACT_FIELDS)
+    cross_table_count = 0
+    for row in cross_table_rows:
+        active = normalize_slides_archive_projection(
+            dict(zip(SLIDES_ARCHIVE_EXACT_FIELDS, row[:projection_size]))
+        )
+        archived_values = dict(
+            zip(
+                SLIDES_ARCHIVE_EXACT_FIELDS,
+                row[projection_size : 2 * projection_size],
+            )
+        )
+        archived_values["payload_compressed"] = row[2 * projection_size]
+        archived_values["result_compressed"] = row[2 * projection_size + 1]
+        archived = normalize_slides_archive_projection(archived_values)
+        if any(
+            active.get(field) != archived.get(field)
+            for field in SLIDES_ARCHIVE_EXACT_FIELDS
+        ):
+            cross_table_count += 1
 
     diagnostic_code: str | None = None
     diagnostic_count = 0
@@ -963,6 +1075,29 @@ def _audit_and_index_slides_generation(conn: sqlite3.Connection) -> None:
     )
 
 
+def _record_slides_audit_failure_sqlite(conn: sqlite3.Connection) -> None:
+    """Persist a bounded fail-closed diagnostic after an audit rollback."""
+    result = conn.execute(
+        """
+        UPDATE slides_standalone_reconciliation
+        SET diagnostic_code=CASE
+              WHEN diagnostic_code='duplicate_archive_uuid'
+              THEN diagnostic_code ELSE 'ambiguous_generation_legacy_row' END,
+            diagnostic_count=CASE
+              WHEN diagnostic_code='duplicate_archive_uuid'
+              THEN diagnostic_count ELSE MAX(COALESCE(diagnostic_count, 0), 1) END,
+            diagnostic_at=CASE
+              WHEN diagnostic_code='duplicate_archive_uuid'
+              THEN diagnostic_at ELSE DATETIME('now') END
+        WHERE singleton_id=1
+        """
+    )
+    if result.rowcount != 1:
+        raise _SlidesAuditSafetyError(
+            "standalone audit readiness singleton is unavailable"
+        )
+
+
 def ensure_jobs_tables(db_path: Path | None = None) -> Path:
     """Ensure the jobs table exists in the given SQLite database.
 
@@ -1011,6 +1146,8 @@ def ensure_jobs_tables(db_path: Path | None = None) -> Path:
                 f"{_sqlite_archive_migration_busy_timeout_ms()}"
             )
             conn.executescript(JOBS_SQLITE_DDL)
+            if not conn.in_transaction:
+                conn.execute("BEGIN IMMEDIATE")
             with contextlib.suppress(_JOBS_DB_EXCEPTIONS):
                 conn.execute("ALTER TABLE jobs ADD COLUMN batch_group TEXT")
             with contextlib.suppress(_JOBS_DB_EXCEPTIONS):
@@ -1031,9 +1168,40 @@ def ensure_jobs_tables(db_path: Path | None = None) -> Path:
             ):
                 with contextlib.suppress(_JOBS_DB_EXCEPTIONS):
                     conn.execute(f"ALTER TABLE jobs_archive ADD COLUMN {column_sql}")  # nosec B608
-            _audit_and_index_slides_generation(conn)
             _ensure_sqlite_dependency_snapshot_columns(conn)
-            conn.commit()
+            try:
+                _record_slides_audit_failure_sqlite(conn)
+                conn.execute("SAVEPOINT slides_generation_audit")
+            except _JOBS_DB_EXCEPTIONS as poison_error:
+                conn.rollback()
+                raise _SlidesAuditSafetyError(
+                    "standalone audit could not establish fail-closed readiness"
+                ) from poison_error
+            try:
+                _audit_and_index_slides_generation(conn)
+            except _JOBS_DB_EXCEPTIONS as audit_error:
+                try:
+                    conn.execute("ROLLBACK TO SAVEPOINT slides_generation_audit")
+                    conn.execute("RELEASE SAVEPOINT slides_generation_audit")
+                    conn.commit()
+                except _JOBS_DB_EXCEPTIONS as persistence_error:
+                    conn.rollback()
+                    raise _SlidesAuditSafetyError(
+                        "standalone audit failure could not be persisted"
+                    ) from persistence_error
+                logger.warning(
+                    "Jobs standalone audit failed closed ({})",
+                    type(audit_error).__name__,
+                )
+            else:
+                try:
+                    conn.execute("RELEASE SAVEPOINT slides_generation_audit")
+                    conn.commit()
+                except _JOBS_DB_EXCEPTIONS as persistence_error:
+                    conn.rollback()
+                    raise _SlidesAuditSafetyError(
+                        "standalone audit result could not be persisted"
+                    ) from persistence_error
             _ensure_sqlite_archive_locators(conn)
             _ensure_sqlite_archive_batch_read_indexes(conn)
             archive_locator_verified = True

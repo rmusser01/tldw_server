@@ -60,7 +60,9 @@ from .migrations import (
     SQLITE_ARCHIVE_CURSOR_TIME_SQL,
     _ensure_sqlite_archive_batch_read_indexes,
     ensure_jobs_tables,
+    normalize_slides_archive_projection,
     slides_archive_indexes_ready_sqlite,
+    slides_archive_projection_ready_sqlite,
 )
 from .operations.contracts import (
     AcquireJobCommand,
@@ -88,6 +90,7 @@ from .pg_migrations import (
     ensure_job_counters_pg,
     ensure_jobs_tables_pg,
     slides_archive_indexes_ready_pg,
+    slides_archive_projection_ready_pg,
 )
 from .tracing import job_span
 
@@ -1215,17 +1218,24 @@ class JobManager:
         try:
             if self.backend == "postgres":
                 with conn, self._pg_cursor(conn) as cur:
+                    projection_ready = slides_archive_projection_ready_pg(cur)
                     index_ready = slides_archive_indexes_ready_pg(cur)
             else:
+                projection_ready = slides_archive_projection_ready_sqlite(conn)
                 index_ready = slides_archive_indexes_ready_sqlite(conn)
         finally:
             conn.close()
         return {
-            "ready": state.get("diagnostic_code") is None and index_ready,
+            "ready": (
+                state.get("diagnostic_code") is None
+                and projection_ready
+                and index_ready
+            ),
             "diagnostic_code": state.get("diagnostic_code"),
             "diagnostic_count": state.get("diagnostic_count", 0),
             "diagnostic_at": state.get("diagnostic_at"),
             "archive_indexes_ready": index_ready,
+            "archive_projection_ready": projection_ready,
         }
 
     def _slides_generation_ready_in_connection(
@@ -1240,15 +1250,89 @@ class JobManager:
                 raise RuntimeError("PostgreSQL readiness check requires a cursor")
             cursor.execute(
                 "SELECT diagnostic_code FROM slides_standalone_reconciliation "
-                "WHERE singleton_id=1"
+                "WHERE singleton_id=1 FOR SHARE"
             )
             row = cursor.fetchone()
             diagnostic = row.get("diagnostic_code") if isinstance(row, dict) else (row[0] if row else None)
-            return row is not None and diagnostic is None and slides_archive_indexes_ready_pg(cursor)
+            return (
+                row is not None
+                and diagnostic is None
+                and slides_archive_projection_ready_pg(cursor)
+                and slides_archive_indexes_ready_pg(cursor)
+            )
         row = conn.execute(
             "SELECT diagnostic_code FROM slides_standalone_reconciliation WHERE singleton_id=1"
         ).fetchone()
-        return row is not None and row[0] is None and slides_archive_indexes_ready_sqlite(conn)
+        return (
+            row is not None
+            and row[0] is None
+            and slides_archive_projection_ready_sqlite(conn)
+            and slides_archive_indexes_ready_sqlite(conn)
+        )
+
+    def _serialized_slides_generation_replay(
+        self,
+        *,
+        owner_user_id: str,
+        idempotency_key: str,
+        expected_job_uuid: str | None = None,
+        expected_job_id: int | None = None,
+        rejection: Exception | None = None,
+    ) -> dict[str, Any] | None:
+        """Resolve one replay under the create/prune lock or raise its rejection."""
+        conn = self._connect()
+        try:
+            if self.backend == "postgres":
+                with conn, self._pg_cursor(conn) as cur:
+                    cur.execute(
+                        "SELECT pg_advisory_xact_lock(%s)",
+                        (
+                            self._pg_advisory_key(
+                                *_SLIDES_GENERATION_CORRELATION_LOCK_PARTS
+                            ),
+                        ),
+                    )
+                    if not self._slides_generation_ready_in_connection(
+                        conn,
+                        cursor=cur,
+                    ):
+                        raise SlidesGenerationJobsUnavailableError(
+                            "presentation.generate Jobs coordination is unavailable"
+                        )
+                    existing = self._lookup_slides_generation_job_in_connection(
+                        conn,
+                        owner_user_id=owner_user_id,
+                        idempotency_key=idempotency_key,
+                        expected_job_uuid=expected_job_uuid,
+                        expected_job_id=expected_job_id,
+                        cursor=cur,
+                    )
+                    if existing is not None:
+                        return existing
+                    if rejection is not None:
+                        raise rejection
+                    return None
+
+            with conn:
+                conn.execute("BEGIN IMMEDIATE")
+                if not self._slides_generation_ready_in_connection(conn):
+                    raise SlidesGenerationJobsUnavailableError(
+                        "presentation.generate Jobs coordination is unavailable"
+                    )
+                existing = self._lookup_slides_generation_job_in_connection(
+                    conn,
+                    owner_user_id=owner_user_id,
+                    idempotency_key=idempotency_key,
+                    expected_job_uuid=expected_job_uuid,
+                    expected_job_id=expected_job_id,
+                )
+                if existing is not None:
+                    return existing
+                if rejection is not None:
+                    raise rejection
+                return None
+        finally:
+            conn.close()
 
     def _lookup_ready_slides_generation_job_in_connection(
         self,
@@ -1419,32 +1503,12 @@ class JobManager:
         """Resolve the authoritative active-first generation row without requiring its UUID."""
         if not all(isinstance(value, str) and value.strip() for value in (owner_user_id, idempotency_key)):
             raise ValueError("owner_user_id and idempotency_key must be nonblank strings")
-        readiness = self.get_slides_generation_readiness()
-        if not readiness["ready"]:
-            raise SlidesGenerationJobsUnavailableError(
-                f"presentation.generate Jobs coordination is unavailable: {readiness.get('diagnostic_code') or 'indexes'}"
-            )
-        conn = self._connect()
-        try:
-            if self.backend == "postgres":
-                with conn, self._pg_cursor(conn) as cur:
-                    return self._lookup_slides_generation_job_in_connection(
-                        conn,
-                        owner_user_id=owner_user_id,
-                        idempotency_key=idempotency_key,
-                        expected_job_uuid=expected_job_uuid,
-                        expected_job_id=expected_job_id,
-                        cursor=cur,
-                    )
-            return self._lookup_slides_generation_job_in_connection(
-                conn,
-                owner_user_id=owner_user_id,
-                idempotency_key=idempotency_key,
-                expected_job_uuid=expected_job_uuid,
-                expected_job_id=expected_job_id,
-            )
-        finally:
-            conn.close()
+        return self._serialized_slides_generation_replay(
+            owner_user_id=owner_user_id,
+            idempotency_key=idempotency_key,
+            expected_job_uuid=expected_job_uuid,
+            expected_job_id=expected_job_id,
+        )
 
     def resolve_slides_generation_job(
         self,
@@ -1466,11 +1530,7 @@ class JobManager:
 
     def _normalize_archived_job(self, row: Any) -> dict[str, Any]:
         """Decode one archived Jobs row without relying on its reusable numeric id."""
-        result = dict(row)
-        if result.get("payload") is None:
-            result["payload"] = self._decode_archive_blob(result.get("payload_compressed"))
-        if result.get("result") is None:
-            result["result"] = self._decode_archive_blob(result.get("result_compressed"))
+        result = normalize_slides_archive_projection(row)
         result["payload"] = self._maybe_decrypt_json(self._parse_json_value(result.get("payload")))
         result["result"] = self._maybe_decrypt_json(self._parse_json_value(result.get("result")))
         result["archived"] = True
@@ -1497,7 +1557,7 @@ class JobManager:
 
         exact_collisions: set[str] = set()
         for active_row in active_rows:
-            active = dict(active_row)
+            active = normalize_slides_archive_projection(active_row)
             job_uuid = str(active.get("uuid") or "").strip()
             if not job_uuid:
                 continue
@@ -1519,8 +1579,12 @@ class JobManager:
             if len(archived_rows) != 1:
                 raise SlidesGenerationJobsUnavailableError("unsafe presentation.generate archive collision")
             archived = self._normalize_archived_job(archived_rows[0])
-            active["payload"] = self._maybe_decrypt_json(self._parse_json_value(active.get("payload")))
-            active["result"] = self._maybe_decrypt_json(self._parse_json_value(active.get("result")))
+            active["payload"] = self._maybe_decrypt_json(
+                self._parse_json_value(active.get("payload"))
+            )
+            active["result"] = self._maybe_decrypt_json(
+                self._parse_json_value(active.get("result"))
+            )
             if any(archived.get(field) != active.get(field) for field in SLIDES_ARCHIVE_EXACT_FIELDS):
                 raise SlidesGenerationJobsUnavailableError("unsafe presentation.generate archive collision")
             exact_collisions.add(job_uuid)
@@ -2957,7 +3021,7 @@ class JobManager:
                 raise ValueError("presentation.generate jobs require owner_user_id")
             if not isinstance(idempotency_key, str) or not idempotency_key.strip():
                 raise ValueError("presentation.generate jobs require idempotency_key")
-            existing = self.lookup_slides_generation_job(
+            existing = self._serialized_slides_generation_replay(
                 owner_user_id=owner_user_id,
                 idempotency_key=idempotency_key,
             )
@@ -2977,7 +3041,15 @@ class JobManager:
                 fair_priority = scheduler.calculate_priority(owner_user_id, active_count)
                 fair_priority_mapped = self._map_fair_share_score_to_priority(fair_priority)
                 priority = min(priority, fair_priority_mapped)
-            except BadRequestError:
+            except BadRequestError as exc:
+                if slides_generation:
+                    existing = self._serialized_slides_generation_replay(
+                        owner_user_id=owner_user_id,
+                        idempotency_key=idempotency_key,
+                        rejection=exc,
+                    )
+                    if existing is not None:
+                        return existing
                 raise
             except _JOB_NONCRITICAL_EXCEPTIONS as _fs_exc:
                 logger.warning(f"Fair-share scheduling check skipped: {_fs_exc}")
@@ -3004,7 +3076,18 @@ class JobManager:
         truncate = JobManager._is_truthy(os.getenv("JOBS_JSON_TRUNCATE", ""))
         # Optional encryption at rest for payload
         payload = self._maybe_encrypt_json(payload, domain)
-        payload_json = json.dumps(payload)
+        try:
+            payload_json = json.dumps(payload)
+        except (TypeError, ValueError) as exc:
+            if slides_generation:
+                existing = self._serialized_slides_generation_replay(
+                    owner_user_id=owner_user_id,
+                    idempotency_key=idempotency_key,
+                    rejection=exc,
+                )
+                if existing is not None:
+                    return existing
+            raise
         payload_bytes = len(payload_json.encode("utf-8"))
         if payload_bytes > max_bytes:
             if truncate:
@@ -3013,7 +3096,18 @@ class JobManager:
                 with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
                     increment_json_truncated({"domain": domain, "queue": queue, "job_type": job_type}, "payload")
             else:
-                raise ValueError(f"Payload too large: {payload_bytes} bytes > limit {max_bytes}")  # noqa: TRY003
+                error = ValueError(
+                    f"Payload too large: {payload_bytes} bytes > limit {max_bytes}"
+                )
+                if slides_generation:
+                    existing = self._serialized_slides_generation_replay(
+                        owner_user_id=owner_user_id,
+                        idempotency_key=idempotency_key,
+                        rejection=error,
+                    )
+                    if existing is not None:
+                        return existing
+                raise error  # noqa: TRY003
 
         # Note: completion_token enforcement applies to finalize paths (complete/fail), not creation.
         conn = self._connect()
@@ -3054,9 +3148,18 @@ class JobManager:
                 if env_dom:
                     allowed_job_types.extend([x.strip() for x in env_dom.split(",") if x.strip()])
             if allowed_job_types and job_type not in allowed_job_types:
-                raise ValueError(  # noqa: TRY003
+                error = ValueError(
                     f"Job type '{job_type}' not allowed for domain '{domain}'. Allowed: {sorted(set(allowed_job_types))}"
                 )
+                if slides_generation:
+                    existing = self._serialized_slides_generation_replay(
+                        owner_user_id=owner_user_id,
+                        idempotency_key=idempotency_key,
+                        rejection=error,
+                    )
+                    if existing is not None:
+                        return existing
+                raise error  # noqa: TRY003
 
             if self.backend == "postgres":
                 command = self._build_create_job_command(
@@ -5637,6 +5740,375 @@ class JobManager:
                 and stored.get("completion_token") == completion_token
                 and stored.get("error_code") == error_code
                 and stored.get("error_message") == error_message
+            )
+            if exact_correlation and identical_terminal:
+                return "IDEMPOTENT"
+            return "CONFLICT"
+        finally:
+            conn.close()
+
+    def terminalize_slides_generation_job_from_reconciler(
+        self,
+        *,
+        job_uuid: str,
+        owner_user_id: str,
+        expected_status: str,
+        status: str,
+        error_code: str,
+        error_message: str,
+        completion_token: str,
+        job_id: int | None = None,
+        require_processing_lease_expired: bool = False,
+    ) -> str:
+        """Apply one UUID-authoritative Slides reconciliation terminal CAS."""
+        if expected_status not in {"queued", "processing"}:
+            raise ValueError("reconciler expected status must be queued or processing")
+        if status not in {"failed", "cancelled"}:
+            raise ValueError("terminal status must be failed or cancelled")
+        if not isinstance(error_code, str) or re.fullmatch(r"[a-z][a-z0-9_.-]{0,127}", error_code) is None:
+            raise ValueError("terminal error_code is invalid")
+        if not isinstance(error_message, str) or len(error_message) > 1024:
+            raise ValueError("terminal error_message exceeds 1024 characters")
+        if not all(
+            isinstance(value, str) and value.strip()
+            for value in (job_uuid, owner_user_id, completion_token)
+        ):
+            raise ValueError("terminal correlation values must be nonblank strings")
+        if job_id is not None and (
+            isinstance(job_id, bool) or not isinstance(job_id, int) or job_id <= 0
+        ):
+            raise ValueError("job_id hint must be a positive integer")
+        if not isinstance(require_processing_lease_expired, bool):
+            raise ValueError("require_processing_lease_expired must be a boolean")
+
+        domain = _SLIDES_GENERATION_DOMAIN
+        queue = _SLIDES_GENERATION_QUEUE
+        job_type = _SLIDES_GENERATION_JOB_TYPE
+        event_type = "job.failed" if status == "failed" else "job.cancelled"
+        event_attrs = (
+            {"error_code": error_code}
+            if status == "failed"
+            else {"reason": error_message, "terminal": True}
+        )
+        applied_job: dict[str, Any] | None = None
+        row = None
+        unsafe_correlation = False
+        conn = self._connect()
+        try:
+            if self.backend == "postgres":
+                lease_clause = (
+                    " AND (leased_until IS NULL OR leased_until <= NOW())"
+                    if expected_status == "processing" and require_processing_lease_expired
+                    else ""
+                )
+                with conn, self._pg_cursor(conn) as cur:
+                    cur.execute(
+                        "SELECT pg_advisory_xact_lock(%s)",
+                        (
+                            self._pg_advisory_key(
+                                *_SLIDES_GENERATION_CORRELATION_LOCK_PARTS
+                            ),
+                        ),
+                    )
+                    if not self._slides_generation_ready_in_connection(
+                        conn,
+                        cursor=cur,
+                    ):
+                        raise SlidesGenerationJobsUnavailableError(
+                            "presentation.generate Jobs coordination is unavailable"
+                        )
+                    cur.execute(
+                        "SELECT * FROM jobs WHERE uuid=%s "
+                        "ORDER BY id LIMIT 2 FOR UPDATE",
+                        (job_uuid,),
+                    )
+                    authority_rows = list(cur.fetchall() or [])
+                    if len(authority_rows) > 1:
+                        cur.execute(
+                            """
+                            UPDATE slides_standalone_reconciliation
+                            SET diagnostic_code=CASE
+                                  WHEN diagnostic_code='duplicate_archive_uuid'
+                                  THEN diagnostic_code
+                                  ELSE 'ambiguous_generation_legacy_row' END,
+                                diagnostic_count=CASE
+                                  WHEN diagnostic_code='duplicate_archive_uuid'
+                                  THEN diagnostic_count
+                                  ELSE GREATEST(diagnostic_count, %s) END,
+                                diagnostic_at=CASE
+                                  WHEN diagnostic_code='duplicate_archive_uuid'
+                                  THEN diagnostic_at ELSE NOW() END
+                            WHERE singleton_id=1
+                            """,
+                            (len(authority_rows),),
+                        )
+                        unsafe_correlation = True
+                    row = authority_rows[0] if authority_rows else None
+                    authority_id = (
+                        int(row["id"])
+                        if row is not None and not unsafe_correlation
+                        else None
+                    )
+                    params: list[Any] = [
+                        status,
+                        error_code,
+                        error_message,
+                        completion_token,
+                        status,
+                        status,
+                        error_message,
+                        job_uuid,
+                        owner_user_id,
+                        domain,
+                        queue,
+                        job_type,
+                        expected_status,
+                        (
+                            job_id
+                            if job_id is not None and not unsafe_correlation
+                            else authority_id
+                        ),
+                    ]
+                    params.append(completion_token)
+                    cur.execute(
+                        (
+                            "UPDATE jobs SET status=%s, error_code=%s, error_message=%s, "
+                            "completion_token=%s, completed_at=NOW(), leased_until=NULL, "
+                            "cancelled_at=CASE WHEN %s='cancelled' THEN NOW() ELSE cancelled_at END, "
+                            "cancellation_reason=CASE WHEN %s='cancelled' THEN %s ELSE cancellation_reason END "
+                            "WHERE uuid=%s AND owner_user_id IS NOT DISTINCT FROM %s "
+                            "AND domain=%s AND queue=%s AND job_type=%s AND status=%s "
+                            f"AND id=%s{lease_clause} "  # nosec B608
+                            "AND (completion_token IS NULL OR completion_token=%s) RETURNING *"
+                        ),
+                        tuple(params),
+                    )
+                    applied = cur.fetchone()
+                    if applied is not None:
+                        applied_job = dict(applied)
+                        if JobManager._is_truthy(os.getenv("JOBS_COUNTERS_ENABLED", "")):
+                            available_at = _parse_dt(applied_job.get("available_at"))
+                            if available_at is not None and available_at.tzinfo is None:
+                                available_at = available_at.replace(tzinfo=_tz.utc)
+                            scheduled = available_at is not None and available_at > self._clock.now_utc()
+                            ready_delta = int(expected_status == "queued" and not scheduled)
+                            scheduled_delta = int(expected_status == "queued" and scheduled)
+                            processing_delta = int(expected_status == "processing")
+                            cur.execute(
+                                "UPDATE job_counters SET "
+                                "ready_count=GREATEST(ready_count - %s, 0), "
+                                "scheduled_count=GREATEST(scheduled_count - %s, 0), "
+                                "processing_count=GREATEST(processing_count - %s, 0), "
+                                "updated_at=NOW() WHERE domain=%s AND queue=%s AND job_type=%s",
+                                (
+                                    ready_delta,
+                                    scheduled_delta,
+                                    processing_delta,
+                                    domain,
+                                    queue,
+                                    job_type,
+                                ),
+                            )
+                        cur.execute(
+                            "INSERT INTO job_events("
+                            "job_id, domain, queue, job_type, event_type, attrs_json, "
+                            "owner_user_id, request_id, trace_id, created_at"
+                            ") VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())",
+                            (
+                                int(applied_job["id"]),
+                                domain,
+                                queue,
+                                job_type,
+                                event_type,
+                                json.dumps(event_attrs),
+                                owner_user_id,
+                                applied_job.get("request_id"),
+                                applied_job.get("trace_id"),
+                            ),
+                        )
+            else:
+                now_utc = self._clock.now_utc().astimezone(_tz.utc)
+                now_sql = now_utc.strftime("%Y-%m-%d %H:%M:%S")
+                lease_clause = (
+                    " AND (leased_until IS NULL OR DATETIME(leased_until) <= DATETIME(?))"
+                    if expected_status == "processing" and require_processing_lease_expired
+                    else ""
+                )
+                with conn:
+                    conn.execute("BEGIN IMMEDIATE")
+                    if not self._slides_generation_ready_in_connection(conn):
+                        raise SlidesGenerationJobsUnavailableError(
+                            "presentation.generate Jobs coordination is unavailable"
+                        )
+                    authority_rows = list(
+                        conn.execute(
+                            "SELECT * FROM jobs WHERE uuid=? ORDER BY id LIMIT 2",
+                            (job_uuid,),
+                        ).fetchall()
+                    )
+                    if len(authority_rows) > 1:
+                        conn.execute(
+                            """
+                            UPDATE slides_standalone_reconciliation
+                            SET diagnostic_code=CASE
+                                  WHEN diagnostic_code='duplicate_archive_uuid'
+                                  THEN diagnostic_code
+                                  ELSE 'ambiguous_generation_legacy_row' END,
+                                diagnostic_count=CASE
+                                  WHEN diagnostic_code='duplicate_archive_uuid'
+                                  THEN diagnostic_count
+                                  ELSE MAX(diagnostic_count, ?) END,
+                                diagnostic_at=CASE
+                                  WHEN diagnostic_code='duplicate_archive_uuid'
+                                  THEN diagnostic_at ELSE DATETIME('now') END
+                            WHERE singleton_id=1
+                            """,
+                            (len(authority_rows),),
+                        )
+                        unsafe_correlation = True
+                    row = authority_rows[0] if authority_rows else None
+                    authority_id = (
+                        int(row["id"])
+                        if row is not None and not unsafe_correlation
+                        else None
+                    )
+                    params = [
+                        status,
+                        error_code,
+                        error_message,
+                        completion_token,
+                        now_sql,
+                        status,
+                        now_sql,
+                        status,
+                        error_message,
+                        job_uuid,
+                        owner_user_id,
+                        domain,
+                        queue,
+                        job_type,
+                        expected_status,
+                        (
+                            job_id
+                            if job_id is not None and not unsafe_correlation
+                            else authority_id
+                        ),
+                    ]
+                    if lease_clause:
+                        params.append(now_sql)
+                    params.append(completion_token)
+                    updated = conn.execute(
+                        (
+                            "UPDATE jobs SET status=?, error_code=?, error_message=?, "
+                            "completion_token=?, completed_at=?, leased_until=NULL, "
+                            "cancelled_at=CASE WHEN ?='cancelled' THEN ? ELSE cancelled_at END, "
+                            "cancellation_reason=CASE WHEN ?='cancelled' THEN ? ELSE cancellation_reason END "
+                            "WHERE uuid=? AND owner_user_id IS ? "
+                            "AND domain=? AND queue=? AND job_type=? AND status=? "
+                            f"AND id=?{lease_clause} "  # nosec B608
+                            "AND (completion_token IS NULL OR completion_token=?)"
+                        ),
+                        tuple(params),
+                    )
+                    if updated.rowcount == 1:
+                        applied = conn.execute(
+                            "SELECT * FROM jobs WHERE uuid=?",
+                            (job_uuid,),
+                        ).fetchone()
+                        if applied is None:
+                            raise RuntimeError("terminalized job disappeared before bookkeeping")
+                        applied_job = dict(applied)
+                        if JobManager._is_truthy(os.getenv("JOBS_COUNTERS_ENABLED", "")):
+                            available_at = _parse_dt(applied_job.get("available_at"))
+                            if available_at is not None and available_at.tzinfo is None:
+                                available_at = available_at.replace(tzinfo=_tz.utc)
+                            scheduled = available_at is not None and available_at > now_utc
+                            ready_delta = int(expected_status == "queued" and not scheduled)
+                            scheduled_delta = int(expected_status == "queued" and scheduled)
+                            processing_delta = int(expected_status == "processing")
+                            conn.execute(
+                                "UPDATE job_counters SET "
+                                "ready_count=MAX(ready_count - ?, 0), "
+                                "scheduled_count=MAX(scheduled_count - ?, 0), "
+                                "processing_count=MAX(processing_count - ?, 0), "
+                                "updated_at=DATETIME('now') "
+                                "WHERE domain=? AND queue=? AND job_type=?",
+                                (
+                                    ready_delta,
+                                    scheduled_delta,
+                                    processing_delta,
+                                    domain,
+                                    queue,
+                                    job_type,
+                                ),
+                            )
+                        conn.execute(
+                            "INSERT INTO job_events("
+                            "job_id, domain, queue, job_type, event_type, attrs_json, "
+                            "owner_user_id, request_id, trace_id, created_at"
+                            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, DATETIME('now'))",
+                            (
+                                int(applied_job["id"]),
+                                domain,
+                                queue,
+                                job_type,
+                                event_type,
+                                json.dumps(event_attrs),
+                                owner_user_id,
+                                applied_job.get("request_id"),
+                                applied_job.get("trace_id"),
+                            ),
+                        )
+            if unsafe_correlation:
+                raise SlidesGenerationJobsUnavailableError(
+                    "presentation.generate correlation is unsafe"
+                )
+            if applied_job is not None:
+                with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
+                    self._update_gauges(domain=domain, queue=queue, job_type=job_type)
+                if status == "failed":
+                    with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
+                        increment_failures(applied_job, reason="terminal")
+                    with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
+                        from .metrics import increment_failures_by_code
+
+                        increment_failures_by_code(applied_job, error_code)
+                else:
+                    with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
+                        increment_cancelled(applied_job)
+                if not JobManager._is_truthy(os.getenv("JOBS_EVENTS_OUTBOX", "")):
+                    with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
+                        emit_job_event(event_type, job=applied_job, attrs=event_attrs)
+                with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
+                    submit_job_audit_event(event_type, job=applied_job, attrs=event_attrs)
+                return "APPLIED"
+            if row is None:
+                return "MISSING"
+            stored = dict(row)
+            exact_correlation = (
+                stored.get("uuid") == job_uuid
+                and stored.get("owner_user_id") == owner_user_id
+                and _is_slides_generation_scope(
+                    stored.get("domain"),
+                    stored.get("queue"),
+                    stored.get("job_type"),
+                )
+                and (job_id is None or stored.get("id") == job_id)
+            )
+            identical_terminal = (
+                stored.get("status") == status
+                and stored.get("completion_token") == completion_token
+                and stored.get("error_code") == error_code
+                and stored.get("error_message") == error_message
+                and stored.get("completed_at") is not None
+                and stored.get("leased_until") is None
+                and (
+                    status != "cancelled"
+                    or (
+                        stored.get("cancelled_at") is not None
+                        and stored.get("cancellation_reason") == error_message
+                    )
+                )
             )
             if exact_correlation and identical_terminal:
                 return "IDEMPOTENT"
@@ -8306,36 +8778,29 @@ class JobManager:
                                 )
                             return count
 
-                        # Each locked batch copies the exact archive projection
-                        # before deletion when enabled. The helper also validates
-                        # and suppresses only exact idempotent Slides collisions.
-                        from psycopg.rows import dict_row  # type: ignore
-
-                        with conn.cursor(
-                            name="jobs_prune_candidates",
-                            row_factory=dict_row,
-                        ) as candidate_cur:
-                            candidate_cur.execute(
-                                f"SELECT id FROM jobs{where_clause} "  # nosec B608
-                                "ORDER BY id FOR UPDATE",
-                                tuple(params),
+                        # Freeze the exact prune population under row locks before
+                        # any archive, counter, or delete mutation. Process that
+                        # immutable ID set in bounded batches using the current
+                        # archive-before-delete helper.
+                        cur.execute(
+                            f"SELECT id FROM jobs{where_clause} "  # nosec B608
+                            "ORDER BY id FOR UPDATE",
+                            tuple(params),
+                        )
+                        locked_ids = [
+                            int(row["id"] if isinstance(row, dict) else row[0])
+                            for row in (cur.fetchall() or [])
+                        ]
+                        for offset in range(0, len(locked_ids), _PRUNE_BATCH_SIZE):
+                            candidate_ids = locked_ids[
+                                offset : offset + _PRUNE_BATCH_SIZE
+                            ]
+                            deleted += self._prune_postgres_batch(
+                                cur,
+                                candidate_ids,
+                                archive_enabled=archive_enabled,
+                                test_mode=_test_mode,
                             )
-                            while True:
-                                candidate_rows = candidate_cur.fetchmany(
-                                    _PRUNE_BATCH_SIZE
-                                )
-                                candidate_ids = [
-                                    int(candidate["id"])
-                                    for candidate in (candidate_rows or [])
-                                ]
-                                if not candidate_ids:
-                                    break
-                                deleted += self._prune_postgres_batch(
-                                    cur,
-                                    candidate_ids,
-                                    archive_enabled=archive_enabled,
-                                    test_mode=_test_mode,
-                                )
             else:
                 with conn:
                     if not dry_run:

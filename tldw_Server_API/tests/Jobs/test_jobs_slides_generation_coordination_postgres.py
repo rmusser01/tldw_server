@@ -1,15 +1,20 @@
 from __future__ import annotations
 
+import gzip
 import inspect
 import json
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
+from threading import Event
 
 import pytest
 
 psycopg = pytest.importorskip("psycopg")
 
+from tldw_Server_API.app.core.Jobs import pg_migrations as jobs_pg_migrations
 from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.Jobs.migrations import SLIDES_ARCHIVE_EXACT_FIELDS
 from tldw_Server_API.app.core.Jobs.pg_migrations import (
     ensure_jobs_rls_policies_pg,
     ensure_jobs_tables_pg,
@@ -246,6 +251,143 @@ def test_postgres_forward_migration_adds_archive_terminal_projection_before_audi
         assert cur.fetchone()[0] is None
 
 
+def test_postgres_audit_locks_before_scans_and_normalizes_compressed_rows():
+    source = inspect.getsource(jobs_pg_migrations._audit_slides_generation_pg)
+    ensure_source = inspect.getsource(jobs_pg_migrations.ensure_jobs_tables_pg)
+    forward_block = ensure_source.split("# Forward-migrate older installs:", 1)[1].split(
+        "# Audit before creating the standalone archive indexes.",
+        1,
+    )[0]
+    audit_block = ensure_source.split(
+        "# Audit before creating the standalone archive indexes.",
+        1,
+    )[1].split(
+        "# Create hot-path indexes", 1
+    )[0]
+
+    assert source.index("FOR UPDATE") < source.index("SELECT COALESCE(SUM(candidate_count), 0)")
+    assert "normalize_slides_archive_projection" in source
+    assert forward_block.count("except psycopg.Error") == 1
+    assert "except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS" in audit_block
+    assert audit_block.index("_mark_slides_audit_failure_pg(audit_cur)") < audit_block.index(
+        "_audit_slides_generation_pg(audit_cur)"
+    )
+    assert "SAVEPOINT slides_generation_audit" in audit_block
+    assert "ROLLBACK TO SAVEPOINT slides_generation_audit" in audit_block
+
+
+@pytest.mark.pg_jobs
+def test_postgres_incomplete_archive_projection_fails_generation_readiness(
+    jobs_pg_dsn,
+):
+    manager = JobManager(None, backend="postgres", db_url=jobs_pg_dsn)
+    with psycopg.connect(jobs_pg_dsn, autocommit=True) as conn, conn.cursor() as cur:
+        cur.execute("ALTER TABLE jobs_archive DROP COLUMN error_code")
+
+    readiness = manager.get_slides_generation_readiness()
+
+    assert readiness["ready"] is False
+    assert readiness["archive_projection_ready"] is False
+
+
+@pytest.mark.pg_jobs
+@pytest.mark.parametrize("divergent", (False, True))
+def test_postgres_audit_compares_logical_compressed_archive_projection(
+    jobs_pg_dsn,
+    divergent,
+):
+    manager = JobManager(None, backend="postgres", db_url=jobs_pg_dsn)
+    job = manager.create_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        payload={"receipt_id": "receipt-1"},
+        owner_user_id="owner-1",
+        idempotency_key=f"compressed-audit-{divergent}",
+    )
+    projection = ", ".join(("id", *SLIDES_ARCHIVE_EXACT_FIELDS))
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            f"INSERT INTO jobs_archive ({projection}) "  # nosec B608 - closed projection
+            f"SELECT {projection} FROM jobs WHERE id=%s",  # nosec B608 - closed projection
+            (int(job["id"]),),
+        )
+        cur.execute("SELECT payload FROM jobs WHERE id=%s", (int(job["id"]),))
+        stored_payload = cur.fetchone()[0]
+        logical_payload = {"receipt_id": "different"} if divergent else stored_payload
+        if divergent:
+            cur.execute("UPDATE jobs SET payload=NULL WHERE id=%s", (int(job["id"]),))
+        cur.execute(
+            """
+            UPDATE jobs_archive
+            SET payload=NULL, payload_compressed=%s
+            WHERE uuid=%s
+            """,
+            (
+                gzip.compress(json.dumps(logical_payload).encode("utf-8")),
+                str(job["uuid"]),
+            ),
+        )
+
+    ensure_jobs_tables_pg(jobs_pg_dsn)
+    readiness = manager.get_slides_generation_readiness()
+
+    assert readiness["ready"] is (not divergent)
+    assert readiness["diagnostic_code"] == ("ambiguous_generation_legacy_row" if divergent else None)
+
+
+@pytest.mark.pg_jobs
+def test_postgres_audit_holds_singleton_lock_before_scans(jobs_pg_dsn):
+    scan_reached = Event()
+    release_scan = Event()
+
+    class PausingCursor:
+        def __init__(self, inner):
+            self._inner = inner
+
+        def execute(self, sql, *args, **kwargs):
+            normalized = " ".join(str(sql).split())
+            if "SELECT COALESCE(SUM(candidate_count), 0)" in normalized:
+                scan_reached.set()
+                assert release_scan.wait(timeout=5)
+            return self._inner.execute(sql, *args, **kwargs)
+
+        def __getattr__(self, name):
+            return getattr(self._inner, name)
+
+    def run_audit():
+        with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+            return jobs_pg_migrations._audit_slides_generation_pg(PausingCursor(cur))
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        audit_future = executor.submit(run_audit)
+        assert scan_reached.wait(timeout=5)
+        with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+            cur.execute("SET LOCAL lock_timeout='250ms'")
+            with pytest.raises(psycopg.errors.LockNotAvailable):
+                cur.execute(
+                    """
+                    UPDATE slides_standalone_reconciliation
+                    SET diagnostic_code='ambiguous_generation_legacy_row'
+                    WHERE singleton_id=1
+                    """
+                )
+            conn.rollback()
+            cur.execute("SET LOCAL lock_timeout='250ms'")
+            with pytest.raises(psycopg.errors.LockNotAvailable):
+                cur.execute(
+                    """
+                    SELECT diagnostic_code
+                    FROM slides_standalone_reconciliation
+                    WHERE singleton_id=1
+                    FOR SHARE
+                    """
+                )
+            conn.rollback()
+        release_scan.set()
+        audit_future.result(timeout=5)
+
+
 @pytest.mark.pg_jobs
 def test_postgres_reconciliation_takeover_and_revision_fencing_matches_sqlite(jobs_pg_dsn):
     first = JobManager(None, backend="postgres", db_url=jobs_pg_dsn)
@@ -410,6 +552,44 @@ def test_postgres_reconciliation_lock_order_and_registry_grant_are_narrow():
     assert "GRANT INSERT ON {}.job_events TO {}" in rls_source
     assert "GRANT USAGE, SELECT ON SEQUENCE {}.job_events_id_seq TO {}" in rls_source
     assert "GRANT INSERT ON ALL TABLES" not in rls_source
+
+
+def test_postgres_prune_uses_one_locked_candidate_set_for_every_mutation():
+    prune_source = inspect.getsource(JobManager.prune_jobs)
+    batch_source = inspect.getsource(JobManager._prune_postgres_batch)
+
+    candidate_lock = prune_source.index('f"SELECT id FROM jobs{where_clause} "')
+    batch_dispatch = prune_source.index("_prune_postgres_batch")
+    collision_check = batch_source.index("_idempotent_slides_archive_collisions")
+    archive_copy = batch_source.index("SELECT {archive_projection} FROM locked_jobs")
+    delete = batch_source.index("DELETE FROM jobs{candidate_where_clause}")
+
+    assert candidate_lock < batch_dispatch
+    assert "ORDER BY id FOR UPDATE" in prune_source
+    assert "locked_ids" in prune_source
+    assert collision_check < archive_copy < delete
+
+
+def test_postgres_reconciler_terminalizer_serializes_before_uuid_authority_check():
+    source = inspect.getsource(JobManager.terminalize_slides_generation_job_from_reconciler)
+
+    advisory_lock = source.index("pg_advisory_xact_lock")
+    readiness = source.index("_slides_generation_ready_in_connection")
+    authority_check = source.index("ORDER BY id LIMIT 2 FOR UPDATE")
+    update = source.index("UPDATE jobs SET status=%s")
+
+    assert advisory_lock < readiness < authority_check < update
+    assert 'conn.execute("BEGIN IMMEDIATE")' in source
+    assert "len(authority_rows) > 1" in source
+
+
+def test_postgres_admission_and_public_lookup_hold_serialized_readiness_lock():
+    readiness_source = inspect.getsource(JobManager._slides_generation_ready_in_connection)
+    lookup_source = inspect.getsource(JobManager.lookup_slides_generation_job)
+
+    assert "FOR SHARE" in readiness_source
+    assert "_serialized_slides_generation_replay" in lookup_source
+    assert "get_slides_generation_readiness" not in lookup_source
 
 
 def test_postgres_archive_index_shape_helper_rejects_wrong_catalog_rows():
@@ -645,6 +825,107 @@ def test_postgres_archive_preserves_terminal_error_projection(jobs_pg_dsn, monke
 
 
 @pytest.mark.pg_jobs
+def test_postgres_prune_row_lock_prevents_candidate_status_phantom(
+    jobs_pg_dsn,
+    monkeypatch,
+):
+    prune_manager = JobManager(None, backend="postgres", db_url=jobs_pg_dsn)
+    job = prune_manager.create_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        payload={"receipt_id": "prune-lock"},
+        owner_user_id="owner-1",
+        idempotency_key="prune-lock",
+    )
+    phantom = prune_manager.create_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        payload={"receipt_id": "must-not-enter-prune-set"},
+        owner_user_id="owner-1",
+        idempotency_key="prune-phantom",
+    )
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE jobs
+            SET status='failed', created_at=NOW() - INTERVAL '60 days',
+                completed_at=NOW() - INTERVAL '60 days'
+            WHERE id=%s
+            """,
+            (int(job["id"]),),
+        )
+
+    collision_reached = Event()
+    release_collision = Event()
+    original_collision_check = prune_manager._idempotent_slides_archive_collisions
+
+    def pause_before_collision(*args, **kwargs):
+        collision_reached.set()
+        assert release_collision.wait(timeout=5)
+        return original_collision_check(*args, **kwargs)
+
+    monkeypatch.setattr(
+        prune_manager,
+        "_idempotent_slides_archive_collisions",
+        pause_before_collision,
+    )
+    monkeypatch.setenv("JOBS_ARCHIVE_BEFORE_DELETE", "true")
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        prune_future = executor.submit(
+            prune_manager.prune_jobs,
+            statuses=["failed"],
+            older_than_days=0,
+            domain="slides",
+            queue="default",
+            job_type="presentation.generate",
+        )
+        assert collision_reached.wait(timeout=5)
+        try:
+            with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+                cur.execute("SET LOCAL lock_timeout='250ms'")
+                with pytest.raises(psycopg.errors.LockNotAvailable):
+                    cur.execute(
+                        "UPDATE jobs SET error_message='racing update' WHERE id=%s",
+                        (int(job["id"]),),
+                    )
+                conn.rollback()
+                cur.execute(
+                    """
+                    UPDATE jobs
+                    SET status='failed', error_code='slides_orphaned',
+                        error_message='terminalized while prune is paused',
+                        completion_token='prune-phantom', completed_at=NOW()
+                    WHERE id=%s AND status='queued'
+                    """,
+                    (int(phantom["id"]),),
+                )
+                assert cur.rowcount == 1
+        finally:
+            release_collision.set()
+
+        assert prune_future.result(timeout=5) == 1
+
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        cur.execute("SELECT COUNT(*) FROM jobs WHERE id=%s", (int(job["id"]),))
+        assert cur.fetchone()[0] == 0
+        cur.execute(
+            "SELECT status FROM jobs_archive WHERE uuid=%s",
+            (str(job["uuid"]),),
+        )
+        assert cur.fetchone()[0] == "failed"
+        cur.execute("SELECT status FROM jobs WHERE uuid=%s", (str(phantom["uuid"]),))
+        assert cur.fetchone()[0] == "failed"
+        cur.execute(
+            "SELECT COUNT(*) FROM jobs_archive WHERE uuid=%s",
+            (str(phantom["uuid"]),),
+        )
+        assert cur.fetchone()[0] == 0
+
+
+@pytest.mark.pg_jobs
 @pytest.mark.parametrize(
     ("status", "event_type"),
     (("failed", "job.failed"), ("cancelled", "job.cancelled")),
@@ -713,3 +994,175 @@ def test_postgres_worker_terminalizer_bookkeeping_is_exactly_once(
             (int(job["id"]), event_type),
         )
         assert cur.fetchone()[0] == 1
+
+
+@pytest.mark.pg_jobs
+@pytest.mark.parametrize(
+    ("source_status", "available_at", "expected_counts"),
+    (
+        ("queued", None, (2, 4, 5)),
+        ("queued", "future", (3, 3, 5)),
+        ("processing", None, (3, 4, 4)),
+    ),
+)
+def test_postgres_reconciler_terminalizer_bookkeeping_and_replay_match_sqlite(
+    jobs_pg_dsn,
+    monkeypatch,
+    source_status,
+    available_at,
+    expected_counts,
+):
+    monkeypatch.setenv("JOBS_COUNTERS_ENABLED", "true")
+    monkeypatch.setenv("JOBS_EVENTS_OUTBOX", "true")
+    manager = JobManager(None, backend="postgres", db_url=jobs_pg_dsn)
+    scheduled_at = datetime.now(UTC) + timedelta(hours=1) if available_at else None
+    job = manager.create_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        payload={},
+        owner_user_id="owner-1",
+        idempotency_key=f"reconciler-pg-{source_status}-{available_at}",
+        available_at=scheduled_at,
+    )
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        if source_status == "processing":
+            cur.execute(
+                """
+                UPDATE jobs
+                SET status='processing', worker_id='slides-worker',
+                    lease_id='slides-lease', leased_until=NOW() + INTERVAL '1 hour'
+                WHERE id=%s
+                """,
+                (int(job["id"]),),
+            )
+        cur.execute(
+            """
+            INSERT INTO job_counters(
+                domain, queue, job_type, ready_count, scheduled_count,
+                processing_count, quarantined_count
+            ) VALUES('slides', 'default', 'presentation.generate', 3, 4, 5, 0)
+            ON CONFLICT(domain, queue, job_type) DO UPDATE SET
+                ready_count=3, scheduled_count=4, processing_count=5
+            """
+        )
+    arguments = {
+        "job_uuid": str(job["uuid"]),
+        "job_id": int(job["id"]),
+        "owner_user_id": "owner-1",
+        "expected_status": source_status,
+        "status": "cancelled",
+        "error_code": "generation_cancelled",
+        "error_message": "generation cancelled",
+        "completion_token": f"reconciler:pg:{source_status}:{available_at}",
+    }
+
+    assert manager.terminalize_slides_generation_job_from_reconciler(**arguments) == "APPLIED"
+    assert manager.terminalize_slides_generation_job_from_reconciler(**arguments) == "IDEMPOTENT"
+    assert (
+        manager.terminalize_slides_generation_job_from_reconciler(**{**arguments, "owner_user_id": "owner-2"})
+        == "CONFLICT"
+    )
+
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT ready_count, scheduled_count, processing_count
+            FROM job_counters
+            WHERE domain='slides' AND queue='default'
+              AND job_type='presentation.generate'
+            """
+        )
+        assert cur.fetchone() == expected_counts
+        cur.execute(
+            "SELECT COUNT(*) FROM job_events WHERE job_id=%s AND event_type='job.cancelled'",
+            (int(job["id"]),),
+        )
+        assert cur.fetchone()[0] == 1
+
+
+@pytest.mark.pg_jobs
+def test_postgres_reconciler_terminalizer_respects_live_processing_lease(
+    jobs_pg_dsn,
+):
+    manager = JobManager(None, backend="postgres", db_url=jobs_pg_dsn)
+    job = manager.create_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        payload={},
+        owner_user_id="owner-1",
+        idempotency_key="reconciler-pg-lease",
+    )
+    acquired = manager.acquire_next_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        lease_seconds=30,
+        worker_id="slides-worker",
+    )
+    assert acquired is not None
+    arguments = {
+        "job_uuid": str(job["uuid"]),
+        "job_id": int(job["id"]),
+        "owner_user_id": "owner-1",
+        "expected_status": "processing",
+        "status": "failed",
+        "error_code": "generation_expired",
+        "error_message": "generation input expired",
+        "completion_token": "reconciler:pg:lease",
+        "require_processing_lease_expired": True,
+    }
+
+    assert manager.terminalize_slides_generation_job_from_reconciler(**arguments) == "CONFLICT"
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE jobs SET leased_until=NOW() - INTERVAL '1 second' WHERE id=%s",
+            (int(job["id"]),),
+        )
+    assert manager.terminalize_slides_generation_job_from_reconciler(**arguments) == "APPLIED"
+
+
+@pytest.mark.pg_jobs
+def test_postgres_reconciler_terminalizer_never_mutates_duplicate_active_uuid(
+    jobs_pg_dsn,
+):
+    manager = JobManager(None, backend="postgres", db_url=jobs_pg_dsn)
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        cur.execute("ALTER TABLE jobs DROP CONSTRAINT jobs_uuid_key")
+        cur.execute(
+            """
+            INSERT INTO jobs (
+                uuid, domain, queue, job_type, owner_user_id,
+                idempotency_key, payload, status
+            ) VALUES
+                ('ambiguous-active-pg', 'slides', 'default',
+                 'presentation.generate', 'owner-1', 'ambiguous-pg-a', '{}', 'queued'),
+                ('ambiguous-active-pg', 'slides', 'default',
+                 'presentation.generate', 'owner-1', 'ambiguous-pg-b', '{}', 'queued')
+            """
+        )
+
+    with pytest.raises(ValueError, match="correlation is unsafe"):
+        manager.terminalize_slides_generation_job_from_reconciler(
+            job_uuid="ambiguous-active-pg",
+            owner_user_id="owner-1",
+            expected_status="queued",
+            status="failed",
+            error_code="generation_ambiguous",
+            error_message="ambiguous generation correlation",
+            completion_token="reconciler:ambiguous:pg",
+        )
+
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        cur.execute("SELECT status FROM jobs WHERE uuid='ambiguous-active-pg' ORDER BY id")
+        assert cur.fetchall() == [("queued",), ("queued",)]
+        cur.execute(
+            """
+            SELECT diagnostic_code, diagnostic_count
+            FROM slides_standalone_reconciliation WHERE singleton_id=1
+            """
+        )
+        diagnostic = cur.fetchone()
+        assert diagnostic[0] == "ambiguous_generation_legacy_row"
+        assert diagnostic[1] >= 2
