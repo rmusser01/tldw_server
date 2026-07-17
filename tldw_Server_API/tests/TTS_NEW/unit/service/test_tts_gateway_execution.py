@@ -186,6 +186,7 @@ class FakeBreaker:
 
     async def record_manual_failure(self, error: BaseException) -> None:
         self.failures.append(error)
+        self.state = "open"
 
     async def release(self) -> None:
         self.releases += 1
@@ -548,6 +549,47 @@ async def test_attempt_and_result_events_report_bounded_breaker_state(
         for name, payload in events
         if name in {"gateway_tts_attempt", "gateway_tts_result"}
     ] == [expected, expected]
+
+
+@pytest.mark.asyncio
+async def test_fallback_event_reports_breaker_state_after_failure_transition() -> None:
+    gateway_specs = specs(
+        primary_fallback={
+            "on": ["timeout"],
+            "max_attempts": 2,
+            "targets": [
+                {
+                    "backend": "target",
+                    "model": "Target/Model",
+                    "voice": "TargetVoice",
+                }
+            ],
+        }
+    )
+    registry = FakeRegistry(
+        {
+            "gateway:primary": [(TTSTimeoutError("private upstream"),)],
+            "gateway:target": [(MP3,)],
+        }
+    )
+    events: list[tuple[str, dict[str, Any]]] = []
+    result = await executor(registry, gateway_specs, events=events).execute(
+        request(stream=False),
+        user_id=1,
+    )
+
+    assert await collect(result) == MP3
+    assert [
+        (name, payload["circuit"])
+        for name, payload in events
+        if payload["backend_id"] == "gateway:primary"
+        and name
+        in {"gateway_tts_attempt", "gateway_tts_result", "gateway_tts_fallback"}
+    ] == [
+        ("gateway_tts_attempt", "closed"),
+        ("gateway_tts_result", "open"),
+        ("gateway_tts_fallback", "open"),
+    ]
 
 
 @pytest.mark.asyncio

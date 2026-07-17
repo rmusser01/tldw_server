@@ -535,7 +535,7 @@ class GatewaySpeechExecutor:
                     backend_id=route.backend_id,
                     attempt=attempt_count,
                     category=failure_category,
-                    circuit="closed",
+                    circuit=self._circuit_state(prepared.breaker),
                 )
                 continue
 
