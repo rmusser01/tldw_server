@@ -12,6 +12,8 @@ references:
 - https://github.com/rmusser01/tldw_server/pull/2744
 - Docs/Development/Release_Process.md
 - Docs/Release_Checklist.md
+- https://github.com/rmusser01/tldw_server/pull/2745
+- https://github.com/rmusser01/tldw_server/pull/2748
 documentation:
 - Docs/superpowers/specs/2026-07-15-release-0.1.41-design.md
 - Docs/superpowers/plans/2026-07-15-release-0.1.41-implementation-plan.md
@@ -95,6 +97,7 @@ Worktree clean. The corrected merge ancestry has not yet been pushed at note tim
 - Clean detached post-merge verification at 7a23be3202 confirmed pyproject, FastAPI AST, README, and MkDocs versions are 0.1.41; release-note extraction length is 2561 with no duplicate bullets; historical 0.1.40 references remain only in prior-release sections; checked-in and refreshed strict MkDocs builds exited zero with no WARNING records; two refreshes were deterministic and left the worktree clean.
 - Requester instruction on 2026-07-16: "Do not create a new tagged release." Tag and GitHub Release publication are therefore intentionally skipped. Confirmed no local v0.1.41 tag, no remote matching tag ref, and no GitHub Release for v0.1.41. Do not create or publish either later under this task.
 - Sync branch codex/sync-main-0.1.41-to-dev was created from released main merge 7a23be3202. TASK-12973 remains In Progress until the sync PR merges and closeout evidence is committed.
+Main-to-dev sync PR opened: https://github.com/rmusser01/tldw_server/pull/2748. Base=dev, head=codex/sync-main-0.1.41-to-dev. Its human-authored Change summary reuses the requester's exact two sentences from release PR #2745. No tag or GitHub Release will be created.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
