@@ -7,6 +7,9 @@ from typing import Any
 
 import pytest
 
+from tldw_Server_API.app.core import exceptions as core_exceptions
+from tldw_Server_API.app.core.DB_Management import Prompts_DB as prompts_db_module
+from tldw_Server_API.app.core.Prompt_Management import service_prompts as service_prompts_module
 from tldw_Server_API.app.core.Prompt_Management.service_prompts import (
     ServicePromptCorruptOverride,
     ServicePromptValidationError,
@@ -17,6 +20,8 @@ from tldw_Server_API.app.core.Prompt_Management.service_prompts import (
     resolve_service_prompt,
     validate_service_prompt_parts,
 )
+
+pytestmark = pytest.mark.unit
 
 FIXTURE_PATH = (
     Path(__file__).resolve().parents[3] / "apps/packages/ui/src/utils/__fixtures__/service-prompt-rendering.json"
@@ -64,6 +69,25 @@ EXPECTED_REGISTRY = {
         "workflows": (("media.text.translation", "Text translation"),),
     },
 }
+
+
+def test_service_prompt_exceptions_have_one_canonical_definition() -> None:
+    for name in (
+        "UnknownServicePromptDefinition",
+        "ServicePromptValidationError",
+        "ServicePromptCorruptOverride",
+    ):
+        canonical = getattr(core_exceptions, name)
+        assert canonical.__module__ == core_exceptions.__name__
+        assert getattr(service_prompts_module, name) is canonical
+
+    assert prompts_db_module.DatabaseError is core_exceptions.PromptsDatabaseError
+    assert prompts_db_module.ConflictError is core_exceptions.PromptsConflictError
+    assert prompts_db_module.ServicePromptRevisionConflict is core_exceptions.ServicePromptRevisionConflict
+    assert issubclass(
+        core_exceptions.ServicePromptRevisionConflict,
+        prompts_db_module.ConflictError,
+    )
 
 
 @dataclass(frozen=True)

@@ -57,6 +57,9 @@ from tldw_Server_API.app.core.DB_Management.sqlite_policy import (
     begin_immediate_if_needed,
     configure_sqlite_connection,
 )
+from tldw_Server_API.app.core.exceptions import PromptsConflictError as ConflictError
+from tldw_Server_API.app.core.exceptions import PromptsDatabaseError as DatabaseError
+from tldw_Server_API.app.core.exceptions import ServicePromptRevisionConflict
 from tldw_Server_API.app.core.testing import is_test_mode
 
 #
@@ -67,11 +70,6 @@ from tldw_Server_API.app.core.testing import is_test_mode
 # Functions:
 
 # --- Custom Exceptions (mirrors the legacy media DB shape) ---
-class DatabaseError(Exception):
-    """Base exception for database related errors."""
-    pass
-
-
 class SchemaError(DatabaseError):
     """Exception for schema version mismatches or migration failures."""
     pass
@@ -88,24 +86,6 @@ class InputError(ValueError):
         self.safe_message = safe_message or self.DEFAULT_SAFE_MESSAGE
 
 
-class ConflictError(DatabaseError):
-    """Indicates a conflict due to concurrent modification (version mismatch)."""
-
-    def __init__(self, message="Conflict detected: Record modified concurrently.", entity=None, identifier=None):
-        super().__init__(message)
-        self.entity = entity
-        self.identifier = identifier
-
-    def __str__(self):
-        base = super().__str__()
-        details = []
-        if self.entity:
-            details.append(f"Entity: {self.entity}")
-        if self.identifier:
-            details.append(f"ID: {self.identifier}")
-        return f"{base} ({', '.join(details)})" if details else base
-
-
 @dataclass(frozen=True)
 class ServicePromptOverrideRow:
     """Raw persisted Service Prompt override state."""
@@ -113,14 +93,6 @@ class ServicePromptOverrideRow:
     definition_id: str
     parts_json: str | bytes
     revision: str
-
-
-class ServicePromptRevisionConflict(ConflictError):
-    """Report the revision observed during a failed conditional write."""
-
-    def __init__(self, current_revision: str | None):
-        super().__init__("Service Prompt override changed concurrently.")
-        self.current_revision = current_revision
 
 
 _PROMPTS_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (

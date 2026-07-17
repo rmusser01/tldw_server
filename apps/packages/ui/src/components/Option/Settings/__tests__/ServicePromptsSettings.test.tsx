@@ -925,6 +925,24 @@ describe("ServicePromptsSettings", () => {
     expect(editor).toHaveValue("Context {context}; question {question}")
   })
 
+  it("shows a generic save error for structural 422 responses without dropping the draft", async () => {
+    renderSettings()
+    await openPrompt("RAG answer")
+    const editor = screen.getByRole("textbox", { name: "Template" })
+    const draft = "Context {context}; question {question}"
+    fireEvent.change(editor, { target: { value: draft } })
+    mocks.save.mockRejectedValueOnce(new ServicePromptApiError(
+      "Framework validation failed",
+      { status: 422 }
+    ))
+
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
+
+    expect(await screen.findByText("Unable to save this workflow prompt."))
+      .toBeInTheDocument()
+    expect(editor).toHaveValue(draft)
+  })
+
   it("preserves the whole draft on conflict and reloads only on request", async () => {
     renderSettings()
     await openPrompt("RAG answer")

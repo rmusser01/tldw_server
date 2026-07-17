@@ -20,6 +20,8 @@ from tldw_Server_API.app.core.Prompt_Management.service_prompts import (
     ServicePromptCorruptOverride,
 )
 
+pytestmark = pytest.mark.unit
+
 PACKAGED_SYSTEM = """You are an expert translator. Your task is to provide accurate,
 natural-sounding translations that preserve the original meaning, tone, and formatting.
 Do not add explanations or notes - only provide the translation."""

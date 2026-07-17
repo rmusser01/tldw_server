@@ -1,7 +1,7 @@
 ---
 id: TASK-12974
 title: Implement user-customizable Service Prompts v1 vertical slice
-status: Done
+status: In Progress
 assignee: []
 created_date: ''
 updated_date: 2026-07-17 04:57

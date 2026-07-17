@@ -11,6 +11,12 @@ from string import Formatter
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Literal
 
+from tldw_Server_API.app.core.exceptions import (
+    ServicePromptCorruptOverride,
+    ServicePromptValidationError,
+    UnknownServicePromptDefinition,
+)
+
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.DB_Management.Prompts_DB import PromptsDatabase
 
@@ -58,31 +64,6 @@ class ResolvedServicePrompt:
     parts: Mapping[str, str]
     source: Literal["user", "packaged"]
     revision: str | None
-
-
-class UnknownServicePromptDefinition(ValueError):
-    """Raised when a caller requests a definition outside the static registry."""
-
-    def __init__(self, definition_id: str):
-        self.definition_id = definition_id
-        super().__init__(f"Unknown Service Prompt definition: {definition_id}")
-
-
-class ServicePromptValidationError(ValueError):
-    """Raised with safe, immutable validation errors keyed by registered part."""
-
-    def __init__(self, field_errors: Mapping[str, str]):
-        safe_errors = dict(field_errors)
-        self.field_errors: Mapping[str, str] = MappingProxyType(safe_errors)
-        super().__init__("Service Prompt validation failed for: " + ", ".join(safe_errors))
-
-
-class ServicePromptCorruptOverride(RuntimeError):
-    """Raised when a saved override cannot be parsed or validated."""
-
-    def __init__(self, revision: str):
-        self.revision = revision
-        super().__init__(f"Stored Service Prompt override is corrupt at revision {revision}.")
 
 
 _RAG_ANSWER_DEFAULT = (
@@ -215,6 +196,8 @@ class _TemplateSyntaxError(ValueError):
 
 
 def _check_template_braces(authored_text: str) -> None:
+    """Reject malformed braces and field modifiers without echoing authored text."""
+
     index = 0
     while index < len(authored_text):
         character = authored_text[index]
@@ -248,6 +231,8 @@ def _parse_template(
     part: ServicePromptPart,
     authored_text: str,
 ) -> tuple[tuple[str, str | None, str | None, str | None], ...]:
+    """Parse one template and enforce its exact registered variable contract."""
+
     _check_template_braces(authored_text)
     try:
         parsed = tuple(_FORMATTER.parse(authored_text))

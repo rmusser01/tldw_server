@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import UUID, uuid4
@@ -22,6 +23,8 @@ from tldw_Server_API.app.core.DB_Management.Prompts_DB import (
     DatabaseError,
     PromptsDatabase,
 )
+
+pytestmark = pytest.mark.integration
 
 TRANSLATION_ID = "media.text.translation"
 TRANSLATION_PATH = f"/api/v1/service-prompts/{TRANSLATION_ID}"
@@ -479,6 +482,50 @@ def test_service_prompt_api_key_scopes_and_jwt_bypass(api_context) -> None:
         json={"parts": CUSTOM_PARTS, "expected_revision": None},
     )
     assert jwt_save.status_code == 200
+
+
+def test_service_prompt_database_calls_run_off_the_event_loop(
+    api_context,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    event_loop_threads: set[int] = set()
+    database_threads: set[int] = set()
+
+    async def override_db() -> PromptsDatabase:
+        event_loop_threads.add(threading.get_ident())
+        return api_context.db
+
+    api_context.app.dependency_overrides[get_prompts_db_for_user] = override_db
+    for method_name in (
+        "get_service_prompt_override",
+        "save_service_prompt_override",
+        "reset_service_prompt_override",
+    ):
+        original = getattr(api_context.db, method_name)
+
+        def tracked(*args, _original=original, **kwargs):
+            database_threads.add(threading.get_ident())
+            return _original(*args, **kwargs)
+
+        monkeypatch.setattr(api_context.db, method_name, tracked)
+
+    get_response = api_context.client.get(TRANSLATION_PATH)
+    put_response = api_context.client.put(
+        TRANSLATION_PATH,
+        json={"parts": CUSTOM_PARTS, "expected_revision": None},
+    )
+    delete_response = api_context.client.delete(
+        TRANSLATION_PATH,
+        params={"expected_revision": put_response.json()["revision"]},
+    )
+
+    assert [get_response.status_code, put_response.status_code, delete_response.status_code] == [
+        200,
+        200,
+        200,
+    ]
+    assert event_loop_threads
+    assert database_threads.isdisjoint(event_loop_threads)
 
 
 def test_service_prompt_databases_are_isolated_by_dependency(api_context, tmp_path: Path) -> None:

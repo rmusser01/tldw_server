@@ -20,14 +20,16 @@ from tldw_Server_API.app.api.v1.schemas.service_prompt_schemas import (
 from tldw_Server_API.app.core.DB_Management.Prompts_DB import (
     DatabaseError,
     PromptsDatabase,
+)
+from tldw_Server_API.app.core.exceptions import (
+    ServicePromptCorruptOverride,
     ServicePromptRevisionConflict,
+    ServicePromptValidationError,
+    UnknownServicePromptDefinition,
 )
 from tldw_Server_API.app.core.Prompt_Management.service_prompts import (
     ResolvedServicePrompt,
-    ServicePromptCorruptOverride,
     ServicePromptDefinition,
-    ServicePromptValidationError,
-    UnknownServicePromptDefinition,
     get_service_prompt_definition,
     list_service_prompt_definitions,
     resolve_service_prompt,
@@ -39,9 +41,13 @@ class _ServicePromptRoute(APIRoute):
     """Keep FastAPI validation errors useful without echoing authored prompts."""
 
     def get_route_handler(self) -> Callable[[Request], Coroutine[Any, Any, Response]]:
+        """Wrap one route handler with prompt-safe request validation errors."""
+
         original_route_handler = super().get_route_handler()
 
         async def sanitized_route_handler(request: Request) -> Response:
+            """Remove authored inputs from FastAPI validation error details."""
+
             try:
                 return await original_route_handler(request)
             except RequestValidationError as exc:
@@ -62,6 +68,8 @@ router = APIRouter(route_class=_ServicePromptRoute)
 
 
 def _catalog_item(definition: ServicePromptDefinition) -> ServicePromptCatalogItemResponse:
+    """Build prompt-free catalog metadata for one registered definition."""
+
     return ServicePromptCatalogItemResponse(
         id=definition.id,
         label=definition.label,
@@ -83,6 +91,8 @@ def _catalog_item(definition: ServicePromptDefinition) -> ServicePromptCatalogIt
 
 
 def _detail(resolved: ResolvedServicePrompt) -> ServicePromptDetailResponse:
+    """Build the no-store wire detail for one resolved prompt state."""
+
     definition = resolved.definition
     effective_parts = dict(resolved.parts)
     return ServicePromptDetailResponse(
@@ -96,6 +106,8 @@ def _detail(resolved: ResolvedServicePrompt) -> ServicePromptDetailResponse:
 
 
 def _domain_error(exc: Exception) -> HTTPException:
+    """Map a recognized domain or store failure to a content-free HTTP error."""
+
     if isinstance(exc, UnknownServicePromptDefinition):
         return HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -147,6 +159,8 @@ def _domain_error(exc: Exception) -> HTTPException:
 
 
 def _raise_domain_error(exc: Exception) -> NoReturn:
+    """Raise the sanitized HTTP representation while preserving exception chaining."""
+
     raise _domain_error(exc) from exc
 
 
@@ -167,7 +181,7 @@ async def list_service_prompts(response: Response) -> list[ServicePromptCatalogI
     response_model=ServicePromptDetailResponse,
     dependencies=[Depends(require_api_key_scope("read"))],
 )
-async def get_service_prompt(
+def get_service_prompt(
     definition_id: str,
     response: Response,
     db: PromptsDatabase = Depends(get_prompts_db_for_user),
@@ -190,7 +204,7 @@ async def get_service_prompt(
     response_model=ServicePromptDetailResponse,
     dependencies=[Depends(require_api_key_scope("write"))],
 )
-async def update_service_prompt(
+def update_service_prompt(
     definition_id: str,
     payload: ServicePromptUpdateRequest,
     response: Response,
@@ -224,7 +238,7 @@ async def update_service_prompt(
     response_model=ServicePromptDetailResponse,
     dependencies=[Depends(require_api_key_scope("write"))],
 )
-async def reset_service_prompt(
+def reset_service_prompt(
     definition_id: str,
     response: Response,
     expected_revision: UUID | None = Query(default=None),

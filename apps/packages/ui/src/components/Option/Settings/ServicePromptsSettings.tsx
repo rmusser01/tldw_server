@@ -921,8 +921,12 @@ export const ServicePromptsSettings = () => {
     } catch (error) {
       if (!isCurrentOperation(operation) || isAbortError(error)) return
       setOperationAnnouncement("")
-      if (error instanceof ServicePromptApiError && error.status === 422) {
-        setFieldErrors(error.fieldErrors ?? {})
+      if (error instanceof ServicePromptApiError &&
+        error.status === 422 &&
+        error.fieldErrors &&
+        Object.keys(error.fieldErrors).length > 0
+      ) {
+        setFieldErrors(error.fieldErrors)
       } else if (error instanceof ServicePromptApiError && error.status === 409) {
         setConflict(true)
       } else {

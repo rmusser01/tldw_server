@@ -4,6 +4,7 @@ import email.utils
 import re
 import weakref
 from collections.abc import Mapping
+from types import MappingProxyType
 from typing import Any, Literal, NoReturn
 
 from fastapi import FastAPI, HTTPException, Request, status
@@ -117,6 +118,66 @@ class PromptImprovementDispatchError(RuntimeError):
             if retry_after is not None
             else None
         )
+
+
+class PromptsDatabaseError(Exception):
+    """Base exception for Prompts database failures."""
+
+
+class PromptsConflictError(PromptsDatabaseError):
+    """Report a Prompts database concurrent-modification conflict."""
+
+    def __init__(
+        self,
+        message: str = "Conflict detected: Record modified concurrently.",
+        entity: Any = None,
+        identifier: Any = None,
+    ) -> None:
+        super().__init__(message)
+        self.entity = entity
+        self.identifier = identifier
+
+    def __str__(self) -> str:
+        base = super().__str__()
+        details = []
+        if self.entity:
+            details.append(f"Entity: {self.entity}")
+        if self.identifier:
+            details.append(f"ID: {self.identifier}")
+        return f"{base} ({', '.join(details)})" if details else base
+
+
+class UnknownServicePromptDefinition(ValueError):
+    """Raised when a caller requests a definition outside the static registry."""
+
+    def __init__(self, definition_id: str) -> None:
+        self.definition_id = definition_id
+        super().__init__(f"Unknown Service Prompt definition: {definition_id}")
+
+
+class ServicePromptValidationError(ValueError):
+    """Raised with safe, immutable validation errors keyed by registered part."""
+
+    def __init__(self, field_errors: Mapping[str, str]) -> None:
+        safe_errors = dict(field_errors)
+        self.field_errors: Mapping[str, str] = MappingProxyType(safe_errors)
+        super().__init__("Service Prompt validation failed for: " + ", ".join(safe_errors))
+
+
+class ServicePromptCorruptOverride(RuntimeError):
+    """Raised when a saved override cannot be parsed or validated."""
+
+    def __init__(self, revision: str) -> None:
+        self.revision = revision
+        super().__init__(f"Stored Service Prompt override is corrupt at revision {revision}.")
+
+
+class ServicePromptRevisionConflict(PromptsConflictError):
+    """Report the revision observed during a failed conditional write."""
+
+    def __init__(self, current_revision: str | None) -> None:
+        super().__init__("Service Prompt override changed concurrently.")
+        self.current_revision = current_revision
 
 
 class VideoProcessingError(Exception):
