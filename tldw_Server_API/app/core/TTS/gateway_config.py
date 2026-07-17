@@ -13,6 +13,7 @@ from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
+from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 from urllib.parse import unquote, urlsplit
@@ -310,6 +311,7 @@ class GatewaySpec:
     fallback: GatewayFallbackPolicy
     discovery: GatewayDiscoveryPolicy
     conversion: GatewayConversionPolicy
+    ffmpeg_path: str | None
     config_generation: str
 
     def allows_model(
@@ -745,12 +747,25 @@ def _config_generation(spec_data: dict[str, Any]) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+def _available_executable_path(value: str | None) -> str | None:
+    """Return one absolute executable identity, or None when unavailable."""
+    if not value:
+        return None
+    try:
+        path = Path(value).expanduser().resolve()
+        if not path.is_file() or not os.access(path, os.X_OK):
+            return None
+    except OSError:
+        return None
+    return str(path)
+
+
 def _normalize_one(
     backend_id: str,
     raw: dict[str, Any],
     *,
     path: str,
-    ffmpeg_available: bool,
+    ffmpeg_path: str | None,
 ) -> GatewaySpec:
     config = materialize_gateway_config(raw, path=path)
 
@@ -795,7 +810,7 @@ def _normalize_one(
     immutable_overrides = MappingProxyType(dict(config.model_overrides))
     request_options = _validate_request_options(config.allowed_request_options)
     conversion = config.conversion
-    if conversion.enabled and not ffmpeg_available:
+    if conversion.enabled and ffmpeg_path is None:
         conversion = conversion.model_copy(update={"target_formats": ()})
 
     discovery_query = tuple(
@@ -841,6 +856,7 @@ def _normalize_one(
         "fallback": fallback_output,
         "discovery": discovery.model_dump(mode="json"),
         "conversion": conversion.model_dump(mode="json"),
+        "ffmpeg_path": ffmpeg_path,
     }
     return GatewaySpec(
         backend_id=backend_id,
@@ -864,6 +880,7 @@ def _normalize_one(
         fallback=fallback,
         discovery=discovery,
         conversion=conversion,
+        ffmpeg_path=ffmpeg_path,
         config_generation=_config_generation(output_fields),
     )
 
@@ -916,9 +933,13 @@ def normalize_gateway_specs(
     gateways: Mapping[str, Any],
     *,
     ffmpeg_available: bool | None = None,
+    ffmpeg_path: str | None = None,
 ) -> Mapping[str, GatewaySpec]:
     """Validate all definitions locally and return immutable normalized specs."""
-    ffmpeg_ready = shutil.which("ffmpeg") is not None if ffmpeg_available is None else ffmpeg_available
+    ffmpeg_candidate = ffmpeg_path if ffmpeg_path is not None else shutil.which("ffmpeg")
+    if ffmpeg_available is False:
+        ffmpeg_candidate = None
+    effective_ffmpeg_path = _available_executable_path(ffmpeg_candidate)
     raw_definitions: list[tuple[str, dict[str, Any], str]] = []
     openrouter = providers.get("openrouter")
     if openrouter is not None:
@@ -947,7 +968,7 @@ def normalize_gateway_specs(
             backend_id,
             definition,
             path=path,
-            ffmpeg_available=ffmpeg_ready,
+            ffmpeg_path=effective_ffmpeg_path,
         )
     _validate_fallback_graph(specs)
     return MappingProxyType(specs)
