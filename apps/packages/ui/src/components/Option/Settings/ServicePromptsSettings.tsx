@@ -1588,14 +1588,16 @@ export const ServicePromptsSettings = () => {
                   defaultValue:
                     "The saved value cannot be read safely. Reset it to restore the server default."
                 })}
-                primaryAction={{
-                  label: t("servicePrompts.corrupt.resetAction", {
-                    defaultValue: "Reset corrupt customization"
-                  }),
-                  onClick: () => void resetPrompt(corruptRevision, true),
-                  loading: isResetting,
-                  disabled: activeKind !== null
-                }}
+                secondaryActions={[
+                  {
+                    label: t("servicePrompts.corrupt.resetAction", {
+                      defaultValue: "Reset corrupt customization"
+                    }),
+                    onClick: () => void resetPrompt(corruptRevision, true),
+                    loading: isResetting,
+                    disabled: activeKind !== null
+                  }
+                ]}
               >
                 {operationError ? (
                   <Alert variant="error" title={operationError} />
@@ -1765,7 +1767,10 @@ export const ServicePromptsSettings = () => {
                             <p className="text-xs font-medium text-text-muted">
                               {getPartLabel(part.key, part.label, t)}
                             </p>
-                            <pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border bg-surface p-3 text-sm text-text">
+                            <pre
+                              className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border bg-surface p-3 text-sm text-text"
+                              tabIndex={0}
+                            >
                               <code role="code">{preview[part.key]}</code>
                             </pre>
                           </div>

@@ -12,6 +12,7 @@ const {
   normalChatModeMock,
   saveHistoryMock,
   saveMessageMock,
+  tabChatModeMock,
 } = vi.hoisted(() => ({
   events: [] as string[],
   generateTitleMock: vi.fn(),
@@ -19,6 +20,7 @@ const {
   normalChatModeMock: vi.fn(),
   saveHistoryMock: vi.fn(),
   saveMessageMock: vi.fn(),
+  tabChatModeMock: vi.fn(),
 }));
 
 vi.mock("@/services/service-prompts", () => ({
@@ -38,7 +40,7 @@ vi.mock("@/hooks/chat-modes/ragMode", () => ({
 }));
 
 vi.mock("@/hooks/chat-modes/tabChatMode", () => ({
-  tabChatMode: vi.fn(),
+  tabChatMode: tabChatModeMock,
 }));
 
 vi.mock("@/hooks/chat-modes/documentChatMode", () => ({
@@ -598,5 +600,37 @@ describe("useChatActions Compare service prompt snapshot", () => {
     });
 
     expect(loadServicePromptSnapshotMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("passes stored tab context when request-level docs is an empty array", async () => {
+    const storedTabs = [
+      {
+        type: "tab" as const,
+        tabId: 7,
+        title: "Stored tab",
+        url: "https://example.test/stored-tab",
+      },
+    ];
+    const options = {
+      ...createHookOptions({ webSearch: false, historyId: "history-1" }),
+      compareModeActive: false,
+      documentContext: storedTabs,
+    };
+    const { result } = renderHook(() =>
+      useChatActions(
+        options as unknown as Parameters<typeof useChatActions>[0],
+      ),
+    );
+
+    await act(async () => {
+      await result.current.onSubmit({
+        message: "Use the stored tab",
+        image: "",
+        docs: [],
+      });
+    });
+
+    expect(tabChatModeMock).toHaveBeenCalledTimes(1);
+    expect(tabChatModeMock.mock.calls[0]?.[2]).toEqual(storedTabs);
   });
 });

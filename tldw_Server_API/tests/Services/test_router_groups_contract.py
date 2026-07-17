@@ -346,7 +346,7 @@ def _install_fake_router_module(
         or not getattr(fake_module, "_router_test_fake", False)
     ):
         fake_module = ModuleType(module_name)
-        setattr(fake_module, "_router_test_fake", True)
+        fake_module._router_test_fake = True
     setattr(fake_module, attr_name, router)
     monkeypatch.setitem(sys.modules, module_name, fake_module)
     return router
@@ -458,7 +458,7 @@ def test_install_fake_router_module_does_not_mutate_existing_real_module(
 
     assert not hasattr(real_module, "router")
     assert sys.modules[module_name] is not real_module
-    assert getattr(sys.modules[module_name], "router") is router
+    assert sys.modules[module_name].router is router
 
 
 def test_append_imported_router_spec_preserves_metadata(
@@ -1322,7 +1322,7 @@ def test_iter_admin_router_specs_defers_selected_router_attr_lookup(
         "tldw_Server_API.app.api.v1.endpoints.jobs_admin": "/jobs/status",
         "tldw_Server_API.app.api.v1.endpoints.org_invites": "/orgs/invites",
     }
-    access_count = {module_name: 0 for module_name in router_definitions}
+    access_count = dict.fromkeys(router_definitions, 0)
     real_import_module = importlib.import_module
 
     def _guarded_import_module(module_name: str, package: str | None = None) -> ModuleType:
@@ -1356,11 +1356,11 @@ def test_iter_admin_router_specs_defers_selected_router_attr_lookup(
         monkeypatch.setitem(sys.modules, module_name, fake_module)
 
     specs = list(iter_admin_router_specs())
-    assert access_count == {module_name: 0 for module_name in router_definitions}
+    assert access_count == dict.fromkeys(router_definitions, 0)
 
     by_first_path = {_first_router_path(spec.router): spec for spec in specs}
     assert set(router_definitions.values()).issubset(by_first_path)
-    assert access_count == {module_name: 1 for module_name in router_definitions}
+    assert access_count == dict.fromkeys(router_definitions, 1)
 
 
 def test_iter_core_router_specs_raises_crashing_chat_import(
@@ -2002,7 +2002,7 @@ def test_iter_content_router_specs_defers_discovery_router_attr_lookup(
         "tldw_Server_API.app.api.v1.endpoints.research_runs": "/research-runs",
         "tldw_Server_API.app.api.v1.endpoints.paper_search": "/paper-search",
     }
-    access_count = {module_name: 0 for module_name in router_definitions}
+    access_count = dict.fromkeys(router_definitions, 0)
 
     for module_name, path in router_definitions.items():
         router = APIRouter()
@@ -2028,11 +2028,11 @@ def test_iter_content_router_specs_defers_discovery_router_attr_lookup(
         monkeypatch.setitem(sys.modules, module_name, fake_module)
 
     specs = list(iter_content_router_specs())
-    assert access_count == {module_name: 0 for module_name in router_definitions}
+    assert access_count == dict.fromkeys(router_definitions, 0)
 
     by_first_path = {_first_router_path(spec.router): spec for spec in specs}
     assert set(router_definitions.values()).issubset(by_first_path)
-    assert access_count == {module_name: 1 for module_name in router_definitions}
+    assert access_count == dict.fromkeys(router_definitions, 1)
 
 
 def test_iter_content_router_specs_defers_media_audio_router_attr_lookup(
@@ -2374,7 +2374,7 @@ def test_iter_content_router_specs_defers_workflow_router_attr_lookup(
         "tldw_Server_API.app.api.v1.endpoints.chat_workflows": "/chat/workflows",
         "tldw_Server_API.app.api.v1.endpoints.scheduler_workflows": "/scheduler/workflows",
     }
-    access_count = {module_name: 0 for module_name in module_paths}
+    access_count = dict.fromkeys(module_paths, 0)
 
     for module_name, path in module_paths.items():
         router = APIRouter()
@@ -2400,7 +2400,7 @@ def test_iter_content_router_specs_defers_workflow_router_attr_lookup(
         monkeypatch.setitem(sys.modules, module_name, fake_module)
 
     specs = list(iter_content_router_specs())
-    assert access_count == {module_name: 0 for module_name in module_paths}
+    assert access_count == dict.fromkeys(module_paths, 0)
 
     by_first_path = {_first_router_path(spec.router): spec for spec in specs}
     assert by_first_path["/workflows"].prefix == ""
@@ -2414,7 +2414,7 @@ def test_iter_content_router_specs_defers_workflow_router_attr_lookup(
     assert by_first_path["/scheduler/workflows"].tags == ("scheduler",)
     assert by_first_path["/scheduler/workflows"].route_key == ""
     assert by_first_path["/scheduler/workflows"].default_stable is False
-    assert access_count == {module_name: 1 for module_name in module_paths}
+    assert access_count == dict.fromkeys(module_paths, 1)
 
 
 def test_iter_content_router_specs_defers_processing_router_attr_lookup(
@@ -2674,7 +2674,7 @@ def test_iter_content_router_specs_defers_output_router_attr_lookup(
         "tldw_Server_API.app.api.v1.endpoints.outputs_templates": "/outputs/templates",
         "tldw_Server_API.app.api.v1.endpoints.outputs": "/outputs",
     }
-    access_count = {module_name: 0 for module_name in module_paths}
+    access_count = dict.fromkeys(module_paths, 0)
 
     for module_name, path in module_paths.items():
         router = APIRouter()
@@ -2700,7 +2700,7 @@ def test_iter_content_router_specs_defers_output_router_attr_lookup(
         monkeypatch.setitem(sys.modules, module_name, fake_module)
 
     specs = list(iter_content_router_specs())
-    assert access_count == {module_name: 0 for module_name in module_paths}
+    assert access_count == dict.fromkeys(module_paths, 0)
 
     by_first_path = {_first_router_path(spec.router): spec for spec in specs}
     assert by_first_path["/outputs/templates"].prefix == "/api/v1"
@@ -2709,7 +2709,7 @@ def test_iter_content_router_specs_defers_output_router_attr_lookup(
     assert by_first_path["/outputs"].prefix == "/api/v1"
     assert by_first_path["/outputs"].tags == ("outputs",)
     assert by_first_path["/outputs"].route_key == "outputs"
-    assert access_count == {module_name: 1 for module_name in module_paths}
+    assert access_count == dict.fromkeys(module_paths, 1)
 
 
 def test_iter_content_router_specs_defers_notes_router_attr_lookup(
@@ -11216,8 +11216,8 @@ def test_iter_content_router_specs_populates_expected_specs(monkeypatch: pytest.
         path="/chatbooks",
     )
     fake_chatbooks = sys.modules["tldw_Server_API.app.api.v1.endpoints.chatbooks"]
-    setattr(fake_chatbooks, "_persist_completed_sync_export_job", lambda **_kwargs: None)
-    setattr(fake_chatbooks, "get_chatbook_service", lambda: None)
+    fake_chatbooks._persist_completed_sync_export_job = lambda **_kwargs: None
+    fake_chatbooks.get_chatbook_service = lambda: None
     _install_fake_router_module(
         monkeypatch,
         "tldw_Server_API.app.api.v1.endpoints.workflows",

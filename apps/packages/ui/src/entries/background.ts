@@ -3793,24 +3793,6 @@ export default defineBackground({
       }
     });
 
-    browser.commands?.onCommand?.addListener((command) => {
-      switch (command) {
-        case "execute_side_panel":
-          browser.tabs
-            .query({ active: true, currentWindow: true })
-            .then((tabs) => {
-              const tab = tabs[0];
-              ensureSidepanelOpen(tab?.id);
-            })
-            .catch(() => {
-              ensureSidepanelOpen();
-            });
-          break;
-        default:
-          break;
-      }
-    });
-
     // Stream handler via Port API
     browser.runtime.onConnect.addListener((port) => {
       if (!isTrustedRuntimeSender(port.sender)) {

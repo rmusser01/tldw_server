@@ -3291,7 +3291,7 @@ export const useChatActions = ({
       }
 
       if (docs?.length > 0 || documentContext?.length > 0) {
-        const processingTabs = docs || documentContext || []
+        const processingTabs = docs?.length ? docs : documentContext || []
 
         if (docs?.length > 0) {
           setDocumentContext(

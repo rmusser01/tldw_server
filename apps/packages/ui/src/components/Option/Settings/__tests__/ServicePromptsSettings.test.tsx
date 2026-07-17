@@ -686,6 +686,9 @@ describe("ServicePromptsSettings", () => {
     expect(outputs[1]).toHaveTextContent(
       "Translate to [target_language]: [text]"
     )
+    for (const output of outputs) {
+      expect(output.closest("pre")).toHaveAttribute("tabindex", "0")
+    }
     expect(mocks.renderPart).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({ id: "media.text.translation" }),
