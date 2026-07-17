@@ -6,6 +6,7 @@ import asyncio
 import base64
 import binascii
 import importlib.util
+import math
 import re
 import shutil
 import subprocess  # nosec B404
@@ -234,6 +235,7 @@ class AudioProcessor:
         target_sample_rate: Optional[int] = None,
         provider: Optional[str] = None,
         strict: bool = False,
+        timeout_seconds: float | None = None,
     ) -> bytes:
         """
         Convert audio to target format and sample rate.
@@ -244,10 +246,27 @@ class AudioProcessor:
             target_sample_rate: Target sample rate (Hz)
             provider: Provider name for specific requirements
             strict: Raise when conversion fails instead of returning original bytes
+            timeout_seconds: Optional finite positive ffmpeg subprocess timeout
 
         Returns:
             Converted audio bytes
         """
+        if timeout_seconds is not None:
+            try:
+                invalid_timeout = (
+                    isinstance(timeout_seconds, bool)
+                    or not math.isfinite(timeout_seconds)
+                    or timeout_seconds <= 0
+                )
+            except (TypeError, ValueError):
+                invalid_timeout = True
+            if invalid_timeout:
+                raise ValueError("timeout_seconds must be a finite positive number")
+
+            if not self.ffmpeg_available:
+                logger.error("Audio conversion failed (RuntimeError)")
+                raise RuntimeError("Audio conversion failed")
+
         if not self.ffmpeg_available and not self.librosa_available:
             logger.warning("No audio conversion libraries available")
             if strict:
@@ -260,98 +279,82 @@ class AudioProcessor:
             if not target_sample_rate:
                 target_sample_rate = requirements['preferred_sample_rate']
 
+        input_path: str | None = None
+        output_path: str | None = None
+        ffmpeg_path: str | None = None
         try:
-            if self.librosa_available:
+            use_ffmpeg = timeout_seconds is not None or not self.librosa_available
+            if use_ffmpeg:
+                ffmpeg_path = getattr(self, 'ffmpeg_path', None) or shutil.which('ffmpeg')
+                if not ffmpeg_path:
+                    if timeout_seconds is not None:
+                        raise RuntimeError("Audio conversion failed")
+                    raise RuntimeError("ffmpeg executable not found")
+
+            with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as input_file:
+                input_path = input_file.name
+                input_file.write(audio_bytes)
+
+            output_suffix = f'.{target_format.lower()}'
+            with tempfile.NamedTemporaryFile(suffix=output_suffix, delete=False) as output_file:
+                output_path = output_file.name
+
+            if not use_ffmpeg:
                 import librosa
                 import soundfile as sf
 
-                # Write input to temp file
-                with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as input_file:
-                    input_file.write(audio_bytes)
-                    input_path = input_file.name
+                audio_data, original_sr = librosa.load(input_path, sr=None)
 
-                # Output temp file
-                output_suffix = f'.{target_format.lower()}'
-                with tempfile.NamedTemporaryFile(suffix=output_suffix, delete=False) as output_file:
-                    output_path = output_file.name
-
-                try:
-                    # Load and resample
-                    audio_data, original_sr = librosa.load(input_path, sr=None)
-
-                    if target_sample_rate and target_sample_rate != original_sr:
-                        audio_data = librosa.resample(
-                            audio_data,
-                            orig_sr=original_sr,
-                            target_sr=target_sample_rate
-                        )
-                        sample_rate = target_sample_rate
-                    else:
-                        sample_rate = original_sr
-
-                    # Write output
-                    sf.write(output_path, audio_data, sample_rate, format=target_format.upper())
-
-                    # Read converted audio
-                    with open(output_path, 'rb') as f:
-                        converted_bytes = f.read()
-
-                    return converted_bytes
-
-                finally:
-                    # Clean up temp files
-                    Path(input_path).unlink(missing_ok=True)
-                    Path(output_path).unlink(missing_ok=True)
-
-            elif self.ffmpeg_available:
-                # Use ffmpeg for conversion
-                with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as input_file:
-                    input_file.write(audio_bytes)
-                    input_path = input_file.name
-
-                output_suffix = f'.{target_format.lower()}'
-                with tempfile.NamedTemporaryFile(suffix=output_suffix, delete=False) as output_file:
-                    output_path = output_file.name
-
-                try:
-                    ffmpeg_path = getattr(self, 'ffmpeg_path', None) or shutil.which('ffmpeg')
-                    if not ffmpeg_path:
-                        raise RuntimeError("ffmpeg executable not found")
-
-                    # Build ffmpeg command
-                    cmd = [ffmpeg_path, '-i', input_path, '-y']
-
-                    if target_sample_rate:
-                        cmd.extend(['-ar', str(target_sample_rate)])
-
-                    cmd.append(output_path)
-
-                    # Run conversion
-                    result = subprocess.run(  # nosec B603
-                        cmd,
-                        capture_output=True,
-                        text=True,
-                        check=False,
+                if target_sample_rate and target_sample_rate != original_sr:
+                    audio_data = librosa.resample(
+                        audio_data,
+                        orig_sr=original_sr,
+                        target_sr=target_sample_rate
                     )
-                    if result.returncode != 0:
-                        raise RuntimeError(f"ffmpeg conversion failed: {result.stderr}")
+                    sample_rate = target_sample_rate
+                else:
+                    sample_rate = original_sr
 
-                    # Read converted audio
-                    with open(output_path, 'rb') as f:
-                        converted_bytes = f.read()
+                sf.write(output_path, audio_data, sample_rate, format=target_format.upper())
+            else:
+                cmd = [ffmpeg_path, '-i', input_path, '-y']
 
-                    return converted_bytes
+                if target_sample_rate:
+                    cmd.extend(['-ar', str(target_sample_rate)])
 
-                finally:
-                    # Clean up temp files
-                    Path(input_path).unlink(missing_ok=True)
-                    Path(output_path).unlink(missing_ok=True)
+                cmd.append(output_path)
+                run_options: dict[str, Any] = {
+                    'capture_output': True,
+                    'text': True,
+                    'check': False,
+                }
+                if timeout_seconds is not None:
+                    run_options['timeout'] = timeout_seconds
 
+                result = subprocess.run(cmd, **run_options)  # nosec B603
+                if result.returncode != 0:
+                    raise RuntimeError(f"ffmpeg conversion failed: {result.stderr}")
+
+            with open(output_path, 'rb') as f:
+                return f.read()
+
+        except subprocess.TimeoutExpired as e:
+            logger.error("Audio conversion failed (TimeoutExpired)")
+            raise RuntimeError("Audio conversion failed") from e
         except _AUDIO_PROCESS_EXCEPTIONS as e:
-            logger.error(f"Audio conversion failed ({type(e).__name__})")
+            logger.error("Audio conversion failed ({})", type(e).__name__)
+            if timeout_seconds is not None and (
+                not ffmpeg_path or isinstance(e, OSError)
+            ):
+                raise RuntimeError("Audio conversion failed") from e
             if strict:
                 raise RuntimeError("Audio conversion failed") from e
             return audio_bytes  # Return original if conversion fails
+        finally:
+            if input_path is not None:
+                Path(input_path).unlink(missing_ok=True)
+            if output_path is not None:
+                Path(output_path).unlink(missing_ok=True)
 
     async def convert_audio_async(
         self,
@@ -360,6 +363,7 @@ class AudioProcessor:
         target_sample_rate: Optional[int] = None,
         provider: Optional[str] = None,
         strict: bool = False,
+        timeout_seconds: float | None = None,
     ) -> bytes:
         """
         Async-friendly wrapper around convert_audio.
@@ -377,6 +381,7 @@ class AudioProcessor:
                 target_sample_rate=target_sample_rate,
                 provider=provider,
                 strict=strict,
+                timeout_seconds=timeout_seconds,
             ),
         )
 

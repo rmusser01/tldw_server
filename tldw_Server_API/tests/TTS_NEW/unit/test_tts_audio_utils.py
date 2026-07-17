@@ -1,5 +1,9 @@
+import asyncio
+import subprocess
 import sys
+import threading
 import types
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -118,6 +122,272 @@ def test_convert_audio_strict_failure_raises_without_returning_original(monkeypa
 
     with pytest.raises(RuntimeError, match="Audio conversion failed"):
         processor.convert_audio(audio_bytes, strict=True)
+
+
+@pytest.mark.parametrize(
+    "timeout_seconds",
+    [0, -1, float("nan"), float("inf"), float("-inf"), "1", True],
+)
+def test_convert_audio_rejects_invalid_timeout_before_work(monkeypatch, timeout_seconds):
+    """Invalid conversion timeouts fail before selecting a conversion backend."""
+    processor = audio_utils.AudioProcessor.__new__(audio_utils.AudioProcessor)
+    processor.ffmpeg_available = False
+    processor.librosa_available = True
+    monkeypatch.setattr(
+        audio_utils.tempfile,
+        "NamedTemporaryFile",
+        lambda *args, **kwargs: pytest.fail("conversion work must not start"),
+    )
+
+    with pytest.raises(ValueError, match="timeout_seconds must be a finite positive number"):
+        processor.convert_audio(b"audio", timeout_seconds=timeout_seconds)
+
+
+def test_convert_audio_timeout_requires_ffmpeg_before_temp_files(monkeypatch):
+    """Timed conversion never falls back to an uninterruptible local decoder."""
+    processor = audio_utils.AudioProcessor.__new__(audio_utils.AudioProcessor)
+    processor.ffmpeg_available = False
+    processor.librosa_available = True
+    monkeypatch.setattr(
+        audio_utils.tempfile,
+        "NamedTemporaryFile",
+        lambda *args, **kwargs: pytest.fail("temp files must not be created"),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "librosa",
+        types.SimpleNamespace(load=lambda *args, **kwargs: pytest.fail("librosa must not run")),
+    )
+
+    with pytest.raises(RuntimeError, match="^Audio conversion failed$"):
+        processor.convert_audio(b"audio", timeout_seconds=1.0)
+
+
+def test_convert_audio_timeout_is_forwarded_to_ffmpeg(monkeypatch, tmp_path):
+    """Timed ffmpeg conversion forwards the exact timeout to subprocess.run."""
+    processor = audio_utils.AudioProcessor.__new__(audio_utils.AudioProcessor)
+    processor.ffmpeg_available = True
+    processor.librosa_available = True
+    processor.ffmpeg_path = "/usr/bin/ffmpeg"
+    seen: dict[str, object] = {}
+    monkeypatch.setattr(audio_utils.tempfile, "tempdir", str(tmp_path))
+
+    def fake_run(command, **kwargs):
+        seen["command"] = command
+        seen["kwargs"] = kwargs
+        Path(command[-1]).write_bytes(b"converted")
+        return types.SimpleNamespace(returncode=0, stderr="")
+
+    monkeypatch.setattr(audio_utils.subprocess, "run", fake_run)
+
+    result = processor.convert_audio(b"audio", target_format="mp3", timeout_seconds=1.25)
+
+    assert result == b"converted"
+    assert seen["kwargs"]["timeout"] == 1.25
+    assert not list(tmp_path.iterdir())
+
+
+def test_convert_audio_timeout_maps_and_sanitizes_timeout_expired(monkeypatch, tmp_path):
+    """Subprocess timeouts become sanitized, chained conversion failures."""
+    processor = audio_utils.AudioProcessor.__new__(audio_utils.AudioProcessor)
+    processor.ffmpeg_available = True
+    processor.librosa_available = False
+    processor.ffmpeg_path = "/private/secret/ffmpeg-token-sk-test"
+    logged_messages: list[str] = []
+    monkeypatch.setattr(audio_utils.tempfile, "tempdir", str(tmp_path))
+
+    def fail_run(command, **kwargs):
+        raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+
+    monkeypatch.setattr(audio_utils.subprocess, "run", fail_run)
+    sink_id = audio_utils.logger.add(
+        lambda message: logged_messages.append(message.record["message"]),
+        level="ERROR",
+    )
+    try:
+        with pytest.raises(RuntimeError, match="^Audio conversion failed$") as exc_info:
+            processor.convert_audio(b"raw-input-token", timeout_seconds=0.5)
+    finally:
+        audio_utils.logger.remove(sink_id)
+
+    assert isinstance(exc_info.value.__cause__, subprocess.TimeoutExpired)
+    assert "secret" not in str(exc_info.value)
+    assert "raw-input-token" not in str(exc_info.value)
+    assert all("secret" not in message for message in logged_messages)
+    assert all("raw-input-token" not in message for message in logged_messages)
+    assert not list(tmp_path.iterdir())
+
+
+def test_convert_audio_timeout_maps_ffmpeg_launch_failure(monkeypatch, tmp_path):
+    """Timed conversion fails if an advertised ffmpeg executable disappears."""
+    processor = audio_utils.AudioProcessor.__new__(audio_utils.AudioProcessor)
+    processor.ffmpeg_available = True
+    processor.librosa_available = False
+    processor.ffmpeg_path = "/private/secret/missing-ffmpeg"
+    monkeypatch.setattr(audio_utils.tempfile, "tempdir", str(tmp_path))
+
+    def fail_run(*args, **kwargs):
+        raise FileNotFoundError("private command")
+
+    monkeypatch.setattr(audio_utils.subprocess, "run", fail_run)
+
+    with pytest.raises(RuntimeError, match="^Audio conversion failed$") as exc_info:
+        processor.convert_audio(b"audio", timeout_seconds=0.5)
+
+    assert isinstance(exc_info.value.__cause__, FileNotFoundError)
+    assert "private" not in str(exc_info.value)
+    assert not list(tmp_path.iterdir())
+
+
+@pytest.mark.parametrize("returncode", [0, 1])
+def test_convert_audio_ffmpeg_cleans_temp_files_on_success_and_error(
+    monkeypatch,
+    tmp_path,
+    returncode,
+):
+    """Converter-owned ffmpeg files are removed on both result paths."""
+    processor = audio_utils.AudioProcessor.__new__(audio_utils.AudioProcessor)
+    processor.ffmpeg_available = True
+    processor.librosa_available = False
+    processor.ffmpeg_path = "/usr/bin/ffmpeg"
+    monkeypatch.setattr(audio_utils.tempfile, "tempdir", str(tmp_path))
+
+    def fake_run(command, **kwargs):
+        if returncode == 0:
+            Path(command[-1]).write_bytes(b"converted")
+        return types.SimpleNamespace(returncode=returncode, stderr="private path")
+
+    monkeypatch.setattr(audio_utils.subprocess, "run", fake_run)
+
+    if returncode == 0:
+        assert processor.convert_audio(b"audio", strict=True) == b"converted"
+    else:
+        with pytest.raises(RuntimeError, match="^Audio conversion failed$"):
+            processor.convert_audio(b"audio", strict=True)
+
+    assert not list(tmp_path.iterdir())
+
+
+def test_convert_audio_cleans_input_when_output_temp_creation_fails(monkeypatch, tmp_path):
+    """A failed output allocation does not leak the already-written input file."""
+    processor = audio_utils.AudioProcessor.__new__(audio_utils.AudioProcessor)
+    processor.ffmpeg_available = True
+    processor.librosa_available = False
+    processor.ffmpeg_path = "/usr/bin/ffmpeg"
+    real_named_tempfile = audio_utils.tempfile.NamedTemporaryFile
+    calls = 0
+
+    def create_temp(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise OSError("output unavailable")
+        return real_named_tempfile(*args, dir=tmp_path, **kwargs)
+
+    monkeypatch.setattr(audio_utils.tempfile, "NamedTemporaryFile", create_temp)
+
+    with pytest.raises(RuntimeError, match="^Audio conversion failed$"):
+        processor.convert_audio(b"audio", strict=True)
+
+    assert not list(tmp_path.iterdir())
+
+
+def test_convert_audio_without_timeout_preserves_librosa_first_behavior(monkeypatch, tmp_path):
+    """The legacy no-timeout call still prefers librosa when it is available."""
+    processor = audio_utils.AudioProcessor.__new__(audio_utils.AudioProcessor)
+    processor.ffmpeg_available = True
+    processor.librosa_available = True
+    processor.ffmpeg_path = "/usr/bin/ffmpeg"
+    monkeypatch.setattr(audio_utils.tempfile, "tempdir", str(tmp_path))
+    monkeypatch.setattr(
+        audio_utils.subprocess,
+        "run",
+        lambda *args, **kwargs: pytest.fail("legacy path must keep preferring librosa"),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "librosa",
+        types.SimpleNamespace(load=lambda *args, **kwargs: (np.zeros(8), 24000)),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "soundfile",
+        types.SimpleNamespace(
+            write=lambda path, *args, **kwargs: Path(path).write_bytes(b"legacy-converted")
+        ),
+    )
+
+    assert processor.convert_audio(b"audio") == b"legacy-converted"
+    assert not list(tmp_path.iterdir())
+
+
+@pytest.mark.asyncio
+async def test_convert_audio_async_forwards_timeout_and_strict(monkeypatch):
+    """The async wrapper preserves timeout and strict conversion options."""
+    processor = audio_utils.AudioProcessor.__new__(audio_utils.AudioProcessor)
+    seen: dict[str, object] = {}
+
+    def fake_convert(audio_bytes, **kwargs):
+        seen["audio_bytes"] = audio_bytes
+        seen.update(kwargs)
+        return b"converted"
+
+    monkeypatch.setattr(processor, "convert_audio", fake_convert)
+
+    result = await processor.convert_audio_async(
+        b"audio",
+        target_format="flac",
+        target_sample_rate=16000,
+        provider="higgs",
+        strict=True,
+        timeout_seconds=2.5,
+    )
+
+    assert result == b"converted"
+    assert seen == {
+        "audio_bytes": b"audio",
+        "target_format": "flac",
+        "target_sample_rate": 16000,
+        "provider": "higgs",
+        "strict": True,
+        "timeout_seconds": 2.5,
+    }
+
+
+@pytest.mark.asyncio
+async def test_convert_audio_async_cancellation_allows_late_cleanup(monkeypatch, tmp_path):
+    """Cancelling the awaiter does not prevent the worker's final cleanup."""
+    processor = audio_utils.AudioProcessor.__new__(audio_utils.AudioProcessor)
+    processor.ffmpeg_available = True
+    processor.librosa_available = False
+    processor.ffmpeg_path = "/usr/bin/ffmpeg"
+    started = threading.Event()
+    release = threading.Event()
+    monkeypatch.setattr(audio_utils.tempfile, "tempdir", str(tmp_path))
+
+    def delayed_run(command, **kwargs):
+        started.set()
+        assert release.wait(2)
+        Path(command[-1]).write_bytes(b"converted")
+        return types.SimpleNamespace(returncode=0, stderr="")
+
+    monkeypatch.setattr(audio_utils.subprocess, "run", delayed_run)
+    task = asyncio.create_task(
+        processor.convert_audio_async(b"audio", strict=True, timeout_seconds=1.0)
+    )
+    assert await asyncio.to_thread(started.wait, 1)
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    release.set()
+    for _ in range(100):
+        if not list(tmp_path.iterdir()):
+            break
+        await asyncio.sleep(0.01)
+
+    assert not list(tmp_path.iterdir())
 
 
 def test_process_voice_reference_uses_strict_conversion(monkeypatch):
