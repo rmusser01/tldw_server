@@ -1125,6 +1125,45 @@ def test_sqlite_archived_generation_replay_precedes_quota_admission(tmp_path, mo
     assert replayed["archived"] is True
 
 
+@pytest.mark.parametrize("archived", (False, True))
+def test_sqlite_generation_replay_precedes_queue_policy_rejection(
+    tmp_path,
+    monkeypatch,
+    archived,
+):
+    db_path = ensure_jobs_tables(tmp_path / f"slides-queue-policy-replay-{archived}.db")
+    manager = JobManager(db_path)
+    original = manager.create_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        payload={"receipt_id": "receipt-1"},
+        owner_user_id="owner-1",
+        idempotency_key="queue-policy-replay",
+    )
+    if archived:
+        with sqlite3.connect(db_path) as conn:
+            conn.execute(
+                "UPDATE jobs SET status='completed', completed_at=? WHERE id=?",
+                (NOW.isoformat(), int(original["id"])),
+            )
+            _copy_job_to_archive(conn, job_id=int(original["id"]))
+            conn.execute("DELETE FROM jobs WHERE id=?", (int(original["id"]),))
+    monkeypatch.setattr(manager, "_get_allowed_queues", lambda _domain: ["high"])
+
+    replayed = manager.create_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        payload={"receipt_id": "receipt-1"},
+        owner_user_id="owner-1",
+        idempotency_key="queue-policy-replay",
+    )
+
+    assert replayed["uuid"] == original["uuid"]
+    assert replayed["archived"] is archived
+
+
 def test_sqlite_not_ready_fails_closed_only_for_exact_generation_scope(tmp_path):
     db_path = ensure_jobs_tables(tmp_path / "slides-readiness-enforcement.db")
     jm = JobManager(db_path)
