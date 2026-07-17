@@ -70,25 +70,31 @@ export const useTtsProviderData = ({
     enabled: hasAudio
   })
 
+  const explicitBackend =
+    providersInfo?.supports_explicit_backend === true && backend
+      ? backend
+      : undefined
+
   const { data: tldwTtsModels } = useQuery<TldwTtsModel[]>({
-    queryKey: ["tldw-tts-models", backend],
-    queryFn: () => fetchTldwTtsModels(backend),
+    queryKey: ["tldw-tts-models", explicitBackend],
+    queryFn: () => fetchTldwTtsModels(explicitBackend),
     enabled: hasAudio
   })
 
-  const catalogProvider = backend
-    ? backend
+  const catalogProvider = explicitBackend
+    ? explicitBackend
     : inferredProviderKey
       ? toServerTtsProviderKey(inferredProviderKey)
       : null
+  const catalogModel = explicitBackend ? model : undefined
 
   const { data: tldwVoiceCatalog } = useQuery<TldwTtsVoiceInfo[]>({
-    queryKey: ["tldw-voice-catalog", catalogProvider, model],
+    queryKey: ["tldw-voice-catalog", catalogProvider, catalogModel],
     queryFn: async () => {
       if (!catalogProvider) return []
       const voices = await fetchTldwVoiceCatalog(
         catalogProvider,
-        model ? { model } : undefined
+        catalogModel ? { model: catalogModel } : undefined
       )
       return voices.map((v) => ({
         id: v.voice_id || v.id || v.name,

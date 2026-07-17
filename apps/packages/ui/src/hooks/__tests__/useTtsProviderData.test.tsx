@@ -5,7 +5,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { useTtsProviderData } from "@/hooks/useTtsProviderData"
 import { getModels, getVoices } from "@/services/elevenlabs"
 import { fetchTldwTtsModels } from "@/services/tldw/audio-models"
-import { fetchTtsProviders } from "@/services/tldw/audio-providers"
+import {
+  fetchTtsProviders,
+  type TldwTtsProvidersInfo
+} from "@/services/tldw/audio-providers"
 import { fetchTldwVoiceCatalog } from "@/services/tldw/audio-voices"
 
 vi.mock("@/hooks/useServerCapabilities", () => ({
@@ -115,6 +118,11 @@ describe("useTtsProviderData", () => {
   })
 
   it("scopes model and voice queries by exact backend and model", async () => {
+    vi.mocked(fetchTtsProviders).mockResolvedValue({
+      providers: {},
+      voices: {},
+      supports_explicit_backend: true
+    })
     const { client, wrapper } = buildHarness()
 
     const { result } = renderHook(
@@ -155,6 +163,11 @@ describe("useTtsProviderData", () => {
   })
 
   it("ignores late model and voice results from a previous selection", async () => {
+    vi.mocked(fetchTtsProviders).mockResolvedValue({
+      providers: {},
+      voices: {},
+      supports_explicit_backend: true
+    })
     let resolveOldModels!: (value: { id: string; label: string }[]) => void
     let resolveOldVoices!: (value: { id: string; name: string }[]) => void
     vi.mocked(fetchTldwTtsModels).mockImplementation((backend?: string) => {
@@ -189,6 +202,13 @@ describe("useTtsProviderData", () => {
       }
     )
 
+    await waitFor(() => {
+      expect(fetchTldwTtsModels).toHaveBeenCalledWith("gateway:Old")
+      expect(fetchTldwVoiceCatalog).toHaveBeenCalledWith("gateway:Old", {
+        model: "Old/Model"
+      })
+    })
+
     rerender({ backend: "gateway:New", model: "New/Model" })
 
     await waitFor(() => {
@@ -202,6 +222,113 @@ describe("useTtsProviderData", () => {
     await waitFor(() => {
       expect(result.current.tldwTtsModels?.[0]?.id).toBe("New/Model")
       expect(result.current.tldwVoiceCatalog?.[0]?.id).toBe("NewVoice")
+    })
+  })
+
+  it.each([
+    ["false", false],
+    ["missing", undefined]
+  ])(
+    "uses legacy discovery when explicit backend support is %s",
+    async (_label, supportsExplicitBackend) => {
+      vi.mocked(fetchTtsProviders).mockResolvedValue({
+        providers: {},
+        voices: {},
+        ...(supportsExplicitBackend === undefined
+          ? {}
+          : { supports_explicit_backend: supportsExplicitBackend })
+      })
+      const { wrapper } = buildHarness()
+
+      renderHook(
+        () =>
+          useTtsProviderData({
+            provider: "tldw",
+            backend: "gateway:Stored",
+            model: "Vendor/Exact",
+            inferredProviderKey: "openai"
+          }),
+        { wrapper }
+      )
+
+      await waitFor(() => {
+        expect(fetchTldwTtsModels).toHaveBeenCalledWith(undefined)
+        expect(fetchTldwVoiceCatalog).toHaveBeenCalledWith("openai", undefined)
+      })
+      expect(fetchTldwTtsModels).not.toHaveBeenCalledWith("gateway:Stored")
+      expect(
+        vi
+          .mocked(fetchTldwVoiceCatalog)
+          .mock.calls.some(([catalogProvider]) => catalogProvider === "gateway:Stored")
+      ).toBe(false)
+    }
+  )
+
+  it("uses legacy discovery when provider capability discovery fails", async () => {
+    vi.mocked(fetchTtsProviders).mockRejectedValue(new Error("old server"))
+    const { wrapper } = buildHarness()
+
+    renderHook(
+      () =>
+        useTtsProviderData({
+          provider: "tldw",
+          backend: "gateway:Stored",
+          model: "Vendor/Exact",
+          inferredProviderKey: "openai"
+        }),
+      { wrapper }
+    )
+
+    await waitFor(() => {
+      expect(fetchTldwTtsModels).toHaveBeenCalledWith(undefined)
+      expect(fetchTldwVoiceCatalog).toHaveBeenCalledWith("openai", undefined)
+    })
+    expect(fetchTldwTtsModels).not.toHaveBeenCalledWith("gateway:Stored")
+    expect(
+      vi
+        .mocked(fetchTldwVoiceCatalog)
+        .mock.calls.some(([catalogProvider]) => catalogProvider === "gateway:Stored")
+    ).toBe(false)
+  })
+
+  it("does not scope discovery to a saved backend until support is confirmed", async () => {
+    let resolveProviders!: (value: TldwTtsProvidersInfo) => void
+    vi.mocked(fetchTtsProviders).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveProviders = resolve
+        })
+    )
+    const { wrapper } = buildHarness()
+
+    renderHook(
+      () =>
+        useTtsProviderData({
+          provider: "tldw",
+          backend: "gateway:Stored",
+          model: "Vendor/Exact",
+          inferredProviderKey: "openai"
+        }),
+      { wrapper }
+    )
+
+    await waitFor(() => {
+      expect(fetchTldwTtsModels).toHaveBeenCalledWith(undefined)
+      expect(fetchTldwVoiceCatalog).toHaveBeenCalledWith("openai", undefined)
+    })
+    expect(fetchTldwTtsModels).not.toHaveBeenCalledWith("gateway:Stored")
+
+    resolveProviders({
+      providers: {},
+      voices: {},
+      supports_explicit_backend: true
+    })
+
+    await waitFor(() => {
+      expect(fetchTldwTtsModels).toHaveBeenCalledWith("gateway:Stored")
+      expect(fetchTldwVoiceCatalog).toHaveBeenCalledWith("gateway:Stored", {
+        model: "Vendor/Exact"
+      })
     })
   })
 })

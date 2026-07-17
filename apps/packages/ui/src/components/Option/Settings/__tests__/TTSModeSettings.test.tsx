@@ -253,13 +253,16 @@ const explicitBackendCatalog = {
           default_voice: "Narrator",
           voices: ["Narrator", "Guide"],
           requires_freeform_voice: false,
-          formats: ["mp3"]
+          formats: ["wav", "mp3"],
+          default_format: "wav",
+          native_formats: ["mp3"]
         },
         "Vendor/Free-Form": {
           default_voice: null,
           voices: [],
           requires_freeform_voice: true,
-          formats: ["mp3"]
+          formats: ["wav"],
+          native_formats: ["wav"]
         }
       },
       fallback: {
@@ -278,7 +281,8 @@ const explicitBackendCatalog = {
           default_voice: "BackupVoice",
           voices: ["BackupVoice"],
           requires_freeform_voice: false,
-          formats: ["mp3"]
+          formats: ["flac"],
+          native_formats: ["flac"]
         }
       },
       fallback: { available: false, targets: [] }
@@ -393,7 +397,63 @@ describe("TTSModeSettings explicit backend discovery", () => {
         expect.objectContaining({
           tldwTtsBackend: "gateway:Company",
           tldwTtsModel: "Vendor/Exact-Case",
-          tldwTtsVoice: "Narrator"
+          tldwTtsVoice: "Narrator",
+          tldwTtsResponseFormat: "mp3"
+        })
+      )
+    })
+  })
+
+  it("resets an unsupported response format in the backend selection update", async () => {
+    getTTSSettingsMock.mockResolvedValue(
+      buildTtsSettings({
+        ttsProvider: "tldw",
+        tldwTtsResponseFormat: "ogg"
+      })
+    )
+    renderSettings()
+
+    await selectAntOption("tldw TTS backend", "Company Speech")
+    fireEvent.click(screen.getByRole("button", { name: /save/i }))
+
+    await waitFor(() => {
+      expect(setTTSSettingsMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          tldwTtsBackend: "gateway:Company",
+          tldwTtsModel: "Vendor/Exact-Case",
+          tldwTtsVoice: "Narrator",
+          tldwTtsResponseFormat: "wav"
+        })
+      )
+    })
+  })
+
+  it("resets an unsupported response format in the model selection update", async () => {
+    getTTSSettingsMock.mockResolvedValue(
+      buildTtsSettings({
+        ttsProvider: "tldw",
+        tldwTtsBackend: "gateway:Company",
+        tldwTtsModel: "Vendor/Exact-Case",
+        tldwTtsVoice: "Narrator",
+        tldwTtsResponseFormat: "mp3"
+      })
+    )
+    renderSettings()
+
+    await selectAntOption("tldw TTS model", "Vendor/Free-Form")
+    const freeformVoice = await screen.findByLabelText("tldw TTS voice")
+    expect(freeformVoice).toBeRequired()
+    expect(freeformVoice).toHaveValue("")
+    fireEvent.change(freeformVoice, { target: { value: "ManualVoice" } })
+    fireEvent.click(screen.getByRole("button", { name: /save/i }))
+
+    await waitFor(() => {
+      expect(setTTSSettingsMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          tldwTtsBackend: "gateway:Company",
+          tldwTtsModel: "Vendor/Free-Form",
+          tldwTtsVoice: "ManualVoice",
+          tldwTtsResponseFormat: "wav"
         })
       )
     })
@@ -464,6 +524,45 @@ describe("TTSModeSettings explicit backend discovery", () => {
     expect(disclosure).not.toHaveTextContent("OpenRouter")
     expect(disclosure).not.toHaveTextContent("Backup")
     expect(disclosure).not.toHaveTextContent("bad_slug")
+  })
+
+  it("renders normalized malformed discovery without exposing authority fields", async () => {
+    const { normalizeTtsProvidersResponse } = await vi.importActual<
+      typeof import("@/services/tldw/audio-providers")
+    >("@/services/tldw/audio-providers")
+    const normalized = normalizeTtsProvidersResponse({
+      providers: {
+        "gateway:safe": {
+          display_name: "Safe Speech",
+          models: ["Safe/Model", null, 7],
+          default_model: "Safe/Model",
+          model_capabilities: {
+            "Safe/Model": {
+              voices: { unsafe: true },
+              formats: "mp3",
+              default_voice: { unsafe: true }
+            }
+          },
+          fallback: {
+            available: true,
+            targets: ["openrouter", 42]
+          },
+          base_url: "https://private-gateway.invalid",
+          credential_source: "user-api-key"
+        }
+      },
+      voices: {},
+      supports_explicit_backend: true
+    })
+    fetchTtsProvidersMock.mockResolvedValue(normalized)
+
+    renderSettings()
+    await selectAntOption("tldw TTS backend", "Safe Speech")
+
+    expect(await screen.findByLabelText("tldw TTS model")).toBeInTheDocument()
+    expect(await screen.findByLabelText("tldw TTS voice")).toBeInTheDocument()
+    expect(document.body).not.toHaveTextContent("private-gateway")
+    expect(document.body).not.toHaveTextContent("user-api-key")
   })
 
   it("returns to automatic inference and persists an empty backend", async () => {
