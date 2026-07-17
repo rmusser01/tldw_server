@@ -6,21 +6,15 @@ without mocking to verify end-to-end functionality.
 """
 
 import pytest
+
 pytestmark = pytest.mark.integration
-import tempfile
-import shutil
 import uuid
-import time
-from pathlib import Path
-from typing import List, Dict, Any
-import numpy as np
 
 import chromadb
+import numpy as np
 from chromadb.config import Settings
 
 from tldw_Server_API.app.core.Embeddings.ChromaDB_Library import ChromaDBManager
-from tldw_Server_API.app.core.Embeddings.Embeddings_Create import create_embeddings_batch
-from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 
 
 @pytest.mark.integration
@@ -143,6 +137,34 @@ class TestChromaDBSetup:
 @pytest.mark.integration
 class TestChromaDBManagerIntegration:
     """Integration tests for ChromaDBManager with real components."""
+
+    def test_manager_can_reopen_persistent_store_after_final_close(self, tmp_path):
+        config = {
+            "USER_DB_BASE_DIR": str(tmp_path),
+            "embedding_config": {},
+            "chroma_client_settings": {
+                "backend": "persistent",
+                "anonymized_telemetry": False,
+                "allow_reset": True,
+            },
+        }
+        first = ChromaDBManager(user_id="reopen_user", user_embedding_config=config)
+        first.store_in_chroma(
+            collection_name="reopen_collection",
+            texts=["persistent document"],
+            embeddings=[[0.1, 0.2, 0.3]],
+            ids=["persistent-id"],
+            metadatas=[{"source": "reopen-test"}],
+        )
+        first.close()
+
+        second = ChromaDBManager(user_id="reopen_user", user_embedding_config=config)
+        try:
+            collection = second.get_collection("reopen_collection")
+            result = collection.get(ids=["persistent-id"])
+            assert result["documents"] == ["persistent document"]
+        finally:
+            second.close()
 
     def test_manager_initialization_with_real_chromadb(self, real_chromadb_manager):
 
@@ -486,7 +508,6 @@ class TestConcurrentOperations:
     @pytest.mark.concurrent
     def test_concurrent_writes(self, real_chromadb_manager):
         """Test concurrent write operations."""
-        import threading
         import concurrent.futures
 
         collection_name = "concurrent_test"

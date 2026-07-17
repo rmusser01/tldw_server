@@ -310,6 +310,7 @@ jobs:
               tldw_Server_API/tests/Config/test_module_yaml_integration.py
           - name: config-runtime-env
             paths: >-
+              tldw_Server_API/tests/Config/test_claims_verification_env.py
               tldw_Server_API/tests/Config/test_env_absent_defaults.py
               tldw_Server_API/tests/Config/test_env_file_selection.py
               tldw_Server_API/tests/Config/test_feature_flags.py
@@ -790,13 +791,20 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_note_*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_order_by_validation.py
               tldw_Server_API/tests/ChaChaNotesDB/test_persona_*.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_quiz_*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_quizzes_basic.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_source_review_plans*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_assistant_defaults_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_resource_memberships_db.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_workspace_source_saved_views_db.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_workspace_source_saved_views_postgres.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_db.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_postgres.py
+              tldw_Server_API/tests/Workspaces/test_workspace_context_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_defaults_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_artifact_validation.py
+              tldw_Server_API/tests/Workspaces/test_workspace_source_saved_views_api.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
           - name: db-privileges
             paths: >-
@@ -1058,6 +1066,7 @@ jobs:
           - name: research-websearch
             paths: >-
               tldw_Server_API/tests/Research
+              tldw_Server_API/tests/ResearchWorkspace
               tldw_Server_API/tests/WebSearch
           - name: media-audio
             paths: >-
@@ -1107,6 +1116,7 @@ jobs:
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_list_no_slash_redirect.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_upload_failures.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_research_discovery_handoff.py
           - name: media-ingestion-new-unit-mediawiki
             paths: >-
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_mediawiki_*.py
@@ -1127,6 +1137,7 @@ jobs:
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_video_*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_visual_ingestion.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_xml_ingestion.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_yt_dlp_support.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_youtube_audio_downloads.py
           - name: media-ingestion-modification
             paths: >-
@@ -1301,6 +1312,7 @@ jobs:
               tldw_Server_API/tests/Local_LLM
           - name: product-claims-core
             paths: >-
+              tldw_Server_API/tests/Claims/test_artifact_verification*.py
               tldw_Server_API/tests/Claims/test_claim_cluster_upsert_idempotency.py
               tldw_Server_API/tests/Claims/test_claim_embeddings_chroma.py
               tldw_Server_API/tests/Claims/test_claim_review_rule_assignment.py
@@ -1443,6 +1455,8 @@ jobs:
               tldw_Server_API/tests/Watchlists/test_youtube_*.py
           - name: product-watchlists-pipeline
             paths: >-
+              tldw_Server_API/tests/Watchlists/test_briefing_*.py
+              tldw_Server_API/tests/Watchlists/test_schedule_*.py
               tldw_Server_API/tests/Watchlists/test_watchlists_*.py
           - name: product-workflows-adapters-core
             paths: >-
@@ -2198,13 +2212,20 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_note_*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_order_by_validation.py
               tldw_Server_API/tests/ChaChaNotesDB/test_persona_*.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_quiz_*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_quizzes_basic.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_source_review_plans*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_assistant_defaults_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_resource_memberships_db.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_workspace_source_saved_views_db.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_workspace_source_saved_views_postgres.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_db.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_postgres.py
+              tldw_Server_API/tests/Workspaces/test_workspace_context_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_defaults_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_artifact_validation.py
+              tldw_Server_API/tests/Workspaces/test_workspace_source_saved_views_api.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
           - name: db-privileges
             paths: >-
@@ -2466,6 +2487,7 @@ jobs:
           - name: research-websearch
             paths: >-
               tldw_Server_API/tests/Research
+              tldw_Server_API/tests/ResearchWorkspace
               tldw_Server_API/tests/WebSearch
           - name: media-audio
             paths: >-
@@ -2515,6 +2537,7 @@ jobs:
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_list_no_slash_redirect.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_upload_failures.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_research_discovery_handoff.py
           - name: media-ingestion-new-unit-mediawiki
             paths: >-
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_mediawiki_*.py
@@ -2535,6 +2558,7 @@ jobs:
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_video_*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_visual_ingestion.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_xml_ingestion.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_yt_dlp_support.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_youtube_audio_downloads.py
           - name: media-ingestion-modification
             paths: >-
@@ -2709,6 +2733,7 @@ jobs:
               tldw_Server_API/tests/Local_LLM
           - name: product-claims-core
             paths: >-
+              tldw_Server_API/tests/Claims/test_artifact_verification*.py
               tldw_Server_API/tests/Claims/test_claim_cluster_upsert_idempotency.py
               tldw_Server_API/tests/Claims/test_claim_embeddings_chroma.py
               tldw_Server_API/tests/Claims/test_claim_review_rule_assignment.py
@@ -2851,6 +2876,8 @@ jobs:
               tldw_Server_API/tests/Watchlists/test_youtube_*.py
           - name: product-watchlists-pipeline
             paths: >-
+              tldw_Server_API/tests/Watchlists/test_briefing_*.py
+              tldw_Server_API/tests/Watchlists/test_schedule_*.py
               tldw_Server_API/tests/Watchlists/test_watchlists_*.py
           - name: product-workflows-adapters-core
             paths: >-
@@ -3477,13 +3504,20 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_note_*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_order_by_validation.py
               tldw_Server_API/tests/ChaChaNotesDB/test_persona_*.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_quiz_*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_quizzes_basic.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_source_review_plans*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_assistant_defaults_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_resource_memberships_db.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_workspace_source_saved_views_db.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_workspace_source_saved_views_postgres.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_db.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_postgres.py
+              tldw_Server_API/tests/Workspaces/test_workspace_context_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_defaults_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_artifact_validation.py
+              tldw_Server_API/tests/Workspaces/test_workspace_source_saved_views_api.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
           - name: db-privileges
             paths: >-
@@ -3745,6 +3779,7 @@ jobs:
           - name: research-websearch
             paths: >-
               tldw_Server_API/tests/Research
+              tldw_Server_API/tests/ResearchWorkspace
               tldw_Server_API/tests/WebSearch
           - name: media-audio
             paths: >-
@@ -3794,6 +3829,7 @@ jobs:
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_list_no_slash_redirect.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_upload_failures.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_research_discovery_handoff.py
           - name: media-ingestion-new-unit-mediawiki
             paths: >-
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_mediawiki_*.py
@@ -3814,6 +3850,7 @@ jobs:
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_video_*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_visual_ingestion.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_xml_ingestion.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_yt_dlp_support.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_youtube_audio_downloads.py
           - name: media-ingestion-modification
             paths: >-
@@ -3988,6 +4025,7 @@ jobs:
               tldw_Server_API/tests/Local_LLM
           - name: product-claims-core
             paths: >-
+              tldw_Server_API/tests/Claims/test_artifact_verification*.py
               tldw_Server_API/tests/Claims/test_claim_cluster_upsert_idempotency.py
               tldw_Server_API/tests/Claims/test_claim_embeddings_chroma.py
               tldw_Server_API/tests/Claims/test_claim_review_rule_assignment.py
@@ -4130,6 +4168,8 @@ jobs:
               tldw_Server_API/tests/Watchlists/test_youtube_*.py
           - name: product-watchlists-pipeline
             paths: >-
+              tldw_Server_API/tests/Watchlists/test_briefing_*.py
+              tldw_Server_API/tests/Watchlists/test_schedule_*.py
               tldw_Server_API/tests/Watchlists/test_watchlists_*.py
           - name: product-workflows-adapters-core
             paths: >-
@@ -4680,13 +4720,20 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_note_*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_order_by_validation.py
               tldw_Server_API/tests/ChaChaNotesDB/test_persona_*.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_quiz_*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_quizzes_basic.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_source_review_plans*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_assistant_defaults_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_resource_memberships_db.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_workspace_source_saved_views_db.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_workspace_source_saved_views_postgres.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_db.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_postgres.py
+              tldw_Server_API/tests/Workspaces/test_workspace_context_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_defaults_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_artifact_validation.py
+              tldw_Server_API/tests/Workspaces/test_workspace_source_saved_views_api.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
           - name: db-privileges
             paths: >-
@@ -4948,6 +4995,7 @@ jobs:
           - name: research-websearch
             paths: >-
               tldw_Server_API/tests/Research
+              tldw_Server_API/tests/ResearchWorkspace
               tldw_Server_API/tests/WebSearch
           - name: media-audio
             paths: >-
@@ -4997,6 +5045,7 @@ jobs:
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_list_no_slash_redirect.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_upload_failures.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_research_discovery_handoff.py
           - name: media-ingestion-new-unit-mediawiki
             paths: >-
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_mediawiki_*.py
@@ -5017,6 +5066,7 @@ jobs:
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_video_*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_visual_ingestion.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_xml_ingestion.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_yt_dlp_support.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_youtube_audio_downloads.py
           - name: media-ingestion-modification
             paths: >-
@@ -5191,6 +5241,7 @@ jobs:
               tldw_Server_API/tests/Local_LLM
           - name: product-claims-core
             paths: >-
+              tldw_Server_API/tests/Claims/test_artifact_verification*.py
               tldw_Server_API/tests/Claims/test_claim_cluster_upsert_idempotency.py
               tldw_Server_API/tests/Claims/test_claim_embeddings_chroma.py
               tldw_Server_API/tests/Claims/test_claim_review_rule_assignment.py
@@ -5333,6 +5384,8 @@ jobs:
               tldw_Server_API/tests/Watchlists/test_youtube_*.py
           - name: product-watchlists-pipeline
             paths: >-
+              tldw_Server_API/tests/Watchlists/test_briefing_*.py
+              tldw_Server_API/tests/Watchlists/test_schedule_*.py
               tldw_Server_API/tests/Watchlists/test_watchlists_*.py
           - name: product-workflows-adapters-core
             paths: >-
@@ -5884,13 +5937,20 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_note_*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_order_by_validation.py
               tldw_Server_API/tests/ChaChaNotesDB/test_persona_*.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_quiz_*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_quizzes_basic.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_source_review_plans*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_assistant_defaults_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_resource_memberships_db.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_workspace_source_saved_views_db.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_workspace_source_saved_views_postgres.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_db.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_postgres.py
+              tldw_Server_API/tests/Workspaces/test_workspace_context_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_defaults_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_artifact_validation.py
+              tldw_Server_API/tests/Workspaces/test_workspace_source_saved_views_api.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
           - name: db-privileges
             paths: >-
@@ -6152,6 +6212,7 @@ jobs:
           - name: research-websearch
             paths: >-
               tldw_Server_API/tests/Research
+              tldw_Server_API/tests/ResearchWorkspace
               tldw_Server_API/tests/WebSearch
           - name: media-audio
             paths: >-
@@ -6201,6 +6262,7 @@ jobs:
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_list_no_slash_redirect.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_upload_failures.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_research_discovery_handoff.py
           - name: media-ingestion-new-unit-mediawiki
             paths: >-
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_mediawiki_*.py
@@ -6221,6 +6283,7 @@ jobs:
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_video_*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_visual_ingestion.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_xml_ingestion.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_yt_dlp_support.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_youtube_audio_downloads.py
           - name: media-ingestion-modification
             paths: >-
@@ -6395,6 +6458,7 @@ jobs:
               tldw_Server_API/tests/Local_LLM
           - name: product-claims-core
             paths: >-
+              tldw_Server_API/tests/Claims/test_artifact_verification*.py
               tldw_Server_API/tests/Claims/test_claim_cluster_upsert_idempotency.py
               tldw_Server_API/tests/Claims/test_claim_embeddings_chroma.py
               tldw_Server_API/tests/Claims/test_claim_review_rule_assignment.py
@@ -6537,6 +6601,8 @@ jobs:
               tldw_Server_API/tests/Watchlists/test_youtube_*.py
           - name: product-watchlists-pipeline
             paths: >-
+              tldw_Server_API/tests/Watchlists/test_briefing_*.py
+              tldw_Server_API/tests/Watchlists/test_schedule_*.py
               tldw_Server_API/tests/Watchlists/test_watchlists_*.py
           - name: product-workflows-adapters-core
             paths: >-

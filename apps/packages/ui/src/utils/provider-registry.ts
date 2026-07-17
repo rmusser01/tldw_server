@@ -454,69 +454,69 @@ export type ProviderInferenceDomain = "llm" | "tts"
 
 type ProviderInferenceRule = {
   provider: string
-  match: (value: string) => boolean
+  matches: (value: string) => boolean
 }
 
 const LLM_PROVIDER_RULES: ProviderInferenceRule[] = [
-  { provider: "openai", match: (value) => value.includes("gpt") },
-  { provider: "anthropic", match: (value) => value.includes("claude") },
-  { provider: "meta", match: (value) => value.includes("llama") },
-  { provider: "google", match: (value) => value.includes("gemini") },
-  { provider: "mistral", match: (value) => value.includes("mistral") }
+  { provider: "openai", matches: (value) => value.includes("gpt") },
+  { provider: "anthropic", matches: (value) => value.includes("claude") },
+  { provider: "meta", matches: (value) => value.includes("llama") },
+  { provider: "google", matches: (value) => value.includes("gemini") },
+  { provider: "mistral", matches: (value) => value.includes("mistral") }
 ]
 
 const TTS_PROVIDER_RULES: ProviderInferenceRule[] = [
   {
     provider: "openai",
-    match: (value) =>
+    matches: (value) =>
       value === "tts-1" || value === "tts-1-hd" || value.startsWith("gpt-")
   },
   {
     provider: "kitten_tts",
-    match: (value) =>
+    matches: (value) =>
       value.startsWith("kitten_tts") ||
       value.startsWith("kitten-tts") ||
       value.startsWith("kittentts") ||
       value.startsWith("kittenml/kitten-tts")
   },
-  { provider: "kokoro", match: (value) => value.startsWith("kokoro") },
-  { provider: "higgs", match: (value) => value.startsWith("higgs") },
-  { provider: "dia", match: (value) => value.startsWith("dia") },
-  { provider: "chatterbox", match: (value) => value.startsWith("chatterbox") },
-  { provider: "vibevoice", match: (value) => value.startsWith("vibevoice") },
+  { provider: "kokoro", matches: (value) => value.startsWith("kokoro") },
+  { provider: "higgs", matches: (value) => value.startsWith("higgs") },
+  { provider: "dia", matches: (value) => value.startsWith("dia") },
+  { provider: "chatterbox", matches: (value) => value.startsWith("chatterbox") },
+  { provider: "vibevoice", matches: (value) => value.startsWith("vibevoice") },
   {
     provider: "vibevoice_realtime",
-    match: (value) => value.startsWith("vibevoice_realtime") || value.startsWith("vibevoice-realtime")
+    matches: (value) => value.startsWith("vibevoice_realtime") || value.startsWith("vibevoice-realtime")
   },
-  { provider: "neutts", match: (value) => value.startsWith("neutts") },
+  { provider: "neutts", matches: (value) => value.startsWith("neutts") },
   {
     provider: "pockettts",
-    match: (value) =>
+    matches: (value) =>
       value.startsWith("pockettts") ||
       value.startsWith("pocket-tts") ||
       value.startsWith("pocket_tts")
   },
-  { provider: "qwen3_tts", match: (value) => value.startsWith("qwen3") || value.startsWith("qwen3_tts") },
-  { provider: "lux_tts", match: (value) => value.startsWith("lux_tts") || value.startsWith("luxtts") },
-  { provider: "echo_tts", match: (value) => value.startsWith("echo_tts") || value.startsWith("echo") },
-  { provider: "elevenlabs", match: (value) => value.startsWith("eleven") },
+  { provider: "qwen3_tts", matches: (value) => value.startsWith("qwen3") || value.startsWith("qwen3_tts") },
+  { provider: "lux_tts", matches: (value) => value.startsWith("lux_tts") || value.startsWith("luxtts") },
+  { provider: "echo_tts", matches: (value) => value.startsWith("echo_tts") || value.startsWith("echo") },
+  { provider: "elevenlabs", matches: (value) => value.startsWith("eleven") },
   {
     provider: "index_tts",
-    match: (value) =>
+    matches: (value) =>
       value.startsWith("index_tts") || value.startsWith("indextts")
   },
   {
     provider: "index_tts2",
-    match: (value) =>
+    matches: (value) =>
       value.startsWith("index_tts2") || value.startsWith("indextts2")
   },
   {
     provider: "supertonic2",
-    match: (value) => value.startsWith("supertonic2") || value.startsWith("supertonic-2")
+    matches: (value) => value.startsWith("supertonic2") || value.startsWith("supertonic-2")
   },
   {
     provider: "supertonic",
-    match: (value) => value.startsWith("supertonic")
+    matches: (value) => value.startsWith("supertonic")
   }
 ]
 
@@ -525,7 +525,7 @@ const inferFromRules = (
   rules: ProviderInferenceRule[]
 ): string | null => {
   for (const rule of rules) {
-    if (rule.match(value)) return rule.provider
+    if (rule.matches(value)) return rule.provider
   }
   return null
 }

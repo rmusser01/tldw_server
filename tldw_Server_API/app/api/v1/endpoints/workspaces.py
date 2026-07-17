@@ -62,6 +62,14 @@ from tldw_Server_API.app.api.v1.schemas.workspace_schemas import (
     WorkspaceSourcePreviewResponse,
     WorkspaceSourceReorderRequest,
     WorkspaceSourceResponse,
+    WorkspaceSourceReviewStateBatchRequest,
+    WorkspaceSourceSavedViewCreateRequest,
+    WorkspaceSourceSavedViewConflictResponse,
+    WorkspaceSourceSavedViewListResponse,
+    WorkspaceSourceSavedViewNotFoundResponse,
+    WorkspaceSourceSavedViewPatchRequest,
+    WorkspaceSourceSavedViewResponse,
+    WorkspaceSourceSavedViewStateV1,
     WorkspaceSourceSelectionRequest,
     WorkspaceSourceStatusListResponse,
     WorkspaceSourceUpdateRequest,
@@ -77,6 +85,8 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDBError,
     ConflictError,
     InputError,
+    WorkspaceSourceSavedViewConflictError,
+    WorkspaceSourceSavedViewNotFoundError,
 )
 from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowsDatabase
 from tldw_Server_API.app.core.DB_Management.media_db import api as media_db_api
@@ -366,6 +376,10 @@ def _src_to_response(src: dict) -> WorkspaceSourceResponse:
         position=src.get("position", 0),
         selected=bool(src.get("selected", True)),
         added_at=str(src.get("added_at", "")),
+        review_state=src.get("review_state") or "unset",
+        review_state_updated_at=src.get("review_state_updated_at"),
+        reviewed_at=src.get("reviewed_at"),
+        reviewed_by_user_id=src.get("reviewed_by_user_id"),
         version=src.get("version", 1),
     )
 
@@ -708,6 +722,68 @@ def _membership_service(db: CharactersRAGDB) -> WorkspaceMembershipService:
 
 def _request_user_id(current_user: User) -> str:
     return str(current_user.id)
+
+
+def _serialize_source_saved_view_state(state_model: WorkspaceSourceSavedViewStateV1) -> str:
+    """Return the deterministic UTF-8 JSON persisted for a canonical V1 state."""
+    return json.dumps(
+        state_model.model_dump(mode="json"),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+
+
+def _source_saved_view_response(
+    row: dict[str, Any],
+) -> WorkspaceSourceSavedViewResponse:
+    """Convert one raw row without allowing corrupt state to fail a list."""
+    state_model: WorkspaceSourceSavedViewStateV1 | None = None
+    invalid_reason: str | None = None
+    schema_version = int(row["schema_version"])
+    if schema_version != 1:
+        invalid_reason = "unsupported_schema_version"
+    else:
+        try:
+            parsed_state = json.loads(row["state_json"])
+        except (RecursionError, TypeError, ValueError):
+            invalid_reason = "invalid_json"
+        else:
+            try:
+                state_model = WorkspaceSourceSavedViewStateV1.model_validate(parsed_state)
+            except ValueError:
+                invalid_reason = "invalid_state"
+
+    return WorkspaceSourceSavedViewResponse.model_validate(
+        {
+            "id": str(row["id"]),
+            "workspace_id": str(row["workspace_id"]),
+            "name": str(row["name"]),
+            "schema_version": schema_version,
+            "state": state_model,
+            "valid": invalid_reason is None,
+            "invalid_reason": invalid_reason,
+            "version": int(row["version"]),
+            "created_at": str(row["created_at"]),
+            "updated_at": str(row["updated_at"]),
+        }
+    )
+
+
+def _source_saved_view_error(exc: Exception, *, default_detail: str) -> HTTPException:
+    """Map focused saved-view failures without exposing another tenant's metadata."""
+    if isinstance(exc, WorkspaceSourceSavedViewNotFoundError):
+        return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source view not found")
+    if isinstance(exc, WorkspaceSourceSavedViewConflictError):
+        return HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": exc.code, **exc.metadata},
+        )
+    return map_db_error_to_http(
+        exc,
+        input_status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        default_detail=default_detail,
+    )
 
 
 def _membership_service_error_to_http(exc: WorkspaceMembershipServiceError) -> HTTPException:
@@ -1777,6 +1853,131 @@ async def archive_workspace_runtime_binding(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+# ── Source Saved Views ──────────────────────────────────────────
+
+@router.get(
+    "/{workspace_id}/source-views",
+    response_model=WorkspaceSourceSavedViewListResponse,
+    responses={404: {"model": WorkspaceSourceSavedViewNotFoundResponse}},
+    dependencies=[Depends(WORKSPACES_READ_RATE_LIMIT)],
+    summary="List workspace source saved views",
+)
+def list_source_saved_views(
+    workspace_id: str,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    current_user: User = Depends(get_request_user),
+) -> WorkspaceSourceSavedViewListResponse:
+    """List the current user's source views for one active owned workspace."""
+    owner_user_id = _request_user_id(current_user)
+    try:
+        rows = db.list_workspace_source_saved_views(owner_user_id, workspace_id)
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise _source_saved_view_error(
+            exc, default_detail="Failed to fetch workspace source saved views"
+        ) from exc
+    return WorkspaceSourceSavedViewListResponse(
+        items=[_source_saved_view_response(row) for row in rows]
+    )
+
+
+@router.post(
+    "/{workspace_id}/source-views",
+    response_model=WorkspaceSourceSavedViewResponse,
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        404: {"model": WorkspaceSourceSavedViewNotFoundResponse},
+        409: {"model": WorkspaceSourceSavedViewConflictResponse},
+    },
+    dependencies=[Depends(WORKSPACES_WRITE_RATE_LIMIT)],
+    summary="Create a workspace source saved view",
+)
+def create_source_saved_view(
+    workspace_id: str,
+    body: WorkspaceSourceSavedViewCreateRequest,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    current_user: User = Depends(get_request_user),
+) -> WorkspaceSourceSavedViewResponse:
+    """Create one canonical V1 source view."""
+    owner_user_id = _request_user_id(current_user)
+    try:
+        row = db.create_workspace_source_saved_view(
+            owner_user_id,
+            workspace_id,
+            name=body.name,
+            schema_version=body.schema_version,
+            state_json=_serialize_source_saved_view_state(body.state),
+        )
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise _source_saved_view_error(
+            exc, default_detail="Failed to create workspace source saved view"
+        ) from exc
+    return _source_saved_view_response(row)
+
+
+@router.patch(
+    "/{workspace_id}/source-views/{view_id}",
+    response_model=WorkspaceSourceSavedViewResponse,
+    responses={
+        404: {"model": WorkspaceSourceSavedViewNotFoundResponse},
+        409: {"model": WorkspaceSourceSavedViewConflictResponse},
+    },
+    dependencies=[Depends(WORKSPACES_WRITE_RATE_LIMIT)],
+    summary="Update a workspace source saved view",
+)
+def update_source_saved_view(
+    workspace_id: str,
+    view_id: str,
+    body: WorkspaceSourceSavedViewPatchRequest,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    current_user: User = Depends(get_request_user),
+) -> WorkspaceSourceSavedViewResponse:
+    """Replace a saved view name and/or state with optimistic locking."""
+    owner_user_id = _request_user_id(current_user)
+    patch = body.root
+    state_model = getattr(patch, "state", None)
+    try:
+        row = db.update_workspace_source_saved_view(
+            owner_user_id,
+            workspace_id,
+            view_id,
+            expected_version=patch.version,
+            name=getattr(patch, "name", None),
+            schema_version=getattr(patch, "schema_version", None),
+            state_json=(
+                _serialize_source_saved_view_state(state_model) if state_model is not None else None
+            ),
+        )
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise _source_saved_view_error(
+            exc, default_detail="Failed to update workspace source saved view"
+        ) from exc
+    return _source_saved_view_response(row)
+
+
+@router.delete(
+    "/{workspace_id}/source-views/{view_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={404: {"model": WorkspaceSourceSavedViewNotFoundResponse}},
+    dependencies=[Depends(WORKSPACES_DELETE_RATE_LIMIT)],
+    summary="Delete a workspace source saved view",
+)
+def delete_source_saved_view(
+    workspace_id: str,
+    view_id: str,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    current_user: User = Depends(get_request_user),
+) -> Response:
+    """Unconditionally delete one owned source view."""
+    owner_user_id = _request_user_id(current_user)
+    try:
+        db.delete_workspace_source_saved_view(owner_user_id, workspace_id, view_id)
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise _source_saved_view_error(
+            exc, default_detail="Failed to delete workspace source saved view"
+        ) from exc
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 # ── Sources ─────────────────────────────────────────────────────
 
 @router.get(
@@ -2413,6 +2614,35 @@ async def reorder_sources(
 
 
 @router.put(
+    "/{workspace_id}/sources/review-state",
+    response_model=list[WorkspaceSourceResponse],
+    dependencies=[Depends(WORKSPACES_WRITE_RATE_LIMIT)],
+    summary="Batch-update workspace source review state",
+)
+async def update_source_review_states(
+    workspace_id: str,
+    body: WorkspaceSourceReviewStateBatchRequest,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    current_user: User = Depends(get_request_user),
+) -> list[WorkspaceSourceResponse]:
+    """Set the review state for selected workspace sources atomically."""
+    _require_workspace(db, workspace_id)
+    try:
+        sources = db.update_workspace_source_review_states(
+            workspace_id,
+            body.source_ids,
+            body.review_state,
+            str(getattr(current_user, "id", "")),
+        )
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(
+            exc,
+            default_detail="Failed to update workspace source review state",
+        ) from exc
+    return [_src_to_response(source) for source in sources]
+
+
+@router.put(
     "/{workspace_id}/sources/{source_id}",
     response_model=WorkspaceSourceResponse,
     dependencies=[Depends(WORKSPACES_WRITE_RATE_LIMIT)],
@@ -2428,8 +2658,21 @@ async def update_source(
     """Update a workspace source with optimistic locking."""
     _require_workspace(db, workspace_id)
     updates = body.model_dump(exclude_unset=True, exclude={"version"})
+    if updates.get("review_state") is None:
+        updates.pop("review_state", None)
+    actor_kwargs = (
+        {"actor_user_id": str(getattr(current_user, "id", ""))}
+        if "review_state" in updates
+        else {}
+    )
     try:
-        src = db.update_workspace_source(workspace_id, source_id, updates, expected_version=body.version)
+        src = db.update_workspace_source(
+            workspace_id,
+            source_id,
+            updates,
+            expected_version=body.version,
+            **actor_kwargs,
+        )
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to update workspace source") from exc
     return _src_to_response(src)

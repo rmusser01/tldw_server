@@ -10,7 +10,7 @@ build-backend = "setuptools.build_meta"
 ###########################
 [project]
 name = "tldw-server"
-version = "0.1.40"
+version = "0.1.41"
 description = "A comprehensive research assistant and media analysis platform - Too Long; Didn't Watch Server"
 requires-python = ">=3.10"
 readme = "README.md"
@@ -54,7 +54,9 @@ dependencies = [
   "defusedxml>=0.7.0",
   "email-validator>=2.0.0",
   "fastapi>=0.136.3,<0.137.0",
+  "httpcore[asyncio]>=1.0.9,<2",
   "httpx>=0.24.0",
+  "certifi>=2024.2.2",
   "hypothesis",
   "loguru>=0.7.0",
   "lxml>=4.9.0",
@@ -108,7 +110,7 @@ dependencies = [
   "PyAudio>=0.2.0",
   "sounddevice>=0.4.0",
   "soundfile>=0.12.0",
-  "yt-dlp>=2023.12.0",
+  "yt-dlp>=2026.7.4",
 
   # NLP/Text Processing
   "chardet>=5.0.0",

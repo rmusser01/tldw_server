@@ -61,3 +61,4 @@ Small bug fixes, local implementation details, product copy, temporary experimen
 | [ADR-027](027-security-aes-gcm-json-envelope-helpers.md) | Accepted | Use Security AES-GCM JSON envelope helpers as the shared primitive for configured encrypted structured-metadata persistence and key-rotation paths. |
 | [ADR-028](028-security-restricted-legacy-pickle-compatibility.md) | Accepted | Use Security restricted pickle helpers only for explicitly gated legacy compatibility paths, not as a general-purpose serialization format. |
 | [ADR-029](029-tldw-frontend-static-pypi-bundle.md) | Proposed | Allow a guarded static `tldw-frontend` export in `tldw-server` PyPI releases while forbidding source, cache, standalone, model, database, and admin UI artifacts. |
+| [ADR-030](030-configured-local-llm-egress-policy.md) | Accepted | Allow only an exact server-configured local LLM origin through scoped checked egress without weakening global SSRF defaults. |

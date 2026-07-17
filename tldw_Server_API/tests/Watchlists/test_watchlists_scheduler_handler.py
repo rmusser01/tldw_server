@@ -4,7 +4,6 @@ import pytest
 
 from tldw_Server_API.app.core.Scheduler.handlers import watchlists as watchlist_handler
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -56,4 +55,49 @@ async def test_watchlists_enrich_output_calls_core_handler(monkeypatch):
         "user_id": 555,
         "grouping_config": {"group_by": "topic"},
         "summary_config": {"enabled": True, "llm_provider": "mock"},
+    }
+
+
+@pytest.mark.asyncio
+async def test_watchlists_deliver_briefing_calls_core_handler(monkeypatch):
+    captured: dict[str, object] = {}
+    marked: dict[str, object] = {}
+
+    async def fake_deliver_for_user(**kwargs):
+        captured.update(kwargs)
+        return {"occurrence_id": 31, "delivery_status": "delivered"}
+
+    def fake_assert_audio_ready(**kwargs):
+        marked.update(kwargs)
+
+    monkeypatch.setattr(
+        watchlist_handler.briefing_delivery,
+        "deliver_briefing_for_user",
+        fake_deliver_for_user,
+    )
+    monkeypatch.setattr(
+        watchlist_handler.briefing_delivery,
+        "assert_audio_dependency_ready",
+        fake_assert_audio_ready,
+    )
+    result = await watchlist_handler.watchlists_deliver_briefing(
+        {
+            "user_id": "17",
+            "occurrence_id": "31",
+            "audio_dependency_task_id": "audio-7",
+            "confirmed_unknown_adapters": ["email"],
+        }
+    )
+
+    assert result == {"occurrence_id": 31, "delivery_status": "delivered"}
+    assert marked == {
+        "user_id": 17,
+        "occurrence_id": 31,
+        "audio_task_id": "audio-7",
+    }
+    assert captured == {
+        "user_id": 17,
+        "occurrence_id": 31,
+        "requested_adapters": set(),
+        "confirmed_unknown_adapters": {"email"},
     }

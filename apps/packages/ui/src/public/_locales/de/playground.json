@@ -899,18 +899,6 @@
   "actor_presetPlaceholder": {
     "message": "Preset auswählen"
   },
-  "actor_preset.sliceOfLife": {
-    "message": "Alltag"
-  },
-  "actor_preset.dungeonCrawl": {
-    "message": "Dungeon-Crawl"
-  },
-  "actor_preset.romance": {
-    "message": "Romantik"
-  },
-  "actor_preset.workSession": {
-    "message": "Arbeitssitzung"
-  },
   "actor_applyPreset": {
     "message": "Anwenden"
   },
@@ -931,15 +919,6 @@
   },
   "actor_templateModeHelp": {
     "message": "Steuert, wie Actor mit aktiven Szenenvorlagen interagiert. Zusammenführen behält beides; Überschreiben lässt Actor überlappende Felder ersetzen; Ignorieren überspringt Actor, wenn Vorlagen aktiv sind."
-  },
-  "actor_templateMode.merge": {
-    "message": "Mit Vorlagen zusammenführen"
-  },
-  "actor_templateMode.override": {
-    "message": "Vorlagen überschreiben"
-  },
-  "actor_templateMode.ignore": {
-    "message": "Ignorieren, wenn Vorlagen aktiv sind"
   },
   "actor_bladeAspectsTitle": {
     "message": "Aspekte"
@@ -1468,5 +1447,29 @@
   },
   "acp_workspace_title": {
     "message": "Arbeitsbereich-Terminal"
+  },
+  "tts_routeTitle": {
+    "message": "Text-zu-Sprache"
+  },
+  "actor_preset_sliceOfLife": {
+    "message": "Alltag"
+  },
+  "actor_preset_dungeonCrawl": {
+    "message": "Dungeon-Crawl"
+  },
+  "actor_preset_romance": {
+    "message": "Romantik"
+  },
+  "actor_preset_workSession": {
+    "message": "Arbeitssitzung"
+  },
+  "actor_templateMode_merge": {
+    "message": "Mit Vorlagen zusammenführen"
+  },
+  "actor_templateMode_override": {
+    "message": "Vorlagen überschreiben"
+  },
+  "actor_templateMode_ignore": {
+    "message": "Ignorieren, wenn Vorlagen aktiv sind"
   }
 }

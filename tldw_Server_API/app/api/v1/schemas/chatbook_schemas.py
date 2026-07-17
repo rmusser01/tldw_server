@@ -263,6 +263,30 @@ class ContentItemResponse(BaseModel):
     checksum: Optional[str] = None
 
 
+class ChatbookAccountInventoryResponse(BaseModel):
+    """Redacted account-inventory row safe for archive previews."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    category: str
+    label: str
+    restore_status: str
+
+
+class ChatbookAccountInventorySummaryResponse(BaseModel):
+    """Redacted account-inventory aggregate safe for archive previews."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    counts: dict[str, int] = Field(default_factory=dict)
+    pointer_only_count: int = Field(default=0, ge=0)
+    sensitive_category_count: int = Field(default=0, ge=0)
+    warning_count: int = Field(default=0, ge=0)
+    warnings: list[str] = Field(default_factory=list)
+    archive_size_bytes: int = Field(default=0, ge=0)
+    post_write_verification: bool = False
+
+
 class ChatbookManifestResponse(BaseModel):
     """Chatbook manifest information."""
     version: ChatbookVersion
@@ -275,6 +299,10 @@ class ChatbookManifestResponse(BaseModel):
 
     # Content summary
     content_items: list[ContentItemResponse] = Field(default_factory=list)
+    account_inventory: list[ChatbookAccountInventoryResponse] = Field(default_factory=list)
+    account_inventory_summary: ChatbookAccountInventorySummaryResponse = Field(
+        default_factory=ChatbookAccountInventorySummaryResponse
+    )
 
     # Configuration
     include_media: bool = False
@@ -329,8 +357,12 @@ class ImportJobResponse(BaseModel):
     """Import job status."""
     job_id: str
     status: ImportStatus
-    chatbook_path: str
+    chatbook_path: str = Field(
+        description="Deprecated safe filename alias; internal server paths are never returned"
+    )
     created_at: datetime
+    source_filename: Optional[str] = None
+    chatbook_name: Optional[str] = None
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     error_message: Optional[str] = None
@@ -748,6 +780,14 @@ class RemoveJobResponse(BaseModel):
     success: bool
     message: str
     job_id: str
+
+
+class RemoveFinishedJobsResponse(BaseModel):
+    """Response for removing all terminal Chatbook job history."""
+    success: bool
+    message: str
+    export_jobs_removed: int = Field(default=0, ge=0)
+    import_jobs_removed: int = Field(default=0, ge=0)
 
 
 class ContinueExportRequest(BaseModel):

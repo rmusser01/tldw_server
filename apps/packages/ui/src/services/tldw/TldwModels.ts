@@ -1,4 +1,3 @@
-import { Storage } from "@plasmohq/storage"
 import { tldwClient, TldwModel, type TldwConfig } from "./TldwApiClient"
 import { createSafeStorage } from "@/utils/safe-storage"
 import { isPlaceholderApiKey } from "@/utils/api-key"
@@ -100,6 +99,16 @@ export interface ModelInfo {
   }
 }
 
+type ModelCacheRecord = {
+  version: number
+  models: ModelInfo[] | null
+  timestamp: number
+  scope: string | null
+  invalidationToken?: string
+}
+
+type InvalidationListener = (token: string) => void
+
 export class TldwModelsService {
   private cachedModels: ModelInfo[] | null = null
   private lastFetchTime: number = 0
@@ -108,11 +117,18 @@ export class TldwModelsService {
   private readonly FORCE_REFRESH_COOLDOWN = 30 * 1000
   private readonly CACHE_KEY = "tldwModelsCache"
   private readonly CACHE_SCHEMA_VERSION = 4
+  private readonly INVALIDATION_TOKEN_HISTORY_LIMIT = 64
   private storage = createSafeStorage({ area: "local" })
   private storageLoaded = false
   private storageInitPromise: Promise<void> | null = null
+  private storageWritePromise: Promise<void> = Promise.resolve()
   private inFlightFetch: Promise<ModelInfo[]> | null = null
   private cacheScopeKey: string | null = null
+  private invalidationGeneration = 0
+  private lastAppliedInvalidationToken: string | null = null
+  private seenInvalidationTokens = new Set<string>()
+  private pendingLocalInvalidationTokens = new Set<string>()
+  private invalidationListeners = new Set<InvalidationListener>()
 
   constructor() {
     this.getModels = this.getModels.bind(this)
@@ -120,20 +136,31 @@ export class TldwModelsService {
     this.getCachedChatModels = this.getCachedChatModels.bind(this)
     this.getEmbeddingModels = this.getEmbeddingModels.bind(this)
     this.getImageModels = this.getImageModels.bind(this)
+    this.storage.watch?.({
+      [this.CACHE_KEY]: (change) => {
+        this.applyInvalidationRecord(change.newValue)
+      }
+    })
   }
 
   private async ensureStorageLoaded() {
     if (this.storageLoaded) return
     if (!this.storageInitPromise) {
+      const loadGeneration = this.invalidationGeneration
       this.storageInitPromise = (async () => {
         try {
-          const cached = (await this.storage.get<any>(this.CACHE_KEY)) || null
+          const cached =
+            (await this.storage.get<ModelCacheRecord>(this.CACHE_KEY)) || null
           const cacheVersion =
             typeof cached?.version === "number" ? cached.version : 0
+          if (this.applyInvalidationRecord(cached)) {
+            return
+          }
           if (
             cacheVersion === this.CACHE_SCHEMA_VERSION &&
             cached?.models &&
-            Array.isArray(cached.models)
+            Array.isArray(cached.models) &&
+            loadGeneration === this.invalidationGeneration
           ) {
             this.cachedModels = cached.models as ModelInfo[]
             this.lastFetchTime = Number(cached.timestamp || 0)
@@ -150,17 +177,137 @@ export class TldwModelsService {
     await this.storageInitPromise
   }
 
-  private async persistCache() {
-    try {
-      await this.storage.set(this.CACHE_KEY, {
-        version: this.CACHE_SCHEMA_VERSION,
-        models: this.cachedModels,
-        timestamp: this.lastFetchTime,
-        scope: this.cacheScopeKey
-      })
-    } catch {
-      // Best-effort persistence; ignore errors
+  private async persistCache(expectedGeneration = this.invalidationGeneration) {
+    if (expectedGeneration !== this.invalidationGeneration) return
+    const value = {
+      version: this.CACHE_SCHEMA_VERSION,
+      models: this.cachedModels,
+      timestamp: this.lastFetchTime,
+      scope: this.cacheScopeKey
     }
+    const write = this.storageWritePromise.then(async () => {
+      if (expectedGeneration !== this.invalidationGeneration) return
+      try {
+        await this.storage.set(this.CACHE_KEY, value)
+      } catch {
+        // Best-effort persistence; ignore errors
+      }
+    })
+    this.storageWritePromise = write
+    await write
+  }
+
+  private async persistInvalidationTombstone(
+    token: string,
+    expectedGeneration: number
+  ): Promise<void> {
+    const value: ModelCacheRecord = {
+      version: this.CACHE_SCHEMA_VERSION,
+      models: null,
+      timestamp: 0,
+      scope: null,
+      invalidationToken: token
+    }
+    const write = this.storageWritePromise.then(async () => {
+      if (
+        expectedGeneration !== this.invalidationGeneration ||
+        token !== this.lastAppliedInvalidationToken
+      ) {
+        this.pendingLocalInvalidationTokens.delete(token)
+        return
+      }
+      try {
+        await this.storage.set(this.CACHE_KEY, value)
+      } catch {
+        this.pendingLocalInvalidationTokens.delete(token)
+        // Best-effort persistence; ignore errors
+      }
+    })
+    this.storageWritePromise = write
+    await write
+  }
+
+  private invalidateCacheState() {
+    this.invalidationGeneration += 1
+    this.cachedModels = null
+    this.lastFetchTime = 0
+    this.lastForcedFetchTime = 0
+    this.inFlightFetch = null
+    this.cacheScopeKey = null
+  }
+
+  private applyInvalidationRecord(value: unknown): boolean {
+    const record = value as Partial<ModelCacheRecord> | null
+    if (
+      record?.version !== this.CACHE_SCHEMA_VERSION ||
+      record.models !== null ||
+      typeof record.invalidationToken !== "string"
+    ) {
+      return false
+    }
+    const token = record.invalidationToken.trim()
+    const applied = this.applyInvalidationToken(token)
+    this.pendingLocalInvalidationTokens.delete(token)
+    return applied
+  }
+
+  private applyInvalidationToken(token: string): boolean {
+    const normalizedToken = token.trim()
+    if (
+      !normalizedToken ||
+      normalizedToken === this.lastAppliedInvalidationToken ||
+      this.seenInvalidationTokens.has(normalizedToken) ||
+      this.pendingLocalInvalidationTokens.has(normalizedToken)
+    ) {
+      return false
+    }
+    this.rememberInvalidationToken(
+      this.seenInvalidationTokens,
+      normalizedToken
+    )
+    this.lastAppliedInvalidationToken = normalizedToken
+    if (!this.storageLoaded && !this.storageInitPromise) {
+      this.storageLoaded = true
+    }
+    this.invalidateCacheState()
+    this.invalidationListeners.forEach((listener) => {
+      try {
+        listener(normalizedToken)
+      } catch (error) {
+        console.error("Model cache invalidation listener failed:", error)
+      }
+    })
+    return true
+  }
+
+  private rememberInvalidationToken(tokens: Set<string>, token: string): void {
+    if (tokens.has(token)) return
+    tokens.add(token)
+    if (tokens.size <= this.INVALIDATION_TOKEN_HISTORY_LIMIT) return
+    const oldestToken = tokens.values().next().value
+    if (oldestToken) tokens.delete(oldestToken)
+  }
+
+  private createInvalidationToken(): string {
+    if (typeof globalThis.crypto?.randomUUID === "function") {
+      return globalThis.crypto.randomUUID()
+    }
+    return `${Date.now()}-${Math.random().toString(36).slice(2)}`
+  }
+
+  private reconcileCacheScope(
+    scopeKey: string,
+    requestGeneration: number
+  ): number {
+    if (requestGeneration !== this.invalidationGeneration) {
+      return requestGeneration
+    }
+    if (this.cacheScopeKey && this.cacheScopeKey !== scopeKey) {
+      this.invalidateCacheState()
+      requestGeneration = this.invalidationGeneration
+    }
+    this.cacheScopeKey = scopeKey
+    return requestGeneration
   }
 
   private isConfiguredForModels(config: TldwConfig | null): boolean {
@@ -196,14 +343,10 @@ export class TldwModelsService {
     options?: { refreshOpenRouter?: boolean }
   ): Promise<ModelInfo[]> {
     await this.ensureStorageLoaded()
+    let fetchGeneration = this.invalidationGeneration
     const config = await tldwClient.getConfig().catch(() => null)
     const scopeKey = this.buildCacheScope(config)
-    if (this.cacheScopeKey && this.cacheScopeKey !== scopeKey) {
-      this.cachedModels = null
-      this.lastFetchTime = 0
-      this.lastForcedFetchTime = 0
-    }
-    this.cacheScopeKey = scopeKey
+    fetchGeneration = this.reconcileCacheScope(scopeKey, fetchGeneration)
 
     const now = Date.now()
 
@@ -233,14 +376,17 @@ export class TldwModelsService {
       })
 
       // Transform tldw models to our format
-      this.cachedModels = models.map(model => this.transformModel(model))
-      this.lastFetchTime = Date.now()
-      if (forceRefresh) {
-        this.lastForcedFetchTime = this.lastFetchTime
+      const transformedModels = models.map(model => this.transformModel(model))
+      if (fetchGeneration === this.invalidationGeneration) {
+        this.cachedModels = transformedModels
+        this.lastFetchTime = Date.now()
+        if (forceRefresh) {
+          this.lastForcedFetchTime = this.lastFetchTime
+        }
+        await this.persistCache(fetchGeneration)
       }
-      await this.persistCache()
 
-      return this.cachedModels
+      return transformedModels
     }
 
     const fetchPromise = fetchFromServer().catch(async (error) => {
@@ -265,7 +411,9 @@ export class TldwModelsService {
       return []
     })
 
-    this.inFlightFetch = fetchPromise
+    if (fetchGeneration === this.invalidationGeneration) {
+      this.inFlightFetch = fetchPromise
+    }
     try {
       return await fetchPromise
     } finally {
@@ -288,14 +436,10 @@ export class TldwModelsService {
 
   async getCachedChatModels(): Promise<ModelInfo[]> {
     await this.ensureStorageLoaded()
+    const requestGeneration = this.invalidationGeneration
     const config = await tldwClient.getConfig().catch(() => null)
     const scopeKey = this.buildCacheScope(config)
-    if (this.cacheScopeKey && this.cacheScopeKey !== scopeKey) {
-      this.cachedModels = null
-      this.lastFetchTime = 0
-      this.lastForcedFetchTime = 0
-    }
-    this.cacheScopeKey = scopeKey
+    this.reconcileCacheScope(scopeKey, requestGeneration)
     return (this.cachedModels || []).filter((model) =>
       this.isSelectableChatModel(model)
     )
@@ -472,12 +616,10 @@ export class TldwModelsService {
     if (model.isConfigured === false) return false
     if (model.providerIsConfigured === false) return false
     if (model.providerEnabled === false) return false
-    const availability = model.availability?.trim().toLowerCase()
+    const availability = normalizeAvailabilityStatus(model.availability)
     if (
       availability &&
-      ["disabled", "failed", "unavailable", "not-configured"].includes(
-        availability
-      )
+      UNSELECTABLE_CHAT_MODEL_AVAILABILITY.has(availability)
     ) {
       return false
     }
@@ -488,12 +630,21 @@ export class TldwModelsService {
    * Clear the model cache
    */
   async clearCache(): Promise<void> {
-    this.cachedModels = null
-    this.lastFetchTime = 0
-    this.lastForcedFetchTime = 0
-    this.inFlightFetch = null
-    this.cacheScopeKey = null
-    await this.persistCache()
+    const token = this.createInvalidationToken()
+    this.applyInvalidationToken(token)
+    this.rememberInvalidationToken(
+      this.pendingLocalInvalidationTokens,
+      token
+    )
+    await this.persistInvalidationTombstone(
+      token,
+      this.invalidationGeneration
+    )
+  }
+
+  subscribeInvalidation(listener: InvalidationListener): () => void {
+    this.invalidationListeners.add(listener)
+    return () => this.invalidationListeners.delete(listener)
   }
 
   /**

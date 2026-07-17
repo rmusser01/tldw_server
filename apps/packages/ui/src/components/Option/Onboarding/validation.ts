@@ -1,5 +1,10 @@
 import type { TFunction } from "i18next"
+import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { tldwAuth } from "@/services/tldw/TldwAuth"
+import {
+  normalizeServerOrigin,
+  type ApiKeyPersistence
+} from "@/services/tldw/single-user-credential"
 import { mapMultiUserLoginErrorMessage } from "@/services/auth-errors"
 
 export type ConnectionErrorKind =
@@ -16,6 +21,42 @@ export type ValidationResult = {
   success: boolean
   error?: string
   errorKind?: ConnectionErrorKind
+  persistence?: ApiKeyPersistence | "memory"
+}
+
+export type ManualServerTransitionInput = {
+  serverUrl: string
+  apiKey: string
+  persistence: ApiKeyPersistence
+}
+
+export const shouldClearManualApiKeyForServerChange = (
+  configuredServerUrl: string,
+  candidateServerUrl: string
+): boolean => {
+  const configuredOrigin = normalizeServerOrigin(configuredServerUrl)
+  const candidateOrigin = normalizeServerOrigin(candidateServerUrl)
+  return Boolean(
+    configuredOrigin &&
+      candidateOrigin &&
+      configuredOrigin !== candidateOrigin
+  )
+}
+
+export const commitManualServerTransition = async (
+  input: ManualServerTransitionInput
+): Promise<"device" | "session" | "memory"> => {
+  if (!normalizeServerOrigin(input.serverUrl)) {
+    throw new Error("Invalid server URL")
+  }
+  if (!(await tldwAuth.testApiKey(input.serverUrl, input.apiKey))) {
+    const error = new Error("API key validation failed") as Error & {
+      status?: number
+    }
+    error.status = 401
+    throw error
+  }
+  return await tldwClient.saveManualSingleUserCredential(input)
 }
 
 export const isConnectivityErrorKind = (
@@ -167,11 +208,19 @@ export const validateMagicLinkAuth = async (
 export const validateApiKey = async (
   serverUrl: string,
   apiKey: string,
-  t: TFunction
+  t: TFunction,
+  persistence: ApiKeyPersistence = "device"
 ): Promise<ValidationResult> => {
   try {
-    const isValid = await tldwAuth.testApiKey(serverUrl, apiKey)
-    if (!isValid) {
+    const achievedPersistence = await commitManualServerTransition({
+      serverUrl,
+      apiKey,
+      persistence
+    })
+    return { success: true, persistence: achievedPersistence }
+  } catch (error: unknown) {
+    const { status, message } = extractStatusAndMessage(error)
+    if (status === 401 || status === 403) {
       return {
         success: false,
         errorKind: "auth_invalid",
@@ -181,9 +230,6 @@ export const validateApiKey = async (
         )
       }
     }
-    return { success: true }
-  } catch (error: unknown) {
-    const { status, message } = extractStatusAndMessage(error)
     const errorMessage =
       message ??
       t(

@@ -1,5 +1,5 @@
 import type { Character } from "@/types/character"
-import { createImageDataUrl } from "@/utils/image-utils"
+import { createImageDataUrl, safeImageUrl } from "@/utils/image-utils"
 import {
   normalizePersonaBuddySummary,
   type PersonaBuddySummary
@@ -92,18 +92,17 @@ const resolveAvatarUrl = (
   candidate: StoredSelectionRecord
 ): string | null | undefined => {
   const avatarUrl = normalizeOptionalText(candidate.avatar_url)
-  if (typeof avatarUrl === "string" && avatarUrl.trim().length > 0) {
-    return avatarUrl
-  }
-
-  const embeddedImageBase64 =
+  const externalAvatarUrl = safeImageUrl(avatarUrl)
+  const embeddedImageUrl =
     typeof candidate.image_base64 === "string"
-      ? candidate.image_base64.trim()
-      : ""
-  const embeddedImageUrl = embeddedImageBase64
-    ? createImageDataUrl(embeddedImageBase64)
-    : null
-  return embeddedImageUrl ?? avatarUrl
+      ? createImageDataUrl(candidate.image_base64)
+      : null
+
+  return (
+    externalAvatarUrl ??
+    embeddedImageUrl ??
+    (avatarUrl === undefined ? undefined : null)
+  )
 }
 
 export const isAssistantKind = (value: unknown): value is AssistantKind =>

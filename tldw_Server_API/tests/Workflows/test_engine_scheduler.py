@@ -263,6 +263,64 @@ def test_continue_run_clears_secrets(workflows_db: WorkflowsDatabase):
     assert stats["active_workflows"] == 0
 
 
+def test_continue_run_recovers_succeeded_step_outputs_for_exact_resume(
+    workflows_db: WorkflowsDatabase,
+    monkeypatch,
+):
+    definition = {
+        "name": "audio-resume",
+        "steps": [
+            {"id": "compose_script", "type": "log", "config": {}},
+            {"id": "generate_audio", "type": "log", "config": {}},
+        ],
+    }
+    run_id = "audio-resume-run"
+    workflows_db.create_run(
+        run_id=run_id,
+        tenant_id="tenant",
+        user_id="user",
+        inputs={},
+        workflow_id=None,
+        definition_version=1,
+        definition_snapshot=definition,
+    )
+    workflows_db.create_step_run(
+        step_run_id="compose-success",
+        tenant_id="tenant",
+        run_id=run_id,
+        step_id="compose_script",
+        name="compose_script",
+        step_type="log",
+    )
+    workflows_db.complete_step_run(
+        step_run_id="compose-success",
+        outputs={"sections": [{"speaker": "HOST", "text": "Ready script"}]},
+    )
+    workflows_db.update_run_status(run_id, "failed", error="tts failed")
+    captured: dict[str, object] = {}
+
+    async def fake_adapter(self, step_type, config, context, last_outputs, run_id, step_run_id=None):
+        captured.update(context)
+        return {"artifact_id": "audio-final"}
+
+    monkeypatch.setattr(WorkflowEngine, "_run_step_adapter", fake_adapter)
+    engine = WorkflowEngine(workflows_db)
+
+    asyncio.run(
+        engine.continue_run(
+            run_id,
+            after_step_id="",
+            next_step_id="generate_audio",
+            retry_resume=True,
+        )
+    )
+
+    assert captured["compose_script"] == {
+        "sections": [{"speaker": "HOST", "text": "Ready script"}]
+    }
+    assert workflows_db.get_run(run_id).status == "succeeded"
+
+
 def test_adapter_returned_research_checkpoint_wait_sets_run_waiting_human_without_human_timeout(
     workflows_db: WorkflowsDatabase,
     monkeypatch,

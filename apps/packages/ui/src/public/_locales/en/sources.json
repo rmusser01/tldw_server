@@ -20,6 +20,9 @@
   "actions_reattach": {
     "message": "Reattach"
   },
+  "actions_showRoots": {
+    "message": "Show roots"
+  },
   "states_unsupported": {
     "message": "This server does not advertise ingestion source support."
   },
@@ -43,5 +46,20 @@
   },
   "form_archiveHint": {
     "message": "Upload archive after creation"
+  },
+  "form_checkingFolderSync": {
+    "message": "Checking whether this server allows folder sync."
+  },
+  "form_currentDestination": {
+    "message": "Current destination"
+  },
+  "form_folderSyncDisabledDescription": {
+    "message": "The administrator must enable server folder sync before you can create a local directory source."
+  },
+  "form_lockedAfterSync": {
+    "message": "Locked after first successful sync"
+  },
+  "form_serverFolderSyncDisabled": {
+    "message": "Server folder sync is disabled"
   }
 }

@@ -59,14 +59,13 @@ jobs:
       - name: Check public/private docs boundary
         run: |
           python Helper_Scripts/docs/check_public_private_boundary.py
-      - name: Build site (baseline warnings allowed)
+      - name: Build site
         run: |
-          # TASK-12074: strict mode currently aborts on the existing published-docs warning baseline.
-          mkdocs build -f Docs/mkdocs.yml
+          mkdocs build --strict -f Docs/mkdocs.yml
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v4
         with:
-          path: Docs/site
+          path: Docs/_site
 
   deploy:
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/PG-Backend'

@@ -1,4 +1,12 @@
 {
+  "accessibilityHardening": {
+    "source": { "toggleActive": "Aktivstatus umschalten: {{name}}", "checkNow": "Jetzt prüfen: {{name}}", "openWebsite": "Quellwebsite öffnen: {{name}}", "openHealth": "Quellstatus öffnen: {{name}}", "edit": "Quelle bearbeiten: {{name}}", "delete": "Quelle löschen: {{name}}" },
+    "item": { "open": "Aktualisierung öffnen: {{title}}", "select": "Aktualisierung auswählen: {{title}}", "description": "{{state}}. Quelle: {{source}}." },
+    "output": { "openNewTab": "{{title}} in neuem Tab öffnen", "chat": "Über {{title}} chatten", "download": "{{title}} herunterladen", "close": "Vorschau schließen: {{title}}" },
+    "health": { "show": "Statusdetails der Watchlists anzeigen", "hide": "Statusdetails der Watchlists ausblenden", "refresh": "Watchlists-Status aktualisieren", "settings": "Watchlists-Einstellungen öffnen" },
+    "delivery": { "email": "Bei Aktivierung jeden Bericht an die konfigurierten Empfänger senden.", "chatbook": "Bei Aktivierung jeden Bericht in Chatbook veröffentlichen." },
+    "help": { "open": "Watchlists-Hilfe öffnen", "title": "Watchlists-Hilfe" }
+  },
   "items": {
     "queuedForBriefing": "Für Briefing vorgemerkt",
     "includeInNextBriefing": "In nächstes Briefing aufnehmen",
@@ -17,5 +25,467 @@
       "generateError": "Bericht aus Warteschlangen-Elementen konnte nicht erstellt werden.",
       "generateReport": "Bericht aus Warteschlange erstellen"
     }
+  },
+  "setupWizard": {
+    "title": "Watchlist erstellen",
+    "containerTitle": "Watchlist erstellen",
+    "containerHelp": "Erstellen Sie zuerst den Projektcontainer. Quellen, Rhythmus, Briefing, Zustellung und Test folgen in einem gemeinsamen Einrichtungsablauf.",
+    "actions": {
+      "continue": "Weiter zu Quellen"
+    },
+    "sections": {
+      "preset": "Domänenvorlage"
+    },
+    "fields": {
+      "name": "Name der Watchlist",
+      "objective": "Ziel"
+    },
+    "validation": {
+      "nameRequired": "Geben Sie einen Namen für die Watchlist ein."
+    },
+    "errors": {
+      "createFailed": "Die Watchlist konnte nicht erstellt werden."
+    },
+    "presets": {
+      "cti_osint": {
+        "label": "CTI / OSINT",
+        "description": "Überwachen Sie Schwachstellen, Schadsoftware, Akteure, Hinweise und Quellenänderungen."
+      },
+      "news": {
+        "label": "Nachrichten",
+        "description": "Verfolgen Sie aktuelle Ereignisse, Personen, Organisationen und die Quellenvielfalt."
+      },
+      "general": {
+        "label": "Allgemein",
+        "description": "Verfolgen Sie ein Thema und sammeln Sie Aktualisierungen zur Prüfung."
+      },
+      "blank": {
+        "label": "Leer",
+        "description": "Beginnen Sie mit einer leeren Watchlist und konfigurieren Sie die Details selbst."
+      }
+    },
+    "startModes": {
+      "sources": {
+        "label": "Mit Quellen beginnen",
+        "description": "Erstellen Sie eine Watchlist mit ersten Feeds und einem optionalen Monitor."
+      },
+      "topic": {
+        "label": "Mit Thema beginnen",
+        "description": "Erstellen Sie zuerst das Ziel der Watchlist und fügen Sie vor Beginn der Sammlung Feeds hinzu."
+      },
+      "report_goal": {
+        "label": "Mit Berichtsziel beginnen",
+        "description": "Definieren Sie zuerst das Briefing-Ziel und verbinden Sie dann Quellen und Vorlagen."
+      }
+    },
+    "boundaries": {
+      "alerts": "Inhaltsbezogene Warnungen folgen später. Diese Einrichtung definiert die Watchlist und ihren anfänglichen Sammelumfang."
+    }
+  },
+  "overview": {
+    "pipelineSetup": {
+      "title": "Briefing einrichten",
+      "open": "Briefing einrichten",
+      "progress": "Schritte der Briefing-Einrichtung",
+      "steps": {
+        "sources": "Quellen",
+        "cadence": "Rhythmus",
+        "briefing": "Briefing",
+        "delivery": "Zustellung",
+        "test": "Test"
+      },
+      "actions": {
+        "next": "Weiter zu {{step}}"
+      },
+      "source": {
+        "existing": "Vorhandene Quellen verwenden",
+        "new": "Neue Quelle hinzufügen",
+        "fallback": "Quelle {{id}}"
+      },
+      "sources": {
+        "help": "Wählen Sie vorhandene Quellen oder fügen Sie eine hinzu und testen Sie dann die Verbindung."
+      },
+      "sourcesLoading": "Quellen werden geladen...",
+      "sourcesError": "Feeds für den Einrichtungsassistenten konnten nicht geladen werden.",
+      "sourceTest": {
+        "action": "Quelle testen",
+        "ready": "Quelle ist bereit.",
+        "cancelled": "Quellentest abgebrochen.",
+        "failed": "Quellentest fehlgeschlagen. {{message}}",
+        "summary": "{{ready}} bereit, {{filtered}} gefiltert",
+        "sample": "Beispielelemente",
+        "readyItem": "Bereit",
+        "filteredItem": "Gefiltert",
+        "untitled": "Element ohne Titel"
+      },
+      "fields": {
+        "sources": "Quellen",
+        "sourceName": "Quellenname",
+        "sourceUrl": "Quellen-URL",
+        "monitorName": "Monitorname",
+        "schedule": "Zeitplan",
+        "timezone": "Zeitzone",
+        "intervalEvery": "Alle",
+        "intervalUnit": "Intervalleinheit",
+        "weekday": "Wochentag",
+        "hour": "Stunde",
+        "minute": "Minute",
+        "cronExpression": "Cron-Ausdruck",
+        "showName": "Sendungsname",
+        "premise": "Sendungskonzept",
+        "includeAudio": "Audio",
+        "audioHelp": "Eine abspielbare gesprochene Version hinzufügen.",
+        "audioMinutes": "Zieldauer in Minuten",
+        "speakerCount": "Besetzungsgröße",
+        "template": "Berichtsvorlage",
+        "audioProvider": "Audioanbieter überschreiben",
+        "audioModel": "Audiomodell überschreiben",
+        "customInstructions": "Benutzerdefinierte redaktionelle Anweisungen",
+        "emailDelivery": "E-Mail",
+        "emailRecipients": "E-Mail-Empfänger",
+        "chatbookDelivery": "Chatbook",
+        "chatbookTitle": "Chatbook-Titel"
+      },
+      "schedule": {
+        "manual": "Nur manuell",
+        "interval": "Alle N Stunden oder Minuten",
+        "daily": "Täglich",
+        "weekdays": "Werktags",
+        "weekly": "Wöchentlich",
+        "advanced": "Erweiterter Cron"
+      },
+      "intervalUnits": {
+        "hours": "Stunden",
+        "minutes": "Minuten"
+      },
+      "weekdays": {
+        "monday": "Montag",
+        "tuesday": "Dienstag",
+        "wednesday": "Mittwoch",
+        "thursday": "Donnerstag",
+        "friday": "Freitag",
+        "saturday": "Samstag",
+        "sunday": "Sonntag"
+      },
+      "advancedCron": "Erweiterter Cron",
+      "nextOccurrence": "Nächste Ausführung",
+      "manualOccurrence": "Nur manuell",
+      "nextOccurrencePending": "Speichern Sie einen gültigen Zeitplan, um die genaue Zeit zu berechnen.",
+      "schedulePreview": {
+        "loading": "Der genaue Zeitplan wird berechnet…",
+        "error": "Der genaue Zeitplan konnte nicht berechnet werden. Prüfen Sie Cron-Ausdruck und Zeitzone."
+      },
+      "briefing": {
+        "question": "Was möchten Sie erstellen?",
+        "help": "Wählen Sie die redaktionelle Form. Jede Option bleibt auf Ihren ausgewählten Quellen gegründet.",
+        "advanced": "Erweiterte Briefing-Einstellungen"
+      },
+      "formats": {
+        "concise_briefing": "Kurzes Briefing",
+        "solo_update": "Solo-Update",
+        "host_discussion": "Moderiertes Gespräch",
+        "sportscast": "Sportübertragung",
+        "culture_roundtable": "Kulturgespräch",
+        "custom": "Benutzerdefiniert"
+      },
+      "speaker": {
+        "defaultLabel": "Sprecher {{index}}",
+        "defaultRole": "Moderator",
+        "labelField": "Bezeichnung von Sprecher {{index}}",
+        "roleField": "Rolle von Sprecher {{index}}",
+        "voiceField": "Stimme von Sprecher {{index}}",
+        "personaField": "Persona von Sprecher {{index}}"
+      },
+      "preview": {
+        "generate": "Berichtsvorschau",
+        "diagnostics": "Vorschaudiagnose",
+        "context": "Vorschauausführung: {{runId}}",
+        "noRunContext": "Führen Sie einen Monitor erfolgreich aus, bevor Sie diesen Bericht in der Vorschau anzeigen.",
+        "templateRequired": "Wählen Sie vor der Vorschau eine Vorlage aus.",
+        "templateEmpty": "Die ausgewählte Vorlage ist leer.",
+        "emptyResult": "Die Vorschau enthielt keinen gerenderten Inhalt.",
+        "error": "Vorschau konnte nicht erstellt werden."
+      },
+      "delivery": {
+        "help": "Berichte sind immer enthalten. Die externe Zustellung wartet, bis die ausgewählten Artefakte bereit sind.",
+        "reports": "Berichte",
+        "required": "Erforderlicher Speicher",
+        "alwaysOn": "Immer aktiv"
+      },
+      "receipt": {
+        "labels": {
+          "schedule": "Zeitplan",
+          "sources": "Quellen",
+          "artifacts": "Artefakte",
+          "format": "Format",
+          "showName": "Sendungsname",
+          "cast": "Besetzung",
+          "duration": "Zieldauer",
+          "destinations": "Ziele"
+        },
+        "schedule": {
+          "manual": "Nur manuell",
+          "scheduled": "{{date}} ({{timezone}})"
+        },
+        "sources": "{{count}} Quellen",
+        "sources_one": "{{count}} Quelle",
+        "sources_other": "{{count}} Quellen",
+        "artifacts": {
+          "textReport": "Textbericht",
+          "showNotes": "Sendungsnotizen",
+          "audio": "Audio"
+        },
+        "formats": {
+          "concise_briefing": "kurzes Briefing",
+          "solo_update": "Solo-Update",
+          "host_discussion": "moderiertes Gespräch",
+          "sportscast": "Sportübertragung",
+          "culture_roundtable": "Kulturgespräch",
+          "custom": "benutzerdefiniertes Programm"
+        },
+        "speakerStyle": {
+          "1": "solo",
+          "2": "mit zwei Moderatoren",
+          "3": "mit drei Moderatoren",
+          "4": "mit vier Moderatoren"
+        },
+        "programWithSpeakers": "{{speakers}} {{format}}",
+        "cast": "{{count}} Sprecher",
+        "cast_one": "{{count}} Sprecher",
+        "cast_other": "{{count}} Sprecher",
+        "duration": "Ziel: {{count}} Minuten",
+        "duration_one": "Ziel: {{count}} Minute",
+        "duration_other": "Ziel: {{count}} Minuten",
+        "destinations": {
+          "email": "E-Mail: {{recipients}}",
+          "chatbook": "Chatbook: {{title}}"
+        },
+        "untitledChatbook": "Ohne Titel",
+        "dstChange": "Die folgende Ausführung verwendet nach der Zeitumstellung {{timezoneName}}: {{date}}."
+      },
+      "test": {
+        "providerDisclosure": "Tests verwenden Ihre konfigurierten LLM- und Sprachsyntheseanbieter. Ein Beispiel ist auf 60 Sekunden begrenzt; ein vollständiger Test verwendet die Zieldauer.",
+        "textProviderDisclosure": "Tests verwenden Ihren konfigurierten LLM-Anbieter. Reine Texttests verwenden keine Sprachsynthese.",
+        "receipt": "Aktivierungsübersicht",
+        "manualReceipt": "Dieses Briefing wird manuell ausgeführt, speichert ausgewählte Artefakte unter Berichte und kontaktiert kein externes Ziel, sofern Sie nicht Test senden wählen.",
+        "scheduledReceipt": "{{schedule}}: Aktualisierungen aus {{sources}} sammeln, {{artifacts}} als {{program}}{{duration}} erzeugen und anschließend unter {{destinations}} speichern und zustellen.",
+        "audioTestRequired": "Erzeugen Sie vor der Aktivierung erfolgreich eine Audioprobe oder einen vollständigen Test.",
+        "progress": "Testfortschritt",
+        "stages": {
+          "collection": "Quellen sammeln",
+          "selection": "Aktualisierungen auswählen",
+          "text": "Bericht erstellen",
+          "audio": "Audio erstellen",
+          "persistence": "Unter Berichte speichern",
+          "audioScript": "Audioskript verfassen",
+          "audioScriptPersistence": "Audioskript speichern",
+          "audioPersistence": "Audio unter Berichte speichern",
+          "delivery": "Testzustellung prüfen",
+          "deliveryAdapter": "An {{adapter}} zustellen",
+          "unknown": "Phase {{stage}}"
+        },
+        "sample": "60-Sekunden-Beispiel erstellen",
+        "full": "Vollständige Testepisode erstellen",
+        "text": "Testbericht erstellen",
+        "send": "Test senden",
+        "activate": "Zeitplan aktivieren",
+        "ready": "Test abgeschlossen. Ihr Briefing ist bereit. Dieser Entwurf bleibt inaktiv, bis Sie seinen Zeitplan aktivieren.",
+        "running": "Ausführung {{runId}} läuft noch: {{stage}}. Sie können die Einrichtung schließen und sie in der Übersicht verfolgen.",
+        "failedStage": "{{stage}} ist fehlgeschlagen. Öffnen Sie Ausführung {{runId}} und versuchen Sie diese Phase erneut.",
+        "failedWithCode": "{{stage}} ist fehlgeschlagen ({{code}}). Öffnen Sie Ausführung {{runId}} und versuchen Sie diese Phase erneut.",
+        "cancelledStage": "{{stage}} wurde abgebrochen. Ihr Entwurf wurde gespeichert.",
+        "cancelledWithCode": "{{stage}} wurde abgebrochen ({{code}}). Ihr Entwurf wurde gespeichert.",
+        "cancelled": "Test abgebrochen. Ihr Entwurf wurde gespeichert.",
+        "failed": "Test fehlgeschlagen. Ihr Entwurf wurde gespeichert. {{message}}",
+        "status": {
+          "not_started": "Nicht gestartet",
+          "queued": "In Warteschlange",
+          "running": "Wird ausgeführt",
+          "ready": "Bereit",
+          "failed": "Fehlgeschlagen",
+          "skipped": "Übersprungen",
+          "cancelled": "Abgebrochen"
+        }
+      },
+      "activate": {
+        "ready": "Zeitplan aktiviert.",
+        "failed": "Zeitplan konnte nicht aktiviert werden. Ihr Entwurf wurde gespeichert. {{message}}"
+      },
+      "validation": {
+        "sourcesRequired": "Wählen Sie vor dem Fortfahren mindestens eine Quelle.",
+        "sourceNameRequired": "Geben Sie einen Quellennamen ein.",
+        "sourceUrlInvalid": "Geben Sie eine gültige HTTP- oder HTTPS-Quellen-URL ein.",
+        "monitorNameRequired": "Geben Sie einen Monitornamen ein.",
+        "timezoneInvalid": "Geben Sie eine gültige IANA-Zeitzone ein.",
+        "intervalInvalid": "Geben Sie ein unterstütztes Zeitplanintervall ein.",
+        "hourInvalid": "Geben Sie eine Stunde von 0 bis 23 ein.",
+        "minuteInvalid": "Geben Sie eine Minute von 0 bis 59 ein.",
+        "cronInvalid": "Geben Sie einen gültigen fünfteiligen Cron-Ausdruck ein.",
+        "cronTooFrequent": "Wählen Sie einen Zeitplan mit mindestens fünf Minuten Abstand.",
+        "templateRequired": "Geben Sie eine Berichtsvorlage ein.",
+        "castSizeInvalid": "Wählen Sie ein bis vier Sprecher.",
+        "castIdsInvalid": "Jeder Sprecher benötigt eine eindeutige Identität.",
+        "castVoicesRequired": "Wählen Sie für jeden Sprecher eine Stimme.",
+        "audioMinutesInvalid": "Geben Sie eine Dauer von 1 bis 60 Minuten ein.",
+        "emailInvalid": "Geben Sie mindestens eine gültige E-Mail-Adresse ein."
+      },
+      "validationError": "Prüfen Sie die markierten Felder, bevor Sie fortfahren."
+    },
+    "latest": {
+      "heading": {
+        "briefing": "Neuestes Briefing",
+        "episode": "Neueste Episode"
+      },
+      "empty": {
+        "scheduled": "Ihr erstes Briefing ist für {{date}} geplant.",
+        "manual": "Nicht gestartet. Jetzt testen."
+      },
+      "generatedAt": "Erstellt {{date}}",
+      "untitled": "Übersicht {{runId}}",
+      "artifacts": "Bericht / Audio",
+      "audio": "Audio",
+      "audioFailed": "Audio fehlgeschlagen",
+      "ready": "Bereit",
+      "saved": "Gespeichert",
+      "waiting": "Wartet",
+      "script": "Audio Bericht",
+      "stageWithStatus": "{{stage}}: {{status}}",
+      "noUpdates": "Es wurden keine passenden Aktualisierungen gefunden. Ein Status-{{noun}} wurde gespeichert.",
+      "nextRun": "Nächster Lauf: {{date}}",
+      "nextRunRelative": "Nächster Lauf: {{relative}}",
+      "counts": "Briefing: Enthalten, Ungelesen, Neu",
+      "count": {
+        "included": "Enthalten {{count}}",
+        "unread": "Ungelesen {{count}}",
+        "new": "Neu {{count}}"
+      },
+      "provenance": {
+        "sources": "{{count}} verfolgte Quellen",
+        "sources_zero": "{{count}} verfolgte Quellen",
+        "sources_one": "{{count}} verfolgte Quelle",
+        "sources_two": "{{count}} verfolgte Quellen",
+        "sources_few": "{{count}} verfolgte Quellen",
+        "sources_many": "{{count}} verfolgte Quellen",
+        "sources_other": "{{count}} verfolgte Quellen"
+      },
+      "delivery": {
+        "reports": "Alle Berichte anzeigen",
+        "retryAria": "Erneut versuchen {{adapter}}: {{name}}",
+        "retryUnknownAria": "Ergebnis unbekannt. Erneut versuchen {{adapter}}: {{name}}",
+        "reviewRetry": "Prüfen und erneut versuchen",
+        "unknownConfirmation": "Der Anbieter hat die Zustellung über {{adapter}} nicht bestätigt. Ein erneuter Versuch kann ein Duplikat senden. Prüfen Sie das Ziel und fahren Sie nur fort, wenn dieses Risiko vertretbar ist. ({{destination}})",
+        "chatbookDestination": "Chatbook",
+        "confirmRetry": "Erneut versuchen Zustellung",
+        "confirmRetryAria": "Erneut versuchen {{adapter}} Zustellung",
+        "recipientCount": "{{count}} Empfänger",
+        "recipientCount_zero": "{{count}} Empfänger",
+        "recipientCount_one": "{{count}} Empfänger",
+        "recipientCount_two": "{{count}} Empfänger",
+        "recipientCount_few": "{{count}} Empfänger",
+        "recipientCount_many": "{{count}} Empfänger",
+        "recipientCount_other": "{{count}} Empfänger",
+        "reviewAcknowledgement": "Ich habe das Ziel geprüft und akzeptiere das Risiko einer doppelten Zustellung.",
+        "reviewSettings": "Prüfen Einstellungen",
+        "reviewTitle": "Prüfen {{adapter}} Zustellung"
+      },
+      "playback": {
+        "region": "Audio: {{name}}",
+        "playAria": "{{name}} abspielen",
+        "pauseAria": "{{name}} pausieren",
+        "resumeAria": "{{name}} fortsetzen",
+        "seekAria": "Audio: {{name}}",
+        "loading": "Audio wird geladen",
+        "error": "Audio fehlgeschlagen. Öffnen Bericht / Neu erzeugen Audio.",
+        "play": "Abspielen",
+        "pause": "Pause",
+        "resume": "Fortsetzen",
+        "accessError": "Audio: Zugriff fehlgeschlagen. Prüfen Sie Ihre Anmeldung und Serververbindung.",
+        "missing": "Audio ist nicht mehr verfügbar."
+      },
+      "actions": {
+        "label": "Neuestes Briefing",
+        "openReport": "Öffnen {{report}}",
+        "openReportAria": "Öffnen {{report}}: {{name}}",
+        "regenerateAudio": "Neu erzeugen Audio",
+        "regenerateAudioAria": "Neu erzeugen {{style}} {{noun}} Audio: {{name}}",
+        "retry": "Erneut versuchen",
+        "retrySaveAria": "Erneut versuchen gespeichert Bericht: {{name}}",
+        "retryTextAria": "Erneut versuchen Bericht: {{name}}",
+        "retryStage": "Erneut versuchen: {{stage}}",
+        "inspect": "Lauf prüfen",
+        "inspectAria": "Lauf prüfen {{runId}}: {{name}}",
+        "viewReports": "Alle Berichte anzeigen",
+        "testNow": "Jetzt testen",
+        "downloadAudio": "Herunterladen Audio",
+        "downloadAudioAria": "Herunterladen Audio: {{name}}",
+        "retryExactAria": "Erneut versuchen {{stage}}: {{name}}",
+        "reviewScript": "Prüfen Audio Bericht",
+        "reviewScriptAria": "Prüfen Audio Bericht: {{name}}"
+      },
+      "announcements": {
+        "blockingFailure": "{{name}} fehlgeschlagen. Lauf prüfen {{runId}}.",
+        "delivered": "{{name}}: zugestellt.",
+        "nextRunUpdated": "{{name}}: nächster lauf.",
+        "partialAudioFailure": "{{name}}: Shownotizen bereit, Audio fehlgeschlagen.",
+        "readyText": "{{name}}: Bericht bereit.",
+        "readyWithAudio": "{{name}}: Bereit. Audio / Shownotizen.",
+        "stageProgress": "{{name}}: {{stage}} {{status}}.",
+        "testQueued": "Jetzt testen: eingereiht."
+      },
+      "retryError": "Erneut versuchen fehlgeschlagen. Lauf prüfen.",
+      "regenerateError": "Neu erzeugen Audio: fehlgeschlagen.",
+      "testError": "Jetzt testen: fehlgeschlagen.",
+      "status": {
+        "ready": "Bereit",
+        "failed": "Fehlgeschlagen",
+        "saved": "Gespeichert",
+        "waiting": "Wartet",
+        "running": "Läuft",
+        "queued": "Eingereiht",
+        "notStarted": "Nicht gestartet",
+        "notSelected": "Nicht ausgewählt",
+        "cancelled": "Abgebrochen",
+        "delivered": "Zugestellt",
+        "unknown": "Ergebnis unbekannt",
+        "sending": "Wird gesendet",
+        "stale": "Veraltet",
+        "superseded": "Ersetzt",
+        "unavailable": "Nicht verfügbar",
+        "partial": "Teilweise"
+      },
+      "stages": {
+        "renderText": "Bericht",
+        "persistText": "Gespeichert Bericht",
+        "composeScript": "Audio Bericht",
+        "persistScript": "Gespeichert Audio Bericht",
+        "generateAudio": "Audio",
+        "persistAudio": "Gespeichert Audio"
+      },
+      "nouns": {
+        "briefing": "Übersicht",
+        "episode": "Episode",
+        "report": "Bericht",
+        "showNotes": "Shownotizen"
+      },
+      "scriptAccessError": "Audio Bericht: Zugriff fehlgeschlagen. Prüfen Sie Ihre Anmeldung und Serververbindung.",
+      "scriptLoading": "Wird geladen Audio Bericht",
+      "scriptMissing": "Audio Bericht ist nicht mehr verfügbar.",
+      "recovery": {
+        "renderText": "Wird erstellt Bericht",
+        "persistText": "Wird gespeichert Bericht",
+        "composeScript": "Wird verfasst Audio Bericht",
+        "persistScript": "Wird gespeichert Audio Bericht",
+        "generateAudio": "Wird erstellt Audio",
+        "persistAudio": "Wird gespeichert Audio"
+      }
+    }
+  },
+  "outputs": {
+    "openInNewTabAria": "In neuem Tab öffnen: {{title}}",
+    "chatAboutAria": "Darüber chatten: {{title}}",
+    "downloadAria": "Herunterladen: {{title}}",
+    "artifactMissing": "ist nicht mehr verfügbar.",
+    "artifactAuthError": "Zugriff verweigert. Prüfen Sie Ihre Anmeldung.",
+    "artifactAccessError": "Zugriff fehlgeschlagen. Prüfen Sie Ihre Anmeldung und Serververbindung."
   }
 }

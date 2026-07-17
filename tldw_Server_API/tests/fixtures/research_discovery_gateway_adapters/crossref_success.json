@@ -1,0 +1,39 @@
+{
+  "status": "ok",
+  "message-type": "work-list",
+  "message-version": "1.0.0",
+  "message": {
+    "total-results": 1,
+    "items": [
+      {
+        "DOI": "10.5555/shared.discovery.2026",
+        "title": [
+          "Shared Discovery Record"
+        ],
+        "author": [
+          {
+            "given": "Ada",
+            "family": "Researcher",
+            "ORCID": "https://orcid.org/0000-0002-1825-0097"
+          }
+        ],
+        "abstract": "<jats:p>A sanitized abstract for discovery adapter testing.</jats:p>",
+        "URL": "https://doi.org/10.5555/shared.discovery.2026",
+        "link": [
+          {
+            "URL": "https://example.org/research/shared-discovery.html",
+            "content-type": "text/html",
+            "content-version": "vor",
+            "intended-application": "text-mining"
+          },
+          {
+            "URL": "https://example.org/research/shared-discovery.pdf",
+            "content-type": "application/pdf",
+            "content-version": "vor",
+            "intended-application": "text-mining"
+          }
+        ]
+      }
+    ]
+  }
+}

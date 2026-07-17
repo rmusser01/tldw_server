@@ -305,7 +305,31 @@ export async function completeFirstSourcePasteIngest(
     .getByRole("button", { name: /add pasted text to queue/i })
     .click()
   await expect(page.getByText(/queued/i)).toBeVisible({ timeout: 20_000 })
-  await page.getByRole("button", { name: /use defaults & process/i }).click()
+
+  await page.getByRole("button", { name: /configure \d+ items/i }).click()
+  const analysisSwitch = page
+    .getByRole("switch", { name: /^Ingestion options\s*[–-]\s*analysis$/i })
+    .first()
+  await expect(analysisSwitch).toBeVisible({ timeout: 20_000 })
+  if ((await analysisSwitch.getAttribute("aria-checked")) === "true") {
+    await analysisSwitch.click()
+    await expect(analysisSwitch).toHaveAttribute("aria-checked", "false")
+  }
+  const chunkingSwitch = page
+    .getByRole("switch", { name: /^Ingestion options\s*[–-]\s*chunking$/i })
+    .first()
+  await expect(chunkingSwitch).toBeVisible({ timeout: 20_000 })
+  if ((await chunkingSwitch.getAttribute("aria-checked")) === "true") {
+    await chunkingSwitch.click()
+    await expect(chunkingSwitch).toHaveAttribute("aria-checked", "false")
+  }
+
+  await page.getByRole("button", { name: /^next$/i }).click()
+  await expect(page.getByText(/ready to process/i)).toBeVisible({
+    timeout: 20_000,
+  })
+  await page.getByRole("button", { name: /start processing/i }).click()
+
   await expect(page.getByTestId("wizard-results-step")).toBeVisible({
     timeout: 120_000,
   })

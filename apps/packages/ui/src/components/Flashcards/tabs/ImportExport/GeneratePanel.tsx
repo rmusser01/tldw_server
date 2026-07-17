@@ -68,6 +68,7 @@ const ADVANCED_MIX_ERROR_ID = "flashcards-generate-plan-error"
  */
 export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporterProps> = ({
   initialIntent,
+  sourceReviewIntent,
   onTransferAction
 }) => {
   const { t } = useTranslation(["option", "common"])
@@ -98,6 +99,20 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
   }, [llmProvidersQuery.data, llmProvidersQuery.isLoading, llmProvidersQuery.isError])
 
   const sourceContext = React.useMemo<GenerateSourceContext | null>(() => {
+    const sourceReviewItem =
+      sourceReviewIntent?.source_items.length === 1
+        ? sourceReviewIntent.source_items[0]
+        : null
+    if (sourceReviewItem) {
+      return {
+        sourceType: sourceReviewItem.source_type,
+        sourceId: sourceReviewItem.source_id,
+        sourceTitle:
+          sourceReviewItem.label?.trim() ||
+          sourceReviewItem.source_title?.trim() ||
+          null
+      }
+    }
     if (!initialIntent) return null
     if (
       initialIntent.sourceType !== "manual" &&
@@ -117,11 +132,15 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
       sourceId: sourceId || (initialIntent.sourceType === "manual" ? sourceTitle : null),
       sourceTitle
     }
-  }, [initialIntent])
+  }, [initialIntent, sourceReviewIntent])
 
-  const [sourceText, setSourceText] = React.useState(() => initialIntent?.text || "")
+  const [sourceText, setSourceText] = React.useState(
+    () => sourceReviewIntent?.text || initialIntent?.text || ""
+  )
   const [numCards, setNumCards] = React.useState(10)
-  const [cardType, setCardType] = React.useState<"basic" | "basic_reverse" | "cloze">("basic")
+  const [cardType, setCardType] = React.useState<"basic" | "basic_reverse" | "cloze">(
+    () => (sourceReviewIntent?.activity_type === "cloze" ? "cloze" : "basic")
+  )
   const [advancedMixEnabled, setAdvancedMixEnabled] = React.useState(false)
   const [cardPlanDraft, setCardPlanDraft] = React.useState<CardPlanDraftItem[]>(DEFAULT_CARD_PLAN_DRAFT)
   const [difficulty, setDifficulty] = React.useState<"easy" | "medium" | "hard" | "mixed">("mixed")
@@ -175,6 +194,16 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
     !sourceText.trim() ||
     !hasLlmProviders ||
     advancedPlanInvalid
+
+  React.useEffect(() => {
+    if (!sourceReviewIntent) return
+    setSourceText(sourceReviewIntent.text)
+    setCardType(sourceReviewIntent.activity_type === "cloze" ? "cloze" : "basic")
+    setAdvancedMixEnabled(false)
+    setGeneratedCards([])
+    setGenerationError(null)
+    setSaveStatus(null)
+  }, [sourceReviewIntent])
 
   React.useEffect(() => {
     if (targetDeckId != null) return
@@ -353,8 +382,12 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
             model_type: card.model_type,
             reverse: card.model_type === "basic_reverse",
             is_cloze: card.model_type === "cloze",
-            source_ref_type: sourceContext?.sourceType,
-            source_ref_id: sourceContext?.sourceId || undefined
+            ...(sourceContext?.sourceType && sourceContext.sourceId
+              ? {
+                  source_ref_type: sourceContext.sourceType,
+                  source_ref_id: sourceContext.sourceId
+                }
+              : {})
           })
           created += 1
           successfulDraftIds.add(card.id)

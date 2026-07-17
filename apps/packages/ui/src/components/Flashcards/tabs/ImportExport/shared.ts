@@ -4,6 +4,7 @@ import type {
   StructuredQaImportPreviewDraft
 } from "@/services/flashcards"
 import type { FlashcardsGenerateIntent } from "@/services/tldw/flashcards-generate-handoff"
+import type { SourceReviewFlashcardsIntent } from "@/services/tldw/source-review-handoff"
 
 import { getUtf8ByteLength } from "../../utils/field-byte-limit"
 
@@ -50,6 +51,7 @@ export interface GenerateSourceContext {
 
 export interface GeneratePanelProps {
   initialIntent?: FlashcardsGenerateIntent | null
+  sourceReviewIntent?: SourceReviewFlashcardsIntent | null
 }
 
 export type TransferActionStatus = "success" | "warning" | "error"

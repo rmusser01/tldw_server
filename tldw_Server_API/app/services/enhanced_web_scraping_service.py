@@ -24,6 +24,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import
     async_resolve_chunking_options_and_plan,
     attach_chunking_plan_to_result,
 )
+from tldw_Server_API.app.core.Ingestion_Media_Processing.logging_safety import redact_url_for_log
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
 from tldw_Server_API.app.core.Metrics import get_metrics_registry
 from tldw_Server_API.app.core.testing import is_truthy
@@ -427,6 +428,7 @@ class WebScrapingService:
             user_agent=user_agent,
             custom_headers=custom_headers,
             user_id=str(user_id) if user_id is not None else None,
+            allow_llm_extraction=summarize,
         )
 
         logger.info(f"Scraping completed, got {len(results)} results")
@@ -479,6 +481,7 @@ class WebScrapingService:
             custom_headers=custom_headers,
             user_id=str(user_id) if user_id is not None else None,
             task_id=task_id,
+            allow_llm_extraction=summarize,
         )
 
         # Add summarization if requested
@@ -544,6 +547,7 @@ class WebScrapingService:
             score_threshold_override=score_threshold,
             crawl_strategy=crawl_strategy,
             task_id=task_id,
+            allow_llm_extraction=summarize,
         )
 
         # Add summarization if requested
@@ -606,6 +610,7 @@ class WebScrapingService:
                 score_threshold_override=score_threshold,
                 crawl_strategy=crawl_strategy,
                 task_id=task_id,
+                allow_llm_extraction=summarize,
             )
 
             # Add summarization if requested
@@ -709,6 +714,8 @@ class WebScrapingService:
         """Store results in database"""
         media_ids = []
         errors = []
+        skipped_articles = 0
+        duplicate_articles = 0
 
         logger.info(f"Storing {len(result.get('articles', []))} articles to database")
 
@@ -742,12 +749,39 @@ class WebScrapingService:
             _batch_t0 = time.perf_counter()
             for article in result.get("articles", []):
                 logger.debug(
-                    f"Processing article: url={article.get('url')}, "
+                    f"Processing article: url={redact_url_for_log(article.get('url'))}, "
                     f"extraction_successful={article.get('extraction_successful')}"
                 )
                 if not article.get("extraction_successful"):
+                    if (
+                        article.get("is_duplicate") is True
+                        or article.get("error_code") == "duplicate_content"
+                    ):
+                        skipped_articles += 1
+                        duplicate_articles += 1
+                        logger.info(
+                            f"Skipping duplicate article: "
+                            f"{redact_url_for_log(article.get('url', 'Unknown URL'))}"
+                        )
+                        continue
                     error_msg = f"Failed to extract: {article.get('url', 'Unknown URL')}"
-                    logger.warning(error_msg)
+                    logger.warning(
+                        f"Failed to extract: {redact_url_for_log(article.get('url', 'Unknown URL'))}"
+                    )
+                    errors.append(error_msg)
+                    continue
+
+                content_text = article.get("content")
+                body_text = (
+                    ContentMetadataHandler.strip_metadata(content_text)
+                    if isinstance(content_text, str)
+                    else content_text
+                )
+                if not isinstance(body_text, str) or not body_text.strip():
+                    error_msg = f"No extracted content: {article.get('url', 'Unknown URL')}"
+                    logger.warning(
+                        f"No extracted content: {redact_url_for_log(article.get('url', 'Unknown URL'))}"
+                    )
                     errors.append(error_msg)
                     continue
 
@@ -790,7 +824,7 @@ class WebScrapingService:
 
                     content_with_metadata = ContentMetadataHandler.format_content_with_metadata(
                         url=article.get("url", ""),
-                        content=article.get("content", ""),
+                        content=body_text,
                         pipeline=article.get("method", "enhanced"),
                         additional_metadata={
                             "date": article.get("date", ""),
@@ -925,6 +959,19 @@ class WebScrapingService:
                     except _WEB_SCRAPE_NONCRITICAL_EXCEPTIONS as me:
                         logger.debug(f"webscraping.persist: metric observe failed: {me}")
 
+                    title = article.get("title", "Untitled")
+                    if media_id and message in {
+                        f"Media '{title}' already exists. Overwrite not enabled.",
+                        f"Media '{title}' already exists (concurrent insert). Overwrite not enabled.",
+                    }:
+                        skipped_articles += 1
+                        duplicate_articles += 1
+                        logger.info(
+                            f"Skipping duplicate article: "
+                            f"{redact_url_for_log(article.get('url', 'Unknown URL'))}"
+                        )
+                        continue
+
                     if media_id:
                         media_ids.append(media_id)
                         logger.info(f"Stored article with media_id: {media_id}, uuid: {media_uuid}")
@@ -938,7 +985,11 @@ class WebScrapingService:
                         except _WEB_SCRAPE_NONCRITICAL_EXCEPTIONS as me:
                             logger.debug(f"webscraping.persist: metric increment failed: {me}")
                     else:
-                        logger.warning(f"Failed to get media_id for article: {article.get('url')}")
+                        logger.warning(
+                            f"Failed to get media_id for article: "
+                            f"{redact_url_for_log(article.get('url'))}"
+                        )
+                        errors.append("Storage failed for article")
                         try:
                             if reg:
                                 reg.increment(
@@ -949,8 +1000,8 @@ class WebScrapingService:
                         except _WEB_SCRAPE_NONCRITICAL_EXCEPTIONS as me:
                             logger.debug(f"webscraping.persist: metric increment failed: {me}")
 
-                except _WEB_SCRAPE_NONCRITICAL_EXCEPTIONS as e:
-                    logger.error(f"Failed to store article: {e}")
+                except _WEB_SCRAPE_NONCRITICAL_EXCEPTIONS:
+                    logger.error("Failed to store article")
                     errors.append("Storage failed for article")
                     try:
                         if reg:
@@ -971,11 +1022,23 @@ class WebScrapingService:
             except _WEB_SCRAPE_NONCRITICAL_EXCEPTIONS as me:
                 logger.debug(f"webscraping.persist: batch metric observe failed: {me}")
 
+        stored_articles = len(media_ids)
+        status = (
+            "duplicate"
+            if stored_articles == 0
+            and duplicate_articles > 0
+            and duplicate_articles == len(result.get("articles", []))
+            and not errors
+            else "persist-ok"
+        )
+
         return {
-            "status": "persist-ok",
+            "status": status,
             "media_ids": media_ids,
             "total_articles": len(result.get("articles", [])),
-            "stored_articles": len(media_ids),
+            "stored_articles": stored_articles,
+            "skipped_articles": skipped_articles,
+            "duplicate_articles": duplicate_articles,
             "method": result.get("method"),
             "errors": errors if errors else None,
         }

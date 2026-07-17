@@ -17,7 +17,7 @@ const watchlistsBasics: TutorialDefinition = {
   priority: 1,
   steps: [
     {
-      target: '[data-testid="watchlists-overview-onboarding-path-beginner"], [data-testid="watchlists-overview-cta-guided-setup"]',
+      target: '[data-testid="watchlists-outcome-first-region"]',
       titleKey: "tutorials:watchlists.basics.setupTitle",
       titleFallback: "Quick Setup",
       contentKey: "tutorials:watchlists.basics.setupContent",
@@ -27,7 +27,7 @@ const watchlistsBasics: TutorialDefinition = {
       disableBeacon: true
     },
     {
-      target: '[data-testid="watchlists-overview-cta-add-feed"]',
+      target: '[data-tour="watchlists-add-feeds"]',
       titleKey: "tutorials:watchlists.basics.feedsTitle",
       titleFallback: "Add Feeds",
       contentKey: "tutorials:watchlists.basics.feedsContent",
@@ -36,7 +36,7 @@ const watchlistsBasics: TutorialDefinition = {
       placement: "bottom"
     },
     {
-      target: '[data-testid="watchlists-overview-cta-create-monitor"]',
+      target: '[data-tour="watchlists-create-monitors"]',
       titleKey: "tutorials:watchlists.basics.monitorsTitle",
       titleFallback: "Create Monitors",
       contentKey: "tutorials:watchlists.basics.monitorsContent",
@@ -45,7 +45,7 @@ const watchlistsBasics: TutorialDefinition = {
       placement: "bottom"
     },
     {
-      target: '[data-testid="watchlists-items-list"], .ant-tabs-tab',
+      target: '[data-tour="watchlists-review-updates"]',
       titleKey: "tutorials:watchlists.basics.articlesTitle",
       titleFallback: "Review Articles",
       contentKey: "tutorials:watchlists.basics.articlesContent",

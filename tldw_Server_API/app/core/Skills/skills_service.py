@@ -23,19 +23,14 @@ import shutil
 import stat
 import time
 import zipfile
+from collections.abc import AsyncIterator, Coroutine
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path, PurePosixPath
-from typing import Any, Optional
+from typing import Any, Optional, TypeVar
 
 from loguru import logger
 
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
-    CharactersRAGDB,
-    CharactersRAGDBError,
-    ConflictError,
-    InputError,
-)
 from tldw_Server_API.app.core.Context_Integrity.canonicalization import (
     canonical_filesystem_digest,
 )
@@ -44,6 +39,13 @@ from tldw_Server_API.app.core.Context_Integrity.resolver import (
     ContextIntegrityResolver,
     get_global_context_integrity_resolver,
 )
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+    CharactersRAGDB,
+    CharactersRAGDBError,
+    ConflictError,
+    InputError,
+)
+from tldw_Server_API.app.core.Infrastructure.distributed_lock import FileLock
 from tldw_Server_API.app.core.Skills.exceptions import (
     SkillConflictError,
     SkillNotFoundError,
@@ -64,8 +66,10 @@ MAX_SUPPORTING_FILE_BYTES = 500000
 MAX_SUPPORTING_FILES_TOTAL_BYTES = 5 * 1024 * 1024  # 5MB
 MAX_SKILL_MD_BYTES = 500000
 MAX_ZIP_IMPORT_ENTRIES = 100
+SKILLS_TRASH_LOCK_TIMEOUT_SECONDS = 10.0
 SKILL_INTEGRITY_TEXT_SUFFIXES = {".md", ".txt", ".json", ".yaml", ".yml", ".py", ".sh"}
 SkillFileFingerprint = tuple[tuple[str, int, int, int, int, int], ...]
+_TrashResult = TypeVar("_TrashResult")
 _TRACEBACK_ERROR_MARKERS = (
     "traceback (most recent call last):",
     "stack trace",
@@ -245,10 +249,14 @@ class SkillsService:
         self.user_id = user_id
         self.base_path = Path(base_path)
         self.skills_dir = self.base_path / "skills"
+        self.trash_dir = self.skills_dir / ".trash"
+        self.cleanup_dir = self.trash_dir / ".cleanup"
+        self.trash_lock_path = self.skills_dir / ".trash.lock"
         self.db = db
         self._parser = SkillParser()
         self._sync_interval = sync_interval
-        self._last_sync_time: float = 0.0
+        self._last_sync_time: float | None = None
+        self._startup_maintenance_complete = False
         self.integrity_resolver = (
             integrity_resolver if integrity_resolver is not None else get_global_context_integrity_resolver()
         )
@@ -280,6 +288,55 @@ class SkillsService:
             raise SkillsError("SkillsService requires a database instance for registry operations.")
         return self.db
 
+    @staticmethod
+    async def _await_task_completion(
+        task: asyncio.Task[_TrashResult],
+    ) -> tuple[_TrashResult, asyncio.CancelledError | None]:
+        """Wait for a task to finish while recording cancellation of the caller."""
+        cancellation: asyncio.CancelledError | None = None
+        while True:
+            try:
+                return await asyncio.shield(task), cancellation
+            except asyncio.CancelledError as error:
+                if task.cancelled():
+                    raise
+                if cancellation is None:
+                    cancellation = error
+
+    async def _finish_trash_mutation(
+        self,
+        mutation: Coroutine[Any, Any, _TrashResult],
+    ) -> _TrashResult:
+        """Finish a locked Trash transaction before propagating caller cancellation."""
+        task = asyncio.create_task(mutation)
+        result, cancellation = await self._await_task_completion(task)
+        if cancellation is not None:
+            raise cancellation
+        return result
+
+    @contextlib.asynccontextmanager
+    async def _trash_operation_lock(self) -> AsyncIterator[None]:
+        """Serialize Trash filesystem and registry transitions for this user."""
+        lock = FileLock(
+            self.trash_lock_path,
+            timeout=SKILLS_TRASH_LOCK_TIMEOUT_SECONDS,
+        )
+        acquire_task = asyncio.create_task(asyncio.to_thread(lock.acquire))
+        acquired, cancellation = await self._await_task_completion(acquire_task)
+        if cancellation is not None:
+            if acquired:
+                lock.release()
+            raise cancellation
+        if not acquired:
+            raise SkillStorageError(
+                "Skills Trash is busy; try again.",
+                path=str(self.trash_dir),
+            )
+        try:
+            yield
+        finally:
+            lock.release()
+
     def _get_skill_dir(self, name: str) -> Path:
         """Get the directory path for a skill."""
         safe_name = self._normalize_and_validate_skill_name(name)
@@ -290,6 +347,653 @@ class SkillsService:
         except ValueError as e:
             raise SkillValidationError(f"Invalid skill name: {name}", field="name") from e
         return path
+
+    def _ensure_trash_directory(self) -> Path:
+        """Return a non-symlinked Trash directory under the user skills root."""
+        try:
+            self.trash_dir.mkdir(parents=True, exist_ok=True)
+            trash_stat = self.trash_dir.lstat()
+        except OSError as e:
+            raise SkillStorageError(
+                f"Failed to prepare Skills Trash: {e}",
+                path=str(self.trash_dir),
+            ) from e
+        if not stat.S_ISDIR(trash_stat.st_mode) or stat.S_ISLNK(trash_stat.st_mode):
+            raise SkillStorageError(
+                "Skills Trash must be a regular directory",
+                path=str(self.trash_dir),
+            )
+        return self.trash_dir
+
+    def _get_archive_dir(self, row: dict[str, Any]) -> Path:
+        """Resolve the archive directory for a deleted registry row."""
+        trash_dir = self._ensure_trash_directory()
+        trash_root = trash_dir.resolve(strict=False)
+        archive_id = str(row.get("uuid") or "")
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", archive_id):
+            raise SkillStorageError(
+                "Skill archive identifier is invalid",
+                path=str(row.get("directory_path") or ""),
+            )
+        archive_path = trash_root / archive_id
+
+        try:
+            archive_path.relative_to(trash_root)
+        except ValueError as e:
+            raise SkillStorageError(
+                "Skill archive path escapes Skills Trash",
+                path=str(archive_path),
+            ) from e
+        try:
+            archive_stat = archive_path.lstat()
+        except FileNotFoundError:
+            pass
+        except OSError as e:
+            raise SkillStorageError(
+                f"Failed to inspect skill archive path: {e}",
+                path=str(archive_path),
+            ) from e
+        else:
+            if stat.S_ISLNK(archive_stat.st_mode):
+                raise SkillStorageError(
+                    "Skill archive path must not be a symlink",
+                    path=str(archive_path),
+                )
+        return archive_path
+
+    def _ensure_cleanup_directory(self) -> Path:
+        """Return the non-symlinked directory used for committed cleanup work."""
+        self._ensure_trash_directory()
+        try:
+            self.cleanup_dir.mkdir(parents=True, exist_ok=True)
+            cleanup_stat = self.cleanup_dir.lstat()
+        except OSError as e:
+            raise SkillStorageError(
+                f"Failed to prepare Skills cleanup directory: {e}",
+                path=str(self.cleanup_dir),
+            ) from e
+        if not stat.S_ISDIR(cleanup_stat.st_mode) or stat.S_ISLNK(cleanup_stat.st_mode):
+            raise SkillStorageError(
+                "Skills cleanup path must be a regular directory",
+                path=str(self.cleanup_dir),
+            )
+        return self.cleanup_dir
+
+    def _stage_for_cleanup(self, source: Path, label: str) -> Path:
+        """Atomically move a committed obsolete bundle into the cleanup queue."""
+        cleanup_dir = self._ensure_cleanup_directory()
+        safe_label = re.sub(r"[^A-Za-z0-9_-]+", "-", label).strip("-") or "skill"
+        destination = cleanup_dir / f"{safe_label}-{time.time_ns()}"
+        self._move_skill_dir(source, destination)
+        return destination
+
+    def _remove_cleanup_path_best_effort(self, cleanup_path: Path) -> bool:
+        """Remove one queued directory, preserving partial residue for a later retry."""
+        cleanup_root = self.cleanup_dir.resolve(strict=False)
+        path = Path(cleanup_path)
+        try:
+            path_stat = path.lstat()
+            parent = path.parent.resolve(strict=False)
+        except OSError as e:
+            logger.warning(
+                "Skipped invalid Skills cleanup entry '{}' for user {} (error {})",
+                path.name,
+                self.user_id,
+                type(e).__name__,
+            )
+            return False
+        if (
+            parent != cleanup_root
+            or not stat.S_ISDIR(path_stat.st_mode)
+            or stat.S_ISLNK(path_stat.st_mode)
+        ):
+            logger.warning(
+                "Skipped unsafe Skills cleanup entry '{}' for user {}",
+                path.name,
+                self.user_id,
+            )
+            return False
+
+        def _retry_readonly(
+            func: Any,
+            readonly_path: str,
+            exc_info: tuple[type[BaseException], BaseException, Any],
+        ) -> None:
+            error = exc_info[1]
+            readonly_stat = os.lstat(readonly_path)
+            if not isinstance(error, PermissionError) or stat.S_ISLNK(readonly_stat.st_mode):
+                raise error
+            os.chmod(readonly_path, readonly_stat.st_mode | stat.S_IWUSR)
+            func(readonly_path)
+
+        try:
+            shutil.rmtree(path, onerror=_retry_readonly)
+        except OSError as e:
+            logger.warning(
+                "Skills cleanup will retry entry '{}' for user {} (error {})",
+                path.name,
+                self.user_id,
+                type(e).__name__,
+            )
+            return False
+        return True
+
+    def _retry_staged_cleanup(self) -> None:
+        """Best-effort retry of cleanup work committed by an earlier service call."""
+        try:
+            cleanup_stat = self.cleanup_dir.lstat()
+        except FileNotFoundError:
+            return
+        except OSError as e:
+            logger.warning(
+                "Could not inspect Skills cleanup directory for user {} (error {})",
+                self.user_id,
+                type(e).__name__,
+            )
+            return
+        if not stat.S_ISDIR(cleanup_stat.st_mode) or stat.S_ISLNK(cleanup_stat.st_mode):
+            logger.warning("Skipped unsafe Skills cleanup directory for user {}", self.user_id)
+            return
+        try:
+            cleanup_paths = sorted(self.cleanup_dir.iterdir(), key=lambda path: path.name)
+        except OSError as e:
+            logger.warning(
+                "Could not list Skills cleanup directory for user {} (error {})",
+                self.user_id,
+                type(e).__name__,
+            )
+            return
+        for cleanup_path in cleanup_paths:
+            self._remove_cleanup_path_best_effort(cleanup_path)
+
+    def _registry_row_for_archive_id(self, archive_id: str) -> dict[str, Any] | None:
+        """Resolve a Trash staging identifier without trusting mutable path metadata."""
+        row = self._get_db().get_skill_registry_by_uuid(archive_id)
+        if row is not None:
+            return row
+        if SKILL_NAME_PATTERN.fullmatch(archive_id):
+            legacy_row = self._get_db().get_skill_registry(archive_id, include_deleted=True)
+            if legacy_row is not None and not legacy_row.get("uuid"):
+                return legacy_row
+        return None
+
+    def _reconcile_orphaned_archives(self) -> None:
+        """Recover interrupted pre-commit moves and queue committed stale archives."""
+        try:
+            trash_stat = self.trash_dir.lstat()
+        except FileNotFoundError:
+            return
+        except OSError as e:
+            logger.warning(
+                "Could not inspect Skills Trash for user {} (error {})",
+                self.user_id,
+                type(e).__name__,
+            )
+            return
+        if not stat.S_ISDIR(trash_stat.st_mode) or stat.S_ISLNK(trash_stat.st_mode):
+            logger.warning("Skipped unsafe Skills Trash reconciliation for user {}", self.user_id)
+            return
+        try:
+            candidates = sorted(self.trash_dir.iterdir(), key=lambda path: path.name)
+        except OSError as e:
+            logger.warning(
+                "Could not list Skills Trash for user {} (error {})",
+                self.user_id,
+                type(e).__name__,
+            )
+            return
+
+        for candidate in candidates:
+            try:
+                candidate_stat = candidate.lstat()
+            except OSError:
+                continue
+            if not stat.S_ISDIR(candidate_stat.st_mode) or stat.S_ISLNK(candidate_stat.st_mode):
+                continue
+
+            if candidate.name.startswith(".purging-"):
+                archive_id = candidate.name.removeprefix(".purging-")
+                try:
+                    row = self._registry_row_for_archive_id(archive_id)
+                    if row is None or not row.get("deleted"):
+                        self._stage_for_cleanup(candidate, f"orphaned-purge-{archive_id}")
+                        continue
+
+                    archive_dir = self._get_archive_dir(row)
+                    if archive_dir.exists():
+                        logger.warning(
+                            "Left duplicate purge staging '{}' for user {} because its Trash archive exists",
+                            archive_id,
+                            self.user_id,
+                        )
+                        continue
+                    self._move_skill_dir(candidate, archive_dir)
+                    logger.info("Restored interrupted purge staging for skill '{}'", row.get("name"))
+                except (CharactersRAGDBError, OSError, SkillStorageError) as e:
+                    logger.warning(
+                        "Skills purge reconciliation deferred for archive '{}' and user {} (error {})",
+                        archive_id,
+                        self.user_id,
+                        type(e).__name__,
+                    )
+                continue
+
+            if candidate.name.startswith(".") or not re.fullmatch(r"[A-Za-z0-9_-]+", candidate.name):
+                continue
+            try:
+                row = self._get_db().get_skill_registry_by_uuid(candidate.name)
+                if row is not None and not row.get("deleted"):
+                    active_name = self._normalize_and_validate_skill_name(str(row.get("name") or ""))
+                    active_dir = self.skills_dir / active_name
+                    try:
+                        active_dir.lstat()
+                    except FileNotFoundError:
+                        active_exists = False
+                    except OSError as e:
+                        logger.warning(
+                            "Preserved Skills archive '{}' for skill '{}' and user {} (inspect error {})",
+                            candidate.name,
+                            active_name,
+                            self.user_id,
+                            type(e).__name__,
+                        )
+                        continue
+                    else:
+                        active_exists = True
+
+                    if not active_exists:
+                        if not self._is_skill_bundle_valid(active_name, candidate):
+                            logger.warning(
+                                "Preserved invalid Skills archive '{}' for skill '{}' and user {}",
+                                candidate.name,
+                                active_name,
+                                self.user_id,
+                            )
+                            continue
+                        self._move_skill_dir(candidate, active_dir)
+                        logger.info("Restored interrupted delete for skill '{}'", active_name)
+                        continue
+
+                    if not self._is_skill_bundle_valid(active_name, active_dir):
+                        logger.warning(
+                            "Preserved Skills archive '{}' because skill '{}' is invalid for user {}",
+                            candidate.name,
+                            active_name,
+                            self.user_id,
+                        )
+                        continue
+                    self._stage_for_cleanup(candidate, f"orphaned-replacement-{candidate.name}")
+            except (CharactersRAGDBError, OSError, SkillStorageError, SkillValidationError) as e:
+                logger.warning(
+                    "Skills replacement reconciliation deferred for archive '{}' and user {} (error {})",
+                    candidate.name,
+                    self.user_id,
+                    type(e).__name__,
+                )
+
+    def _discard_stale_archive(self, archive_dir: Path, label: str) -> None:
+        """Move an obsolete canonical archive aside before reusing its path."""
+        if not archive_dir.exists():
+            return
+        cleanup_path = self._stage_for_cleanup(archive_dir, label)
+        self._remove_cleanup_path_best_effort(cleanup_path)
+
+    def _move_skill_dir(self, source: Path, destination: Path) -> None:
+        """Atomically move one non-symlinked skill bundle within the skills root."""
+        root = self.skills_dir.resolve(strict=False)
+        source_path = source.resolve(strict=False)
+        destination_path = destination.resolve(strict=False)
+        try:
+            source_path.relative_to(root)
+            destination_path.relative_to(root)
+        except ValueError as e:
+            raise OSError("Skill bundle move escapes the user skills root") from e
+
+        source_stat = source.lstat()
+        if not stat.S_ISDIR(source_stat.st_mode) or stat.S_ISLNK(source_stat.st_mode):
+            raise OSError(f"Skill bundle is not a regular directory: {source}")
+        try:
+            destination.lstat()
+        except FileNotFoundError:
+            pass
+        else:
+            raise FileExistsError(f"Skill bundle destination already exists: {destination}")
+
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        source.rename(destination)
+
+    def _new_skill_staging_path(self, name: str, operation: str) -> Path:
+        """Return a unique hidden path for preparing a complete skill bundle."""
+        safe_name = self._normalize_and_validate_skill_name(name)
+        safe_operation = re.sub(r"[^A-Za-z0-9_-]+", "-", operation).strip("-") or "write"
+        return self.skills_dir / f".staging-{safe_operation}-{safe_name}-{time.time_ns()}"
+
+    def _prepare_skill_bundle(
+        self,
+        name: str,
+        content: str,
+        supporting_files: dict[str, Optional[str]],
+        *,
+        operation: str,
+    ) -> tuple[Path, Any]:
+        """Write and validate a complete bundle without publishing its active path."""
+        staging_dir = self._new_skill_staging_path(name, operation)
+        try:
+            staging_dir.mkdir(parents=False, exist_ok=False)
+            self._skill_main_file(staging_dir).write_text(content, encoding="utf-8")
+            for filename, file_content in supporting_files.items():
+                file_path = self._safe_supporting_path(staging_dir, filename)
+                file_path.write_text(file_content or "", encoding="utf-8")
+            parsed = self._parse_unchecked_skill_directory(name, staging_dir)
+            self._validate_parsed_skill_name(name, parsed)
+            return staging_dir, parsed
+        except (OSError, SkillStorageError) as e:
+            with contextlib.suppress(OSError, SkillStorageError):
+                self._remove_skill_dir(staging_dir)
+            raise SkillStorageError(
+                f"Failed to prepare skill bundle: {e}",
+                path=str(staging_dir),
+            ) from e
+        except SkillValidationError:
+            with contextlib.suppress(OSError, SkillStorageError):
+                self._remove_skill_dir(staging_dir)
+            raise
+        except Exception as e:
+            with contextlib.suppress(OSError, SkillStorageError):
+                self._remove_skill_dir(staging_dir)
+            raise SkillValidationError(f"Invalid skill content: {e}") from e
+
+    def _replacement_backup_path(self, row: dict[str, Any]) -> Path:
+        """Return the recoverable backup path for an active replacement."""
+        replacement_id = str(row.get("uuid") or row.get("name") or "")
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", replacement_id):
+            raise SkillStorageError("Skill replacement identifier is invalid")
+        try:
+            replacement_version = int(row.get("version"))
+        except (TypeError, ValueError) as e:
+            raise SkillStorageError("Skill replacement version is invalid") from e
+        if replacement_version < 1:
+            raise SkillStorageError("Skill replacement version is invalid")
+        return self.skills_dir / f".replacing-{replacement_id}.v{replacement_version}"
+
+    @staticmethod
+    def _replacement_backup_metadata(backup_dir: Path) -> tuple[str, Optional[int]]:
+        """Return the registry identifier and pre-swap version encoded in a backup."""
+        suffix = backup_dir.name.removeprefix(".replacing-")
+        versioned = re.fullmatch(r"([A-Za-z0-9_-]+)\.v([1-9][0-9]*)", suffix)
+        if versioned:
+            return versioned.group(1), int(versioned.group(2))
+        if re.fullmatch(r"[A-Za-z0-9_-]+", suffix):
+            return suffix, None
+        raise SkillStorageError("Skill replacement backup name is invalid")
+
+    def _bundle_content_hash(self, name: str, bundle_dir: Path) -> str | None:
+        """Return a validated bundle hash, or None when the bundle is invalid."""
+        try:
+            parsed = self._parse_unchecked_skill_directory(name, bundle_dir)
+            self._validate_parsed_skill_name(name, parsed)
+        except Exception as e:
+            logger.warning(
+                "Invalid replacement bundle preserved for skill '{}' and user {} (error {})",
+                name,
+                self.user_id,
+                type(e).__name__,
+            )
+            return None
+        return str(parsed.content_hash)
+
+    def _discard_prepublication_staging(self) -> None:
+        """Remove hidden bundles that were never published after an interrupted write."""
+        try:
+            candidates = sorted(self.skills_dir.iterdir(), key=lambda path: path.name)
+        except OSError as e:
+            logger.warning(
+                "Could not inspect Skills staging for user {} (error {})",
+                self.user_id,
+                type(e).__name__,
+            )
+            return
+
+        for candidate in candidates:
+            if not candidate.name.startswith(".staging-"):
+                continue
+            try:
+                candidate_stat = candidate.lstat()
+                if not stat.S_ISDIR(candidate_stat.st_mode) or stat.S_ISLNK(candidate_stat.st_mode):
+                    continue
+                cleanup_path = self._stage_for_cleanup(
+                    candidate,
+                    f"interrupted-staging-{candidate.name.removeprefix('.staging-')}",
+                )
+                self._remove_cleanup_path_best_effort(cleanup_path)
+            except (OSError, SkillStorageError) as e:
+                logger.warning(
+                    "Skills staging cleanup deferred for '{}' and user {} (error {})",
+                    candidate.name,
+                    self.user_id,
+                    type(e).__name__,
+                )
+
+    def _roll_back_interrupted_replacement(
+        self,
+        *,
+        active_dir: Path,
+        backup_dir: Path,
+        replacement_id: str,
+    ) -> None:
+        """Restore a replacement backup without losing the displaced active bundle."""
+        displaced_dir = self._stage_for_cleanup(
+            active_dir,
+            f"rollback-candidate-{replacement_id}",
+        )
+        try:
+            self._move_skill_dir(backup_dir, active_dir)
+        except Exception:
+            try:
+                self._move_skill_dir(displaced_dir, active_dir)
+            except Exception as restore_error:
+                raise SkillStorageError(
+                    "Failed to restore the original or displaced skill bundle",
+                    path=str(active_dir),
+                ) from restore_error
+            raise
+        self._remove_cleanup_path_best_effort(displaced_dir)
+
+    def _reconcile_interrupted_active_replacements(self) -> bool:
+        """Resolve active bundle swaps and report whether registry sync is safe."""
+        try:
+            candidates = sorted(self.skills_dir.iterdir(), key=lambda path: path.name)
+        except OSError as e:
+            logger.warning(
+                "Could not inspect Skills replacements for user {} (error {})",
+                self.user_id,
+                type(e).__name__,
+            )
+            return False
+
+        all_resolved = True
+        for backup_dir in candidates:
+            if not backup_dir.name.startswith(".replacing-"):
+                continue
+            replacement_label = backup_dir.name.removeprefix(".replacing-")
+            try:
+                replacement_id, replacement_version = self._replacement_backup_metadata(
+                    backup_dir
+                )
+                backup_stat = backup_dir.lstat()
+                if not stat.S_ISDIR(backup_stat.st_mode) or stat.S_ISLNK(backup_stat.st_mode):
+                    all_resolved = False
+                    logger.warning(
+                        "Preserved unsafe Skills replacement '{}' for user {}",
+                        replacement_id,
+                        self.user_id,
+                    )
+                    continue
+                row = self._registry_row_for_archive_id(replacement_id)
+                if row is None or row.get("deleted"):
+                    all_resolved = False
+                    logger.warning(
+                        "Preserved unresolved Skills replacement '{}' for user {}",
+                        replacement_id,
+                        self.user_id,
+                    )
+                    continue
+
+                name = self._normalize_and_validate_skill_name(str(row.get("name") or ""))
+                registry_hash = str(row.get("file_hash") or "")
+                backup_hash = self._bundle_content_hash(name, backup_dir)
+                if not registry_hash or backup_hash is None:
+                    all_resolved = False
+                    logger.warning(
+                        "Preserved unverifiable Skills replacement '{}' for skill '{}' and user {}",
+                        replacement_id,
+                        name,
+                        self.user_id,
+                    )
+                    continue
+                try:
+                    registry_version = int(row.get("version") or 1)
+                except (TypeError, ValueError) as e:
+                    raise SkillStorageError("Skill registry version is invalid") from e
+                if registry_version < 1:
+                    raise SkillStorageError("Skill registry version is invalid")
+
+                active_dir = self._get_skill_dir(name)
+                try:
+                    active_stat = active_dir.lstat()
+                except FileNotFoundError:
+                    if (
+                        backup_hash == registry_hash
+                        and (
+                            replacement_version is None
+                            or registry_version == replacement_version
+                        )
+                    ):
+                        self._move_skill_dir(backup_dir, active_dir)
+                        logger.info("Restored interrupted replacement for skill '{}'", name)
+                    else:
+                        all_resolved = False
+                        logger.warning(
+                            "Preserved ambiguous Skills replacement '{}' for missing skill '{}' and user {}",
+                            replacement_id,
+                            name,
+                            self.user_id,
+                        )
+                    continue
+
+                if not stat.S_ISDIR(active_stat.st_mode) or stat.S_ISLNK(active_stat.st_mode):
+                    all_resolved = False
+                    logger.warning(
+                        "Preserved Skills replacement '{}' because skill '{}' is unsafe for user {}",
+                        replacement_id,
+                        name,
+                        self.user_id,
+                    )
+                    continue
+                active_hash = self._bundle_content_hash(name, active_dir)
+                if active_hash is None:
+                    all_resolved = False
+                    continue
+
+                if replacement_version is not None:
+                    if registry_version == replacement_version:
+                        if backup_hash != registry_hash:
+                            all_resolved = False
+                            logger.warning(
+                                "Preserved invalid Skills replacement backup '{}' for skill '{}' and user {}",
+                                replacement_id,
+                                name,
+                                self.user_id,
+                            )
+                            continue
+                        self._roll_back_interrupted_replacement(
+                            active_dir=active_dir,
+                            backup_dir=backup_dir,
+                            replacement_id=replacement_id,
+                        )
+                        logger.info("Rolled back interrupted replacement for skill '{}'", name)
+                        continue
+
+                    if registry_version > replacement_version and active_hash == registry_hash:
+                        cleanup_path = self._stage_for_cleanup(
+                            backup_dir,
+                            f"committed-replacement-{replacement_id}",
+                        )
+                        self._remove_cleanup_path_best_effort(cleanup_path)
+                        continue
+
+                    all_resolved = False
+                    logger.warning(
+                        "Preserved ambiguous Skills replacement '{}' for skill '{}' and user {}",
+                        replacement_id,
+                        name,
+                        self.user_id,
+                    )
+                    continue
+
+                if active_hash == registry_hash and backup_hash != registry_hash:
+                    cleanup_path = self._stage_for_cleanup(
+                        backup_dir,
+                        f"committed-replacement-{replacement_id}",
+                    )
+                    self._remove_cleanup_path_best_effort(cleanup_path)
+                    continue
+                if backup_hash != registry_hash or active_hash == registry_hash:
+                    all_resolved = False
+                    logger.warning(
+                        "Preserved ambiguous Skills replacement '{}' for skill '{}' and user {}",
+                        replacement_id,
+                        name,
+                        self.user_id,
+                    )
+                    continue
+
+                self._roll_back_interrupted_replacement(
+                    active_dir=active_dir,
+                    backup_dir=backup_dir,
+                    replacement_id=replacement_id,
+                )
+                logger.info("Rolled back interrupted replacement for skill '{}'", name)
+            except (CharactersRAGDBError, OSError, SkillStorageError, SkillValidationError) as e:
+                all_resolved = False
+                logger.warning(
+                    "Skills replacement recovery deferred for '{}' and user {} (error {})",
+                    replacement_label,
+                    self.user_id,
+                    type(e).__name__,
+                )
+        return all_resolved
+
+    def _is_archive_restorable(self, archive_dir: Path) -> bool:
+        """Return whether an archived bundle has a regular directory and SKILL.md."""
+        try:
+            archive_stat = archive_dir.lstat()
+            skill_stat = (archive_dir / "SKILL.md").lstat()
+        except OSError:
+            return False
+        return (
+            stat.S_ISDIR(archive_stat.st_mode)
+            and not stat.S_ISLNK(archive_stat.st_mode)
+            and stat.S_ISREG(skill_stat.st_mode)
+            and not stat.S_ISLNK(skill_stat.st_mode)
+        )
+
+    def _is_skill_bundle_valid(self, name: str, bundle_dir: Path) -> bool:
+        """Return whether a bundle can be read safely and parsed as a skill."""
+        if not self._is_archive_restorable(bundle_dir):
+            return False
+        try:
+            parsed = self._parse_unchecked_skill_directory(name, bundle_dir)
+            self._validate_parsed_skill_name(name, parsed)
+        except Exception as e:
+            logger.warning(
+                "Invalid bundle preserved for skill '{}' and user {} (error {})",
+                name,
+                self.user_id,
+                type(e).__name__,
+            )
+            return False
+        return True
 
     def _remove_skill_dir(self, skill_dir: Path) -> None:
         """Remove a skill directory after confirming it is under the user skills root."""
@@ -568,6 +1272,56 @@ class SkillsService:
             )
         return normalized
 
+    def _resolve_import_skill_name(
+        self,
+        parsed: Any,
+        name: Optional[str],
+    ) -> tuple[str, Optional[str]]:
+        """Resolve one canonical import name with shared preview/import validation."""
+        frontmatter_name = parsed.frontmatter.name
+        if frontmatter_name is not None and not isinstance(frontmatter_name, str):
+            raise SkillValidationError(
+                "Frontmatter skill name must be a string",
+                field="name",
+            )
+        normalized_frontmatter_name = (
+            self._normalize_and_validate_skill_name(
+                frontmatter_name,
+                source="frontmatter skill name",
+            )
+            if frontmatter_name
+            else None
+        )
+        requested_name = (
+            self._normalize_and_validate_skill_name(name)
+            if name is not None
+            else None
+        )
+        skill_name = requested_name or normalized_frontmatter_name
+        if not skill_name:
+            raise SkillValidationError(
+                "Skill name must be specified in frontmatter or as parameter"
+            )
+        return skill_name, requested_name
+
+    def _validate_parsed_skill_name(self, canonical_name: str, parsed: Any) -> None:
+        """Require parsed frontmatter identity to match the canonical registry name."""
+        if not isinstance(parsed.frontmatter.name, str):
+            raise SkillValidationError(
+                "Frontmatter skill name must be a string",
+                field="name",
+            )
+        parsed_name = self._normalize_and_validate_skill_name(
+            parsed.frontmatter.name,
+            source="frontmatter skill name",
+        )
+        if parsed_name != canonical_name:
+            raise SkillValidationError(
+                f"Frontmatter skill name '{parsed_name}' must match canonical name "
+                f"'{canonical_name}'",
+                field="name",
+            )
+
     def _validate_supporting_filename(self, filename: str) -> str:
         """Validate a supporting filename and return normalized value."""
         normalized = (filename or "").strip()
@@ -664,16 +1418,142 @@ class SkillsService:
             logger.warning(f"Failed to parse SKILL.md for {skill_dir.name}: {e}")
             return None
 
+    @staticmethod
+    def _registry_payload(name: str, skill_dir: Path, parsed: Any) -> dict[str, Any]:
+        """Build registry metadata from parsed skill content."""
+        return {
+            "name": name,
+            "description": parsed.frontmatter.description,
+            "argument_hint": parsed.frontmatter.argument_hint,
+            "disable_model_invocation": parsed.frontmatter.disable_model_invocation,
+            "user_invocable": parsed.frontmatter.user_invocable,
+            "allowed_tools": parsed.frontmatter.allowed_tools,
+            "model": parsed.frontmatter.model,
+            "context": parsed.frontmatter.context,
+            "directory_path": str(skill_dir),
+            "file_hash": parsed.content_hash,
+        }
+
+    def _replace_active_bundle_locked(
+        self,
+        name: str,
+        staging_dir: Path,
+        parsed: Any,
+        active_row: dict[str, Any],
+    ) -> None:
+        """Atomically publish an active replacement with startup-recoverable rollback."""
+        active_dir = self._get_skill_dir(name)
+        backup_dir = self._replacement_backup_path(active_row)
+        if backup_dir.exists():
+            raise SkillStorageError(
+                "A previous skill replacement still requires recovery",
+                path=str(backup_dir),
+            )
+
+        try:
+            self._move_skill_dir(active_dir, backup_dir)
+            try:
+                self._move_skill_dir(staging_dir, active_dir)
+            except Exception:
+                self._move_skill_dir(backup_dir, active_dir)
+                raise
+
+            try:
+                self._get_db().update_skill_registry(
+                    name,
+                    self._registry_payload(name, active_dir, parsed),
+                    expected_version=int(active_row.get("version") or 1),
+                )
+            except Exception:
+                try:
+                    self._move_skill_dir(active_dir, staging_dir)
+                    self._move_skill_dir(backup_dir, active_dir)
+                except (OSError, SkillStorageError) as rollback_error:
+                    raise SkillsError(
+                        f"Failed to replace skill '{name}' and restore the original"
+                    ) from rollback_error
+                finally:
+                    with contextlib.suppress(OSError, SkillStorageError):
+                        self._remove_skill_dir(staging_dir)
+                raise
+        except FileNotFoundError as e:
+            with contextlib.suppress(OSError, SkillStorageError):
+                self._remove_skill_dir(staging_dir)
+            raise SkillStorageError(
+                f"Active skill bundle for '{name}' was not found",
+                path=str(active_dir),
+            ) from e
+        except OSError as e:
+            with contextlib.suppress(OSError, SkillStorageError):
+                self._remove_skill_dir(staging_dir)
+            raise SkillStorageError(
+                f"Failed to publish replacement for skill '{name}': {e}",
+                path=str(active_dir),
+            ) from e
+
+        try:
+            cleanup_path = self._stage_for_cleanup(
+                backup_dir,
+                f"committed-replacement-{active_row.get('uuid') or name}",
+            )
+        except (OSError, SkillStorageError) as e:
+            logger.warning(
+                "Replacement for '{}' committed for user {}; backup cleanup deferred (error {})",
+                name,
+                self.user_id,
+                type(e).__name__,
+            )
+            return
+        self._remove_cleanup_path_best_effort(cleanup_path)
+
+    def _activate_deleted_replacement_locked(
+        self,
+        name: str,
+        skill_dir: Path,
+        parsed: Any,
+        deleted_row: dict[str, Any],
+    ) -> None:
+        """Activate a prepared replacement while the Trash lock is held."""
+        deleted_version = int(deleted_row.get("version") or 1)
+        archive_dir = self._get_archive_dir(deleted_row)
+        try:
+            self._get_db().restore_skill_registry(
+                name,
+                self._registry_payload(name, skill_dir, parsed),
+                expected_version=deleted_version,
+            )
+        except Exception:
+            self._remove_skill_dir(skill_dir)
+            raise
+
+        if not archive_dir.exists():
+            return
+        try:
+            cleanup_path = self._stage_for_cleanup(archive_dir, f"replaced-{deleted_row.get('uuid') or name}")
+        except (OSError, SkillStorageError) as e:
+            logger.warning(
+                "Replacement for '{}' is active for user {}; Trash cleanup deferred (error {})",
+                name,
+                self.user_id,
+                type(e).__name__,
+            )
+            return
+        self._remove_cleanup_path_best_effort(cleanup_path)
+
     def _metadata_from_row(self, row: dict[str, Any]) -> SkillMetadata:
         created_at = row.get("created_at")
         last_modified = row.get("last_modified")
+        disable_model_invocation = row.get("disable_model_invocation")
+        user_invocable = row.get("user_invocable")
         return SkillMetadata(
             id=row.get("uuid") or row.get("id"),
             name=row.get("name") or "",
             description=row.get("description"),
             argument_hint=row.get("argument_hint"),
-            disable_model_invocation=bool(row.get("disable_model_invocation", False)),
-            user_invocable=bool(row.get("user_invocable", True)),
+            disable_model_invocation=(
+                False if disable_model_invocation is None else bool(disable_model_invocation)
+            ),
+            user_invocable=True if user_invocable is None else bool(user_invocable),
             allowed_tools=row.get("allowed_tools"),
             model=row.get("model"),
             context=row.get("context", "inline"),
@@ -685,14 +1565,45 @@ class SkillsService:
         )
 
     def _sync_registry(self, force: bool = False) -> None:
-        """Synchronize skill_registry with filesystem contents.
+        """Synchronize the registry while excluding concurrent Trash mutations."""
+        lock = FileLock(
+            self.trash_lock_path,
+            timeout=SKILLS_TRASH_LOCK_TIMEOUT_SECONDS,
+        )
+        if not lock.acquire():
+            raise SkillStorageError(
+                "Skills Trash is busy; try again.",
+                path=str(self.trash_dir),
+            )
+        try:
+            self._sync_registry_locked(force=force)
+        finally:
+            lock.release()
+
+    def _sync_registry_locked(self, force: bool = False) -> None:
+        """Synchronize skill_registry while the per-user Trash lock is held.
 
         Args:
             force: If True, skip debounce and always sync. Write operations
                    should pass force=True.
         """
+        if not self._reconcile_interrupted_active_replacements():
+            raise SkillStorageError(
+                "Skills replacement recovery is incomplete; retry after resolving preserved bundles",
+                path=str(self.skills_dir),
+            )
+        if not self._startup_maintenance_complete:
+            self._discard_prepublication_staging()
+            self._reconcile_orphaned_archives()
+            self._retry_staged_cleanup()
+            self._startup_maintenance_complete = True
+
         now = time.monotonic()
-        if not force and (now - self._last_sync_time) < self._sync_interval:
+        if (
+            not force
+            and self._last_sync_time is not None
+            and (now - self._last_sync_time) < self._sync_interval
+        ):
             return
         self._last_sync_time = now
         db = self._get_db()
@@ -712,6 +1623,8 @@ class SkillsService:
         disk_names: set[str] = set()
         if self.skills_dir.exists():
             for item in self.skills_dir.iterdir():
+                if item.name.startswith("."):
+                    continue
                 try:
                     item_stat = item.lstat()
                 except OSError as e:
@@ -722,6 +1635,8 @@ class SkillsService:
                     continue
                 if not stat.S_ISDIR(item_stat.st_mode):
                     continue
+
+                disk_names.add(item.name)
 
                 skill_file = item / "SKILL.md"
                 try:
@@ -737,7 +1652,6 @@ class SkillsService:
                 if not stat.S_ISREG(skill_file_stat.st_mode):
                     continue
 
-                disk_names.add(item.name)
                 parsed = self._parse_skill_file(item)
                 if not parsed:
                     continue
@@ -817,12 +1731,15 @@ class SkillsService:
                 except CharactersRAGDBError as e:
                     logger.warning(f"Failed to mark skill '{name}' deleted: {e}")
 
-    async def _sync_registry_async(self, force: bool = False) -> None:
+    async def _sync_registry_async(
+        self,
+        force: bool = False,
+        *,
+        trash_lock_held: bool = False,
+    ) -> None:
         """Async wrapper for _sync_registry that offloads filesystem I/O to a thread."""
-        now = time.monotonic()
-        if not force and (now - self._last_sync_time) < self._sync_interval:
-            return
-        await asyncio.to_thread(self._sync_registry, force=force)
+        sync = self._sync_registry_locked if trash_lock_held else self._sync_registry
+        await asyncio.to_thread(sync, force=force)
 
     async def list_skills(
         self,
@@ -891,21 +1808,79 @@ class SkillsService:
         )
         return [self._metadata_from_row(row) for row in rows]
 
-    async def get_skill(self, name: str, *, enforce_integrity: bool = True) -> dict[str, Any]:
-        """
-        Get full skill content.
+    def _is_model_visible_registry_row(self, row: dict[str, Any]) -> bool:
+        """Return whether a registry row is eligible for model-facing discovery."""
+        name = str(row.get("name") or "")
+        user_invocable = row.get("user_invocable")
+        disable_model_invocation = row.get("disable_model_invocation")
+        return (
+            (True if user_invocable is None else bool(user_invocable))
+            and not (False if disable_model_invocation is None else bool(disable_model_invocation))
+            and bool(name)
+            and self._is_skill_allowed(name, purpose="skill_discovery")
+        )
 
-        Args:
-            name: The skill name
+    def _list_model_visible_skills_page_sync(
+        self,
+        q: str | None,
+        limit: int,
+        offset: int,
+    ) -> tuple[list[SkillMetadata], int]:
+        """Return a filtered model-visible page and total from one registry query."""
+        rows = self._get_db().list_skill_registry(
+            include_hidden=True,
+            include_deleted=False,
+            q=q,
+            sort="name",
+            order="asc",
+            limit=None,
+            offset=0,
+        )
+        page: list[SkillMetadata] = []
+        total = 0
+        page_end = offset + limit
+        for row in rows:
+            if not self._is_model_visible_registry_row(row):
+                continue
+            if offset <= total < page_end:
+                page.append(self._metadata_from_row(row))
+            total += 1
+        return page, total
 
-        Returns:
-            Full skill data including content
-
-        Raises:
-            SkillNotFoundError: If skill doesn't exist
-        """
-        name = name.strip().lower()
+    async def list_model_visible_skills_page(
+        self,
+        *,
+        q: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[SkillMetadata], int]:
+        """Return a model-visible Skill metadata page with its filtered total."""
         await self._sync_registry_async()
+        return await asyncio.to_thread(
+            self._list_model_visible_skills_page_sync,
+            q,
+            limit,
+            offset,
+        )
+
+    def _get_model_visible_skill_metadata_sync(self, name: str) -> SkillMetadata:
+        """Return metadata for one model-visible Skill or hide it as not found."""
+        row = self._get_db().get_skill_registry(name, include_deleted=False)
+        if not row or not self._is_model_visible_registry_row(row):
+            raise SkillNotFoundError(name)
+        return self._metadata_from_row(row)
+
+    async def get_model_visible_skill_metadata(self, name: str) -> SkillMetadata:
+        """Return metadata for an exact model-visible Skill lookup."""
+        normalized = self._normalize_and_validate_skill_name(name)
+        await self._sync_registry_async()
+        return await asyncio.to_thread(
+            self._get_model_visible_skill_metadata_sync,
+            normalized,
+        )
+
+    def _get_skill_sync(self, name: str, *, enforce_integrity: bool) -> dict[str, Any]:
+        """Load and verify a Skill after its asynchronous registry synchronization."""
         db = self._get_db()
 
         row = db.get_skill_registry(name, include_deleted=False)
@@ -948,19 +1923,62 @@ class SkillsService:
             "version": metadata.version,
         }
 
+    async def get_skill(self, name: str, *, enforce_integrity: bool = True) -> dict[str, Any]:
+        """
+        Get full skill content.
+
+        Args:
+            name: The skill name
+
+        Returns:
+            Full skill data including content
+
+        Raises:
+            SkillNotFoundError: If skill doesn't exist
+        """
+        name = name.strip().lower()
+        await self._sync_registry_async()
+        return await asyncio.to_thread(
+            self._get_skill_sync,
+            name,
+            enforce_integrity=enforce_integrity,
+        )
+
     async def create_skill(
         self,
         name: str,
         content: str,
         supporting_files: Optional[dict[str, str]] = None,
+        *,
+        replace_deleted: bool = False,
+    ) -> dict[str, Any]:
+        """Create a skill while serializing filesystem and registry changes."""
+        async with self._trash_operation_lock():
+            return await self._finish_trash_mutation(
+                self._create_skill_locked(
+                    name,
+                    content,
+                    supporting_files,
+                    replace_deleted=replace_deleted,
+                )
+            )
+
+    async def _create_skill_locked(
+        self,
+        name: str,
+        content: str,
+        supporting_files: Optional[dict[str, str]] = None,
+        *,
+        replace_deleted: bool = False,
     ) -> dict[str, Any]:
         """
-        Create a new skill.
+        Create a new skill while the per-user operation lock is held.
 
         Args:
             name: The skill name (lowercase, hyphens only)
             content: Full SKILL.md content with optional frontmatter
             supporting_files: Additional files to include
+            replace_deleted: Replace a same-name Trash item after explicit confirmation
 
         Returns:
             Created skill data
@@ -974,73 +1992,44 @@ class SkillsService:
             supporting_files,
             allow_deletes=False,
         )
-        await self._sync_registry_async(force=True)
+        await self._sync_registry_async(force=True, trash_lock_held=True)
         db = self._get_db()
 
         existing = db.get_skill_registry(name, include_deleted=True)
         if existing and not existing.get("deleted"):
             raise SkillConflictError(f"Skill '{name}' already exists", skill_name=name)
+        if existing and existing.get("deleted") and not replace_deleted:
+            raise SkillConflictError(
+                f"Skill '{name}' exists in Trash; restore it or permanently delete it first",
+                skill_name=name,
+            )
 
-        # Parse the content to validate
-        try:
-            parsed = self._parser.parse_content(content, default_name=name)
-        except Exception as e:
-            raise SkillValidationError(f"Invalid skill content: {e}") from e
-
-        # Create skill directory
         skill_dir = self._get_skill_dir(name)
+        staging_dir, parsed = self._prepare_skill_bundle(
+            name,
+            content,
+            normalized_supporting_files,
+            operation="create",
+        )
         try:
-            skill_dir.mkdir(parents=True, exist_ok=False)
+            self._move_skill_dir(staging_dir, skill_dir)
         except FileExistsError:
+            self._remove_skill_dir(staging_dir)
             raise SkillConflictError(f"Skill directory '{name}' already exists", skill_name=name) from None
         except OSError as e:
+            self._remove_skill_dir(staging_dir)
             raise SkillStorageError(f"Failed to create skill directory: {e}", path=str(skill_dir)) from e
 
-        # Write SKILL.md
-        skill_file = self._skill_main_file(skill_dir)
-        try:
-            skill_file.write_text(content, encoding="utf-8")
-        except OSError as e:
-            self._remove_skill_dir(skill_dir)
-            raise SkillStorageError(f"Failed to write SKILL.md: {e}", path=str(skill_file)) from e
-
-        # Write supporting files
-        if normalized_supporting_files:
-            for filename, file_content in normalized_supporting_files.items():
-                file_path = self._safe_supporting_path(skill_dir, filename)
-                try:
-                    file_path.write_text(file_content or "", encoding="utf-8")
-                except OSError as e:
-                    self._remove_skill_dir(skill_dir)
-                    raise SkillStorageError(
-                        f"Failed to write supporting file {filename}: {e}",
-                        path=str(file_path),
-                    ) from e
-
-        registry_payload = {
-            "name": name,
-            "description": parsed.frontmatter.description,
-            "argument_hint": parsed.frontmatter.argument_hint,
-            "disable_model_invocation": parsed.frontmatter.disable_model_invocation,
-            "user_invocable": parsed.frontmatter.user_invocable,
-            "allowed_tools": parsed.frontmatter.allowed_tools,
-            "model": parsed.frontmatter.model,
-            "context": parsed.frontmatter.context,
-            "directory_path": str(skill_dir),
-            "file_hash": parsed.content_hash,
-        }
+        registry_payload = self._registry_payload(name, skill_dir, parsed)
 
         try:
             if existing and existing.get("deleted"):
-                # Hard-delete the soft-deleted row first, then fresh insert.
-                # update_skill_registry rejects soft-deleted records (WHERE deleted=0),
-                # so we purge and re-insert instead.
-                db.execute_query(
-                    "DELETE FROM skill_registry WHERE name = ? AND deleted = 1",
-                    (name,),
-                    commit=True,
+                self._activate_deleted_replacement_locked(
+                    name,
+                    skill_dir,
+                    parsed,
+                    existing,
                 )
-                db.insert_skill_registry(registry_payload)
             else:
                 db.insert_skill_registry(registry_payload)
         except ConflictError as e:
@@ -1052,9 +2041,31 @@ class SkillsService:
 
         logger.info(f"Created skill '{name}' for user {self.user_id}")
 
-        return await self.get_skill(name, enforce_integrity=False)
+        return await asyncio.to_thread(
+            self._get_skill_sync,
+            name,
+            enforce_integrity=False,
+        )
 
     async def update_skill(
+        self,
+        name: str,
+        content: Optional[str] = None,
+        supporting_files: Optional[dict[str, Optional[str]]] = None,
+        expected_version: Optional[int] = None,
+    ) -> dict[str, Any]:
+        """Update one skill while serializing filesystem and Trash transitions."""
+        async with self._trash_operation_lock():
+            return await self._finish_trash_mutation(
+                self._update_skill_locked(
+                    name,
+                    content=content,
+                    supporting_files=supporting_files,
+                    expected_version=expected_version,
+                )
+            )
+
+    async def _update_skill_locked(
         self,
         name: str,
         content: Optional[str] = None,
@@ -1078,7 +2089,7 @@ class SkillsService:
             SkillConflictError: If version mismatch
         """
         name = self._normalize_and_validate_skill_name(name)
-        await self._sync_registry_async(force=True)
+        await self._sync_registry_async(force=True, trash_lock_held=True)
         db = self._get_db()
 
         row = db.get_skill_registry(name, include_deleted=False)
@@ -1125,13 +2136,20 @@ class SkillsService:
                         await asyncio.to_thread(file_path.parent.mkdir, parents=True, exist_ok=True)
                         await asyncio.to_thread(file_path.write_text, original_content, encoding="utf-8")
                 except OSError as e:
-                    logger.error(f"Failed to restore skill file {file_path}: {e}")
+                    logger.error(
+                        "Failed to restore file '{}' for skill '{}' and user {} (error {})",
+                        file_path.name,
+                        name,
+                        self.user_id,
+                        type(e).__name__,
+                    )
 
         if content is not None:
             try:
                 parsed = self._parser.parse_content(content, default_name=name)
             except Exception as e:
                 raise SkillValidationError(f"Invalid skill content: {e}") from e
+            self._validate_parsed_skill_name(name, parsed)
 
             skill_file = self._skill_main_file(skill_dir)
             try:
@@ -1221,11 +2239,22 @@ class SkillsService:
 
         logger.info(f"Updated skill '{name}' for user {self.user_id}")
 
-        return await self.get_skill(name, enforce_integrity=False)
+        return await asyncio.to_thread(
+            self._get_skill_sync,
+            name,
+            enforce_integrity=False,
+        )
 
     async def delete_skill(self, name: str, expected_version: Optional[int] = None) -> None:
+        """Move a skill to Trash under the per-user Trash operation lock."""
+        async with self._trash_operation_lock():
+            await self._finish_trash_mutation(
+                self._delete_skill_locked(name, expected_version)
+            )
+
+    async def _delete_skill_locked(self, name: str, expected_version: Optional[int] = None) -> None:
         """
-        Delete a skill.
+        Move a skill bundle to durable Trash and soft-delete its registry row.
 
         Args:
             name: The skill name
@@ -1236,7 +2265,7 @@ class SkillsService:
             SkillConflictError: If version mismatch
         """
         name = name.strip().lower()
-        await self._sync_registry_async(force=True)
+        await self._sync_registry_async(force=True, trash_lock_held=True)
         db = self._get_db()
 
         row = db.get_skill_registry(name, include_deleted=True)
@@ -1252,34 +2281,86 @@ class SkillsService:
                 actual_version=current_version,
             )
 
-        if not row.get("deleted"):
-            try:
-                db.mark_skill_registry_deleted(name, expected_version=current_version)
-            except ConflictError as e:
-                raise SkillConflictError(str(e), skill_name=name) from e
-            except CharactersRAGDBError as e:
-                raise SkillsError(f"Failed to delete skill '{name}' in registry: {e}") from e
+        if row.get("deleted"):
+            return
 
-        # Delete skill directory after the registry accepts the versioned delete.
         skill_dir = self._get_skill_dir(name)
-        if await asyncio.to_thread(skill_dir.exists):
-            try:
-                await asyncio.to_thread(shutil.rmtree, skill_dir)
-            except OSError as e:
-                if not row.get("deleted"):
-                    try:
-                        db.restore_skill_registry(
-                            name,
-                            {"directory_path": str(skill_dir)},
-                            expected_version=current_version + 1,
-                        )
-                    except Exception as restore_error:
-                        logger.error(f"Failed to restore skill registry after delete failure: {restore_error}")
-                raise SkillStorageError(f"Failed to delete skill directory: {e}", path=str(skill_dir)) from e
+        archive_dir = self._get_archive_dir(row)
+        if not await asyncio.to_thread(skill_dir.exists):
+            raise SkillStorageError(
+                "Skill bundle is missing and cannot be moved to Trash",
+                path=str(skill_dir),
+            )
+        if await asyncio.to_thread(archive_dir.exists) and not await asyncio.to_thread(
+            self._is_skill_bundle_valid,
+            name,
+            skill_dir,
+        ):
+            raise SkillStorageError(
+                "Skill bundle state is ambiguous; preserved active and archived copies.",
+                path=str(skill_dir),
+            )
 
-        logger.info(f"Deleted skill '{name}' for user {self.user_id}")
+        try:
+            await asyncio.to_thread(
+                self._discard_stale_archive,
+                archive_dir,
+                f"stale-{row.get('uuid') or name}",
+            )
+        except (OSError, SkillStorageError) as e:
+            raise SkillStorageError(
+                f"Failed to clear a stale Trash archive: {e}",
+                path=str(archive_dir),
+            ) from e
+
+        try:
+            await asyncio.to_thread(self._move_skill_dir, skill_dir, archive_dir)
+        except OSError as e:
+            raise SkillStorageError(
+                f"Failed to move skill to Trash: {e}",
+                path=str(skill_dir),
+            ) from e
+
+        try:
+            db.mark_skill_registry_deleted(
+                name,
+                expected_version=current_version,
+                directory_path=str(archive_dir),
+            )
+        except ConflictError as e:
+            try:
+                await asyncio.to_thread(self._move_skill_dir, archive_dir, skill_dir)
+            except OSError as rollback_error:
+                logger.error(
+                    "Failed to roll back conflicted archive for skill '{}' and user {} (error {})",
+                    name,
+                    self.user_id,
+                    type(rollback_error).__name__,
+                )
+            raise SkillConflictError(str(e), skill_name=name) from e
+        except CharactersRAGDBError as e:
+            try:
+                await asyncio.to_thread(self._move_skill_dir, archive_dir, skill_dir)
+            except OSError as rollback_error:
+                logger.error(
+                    "Failed to roll back archive for skill '{}' and user {} (error {})",
+                    name,
+                    self.user_id,
+                    type(rollback_error).__name__,
+                )
+            raise SkillsError(f"Failed to delete skill '{name}' in registry: {e}") from e
+
+        self._integrity_decision_cache.pop((self._skill_asset_id(name), "skill_read"), None)
+        logger.info(f"Moved skill '{name}' to Trash for user {self.user_id}")
 
     async def bulk_delete_skills(self, items: list[dict[str, Any]]) -> list[str]:
+        """Move selected skills to Trash under one per-user operation lock."""
+        async with self._trash_operation_lock():
+            return await self._finish_trash_mutation(
+                self._bulk_delete_skills_locked(items)
+            )
+
+    async def _bulk_delete_skills_locked(self, items: list[dict[str, Any]]) -> list[str]:
         """
         Delete multiple skills after validating all selected versions.
 
@@ -1314,12 +2395,91 @@ class SkillsService:
                     )
             normalized_items.append((name, expected_version))
 
-        await self._sync_registry_async(force=True)
+        await self._sync_registry_async(force=True, trash_lock_held=True)
         db = self._get_db()
+        move_plans: list[tuple[Path, Path]] = []
+        stale_archive_plans: list[tuple[Path, str]] = []
+        archive_paths: dict[str, str] = {}
+        for name, expected_version in normalized_items:
+            row = db.get_skill_registry(name, include_deleted=True)
+            if not row:
+                raise SkillNotFoundError(name)
+            current_version = int(row.get("version") or 1)
+            if expected_version is not None and current_version != expected_version:
+                raise SkillConflictError(
+                    f"Skill '{name}' was modified (expected version {expected_version}, got {current_version})",
+                    skill_name=name,
+                    expected_version=expected_version,
+                    actual_version=current_version,
+                )
+            if row.get("deleted"):
+                continue
+
+            skill_dir = self._get_skill_dir(name)
+            if not skill_dir.exists():
+                raise SkillStorageError(
+                    "Skill bundle is missing and cannot be moved to Trash",
+                    path=str(skill_dir),
+                )
+            archive_dir = self._get_archive_dir(row)
+            if archive_dir.exists():
+                if not self._is_skill_bundle_valid(name, skill_dir):
+                    raise SkillStorageError(
+                        "Skill bundle state is ambiguous; preserved active and archived copies.",
+                        path=str(skill_dir),
+                    )
+                stale_archive_plans.append(
+                    (archive_dir, f"stale-{row.get('uuid') or name}")
+                )
+            move_plans.append((skill_dir, archive_dir))
+            archive_paths[name] = str(archive_dir)
+
+        for archive_dir, label in stale_archive_plans:
+            try:
+                await asyncio.to_thread(
+                    self._discard_stale_archive,
+                    archive_dir,
+                    label,
+                )
+            except (OSError, SkillStorageError) as e:
+                raise SkillStorageError(
+                    f"Failed to clear a stale Trash archive: {e}",
+                    path=str(archive_dir),
+                ) from e
+
+        moved: list[tuple[Path, Path]] = []
+
+        async def rollback_moves() -> None:
+            for skill_dir, archive_dir in reversed(moved):
+                try:
+                    await asyncio.to_thread(self._move_skill_dir, archive_dir, skill_dir)
+                except OSError as rollback_error:
+                    logger.error(
+                        "Failed to roll back bulk archive for skill '{}' and user {} (error {})",
+                        skill_dir.name,
+                        self.user_id,
+                        type(rollback_error).__name__,
+                    )
 
         try:
-            deleted_rows = await asyncio.to_thread(db.bulk_mark_skill_registry_deleted, normalized_items)
+            for skill_dir, archive_dir in move_plans:
+                await asyncio.to_thread(self._move_skill_dir, skill_dir, archive_dir)
+                moved.append((skill_dir, archive_dir))
+        except OSError as e:
+            await rollback_moves()
+            raise SkillStorageError(
+                f"Failed to move selected skills to Trash: {e}",
+                path=str(move_plans[len(moved)][0]) if len(moved) < len(move_plans) else None,
+            ) from e
+
+        try:
+            deleted_rows = await asyncio.to_thread(
+                db.bulk_mark_skill_registry_deleted,
+                normalized_items,
+                archive_paths,
+            )
         except InputError as e:
+            await rollback_moves()
             message = str(e)
             missing_name = (
                 message.removeprefix("Skill not found: ").strip()
@@ -1328,32 +2488,249 @@ class SkillsService:
             )
             raise SkillNotFoundError(missing_name) from e
         except ConflictError as e:
+            await rollback_moves()
             raise SkillConflictError(str(e)) from e
         except CharactersRAGDBError as e:
+            await rollback_moves()
             raise SkillsError(f"Failed to bulk delete skills in registry: {e}") from e
 
-        deleted: list[str] = []
-        for row in deleted_rows:
-            name = str(row["name"])
-            skill_dir = self._get_skill_dir(name)
-            if await asyncio.to_thread(skill_dir.exists):
-                try:
-                    await asyncio.to_thread(shutil.rmtree, skill_dir)
-                except OSError as e:
-                    if not row.get("was_deleted"):
-                        try:
-                            db.restore_skill_registry(
-                                name,
-                                {"directory_path": str(skill_dir)},
-                                expected_version=int(row["version"]),
-                            )
-                        except Exception as restore_error:
-                            logger.error(f"Failed to restore skill registry after bulk delete failure: {restore_error}")
-                    raise SkillStorageError(f"Failed to delete skill directory: {e}", path=str(skill_dir)) from e
-            deleted.append(name)
+        deleted = [str(row["name"]) for row in deleted_rows]
+        for name in deleted:
+            self._integrity_decision_cache.pop((self._skill_asset_id(name), "skill_read"), None)
 
-        logger.info(f"Bulk deleted {len(deleted)} skills for user {self.user_id}")
+        logger.info(f"Moved {len(deleted)} skills to Trash for user {self.user_id}")
         return deleted
+
+    def _build_trash_items(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Validate archived bundles and build public Trash items off the event loop."""
+        items: list[dict[str, Any]] = []
+        for row in rows:
+            archive_dir = self._get_archive_dir(row)
+            has_restore_files = self._is_archive_restorable(archive_dir)
+            restorable = has_restore_files and self._is_skill_bundle_valid(
+                str(row["name"]),
+                archive_dir,
+            )
+            items.append(
+                {
+                    "name": row["name"],
+                    "description": row.get("description"),
+                    "argument_hint": row.get("argument_hint"),
+                    "disable_model_invocation": bool(row.get("disable_model_invocation")),
+                    "user_invocable": bool(row.get("user_invocable", True)),
+                    "allowed_tools": row.get("allowed_tools"),
+                    "model": row.get("model"),
+                    "context": row.get("context") or "inline",
+                    "deleted_at": row.get("last_modified") or datetime.now(timezone.utc),
+                    "version": int(row.get("version") or 1),
+                    "restorable": restorable,
+                    "restore_unavailable_reason": (
+                        None
+                        if restorable
+                        else (
+                            "Archived skill files are invalid."
+                            if has_restore_files
+                            else "Archived skill files are missing."
+                        )
+                    ),
+                }
+            )
+        return items
+
+    async def list_trash(self, *, limit: int = 100, offset: int = 0) -> list[dict[str, Any]]:
+        """List deleted skills with truthful restore availability."""
+        await self._sync_registry_async()
+        try:
+            rows = await asyncio.to_thread(
+                self._get_db().list_deleted_skill_registry,
+                limit=limit,
+                offset=offset,
+            )
+        except CharactersRAGDBError as e:
+            raise SkillsError(f"Failed to list Skills Trash: {e}") from e
+        return await asyncio.to_thread(self._build_trash_items, rows)
+
+    async def get_trash_count(self) -> int:
+        """Return the number of records in Skills Trash."""
+        await self._sync_registry_async()
+        try:
+            return await asyncio.to_thread(self._get_db().count_deleted_skill_registry)
+        except CharactersRAGDBError as e:
+            raise SkillsError(f"Failed to count Skills Trash: {e}") from e
+
+    async def restore_skill(
+        self,
+        name: str,
+        expected_version: Optional[int] = None,
+    ) -> dict[str, Any]:
+        """Restore a skill under the per-user Trash operation lock."""
+        async with self._trash_operation_lock():
+            return await self._finish_trash_mutation(
+                self._restore_skill_locked(name, expected_version)
+            )
+
+    async def _restore_skill_locked(
+        self,
+        name: str,
+        expected_version: Optional[int] = None,
+    ) -> dict[str, Any]:
+        """Restore a complete skill bundle from durable Trash."""
+        name = self._normalize_and_validate_skill_name(name)
+        await self._sync_registry_async(force=True, trash_lock_held=True)
+        db = self._get_db()
+        row = db.get_skill_registry(name, include_deleted=True)
+        if not row:
+            raise SkillNotFoundError(name)
+        if not row.get("deleted"):
+            raise SkillConflictError(f"Skill '{name}' is not in Trash", skill_name=name)
+
+        current_version = int(row.get("version") or 1)
+        if expected_version is not None and current_version != expected_version:
+            raise SkillConflictError(
+                f"Skill '{name}' was modified (expected version {expected_version}, got {current_version})",
+                skill_name=name,
+                expected_version=expected_version,
+                actual_version=current_version,
+            )
+
+        archive_dir = self._get_archive_dir(row)
+        if not self._is_archive_restorable(archive_dir):
+            raise SkillConflictError(
+                f"Skill '{name}' cannot be restored because archived files are missing",
+                skill_name=name,
+            )
+        skill_dir = self._get_skill_dir(name)
+        if skill_dir.exists():
+            raise SkillConflictError(
+                f"Skill '{name}' cannot be restored because an active directory exists",
+                skill_name=name,
+            )
+        try:
+            parsed = await asyncio.to_thread(
+                self._parse_unchecked_skill_directory,
+                name,
+                archive_dir,
+            )
+            self._validate_parsed_skill_name(name, parsed)
+        except Exception:
+            raise SkillConflictError(
+                f"Skill '{name}' cannot be restored because archived files are invalid",
+                skill_name=name,
+            ) from None
+
+        try:
+            await asyncio.to_thread(self._move_skill_dir, archive_dir, skill_dir)
+        except OSError as e:
+            raise SkillStorageError(
+                f"Failed to restore skill bundle: {e}",
+                path=str(archive_dir),
+            ) from e
+
+        try:
+            db.restore_skill_registry(
+                name,
+                self._registry_payload(name, skill_dir, parsed),
+                expected_version=current_version,
+            )
+        except ConflictError as e:
+            with contextlib.suppress(OSError):
+                await asyncio.to_thread(self._move_skill_dir, skill_dir, archive_dir)
+            raise SkillConflictError(str(e), skill_name=name) from e
+        except CharactersRAGDBError as e:
+            with contextlib.suppress(OSError):
+                await asyncio.to_thread(self._move_skill_dir, skill_dir, archive_dir)
+            raise SkillsError(f"Failed to restore skill '{name}' in registry: {e}") from e
+
+        logger.info(f"Restored skill '{name}' from Trash for user {self.user_id}")
+        return await asyncio.to_thread(
+            self._get_skill_sync,
+            name,
+            enforce_integrity=False,
+        )
+
+    async def purge_skill(self, name: str, expected_version: Optional[int] = None) -> None:
+        """Permanently delete a trashed skill under the per-user operation lock."""
+        async with self._trash_operation_lock():
+            await self._finish_trash_mutation(
+                self._purge_skill_locked(name, expected_version)
+            )
+
+    async def _purge_skill_locked(self, name: str, expected_version: Optional[int] = None) -> None:
+        """Permanently delete a skill already in Trash."""
+        name = self._normalize_and_validate_skill_name(name)
+        await self._sync_registry_async(force=True, trash_lock_held=True)
+        db = self._get_db()
+        row = db.get_skill_registry(name, include_deleted=True)
+        if not row:
+            raise SkillNotFoundError(name)
+        if not row.get("deleted"):
+            raise SkillConflictError(f"Skill '{name}' must be moved to Trash first", skill_name=name)
+
+        current_version = int(row.get("version") or 1)
+        if expected_version is not None and current_version != expected_version:
+            raise SkillConflictError(
+                f"Skill '{name}' was modified (expected version {expected_version}, got {current_version})",
+                skill_name=name,
+                expected_version=expected_version,
+                actual_version=current_version,
+            )
+
+        archive_dir = self._get_archive_dir(row)
+        staging_dir = self.trash_dir / f".purging-{row.get('uuid') or name}"
+        staged = False
+        if archive_dir.exists():
+            try:
+                await asyncio.to_thread(self._move_skill_dir, archive_dir, staging_dir)
+                staged = True
+            except OSError as e:
+                raise SkillStorageError(
+                    f"Failed to stage skill for permanent deletion: {e}",
+                    path=str(archive_dir),
+                ) from e
+
+        async def restore_staged_archive() -> None:
+            if not staged:
+                return
+            try:
+                await asyncio.to_thread(self._move_skill_dir, staging_dir, archive_dir)
+            except OSError as rollback_error:
+                logger.error(
+                    "Failed to restore purge staging for '{}' and user {}; reconciliation will retry (error {})",
+                    name,
+                    self.user_id,
+                    type(rollback_error).__name__,
+                )
+
+        try:
+            db.purge_skill_registry(name, expected_version=current_version)
+        except InputError as e:
+            await restore_staged_archive()
+            raise SkillNotFoundError(name) from e
+        except ConflictError as e:
+            await restore_staged_archive()
+            raise SkillConflictError(str(e), skill_name=name) from e
+        except CharactersRAGDBError as e:
+            await restore_staged_archive()
+            raise SkillsError(f"Failed to purge skill '{name}' in registry: {e}") from e
+
+        if staged:
+            try:
+                cleanup_path = await asyncio.to_thread(
+                    self._stage_for_cleanup,
+                    staging_dir,
+                    f"purged-{row.get('uuid') or name}",
+                )
+            except (OSError, SkillStorageError) as e:
+                logger.warning(
+                    "Purge for '{}' is committed for user {}; archive cleanup deferred (error {})",
+                    name,
+                    self.user_id,
+                    type(e).__name__,
+                )
+            else:
+                await asyncio.to_thread(self._remove_cleanup_path_best_effort, cleanup_path)
+
+        logger.info(f"Permanently deleted skill '{name}' for user {self.user_id}")
 
     async def import_skill(
         self,
@@ -1361,6 +2738,7 @@ class SkillsService:
         name: Optional[str] = None,
         supporting_files: Optional[dict[str, str]] = None,
         overwrite: bool = False,
+        expected_version: Optional[int] = None,
     ) -> dict[str, Any]:
         """
         Import a skill from content.
@@ -1370,6 +2748,7 @@ class SkillsService:
             name: Override name (otherwise extracted from frontmatter/content)
             supporting_files: Additional files to import
             overwrite: If True, overwrite existing skill
+            expected_version: Existing version confirmed by import preview
 
         Returns:
             Imported skill data
@@ -1380,18 +2759,9 @@ class SkillsService:
         except Exception as e:
             raise SkillValidationError(f"Invalid skill content: {e}") from e
 
-        if parsed.frontmatter.name:
-            self._normalize_and_validate_skill_name(parsed.frontmatter.name, source="frontmatter skill name")
-
-        requested_name: Optional[str] = None
-        if name is not None:
-            requested_name = self._normalize_and_validate_skill_name(name)
-
-        skill_name = requested_name or parsed.frontmatter.name
-        if not skill_name:
-            raise SkillValidationError("Skill name must be specified in frontmatter or as parameter")
-
-        skill_name = self._normalize_and_validate_skill_name(skill_name)
+        skill_name, requested_name = self._resolve_import_skill_name(parsed, name)
+        if requested_name is not None:
+            content = self._parser.rewrite_frontmatter_name(content, requested_name)
         normalized_supporting_files = (
             self._normalize_supporting_files(
                 supporting_files,
@@ -1401,17 +2771,87 @@ class SkillsService:
             else None
         )
 
-        await self._sync_registry_async(force=True)
+        async with self._trash_operation_lock():
+            return await self._finish_trash_mutation(
+                self._import_skill_locked(
+                    skill_name,
+                    content,
+                    normalized_supporting_files,
+                    overwrite=overwrite,
+                    expected_version=expected_version,
+                )
+            )
+
+    async def _import_skill_locked(
+        self,
+        skill_name: str,
+        content: str,
+        supporting_files: Optional[dict[str, str]],
+        *,
+        overwrite: bool,
+        expected_version: Optional[int],
+    ) -> dict[str, Any]:
+        """Import a validated skill while the per-user operation lock is held."""
+        await self._sync_registry_async(force=True, trash_lock_held=True)
         db = self._get_db()
         existing = db.get_skill_registry(skill_name, include_deleted=True)
 
-        if existing and not existing.get("deleted"):
-            if overwrite:
-                await self.delete_skill(skill_name, expected_version=existing.get("version"))
-            else:
-                raise SkillConflictError(f"Skill '{skill_name}' already exists", skill_name=skill_name)
+        if existing:
+            current_version = int(existing.get("version") or 1)
+            if expected_version is not None and current_version != expected_version:
+                raise SkillConflictError(
+                    f"Skill '{skill_name}' was modified "
+                    f"(expected version {expected_version}, got {current_version})",
+                    skill_name=skill_name,
+                    expected_version=expected_version,
+                    actual_version=current_version,
+                )
+            if not overwrite:
+                location = " in Trash" if existing.get("deleted") else ""
+                raise SkillConflictError(
+                    f"Skill '{skill_name}' already exists{location}",
+                    skill_name=skill_name,
+                )
+        elif expected_version is not None:
+            raise SkillConflictError(
+                f"Skill '{skill_name}' no longer exists at the previewed version",
+                skill_name=skill_name,
+                expected_version=expected_version,
+                actual_version=None,
+            )
 
-        return await self.create_skill(skill_name, content, normalized_supporting_files)
+        if existing and not existing.get("deleted"):
+            staging_dir, parsed = self._prepare_skill_bundle(
+                skill_name,
+                content,
+                supporting_files or {},
+                operation="import-replace",
+            )
+            try:
+                self._replace_active_bundle_locked(
+                    skill_name,
+                    staging_dir,
+                    parsed,
+                    existing,
+                )
+            except ConflictError as e:
+                raise SkillConflictError(str(e), skill_name=skill_name) from e
+            except (CharactersRAGDBError, InputError) as e:
+                raise SkillsError(
+                    f"Failed to record imported skill '{skill_name}' in registry: {e}"
+                ) from e
+            return await asyncio.to_thread(
+                self._get_skill_sync,
+                skill_name,
+                enforce_integrity=False,
+            )
+
+        return await self._create_skill_locked(
+            skill_name,
+            content,
+            supporting_files,
+            replace_deleted=overwrite,
+        )
 
     def _invalid_import_preview(self, errors: list[str]) -> dict[str, Any]:
         """Build a non-mutating import preview for invalid input."""
@@ -1458,21 +2898,7 @@ class SkillsService:
             return self._invalid_import_preview([parse_error])
 
         try:
-            if parsed.frontmatter.name:
-                self._normalize_and_validate_skill_name(
-                    parsed.frontmatter.name,
-                    source="frontmatter skill name",
-                )
-
-            requested_name: Optional[str] = None
-            if name is not None:
-                requested_name = self._normalize_and_validate_skill_name(name)
-
-            skill_name = requested_name or parsed.frontmatter.name
-            if not skill_name:
-                raise SkillValidationError("Skill name must be specified in frontmatter or as parameter")
-
-            skill_name = self._normalize_and_validate_skill_name(skill_name)
+            skill_name, _requested_name = self._resolve_import_skill_name(parsed, name)
             normalized_supporting_files = self._normalize_supporting_files(
                 supporting_files,
                 allow_deletes=False,
@@ -1483,8 +2909,8 @@ class SkillsService:
         await self._sync_registry_async()
         db = self._get_db()
         existing = db.get_skill_registry(skill_name, include_deleted=True)
-        active_existing = bool(existing and not existing.get("deleted"))
-        existing_version = int(existing.get("version") or 1) if active_existing else None
+        has_existing = bool(existing)
+        existing_version = int(existing.get("version") or 1) if existing else None
         fm = parsed.frontmatter
 
         return {
@@ -1499,8 +2925,8 @@ class SkillsService:
             "model": fm.model,
             "context": fm.context,
             "supporting_file_count": len(normalized_supporting_files),
-            "conflict": active_existing,
-            "can_overwrite": active_existing,
+            "conflict": has_existing,
+            "can_overwrite": has_existing,
             "existing_version": existing_version,
         }
 
@@ -1633,6 +3059,7 @@ class SkillsService:
         self,
         zip_data: bytes,
         overwrite: bool = False,
+        expected_version: Optional[int] = None,
     ) -> dict[str, Any]:
         """
         Import a skill from a zip file.
@@ -1640,6 +3067,7 @@ class SkillsService:
         Args:
             zip_data: Zip file bytes
             overwrite: If True, overwrite existing skill
+            expected_version: Existing version confirmed by import preview
 
         Returns:
             Imported skill data
@@ -1650,6 +3078,7 @@ class SkillsService:
             name=skill_name,
             supporting_files=supporting_files,
             overwrite=overwrite,
+            expected_version=expected_version,
         )
 
     async def export_skill(self, name: str) -> bytes:
@@ -1823,6 +3252,13 @@ class SkillsService:
         return Path(__file__).parent / "builtin"
 
     async def seed_builtin_skills(self, overwrite: bool = False) -> list[str]:
+        """Seed built-in skills while serializing filesystem and registry changes."""
+        async with self._trash_operation_lock():
+            return await self._finish_trash_mutation(
+                self._seed_builtin_skills_locked(overwrite)
+            )
+
+    async def _seed_builtin_skills_locked(self, overwrite: bool) -> list[str]:
         """Copy built-in example skills into the user's skills directory.
 
         Args:
@@ -1836,7 +3272,7 @@ class SkillsService:
             logger.warning("Built-in skills directory not found: {}", builtin_dir)
             return []
 
-        await self._sync_registry_async(force=True)
+        await self._sync_registry_async(force=True, trash_lock_held=True)
         db = self._get_db()
 
         seeded: list[str] = []
@@ -1864,42 +3300,59 @@ class SkillsService:
                 raise SkillsError(f"Failed to read existing skill state for '{skill_name}': {e}") from e
 
             row_is_deleted = bool(registry_row and registry_row.get("deleted"))
-            skill_exists = bool((registry_row and not row_is_deleted) or destination_dir.exists())
+            skill_exists = bool(registry_row or destination_dir.exists())
+            if skill_exists and not overwrite:
+                logger.debug("Built-in skill '{}' already exists, skipping", skill_name)
+                continue
+            if registry_row is None and destination_dir.exists():
+                raise SkillStorageError(
+                    f"Cannot safely overwrite unregistered skill directory '{skill_name}'",
+                    path=str(destination_dir),
+                )
+
+            staging_dir = self._new_skill_staging_path(skill_name, "seed")
             try:
-                if skill_exists and not overwrite:
-                    logger.debug("Built-in skill '{}' already exists, skipping", skill_name)
-                    continue
+                shutil.copytree(skill_dir, staging_dir, dirs_exist_ok=False)
+                parsed = self._parse_unchecked_skill_directory(skill_name, staging_dir)
+                self._validate_parsed_skill_name(skill_name, parsed)
 
-                if overwrite and row_is_deleted:
-                    db.execute_query(
-                        "DELETE FROM skill_registry WHERE name = ? AND deleted = 1",
-                        (skill_name,),
-                        commit=True,
-                    )
-
-                if overwrite and destination_dir.exists():
-                    self._remove_skill_dir(destination_dir)
-
-                if destination_dir.exists():
-                    logger.warning(
-                        "Skipping built-in skill '{}' because destination already exists",
+                if overwrite and registry_row and not row_is_deleted:
+                    self._replace_active_bundle_locked(
                         skill_name,
+                        staging_dir,
+                        parsed,
+                        registry_row,
                     )
-                    continue
-
-                shutil.copytree(skill_dir, destination_dir, dirs_exist_ok=False)
+                elif overwrite and row_is_deleted and registry_row:
+                    self._move_skill_dir(staging_dir, destination_dir)
+                    self._activate_deleted_replacement_locked(
+                        skill_name,
+                        destination_dir,
+                        parsed,
+                        registry_row,
+                    )
+                else:
+                    self._move_skill_dir(staging_dir, destination_dir)
+            except ConflictError as e:
+                self._remove_skill_dir(staging_dir)
+                raise SkillConflictError(str(e), skill_name=skill_name) from e
             except (CharactersRAGDBError, InputError) as e:
+                self._remove_skill_dir(staging_dir)
                 raise SkillsError(f"Failed to prepare built-in skill '{skill_name}': {e}") from e
             except OSError as e:
+                self._remove_skill_dir(staging_dir)
                 raise SkillStorageError(
                     f"Failed to copy built-in skill '{skill_name}': {e}",
-                    path=str(destination_dir),
+                    path=str(staging_dir),
                 ) from e
+            except Exception:
+                self._remove_skill_dir(staging_dir)
+                raise
 
             seeded.append(skill_name)
             logger.info("Seeded built-in skill: {}", skill_name)
 
         if seeded:
-            await self._sync_registry_async(force=True)
+            await self._sync_registry_async(force=True, trash_lock_held=True)
 
         return seeded

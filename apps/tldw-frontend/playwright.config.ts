@@ -4,6 +4,16 @@ const rawBaseUrl = process.env.TLDW_WEB_URL || 'http://localhost:8080';
 const baseURL = rawBaseUrl.replace('127.0.0.1', 'localhost');
 const webCommand = process.env.TLDW_WEB_CMD || 'bun run dev -- -p 8080';
 const shouldAutoStart = process.env.TLDW_WEB_AUTOSTART !== 'false';
+const extensionPersistenceSuite = process.argv.some((arg) =>
+  arg.includes('extension-api-key-persistence')
+);
+const cookieLifecycleSuite =
+  process.env.TLDW_COOKIE_LIFECYCLE === '1' ||
+  process.argv.some((arg) => arg.includes('single-user-cookie-lifecycle'));
+const cookieLifecycleApiUrl =
+  process.env.TLDW_COOKIE_LIFECYCLE_API_URL || 'http://127.0.0.1:18001';
+const cookieLifecycleApiKey =
+  process.env.TLDW_COOKIE_LIFECYCLE_API_KEY || 'THIS-IS-A-SECURE-KEY-123-FAKE-KEY';
 const rawApiUrl =
   process.env.NEXT_PUBLIC_API_URL ||
   process.env.TLDW_SERVER_URL ||
@@ -16,8 +26,19 @@ const webServerEnv = {
       (entry): entry is [string, string] => typeof entry[1] === 'string'
     )
   ),
-  NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE: process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE || 'advanced',
-  NEXT_PUBLIC_API_URL: defaultApiUrl,
+  NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE: cookieLifecycleSuite
+    ? 'quickstart'
+    : process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE || 'advanced',
+  NEXT_PUBLIC_API_URL: cookieLifecycleSuite ? '' : defaultApiUrl,
+  ...(cookieLifecycleSuite
+    ? {
+        AUTH_MODE: 'single_user',
+        SINGLE_USER_API_KEY: cookieLifecycleApiKey,
+        TLDW_WEBUI_EXPOSE_RUNTIME_AUTH: '1',
+        SINGLE_USER_SESSION_COOKIE_NAME: 'tldw_single_user_session',
+        TLDW_INTERNAL_API_ORIGIN: cookieLifecycleApiUrl,
+      }
+    : {}),
 };
 
 export default defineConfig({
@@ -32,7 +53,7 @@ export default defineConfig({
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
   },
-  webServer: shouldAutoStart
+  webServer: shouldAutoStart && !extensionPersistenceSuite
     ? {
         command: webCommand,
         env: webServerEnv,

@@ -275,7 +275,7 @@ describe("ItemsTab scale behavior", () => {
     })
 
     ;(serviceMocks.fetchScrapedItems as Mock).mockClear()
-    fireEvent.click(screen.getByTestId("watchlists-item-row-102"))
+    fireEvent.click(screen.getByRole("button", { name: "Open update: Item Two" }))
     expect(screen.getByTestId("watchlists-item-reader")).toHaveTextContent("Item Two")
     expect(serviceMocks.fetchScrapedItems).toHaveBeenCalledTimes(0)
   })

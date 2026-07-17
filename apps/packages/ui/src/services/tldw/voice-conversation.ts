@@ -1,4 +1,7 @@
-import { resolveBrowserWebSocketBase } from "@/services/tldw/browser-websocket"
+import {
+  resolveCookieSessionWebSocketBase,
+  resolveBrowserWebSocketBase,
+} from "@/services/tldw/browser-websocket"
 import { normalizeTldwTtsResponseFormat } from "@/services/tts"
 import { inferTldwProviderFromModel } from "@/services/tts-provider"
 import { toServerTtsProviderKey } from "@/services/tldw/tts-provider-keys"
@@ -42,6 +45,14 @@ type VoiceConversationAvailabilityInput = {
   ttsConfigReady: boolean
 }
 
+type VoiceConversationAuthConfig = {
+  serverUrl?: string | null
+  authMode?: "single-user" | "multi-user" | null
+  authSource?: "manual" | "cookie-session" | null
+  apiKey?: string | null
+  accessToken?: string | null
+}
+
 type VoiceConversationAudioHealthProbeInput = {
   isConnectionReady: boolean
   hasServerVoiceChat: boolean
@@ -52,8 +63,40 @@ type VoiceConversationAudioHealthProbeInput = {
 type VoiceConversationPreflightInput = VoiceConversationTtsConfigInput & {
   serverUrl: string
   token: string
+  authSource?: "manual" | "cookie-session"
+  authMode?: "single-user" | "multi-user"
   requestedModel?: string | null
   resolveProvider: ({ modelId }: { modelId: string }) => Promise<string | undefined> | string | undefined
+}
+
+export const buildAuthenticatedAudioWebSocketUrl = ({
+  serverUrl,
+  token,
+  authSource,
+  authMode,
+  path
+}: {
+  serverUrl: string
+  token?: string | null
+  authSource?: "manual" | "cookie-session"
+  authMode?: "single-user" | "multi-user"
+  path: string
+}): string => {
+  const cookieBase = resolveCookieSessionWebSocketBase({
+    serverUrl,
+    authMode,
+    authSource
+  })
+  const cookieSession = Boolean(cookieBase)
+  const base = cookieBase || resolveBrowserWebSocketBase(serverUrl)
+  if (!base) throw new Error("WebUI origin is not available")
+  if (cookieSession) return `${base}${path}`
+
+  const normalizedToken = trimString(token)
+  if (!normalizedToken) {
+    throw new Error("Not authenticated. Configure tldw credentials in Settings.")
+  }
+  return `${base}${path}`
 }
 
 type VoiceConversationTtsConfig = {
@@ -108,6 +151,18 @@ type VoiceConversationRuntimeError = {
 }
 
 const trimString = (value?: string | null): string => String(value || "").trim()
+
+export const isVoiceConversationAuthReady = (
+  config?: VoiceConversationAuthConfig | null
+): boolean => {
+  if (!trimString(config?.serverUrl)) return false
+  if (config?.authMode === "multi-user") {
+    return Boolean(trimString(config.accessToken))
+  }
+  return Boolean(
+    resolveCookieSessionWebSocketBase(config || {}) || trimString(config?.apiKey)
+  )
+}
 
 const resolveVoiceConversationFormat = (
   requestedFormat?: string | null,
@@ -334,11 +389,6 @@ export const buildVoiceConversationPreflight = async (
     throw new Error("tldw server not configured")
   }
 
-  const token = trimString(input.token)
-  if (!token) {
-    throw new Error("Not authenticated. Configure tldw credentials in Settings.")
-  }
-
   const ttsResolution = resolveVoiceConversationTtsConfig(input)
   if ("reason" in ttsResolution) {
     const error =
@@ -363,7 +413,13 @@ export const buildVoiceConversationPreflight = async (
     // {type:"auth", token} first frame sent by the client after `onopen`
     // (streaming_service.py:641-647 multi-user / 720-723 single-user). The token
     // is still validated above so callers fail fast when it is missing.
-    websocketUrl: `${resolveBrowserWebSocketBase(serverUrl)}/api/v1/audio/chat/stream`,
+    websocketUrl: buildAuthenticatedAudioWebSocketUrl({
+      serverUrl,
+      token: input.token,
+      authMode: input.authMode,
+      authSource: input.authSource,
+      path: "/api/v1/audio/chat/stream"
+    }),
     llm,
     tts: ttsConfig
   }

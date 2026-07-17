@@ -443,6 +443,7 @@ async def _handle_import(service: ChatbookService, payload: dict[str, Any], job_
             _payload_bool_or_default(payload, "import_media", True),
             _payload_bool_or_default(payload, "import_embeddings", True),
         )
+        ok, msg, result = await service.finalize_account_restore(ok, msg, result)
     finally:
         try:
             if resolved_path.exists() and resolved_path.is_file():
@@ -485,6 +486,7 @@ async def _handle_import(service: ChatbookService, payload: dict[str, Any], job_
             )
             ij.warnings = warnings
             ij.metadata = {
+                **(ij.metadata if isinstance(ij.metadata, dict) else {}),
                 "imported_items": imported_items,
                 "inventory_summary": result_data.get("inventory_summary"),
                 "skipped_non_restorable": skipped_non_restorable,

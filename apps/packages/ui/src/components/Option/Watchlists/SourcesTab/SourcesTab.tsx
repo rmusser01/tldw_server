@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import React, { useCallback, useEffect, useMemo, useState } from "react"
 import {
   Alert,
   Button,
@@ -66,7 +66,6 @@ import {
 } from "./empty-state"
 import {
   normalizeSourceIds,
-  resolveCheckNowTargets,
   shouldConfirmMultiSourceCheck
 } from "./check-now-utils"
 import { countToggleImpact, summarizeSourceSelection } from "./bulk-action-summary"
@@ -97,12 +96,6 @@ const SOURCE_USAGE_LOOKUP_PAGE_SIZE = 200
 const SOURCE_USAGE_LOOKUP_MAX_PAGES = 10
 const BULK_MOVE_NO_GROUP_VALUE = "__none__"
 const SOURCES_ADVANCED_COLUMNS_STORAGE_KEY = "watchlists:sources:advanced-columns:v1"
-const GROUP_OPML_CACHE_TTL_MS = 30_000
-
-interface GroupOpmlCacheEntry {
-  urlSet: Set<string>
-  cachedAt: number
-}
 
 const readStoredDisclosureState = (key: string): boolean | null => {
   if (typeof window === "undefined") return null
@@ -199,8 +192,6 @@ export const SourcesTab: React.FC = () => {
     const stored = readStoredDisclosureState(SOURCES_ADVANCED_COLUMNS_STORAGE_KEY)
     return stored ?? false
   })
-  const groupOpmlCacheRef = useRef<Record<number, GroupOpmlCacheEntry>>({})
-
   const selectedSources = useMemo(
     () => sources.filter((source) => selectedRowKeys.includes(source.id)),
     [sources, selectedRowKeys]
@@ -258,11 +249,12 @@ export const SourcesTab: React.FC = () => {
   const loadSources = useCallback(async () => {
     setSourcesLoading(true)
     try {
-      const useClientFilter = Boolean(selectedGroupId || selectedTypeFilter)
+      const useClientFilter = Boolean(selectedTypeFilter)
       const baseParams = {
         watchlist_id: selectedWatchlistId ?? undefined,
         q: sourcesSearch || undefined,
-        tags: selectedTagName ? [selectedTagName] : undefined
+        tags: selectedTagName ? [selectedTagName] : undefined,
+        groups: selectedGroupId != null ? [selectedGroupId] : undefined
       }
       let items: WatchlistSource[] = []
       let total = 0
@@ -291,34 +283,6 @@ export const SourcesTab: React.FC = () => {
         })
         items = Array.isArray(result.items) ? result.items : []
         total = result.total || items.length
-      }
-
-      if (selectedGroupId) {
-        try {
-          const cached = groupOpmlCacheRef.current[selectedGroupId]
-          const cacheIsFresh =
-            Boolean(cached) && Date.now() - cached.cachedAt < GROUP_OPML_CACHE_TTL_MS
-          let urlSet = cacheIsFresh ? cached.urlSet : null
-
-          if (!urlSet) {
-            const opml = await exportOpml({ group: [selectedGroupId] })
-            const parser = new DOMParser()
-            const doc = parser.parseFromString(opml, "text/xml")
-            const urls = Array.from(doc.querySelectorAll("outline[xmlUrl]"))
-              .map((node) => node.getAttribute("xmlUrl"))
-              .filter((url): url is string => Boolean(url))
-            urlSet = new Set(urls)
-            groupOpmlCacheRef.current[selectedGroupId] = {
-              urlSet,
-              cachedAt: Date.now()
-            }
-          }
-
-          items = items.filter((source) => urlSet.has(source.url))
-        } catch (err) {
-          console.error("Failed to load group OPML:", err)
-          message.error(t("watchlists:sources.groupFilterError", "Failed to load group filter"))
-        }
       }
 
       if (selectedTypeFilter) {
@@ -1103,10 +1067,6 @@ export const SourcesTab: React.FC = () => {
     void executeCheckNow(normalizedIds)
   }, [executeCheckNow, t])
 
-  const resolveCheckNowTargetIds = useCallback((sourceId: number): number[] => {
-    return resolveCheckNowTargets(sourceId, selectedSourceIds)
-  }, [selectedSourceIds])
-
   const toggleSourceSelection = useCallback((source: WatchlistSource) => {
     setSelectedRowKeys((previousKeys) => {
       const selectedSet = new Set(previousKeys.map((key) => String(key)))
@@ -1252,10 +1212,15 @@ export const SourcesTab: React.FC = () => {
                   href={safeUrl}
                   target="_blank"
                   rel="noopener noreferrer"
+                  aria-label={t(
+                    "watchlists:accessibilityHardening.source.openWebsite",
+                    "Open source website: {{name}}",
+                    { name: record.name }
+                  )}
                   className="text-text-subtle hover:text-text-muted"
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <ExternalLink className="h-3.5 w-3.5" />
+                  <ExternalLink className="h-3.5 w-3.5" aria-hidden />
                 </a>
               </Tooltip>
             )}
@@ -1340,15 +1305,12 @@ export const SourcesTab: React.FC = () => {
       key: "last_scraped_at",
       width: 190,
       render: (date: string | null, record) => {
-        const targetIds = resolveCheckNowTargetIds(record.id)
-        const checkNowLoading = targetIds.some((id) => checkingSourceIds.includes(id))
-        const checkNowTooltip = targetIds.length > 1
-          ? t(
-              "watchlists:sources.checkNowSelectedTooltip",
-              "Check now for {{count}} selected sources",
-              { count: targetIds.length }
-            )
-          : t("watchlists:sources.checkNowTooltip", "Check now")
+        const checkNowLoading = checkingSourceIds.includes(record.id)
+        const checkNowTooltip = t(
+          "watchlists:accessibilityHardening.source.checkNow",
+          "Check now: {{name}}",
+          { name: record.name }
+        )
 
         return (
           <div className="flex items-center gap-1.5">
@@ -1366,12 +1328,12 @@ export const SourcesTab: React.FC = () => {
                 type="text"
                 size="small"
                 shape="circle"
-                icon={<RefreshCw className="h-3.5 w-3.5" />}
+                icon={<RefreshCw className="h-3.5 w-3.5" aria-hidden />}
                 loading={checkNowLoading}
                 aria-label={checkNowTooltip}
                 onClick={(event) => {
                   event.stopPropagation()
-                  requestCheckNow(targetIds)
+                  requestCheckNow([record.id])
                 }}
               />
             </Tooltip>
@@ -1390,7 +1352,7 @@ export const SourcesTab: React.FC = () => {
           <Switch
             checked={active}
             size="small"
-            aria-label={t("watchlists:sources.toggleActiveAria", "Toggle active for {{name}}", { name: record.name })}
+            aria-label={t("watchlists:accessibilityHardening.source.toggleActive", "Toggle active: {{name}}", { name: record.name })}
             onChange={() => handleToggleActive(record)}
           />
           <span className="text-xs text-text-muted">
@@ -1412,8 +1374,8 @@ export const SourcesTab: React.FC = () => {
             <Button
               type="text"
               size="small"
-              aria-label={t("common:edit", "Edit")}
-              icon={<Edit2 className="h-4 w-4" />}
+              aria-label={t("watchlists:accessibilityHardening.source.edit", "Edit source: {{name}}", { name: record.name })}
+              icon={<Edit2 className="h-4 w-4" aria-hidden />}
               onClick={() => handleOpenExistingSourceForm(record.id)}
             />
           </Tooltip>
@@ -1421,8 +1383,8 @@ export const SourcesTab: React.FC = () => {
             <Button
               type="text"
               size="small"
-              aria-label={t("watchlists:sources.seenInfo", "Source Health & Dedup Stats")}
-              icon={<Eye className="h-4 w-4" />}
+              aria-label={t("watchlists:accessibilityHardening.source.openHealth", "Open source health: {{name}}", { name: record.name })}
+              icon={<Eye className="h-4 w-4" aria-hidden />}
               onClick={() => setSeenDrawerSourceId(record.id)}
             />
           </Tooltip>
@@ -1440,8 +1402,8 @@ export const SourcesTab: React.FC = () => {
               type="text"
               size="small"
               danger
-              aria-label={t("common:delete", "Delete")}
-              icon={<Trash2 className="h-4 w-4" />}
+              aria-label={t("watchlists:accessibilityHardening.source.delete", "Delete source: {{name}}", { name: record.name })}
+              icon={<Trash2 className="h-4 w-4" aria-hidden />}
               onClick={() => void requestDeleteConfirmation(record)}
             />
           </Tooltip>
@@ -1495,10 +1457,14 @@ export const SourcesTab: React.FC = () => {
           ? t("watchlists:sources.compactSummaryGroupSingular", "group")
           : t("watchlists:sources.compactSummaryGroupPlural", "groups")
         const sourceTags = Array.isArray(source.tags) ? source.tags : []
-        const targetIds = resolveCheckNowTargetIds(source.id)
-        const checkNowLoading = targetIds.some((id) => checkingSourceIds.includes(id))
+        const checkNowLoading = checkingSourceIds.includes(source.id)
         const isSelected = selectedRowKeys.some((key) => String(key) === String(source.id))
         const sourceSafeUrl = safeExternalUrl(source.url)
+        const sourceWebsiteLabel = t(
+          "watchlists:accessibilityHardening.source.openWebsite",
+          "Open source website: {{name}}",
+          { name: source.name }
+        )
 
         return (
           <article
@@ -1507,32 +1473,39 @@ export const SourcesTab: React.FC = () => {
             data-testid={`watchlists-source-card-${source.id}`}
           >
             <div className="flex items-start justify-between gap-3">
-              <label className="flex min-w-0 items-start gap-3">
+              <label
+                htmlFor={`watchlists-source-select-${source.id}`}
+                className="flex min-w-0 items-start gap-3"
+              >
                 <input
+                  id={`watchlists-source-select-${source.id}`}
                   type="checkbox"
                   className="mt-1 h-4 w-4 shrink-0"
                   checked={isSelected}
                   aria-label={t("watchlists:sources.selectSourceAria", "Select {{name}}", { name: source.name })}
                   onChange={() => toggleSourceSelection(source)}
                 />
-                <span className="min-w-0 space-y-1">
+                <span className="min-w-0">
                   <span className="block truncate font-medium text-text">{source.name}</span>
-                  {sourceSafeUrl ? (
-                    <a
-                      href={sourceSafeUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="block truncate text-xs text-text-muted hover:text-primary"
-                    >
-                      {sourceSafeUrl}
-                    </a>
-                  ) : null}
                 </span>
               </label>
               <Tag color={SOURCE_TYPE_COLORS[source.source_type] || "default"} className="shrink-0">
                 {source.source_type.toUpperCase()}
               </Tag>
             </div>
+            {sourceSafeUrl ? (
+              <a
+                href={sourceSafeUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label={sourceWebsiteLabel}
+                className="mt-1 inline-flex min-h-11 items-center gap-1 text-xs text-text-muted hover:text-primary"
+                onClick={(event) => event.stopPropagation()}
+              >
+                {sourceWebsiteLabel}
+                <ExternalLink className="h-3.5 w-3.5" aria-hidden />
+              </a>
+            ) : null}
 
             <div className="mt-3 flex flex-wrap gap-1.5">
               {sourceTags.slice(0, 4).map((tag) => (
@@ -1561,7 +1534,7 @@ export const SourcesTab: React.FC = () => {
                 <Switch
                   checked={source.active}
                   size="small"
-                  aria-label={t("watchlists:sources.toggleActiveAria", "Toggle active for {{name}}", { name: source.name })}
+                  aria-label={t("watchlists:accessibilityHardening.source.toggleActive", "Toggle active: {{name}}", { name: source.name })}
                   onChange={() => handleToggleActive(source)}
                 />
                 <span className="text-xs text-text-muted">
@@ -1572,21 +1545,24 @@ export const SourcesTab: React.FC = () => {
                 <Button
                   type="text"
                   size="small"
-                  aria-label={t("watchlists:sources.checkNowForSourceAria", "Check now for {{name}}", { name: source.name })}
-                  icon={<RefreshCw className="h-4 w-4" />}
+                  className="min-h-11 min-w-11"
+                  aria-label={t("watchlists:accessibilityHardening.source.checkNow", "Check now: {{name}}", { name: source.name })}
+                  icon={<RefreshCw className="h-4 w-4" aria-hidden />}
                   loading={checkNowLoading}
-                  onClick={() => requestCheckNow(targetIds)}
+                  onClick={() => requestCheckNow([source.id])}
                 />
                 <Button
                   type="text"
                   size="small"
-                  aria-label={t("watchlists:sources.seenInfoForSourceAria", "Source Health & Dedup Stats for {{name}}", { name: source.name })}
-                  icon={<Eye className="h-4 w-4" />}
+                  className="min-h-11 min-w-11"
+                  aria-label={t("watchlists:accessibilityHardening.source.openHealth", "Open source health: {{name}}", { name: source.name })}
+                  icon={<Eye className="h-4 w-4" aria-hidden />}
                   onClick={() => setSeenDrawerSourceId(source.id)}
                 />
                 <Button
                   type="text"
                   size="small"
+                  className="min-h-11 min-w-11"
                   aria-label={t("watchlists:sources.cloneFeedAria", "Clone {{name}}", { name: source.name })}
                   icon={<Copy className="h-4 w-4" />}
                   onClick={() => handleCloneSource(source)}
@@ -1594,16 +1570,18 @@ export const SourcesTab: React.FC = () => {
                 <Button
                   type="text"
                   size="small"
-                  aria-label={t("watchlists:sources.editSourceAria", "Edit {{name}}", { name: source.name })}
-                  icon={<Edit2 className="h-4 w-4" />}
+                  className="min-h-11 min-w-11"
+                  aria-label={t("watchlists:accessibilityHardening.source.edit", "Edit source: {{name}}", { name: source.name })}
+                  icon={<Edit2 className="h-4 w-4" aria-hidden />}
                   onClick={() => handleOpenExistingSourceForm(source.id)}
                 />
                 <Button
                   type="text"
                   size="small"
+                  className="min-h-11 min-w-11"
                   danger
-                  aria-label={t("watchlists:sources.deleteSourceAria", "Delete {{name}}", { name: source.name })}
-                  icon={<Trash2 className="h-4 w-4" />}
+                  aria-label={t("watchlists:accessibilityHardening.source.delete", "Delete source: {{name}}", { name: source.name })}
+                  icon={<Trash2 className="h-4 w-4" aria-hidden />}
                   onClick={() => void requestDeleteConfirmation(source)}
                 />
               </Space>
@@ -1748,6 +1726,11 @@ export const SourcesTab: React.FC = () => {
           <Button
             size="small"
             icon={<RefreshCw className="h-3.5 w-3.5" />}
+            aria-label={t(
+              "watchlists:sources.checkNowSelectedTooltip",
+              "Check now for {{count}} selected sources",
+              { count: selectedSourceIds.length }
+            )}
             onClick={() => requestCheckNow(selectedSourceIds)}
             loading={selectedSourceIds.some((id) => checkingSourceIds.includes(id))}
             disabled={bulkWorking}

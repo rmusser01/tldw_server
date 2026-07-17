@@ -242,9 +242,6 @@
   "header_omniSearchStartChat": {
     "message": "Start ny chat \"{{query}}\""
   },
-  "header_connectionCard.connectedCaption": {
-    "message": "Chat og værktøjer er nu tilgængelige i Indstillinger og sidepanelet."
-  },
   "header_quickIngestQueuedAria": {
     "message": "{{label}} — {{count}} elementer i kø — klik for at gennemgå og behandle"
   },
@@ -2752,5 +2749,8 @@
   },
   "repo2txt_status_generated": {
     "message": "Generated output for {{count}} files ({{tokenCount}} tokens)."
+  },
+  "header_connectionCard_connectedCaption": {
+    "message": "Chat og værktøjer er nu tilgængelige i Indstillinger og sidepanelet."
   }
 }

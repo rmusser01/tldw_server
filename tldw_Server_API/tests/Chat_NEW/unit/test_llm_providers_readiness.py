@@ -10,6 +10,11 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.endpoints import llm_providers
+from tldw_Server_API.app.core.LLM_Calls.provider_readiness import (
+    ModelDiscoveryResult,
+    provider_readiness,
+)
+from tldw_Server_API.app.core.Security.egress import URLPolicyResult
 
 
 class _EmptyProviderManager:
@@ -76,16 +81,93 @@ def _model(data: dict[str, object], provider: str, name: str) -> dict[str, objec
 
 
 @pytest.mark.unit
-def test_llm_provider_readiness_marks_egress_blocked_ollama_unavailable(
+@pytest.mark.parametrize(
+    ("result", "has_explicit_models", "probe", "enabled", "reason"),
+    [
+        (ModelDiscoveryResult("ready", ("discovered",)), False, False, True, None),
+        (ModelDiscoveryResult("ready", ()), False, False, True, "no_models_reported"),
+        (ModelDiscoveryResult("auth_failed", ()), False, False, False, "auth_failed"),
+        (ModelDiscoveryResult("server_error", ()), False, False, False, "endpoint_error"),
+        (ModelDiscoveryResult("unsupported", ()), False, False, True, "model_discovery_unavailable"),
+        (ModelDiscoveryResult("unreachable", ()), False, False, False, "endpoint_unreachable"),
+        (None, True, False, True, None),
+        (ModelDiscoveryResult("ready", ()), True, True, True, None),
+        (ModelDiscoveryResult("auth_failed", ()), True, True, False, "auth_failed"),
+        (ModelDiscoveryResult("server_error", ()), True, True, False, "endpoint_error"),
+        (ModelDiscoveryResult("unsupported", ()), True, True, True, "model_discovery_unavailable"),
+        (ModelDiscoveryResult("unreachable", ()), True, True, False, "endpoint_unreachable"),
+    ],
+)
+def test_provider_readiness_reduces_precomputed_discovery_without_io(
+    result,
+    has_explicit_models,
+    probe,
+    enabled,
+    reason,
+):
+    readiness = provider_readiness(
+        provider_name="llama",
+        provider_info={"display_name": "Llama.cpp", "type": "local"},
+        is_configured=True,
+        endpoint_url="http://10.0.0.5:18080/v1",
+        api_key_value=None,
+        current_availability=None,
+        health_entry=None,
+        supported_chat_providers={"llama.cpp"},
+        endpoint_policy=URLPolicyResult(True),
+        discovery_result=result,
+        has_explicit_models=has_explicit_models,
+        endpoint_probe_enabled=probe,
+    )
+
+    assert readiness["provider_enabled"] is enabled
+    assert readiness["readiness_reason_code"] == reason
+
+
+@pytest.mark.unit
+def test_provider_readiness_policy_and_health_failures_override_models():
+    common = {
+        "provider_name": "llama",
+        "provider_info": {"display_name": "Llama.cpp", "type": "local"},
+        "is_configured": True,
+        "endpoint_url": "http://10.0.0.5:18080/v1",
+        "api_key_value": None,
+        "current_availability": None,
+        "supported_chat_providers": {"llama.cpp"},
+        "discovery_result": ModelDiscoveryResult("ready", ("manual",)),
+        "has_explicit_models": True,
+        "endpoint_probe_enabled": False,
+    }
+
+    policy_blocked = provider_readiness(
+        **common,
+        endpoint_policy=URLPolicyResult(False, "blocked", reason_code="address_forbidden"),
+        health_entry=None,
+    )
+    unhealthy = provider_readiness(
+        **common,
+        endpoint_policy=URLPolicyResult(True),
+        health_entry={"status": "unhealthy"},
+    )
+
+    assert policy_blocked["readiness_reason_code"] == "egress_blocked"
+    assert policy_blocked["provider_enabled"] is False
+    assert unhealthy["readiness_reason_code"] == "provider_health_unavailable"
+    assert unhealthy["provider_enabled"] is False
+
+
+@pytest.mark.unit
+def test_llama_manual_model_on_scoped_lan_nonstandard_port_is_selectable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Egress-blocked local endpoints are reported as unavailable."""
+    """Trusted LAN endpoints bypass global private/port defaults only for their exact origin."""
     monkeypatch.setenv("WORKFLOWS_EGRESS_ALLOWED_PORTS", "80,443")
+    monkeypatch.setenv("WORKFLOWS_EGRESS_BLOCK_PRIVATE", "true")
     parser = _config(
         {
             "Local-API": {
-                "ollama_api_IP": "http://192.168.2.216:11434/v1",
-                "ollama_model": "gemma3:1b",
+                "llama_api_IP": "http://192.168.2.216:18080/v1",
+                "llama_model": "manual-llama.gguf",
             }
         }
     )
@@ -95,18 +177,187 @@ def test_llm_provider_readiness_marks_egress_blocked_ollama_unavailable(
         models_response = client.get("/api/v1/llm/models/metadata")
 
     assert providers_response.status_code == 200, providers_response.text
-    ollama = _provider(providers_response.json(), "ollama")
-    assert ollama["availability"] == "unavailable"
-    assert ollama["provider_enabled"] is False
-    assert ollama["readiness_reason_code"] == "egress_blocked"
-    assert "Port not allowed: 11434" in ollama["readiness_message"]
-    assert ollama["chat_provider"] == "ollama"
+    llama = _provider(providers_response.json(), "llama")
+    assert llama["availability"] == "enabled"
+    assert llama["provider_enabled"] is True
+    assert llama["readiness_reason_code"] is None
+    assert llama["chat_provider"] == "llama.cpp"
 
     assert models_response.status_code == 200, models_response.text
-    model = _model(models_response.json(), "ollama", "gemma3:1b")
+    model = _model(models_response.json(), "llama", "manual-llama.gguf")
+    assert model["availability"] == "enabled"
+    assert model["provider_enabled"] is True
+    assert model.get("readiness_reason_code") is None
+    assert model["catalog_only"] is False
+
+
+@pytest.mark.unit
+def test_llama_manual_model_on_metadata_target_is_egress_blocked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parser = _config(
+        {
+            "Local-API": {
+                "llama_api_IP": "http://169.254.169.254:18080/v1",
+                "llama_model": "manual-llama.gguf",
+            }
+        }
+    )
+
+    with _client_for_config(monkeypatch, parser) as client:
+        models_response = client.get("/api/v1/llm/models/metadata")
+
+    assert models_response.status_code == 200, models_response.text
+    model = _model(models_response.json(), "llama", "manual-llama.gguf")
     assert model["availability"] == "unavailable"
     assert model["provider_enabled"] is False
     assert model["readiness_reason_code"] == "egress_blocked"
+
+
+@pytest.mark.unit
+def test_catalog_computes_discovery_once_and_passes_same_result_to_readiness(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parser = _config(
+        {"Local-API": {"llama_api_IP": "http://10.0.0.5:18080/v1"}}
+    )
+    result = ModelDiscoveryResult("ready", ("discovered-llama",))
+    discovery_calls = []
+    readiness_results = []
+    original_readiness = provider_readiness
+
+    def discover(*args, **kwargs):
+        discovery_calls.append((args, kwargs))
+        return result
+
+    def reduce_readiness(**kwargs):
+        if kwargs["provider_name"] == "llama":
+            readiness_results.append(kwargs["discovery_result"])
+        return original_readiness(**kwargs)
+
+    client = _client_for_config(monkeypatch, parser)
+    monkeypatch.setattr(llm_providers, "discover_models_from_endpoint", discover)
+    monkeypatch.setattr(llm_providers, "_provider_readiness", reduce_readiness)
+    with client:
+        response = client.get("/api/v1/llm/providers")
+
+    assert response.status_code == 200, response.text
+    assert len(discovery_calls) == 1
+    assert readiness_results == [result]
+    assert readiness_results[0] is result
+    assert _provider(response.json(), "llama")["models"] == ["discovered-llama"]
+
+
+@pytest.mark.unit
+def test_catalog_maps_dns_unresolved_to_endpoint_unreachable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parser = _config(
+        {
+            "Local-API": {
+                "llama_api_IP": "http://llama.internal:18080/v1",
+                "llama_model": "manual-llama.gguf",
+            }
+        }
+    )
+    client = _client_for_config(monkeypatch, parser)
+    monkeypatch.setattr(
+        llm_providers,
+        "evaluate_url_policy",
+        lambda *_args, **_kwargs: URLPolicyResult(
+            False,
+            "Host could not be resolved",
+            reason_code="dns_unresolved",
+        ),
+    )
+
+    with client:
+        response = client.get("/api/v1/llm/providers")
+
+    assert response.status_code == 200, response.text
+    llama = _provider(response.json(), "llama")
+    assert llama["provider_enabled"] is False
+    assert llama["availability"] == "unavailable"
+    assert llama["readiness_reason_code"] == "endpoint_unreachable"
+    assert "llama.internal" not in llama["readiness_message"]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("result", "reason_code"),
+    [
+        (ModelDiscoveryResult("ready", ()), "no_models_reported"),
+        (ModelDiscoveryResult("unsupported", ()), "model_discovery_unavailable"),
+    ],
+)
+def test_catalog_keeps_empty_discovery_diagnostics_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+    result: ModelDiscoveryResult,
+    reason_code: str,
+) -> None:
+    parser = _config(
+        {"Local-API": {"llama_api_IP": "http://10.0.0.5:18080/v1"}}
+    )
+    client = _client_for_config(monkeypatch, parser)
+    monkeypatch.setattr(
+        llm_providers,
+        "discover_models_from_endpoint",
+        lambda *_args, **_kwargs: result,
+    )
+
+    with client:
+        response = client.get("/api/v1/llm/providers")
+
+    assert response.status_code == 200, response.text
+    llama = _provider(response.json(), "llama")
+    assert llama["provider_enabled"] is True
+    assert llama["availability"] == "enabled"
+    assert llama["models"] == []
+    assert llama["endpoint_only"] is True
+    assert llama["readiness_reason_code"] == reason_code
+
+
+@pytest.mark.unit
+def test_catalog_requested_discovery_merges_after_explicit_models(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LLM_PROVIDER_READINESS_PROBE_ENDPOINTS", "1")
+    parser = _config(
+        {
+            "Local-API": {
+                "llama_api_IP": "http://10.0.0.5:18080/v1",
+                "llama_model": "manual-llama,shared-model",
+            }
+        }
+    )
+    discovery_calls = []
+    client = _client_for_config(monkeypatch, parser)
+    monkeypatch.setattr(
+        llm_providers,
+        "_resolve_model_tokenizer_support",
+        lambda *_args, **_kwargs: {
+            "available": False,
+            "strict_mode_effective": False,
+        },
+    )
+
+    def discover(*args, **kwargs):
+        discovery_calls.append((args, kwargs))
+        return ModelDiscoveryResult(
+            "ready",
+            ("shared-model", "discovered-model", "manual-llama"),
+        )
+
+    monkeypatch.setattr(llm_providers, "discover_models_from_endpoint", discover)
+
+    with client:
+        response = client.get("/api/v1/llm/providers")
+
+    assert response.status_code == 200, response.text
+    llama = _provider(response.json(), "llama")
+    assert len(discovery_calls) == 1
+    assert llama["models"] == ["manual-llama", "shared-model", "discovered-model"]
+    assert llama["provider_enabled"] is True
 
 
 @pytest.mark.unit

@@ -1,6 +1,5 @@
 import React, { Suspense, useCallback, useEffect, useMemo, useRef } from "react"
 import { Button, Drawer, Input, Modal, Select, Switch, Tabs, Tag, Tooltip } from "antd"
-import { DismissibleBetaAlert } from "@/components/Common/DismissibleBetaAlert"
 import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
 import type { TabsProps } from "antd"
 import {
@@ -37,9 +36,12 @@ import {
   fetchWatchlistRuns,
   fetchWatchlists,
   triggerWatchlistRun,
-  updateWatchlist
+  updateWatchlist,
+  updateWatchlistJob,
+  updateWatchlistSource
 } from "@/services/watchlists"
 import { useWatchlistsStore } from "@/store/watchlists"
+import { useTutorialStore } from "@/store/tutorials"
 import type {
   WatchlistContainer,
   WatchlistDomain,
@@ -49,7 +51,6 @@ import type {
   WatchlistSourceCreate,
   WatchlistStatus
 } from "@/types/watchlists"
-import type { WatchlistTab } from "@/types/watchlists"
 import {
   WatchlistSetupWizard,
   type WatchlistSetupCompleteResult
@@ -84,6 +85,7 @@ import {
 import { trackWatchlistsOnboardingTelemetry } from "@/utils/watchlists-onboarding-telemetry"
 import { resolveWatchlistsIaExperimentRollout } from "@/utils/watchlists-ia-rollout"
 import { resolvePreferredWatchlistId } from "./watchlist-selection"
+import { restoreFocusToElement } from "./shared/focus-management"
 
 const RUN_NOTIFICATIONS_POLL_MS = 15_000
 const RUN_NOTIFICATIONS_PAGE_SIZE = 25
@@ -94,10 +96,13 @@ const RUN_NOTIFICATIONS_RUNS_TAB_POLL_MS = 30_000
 const RUN_STALLED_THRESHOLD_MS = 45 * 60_000
 const GUIDED_TOUR_STORAGE_KEY = "watchlists:guided-tour:v1"
 const TEACH_POINTS_STORAGE_KEY = "watchlists:teach-points:v1"
-const ORIENTATION_DISMISSED_STORAGE_KEY = "watchlists:orientation-dismissed:v1"
 const SHOW_ALL_VIEWS_STORAGE_KEY = "watchlists:show-all-views:v1"
 const SECONDARY_EXPANDED_STORAGE_KEY = "watchlists:secondary-expanded:v1"
+const HELP_TRIGGER_ID = "watchlists-help-trigger"
 const SUCCESSFUL_RUN_STATUSES = new Set(["completed", "succeeded", "success", "done", "finished"])
+const TAB_PANEL_FALLBACK = (
+  <div className="py-6 text-sm text-text-muted" data-testid="watchlists-tab-loading" />
+)
 
 const OverviewTab = React.lazy(() =>
   import("./OverviewTab/OverviewTab").then((module) => ({ default: module.OverviewTab }))
@@ -128,7 +133,7 @@ const AlertsTab = React.lazy(() =>
 )
 
 /** Primary tabs in the progressive disclosure layout */
-const PROGRESSIVE_PRIMARY_TABS = ["sources", "alerts", "items", "outputs"] as const
+const PROGRESSIVE_PRIMARY_TABS = ["overview", "sources", "alerts", "items", "outputs"] as const
 
 /** Which secondary section lives inside which primary tab */
 const SECONDARY_IN_PRIMARY: Record<string, string> = {
@@ -214,7 +219,6 @@ interface TeachPointState {
   jobsCronFilters: boolean
   templatesAuthoring: boolean
 }
-type OrientationDismissState = Partial<Record<WatchlistsTabKey, boolean>>
 interface WatchlistFormState {
   name: string
   description: string
@@ -371,27 +375,6 @@ const writeTeachPointState = (state: TeachPointState): void => {
   }
 }
 
-const readOrientationDismissState = (): OrientationDismissState => {
-  if (typeof window === "undefined") return {}
-  try {
-    const raw = localStorage.getItem(ORIENTATION_DISMISSED_STORAGE_KEY)
-    if (!raw) return {}
-    const parsed = JSON.parse(raw) as OrientationDismissState
-    return parsed && typeof parsed === "object" ? parsed : {}
-  } catch {
-    return {}
-  }
-}
-
-const writeOrientationDismissState = (state: OrientationDismissState): void => {
-  if (typeof window === "undefined") return
-  try {
-    localStorage.setItem(ORIENTATION_DISMISSED_STORAGE_KEY, JSON.stringify(state))
-  } catch {
-    // localStorage may be unavailable.
-  }
-}
-
 const resolveRunNotificationsPollMs = (): number => {
   if (typeof window === "undefined") return RUN_NOTIFICATIONS_POLL_MS
   const override = Number(
@@ -468,6 +451,8 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
   const addWatchlist = useWatchlistsStore((s) => s.addWatchlist)
   const updateWatchlistInList = useWatchlistsStore((s) => s.updateWatchlistInList)
   const resetStore = useWatchlistsStore((s) => s.resetStore)
+  const activeTutorialId = useTutorialStore((s) => s.activeTutorialId)
+  const watchlistsBasicsTutorialActive = activeTutorialId === "watchlists-basics"
   const runStatusRef = useRef<Map<number, string>>(new Map())
   const notifiedRunStatesRef = useRef<Set<string>>(new Set())
   const initializedRunPollingRef = useRef(false)
@@ -478,9 +463,6 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
   const [guidedTourOpen, setGuidedTourOpen] = React.useState(false)
   const [showGuidedTourCompletion, setShowGuidedTourCompletion] = React.useState(false)
   const [teachPointState, setTeachPointState] = React.useState<TeachPointState>(() => readTeachPointState())
-  const [orientationDismissedState, setOrientationDismissedState] = React.useState<OrientationDismissState>(
-    () => readOrientationDismissState()
-  )
   const [documentVisible, setDocumentVisible] = React.useState<boolean>(() => {
     if (typeof document === "undefined") return true
     return document.visibilityState !== "hidden"
@@ -496,6 +478,8 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
   const [settingsDrawerOpen, setSettingsDrawerOpen] = React.useState(false)
   const [commandPaletteOpen, setCommandPaletteOpen] = React.useState(false)
   const [shortcutsHelpOpen, setShortcutsHelpOpen] = React.useState(false)
+  const pendingHelpActionRef = useRef<(() => void) | null>(null)
+  const guidedTourRestoreFocusRef = useRef<HTMLElement | null>(null)
   const [setupWizardOpen, setSetupWizardOpen] = React.useState(false)
   const [watchlistFormOpen, setWatchlistFormOpen] = React.useState(false)
   const [watchlistFormMode, setWatchlistFormMode] = React.useState<WatchlistFormMode>("create")
@@ -505,6 +489,18 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
   const selectedWatchlistIdRef = useRef<number | null>(selectedWatchlistId)
   const loadWatchlistsRequestRef = useRef(0)
   selectedWatchlistIdRef.current = selectedWatchlistId
+
+  const closeHelpThen = useCallback((action: () => void) => {
+    pendingHelpActionRef.current = action
+    setShortcutsHelpOpen(false)
+  }, [])
+
+  const handleHelpAfterOpenChange = useCallback((open: boolean) => {
+    if (open) return
+    const action = pendingHelpActionRef.current
+    pendingHelpActionRef.current = null
+    action?.()
+  }, [])
   const selectedWatchlist = React.useMemo(
     () =>
       Array.isArray(watchlists)
@@ -662,6 +658,16 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
     })
   }, [])
 
+  const updateSetupSource = useCallback(async (
+    sourceId: number,
+    source: Parameters<typeof updateWatchlistSource>[1]
+  ) => updateWatchlistSource(sourceId, source), [])
+
+  const updateSetupJob = useCallback(async (
+    jobId: number,
+    job: WatchlistJobCreate | { active: true }
+  ) => updateWatchlistJob(jobId, job), [])
+
   const completeSetupWizard = useCallback((result: WatchlistSetupCompleteResult) => {
     addWatchlist(result.watchlist)
     setSelectedWatchlistId(result.watchlist.id)
@@ -692,7 +698,11 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
 
   // Navigate to a tab, auto-expanding inline secondary sections in progressive mode
   const navigateToTab = useCallback((key: string) => {
-    const isProgressive = !isConstrained && !showAllViews && !iaExperimentEnabled
+    const isProgressive =
+      !isConstrained &&
+      !showAllViews &&
+      !iaExperimentEnabled &&
+      !watchlistsBasicsTutorialActive
     if (isProgressive && SECONDARY_IN_PRIMARY[key]) {
       const primaryTab = SECONDARY_IN_PRIMARY[key]
       setActiveTab(primaryTab as typeof activeTab)
@@ -705,7 +715,20 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
       return
     }
     setActiveTab(key as typeof activeTab)
-  }, [isConstrained, setActiveTab, showAllViews, iaExperimentEnabled])
+  }, [
+    iaExperimentEnabled,
+    isConstrained,
+    setActiveTab,
+    showAllViews,
+    watchlistsBasicsTutorialActive
+  ])
+
+  const navigateFromHelp = useCallback((key: string) => {
+    closeHelpThen(() => {
+      navigateToTab(key)
+      restoreFocusToElement(document.getElementById(HELP_TRIGGER_ID))
+    })
+  }, [closeHelpThen, navigateToTab])
 
   // Refresh key — incrementing forces tab components to remount and refetch
   const [refreshKey, setRefreshKey] = React.useState(0)
@@ -761,35 +784,6 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
     settings: t("watchlists:help.tabs.settings", "Workspace settings")
   } as const
 
-  const taskShortcuts = [
-    {
-      key: "sources" as const,
-      label: t("watchlists:quickActions.sources", "Set up feeds")
-    },
-    {
-      key: "jobs" as const,
-      label: t("watchlists:quickActions.jobs", "Configure monitors")
-    },
-    {
-      key: "runs" as const,
-      label: t("watchlists:quickActions.runs", "Check activity")
-    },
-    {
-      key: "items" as const,
-      label: t("watchlists:quickActions.items", "Review updates")
-    },
-    {
-      key: "alerts" as const,
-      label: t("watchlists:quickActions.alerts", "Review alerts")
-    },
-    {
-      key: "outputs" as const,
-      label: t("watchlists:quickActions.outputs", "View reports")
-    }
-  ]
-  const repeatUserShortcuts = taskShortcuts.filter((shortcut) =>
-    ["runs", "items", "outputs"].includes(shortcut.key)
-  )
   const taskViews = [
     {
       key: "collect" as const,
@@ -982,8 +976,6 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
     }
   }
   const activeTabOrientation = tabOrientation[activeTab as WatchlistsTabKey] || tabOrientation.overview
-  const activeOrientationKey = (activeTab as WatchlistsTabKey) || "overview"
-  const orientationDismissed = Boolean(orientationDismissedState[activeOrientationKey])
 
   const activeTabHelpHref = WATCHLISTS_TAB_HELP_DOCS[activeTab] || WATCHLISTS_MAIN_DOCS_URL
   const activeTabHelpLabel = tabHelpLabels[activeTab] || t("watchlists:help.docs", "Watchlists docs")
@@ -1066,22 +1058,6 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
     }))
   }, [])
 
-  const dismissOrientationForActiveTab = useCallback(() => {
-    const orientationKey = (activeTab as WatchlistsTabKey) || "overview"
-    setOrientationDismissedState((previous) => ({
-      ...previous,
-      [orientationKey]: true
-    }))
-  }, [activeTab])
-
-  const restoreOrientationForActiveTab = useCallback(() => {
-    const orientationKey = (activeTab as WatchlistsTabKey) || "overview"
-    setOrientationDismissedState((previous) => ({
-      ...previous,
-      [orientationKey]: false
-    }))
-  }, [activeTab])
-
   useEffect(() => {
     writeGuidedTourState(guidedTourState)
   }, [guidedTourState])
@@ -1089,10 +1065,6 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
   useEffect(() => {
     writeTeachPointState(teachPointState)
   }, [teachPointState])
-
-  useEffect(() => {
-    writeOrientationDismissState(orientationDismissedState)
-  }, [orientationDismissedState])
 
   useEffect(() => {
     if (typeof document === "undefined") return
@@ -1135,6 +1107,12 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
       step: toGuidedTourStep(guidedTourState.step)
     })
   }, [guidedTourState.step])
+
+  const handleGuidedTourAfterOpenChange = useCallback((open: boolean) => {
+    if (open) return
+    restoreFocusToElement(guidedTourRestoreFocusRef.current)
+    guidedTourRestoreFocusRef.current = null
+  }, [])
 
   const handleGuidedTourBack = useCallback(() => {
     const nextStep = clampTourStep(guidedTourState.step - 1)
@@ -1561,70 +1539,66 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
   const tabAttentionBadge = (count: number): React.ReactNode =>
     count > 0 ? (
       <span
-        className="inline-flex min-w-5 items-center justify-center rounded-full bg-red-500 px-1.5 text-[10px] font-semibold leading-4 text-white"
+        className="inline-flex min-w-5 items-center justify-center rounded-full bg-red-500 px-1.5 text-xs font-semibold leading-4 text-white"
         aria-label={t("watchlists:tabs.attentionBadgeAria", "{{count}} attention items", { count })}
       >
         {count > 99 ? "99+" : count}
       </span>
     ) : null
 
-  const tabPanelFallback = (
-    <div className="py-6 text-sm text-text-muted" data-testid="watchlists-tab-loading" />
-  )
-
   const renderWatchlistsTab = useCallback((tab: WatchlistsTabKey): React.ReactNode => {
     switch (tab) {
       case "overview":
         return (
-          <Suspense fallback={tabPanelFallback}>
+          <Suspense fallback={TAB_PANEL_FALLBACK}>
             <OverviewTab />
           </Suspense>
         )
       case "sources":
         return (
-          <Suspense fallback={tabPanelFallback}>
+          <Suspense fallback={TAB_PANEL_FALLBACK}>
             <SourcesTab />
           </Suspense>
         )
       case "jobs":
         return (
-          <Suspense fallback={tabPanelFallback}>
+          <Suspense fallback={TAB_PANEL_FALLBACK}>
             <JobsTab />
           </Suspense>
         )
       case "runs":
         return (
-          <Suspense fallback={tabPanelFallback}>
+          <Suspense fallback={TAB_PANEL_FALLBACK}>
             <RunsTab />
           </Suspense>
         )
       case "items":
         return (
-          <Suspense fallback={tabPanelFallback}>
+          <Suspense fallback={TAB_PANEL_FALLBACK}>
             <ItemsTab />
           </Suspense>
         )
       case "alerts":
         return (
-          <Suspense fallback={tabPanelFallback}>
+          <Suspense fallback={TAB_PANEL_FALLBACK}>
             <AlertsTab />
           </Suspense>
         )
       case "outputs":
         return (
-          <Suspense fallback={tabPanelFallback}>
+          <Suspense fallback={TAB_PANEL_FALLBACK}>
             <OutputsTab />
           </Suspense>
         )
       case "templates":
         return (
-          <Suspense fallback={tabPanelFallback}>
+          <Suspense fallback={TAB_PANEL_FALLBACK}>
             <TemplatesTab />
           </Suspense>
         )
       case "settings":
         return (
-          <Suspense fallback={tabPanelFallback}>
+          <Suspense fallback={TAB_PANEL_FALLBACK}>
             <SettingsTab />
           </Suspense>
         )
@@ -1649,7 +1623,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
       key: "sources",
       label: (
         <Tooltip title={t("watchlists:tabs.sourcesTooltip", "RSS feeds, websites, or forums you want to monitor")}>
-          <span className="flex items-center gap-2">
+          <span className="flex items-center gap-2" data-tour="watchlists-add-feeds">
             <Rss className="h-4 w-4" />
             {t("watchlists:tabs.sources", "Feeds")}
             {tabAttentionBadge(overviewBadges.sources)}
@@ -1662,7 +1636,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
       key: "jobs",
       label: (
         <Tooltip title={t("watchlists:tabs.jobsTooltip", "Scheduled tasks that check your sources for new content")}>
-          <span className="flex items-center gap-2">
+          <span className="flex items-center gap-2" data-tour="watchlists-create-monitors">
             <CalendarClock className="h-4 w-4" />
             {t("watchlists:tabs.jobs", "Monitors")}
           </span>
@@ -1687,7 +1661,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
       key: "items",
       label: (
         <Tooltip title={t("watchlists:tabs.itemsTooltip", "Updates collected from your sources")}>
-          <span className="flex items-center gap-2">
+          <span className="flex items-center gap-2" data-tour="watchlists-review-updates">
             <Newspaper className="h-4 w-4" />
             {t("watchlists:tabs.items", "Updates")}
           </span>
@@ -1740,16 +1714,28 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
     }
   ]
 
-  // Progressive disclosure: 3 primary tabs with inline secondary views
+  // Progressive disclosure: outcome overview plus primary workflow tabs with inline secondary views
   const progressiveTabItems: TabsProps["items"] = [
+    {
+      key: "overview",
+      label: (
+        <span className="flex items-center gap-2">
+          <LayoutDashboard className="h-4 w-4" />
+          {t("watchlists:tabs.overview", "Overview")}
+        </span>
+      ),
+      children: renderWatchlistsTab("overview")
+    },
     {
       key: "sources",
       label: (
         <Tooltip title={t("watchlists:tabs.sourcesTooltip", "RSS feeds, websites, or forums you want to monitor")}>
-          <span className="flex items-center gap-2">
-            <Rss className="h-4 w-4" />
-            {t("watchlists:tabs.sources", "Feeds")}
-            {tabAttentionBadge(overviewBadges.sources)}
+          <span className="flex items-center gap-2" data-tour="watchlists-create-monitors">
+            <span className="flex items-center gap-2" data-tour="watchlists-add-feeds">
+              <Rss className="h-4 w-4" />
+              {t("watchlists:tabs.sources", "Feeds")}
+              {tabAttentionBadge(overviewBadges.sources)}
+            </span>
           </span>
         </Tooltip>
       ),
@@ -1783,7 +1769,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
       key: "items",
       label: (
         <Tooltip title={t("watchlists:tabs.itemsTooltip", "Updates collected from your sources")}>
-          <span className="flex items-center gap-2">
+          <span className="flex items-center gap-2" data-tour="watchlists-review-updates">
             <Newspaper className="h-4 w-4" />
             {t("watchlists:tabs.items", "Updates")}
           </span>
@@ -1832,7 +1818,8 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
   ]
 
   // Resolve which tab set to render based on mode
-  const useProgressiveLayout = !showAllViews && !iaExperimentEnabled
+  const useProgressiveLayout =
+    !showAllViews && !iaExperimentEnabled && !watchlistsBasicsTutorialActive
   const renderedTabItems: TabsProps["items"] = useProgressiveLayout
     ? progressiveTabItems
     : iaExperimentEnabled
@@ -2072,22 +2059,6 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
               )}
             </div>
           </div>
-          <div className="flex shrink-0 flex-wrap gap-2">
-            <Button
-              icon={<Plus className="h-4 w-4" />}
-              data-testid="watchlists-create-container"
-              onClick={openCreateWatchlistForm}
-            >
-              {t("watchlists:containers.create", "Create Watchlist")}
-            </Button>
-            <Button
-              icon={<Pencil className="h-4 w-4" />}
-              data-testid="watchlists-edit-container"
-              onClick={openEditWatchlistForm}
-            >
-              {t("common:edit", "Edit")}
-            </Button>
-          </div>
         </div>
       </section>
     )
@@ -2123,243 +2094,31 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
       maxWidthClassName="max-w-[1920px]"
     >
       <PageShell className="min-w-0 w-screen max-w-[100vw] overflow-x-hidden py-6" maxWidthClassName="max-w-[1920px]">
-      <div className="mb-6">
-        <h1 className="text-2xl font-semibold text-text flex items-center gap-2">
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <h1 className="text-2xl font-semibold text-text">
           {t("watchlists:title", "Watchlists")}
-          <Tooltip title={t("watchlists:help.docsTooltip", "Open watchlists documentation")}>
-            <a
-              href={WATCHLISTS_MAIN_DOCS_URL}
-              target="_blank"
-              rel="noreferrer"
-              aria-label={t("watchlists:help.docsTooltip", "Open watchlists documentation")}
-              data-testid="watchlists-help-icon"
-              className="text-text-muted hover:text-primary"
-            >
-              <HelpCircle className="h-5 w-5" />
-            </a>
-          </Tooltip>
         </h1>
-        <p className="mt-1 text-sm text-text-muted">
-          {t(
-            "watchlists:description",
-            "Monitor RSS feeds, websites, and forums. Create scheduled monitors to automatically scrape and process content."
-          )}
-        </p>
-        <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
-          <a
-            href={WATCHLISTS_MAIN_DOCS_URL}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1 text-primary hover:underline"
-            data-testid="watchlists-main-docs-link"
-          >
-            {t("watchlists:help.docs", "Watchlists docs")}
-            <ExternalLink className="h-3.5 w-3.5" />
-          </a>
-          <a
-            href={activeTabHelpHref}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1 text-primary hover:underline"
-            data-testid="watchlists-context-docs-link"
-          >
-            {t("watchlists:help.learnMoreTab", "Learn more: {{tab}}", {
-              tab: activeTabHelpLabel
-            })}
-            <ExternalLink className="h-3.5 w-3.5" />
-          </a>
-          {guidedTourState.status === "in_progress" ? (
-            <Button
-              size="small"
-              type="default"
-              onClick={resumeGuidedTour}
-              data-testid="watchlists-resume-guide"
-            >
-              {t("watchlists:guide.resume", "Resume guided tour")}
-            </Button>
-          ) : (
-            <Button
-              size="small"
-              type="default"
-              onClick={startGuidedTour}
-              data-testid="watchlists-start-guide"
-            >
-              {guidedTourState.status === "completed"
-                ? t("watchlists:guide.restart", "Restart guided tour")
-                : t("watchlists:guide.start", "Start guided tour")}
-            </Button>
-          )}
-          {/* Show all views toggle */}
-          {!iaExperimentEnabled && (
-            <Tooltip title={t("watchlists:healthBar.showAllViewsTooltip", "Switch to the full 8-tab layout")}>
-              <div className="inline-flex items-center gap-1.5 border-l border-border pl-3 ml-1">
-                <Switch
-                  size="small"
-                  checked={showAllViews}
-                  onChange={toggleShowAllViews}
-                  data-testid="watchlists-show-all-views-toggle"
-                />
-                <span className="text-text-muted text-xs">
-                  {t("watchlists:healthBar.showAllViews", "Show all views")}
-                </span>
-              </div>
-            </Tooltip>
-          )}
-          {iaExperimentEnabled && (
-            <div className="inline-flex flex-wrap items-center gap-2 border-l border-border pl-3 ml-1">
-              <span className="text-text-muted">
-                {t("watchlists:tabs.moreViews", "More views")}
-              </span>
-              {reducedIaSecondaryButtons.map((item) => (
-                <Button
-                  key={item.key}
-                  size="small"
-                  type={activeTab === item.key ? "primary" : "default"}
-                  data-testid={`watchlists-experimental-tab-${item.key}`}
-                  onClick={() => setActiveTab(item.key as typeof activeTab)}
-                >
-                  {item.label}
-                </Button>
-              ))}
-            </div>
-          )}
-        </div>
-        {iaExperimentEnabled ? (
-          <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
-            <span className="text-text-muted">
-              {t("watchlists:taskViews.label", "Task views")}
-            </span>
-            {taskViews.map((taskView) => (
-              <Button
-                key={taskView.key}
-                size="small"
-                type={activeTaskView === taskView.key ? "primary" : "default"}
-                aria-pressed={activeTaskView === taskView.key}
-                onClick={() => setActiveTab(TASK_VIEW_PRIMARY_TAB[taskView.key])}
-                data-testid={`watchlists-task-view-${taskView.key}`}
-              >
-                {taskView.label}
-                <span className="ml-1 text-xs text-text-muted">{taskView.hint}</span>
-              </Button>
-            ))}
-          </div>
-        ) : showAllViews ? (
-          <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
-            <span className="text-text-muted">
-              {t("watchlists:quickActions.label", "Jump to")}
-            </span>
-            {taskShortcuts.map((shortcut) => (
-              <Button
-                key={shortcut.key}
-                size="small"
-                type={activeTab === shortcut.key ? "primary" : "default"}
-                onClick={() => setActiveTab(shortcut.key)}
-                data-testid={`watchlists-task-open-${shortcut.key}`}
-              >
-                {shortcut.label}
-              </Button>
-            ))}
-          </div>
-        ) : null}
+        <Tooltip title={t("watchlists:accessibilityHardening.help.open", "Open Watchlists help")}>
+          <Button
+            id={HELP_TRIGGER_ID}
+            type="text"
+            className="min-h-11 min-w-11"
+            icon={<HelpCircle className="h-5 w-5" aria-hidden />}
+            aria-label={t("watchlists:accessibilityHardening.help.open", "Open Watchlists help")}
+            onClick={() => setShortcutsHelpOpen(true)}
+            data-testid="watchlists-help-icon"
+          />
+        </Tooltip>
       </div>
 
-      {renderWatchlistContainerShell()}
+      <div data-testid="watchlists-canonical-controls">
+        <div data-testid="watchlists-outcome-first-region">
+          {renderWatchlistContainerShell()}
+        </div>
 
-      {watchlistViewsAvailable && (
-        <>
-          {/* Persistent health bar - replaces Overview tab in progressive layout */}
+        {watchlistViewsAvailable && activeTab !== "overview" && (
           <WatchlistsHealthBar onOpenSettings={() => setSettingsDrawerOpen(true)} onNavigate={navigateToTab} />
-
-          <div
-            className="mb-4 flex flex-wrap items-center gap-2 text-sm"
-            data-testid="watchlists-repeat-actions"
-          >
-            <span className="text-text-muted">
-              {t("watchlists:quickActions.repeatLabel", "Jump to")}
-            </span>
-            {repeatUserShortcuts.map((shortcut) => (
-              <Button
-                key={shortcut.key}
-                size="small"
-                type={activeTab === shortcut.key ? "primary" : "default"}
-                onClick={() => navigateToTab(shortcut.key)}
-                data-testid={`watchlists-repeat-open-${shortcut.key}`}
-              >
-                {shortcut.label}
-              </Button>
-            ))}
-            <Button
-              size="small"
-              type="default"
-              icon={<Command className="h-3.5 w-3.5" />}
-              onClick={() => setCommandPaletteOpen(true)}
-              data-testid="watchlists-open-command-palette"
-            >
-              {t("watchlists:commandPalette.open", "Command palette")}
-            </Button>
-          </div>
-
-          {orientationDismissed ? (
-            <div className="mb-4">
-              <Button
-                size="small"
-                type="link"
-                data-testid="watchlists-orientation-restore"
-                onClick={restoreOrientationForActiveTab}
-              >
-                {t("watchlists:orientation.showTabGuidance", "Show tab guidance")}
-              </Button>
-            </div>
-          ) : (
-            <DesignSystemAlert
-              variant="info"
-              className="mb-4"
-              data-testid="watchlists-orientation-alert"
-              title={<span data-testid="watchlists-orientation-title">{activeTabOrientation.title}</span>}
-              dismissible
-              onDismiss={dismissOrientationForActiveTab}
-            >
-              <div className="space-y-3">
-                <span data-testid="watchlists-orientation-description">{activeTabOrientation.description}</span>
-                <div className="flex flex-wrap gap-2">
-                  {activeTabOrientation.actions.map((action) => (
-                    <Button
-                      key={action.key}
-                      size="small"
-                      data-testid={`watchlists-orientation-action-${action.key}`}
-                      onClick={() => navigateToTab(action.target)}
-                    >
-                      {action.label}
-                    </Button>
-                  ))}
-                </div>
-              </div>
-            </DesignSystemAlert>
-          )}
-
-          {activeTeachPoint && (
-            <DesignSystemAlert
-              variant="info"
-              className="mb-4"
-              data-testid="watchlists-teach-point-alert"
-              title={<span data-testid="watchlists-teach-point-title">{activeTeachPoint.title}</span>}
-              dismissible
-              onDismiss={() => dismissTeachPoint(activeTeachPoint.key)}
-            >
-              <div className="space-y-3">
-                <span data-testid="watchlists-teach-point-description">{activeTeachPoint.description}</span>
-                <Button
-                  size="small"
-                  data-testid={`watchlists-teach-point-action-${activeTeachPoint.key}`}
-                  onClick={() => navigateToTab(activeTeachPoint.actionTarget)}
-                >
-                  {activeTeachPoint.actionLabel}
-                </Button>
-              </div>
-            </DesignSystemAlert>
-          )}
-        </>
-      )}
+        )}
 
       {showGuidedTourCompletion && (
         <DesignSystemAlert
@@ -2388,46 +2147,8 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
         </DesignSystemAlert>
       )}
 
-      <DismissibleBetaAlert
-        storageKey="beta-dismissed:watchlists"
-        message={t("watchlists:betaNotice", "Beta Feature")}
-        description={(
-          <div className="space-y-1">
-            <div>
-              {t(
-                "watchlists:betaDescription",
-                "Watchlists is currently in beta. Some features may be incomplete or change."
-              )}
-            </div>
-            <div className="flex flex-wrap items-center gap-3 text-sm">
-              <a
-                href={WATCHLISTS_MAIN_DOCS_URL}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-1 text-primary hover:underline"
-                data-testid="watchlists-beta-docs-link"
-              >
-                {t("watchlists:help.docs", "Watchlists docs")}
-                <ExternalLink className="h-3.5 w-3.5" />
-              </a>
-              <a
-                href={WATCHLISTS_ISSUE_REPORT_URL}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-1 text-primary hover:underline"
-                data-testid="watchlists-beta-report-link"
-              >
-                {t("watchlists:help.reportIssue", "Report an issue")}
-                <ExternalLink className="h-3.5 w-3.5" />
-              </a>
-            </div>
-          </div>
-        )}
-        className="mb-6"
-      />
-
       {watchlistViewsAvailable && (
-        isConstrained ? (
+        isConstrained && !watchlistsBasicsTutorialActive ? (
           <>
             <WatchlistsMobileNavigation
               activeKey={activeTab}
@@ -2462,6 +2183,11 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
         )
       )}
 
+      {watchlistViewsAvailable && activeTab === "overview" && (
+        <WatchlistsHealthBar onOpenSettings={() => setSettingsDrawerOpen(true)} onNavigate={navigateToTab} />
+      )}
+      </div>
+
       {/* Settings drawer (accessible from health bar gear icon) */}
       <Drawer
         title={t("watchlists:tabs.settings", "Settings")}
@@ -2476,6 +2202,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
       <Modal
         open={guidedTourOpen}
         onCancel={handleSkipGuidedTour}
+        afterOpenChange={handleGuidedTourAfterOpenChange}
         title={t("watchlists:guide.title", "Watchlists guided tour")}
         footer={(
           <div className="flex items-center justify-between gap-2">
@@ -2518,7 +2245,9 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
         onCancel={() => setSetupWizardOpen(false)}
         onCreateWatchlist={createWatchlist}
         onCreateSources={createSetupSources}
+        onUpdateSource={updateSetupSource}
         onCreateJob={createSetupJob}
+        onUpdateJob={updateSetupJob}
         onComplete={completeSetupWizard}
       />
 
@@ -2678,31 +2407,221 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
         commands={commandPaletteCommands}
       />
 
-      {/* Keyboard shortcuts help */}
+      {/* Secondary help, layout, and power-user controls */}
       <Modal
         open={shortcutsHelpOpen}
         onCancel={() => setShortcutsHelpOpen(false)}
-        title={t("watchlists:keyboardShortcuts.title", "Keyboard Shortcuts")}
+        afterOpenChange={handleHelpAfterOpenChange}
+        title={t("watchlists:accessibilityHardening.help.title", "Watchlists help")}
         footer={null}
-        width={400}
+        width={isConstrained ? "100%" : 520}
+        className={isConstrained ? "max-w-full" : undefined}
         data-testid="watchlists-shortcuts-help"
       >
-        <div className="space-y-2 text-sm">
-          {[
-            { keys: "\u2318/Ctrl + K", label: t("watchlists:keyboardShortcuts.commandPalette", "Command palette") },
-            { keys: "1 / 2 / 3", label: t("watchlists:keyboardShortcuts.switchTab", "Switch tab (1-3)") },
-            { keys: "N", label: t("watchlists:keyboardShortcuts.newEntity", "New entity") },
-            { keys: "R", label: t("watchlists:keyboardShortcuts.refresh", "Refresh") },
-            { keys: "/", label: t("watchlists:keyboardShortcuts.focusSearch", "Focus search") },
-            { keys: "?", label: t("watchlists:keyboardShortcuts.showHelp", "Show shortcuts") }
-          ].map((shortcut) => (
-            <div key={shortcut.keys} className="flex items-center justify-between">
-              <span>{shortcut.label}</span>
-              <kbd className="rounded border border-border bg-surface px-1.5 py-0.5 text-xs font-mono">
-                {shortcut.keys}
-              </kbd>
+        <div
+          className="min-w-0 max-w-full space-y-5 overflow-x-hidden break-words text-sm text-start"
+          data-testid="watchlists-help-panel"
+        >
+          <div className="flex min-w-0 flex-wrap gap-3">
+            <a
+              href={WATCHLISTS_MAIN_DOCS_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex min-h-11 min-w-0 max-w-full items-center gap-1 break-words text-primary [overflow-wrap:anywhere] hover:underline"
+              data-testid="watchlists-main-docs-link"
+            >
+              {t("watchlists:help.docs", "Watchlists docs")}
+              <ExternalLink className="h-3.5 w-3.5" aria-hidden />
+            </a>
+            <a
+              href={activeTabHelpHref}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex min-h-11 min-w-0 max-w-full items-center gap-1 break-words text-primary [overflow-wrap:anywhere] hover:underline"
+              data-testid="watchlists-context-docs-link"
+            >
+              {t("watchlists:help.learnMoreTab", "Learn more: {{tab}}", { tab: activeTabHelpLabel })}
+              <ExternalLink className="h-3.5 w-3.5" aria-hidden />
+            </a>
+            <a
+              href={WATCHLISTS_ISSUE_REPORT_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex min-h-11 min-w-0 max-w-full items-center gap-1 break-words text-primary [overflow-wrap:anywhere] hover:underline"
+            >
+              {t("watchlists:help.reportIssue", "Report an issue")}
+              <ExternalLink className="h-3.5 w-3.5" aria-hidden />
+            </a>
+          </div>
+
+          <div className="flex min-w-0 flex-wrap gap-2">
+            {selectedWatchlist && (
+              <>
+                <Button
+                  className="min-h-11"
+                  icon={<Plus className="h-4 w-4" aria-hidden />}
+                  data-testid="watchlists-create-container"
+                  onClick={() => {
+                    closeHelpThen(openCreateWatchlistForm)
+                  }}
+                >
+                  {t("watchlists:containers.create", "Create Watchlist")}
+                </Button>
+                <Button
+                  className="min-h-11"
+                  icon={<Pencil className="h-4 w-4" aria-hidden />}
+                  data-testid="watchlists-edit-container"
+                  onClick={() => {
+                    closeHelpThen(openEditWatchlistForm)
+                  }}
+                >
+                  {t("common:edit", "Edit")}
+                </Button>
+              </>
+            )}
+            <Button
+              className="min-h-11"
+              onClick={() => {
+                guidedTourRestoreFocusRef.current = document.getElementById(HELP_TRIGGER_ID)
+                closeHelpThen(
+                  guidedTourState.status === "in_progress" ? resumeGuidedTour : startGuidedTour
+                )
+              }}
+              data-testid={guidedTourState.status === "in_progress" ? "watchlists-resume-guide" : "watchlists-start-guide"}
+            >
+              {guidedTourState.status === "in_progress"
+                ? t("watchlists:guide.resume", "Resume guided tour")
+                : guidedTourState.status === "completed"
+                  ? t("watchlists:guide.restart", "Restart guided tour")
+                  : t("watchlists:guide.start", "Start guided tour")}
+            </Button>
+            <Button
+              className="min-h-11"
+              icon={<Command className="h-4 w-4" aria-hidden />}
+              onClick={() => {
+                closeHelpThen(() => setCommandPaletteOpen(true))
+              }}
+              data-testid="watchlists-open-command-palette"
+            >
+              {t("watchlists:commandPalette.open", "Command palette")}
+            </Button>
+          </div>
+
+          <div className="rounded-lg border border-border p-3" data-testid="watchlists-orientation-help">
+            <div className="font-medium text-text" data-testid="watchlists-orientation-title">
+              {activeTabOrientation.title}
             </div>
-          ))}
+            <p className="mt-1 break-words text-text-muted [overflow-wrap:anywhere]" data-testid="watchlists-orientation-description">
+              {activeTabOrientation.description}
+            </p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {activeTabOrientation.actions.map((action) => (
+                <Button
+                  key={action.key}
+                  className="min-h-11"
+                  data-testid={`watchlists-orientation-action-${action.key}`}
+                  onClick={() => navigateFromHelp(action.target)}
+                >
+                  {action.label}
+                </Button>
+              ))}
+            </div>
+          </div>
+
+          {!iaExperimentEnabled && (
+            <div className="rounded-lg border border-border p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div id="watchlists-show-all-views-label" className="font-medium text-text">
+                    {t("watchlists:healthBar.showAllViews", "Show all views")}
+                  </div>
+                  <div id="watchlists-show-all-views-description" className="text-xs text-text-muted">
+                    {t("watchlists:healthBar.showAllViewsTooltip", "Switch to the full 8-tab layout")}
+                  </div>
+                </div>
+                <Switch
+                  checked={showAllViews}
+                  onChange={() => closeHelpThen(toggleShowAllViews)}
+                  aria-labelledby="watchlists-show-all-views-label"
+                  aria-describedby="watchlists-show-all-views-description"
+                  data-testid="watchlists-show-all-views-toggle"
+                />
+              </div>
+            </div>
+          )}
+
+          {iaExperimentEnabled && (
+            <div className="space-y-2">
+              <div className="font-medium text-text">{t("watchlists:taskViews.label", "Task views")}</div>
+              <div className="flex flex-wrap gap-2">
+                {taskViews.map((taskView) => (
+                  <Button
+                    key={taskView.key}
+                    className="min-h-11"
+                    type={activeTaskView === taskView.key ? "primary" : "default"}
+                    aria-pressed={activeTaskView === taskView.key}
+                    onClick={() => navigateFromHelp(TASK_VIEW_PRIMARY_TAB[taskView.key])}
+                    data-testid={`watchlists-task-view-${taskView.key}`}
+                  >
+                    {taskView.label}
+                  </Button>
+                ))}
+                {reducedIaSecondaryButtons.map((item) => (
+                  <Button
+                    key={item.key}
+                    className="min-h-11"
+                    type={activeTab === item.key ? "primary" : "default"}
+                    data-testid={`watchlists-experimental-tab-${item.key}`}
+                    onClick={() => navigateFromHelp(item.key)}
+                  >
+                    {item.label}
+                  </Button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {activeTeachPoint && (
+            <div className="rounded-lg border border-border p-3">
+              <div className="font-medium text-text">{activeTeachPoint.title}</div>
+              <p className="mt-1 text-text-muted">{activeTeachPoint.description}</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <Button
+                  className="min-h-11"
+                  onClick={() => navigateFromHelp(activeTeachPoint.actionTarget)}
+                >
+                  {activeTeachPoint.actionLabel}
+                </Button>
+                <Button
+                  className="min-h-11"
+                  onClick={() => dismissTeachPoint(activeTeachPoint.key)}
+                >
+                  {t("common:dismiss", "Dismiss")}
+                </Button>
+              </div>
+            </div>
+          )}
+
+          <div className="space-y-2">
+            <div className="font-medium text-text">
+              {t("watchlists:keyboardShortcuts.title", "Keyboard shortcuts")}
+            </div>
+            {[
+              { keys: "\u2318/Ctrl + K", label: t("watchlists:keyboardShortcuts.commandPalette", "Command palette") },
+              { keys: "1 / 2 / 3", label: t("watchlists:keyboardShortcuts.switchTab", "Switch tab (1-3)") },
+              { keys: "N", label: t("watchlists:keyboardShortcuts.newEntity", "New entity") },
+              { keys: "R", label: t("watchlists:keyboardShortcuts.refresh", "Refresh") },
+              { keys: "/", label: t("watchlists:keyboardShortcuts.focusSearch", "Focus search") },
+              { keys: "?", label: t("watchlists:keyboardShortcuts.showHelp", "Show shortcuts") }
+            ].map((shortcut) => (
+              <div key={shortcut.keys} className="flex items-center justify-between gap-3">
+                <span>{shortcut.label}</span>
+                <kbd className="rounded border border-border bg-surface px-1.5 py-0.5 font-mono text-xs">
+                  {shortcut.keys}
+                </kbd>
+              </div>
+            ))}
+          </div>
         </div>
       </Modal>
       </PageShell>

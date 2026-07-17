@@ -28,6 +28,7 @@ import {
   sortShareLinksByCreatedDesc,
 } from "./chat-share-links"
 import { getHeaderActionPolicy } from "./header-action-policy"
+import type { NotificationLifecycleState } from "@/services/notification-lifecycle"
 
 type Props = {
   onToggleSidebar?: () => void
@@ -36,13 +37,17 @@ type Props = {
   notificationCount?: number
   /** Callback when notification bell is clicked */
   onOpenNotifications?: () => void
+  notificationState?: NotificationLifecycleState
+  onRetryNotifications?: () => void | Promise<void>
 }
 
 export const Header: React.FC<Props> = ({
   onToggleSidebar,
   sidebarCollapsed = false,
   notificationCount,
-  onOpenNotifications
+  onOpenNotifications,
+  notificationState,
+  onRetryNotifications
 }) => {
   const { t } = useTranslation([
     "option",
@@ -394,6 +399,8 @@ export const Header: React.FC<Props> = ({
         commandKeyLabel={cmdKey}
         notificationCount={notificationCount}
         onOpenNotifications={onOpenNotifications}
+        notificationState={notificationState}
+        onRetryNotifications={onRetryNotifications}
       />
       {ttsClipsOpen ? (
         <TtsClipsDrawer

@@ -16,7 +16,7 @@ import {
   type ScheduleIntervalUnit,
   type WeekdayToken
 } from "../JobsTab/schedule-utils"
-import { normalizeWatchlistTemplateName } from "../shared/templateNames"
+import { toCanonicalWatchlistJobPayload } from "../shared/briefing-contract"
 
 export type QuickSetupSchedulePreset = "none" | "hourly" | "daily" | "weekdays"
 export type QuickSetupScheduleMode = WatchlistCadenceDraft["kind"]
@@ -283,13 +283,14 @@ export const toQuickSetupJobPayload = (
   const uniqueSourceIds = Array.from(
     new Set((Array.isArray(sourceIds) ? sourceIds : []).filter((id) => Number.isFinite(id) && id > 0))
   )
+  const schedule = resolveQuickSetupSchedule(
+    values.scheduleCadence || legacyPresetToQuickSetupCadenceDraft(values.schedulePreset || "daily")
+  )
   const payload: WatchlistJobCreate = {
     name: String(values.monitorName || "").trim(),
     scope: { sources: uniqueSourceIds },
     active: true,
-    ...resolveQuickSetupSchedule(
-      values.scheduleCadence || legacyPresetToQuickSetupCadenceDraft(values.schedulePreset || "daily")
-    )
+    ...schedule
   }
   const normalizedWatchlistId = Number(watchlistId)
   if (Number.isFinite(normalizedWatchlistId) && normalizedWatchlistId > 0) {
@@ -297,14 +298,18 @@ export const toQuickSetupJobPayload = (
   }
 
   if ((values.setupGoal || "briefing") === "briefing") {
-    const templateName = normalizeWatchlistTemplateName("briefing_md")
-    payload.output_prefs = {
-      template_name: templateName,
-      template: {
-        default_name: templateName
-      },
-      generate_audio: Boolean(values.includeAudioBriefing)
-    }
+    return toCanonicalWatchlistJobPayload({
+      monitorName: payload.name,
+      scope: payload.scope,
+      active: true,
+      scheduleExpr: payload.schedule_expr,
+      timezone: payload.timezone,
+      watchlistId: payload.watchlist_id,
+      templateName: "briefing_md",
+      templateFormat: "md",
+      audioEnabled: Boolean(values.includeAudioBriefing),
+      audioVoice: values.includeAudioBriefing ? "alloy" : undefined
+    })
   }
 
   return payload

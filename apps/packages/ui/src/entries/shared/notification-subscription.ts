@@ -1,134 +1,343 @@
-/**
- * Background notification subscription for the browser extension.
- *
- * Subscribes to the server's SSE notification stream and:
- * 1. Updates a storage-backed unread count for the UI bell icon
- * 2. Shows Chrome system notifications for new items
- *
- * Designed to run in the background service worker context.
- */
+/** Background notification subscription for the browser extension. */
 
-import { subscribeNotificationsStream, getUnreadCount } from "@/services/notifications"
-import type { NotificationStreamEvent } from "@/services/notifications"
 import { notify } from "@/services/background-helpers"
+import {
+  classifyNotificationError,
+  reduceNotificationLifecycle,
+  type NotificationLifecycleAction,
+  type NotificationLifecycleState
+} from "@/services/notification-lifecycle"
+import {
+  notificationRecordKeyForConfig,
+  parseNotificationRuntimeConfig,
+  type NotificationRuntimeConfig
+} from "@/services/notification-runtime-scope"
+import { getUnreadCount, subscribeNotificationsStream } from "@/services/notifications"
+import type { NotificationStreamEvent } from "@/services/notifications"
 import { createSafeStorage } from "@/utils/safe-storage"
 import { toUnreadCount } from "@/utils/notifications"
 
-const UNREAD_COUNT_KEY = "tldw:notifications:unreadCount"
-const SUBSCRIPTION_ACTIVE_KEY = "tldw:notifications:subscriptionActive"
+const CONFIG_KEY = "tldwConfig"
+const ACTIVE_SCOPE_KEY = "tldw:notifications:activeScope"
 
+type NotificationConfig = NotificationRuntimeConfig
+type ExposedNotificationState = Exclude<NotificationLifecycleState, "idle">
+type NotificationRecord = {
+  state: ExposedNotificationState
+  unreadCount: number
+  updatedAt: number
+}
+type StorageChange = { oldValue?: unknown; newValue?: unknown }
+type SafeStorage = ReturnType<typeof createSafeStorage>
+
+let storageInstance: SafeStorage | null = null
+let watchedStorage: SafeStorage | null = null
 let unsubscribe: (() => void) | null = null
-let startInFlight: Promise<void> | null = null
+let currentConfig: NotificationConfig | null = null
+let currentScopeKey: string | null = null
+let currentLifecycleState: NotificationLifecycleState = "idle"
+let generation = 0
+let activeScopeWrite: Promise<void> | null = null
 
-/**
- * Start listening for notifications from the server.
- * Safe to call multiple times — only one subscription is active at a time.
- */
-export async function startNotificationSubscription(): Promise<void> {
-  if (unsubscribe) return // Already subscribed
-  if (startInFlight) return startInFlight
+const getStorage = (): SafeStorage => {
+  storageInstance ??= createSafeStorage({ area: "local" })
+  return storageInstance
+}
 
-  startInFlight = (async () => {
-    const storage = createSafeStorage({ area: "local" })
-    let unreadCountWrite = Promise.resolve()
+const configIdentity = (config: NotificationConfig | null): string =>
+  JSON.stringify([
+    config?.serverUrl ?? null,
+    config?.authMode ?? null,
+    config?.orgId ?? null,
+    config?.userId ?? null,
+    config?.accessToken ?? null,
+    config?.apiKey ?? null
+  ])
 
-    // Fetch initial unread count
-    try {
-      const { unread_count } = await getUnreadCount()
-      await storage.set(UNREAD_COUNT_KEY, unread_count)
-    } catch (error) {
-      // Server may not be reachable yet
-      console.debug("[background] Failed to fetch initial unread count:", error)
+const recordKeyFor = (config: NotificationConfig): string =>
+  notificationRecordKeyForConfig(config) as string
+
+const readRecord = (value: unknown): NotificationRecord | null => {
+  if (!value || typeof value !== "object") return null
+  const record = value as Partial<NotificationRecord>
+  if (
+    record.state !== "connecting" &&
+    record.state !== "active" &&
+    record.state !== "degraded" &&
+    record.state !== "auth-required" &&
+    record.state !== "unavailable"
+  ) {
+    return null
+  }
+  return {
+    state: record.state,
+    unreadCount: toUnreadCount(record.unreadCount),
+    updatedAt: typeof record.updatedAt === "number" ? record.updatedAt : 0
+  }
+}
+
+const stopStream = (): void => {
+  const stop = unsubscribe
+  unsubscribe = null
+  stop?.()
+}
+
+const writeActiveScope = (storage: SafeStorage, scopeKey: string | null): Promise<void> => {
+  const previousWrite = activeScopeWrite
+  const write = previousWrite
+    ? previousWrite.catch(() => undefined).then(() => storage.set(ACTIVE_SCOPE_KEY, scopeKey))
+    : storage.set(ACTIVE_SCOPE_KEY, scopeKey)
+  activeScopeWrite = write
+  void write.then(
+    () => {
+      if (activeScopeWrite === write) activeScopeWrite = null
+    },
+    () => {
+      if (activeScopeWrite === write) activeScopeWrite = null
     }
+  )
+  return write
+}
 
-    // Subscribe to SSE stream
-    try {
-      unsubscribe = subscribeNotificationsStream({
-        onEvent: async (event: NotificationStreamEvent) => {
-          if (event.event === "notification") {
-            // Show Chrome system notification
-            const payload = event.payload as {
-              title?: string
-              message?: string
-              severity?: string
-            } | null
-            if (payload?.title) {
-              notify(payload.title, payload.message || "")
-            }
+const clearActiveScope = (storage: SafeStorage): Promise<void> => {
+  currentScopeKey = null
+  return writeActiveScope(storage, null)
+}
 
-            unreadCountWrite = unreadCountWrite
-              .catch(() => undefined)
-              .then(async () => {
-                const current = toUnreadCount(await storage.get<number>(UNREAD_COUNT_KEY))
-                await storage.set(UNREAD_COUNT_KEY, current + 1)
-              })
-              .catch((error) => {
-                console.debug(
-                  "[background] Failed to update unread count from notification event:",
-                  error
-                )
-              })
-            await unreadCountWrite
-          }
+const transitionToConfig = async (
+  value: unknown,
+  options: { force?: boolean } = {}
+): Promise<void> => {
+  const storage = getStorage()
+  const nextConfig = parseNotificationRuntimeConfig(value)
+  if (
+    !options.force &&
+    nextConfig &&
+    currentConfig &&
+    configIdentity(nextConfig) === configIdentity(currentConfig)
+  ) {
+    return
+  }
+  if (
+    !options.force &&
+    nextConfig &&
+    currentConfig &&
+    recordKeyFor(nextConfig) === recordKeyFor(currentConfig) &&
+    currentLifecycleState === "unavailable"
+  ) {
+    currentConfig = nextConfig
+    return
+  }
 
-          if (event.event === "notifications_coalesced") {
-            // Batch arrived — refresh full count
-            try {
-              const { unread_count } = await getUnreadCount()
-              await storage.set(UNREAD_COUNT_KEY, unread_count)
-            } catch (error) {
-              console.debug(
-                "[background] Failed to refresh unread count after coalesced notifications:",
-                error
-              )
-            }
-          }
-        },
-        onError: () => {
-          // Stream will auto-reconnect (handled by subscribeNotificationsStream)
-        },
-      })
+  const activeGeneration = ++generation
+  stopStream()
+  currentConfig = nextConfig
+  currentLifecycleState = "idle"
+  const cleared = clearActiveScope(storage)
+  if (!nextConfig) {
+    await cleared
+    return
+  }
 
-      await storage.set(SUBSCRIPTION_ACTIVE_KEY, true)
-    } catch (error) {
-      await storage.set(SUBSCRIPTION_ACTIVE_KEY, false)
-      // Server not available — will retry on next init
-      console.debug("[background] Failed to start notification subscription:", error)
+  await cleared
+  if (activeGeneration !== generation) return
+
+  const scopeKey = recordKeyFor(nextConfig)
+  currentScopeKey = scopeKey
+  let lifecycleState: NotificationLifecycleState = "idle"
+  let record: NotificationRecord = {
+    state: "connecting",
+    unreadCount: toUnreadCount(
+      readRecord(await storage.get<NotificationRecord>(scopeKey))?.unreadCount
+    ),
+    updatedAt: Date.now()
+  }
+  if (activeGeneration !== generation) return
+
+  const isCurrent = (): boolean =>
+    activeGeneration === generation && currentScopeKey === scopeKey
+
+  const writeRecord = async (
+    action: NotificationLifecycleAction | null,
+    unreadCount = record.unreadCount
+  ): Promise<void> => {
+    if (!isCurrent()) return
+    if (action) lifecycleState = reduceNotificationLifecycle(lifecycleState, action)
+    if (lifecycleState === "idle") return
+    currentLifecycleState = lifecycleState
+    record = {
+      state: lifecycleState,
+      unreadCount: toUnreadCount(unreadCount),
+      updatedAt: Date.now()
     }
-  })()
+    await storage.set(scopeKey, record)
+  }
+
+  await writeActiveScope(storage, scopeKey)
+  await writeRecord({ type: "start" })
+  if (!isCurrent()) return
 
   try {
-    await startInFlight
-  } finally {
-    startInFlight = null
+    const { unread_count } = await getUnreadCount()
+    await writeRecord({ type: "start" }, unread_count)
+  } catch (error) {
+    if (!isCurrent()) return
+    const classification = classifyNotificationError(error)
+    if (classification.kind === "auth-required") {
+      await writeRecord({ type: "auth-required" })
+      return
+    }
+    if (classification.kind === "unavailable") {
+      await writeRecord({ type: "unavailable" })
+      return
+    }
+    if (classification.kind === "idle") return
+    await writeRecord({ type: "retry" })
+  }
+  if (!isCurrent()) return
+
+  let terminal = false
+  let unreadCountWrite = Promise.resolve()
+  const handleTerminalError = async (error: unknown): Promise<void> => {
+    if (!isCurrent()) return
+    const classification = classifyNotificationError(error)
+    if (classification.kind === "retry") {
+      await writeRecord({ type: "retry" })
+      return
+    }
+    if (classification.kind === "auth-required") {
+      terminal = true
+      stopStream()
+      await writeRecord({ type: "auth-required" })
+      return
+    }
+    if (classification.kind === "unavailable") {
+      terminal = true
+      stopStream()
+      await writeRecord({ type: "unavailable" })
+    }
+  }
+
+  const handleStreamEvent = async (event: NotificationStreamEvent): Promise<void> => {
+    if (!isCurrent() || terminal) return
+    if (event.event === "notification") {
+      const payload = event.payload as {
+        title?: string
+        message?: string
+      } | null
+      if (payload?.title) notify(payload.title, payload.message || "")
+
+      unreadCountWrite = unreadCountWrite
+        .catch(() => undefined)
+        .then(() => writeRecord(null, record.unreadCount + 1))
+      await unreadCountWrite
+    }
+
+    if (event.event === "notifications_coalesced") {
+      try {
+        const { unread_count } = await getUnreadCount()
+        await writeRecord(null, unread_count)
+      } catch (error) {
+        await handleTerminalError(error)
+      }
+    }
+  }
+
+  try {
+    const stop = subscribeNotificationsStream({
+      onOpen: () => {
+        if (!terminal) {
+          void writeRecord({ type: "open" }).catch((error) => {
+            console.debug("[background] Failed to mark notification stream active:", error)
+          })
+        }
+      },
+      onError: (error) => {
+        void handleTerminalError(error).catch((writeError) => {
+          console.debug(
+            "[background] Failed to handle notification stream error:",
+            writeError
+          )
+        })
+      },
+      onEvent: (event: NotificationStreamEvent) => {
+        void handleStreamEvent(event).catch((error) => {
+          console.debug("[background] Failed to handle notification stream event:", error)
+        })
+      }
+    })
+    if (terminal || !isCurrent()) {
+      stop()
+      return
+    }
+    unsubscribe = stop
+  } catch (error) {
+    await handleTerminalError(error)
   }
 }
 
-/**
- * Stop the notification subscription.
- */
+const handleConfigChange = (change: StorageChange): void => {
+  void transitionToConfig(change?.newValue).catch((error) => {
+    console.debug("[background] Failed to update notification scope:", error)
+  })
+}
+
+const ensureConfigWatcher = (storage: SafeStorage): void => {
+  if (watchedStorage) return
+  watchedStorage = storage
+  storage.watch({ tldwConfig: handleConfigChange })
+}
+
+/** Start listening for notifications for the current authenticated scope. */
+export async function startNotificationSubscription(config?: unknown): Promise<void> {
+  const storage = getStorage()
+  ensureConfigWatcher(storage)
+  if (config === undefined) {
+    const readGeneration = generation
+    const resolvedConfig = await storage.get(CONFIG_KEY)
+    if (readGeneration !== generation) return
+    await transitionToConfig(resolvedConfig)
+    return
+  }
+  const resolvedConfig = config
+  await transitionToConfig(resolvedConfig)
+}
+
+/** Explicitly retry a stopped terminal subscription. */
+export async function retryNotificationSubscription(): Promise<void> {
+  if (!currentConfig) return
+  await transitionToConfig(currentConfig, { force: true })
+}
+
+/** Stop listening and synchronously clear the rendered scope selector. */
 export function stopNotificationSubscription(): void {
-  if (unsubscribe) {
-    unsubscribe()
-    unsubscribe = null
+  generation += 1
+  stopStream()
+  currentConfig = null
+  currentLifecycleState = "idle"
+  const storage = storageInstance ?? createSafeStorage({ area: "local" })
+  void clearActiveScope(storage)
+  if (watchedStorage) {
+    watchedStorage.unwatch({ tldwConfig: handleConfigChange })
   }
-
-  const storage = createSafeStorage({ area: "local" })
-  void storage.set(SUBSCRIPTION_ACTIVE_KEY, false)
+  watchedStorage = null
+  storageInstance = null
 }
 
-/**
- * Get the current unread count from storage (for UI components).
- */
+/** Read the unread count for the currently rendered scope. */
 export async function getStoredUnreadCount(): Promise<number> {
-  const storage = createSafeStorage({ area: "local" })
-  return toUnreadCount(await storage.get<number>(UNREAD_COUNT_KEY))
+  const storage = getStorage()
+  const scopeKey = await storage.get<string | null>(ACTIVE_SCOPE_KEY)
+  if (!scopeKey) return 0
+  return toUnreadCount(readRecord(await storage.get(scopeKey))?.unreadCount)
 }
 
-/**
- * Reset the unread count (e.g., when user opens notifications page).
- */
+/** Reset the unread count for the currently rendered scope. */
 export async function resetStoredUnreadCount(): Promise<void> {
-  const storage = createSafeStorage({ area: "local" })
-  await storage.set(UNREAD_COUNT_KEY, 0)
+  const storage = getStorage()
+  const scopeKey = await storage.get<string | null>(ACTIVE_SCOPE_KEY)
+  if (!scopeKey) return
+  const record = readRecord(await storage.get(scopeKey))
+  if (!record) return
+  await storage.set(scopeKey, { ...record, unreadCount: 0, updatedAt: Date.now() })
 }

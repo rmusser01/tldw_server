@@ -2,6 +2,7 @@ import { browser } from 'wxt/browser'
 import { createSafeStorage } from '@/utils/safe-storage'
 import { tldwRequest } from '@/services/tldw/request-core'
 import type { PathOrUrl, AllowedMethodFor, UpperLower } from '@/services/tldw/openapi-guard'
+import { resolveDirectBrowserConfig as resolveDirectConfig } from '@/services/tldw/direct-browser-config'
 
 export interface ApiSendPayload<P extends PathOrUrl = PathOrUrl, M extends AllowedMethodFor<P> = AllowedMethodFor<P>> {
   path: P
@@ -125,15 +126,10 @@ async function apiSendImpl<T = any, P extends PathOrUrl = PathOrUrl, M extends A
     }
     // fall through to direct request
   }
-  const storage = createSafeStorage()
+  const storage = createSafeStorage({ area: "local" })
   return await tldwRequest(payload, {
     // IMPORTANT: getConfig must fetch fresh config each time it's called
     // (not pre-fetch once), because the config may change or not be seeded yet.
-    getConfig: async () => {
-      const config = (await storage.get('tldwConfig').catch(() => null)) as
-        | { serverUrl?: string }
-        | null
-      return config
-    }
+    getConfig: () => resolveDirectConfig(storage)
   })
 }

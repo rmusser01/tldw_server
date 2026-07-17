@@ -6,6 +6,7 @@ import pytest
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError
 from tldw_Server_API.app.core.DB_Management.backends.pg_rls_policies import (
     build_chacha_rls_sql,
+    ensure_chacha_rls,
     ensure_prompt_studio_rls,
 )
 
@@ -83,6 +84,40 @@ def test_chacha_rls_includes_workspace_resource_memberships_tenant_policy():
     assert "CREATE POLICY workspace_resource_memberships_tenant_isolation" in sql
     assert "ON workspace_resource_memberships" in sql
     assert "client_id = current_setting('app.current_user_id', true)" in sql
+
+
+def test_chacha_rls_includes_source_review_read_and_write_policies():
+    sql = "\n".join(build_chacha_rls_sql())
+
+    for table_name in ("source_review_plans", "source_review_occurrences"):
+        assert f"to_regclass('{table_name}')" in sql
+        assert f"ALTER TABLE IF EXISTS {table_name} ENABLE ROW LEVEL SECURITY" in sql
+        assert f"ALTER TABLE IF EXISTS {table_name} FORCE ROW LEVEL SECURITY" in sql
+        assert f"CREATE POLICY {table_name}_tenant_isolation ON {table_name}" in sql
+    assert sql.count("WITH CHECK") >= 2
+
+
+def test_chacha_rls_includes_guarded_active_workspace_source_saved_view_policy():
+    sql = "\n".join(build_chacha_rls_sql())
+
+    assert "to_regclass('workspace_source_saved_views')" in sql
+    assert "ALTER TABLE IF EXISTS workspace_source_saved_views ENABLE ROW LEVEL SECURITY" in sql
+    assert "ALTER TABLE IF EXISTS workspace_source_saved_views FORCE ROW LEVEL SECURITY" in sql
+    assert "DROP POLICY IF EXISTS workspace_source_saved_views_tenant_isolation" in sql
+    assert "CREATE POLICY workspace_source_saved_views_tenant_isolation" in sql
+    assert sql.count("owner_user_id = current_setting('app.current_user_id', true)") >= 2
+    assert sql.count("w.id = workspace_source_saved_views.workspace_id") >= 2
+    assert sql.count("w.client_id = current_setting('app.current_user_id', true)") >= 2
+    assert sql.count("w.deleted = false") >= 2
+    assert "WITH CHECK" in sql
+
+
+def test_ensure_chacha_rls_uses_the_guarded_saved_view_policy_block():
+    conn = _TxnConn()
+    conn.cursor_obj.execute = lambda _sql: None
+
+    assert ensure_chacha_rls(_Backend(conn)) is True
+    assert conn.committed is True
 
 
 def test_run_pg_rls_auto_ensure_logs_success_only_after_both_installers_pass(monkeypatch):

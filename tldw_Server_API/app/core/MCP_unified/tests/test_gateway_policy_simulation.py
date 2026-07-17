@@ -45,6 +45,52 @@ def test_subjects_module_extracts_permission_rule_subjects() -> None:
     assert ("domain", "https://example.com/x") in pairs
     assert ("command", "git status") in pairs
 
+    skill_subjects = extract_permission_rule_subjects(
+        "skills.render",
+        {"skill_name": "Review-Paper", "arguments": "--formal /* example */"},
+    )
+    skill_pairs = {(subject_type, value) for subject_type, value, _argv in skill_subjects}
+    assert ("skill", "review-paper") in skill_pairs
+    assert all(
+        subject_type != "skill"
+        for subject_type, _, _ in extract_permission_rule_subjects(
+            "skills.get", {"name": "Review-Paper"}
+        )
+    )
+
+
+def test_skill_permission_subject_extraction_ignores_invalid_values() -> None:
+    from mcp_unified.profiles.subjects import extract_permission_rule_subjects
+
+    for arguments in (
+        {"skill_name": "   "},
+        {"skill_name": 42},
+        {"skill_name": {"name": "Review-Paper"}},
+        {"skill_name": ["Review-Paper"]},
+        {"name": "Review-Paper"},
+    ):
+        assert all(
+            subject_type != "skill"
+            for subject_type, _, _ in extract_permission_rule_subjects("skills.render", arguments)
+        )
+
+
+def test_skill_permission_subject_extraction_requires_exact_argument_key() -> None:
+    from mcp_unified.profiles.subjects import extract_permission_rule_subjects
+
+    for key in ("SKILL_NAME", " skill_name "):
+        assert all(
+            subject_type != "skill"
+            for subject_type, _, _ in extract_permission_rule_subjects(
+                "skills.render", {key: "Review-Paper"}
+            )
+        )
+
+    subjects = extract_permission_rule_subjects(
+        "skills.render", {"skill_name": "Review-Paper"}
+    )
+    assert ("skill", "review-paper", None) in subjects
+
 
 def test_subjects_module_enforces_extraction_limits() -> None:
     from mcp_unified.profiles.subjects import (
@@ -57,6 +103,20 @@ def test_subjects_module_enforces_extraction_limits() -> None:
         extract_permission_rule_subjects(
             "fs.read_text",
             {"paths": [f"docs/file-{index}.txt" for index in range(MAX_PERMISSION_SUBJECTS + 1)]},
+        )
+
+
+def test_skill_permission_subject_extraction_enforces_value_limit() -> None:
+    from mcp_unified.profiles.subjects import (
+        MAX_SUBJECT_VALUE_LENGTH,
+        PermissionSubjectLimitError,
+        extract_permission_rule_subjects,
+    )
+
+    with pytest.raises(PermissionSubjectLimitError, match="max_subject_value_length"):
+        extract_permission_rule_subjects(
+            "skills.render",
+            {"skill_name": "a" * (MAX_SUBJECT_VALUE_LENGTH + 1)},
         )
 
 
@@ -152,6 +212,96 @@ def test_simulation_ask_rule_blocks_then_lease_allows() -> None:
     )
     assert allowed["overall"]["status"] == "allowed"
     assert allowed["approval_grant_markers"]
+
+
+def test_simulation_skill_permission_applies_deny_allow_and_unrelated_rules() -> None:
+    from mcp_unified.gateway.policy_simulation import simulate_tool_call_policy
+
+    denied_profile = _profile(
+        "reviewer",
+        allowed_tools=["skills.render"],
+        permission_rules=[{"pattern": "Skill(secret-*)", "outcome": "deny"}],
+    )
+    allowed_profile = _profile(
+        "reviewer",
+        allowed_tools=["skills.render"],
+        permission_rules=[{"pattern": "Skill(review-*)", "outcome": "allow"}],
+    )
+    unrelated_profile = _profile(
+        "reviewer",
+        allowed_tools=["skills.render"],
+        permission_rules=[{"pattern": "Skill(secret-*)", "outcome": "deny"}],
+    )
+
+    denied = simulate_tool_call_policy(
+        denied_profile,
+        "skills.render",
+        {"skill_name": "secret-plan"},
+    )
+    allowed = simulate_tool_call_policy(
+        allowed_profile,
+        "skills.render",
+        {"skill_name": "Review-Paper"},
+    )
+    unrelated = simulate_tool_call_policy(
+        unrelated_profile,
+        "skills.render",
+        {"skill_name": "review-paper"},
+    )
+
+    assert denied["overall"]["status"] == "denied"
+    assert allowed["overall"]["status"] == "allowed"
+    assert unrelated["overall"]["status"] == "allowed"
+
+
+def test_simulation_skill_permission_approval_lease_lifecycle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import mcp_unified.policy_grants.memory as memory_grants
+    from mcp_unified.gateway.policy_simulation import simulate_tool_call_policy
+    from mcp_unified.policy_grants import InMemoryPolicyGrantStore
+
+    profile = _profile(
+        "reviewer",
+        allowed_tools=["skills.render"],
+        permission_rules=[{"pattern": "Skill(review-*)", "outcome": "ask"}],
+    )
+    grant_store = InMemoryPolicyGrantStore()
+    arguments = {"skill_name": "Review-Paper"}
+
+    blocked = simulate_tool_call_policy(
+        profile,
+        "skills.render",
+        arguments,
+        policy_grant_store=grant_store,
+    )
+    assert blocked["overall"]["status"] == "approval_required"
+
+    monkeypatch.setattr(memory_grants.time, "time", lambda: 1_000.0)
+    grant_store.create_grant(
+        profile_id="reviewer",
+        grant_type="approval",
+        subject_type="skill",
+        value="REVIEW-PAPER",
+        ttl_seconds=10,
+    )
+    allowed = simulate_tool_call_policy(
+        profile,
+        "skills.render",
+        arguments,
+        policy_grant_store=grant_store,
+    )
+    assert allowed["overall"]["status"] == "allowed"
+    assert allowed["approval_grant_markers"]
+
+    monkeypatch.setattr(memory_grants.time, "time", lambda: 1_011.0)
+    expired = simulate_tool_call_policy(
+        profile,
+        "skills.render",
+        arguments,
+        policy_grant_store=grant_store,
+    )
+    assert expired["overall"]["status"] == "approval_required"
 
 
 def test_simulation_includes_merged_ttl_path_grants() -> None:

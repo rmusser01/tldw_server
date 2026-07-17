@@ -1,5 +1,8 @@
 import type { TldwConfig } from "@/services/tldw/TldwApiClient"
-import { resolveBrowserWebSocketBase } from "@/services/tldw/browser-websocket"
+import {
+  resolveCookieSessionWebSocketBase,
+  resolveBrowserWebSocketBase,
+} from "@/services/tldw/browser-websocket"
 
 export type PersonaWebSocketConnection = {
   url: string
@@ -36,14 +39,23 @@ const isSubprotocolSafe = (value: string): boolean =>
   value.length > 0 && WS_SUBPROTOCOL_TOKEN_RE.test(value)
 
 export const buildPersonaWebSocketUrl = (
-  config: Pick<TldwConfig, "serverUrl" | "authMode" | "apiKey" | "accessToken">
+  config: Pick<
+    TldwConfig,
+    "serverUrl" | "authMode" | "authSource" | "apiKey" | "accessToken"
+  >
 ): PersonaWebSocketConnection => {
   const serverUrl = String(config.serverUrl || "").trim()
   if (!serverUrl) {
     throw new Error("tldw server is not configured")
   }
 
-  const base = resolveBrowserWebSocketBase(serverUrl)
+  const cookieBase = resolveCookieSessionWebSocketBase(config)
+  const cookieSession = Boolean(cookieBase)
+  const base = cookieBase || resolveBrowserWebSocketBase(serverUrl)
+  if (!base) throw new Error("WebUI origin is not available")
+  if (cookieSession) {
+    return { url: `${base}/api/v1/persona/stream`, protocols: [] }
+  }
 
   let credential: string
   if (config.authMode === "multi-user") {

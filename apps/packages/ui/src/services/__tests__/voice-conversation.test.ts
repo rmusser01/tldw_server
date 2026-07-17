@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from "vitest"
 
 import {
+  buildAuthenticatedAudioWebSocketUrl,
   buildVoiceConversationPreflight,
+  isVoiceConversationAuthReady,
   normalizeVoiceConversationRuntimeError,
   resolveVoiceConversationAvailability,
   resolveVoiceConversationTtsConfig,
@@ -42,6 +44,107 @@ const getTtsConfigErrorReason = (
 }
 
 describe("voice conversation contract", () => {
+  it("lets sidepanel and playground callers start cookie-authenticated audio and chat sockets", async () => {
+    const originalDeploymentMode = process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+    const config = {
+      serverUrl: window.location.origin,
+      authMode: "single-user" as const,
+      authSource: "cookie-session" as const
+    }
+
+    try {
+      expect(isVoiceConversationAuthReady(config)).toBe(true)
+      expect(
+        resolveVoiceConversationAvailability({
+          isConnectionReady: true,
+          hasVoiceConversationTransport: true,
+          authReady: isVoiceConversationAuthReady(config),
+          sttHealthState: "healthy",
+          ttsHealthState: "healthy",
+          selectedModel: "",
+          allowBackendDefaultModel: true,
+          ttsConfigReady: true
+        }).available
+      ).toBe(true)
+      await expect(
+        buildVoiceConversationPreflight({
+          ...config,
+          token: "",
+          requestedModel: "",
+          ttsProvider: "browser",
+          tldwTtsModel: "kokoro",
+          tldwTtsVoice: "af_heart",
+          tldwTtsSpeed: 1,
+          tldwTtsResponseFormat: "mp3",
+          resolveProvider: vi.fn()
+        })
+      ).resolves.toMatchObject({
+        websocketUrl: expect.stringMatching(/\/api\/v1\/audio\/chat\/stream$/)
+      })
+    } finally {
+      if (originalDeploymentMode === undefined) {
+        delete process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
+      } else {
+        process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = originalDeploymentMode
+      }
+    }
+  })
+
+  it("builds a secret-free page-origin websocket for cookie sessions", async () => {
+    const originalWindow = globalThis.window
+    const originalDeploymentMode = process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: {
+        location: {
+          origin: "https://webui.example.test",
+          protocol: "https:"
+        }
+      }
+    })
+
+    try {
+      const result = await buildVoiceConversationPreflight({
+        serverUrl: "https://remote.example.test",
+        token: "stale-token",
+        authMode: "single-user",
+        authSource: "cookie-session",
+        requestedModel: "",
+        ttsProvider: "browser",
+        tldwTtsModel: "kokoro",
+        tldwTtsVoice: "af_heart",
+        tldwTtsSpeed: 1,
+        tldwTtsResponseFormat: "mp3",
+        resolveProvider: vi.fn()
+      })
+
+      expect(result.websocketUrl).toBe(
+        "wss://webui.example.test/api/v1/audio/chat/stream"
+      )
+      expect(
+        buildAuthenticatedAudioWebSocketUrl({
+          serverUrl: "https://remote.example.test",
+          token: "stale-token",
+          authMode: "single-user",
+          authSource: "cookie-session",
+          path: "/api/v1/audio/stream/tts"
+        })
+      ).toBe("wss://webui.example.test/api/v1/audio/stream/tts")
+    } finally {
+      if (originalDeploymentMode === undefined) {
+        delete process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
+      } else {
+        process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = originalDeploymentMode
+      }
+      Object.defineProperty(globalThis, "window", {
+        configurable: true,
+        value: originalWindow
+      })
+    }
+  })
+
   it("keeps voice conversation unavailable when only broad audio flags exist", () => {
     const result = resolveVoiceConversationAvailability({
       isConnectionReady: true,

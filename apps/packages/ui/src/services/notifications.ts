@@ -1,4 +1,5 @@
 import { bgRequest, bgStream } from "@/services/background-proxy"
+import { classifyNotificationError, nextReconnectDelay } from "@/services/notification-lifecycle"
 
 export type NotificationSeverity = "info" | "warning" | "error"
 
@@ -65,8 +66,11 @@ export type NotificationStreamEvent = {
 export type SubscribeNotificationsOptions = {
   after?: number
   reconnectDelayMs?: number
+  maxReconnectDelayMs?: number
+  reconnectJitter?: number
   onEvent: (event: NotificationStreamEvent) => void
   onError?: (error: unknown) => void
+  onOpen?: () => void
 }
 
 const DEFAULT_RECONNECT_DELAY_MS = 1200
@@ -74,7 +78,8 @@ const DEFAULT_RECONNECT_DELAY_MS = 1200
 export type NotificationStreamReader = (
   signal: AbortSignal,
   cursor: number,
-  onEvent: (event: NotificationStreamEvent) => void
+  onEvent: (event: NotificationStreamEvent) => void,
+  onOpen: () => void
 ) => Promise<number>
 
 export const buildNotificationsQuery = (params?: Record<string, unknown>): string => {
@@ -169,7 +174,8 @@ export const parseNotificationStreamEvent = (line: string): NotificationStreamEv
 const readNotificationsStream = async (
   signal: AbortSignal,
   after: number,
-  onEvent: (event: NotificationStreamEvent) => void
+  onEvent: (event: NotificationStreamEvent) => void,
+  onOpen: () => void
 ): Promise<number> => {
   const headers: Record<string, string> = {}
   if (after > 0) {
@@ -182,7 +188,8 @@ const readNotificationsStream = async (
       path: `/api/v1/notifications/stream${buildNotificationsQuery({ after })}` as any,
       method: "GET",
       headers,
-      abortSignal: signal
+      abortSignal: signal,
+      onOpen
     })) {
       const event = parseNotificationStreamEvent(line)
       if (!event) continue
@@ -206,6 +213,8 @@ export function createNotificationStreamSubscription(options: SubscribeNotificat
   const controller = new AbortController()
   let cursor = Math.max(0, options.after ?? 0)
   const reconnectDelayMs = Math.max(250, options.reconnectDelayMs ?? DEFAULT_RECONNECT_DELAY_MS)
+  const maxReconnectDelayMs = Math.max(reconnectDelayMs, options.maxReconnectDelayMs ?? 30_000)
+  let reconnectAttempt = 0
 
   const delay = async (ms: number): Promise<void> => {
     await new Promise<void>((resolve) => {
@@ -233,9 +242,27 @@ export function createNotificationStreamSubscription(options: SubscribeNotificat
   const run = async (): Promise<void> => {
     while (!controller.signal.aborted) {
       try {
-        cursor = await options.readStream(controller.signal, cursor, options.onEvent)
+        cursor = await options.readStream(
+          controller.signal,
+          cursor,
+          (event) => {
+            reconnectAttempt = 0
+            options.onEvent(event)
+          },
+          () => {
+            reconnectAttempt = 0
+            options.onOpen?.()
+          }
+        )
         if (controller.signal.aborted) break
-        await delay(reconnectDelayMs)
+        const reconnectDelay = nextReconnectDelay({
+          attempt: reconnectAttempt,
+          baseDelayMs: reconnectDelayMs,
+          maxDelayMs: maxReconnectDelayMs,
+          jitter: options.reconnectJitter ?? Math.random()
+        })
+        reconnectAttempt += 1
+        await delay(reconnectDelay)
       } catch (error) {
         if (controller.signal.aborted) break
         const nextCursor =
@@ -243,8 +270,17 @@ export function createNotificationStreamSubscription(options: SubscribeNotificat
         if (typeof nextCursor === "number" && Number.isFinite(nextCursor) && nextCursor > cursor) {
           cursor = nextCursor
         }
+        const classification = classifyNotificationError(error, {
+          attempt: reconnectAttempt,
+          baseDelayMs: reconnectDelayMs,
+          maxDelayMs: maxReconnectDelayMs,
+          jitter: options.reconnectJitter ?? Math.random()
+        })
+        if (classification.kind === "idle") break
         options.onError?.(error)
-        await delay(reconnectDelayMs)
+        if (classification.kind !== "retry") break
+        reconnectAttempt += 1
+        await delay(classification.delayMs)
       }
     }
   }
@@ -252,6 +288,8 @@ export function createNotificationStreamSubscription(options: SubscribeNotificat
   void run()
   return () => controller.abort()
 }
+
+export const runNotificationMutation = <T>(request: () => Promise<T>): Promise<T> => request()
 
 export async function listNotifications(params?: {
   limit?: number
@@ -328,9 +366,7 @@ export async function updateNotificationPreferences(
   })
 }
 
-export function subscribeNotificationsStream(
-  options: SubscribeNotificationsOptions
-): () => void {
+export function subscribeNotificationsStream(options: SubscribeNotificationsOptions): () => void {
   return createNotificationStreamSubscription({
     ...options,
     readStream: readNotificationsStream

@@ -8,14 +8,12 @@ const {
   mockWebSearch,
   mockUploadMedia,
   mockAddMedia,
-  mockAddSource,
-  mockMessageWarning
+  mockAddSource
 } = vi.hoisted(() => ({
   mockWebSearch: vi.fn(),
   mockUploadMedia: vi.fn(),
   mockAddMedia: vi.fn(),
-  mockAddSource: vi.fn(),
-  mockMessageWarning: vi.fn()
+  mockAddSource: vi.fn()
 }))
 
 const workspaceStoreState = {
@@ -80,17 +78,6 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   }
 }))
 
-vi.mock("antd", async () => {
-  const actual = await vi.importActual<typeof import("antd")>("antd")
-  return {
-    ...actual,
-    message: {
-      ...actual.message,
-      warning: mockMessageWarning
-    }
-  }
-})
-
 describe("AddSourceModal Stage 1 error surfaces", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -136,15 +123,16 @@ describe("AddSourceModal Stage 1 error surfaces", () => {
     fireEvent.click(screen.getByText("Result Two"))
     fireEvent.click(screen.getByRole("button", { name: "Add 2 selected" }))
 
-    await waitFor(() => {
-      expect(mockAddSource).toHaveBeenCalledTimes(1)
-      expect(mockMessageWarning).toHaveBeenCalledWith(
-        expect.stringContaining("Added 1 of 2 sources")
-      )
-      expect(mockMessageWarning).toHaveBeenCalledWith(
-        expect.stringContaining("https://example.com/two")
-      )
-    })
+    await waitFor(() => expect(mockAddSource).toHaveBeenCalledTimes(1))
+    expect(await screen.findByText("Queued as workspace source")).toBeInTheDocument()
+    expect(screen.getByText("Media #9001")).toBeInTheDocument()
+    expect(screen.getByText("Failed to import")).toBeInTheDocument()
+    expect(
+      screen.getByText("Request timed out. Retry, or try a smaller source.")
+    ).toBeInTheDocument()
+    expect(screen.getByText("Result Two").closest('[role="listitem"]')).toHaveClass(
+      "bg-primary/10"
+    )
   })
 
   it("keeps pasted text editable and gives an auth recovery path when paste upload is denied", async () => {

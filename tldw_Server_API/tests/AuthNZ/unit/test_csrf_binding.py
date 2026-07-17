@@ -1,9 +1,13 @@
 import types
+from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock
+
 import pytest
 
 from tldw_Server_API.app.core.AuthNZ.csrf_protection import CSRFTokenManager
 from tldw_Server_API.app.core.AuthNZ.jwt_service import JWTService, reset_jwt_service
 from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+from tldw_Server_API.app.core.AuthNZ.single_user_session import SingleUserSessionIdentity
 
 
 def _dummy_request(user_id: int | None):
@@ -76,6 +80,101 @@ def test_csrf_single_user_bearer_skips_protection(monkeypatch):
     # Cleanup env to avoid leakage
     for key in ("AUTH_MODE", "SINGLE_USER_API_KEY", "DATABASE_URL"):
         monkeypatch.delenv(key, raising=False)
+    reset_settings()
+
+
+def test_single_user_csrf_protects_only_cookie_authenticated_requests(monkeypatch):
+    monkeypatch.setenv("AUTH_MODE", "single_user")
+    monkeypatch.setenv("SINGLE_USER_SESSION_COOKIE_NAME", "tldw_single_user_session")
+    reset_settings()
+
+    mgr = CSRFTokenManager()
+    base = {
+        "method": "DELETE",
+        "headers": {},
+        "url": types.SimpleNamespace(path="/api/v1/auth/single-user/session"),
+        "state": types.SimpleNamespace(),
+    }
+    without_cookie = types.SimpleNamespace(**base, cookies={})
+    with_cookie = types.SimpleNamespace(
+        **base,
+        cookies={"tldw_single_user_session": "opaque"},
+    )
+
+    assert mgr.should_protect(without_cookie) is False
+    assert mgr.should_protect(with_cookie) is True
+    reset_settings()
+
+
+def test_effective_csrf_environment_override_drives_resolution(monkeypatch):
+    from tldw_Server_API.app.core.AuthNZ import csrf_protection
+
+    monkeypatch.setenv("AUTH_MODE", "single_user")
+    monkeypatch.setenv("CSRF_ENABLED", "0")
+    reset_settings()
+
+    assert csrf_protection.resolve_effective_csrf_enabled() is False
+
+    monkeypatch.setenv("CSRF_ENABLED", "1")
+    assert csrf_protection.resolve_effective_csrf_enabled() is True
+    reset_settings()
+
+
+def test_pytest_import_alone_does_not_disable_effective_csrf(monkeypatch):
+    from tldw_Server_API.app.core.AuthNZ import csrf_protection
+
+    monkeypatch.delenv("CSRF_ENABLED", raising=False)
+    monkeypatch.setattr(csrf_protection, "global_settings", {})
+    monkeypatch.setattr(csrf_protection, "is_test_mode", lambda: False)
+    monkeypatch.setattr(
+        csrf_protection,
+        "get_settings",
+        lambda: types.SimpleNamespace(AUTH_MODE="single_user"),
+    )
+
+    assert csrf_protection.resolve_effective_csrf_enabled() is True
+
+
+@pytest.mark.asyncio
+async def test_csrf_binding_resolves_single_user_cookie_before_dependencies(monkeypatch):
+    from fastapi import FastAPI
+    from starlette.requests import Request
+
+    from tldw_Server_API.app.core.AuthNZ import csrf_protection
+    from tldw_Server_API.app.core.AuthNZ.csrf_protection import CSRFProtectionMiddleware
+
+    monkeypatch.setenv("AUTH_MODE", "single_user")
+    monkeypatch.setenv("CSRF_BIND_TO_USER", "true")
+    reset_settings()
+    identity = SingleUserSessionIdentity(
+        session_id=9,
+        user_id=1,
+        expires_at=datetime.now(timezone.utc) + timedelta(days=1),
+    )
+    validate = AsyncMock(return_value=identity)
+    monkeypatch.setattr(
+        csrf_protection,
+        "validate_single_user_session",
+        validate,
+        raising=False,
+    )
+    request = Request(
+        {
+            "type": "http",
+            "method": "DELETE",
+            "path": "/api/v1/auth/single-user/session",
+            "headers": [(b"cookie", b"tldw_single_user_session=opaque")],
+            "client": ("127.0.0.1", 0),
+        }
+    )
+
+    middleware = CSRFProtectionMiddleware(FastAPI(), enabled=True)
+    user_id = await middleware._resolve_user_id(request)
+
+    assert user_id == 1
+    assert request.state.user_id == 1
+    assert request.state.single_user_session_id == 9
+    validate.assert_awaited_once_with(request)
     reset_settings()
 
 

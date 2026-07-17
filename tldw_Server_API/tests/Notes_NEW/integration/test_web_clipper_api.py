@@ -71,7 +71,13 @@ def client_with_web_clipper_db(tmp_path):
     db.close_connection()
 
 
-def _save_payload(*, clip_id: str = "clip-123", destination_mode: str = "both", include_attachment: bool = False):
+def _save_payload(
+    *,
+    clip_id: str = "clip-123",
+    destination_mode: str = "both",
+    include_attachment: bool = False,
+    default_review_state: str | None = None,
+):
     attachments = []
     if include_attachment:
         attachments.append(
@@ -104,6 +110,8 @@ def _save_payload(*, clip_id: str = "clip-123", destination_mode: str = "both", 
     }
     if destination_mode in {"workspace", "both"}:
         payload["workspace"] = {"workspace_id": "ws-1"}
+        if default_review_state is not None:
+            payload["workspace"]["default_review_state"] = default_review_state
     return payload
 
 
@@ -144,6 +152,28 @@ def test_web_clipper_workspace_save_creates_media_backed_workspace_source(client
     assert sources[0]["id"] == "web-clipper:clip-source-api"
     assert sources[0]["media_id"] > 0
     assert sources[0]["source_type"] == "web_clip"
+    assert sources[0]["review_state"] == "unset"
+
+
+def test_web_clipper_workspace_save_can_default_source_to_needs_review(
+    client_with_web_clipper_db: TestClient,
+):
+    client = client_with_web_clipper_db
+    db = client.app.state.web_clipper_db
+
+    response = client.post(
+        "/api/v1/web-clipper/save",
+        json=_save_payload(
+            clip_id="clip-source-review-api",
+            destination_mode="workspace",
+            default_review_state="needs_review",
+        ),
+    )
+
+    assert response.status_code == 200, response.text
+    sources = db.list_workspace_sources("ws-1")
+    assert len(sources) == 1
+    assert sources[0]["review_state"] == "needs_review"
 
 
 def test_web_clipper_workspace_save_enqueues_workspace_source_ingest_job(client_with_web_clipper_db: TestClient):

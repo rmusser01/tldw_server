@@ -28,19 +28,13 @@ from tldw_Server_API.app.core.exceptions import (
 from tldw_Server_API.app.core.http_client import RetryPolicy as _RetryPolicy
 from tldw_Server_API.app.core.http_client import fetch as _http_fetch
 from tldw_Server_API.app.core.Image_Generation.listing import list_image_models_for_catalog
-from tldw_Server_API.app.core.Local_LLM import llamacpp_inventory_service
-from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import LLMInferenceLibError
-from tldw_Server_API.app.core.Local_LLM.llamacpp_profile_capabilities import (
-    managed_profile_model_metadata,
+from tldw_Server_API.app.core.LLM_Calls.extra_body_compat_catalog import (
+    get_model_extra_body_compat,
+    get_provider_extra_body_compat,
 )
-from tldw_Server_API.app.core.LLM_Calls.provider_metadata import (
-    PROVIDER_CAPABILITIES,
-    provider_requires_api_key,
-)
-from tldw_Server_API.app.core.LLM_Calls.provider_readiness import (
-    configured_endpoint_probe_enabled as _configured_endpoint_probe_enabled,
-    normalize_catalog_provider_for_chat as _normalize_catalog_provider_for_chat,
-    provider_readiness as _provider_readiness,
+from tldw_Server_API.app.core.LLM_Calls.llamacpp_request_extensions import resolve_llamacpp_runtime_caps
+from tldw_Server_API.app.core.LLM_Calls.openrouter_model_inventory import (
+    discover_openrouter_models as _discover_openrouter_models_shared,
 )
 from tldw_Server_API.app.core.LLM_Calls.provider_config_resolution import (
     has_custom_openai_env_configuration,
@@ -49,18 +43,38 @@ from tldw_Server_API.app.core.LLM_Calls.provider_config_resolution import (
     resolve_provider_model_value,
     valid_provider_api_key,
 )
-from tldw_Server_API.app.core.LLM_Calls.openrouter_model_inventory import (
-    discover_openrouter_models as _discover_openrouter_models_shared,
+from tldw_Server_API.app.core.LLM_Calls.provider_metadata import (
+    PROVIDER_CAPABILITIES,
+    provider_requires_api_key,
 )
-from tldw_Server_API.app.core.LLM_Calls.extra_body_compat_catalog import (
-    get_model_extra_body_compat,
-    get_provider_extra_body_compat,
+from tldw_Server_API.app.core.LLM_Calls.provider_readiness import (
+    ModelDiscoveryResult,
 )
-from tldw_Server_API.app.core.LLM_Calls.llamacpp_request_extensions import resolve_llamacpp_runtime_caps
+from tldw_Server_API.app.core.LLM_Calls.provider_readiness import (
+    configured_endpoint_probe_enabled as _configured_endpoint_probe_enabled,
+)
+from tldw_Server_API.app.core.LLM_Calls.provider_readiness import (
+    normalize_catalog_provider_for_chat as _normalize_catalog_provider_for_chat,
+)
+from tldw_Server_API.app.core.LLM_Calls.provider_readiness import (
+    provider_readiness as _provider_readiness,
+)
 from tldw_Server_API.app.core.LLM_Calls.routing.metadata import merge_routing_metadata
 from tldw_Server_API.app.core.LLM_Calls.tokenizer_resolver import (
     resolve_tokenizer_metadata,
+)
+from tldw_Server_API.app.core.LLM_Calls.tokenizer_resolver import (
     strict_token_counting_enabled as _strict_token_counting_enabled_shared,
+)
+from tldw_Server_API.app.core.Local_LLM import llamacpp_inventory_service
+from tldw_Server_API.app.core.Local_LLM.llamacpp_profile_capabilities import (
+    managed_profile_model_metadata,
+)
+from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import LLMInferenceLibError
+from tldw_Server_API.app.core.Security.egress import (
+    ConfiguredEndpointScope,
+    URLPolicyResult,
+    evaluate_url_policy,
 )
 from tldw_Server_API.app.core.Usage.pricing_catalog import list_provider_models
 
@@ -1008,7 +1022,7 @@ def parse_model_string(model_value: str) -> list[str]:
 # Local model discovery helpers (best-effort; cached to avoid hammering endpoints)
 LOCAL_MODEL_DISCOVERY_TIMEOUT = 3.0  # seconds
 LOCAL_MODEL_DISCOVERY_TTL = 300  # seconds
-_LOCAL_MODEL_CACHE: dict[str, tuple[float, list[str]]] = {}
+_LOCAL_MODEL_CACHE: dict[str, tuple[float, ModelDiscoveryResult]] = {}
 OPENROUTER_MODEL_DISCOVERY_TIMEOUT = 5.0  # seconds
 _TRUE_VALUES = {"1", "true", "yes", "on"}
 
@@ -1117,7 +1131,9 @@ def discover_models_from_endpoint(
     endpoint_url: str,
     discovery_type: str = "openai",
     api_key: Optional[str] = None,
-) -> list[str]:
+    *,
+    configured_endpoint: ConfiguredEndpointScope,
+) -> ModelDiscoveryResult:
     """
     Best-effort discovery of models from a configured local endpoint.
 
@@ -1126,7 +1142,7 @@ def discover_models_from_endpoint(
     """
     endpoint_url = (endpoint_url or "").strip()
     if not endpoint_url:
-        return []
+        return ModelDiscoveryResult("unreachable")
 
     cache_key = f"{provider}:{endpoint_url}"
     now = time.time()
@@ -1144,7 +1160,14 @@ def discover_models_from_endpoint(
     if api_key:
         headers["Authorization"] = f"Bearer {api_key.strip()}"
 
-    discovered: list[str] = []
+    best_result = ModelDiscoveryResult("unreachable")
+    precedence = {
+        "unreachable": 0,
+        "unsupported": 1,
+        "server_error": 2,
+        "auth_failed": 3,
+        "ready": 4,
+    }
     for url in candidates:
         try:
             resp = _http_fetch(
@@ -1153,28 +1176,65 @@ def discover_models_from_endpoint(
                 headers=headers,
                 timeout=LOCAL_MODEL_DISCOVERY_TIMEOUT,
                 retry=_RetryPolicy(attempts=1),
+                configured_endpoint=configured_endpoint,
             )
             try:
-                if resp.status_code >= 400:
+                if resp.status_code in {401, 403}:
+                    candidate_result = ModelDiscoveryResult("auth_failed")
+                elif resp.status_code == 429 or resp.status_code >= 500:
                     logger.debug("Model discovery endpoint returned an error status")
-                    continue
-                discovered = _extract_models_from_response(resp.json())
-                if discovered:
-                    logger.info(f"[Model discovery] {provider}: found {len(discovered)} models via {url}")
-                    break
+                    candidate_result = ModelDiscoveryResult("server_error")
+                elif resp.status_code >= 400:
+                    logger.debug("Model discovery endpoint returned an error status")
+                    candidate_result = ModelDiscoveryResult("unsupported")
+                else:
+                    try:
+                        payload = resp.json()
+                    except (json.JSONDecodeError, TypeError, ValueError):
+                        candidate_result = ModelDiscoveryResult("unsupported")
+                    else:
+                        has_collection = isinstance(payload, dict) and (
+                            isinstance(payload.get("data"), list)
+                            or isinstance(payload.get("models"), list)
+                        )
+                        if not has_collection:
+                            candidate_result = ModelDiscoveryResult("unsupported")
+                        else:
+                            discovered = tuple(_extract_models_from_response(payload))
+                            candidate_result = ModelDiscoveryResult("ready", discovered)
+                            if discovered:
+                                logger.info(
+                                    f"[Model discovery] {provider}: found {len(discovered)} models via {url}"
+                                )
             finally:
                 close = getattr(resp, "close", None)
                 if callable(close):
                     close()
         except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS:
             logger.debug("Model discovery endpoint query failed")
-            continue
+            candidate_result = ModelDiscoveryResult("unreachable")
         except Exception:  # noqa: BLE001 - best-effort local discovery must fail open
             logger.debug("Model discovery endpoint query failed unexpectedly")
-            continue
+            candidate_result = ModelDiscoveryResult("unreachable")
 
-    _LOCAL_MODEL_CACHE[cache_key] = (now, discovered)
-    return discovered
+        if precedence[candidate_result.status] > precedence[best_result.status]:
+            best_result = candidate_result
+        if best_result.status == "ready":
+            break
+
+    if best_result.status in {"ready", "unsupported"}:
+        _LOCAL_MODEL_CACHE[cache_key] = (now, best_result)
+    return best_result
+
+
+def _coerce_model_discovery_result(value: Any) -> ModelDiscoveryResult:
+    """Keep test/plugin list stubs compatible with the typed discovery boundary."""
+    if isinstance(value, ModelDiscoveryResult):
+        return value
+    if isinstance(value, (list, tuple)):
+        models = tuple(str(item).strip() for item in value if str(item).strip())
+        return ModelDiscoveryResult("ready", models) if models else ModelDiscoveryResult("unreachable")
+    return ModelDiscoveryResult("unreachable")
 
 
 def _truthy(value: Any) -> bool:
@@ -1510,7 +1570,7 @@ def get_configured_providers(
             'llama': {
                 'display_name': 'Llama.cpp',
                 'endpoint_field': 'llama_api_IP',
-                'model_field': None,  # No model field in config
+                'model_field': 'llama_model',
                 'type': 'local',
                 'section': 'Local-API',
                 'model_discovery': 'openai',
@@ -1518,7 +1578,7 @@ def get_configured_providers(
             'kobold': {
                 'display_name': 'Kobold.cpp',
                 'endpoint_field': 'kobold_api_IP',
-                'model_field': None,  # No model field in config
+                'model_field': 'kobold_model',
                 'type': 'local',
                 'section': 'Local-API',
                 'model_discovery': 'openai',
@@ -1526,7 +1586,7 @@ def get_configured_providers(
             'ooba': {
                 'display_name': 'Oobabooga',
                 'endpoint_field': 'ooba_api_IP',
-                'model_field': None,  # No model field in config
+                'model_field': 'ooba_model',
                 'type': 'local',
                 'section': 'Local-API',
                 'model_discovery': 'openai',
@@ -1534,7 +1594,7 @@ def get_configured_providers(
             'tabby': {
                 'display_name': 'TabbyAPI',
                 'endpoint_field': 'tabby_api_IP',
-                'model_field': None,  # No model field in config
+                'model_field': 'tabby_model',
                 'type': 'local',
                 'section': 'Local-API',
                 'model_discovery': 'openai',
@@ -1671,13 +1731,55 @@ def get_configured_providers(
                 is_configured = True
             configured_model_names = {str(m).strip() for m in models if str(m).strip()}
             provider_envelope = registry_capability_envelopes.get(provider_name)
+
+            endpoint_scope: ConfiguredEndpointScope | None = None
+            endpoint_policy: URLPolicyResult | None = None
+            if endpoint_url:
+                try:
+                    endpoint_scope = ConfiguredEndpointScope.from_url(endpoint_url)
+                    endpoint_policy = evaluate_url_policy(
+                        endpoint_url,
+                        configured_endpoint=endpoint_scope,
+                    )
+                except (TypeError, ValueError):
+                    endpoint_policy = URLPolicyResult(
+                        False,
+                        "Invalid configured endpoint",
+                        reason_code="invalid_url",
+                    )
+
+            discovery_result: ModelDiscoveryResult | None = None
+            should_discover = (
+                provider_info['type'] == 'local'
+                and is_configured
+                and endpoint_url is not None
+                and endpoint_scope is not None
+                and endpoint_policy is not None
+                and endpoint_policy.allowed
+                and bool(provider_info.get('model_discovery'))
+                and (not models or endpoint_probe_enabled)
+            )
+            if should_discover:
+                discovery_result = _coerce_model_discovery_result(
+                    discover_models_from_endpoint(
+                        provider_name,
+                        endpoint_url,
+                        provider_info.get('model_discovery', 'openai'),
+                        api_key_value,
+                        configured_endpoint=endpoint_scope,
+                    )
+                )
+                if discovery_result.status == "ready":
+                    models = _dedupe_preserve_order(
+                        [*models, *discovery_result.models]
+                    )
+
             provider_readiness = _provider_readiness(
                 provider_name=provider_name,
                 provider_info=provider_info,
                 is_configured=is_configured,
                 endpoint_url=endpoint_url,
                 api_key_value=api_key_value,
-                model_discovery=provider_info.get('model_discovery'),
                 current_availability=(
                     provider_envelope.get("availability")
                     if isinstance(provider_envelope, dict)
@@ -1685,7 +1787,9 @@ def get_configured_providers(
                 ),
                 health_entry=health_report.get(provider_name),
                 supported_chat_providers=supported_chat_providers,
-                discover_models_from_endpoint=discover_models_from_endpoint,
+                endpoint_policy=endpoint_policy,
+                discovery_result=discovery_result,
+                has_explicit_models=bool(configured_model_names),
                 endpoint_probe_enabled=endpoint_probe_enabled,
             )
 
@@ -1715,23 +1819,6 @@ def get_configured_providers(
                     seen = {m.strip() for m in models}
                     extras = [m for m in pricing_models if m not in seen]
                     models = models + extras
-            else:
-                # For local endpoints, try to discover models if none were provided
-                if (
-                    not models
-                    and is_configured
-                    and endpoint_url
-                    and provider_readiness.get("provider_enabled") is not False
-                ):
-                    discovered_models = discover_models_from_endpoint(
-                        provider_name,
-                        endpoint_url,
-                        provider_info.get('model_discovery', 'openai'),
-                        api_key_value,
-                    )
-                    if discovered_models:
-                        models = discovered_models
-
             # Build models and metadata
             models_info = [get_model_metadata(provider_name, m) for m in models]
             if not include_deprecated:

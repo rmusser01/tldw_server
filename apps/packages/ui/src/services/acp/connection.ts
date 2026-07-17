@@ -63,6 +63,8 @@ export const buildACPClientConfig = (
   config: TldwConfig | null | undefined
 ): ACPClientConfig => ({
   serverUrl: resolveACPServerUrl(config),
+  authMode: config?.authMode,
+  authSource: config?.authSource,
   getAuthHeaders: async () => buildACPAuthHeaders(config),
   getAuthParams: async () => buildACPAuthParams(config),
 })

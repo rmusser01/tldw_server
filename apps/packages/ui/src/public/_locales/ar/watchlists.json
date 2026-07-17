@@ -43,5 +43,1136 @@
   },
   "items_queue_generateReport": {
     "message": "إنشاء تقرير من قائمة الانتظار"
+  },
+  "setupWizard_title": {
+    "message": "إنشاء قائمة مراقبة"
+  },
+  "setupWizard_containerTitle": {
+    "message": "إنشاء قائمة مراقبة"
+  },
+  "setupWizard_containerHelp": {
+    "message": "أنشئ حاوية المشروع أولاً. ثم اضبط المصادر ودورية التشغيل والموجز والتسليم والاختبار ضمن مسار إعداد واحد."
+  },
+  "setupWizard_actions_continue": {
+    "message": "المتابعة إلى المصادر"
+  },
+  "setupWizard_sections_preset": {
+    "message": "إعداد مسبق للمجال"
+  },
+  "setupWizard_fields_name": {
+    "message": "اسم قائمة المراقبة"
+  },
+  "setupWizard_fields_objective": {
+    "message": "الهدف"
+  },
+  "setupWizard_validation_nameRequired": {
+    "message": "أضف اسماً لقائمة المراقبة."
+  },
+  "setupWizard_errors_createFailed": {
+    "message": "تعذر إنشاء قائمة المراقبة."
+  },
+  "setupWizard_presets_cti_osint_label": {
+    "message": "CTI / OSINT"
+  },
+  "setupWizard_presets_cti_osint_description": {
+    "message": "راقب الثغرات والبرمجيات الضارة والجهات الفاعلة والتنبيهات وتغييرات المصادر."
+  },
+  "setupWizard_presets_news_label": {
+    "message": "الأخبار"
+  },
+  "setupWizard_presets_news_description": {
+    "message": "تابع الأحداث المتطورة والأشخاص والمؤسسات وتنوع المصادر."
+  },
+  "setupWizard_presets_general_label": {
+    "message": "عام"
+  },
+  "setupWizard_presets_general_description": {
+    "message": "تابع موضوعاً واجمع تحديثات لمراجعتها."
+  },
+  "setupWizard_presets_blank_label": {
+    "message": "فارغة"
+  },
+  "setupWizard_presets_blank_description": {
+    "message": "ابدأ بقائمة مراقبة فارغة واضبط التفاصيل بنفسك."
+  },
+  "setupWizard_startModes_sources_label": {
+    "message": "البدء من المصادر"
+  },
+  "setupWizard_startModes_sources_description": {
+    "message": "أنشئ قائمة مراقبة بموجزات أولية ومراقب اختياري."
+  },
+  "setupWizard_startModes_topic_label": {
+    "message": "البدء من موضوع"
+  },
+  "setupWizard_startModes_topic_description": {
+    "message": "أنشئ هدف قائمة المراقبة أولاً، ثم أضف الموجزات قبل بدء الجمع."
+  },
+  "setupWizard_startModes_report_goal_label": {
+    "message": "البدء من هدف التقرير"
+  },
+  "setupWizard_startModes_report_goal_description": {
+    "message": "حدد هدف الموجز أولاً، ثم صِل المصادر والقوالب."
+  },
+  "setupWizard_boundaries_alerts": {
+    "message": "تأتي تنبيهات مطابقة المحتوى لاحقاً. يحدد هذا الإعداد قائمة المراقبة ونطاق الجمع الأولي لها."
+  },
+  "overview_pipelineSetup_title": {
+    "message": "إعداد الموجز"
+  },
+  "overview_pipelineSetup_open": {
+    "message": "إعداد الموجز"
+  },
+  "overview_pipelineSetup_progress": {
+    "message": "خطوات إعداد الموجز"
+  },
+  "overview_pipelineSetup_steps_sources": {
+    "message": "المصادر"
+  },
+  "overview_pipelineSetup_steps_cadence": {
+    "message": "الدورية"
+  },
+  "overview_pipelineSetup_steps_briefing": {
+    "message": "الموجز"
+  },
+  "overview_pipelineSetup_steps_delivery": {
+    "message": "التسليم"
+  },
+  "overview_pipelineSetup_steps_test": {
+    "message": "الاختبار"
+  },
+  "overview_pipelineSetup_actions_next": {
+    "message": "المتابعة إلى {{step}}"
+  },
+  "overview_pipelineSetup_source_existing": {
+    "message": "استخدام المصادر الموجودة"
+  },
+  "overview_pipelineSetup_source_new": {
+    "message": "إضافة مصدر جديد"
+  },
+  "overview_pipelineSetup_source_fallback": {
+    "message": "المصدر {{id}}"
+  },
+  "overview_pipelineSetup_sources_help": {
+    "message": "اختر مصادر موجودة أو أضف مصدراً جديداً، ثم اختبر الاتصال للتأكد من جاهزيته."
+  },
+  "overview_pipelineSetup_sourcesLoading": {
+    "message": "جارٍ تحميل المصادر..."
+  },
+  "overview_pipelineSetup_sourcesError": {
+    "message": "تعذر تحميل الموجزات لأداة الإعداد."
+  },
+  "overview_pipelineSetup_sourceTest_action": {
+    "message": "اختبار المصدر"
+  },
+  "overview_pipelineSetup_sourceTest_ready": {
+    "message": "المصدر جاهز."
+  },
+  "overview_pipelineSetup_sourceTest_cancelled": {
+    "message": "أُلغي اختبار المصدر."
+  },
+  "overview_pipelineSetup_sourceTest_failed": {
+    "message": "فشل اختبار المصدر. {{message}}"
+  },
+  "overview_pipelineSetup_sourceTest_summary": {
+    "message": "الجاهز: {{ready}}، والمصفّى: {{filtered}}"
+  },
+  "overview_pipelineSetup_sourceTest_sample": {
+    "message": "عناصر نموذجية"
+  },
+  "overview_pipelineSetup_sourceTest_readyItem": {
+    "message": "جاهز"
+  },
+  "overview_pipelineSetup_sourceTest_filteredItem": {
+    "message": "مصفّى"
+  },
+  "overview_pipelineSetup_sourceTest_untitled": {
+    "message": "عنصر بلا عنوان"
+  },
+  "overview_pipelineSetup_fields_sources": {
+    "message": "المصادر"
+  },
+  "overview_pipelineSetup_fields_sourceName": {
+    "message": "اسم المصدر"
+  },
+  "overview_pipelineSetup_fields_sourceUrl": {
+    "message": "عنوان URL للمصدر"
+  },
+  "overview_pipelineSetup_fields_monitorName": {
+    "message": "اسم المراقب"
+  },
+  "overview_pipelineSetup_fields_schedule": {
+    "message": "الجدول"
+  },
+  "overview_pipelineSetup_fields_timezone": {
+    "message": "المنطقة الزمنية"
+  },
+  "overview_pipelineSetup_fields_intervalEvery": {
+    "message": "كل"
+  },
+  "overview_pipelineSetup_fields_intervalUnit": {
+    "message": "وحدة الفاصل"
+  },
+  "overview_pipelineSetup_fields_weekday": {
+    "message": "يوم الأسبوع"
+  },
+  "overview_pipelineSetup_fields_hour": {
+    "message": "الساعة"
+  },
+  "overview_pipelineSetup_fields_minute": {
+    "message": "الدقيقة"
+  },
+  "overview_pipelineSetup_fields_cronExpression": {
+    "message": "تعبير cron"
+  },
+  "overview_pipelineSetup_fields_showName": {
+    "message": "اسم البرنامج"
+  },
+  "overview_pipelineSetup_fields_premise": {
+    "message": "فكرة البرنامج"
+  },
+  "overview_pipelineSetup_fields_includeAudio": {
+    "message": "الصوت"
+  },
+  "overview_pipelineSetup_fields_audioHelp": {
+    "message": "أضف نسخة منطوقة قابلة للتشغيل."
+  },
+  "overview_pipelineSetup_fields_audioMinutes": {
+    "message": "المدة المستهدفة بالدقائق"
+  },
+  "overview_pipelineSetup_fields_speakerCount": {
+    "message": "حجم فريق التقديم"
+  },
+  "overview_pipelineSetup_fields_template": {
+    "message": "قالب التقرير"
+  },
+  "overview_pipelineSetup_fields_audioProvider": {
+    "message": "تجاوز موفر الصوت"
+  },
+  "overview_pipelineSetup_fields_audioModel": {
+    "message": "تجاوز نموذج الصوت"
+  },
+  "overview_pipelineSetup_fields_customInstructions": {
+    "message": "تعليمات تحرير مخصصة"
+  },
+  "overview_pipelineSetup_fields_emailDelivery": {
+    "message": "البريد الإلكتروني"
+  },
+  "overview_pipelineSetup_fields_emailRecipients": {
+    "message": "مستلمو البريد"
+  },
+  "overview_pipelineSetup_fields_chatbookDelivery": {
+    "message": "Chatbook"
+  },
+  "overview_pipelineSetup_fields_chatbookTitle": {
+    "message": "عنوان Chatbook"
+  },
+  "overview_pipelineSetup_schedule_manual": {
+    "message": "يدوي فقط"
+  },
+  "overview_pipelineSetup_schedule_interval": {
+    "message": "كل N ساعة أو دقيقة"
+  },
+  "overview_pipelineSetup_schedule_daily": {
+    "message": "يومياً"
+  },
+  "overview_pipelineSetup_schedule_weekdays": {
+    "message": "أيام العمل"
+  },
+  "overview_pipelineSetup_schedule_weekly": {
+    "message": "أسبوعياً"
+  },
+  "overview_pipelineSetup_schedule_advanced": {
+    "message": "cron متقدم"
+  },
+  "overview_pipelineSetup_intervalUnits_hours": {
+    "message": "ساعات"
+  },
+  "overview_pipelineSetup_intervalUnits_minutes": {
+    "message": "دقائق"
+  },
+  "overview_pipelineSetup_weekdays_monday": {
+    "message": "الاثنين"
+  },
+  "overview_pipelineSetup_weekdays_tuesday": {
+    "message": "الثلاثاء"
+  },
+  "overview_pipelineSetup_weekdays_wednesday": {
+    "message": "الأربعاء"
+  },
+  "overview_pipelineSetup_weekdays_thursday": {
+    "message": "الخميس"
+  },
+  "overview_pipelineSetup_weekdays_friday": {
+    "message": "الجمعة"
+  },
+  "overview_pipelineSetup_weekdays_saturday": {
+    "message": "السبت"
+  },
+  "overview_pipelineSetup_weekdays_sunday": {
+    "message": "الأحد"
+  },
+  "overview_pipelineSetup_advancedCron": {
+    "message": "cron متقدم"
+  },
+  "overview_pipelineSetup_nextOccurrence": {
+    "message": "التشغيل التالي"
+  },
+  "overview_pipelineSetup_manualOccurrence": {
+    "message": "يدوي فقط"
+  },
+  "overview_pipelineSetup_nextOccurrencePending": {
+    "message": "احفظ جدولاً صالحاً لحساب الوقت الدقيق."
+  },
+  "overview_pipelineSetup_briefing_question": {
+    "message": "ماذا تريد أن تنشئ؟"
+  },
+  "overview_pipelineSetup_briefing_help": {
+    "message": "اختر الصيغة التحريرية. تبقى كل الخيارات مستندة إلى المصادر التي حددتها."
+  },
+  "overview_pipelineSetup_briefing_advanced": {
+    "message": "إعدادات الموجز المتقدمة"
+  },
+  "overview_pipelineSetup_formats_concise_briefing": {
+    "message": "موجز مختصر"
+  },
+  "overview_pipelineSetup_formats_solo_update": {
+    "message": "تحديث فردي"
+  },
+  "overview_pipelineSetup_formats_host_discussion": {
+    "message": "نقاش بين المقدمين"
+  },
+  "overview_pipelineSetup_formats_sportscast": {
+    "message": "نشرة رياضية"
+  },
+  "overview_pipelineSetup_formats_culture_roundtable": {
+    "message": "طاولة ثقافية مستديرة"
+  },
+  "overview_pipelineSetup_formats_custom": {
+    "message": "مخصص"
+  },
+  "overview_pipelineSetup_speaker_defaultLabel": {
+    "message": "المشارك {{index}}"
+  },
+  "overview_pipelineSetup_speaker_defaultRole": {
+    "message": "مقدم"
+  },
+  "overview_pipelineSetup_speaker_labelField": {
+    "message": "تسمية المشارك {{index}}"
+  },
+  "overview_pipelineSetup_speaker_roleField": {
+    "message": "دور المشارك {{index}}"
+  },
+  "overview_pipelineSetup_speaker_voiceField": {
+    "message": "صوت المشارك {{index}}"
+  },
+  "overview_pipelineSetup_speaker_personaField": {
+    "message": "شخصية المشارك {{index}}"
+  },
+  "overview_pipelineSetup_preview_generate": {
+    "message": "معاينة التقرير"
+  },
+  "overview_pipelineSetup_preview_diagnostics": {
+    "message": "تشخيص المعاينة"
+  },
+  "overview_pipelineSetup_preview_context": {
+    "message": "تشغيل المعاينة: {{runId}}"
+  },
+  "overview_pipelineSetup_preview_noRunContext": {
+    "message": "شغّل المراقب بنجاح قبل معاينة هذا التقرير."
+  },
+  "overview_pipelineSetup_preview_templateRequired": {
+    "message": "اختر قالباً قبل إنشاء المعاينة."
+  },
+  "overview_pipelineSetup_preview_templateEmpty": {
+    "message": "القالب المحدد فارغ."
+  },
+  "overview_pipelineSetup_preview_emptyResult": {
+    "message": "لم تُرجع المعاينة محتوى معروضاً."
+  },
+  "overview_pipelineSetup_preview_error": {
+    "message": "تعذر إنشاء المعاينة."
+  },
+  "overview_pipelineSetup_delivery_help": {
+    "message": "تُحفظ التقارير دائماً. ينتظر التسليم الخارجي حتى تصبح المخرجات المحددة جاهزة بالكامل للإرسال."
+  },
+  "overview_pipelineSetup_delivery_reports": {
+    "message": "التقارير"
+  },
+  "overview_pipelineSetup_delivery_required": {
+    "message": "تخزين مطلوب"
+  },
+  "overview_pipelineSetup_delivery_alwaysOn": {
+    "message": "مفعّل دائماً"
+  },
+  "overview_pipelineSetup_receipt_labels_schedule": {
+    "message": "الجدول"
+  },
+  "overview_pipelineSetup_receipt_labels_sources": {
+    "message": "المصادر"
+  },
+  "overview_pipelineSetup_receipt_labels_artifacts": {
+    "message": "المخرجات"
+  },
+  "overview_pipelineSetup_receipt_labels_format": {
+    "message": "الصيغة"
+  },
+  "overview_pipelineSetup_receipt_labels_showName": {
+    "message": "اسم البرنامج"
+  },
+  "overview_pipelineSetup_receipt_labels_cast": {
+    "message": "فريق التقديم"
+  },
+  "overview_pipelineSetup_receipt_labels_duration": {
+    "message": "المدة المستهدفة"
+  },
+  "overview_pipelineSetup_receipt_labels_destinations": {
+    "message": "الوجهات"
+  },
+  "overview_pipelineSetup_receipt_schedule_manual": {
+    "message": "يدوي فقط"
+  },
+  "overview_pipelineSetup_receipt_schedule_scheduled": {
+    "message": "{{date}} ({{timezone}})"
+  },
+  "overview_pipelineSetup_receipt_sources": {
+    "message": "{{count}} من المصادر"
+  },
+  "overview_pipelineSetup_receipt_artifacts_textReport": {
+    "message": "تقرير نصي"
+  },
+  "overview_pipelineSetup_receipt_artifacts_showNotes": {
+    "message": "ملاحظات البرنامج"
+  },
+  "overview_pipelineSetup_receipt_artifacts_audio": {
+    "message": "صوت"
+  },
+  "overview_pipelineSetup_receipt_formats_concise_briefing": {
+    "message": "موجز مختصر"
+  },
+  "overview_pipelineSetup_receipt_formats_solo_update": {
+    "message": "تحديث فردي"
+  },
+  "overview_pipelineSetup_receipt_formats_host_discussion": {
+    "message": "نقاش بين المقدمين"
+  },
+  "overview_pipelineSetup_receipt_formats_sportscast": {
+    "message": "نشرة رياضية"
+  },
+  "overview_pipelineSetup_receipt_formats_culture_roundtable": {
+    "message": "طاولة ثقافية مستديرة"
+  },
+  "overview_pipelineSetup_receipt_formats_custom": {
+    "message": "برنامج مخصص"
+  },
+  "overview_pipelineSetup_receipt_speakerStyle_1": {
+    "message": "فردي"
+  },
+  "overview_pipelineSetup_receipt_speakerStyle_2": {
+    "message": "بمقدمين"
+  },
+  "overview_pipelineSetup_receipt_speakerStyle_3": {
+    "message": "بثلاثة مقدمين"
+  },
+  "overview_pipelineSetup_receipt_speakerStyle_4": {
+    "message": "بأربعة مقدمين"
+  },
+  "overview_pipelineSetup_receipt_programWithSpeakers": {
+    "message": "{{format}} {{speakers}}"
+  },
+  "overview_pipelineSetup_receipt_cast": {
+    "message": "{{count}} من المشاركين"
+  },
+  "overview_pipelineSetup_receipt_duration": {
+    "message": "بهدف {{count}} دقيقة"
+  },
+  "overview_pipelineSetup_receipt_destinations_email": {
+    "message": "البريد: {{recipients}}"
+  },
+  "overview_pipelineSetup_receipt_destinations_chatbook": {
+    "message": "Chatbook: {{title}}"
+  },
+  "overview_pipelineSetup_receipt_untitledChatbook": {
+    "message": "بلا عنوان"
+  },
+  "overview_pipelineSetup_receipt_dstChange": {
+    "message": "يستخدم التشغيل التالي {{timezoneName}} بعد تغير إزاحة التوقيت الصيفي: {{date}}."
+  },
+  "overview_pipelineSetup_test_providerDisclosure": {
+    "message": "تستخدم الاختبارات موفري نموذج اللغة وتحويل النص إلى كلام الذين ضبطتهم. تقتصر العينة على 60 ثانية، ويستخدم الاختبار الكامل المدة المستهدفة."
+  },
+  "overview_pipelineSetup_test_textProviderDisclosure": {
+    "message": "تستخدم الاختبارات موفر نموذج اللغة الذي ضبطته. لا تستخدم الاختبارات النصية تحويل النص إلى كلام."
+  },
+  "overview_pipelineSetup_test_receipt": {
+    "message": "ملخص التفعيل"
+  },
+  "overview_pipelineSetup_test_manualReceipt": {
+    "message": "يعمل هذا الموجز يدوياً ويحفظ المخرجات المحددة في التقارير، ولا يتصل بأي وجهة خارجية إلا إذا اخترت إرسال الاختبار."
+  },
+  "overview_pipelineSetup_test_progress": {
+    "message": "تقدم الاختبار"
+  },
+  "overview_pipelineSetup_test_stages_collection": {
+    "message": "جمع المصادر"
+  },
+  "overview_pipelineSetup_test_stages_selection": {
+    "message": "تحديد التحديثات"
+  },
+  "overview_pipelineSetup_test_stages_text": {
+    "message": "إنشاء التقرير"
+  },
+  "overview_pipelineSetup_test_stages_audio": {
+    "message": "إنشاء الصوت"
+  },
+  "overview_pipelineSetup_test_stages_persistence": {
+    "message": "الحفظ في التقارير"
+  },
+  "overview_pipelineSetup_test_stages_audioScript": {
+    "message": "كتابة النص الصوتي"
+  },
+  "overview_pipelineSetup_test_stages_audioScriptPersistence": {
+    "message": "حفظ النص الصوتي"
+  },
+  "overview_pipelineSetup_test_stages_audioPersistence": {
+    "message": "حفظ الصوت في التقارير"
+  },
+  "overview_pipelineSetup_test_stages_delivery": {
+    "message": "فحص تسليم الاختبار"
+  },
+  "overview_pipelineSetup_test_stages_deliveryAdapter": {
+    "message": "التسليم إلى {{adapter}}"
+  },
+  "overview_pipelineSetup_test_stages_unknown": {
+    "message": "المرحلة {{stage}}"
+  },
+  "overview_pipelineSetup_test_sample": {
+    "message": "إنشاء عينة من 60 ثانية"
+  },
+  "overview_pipelineSetup_test_full": {
+    "message": "إنشاء حلقة اختبار كاملة"
+  },
+  "overview_pipelineSetup_test_text": {
+    "message": "إنشاء تقرير اختبار"
+  },
+  "overview_pipelineSetup_test_send": {
+    "message": "إرسال الاختبار"
+  },
+  "overview_pipelineSetup_test_activate": {
+    "message": "تفعيل الجدول"
+  },
+  "overview_pipelineSetup_test_ready": {
+    "message": "اكتمل الاختبار. موجزك جاهز. تبقى هذه المسودة غير مفعلة حتى تفعّل جدولها."
+  },
+  "overview_pipelineSetup_test_cancelled": {
+    "message": "أُلغي الاختبار. حُفظت مسودتك."
+  },
+  "overview_pipelineSetup_test_failed": {
+    "message": "فشل الاختبار. حُفظت مسودتك. {{message}}"
+  },
+  "overview_pipelineSetup_test_status_not_started": {
+    "message": "لم يبدأ"
+  },
+  "overview_pipelineSetup_test_status_queued": {
+    "message": "في قائمة الانتظار"
+  },
+  "overview_pipelineSetup_test_status_running": {
+    "message": "قيد التشغيل"
+  },
+  "overview_pipelineSetup_test_status_ready": {
+    "message": "جاهز"
+  },
+  "overview_pipelineSetup_test_status_failed": {
+    "message": "فشل"
+  },
+  "overview_pipelineSetup_test_status_skipped": {
+    "message": "تم التخطي"
+  },
+  "overview_pipelineSetup_test_status_cancelled": {
+    "message": "أُلغي"
+  },
+  "overview_pipelineSetup_activate_ready": {
+    "message": "فُعّل الجدول."
+  },
+  "overview_pipelineSetup_activate_failed": {
+    "message": "تعذر تفعيل الجدول. حُفظت مسودتك. {{message}}"
+  },
+  "overview_pipelineSetup_validation_sourcesRequired": {
+    "message": "اختر مصدراً واحداً على الأقل قبل المتابعة."
+  },
+  "overview_pipelineSetup_validation_sourceNameRequired": {
+    "message": "أدخل اسم المصدر."
+  },
+  "overview_pipelineSetup_validation_sourceUrlInvalid": {
+    "message": "أدخل عنوان مصدر HTTP أو HTTPS صالحاً."
+  },
+  "overview_pipelineSetup_validation_monitorNameRequired": {
+    "message": "أدخل اسم المراقب."
+  },
+  "overview_pipelineSetup_validation_timezoneInvalid": {
+    "message": "أدخل منطقة زمنية صالحة وفق IANA."
+  },
+  "overview_pipelineSetup_validation_intervalInvalid": {
+    "message": "أدخل فاصل جدول مدعوماً."
+  },
+  "overview_pipelineSetup_validation_hourInvalid": {
+    "message": "أدخل ساعة من 0 إلى 23."
+  },
+  "overview_pipelineSetup_validation_minuteInvalid": {
+    "message": "أدخل دقيقة من 0 إلى 59."
+  },
+  "overview_pipelineSetup_validation_cronInvalid": {
+    "message": "أدخل تعبير cron صالحاً من خمسة حقول."
+  },
+  "overview_pipelineSetup_validation_cronTooFrequent": {
+    "message": "اختر جدولاً بفاصل خمس دقائق على الأقل."
+  },
+  "overview_pipelineSetup_validation_templateRequired": {
+    "message": "أدخل قالب تقرير."
+  },
+  "overview_pipelineSetup_validation_castSizeInvalid": {
+    "message": "اختر من مشارك واحد إلى أربعة."
+  },
+  "overview_pipelineSetup_validation_castIdsInvalid": {
+    "message": "يحتاج كل مشارك إلى هوية فريدة."
+  },
+  "overview_pipelineSetup_validation_castVoicesRequired": {
+    "message": "اختر صوتاً لكل مشارك."
+  },
+  "overview_pipelineSetup_validation_audioMinutesInvalid": {
+    "message": "أدخل مدة من دقيقة إلى 60 دقيقة."
+  },
+  "overview_pipelineSetup_validation_emailInvalid": {
+    "message": "أدخل عنوان بريد إلكتروني صالحاً واحداً على الأقل."
+  },
+  "overview_pipelineSetup_validationError": {
+    "message": "راجع الحقول المميزة قبل المتابعة."
+  },
+  "overview_pipelineSetup_receipt_sources_zero": {
+    "message": "{{count}} مصادر"
+  },
+  "overview_pipelineSetup_receipt_sources_one": {
+    "message": "{{count}} مصدر"
+  },
+  "overview_pipelineSetup_receipt_sources_two": {
+    "message": "{{count}} مصدران"
+  },
+  "overview_pipelineSetup_receipt_sources_few": {
+    "message": "{{count}} مصادر"
+  },
+  "overview_pipelineSetup_receipt_sources_many": {
+    "message": "{{count}} مصدرًا"
+  },
+  "overview_pipelineSetup_receipt_sources_other": {
+    "message": "{{count}} مصدر"
+  },
+  "overview_pipelineSetup_receipt_cast_zero": {
+    "message": "{{count}} مشاركين"
+  },
+  "overview_pipelineSetup_receipt_cast_one": {
+    "message": "{{count}} مشارك"
+  },
+  "overview_pipelineSetup_receipt_cast_two": {
+    "message": "{{count}} مشاركان"
+  },
+  "overview_pipelineSetup_receipt_cast_few": {
+    "message": "{{count}} مشاركين"
+  },
+  "overview_pipelineSetup_receipt_cast_many": {
+    "message": "{{count}} مشاركًا"
+  },
+  "overview_pipelineSetup_receipt_cast_other": {
+    "message": "{{count}} مشارك"
+  },
+  "overview_pipelineSetup_receipt_duration_zero": {
+    "message": "بهدف {{count}} دقائق"
+  },
+  "overview_pipelineSetup_receipt_duration_one": {
+    "message": "بهدف {{count}} دقيقة"
+  },
+  "overview_pipelineSetup_receipt_duration_two": {
+    "message": "بهدف {{count}} دقيقتين"
+  },
+  "overview_pipelineSetup_receipt_duration_few": {
+    "message": "بهدف {{count}} دقائق"
+  },
+  "overview_pipelineSetup_receipt_duration_many": {
+    "message": "بهدف {{count}} دقيقة"
+  },
+  "overview_pipelineSetup_receipt_duration_other": {
+    "message": "بهدف {{count}} دقيقة"
+  },
+  "overview_pipelineSetup_schedulePreview_loading": {
+    "message": "جارٍ حساب الجدول الدقيق…"
+  },
+  "overview_pipelineSetup_schedulePreview_error": {
+    "message": "تعذر حساب الجدول الدقيق. راجع تعبير cron والمنطقة الزمنية."
+  },
+  "overview_pipelineSetup_test_running": {
+    "message": "لا يزال التشغيل {{runId}} قيد التنفيذ: {{stage}}. يمكنك إغلاق الإعداد ومراقبته من نظرة عامة."
+  },
+  "overview_pipelineSetup_test_failedStage": {
+    "message": "فشلت {{stage}}. افتح التشغيل {{runId}} وأعد محاولة هذه المرحلة."
+  },
+  "overview_pipelineSetup_test_failedWithCode": {
+    "message": "فشلت {{stage}} ({{code}}). افتح التشغيل {{runId}} وأعد محاولة هذه المرحلة."
+  },
+  "overview_pipelineSetup_test_cancelledStage": {
+    "message": "أُلغيت {{stage}}. حُفظت مسودتك."
+  },
+  "overview_pipelineSetup_test_cancelledWithCode": {
+    "message": "أُلغيت {{stage}} ({{code}}). حُفظت مسودتك."
+  },
+  "overview_latest_heading_briefing": {
+    "message": "أحدث موجز"
+  },
+  "overview_latest_heading_episode": {
+    "message": "أحدث حلقة"
+  },
+  "overview_latest_empty_scheduled": {
+    "message": "سيتم إنشاء أول موجز لك في {{date}}."
+  },
+  "overview_latest_empty_manual": {
+    "message": "لم يبدأ. اختبار الآن."
+  },
+  "overview_latest_generatedAt": {
+    "message": "تم الإنشاء {{date}}"
+  },
+  "overview_latest_untitled": {
+    "message": "موجز {{runId}}"
+  },
+  "overview_latest_artifacts": {
+    "message": "تقرير / صوت"
+  },
+  "overview_latest_audio": {
+    "message": "صوت"
+  },
+  "overview_latest_audioFailed": {
+    "message": "صوت فشل"
+  },
+  "overview_latest_ready": {
+    "message": "جاهز"
+  },
+  "overview_latest_saved": {
+    "message": "محفوظ"
+  },
+  "overview_latest_waiting": {
+    "message": "قيد الانتظار"
+  },
+  "overview_latest_script": {
+    "message": "صوت تقرير"
+  },
+  "overview_latest_stageWithStatus": {
+    "message": "{{stage}}: {{status}}"
+  },
+  "overview_latest_noUpdates": {
+    "message": "لم يتم العثور على تحديثات مؤهلة. تم حفظ {{noun}} للحالة."
+  },
+  "overview_latest_nextRun": {
+    "message": "التشغيل التالي: {{date}}"
+  },
+  "overview_latest_nextRunRelative": {
+    "message": "التشغيل التالي: {{relative}}"
+  },
+  "overview_latest_counts": {
+    "message": "موجز: مضمّن, غير مقروء, جديد"
+  },
+  "overview_latest_count_included": {
+    "message": "مضمّن {{count}}"
+  },
+  "overview_latest_count_unread": {
+    "message": "غير مقروء {{count}}"
+  },
+  "overview_latest_count_new": {
+    "message": "جديد {{count}}"
+  },
+  "overview_latest_provenance_sources": {
+    "message": "{{count}} مصادر متتبّعة"
+  },
+  "overview_latest_provenance_sources_zero": {
+    "message": "{{count}} مصادر متتبّعة"
+  },
+  "overview_latest_provenance_sources_one": {
+    "message": "{{count}} مصدر متتبّع"
+  },
+  "overview_latest_provenance_sources_two": {
+    "message": "{{count}} مصادر متتبّعة"
+  },
+  "overview_latest_provenance_sources_few": {
+    "message": "{{count}} مصادر متتبّعة"
+  },
+  "overview_latest_provenance_sources_many": {
+    "message": "{{count}} مصادر متتبّعة"
+  },
+  "overview_latest_provenance_sources_other": {
+    "message": "{{count}} مصادر متتبّعة"
+  },
+  "overview_latest_delivery_reports": {
+    "message": "عرض كل التقارير"
+  },
+  "overview_latest_delivery_retryAria": {
+    "message": "إعادة المحاولة {{adapter}}: {{name}}"
+  },
+  "overview_latest_delivery_retryUnknownAria": {
+    "message": "النتيجة غير معروفة. إعادة المحاولة {{adapter}}: {{name}}"
+  },
+  "overview_latest_delivery_reviewRetry": {
+    "message": "مراجعة وإعادة المحاولة"
+  },
+  "overview_latest_delivery_unknownConfirmation": {
+    "message": "لم يؤكد المزوّد تسليم {{adapter}}. قد تؤدي إعادة المحاولة إلى إرسال نسخة مكررة. راجع الوجهة ولا تتابع إلا إذا كان هذا الخطر مقبولًا. ({{destination}})"
+  },
+  "overview_latest_playback_region": {
+    "message": "صوت: {{name}}"
+  },
+  "overview_latest_playback_playAria": {
+    "message": "تشغيل {{name}}"
+  },
+  "overview_latest_playback_pauseAria": {
+    "message": "إيقاف {{name}} مؤقتًا"
+  },
+  "overview_latest_playback_resumeAria": {
+    "message": "استئناف {{name}}"
+  },
+  "overview_latest_playback_seekAria": {
+    "message": "صوت: {{name}}"
+  },
+  "overview_latest_playback_loading": {
+    "message": "جارٍ تحميل الصوت"
+  },
+  "overview_latest_playback_error": {
+    "message": "صوت فشل. فتح تقرير / إعادة الإنشاء صوت."
+  },
+  "overview_latest_playback_play": {
+    "message": "تشغيل"
+  },
+  "overview_latest_playback_pause": {
+    "message": "إيقاف مؤقت"
+  },
+  "overview_latest_playback_resume": {
+    "message": "استئناف"
+  },
+  "overview_latest_actions_label": {
+    "message": "أحدث موجز"
+  },
+  "overview_latest_actions_openReport": {
+    "message": "فتح {{report}}"
+  },
+  "overview_latest_actions_openReportAria": {
+    "message": "فتح {{report}}: {{name}}"
+  },
+  "overview_latest_actions_regenerateAudio": {
+    "message": "إعادة الإنشاء صوت"
+  },
+  "overview_latest_actions_regenerateAudioAria": {
+    "message": "إعادة الإنشاء {{style}} {{noun}} صوت: {{name}}"
+  },
+  "overview_latest_actions_retry": {
+    "message": "إعادة المحاولة"
+  },
+  "overview_latest_actions_retrySaveAria": {
+    "message": "إعادة المحاولة محفوظ تقرير: {{name}}"
+  },
+  "overview_latest_actions_retryTextAria": {
+    "message": "إعادة المحاولة تقرير: {{name}}"
+  },
+  "overview_latest_actions_retryStage": {
+    "message": "إعادة المحاولة: {{stage}}"
+  },
+  "overview_latest_actions_inspect": {
+    "message": "فحص التشغيل"
+  },
+  "overview_latest_actions_inspectAria": {
+    "message": "فحص التشغيل {{runId}}: {{name}}"
+  },
+  "overview_latest_actions_viewReports": {
+    "message": "عرض كل التقارير"
+  },
+  "overview_latest_actions_testNow": {
+    "message": "اختبار الآن"
+  },
+  "overview_latest_announcements_blockingFailure": {
+    "message": "{{name}} فشل. فحص التشغيل {{runId}}."
+  },
+  "overview_latest_announcements_delivered": {
+    "message": "{{name}}: تم التسليم."
+  },
+  "overview_latest_announcements_nextRunUpdated": {
+    "message": "{{name}}: التشغيل التالي."
+  },
+  "overview_latest_announcements_partialAudioFailure": {
+    "message": "{{name}}: ملاحظات العرض جاهز, صوت فشل."
+  },
+  "overview_latest_announcements_readyText": {
+    "message": "{{name}}: تقرير جاهز."
+  },
+  "overview_latest_announcements_readyWithAudio": {
+    "message": "{{name}}: جاهز. صوت / ملاحظات العرض."
+  },
+  "overview_latest_announcements_stageProgress": {
+    "message": "{{name}}: {{stage}} {{status}}."
+  },
+  "overview_latest_announcements_testQueued": {
+    "message": "اختبار الآن: في قائمة الانتظار."
+  },
+  "overview_latest_retryError": {
+    "message": "إعادة المحاولة فشل. فحص التشغيل."
+  },
+  "overview_latest_regenerateError": {
+    "message": "إعادة الإنشاء صوت: فشل."
+  },
+  "overview_latest_testError": {
+    "message": "اختبار الآن: فشل."
+  },
+  "overview_latest_status_ready": {
+    "message": "جاهز"
+  },
+  "overview_latest_status_failed": {
+    "message": "فشل"
+  },
+  "overview_latest_status_saved": {
+    "message": "محفوظ"
+  },
+  "overview_latest_status_waiting": {
+    "message": "قيد الانتظار"
+  },
+  "overview_latest_status_running": {
+    "message": "قيد التشغيل"
+  },
+  "overview_latest_status_queued": {
+    "message": "في قائمة الانتظار"
+  },
+  "overview_latest_status_notStarted": {
+    "message": "لم يبدأ"
+  },
+  "overview_latest_status_notSelected": {
+    "message": "غير محدد"
+  },
+  "overview_latest_status_cancelled": {
+    "message": "ملغى"
+  },
+  "overview_latest_status_delivered": {
+    "message": "تم التسليم"
+  },
+  "overview_latest_status_unknown": {
+    "message": "النتيجة غير معروفة"
+  },
+  "overview_latest_status_sending": {
+    "message": "جارٍ الإرسال"
+  },
+  "overview_latest_stages_renderText": {
+    "message": "تقرير"
+  },
+  "overview_latest_stages_persistText": {
+    "message": "محفوظ تقرير"
+  },
+  "overview_latest_stages_composeScript": {
+    "message": "صوت تقرير"
+  },
+  "overview_latest_stages_persistScript": {
+    "message": "محفوظ صوت تقرير"
+  },
+  "overview_latest_stages_generateAudio": {
+    "message": "صوت"
+  },
+  "overview_latest_stages_persistAudio": {
+    "message": "محفوظ صوت"
+  },
+  "overview_latest_nouns_briefing": {
+    "message": "موجز"
+  },
+  "overview_latest_nouns_episode": {
+    "message": "حلقة"
+  },
+  "overview_latest_nouns_report": {
+    "message": "تقرير"
+  },
+  "overview_latest_nouns_showNotes": {
+    "message": "ملاحظات العرض"
+  },
+  "outputs_openInNewTabAria": {
+    "message": "فتح في علامة تبويب جديدة: {{title}}"
+  },
+  "outputs_chatAboutAria": {
+    "message": "مناقشة هذا: {{title}}"
+  },
+  "outputs_downloadAria": {
+    "message": "تنزيل: {{title}}"
+  },
+  "overview_latest_delivery_chatbookDestination": {
+    "message": "Chatbook"
+  },
+  "overview_latest_delivery_confirmRetry": {
+    "message": "إعادة محاولة التسليم"
+  },
+  "overview_latest_delivery_confirmRetryAria": {
+    "message": "إعادة محاولة {{adapter}} التسليم"
+  },
+  "overview_latest_delivery_recipientCount": {
+    "message": "{{count}} مستلمين"
+  },
+  "overview_latest_delivery_recipientCount_zero": {
+    "message": "{{count}} مستلمين"
+  },
+  "overview_latest_delivery_recipientCount_one": {
+    "message": "{{count}} مستلمين"
+  },
+  "overview_latest_delivery_recipientCount_two": {
+    "message": "{{count}} مستلمين"
+  },
+  "overview_latest_delivery_recipientCount_few": {
+    "message": "{{count}} مستلمين"
+  },
+  "overview_latest_delivery_recipientCount_many": {
+    "message": "{{count}} مستلمين"
+  },
+  "overview_latest_delivery_recipientCount_other": {
+    "message": "{{count}} مستلمين"
+  },
+  "overview_latest_delivery_reviewAcknowledgement": {
+    "message": "راجعت الوجهة وأقبل خطر تكرار التسليم."
+  },
+  "overview_latest_delivery_reviewSettings": {
+    "message": "مراجعة الإعدادات"
+  },
+  "overview_latest_delivery_reviewTitle": {
+    "message": "مراجعة {{adapter}} التسليم"
+  },
+  "overview_latest_playback_accessError": {
+    "message": "صوت: فشل الوصول. تحقق من تسجيل الدخول واتصال الخادم."
+  },
+  "overview_latest_playback_missing": {
+    "message": "صوت لم يعد متاحًا."
+  },
+  "overview_latest_actions_downloadAudio": {
+    "message": "تنزيل صوت"
+  },
+  "overview_latest_actions_downloadAudioAria": {
+    "message": "تنزيل صوت: {{name}}"
+  },
+  "overview_latest_actions_retryExactAria": {
+    "message": "إعادة محاولة {{stage}}: {{name}}"
+  },
+  "overview_latest_actions_reviewScript": {
+    "message": "مراجعة صوت تقرير"
+  },
+  "overview_latest_actions_reviewScriptAria": {
+    "message": "مراجعة صوت تقرير: {{name}}"
+  },
+  "overview_latest_scriptAccessError": {
+    "message": "صوت تقرير: فشل الوصول. تحقق من تسجيل الدخول واتصال الخادم."
+  },
+  "overview_latest_scriptLoading": {
+    "message": "جارٍ تحميل صوت تقرير"
+  },
+  "overview_latest_scriptMissing": {
+    "message": "صوت تقرير لم يعد متاحًا."
+  },
+  "overview_latest_recovery_renderText": {
+    "message": "جارٍ إنشاء تقرير"
+  },
+  "overview_latest_recovery_persistText": {
+    "message": "جارٍ حفظ تقرير"
+  },
+  "overview_latest_recovery_composeScript": {
+    "message": "جارٍ إعداد صوت تقرير"
+  },
+  "overview_latest_recovery_persistScript": {
+    "message": "جارٍ حفظ صوت تقرير"
+  },
+  "overview_latest_recovery_generateAudio": {
+    "message": "جارٍ إنشاء صوت"
+  },
+  "overview_latest_recovery_persistAudio": {
+    "message": "جارٍ حفظ صوت"
+  },
+  "outputs_artifactMissing": {
+    "message": "لم يعد متاحًا."
+  },
+  "outputs_artifactAuthError": {
+    "message": "رُفض الوصول. تحقق من تسجيل الدخول."
+  },
+  "outputs_artifactAccessError": {
+    "message": "فشل الوصول. تحقق من تسجيل الدخول واتصال الخادم."
+  },
+  "overview_latest_status_stale": {
+    "message": "قديم"
+  },
+  "overview_latest_status_superseded": {
+    "message": "مستبدل"
+  },
+  "overview_latest_status_unavailable": {
+    "message": "غير متاح"
+  },
+  "overview_latest_status_partial": {
+    "message": "جزئي"
+  },
+  "accessibilityHardening_source_toggleActive": {
+    "message": "تبديل الحالة النشطة: {{name}}"
+  },
+  "accessibilityHardening_source_checkNow": {
+    "message": "التحقق الآن: {{name}}"
+  },
+  "accessibilityHardening_source_openWebsite": {
+    "message": "فتح موقع المصدر: {{name}}"
+  },
+  "accessibilityHardening_source_openHealth": {
+    "message": "فتح حالة المصدر: {{name}}"
+  },
+  "accessibilityHardening_source_edit": {
+    "message": "تعديل المصدر: {{name}}"
+  },
+  "accessibilityHardening_source_delete": {
+    "message": "حذف المصدر: {{name}}"
+  },
+  "accessibilityHardening_item_open": {
+    "message": "فتح التحديث: {{title}}"
+  },
+  "accessibilityHardening_item_select": {
+    "message": "تحديد التحديث: {{title}}"
+  },
+  "accessibilityHardening_item_description": {
+    "message": "{{state}}. المصدر: {{source}}."
+  },
+  "accessibilityHardening_output_openNewTab": {
+    "message": "فتح {{title}} في علامة تبويب جديدة"
+  },
+  "accessibilityHardening_output_chat": {
+    "message": "الدردشة حول {{title}}"
+  },
+  "accessibilityHardening_output_download": {
+    "message": "تنزيل {{title}}"
+  },
+  "accessibilityHardening_output_close": {
+    "message": "إغلاق المعاينة: {{title}}"
+  },
+  "accessibilityHardening_health_show": {
+    "message": "إظهار تفاصيل حالة قوائم المراقبة"
+  },
+  "accessibilityHardening_health_hide": {
+    "message": "إخفاء تفاصيل حالة قوائم المراقبة"
+  },
+  "accessibilityHardening_health_refresh": {
+    "message": "تحديث حالة قوائم المراقبة"
+  },
+  "accessibilityHardening_health_settings": {
+    "message": "فتح إعدادات قوائم المراقبة"
+  },
+  "accessibilityHardening_delivery_email": {
+    "message": "إرسال كل تقرير إلى المستلمين المحددين عند التفعيل."
+  },
+  "accessibilityHardening_delivery_chatbook": {
+    "message": "نشر كل تقرير في Chatbook عند التفعيل."
+  },
+  "accessibilityHardening_help_open": {
+    "message": "فتح مساعدة قوائم المراقبة"
+  },
+  "accessibilityHardening_help_title": {
+    "message": "مساعدة قوائم المراقبة"
+  },
+  "overview_pipelineSetup_test_scheduledReceipt": {
+    "message": "{{schedule}}، اجمع التحديثات من {{sources}}، وأنشئ {{artifacts}} بصيغة {{program}}{{duration}}، ثم احفظها وسلّمها إلى {{destinations}}."
+  },
+  "overview_pipelineSetup_test_audioTestRequired": {
+    "message": "أنشئ عينة صوتية أو اختباراً كاملاً بنجاح قبل التفعيل."
   }
 }

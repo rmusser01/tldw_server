@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import sqlite3
 from dataclasses import dataclass
@@ -82,7 +83,7 @@ class DocumentUploadDraftStore:
 
     def _initialize_schema(self) -> None:
         """Create the draft table and lookup indexes when absent."""
-        with self._connect() as connection:
+        with contextlib.closing(self._connect()) as connection, connection:
             connection.execute("PRAGMA journal_mode = WAL")
             connection.execute(
                 """
@@ -126,7 +127,7 @@ class DocumentUploadDraftStore:
         now = self._now()
         expires_at = now + timedelta(seconds=self.ttl_seconds)
         draft_id = uuid4().hex
-        with self._connect() as connection:
+        with contextlib.closing(self._connect()) as connection, connection:
             connection.execute("BEGIN IMMEDIATE")
             self._cleanup_expired(connection, now.timestamp())
             owner_count = connection.execute(
@@ -163,15 +164,14 @@ class DocumentUploadDraftStore:
     def get(self, *, owner: str, draft_id: str) -> DocumentUploadDraft | None:
         """Return an unexpired draft owned by the caller."""
         now = self._now()
-        with self._connect() as connection:
-            self._cleanup_expired(connection, now.timestamp())
+        with contextlib.closing(self._connect()) as connection, connection:
             row = connection.execute(
                 """
                 SELECT draft_id, owner, created_at, expires_at, payload_json
                 FROM document_upload_drafts
-                WHERE draft_id = ? AND owner = ?
+                WHERE draft_id = ? AND owner = ? AND expires_at > ?
                 """,
-                (draft_id, owner),
+                (draft_id, owner, now.timestamp()),
             ).fetchone()
         if row is None:
             return None
@@ -185,7 +185,7 @@ class DocumentUploadDraftStore:
 
     def delete(self, *, owner: str, draft_id: str) -> bool:
         """Delete an owned, unexpired draft and report whether it existed."""
-        with self._connect() as connection:
+        with contextlib.closing(self._connect()) as connection, connection:
             self._cleanup_expired(connection, self._now().timestamp())
             cursor = connection.execute(
                 "DELETE FROM document_upload_drafts WHERE draft_id = ? AND owner = ?",

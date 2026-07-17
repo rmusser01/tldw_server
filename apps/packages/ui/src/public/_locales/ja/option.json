@@ -239,9 +239,6 @@
   "header_omniSearchStartChat": {
     "message": "新しいチャット「{{query}}」を開始"
   },
-  "header_connectionCard.connectedCaption": {
-    "message": "オプション画面とサイドパネルでチャットとツールが利用できるようになりました。"
-  },
   "header_quickIngestQueuedAria": {
     "message": "{{label}} — {{count}} 件がキューにあります — クリックして確認および処理します"
   },
@@ -2755,5 +2752,8 @@
   },
   "repo2txt_status_generated": {
     "message": "Generated output for {{count}} files ({{tokenCount}} tokens)."
+  },
+  "header_connectionCard_connectedCaption": {
+    "message": "オプション画面とサイドパネルでチャットとツールが利用できるようになりました。"
   }
 }

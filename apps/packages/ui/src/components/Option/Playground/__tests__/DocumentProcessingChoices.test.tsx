@@ -176,6 +176,28 @@ describe("DocumentProcessingChoices", () => {
     ).toBeInTheDocument()
   })
 
+  it("summarizes processing and cancelled states explicitly", () => {
+    render(
+      <DocumentProcessingChoices
+        files={[
+          makeFile("ready.pdf", "add_to_chat", { processingStatus: "ready" }),
+          makeFile("processing.pdf", "ingest_to_library", {
+            processingStatus: "processing"
+          }),
+          makeFile("cancelled.pdf", "ocr_pages", {
+            processingStatus: "cancelled"
+          })
+        ]}
+        onChangeFiles={vi.fn()}
+      />
+    )
+
+    const summary = screen.getByTestId("document-processing-summary")
+    expect(
+      within(summary).getByText("1 ready, 1 processing, 1 cancelled")
+    ).toBeInTheDocument()
+  })
+
   it("disables bulk and per-file modes until preflight capabilities arrive", async () => {
     const user = userEvent.setup()
 

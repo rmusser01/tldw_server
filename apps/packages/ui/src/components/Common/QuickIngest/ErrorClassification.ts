@@ -45,6 +45,15 @@ const AUTH_CATEGORY: ErrorCategory = {
   suggestion: "Check your API key or server configuration.",
 }
 
+const CONFIG_CATEGORY: ErrorCategory = {
+  classification: "auth",
+  retryable: false,
+  badgeLabel: "Config \u00b7 Check Server",
+  badgeColor: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300",
+  userMessage: "The tldw server is not configured.",
+  suggestion: "Set the server URL and API key in Settings, then try again.",
+}
+
 const VALIDATION_CATEGORY: ErrorCategory = {
   classification: "validation",
   retryable: false,
@@ -104,6 +113,10 @@ const PATTERN_TABLE: PatternEntry[] = [
     category: JOB_LIMIT_CATEGORY,
   },
   {
+    patterns: /^(?:HTTP 400:\s*)?tldw server not configured\.?$/i,
+    category: CONFIG_CATEGORY,
+  },
+  {
     patterns: /\b40[13]\b|unauthorized|forbidden|auth/i,
     category: AUTH_CATEGORY,
   },
@@ -128,8 +141,9 @@ const PATTERN_TABLE: PatternEntry[] = [
 /**
  * Classify an error message string into a structured `ErrorCategory`.
  *
- * Pattern matching is applied in priority order (timeout > auth > validation >
- * server > network) so that overlapping keywords resolve deterministically.
+ * Pattern matching follows `PATTERN_TABLE` order so timeout, job-limit, and
+ * client-configuration errors win before broader auth, validation, server, and
+ * network patterns.
  * If nothing matches, the error is classified as `"unknown"` (retryable).
  */
 export function classifyError(error: string | undefined): ErrorCategory {

@@ -181,7 +181,7 @@ venv.bak/
 
 # mkdocs documentation
 /site
-/Docs/site/
+/Docs/_site/
 
 
 
@@ -279,6 +279,11 @@ errors.log
 # Data files
 *.csv
 *.json
+!Docs/Published/Deployment/sidecar_workers_manifest.json
+!Docs/Published/Evaluations/samples/dataset_quick.json
+!Docs/Published/Evaluations/samples/rag_pipeline_eval_inline.json
+!Docs/Published/Evaluations/samples/run_request.json
+!Docs/Published/Monitoring/Grafana_Streaming_Basics.json
 !.impeccable/design.json
 !tldw_Server_API/app/core/Evaluations/data/bullshit_benchmark/questions_v2.json
 !tldw_Server_API/tests/fixtures/privilege_route_registry_snapshot.json
@@ -293,6 +298,10 @@ errors.log
 !Docs/Product/WebUI/M1_4_Alias_Rollup_Week3_Natural_2026_02_13.json
 !Docs/Deployment/sidecar_workers_manifest.json
 !Docs/Monitoring/claims_grafana_dashboard.json
+!Docs/Design/research_source_inventory/
+!Docs/Design/research_source_inventory/*.json
+!Docs/Design/research_source_inventory/**/
+!Docs/Design/research_source_inventory/**/*.json
 !tools/macos-vz-helper/Tests/TemplateFixtures/**/*.json
 !Docs/Development/schema/embeddings_v1.schema.json
 !Docs/Development/schema/embeddings_registry.json

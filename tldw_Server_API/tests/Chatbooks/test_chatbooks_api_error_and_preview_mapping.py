@@ -2,6 +2,7 @@ import io
 import json
 import zipfile
 from datetime import datetime
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import FastAPI
@@ -18,6 +19,8 @@ from tldw_Server_API.app.core.Chatbooks.chatbook_models import (
     ImportStatus,
 )
 from tldw_Server_API.app.core.Chatbooks.exceptions import JobError
+
+pytestmark = pytest.mark.unit
 
 
 class _DummyAuditService:
@@ -191,6 +194,28 @@ class _ListJobsService:
             )
             for index in range(3)
         ]
+        self._import_jobs[0].chatbook_path = (
+            "/private/tmp/import_0123456789abcdef0123456789abcdef_Family-backup.chatbook"
+        )
+        self._import_jobs[0].metadata = {
+            "source_filename": "/Users/tester/Family-backup.chatbook",
+            "chatbook_name": "Family research backup",
+            "diagnostics": {
+                "path": r"\\fileserver\team share\import logs\import.log",
+                r"C:\Program Data\chatbooks\source.db": "metadata key",
+                "review": r"Review C:\Program Data\chatbooks\import log.txt",
+            },
+        }
+        self._import_jobs[0].error_message = (
+            'Import failed at "C:\\Users\\tester\\My Backups\\Family backup.chatbook" '
+            r"from \\fileserver\team share\Family backup.chatbook"
+        )
+        self._import_jobs[0].warnings = [
+            r"Review C:\Program Data\chatbooks\import log.txt"
+        ]
+        self._import_jobs[0].conflicts = [
+            {"detail": r"Existing item C:\Users\tester\Account Data\account.db"}
+        ]
 
     def count_export_jobs(self) -> int:
         return len(self._export_jobs)
@@ -203,6 +228,14 @@ class _ListJobsService:
 
     def list_import_jobs(self, *, limit: int, offset: int):
         return self._import_jobs[offset:offset + limit]
+
+
+class _BulkRemoveFinishedJobsService:
+    def delete_finished_jobs(self):
+        return {
+            "export_jobs_removed": 75,
+            "import_jobs_removed": 64,
+        }
 
 
 class _ContinuationFailedService:
@@ -333,6 +366,7 @@ def test_import_openwebui_json_source_format_skips_archive_validation(monkeypatc
     assert body["source_format"] == "openwebui_json"
     assert body["openwebui_result"]["imported_chats"] == 1
     assert service.called_kwargs["source_format"] == "openwebui_json"
+    assert service.called_kwargs["source_filename"] == "openwebui.json"
 
 
 @pytest.mark.parametrize(
@@ -404,6 +438,72 @@ def test_job_list_routes_include_canonical_pagination():
         "has_more": True,
         "next_offset": 2,
     }
+
+
+def test_import_job_list_exposes_redacted_human_readable_identity():
+    app = _make_app(_ListJobsService())
+
+    with TestClient(app) as client:
+        response = client.get("/api/v1/chatbooks/import/jobs?limit=1&offset=0")
+
+    assert response.status_code == 200, response.text
+    job = response.json()["jobs"][0]
+    assert job["source_filename"] == "Family-backup.chatbook"
+    assert job["chatbook_name"] == "Family research backup"
+    assert job["chatbook_path"] == "Family-backup.chatbook"
+    assert "/private/" not in job["chatbook_path"]
+    assert "/private/" not in job["source_filename"]
+    assert "/Users/" not in job["source_filename"]
+    assert job["error_message"] == "Import failed at [redacted-path] from [redacted-path]"
+    serialized_job = json.dumps(job)
+    assert "/Users/" not in serialized_job
+    assert "/private/" not in serialized_job
+    assert "/var/" not in serialized_job
+    assert "/tmp/" not in serialized_job
+    assert "C:\\\\Users" not in serialized_job
+    assert "fileserver" not in serialized_job
+    assert "Program Data" not in serialized_job
+    assert "Account Data" not in serialized_job
+    assert "My Backups" not in serialized_job
+    assert job["metadata"]["source_filename"] == "Family-backup.chatbook"
+
+
+def test_import_job_list_redacts_path_like_chatbook_name():
+    service = _ListJobsService()
+    service._import_jobs[0].metadata["chatbook_name"] = (
+        r"C:\Program Data\chatbooks\Family backup.chatbook"
+    )
+    app = _make_app(service)
+
+    with TestClient(app) as client:
+        response = client.get("/api/v1/chatbooks/import/jobs?limit=1&offset=0")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["jobs"][0]["chatbook_name"] == "[redacted-path]"
+
+
+def test_remove_finished_job_history_offloads_server_side_bulk_operation(monkeypatch):
+    service = _BulkRemoveFinishedJobsService()
+    to_thread = AsyncMock(
+        return_value={
+            "export_jobs_removed": 75,
+            "import_jobs_removed": 64,
+        }
+    )
+    monkeypatch.setattr(chatbooks_endpoints.asyncio, "to_thread", to_thread)
+    app = _make_app(service)
+
+    with TestClient(app) as client:
+        response = client.delete("/api/v1/chatbooks/jobs/finished")
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "success": True,
+        "message": "Removed 139 finished Chatbook job records",
+        "export_jobs_removed": 75,
+        "import_jobs_removed": 64,
+    }
+    to_thread.assert_awaited_once_with(service.delete_finished_jobs)
 
 
 def test_continue_export_sanitizes_service_failure_message():

@@ -10,8 +10,13 @@ const storageState = vi.hoisted(() => ({
   tldwConfig: {
     serverUrl: "http://localhost:8000",
     authMode: "single-user",
-    apiKey: "test-key"
-  }
+    apiKey: "test-key",
+    credentialSource: "manual",
+    apiKeyPersistence: "device",
+    apiKeyServerOrigin: "http://localhost:8000"
+  } as Record<string, unknown>,
+  cookieSessionConfig: null as Record<string, unknown> | null,
+  sessionCredential: null as Record<string, unknown> | null
 }))
 
 vi.hoisted(() => {
@@ -27,9 +32,19 @@ vi.mock("@/utils/safe-storage", () => ({
     serialize: (value: unknown) => value,
     deserialize: (value: unknown) => value
   },
-  createSafeStorage: () => ({
-    get: async (key: string) =>
-      key === "tldwConfig" ? storageState.tldwConfig : undefined,
+  createSafeStorage: (options?: { area?: string }) => ({
+    get: async (key: string) => {
+      if (options?.area === "session") {
+        return key === "tldwManualSessionApiKey"
+          ? storageState.sessionCredential
+          : undefined
+      }
+      if (key === "tldwConfig") return storageState.tldwConfig
+      if (key === "tldwCookieSessionConfig") {
+        return storageState.cookieSessionConfig
+      }
+      return undefined
+    },
     set: vi.fn()
   })
 }))
@@ -212,6 +227,16 @@ describe("background STT audio protocol", () => {
     alarmListeners.clear()
     startupListeners.clear()
     MockWebSocket.instances = []
+    storageState.tldwConfig = {
+      serverUrl: "http://localhost:8000",
+      authMode: "single-user",
+      apiKey: "test-key",
+      credentialSource: "manual",
+      apiKeyPersistence: "device",
+      apiKeyServerOrigin: "http://localhost:8000"
+    }
+    storageState.cookieSessionConfig = null
+    storageState.sessionCredential = null
     ;(globalThis as any).WebSocket = MockWebSocket
     windowDescriptor = Object.getOwnPropertyDescriptor(globalThis, "window")
     Object.defineProperty(globalThis, "window", {
@@ -233,7 +258,7 @@ describe("background STT audio protocol", () => {
     const port = connectRuntimePort("tldw:stt")
 
     port.postMessage({ action: "connect" })
-    await Promise.resolve()
+    await vi.waitFor(() => expect(MockWebSocket.instances).toHaveLength(1))
 
     const ws = MockWebSocket.instances[0]
     expect(ws.url).toBe("ws://localhost:8000/api/v1/audio/stream/transcribe")
@@ -257,5 +282,41 @@ describe("background STT audio protocol", () => {
       type: "audio",
       data: "AAA="
     })
+  })
+
+  it("uses matching extension session auth in the STT first frame and ignores cookie markers", async () => {
+    storageState.tldwConfig = {
+      serverUrl: "https://api.example.test",
+      authMode: "single-user",
+      authSource: "manual",
+      credentialSource: "manual",
+      apiKeyPersistence: "session",
+      apiKeyServerOrigin: "https://api.example.test"
+    }
+    storageState.cookieSessionConfig = {
+      serverUrl: "http://localhost",
+      authMode: "single-user",
+      authSource: "cookie-session"
+    }
+    storageState.sessionCredential = {
+      apiKey: "stt-session-key",
+      credentialSource: "manual",
+      apiKeyPersistence: "session",
+      apiKeyServerOrigin: "https://api.example.test"
+    }
+    const port = connectRuntimePort("tldw:stt")
+
+    port.postMessage({ action: "connect" })
+    await vi.waitFor(() => expect(MockWebSocket.instances).toHaveLength(1))
+
+    const ws = MockWebSocket.instances[0]
+    expect(ws.url).toBe("wss://api.example.test/api/v1/audio/stream/transcribe")
+    ws.open()
+
+    expect(JSON.parse(ws.sent[0])).toEqual({
+      type: "auth",
+      token: "stt-session-key"
+    })
+    expect(storageState.tldwConfig).not.toHaveProperty("apiKey")
   })
 })

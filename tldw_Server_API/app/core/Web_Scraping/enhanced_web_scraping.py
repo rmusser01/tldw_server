@@ -797,13 +797,18 @@ class ScrapingJobQueue:
                 job.method,
                 custom_cookies=job.metadata.get('custom_cookies'),
                 user_agent=job.metadata.get('user_agent'),
-                custom_headers=job.metadata.get('custom_headers')
+                custom_headers=job.metadata.get('custom_headers'),
+                allow_llm_extraction=job.metadata.get('allow_llm_extraction', True),
             )
         else:
             # Fallback to importing the standalone scraping function
             logger.warning(f"No parent scraper available for job {job.job_id}, using fallback scraping")
             from tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib import scrape_article
-            return await scrape_article(job.url, custom_cookies=job.metadata.get('custom_cookies'))
+            return await scrape_article(
+                job.url,
+                custom_cookies=job.metadata.get('custom_cookies'),
+                allow_llm_extraction=job.metadata.get('allow_llm_extraction', True),
+            )
 
     def get_status(self) -> dict[str, Any]:
         """Get queue status"""
@@ -1175,6 +1180,7 @@ class EnhancedWebScraper:
         llm_settings: Optional[dict[str, Any]] = None,
         regex_settings: Optional[dict[str, Any]] = None,
         cluster_settings: Optional[dict[str, Any]] = None,
+        allow_llm_extraction: bool = True,
     ) -> dict[str, Any]:
         from tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib import (
             convert_html_to_markdown,
@@ -1191,6 +1197,7 @@ class EnhancedWebScraper:
             llm_settings=llm_settings,
             regex_settings=regex_settings,
             cluster_settings=cluster_settings,
+            allow_llm_extraction=allow_llm_extraction,
         )
         if postprocess_markdown and data.get("extraction_successful") and data.get("content"):
             data["content"] = convert_html_to_markdown(data["content"])
@@ -1338,6 +1345,7 @@ class EnhancedWebScraper:
         custom_cookies: Optional[list[dict[str, Any]]] = None,
         user_agent: Optional[str] = None,
         custom_headers: Optional[dict[str, str]] = None,
+        allow_llm_extraction: bool = True,
     ) -> dict[str, Any]:
         """Scrape a single article with specified method"""
         # Apply rate limiting
@@ -1440,6 +1448,7 @@ class EnhancedWebScraper:
                     llm_settings=llm_settings,
                     regex_settings=regex_settings,
                     cluster_settings=cluster_settings,
+                    allow_llm_extraction=allow_llm_extraction,
                 )
                 return _attach_preflight(result)
             elif effective_method == "playwright":
@@ -1456,6 +1465,7 @@ class EnhancedWebScraper:
                     llm_settings=llm_settings,
                     regex_settings=regex_settings,
                     cluster_settings=cluster_settings,
+                    allow_llm_extraction=allow_llm_extraction,
                 )
                 return _attach_preflight(result)
             elif effective_method == "beautifulsoup":
@@ -1474,6 +1484,7 @@ class EnhancedWebScraper:
                     llm_settings=llm_settings,
                     regex_settings=regex_settings,
                     cluster_settings=cluster_settings,
+                    allow_llm_extraction=allow_llm_extraction,
                 )
                 return _attach_preflight(result)
             else:
@@ -1503,6 +1514,7 @@ class EnhancedWebScraper:
         llm_settings: Optional[dict[str, Any]] = None,
         regex_settings: Optional[dict[str, Any]] = None,
         cluster_settings: Optional[dict[str, Any]] = None,
+        allow_llm_extraction: bool = True,
     ) -> dict[str, Any]:
         """Scrape using trafilatura"""
         headers = self._build_request_headers(user_agent, custom_headers)
@@ -1532,7 +1544,8 @@ class EnhancedWebScraper:
             )
             return {"url": url, "error": str(exc), "extraction_successful": False}
 
-        data = self._extract_from_html_with_pipeline(
+        data = await asyncio.to_thread(
+            self._extract_from_html_with_pipeline,
             html,
             url,
             strategy_order=strategy_order,
@@ -1544,6 +1557,7 @@ class EnhancedWebScraper:
             llm_settings=llm_settings,
             regex_settings=regex_settings,
             cluster_settings=cluster_settings,
+            allow_llm_extraction=allow_llm_extraction,
         )
         outcome = "success" if data.get("extraction_successful") else "no_extract"
         self._emit_scrape_metrics(
@@ -1604,6 +1618,7 @@ class EnhancedWebScraper:
         llm_settings: Optional[dict[str, Any]] = None,
         regex_settings: Optional[dict[str, Any]] = None,
         cluster_settings: Optional[dict[str, Any]] = None,
+        allow_llm_extraction: bool = True,
     ) -> dict[str, Any]:
         """Scrape using Playwright for JavaScript-heavy sites"""
         # Fallback gracefully if browser isn't initialized
@@ -1620,6 +1635,7 @@ class EnhancedWebScraper:
                 llm_settings=llm_settings,
                 regex_settings=regex_settings,
                 cluster_settings=cluster_settings,
+                allow_llm_extraction=allow_llm_extraction,
             )
         headers_copy = dict(custom_headers) if custom_headers else {}
         effective_user_agent = user_agent or headers_copy.pop("User-Agent", None) or DEFAULT_USER_AGENT
@@ -1663,7 +1679,8 @@ class EnhancedWebScraper:
             await page.wait_for_load_state("domcontentloaded")
 
             html = await page.content()
-            data = self._extract_from_html_with_pipeline(
+            data = await asyncio.to_thread(
+                self._extract_from_html_with_pipeline,
                 html,
                 url,
                 strategy_order=strategy_order,
@@ -1675,6 +1692,7 @@ class EnhancedWebScraper:
                 llm_settings=llm_settings,
                 regex_settings=regex_settings,
                 cluster_settings=cluster_settings,
+                allow_llm_extraction=allow_llm_extraction,
             )
             if data.get("extraction_successful") or handler is not None:
                 outcome = "success" if data.get("extraction_successful") else "no_extract"
@@ -1769,6 +1787,7 @@ class EnhancedWebScraper:
         llm_settings: Optional[dict[str, Any]] = None,
         regex_settings: Optional[dict[str, Any]] = None,
         cluster_settings: Optional[dict[str, Any]] = None,
+        allow_llm_extraction: bool = True,
     ) -> dict[str, Any]:
         """Scrape using BeautifulSoup for simple HTML parsing"""
         headers = self._build_request_headers(user_agent, custom_headers)
@@ -1798,7 +1817,8 @@ class EnhancedWebScraper:
             )
             return {"url": url, "error": str(exc), "extraction_successful": False}
 
-        data = self._extract_from_html_with_pipeline(
+        data = await asyncio.to_thread(
+            self._extract_from_html_with_pipeline,
             html,
             url,
             strategy_order=strategy_order,
@@ -1810,6 +1830,7 @@ class EnhancedWebScraper:
             llm_settings=llm_settings,
             regex_settings=regex_settings,
             cluster_settings=cluster_settings,
+            allow_llm_extraction=allow_llm_extraction,
         )
         if data.get("extraction_successful") or handler is not None:
             outcome = "success" if data.get("extraction_successful") else "no_extract"
@@ -1885,6 +1906,7 @@ class EnhancedWebScraper:
         priority: JobPriority = JobPriority.NORMAL,
         summarize: bool = False,
         user_id: Optional[str] = None,
+        allow_llm_extraction: bool = True,
         **kwargs,
     ) -> list[dict[str, Any]]:
         """Scrape multiple URLs concurrently"""
@@ -1909,7 +1931,10 @@ class EnhancedWebScraper:
                 method=method,
                 user_id=owner_id,
                 priority=priority,
-                metadata=kwargs
+                metadata={
+                    **kwargs,
+                    "allow_llm_extraction": allow_llm_extraction,
+                },
             )
             future = await self.job_queue.add_job(job)
             jobs.append(job)
@@ -1966,6 +1991,7 @@ class EnhancedWebScraper:
         custom_headers: Optional[dict[str, str]] = None,
         task_id: Optional[str] = None,
         user_id: Optional[str] = None,
+        allow_llm_extraction: bool = True,
     ) -> list[dict[str, Any]]:
         """Scrape all URLs from a sitemap"""
         headers = self._build_request_headers(user_agent, custom_headers)
@@ -2029,6 +2055,7 @@ class EnhancedWebScraper:
             user_agent=user_agent,
             custom_headers=custom_headers,
             user_id=user_id,
+            allow_llm_extraction=allow_llm_extraction,
         )
         self._set_progress(
             task_id,
@@ -2053,6 +2080,7 @@ class EnhancedWebScraper:
         include_external_override: Optional[bool] = None,
         score_threshold_override: Optional[float] = None,
         crawl_strategy: Optional[str] = None,
+        allow_llm_extraction: bool = True,
     ) -> list[dict[str, Any]]:
         """Recursively scrape a website"""
         try:
@@ -2299,6 +2327,7 @@ class EnhancedWebScraper:
                     user_agent=user_agent,
                     custom_headers=custom_headers,
                     user_id=user_id,
+                    allow_llm_extraction=allow_llm_extraction,
                 )
 
                 # Map url -> (neg_score, depth, parent)
@@ -2517,6 +2546,7 @@ class EnhancedWebScraper:
                     user_agent=user_agent,
                     custom_headers=custom_headers,
                     user_id=user_id,
+                    allow_llm_extraction=allow_llm_extraction,
                 )
 
                 meta_map_fifo = {u: (d, p) for (d, u, p) in batch_fifo}

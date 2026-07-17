@@ -21,6 +21,7 @@ import {
   type SidepanelChatHandoffPageContext
 } from "@/services/sidepanel-chat-handoff"
 import {
+  documentProcessingSelectionKey,
   prepareChatDocumentAttachmentsForSend
 } from "@/services/chat-document-processing"
 import type {
@@ -118,6 +119,18 @@ const toSendingPromptMetadata = (
   }
 }
 
+const toCancelledDocumentProcessingMetadata = (
+  files: UploadedFile[]
+): DocumentProcessingTurnMetadata => ({
+  status: "cancelled",
+  files: files.map((file) => ({
+    id: file.id,
+    filename: file.filename,
+    mode: file.processingMode,
+    status: "cancelled"
+  }))
+})
+
 export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
   const {
     form,
@@ -163,6 +176,29 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
   const submitFormRef = React.useRef<
     (options?: { ignorePinnedResults?: boolean }) => void
   >(() => undefined)
+  const [isPreparingDocuments, setIsPreparingDocuments] = React.useState(false)
+  const currentDocumentSelectionKey =
+    documentProcessingSelectionKey(uploadedFiles)
+  const currentDocumentSelectionKeyRef = React.useRef(
+    currentDocumentSelectionKey
+  )
+  const activeDocumentPreparationRef = React.useRef<{
+    controller: AbortController
+    selectionKey: string
+  } | null>(null)
+  currentDocumentSelectionKeyRef.current = currentDocumentSelectionKey
+
+  React.useEffect(() => {
+    const active = activeDocumentPreparationRef.current
+    if (active && active.selectionKey !== currentDocumentSelectionKey) {
+      active.controller.abort()
+    }
+  }, [currentDocumentSelectionKey])
+
+  React.useEffect(
+    () => () => activeDocumentPreparationRef.current?.controller.abort(),
+    []
+  )
 
   // Route through the shared composer dispatch so cross-cutting concerns
   // (metrics, error handling) have one home if we need them later.
@@ -181,6 +217,12 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
 
   const submitForm = (options?: { ignorePinnedResults?: boolean }) => {
     form.onSubmit(async (value: any) => {
+      if (activeDocumentPreparationRef.current) return
+      let documentPreparation: {
+        controller: AbortController
+        selectionKey: string
+      } | null = null
+      try {
       const intent = resolveSubmissionIntent(value.message)
       if (intent.handled && !intent.invalidImageCommand) {
         form.setFieldValue("message", intent.message)
@@ -317,6 +359,15 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
         return
       }
 
+      if (!intent.isImageCommand && uploadedFiles.length > 0) {
+        documentPreparation = {
+          controller: new AbortController(),
+          selectionKey: currentDocumentSelectionKeyRef.current
+        }
+        activeDocumentPreparationRef.current = documentPreparation
+        setIsPreparingDocuments(true)
+      }
+
       if (!intent.isImageCommand && webSearch) {
         const defaultEM = await defaultEmbeddingModelForRag()
         const simpleSearch = await getIsSimpleInternetSearch()
@@ -327,6 +378,7 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
       }
 
       if (!intent.isImageCommand && uploadedFiles.length > 0) {
+        if (!documentPreparation) return
         const waitingMetadata = buildPendingDocumentProcessingMetadata(
           uploadedFiles,
           "waiting_for_files"
@@ -342,11 +394,42 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
             buildPendingDocumentProcessingMetadata(uploadedFiles, "processing")
           )
         }
-        const preparedDocuments = await prepareChatDocumentAttachmentsForSend({
-          files: uploadedFiles,
-          historyId: historyId ?? undefined,
-          sessionId: serverChatId ?? undefined
-        })
+        let preparedDocuments
+        try {
+          preparedDocuments = await prepareChatDocumentAttachmentsForSend({
+            files: uploadedFiles,
+            historyId: historyId ?? undefined,
+            sessionId: serverChatId ?? undefined,
+            signal: documentPreparation.controller.signal
+          })
+        } catch (error) {
+          if (
+            documentPreparation.controller.signal.aborted ||
+            (error instanceof Error && error.name === "AbortError")
+          ) {
+            if (reservedDocumentUserMessageId) {
+              updateDocumentProcessingTurn?.(
+                reservedDocumentUserMessageId,
+                toCancelledDocumentProcessingMetadata(uploadedFiles)
+              )
+            }
+            return
+          }
+          throw error
+        }
+        if (
+          documentPreparation.controller.signal.aborted ||
+          currentDocumentSelectionKeyRef.current !==
+            documentPreparation.selectionKey
+        ) {
+          if (reservedDocumentUserMessageId) {
+            updateDocumentProcessingTurn?.(
+              reservedDocumentUserMessageId,
+              toCancelledDocumentProcessingMetadata(uploadedFiles)
+            )
+          }
+          return
+        }
         const firstBlockedOrFailed =
           preparedDocuments.blockedFiles[0] || preparedDocuments.failedFiles[0]
         if (
@@ -493,6 +576,15 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
       if (openUIRequestMode) {
         clearOpenUIRequestMode()
       }
+      } finally {
+        if (
+          documentPreparation &&
+          activeDocumentPreparationRef.current === documentPreparation
+        ) {
+          activeDocumentPreparationRef.current = null
+          setIsPreparingDocuments(false)
+        }
+      }
     })()
   }
 
@@ -502,6 +594,7 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
 
   return {
     submitForm,
-    submitFormRef
+    submitFormRef,
+    isPreparingDocuments
   }
 }

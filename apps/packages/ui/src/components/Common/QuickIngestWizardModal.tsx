@@ -1,8 +1,9 @@
-import React, { useCallback, useEffect, useMemo, useRef } from "react"
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Modal, Button } from "antd"
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "react-router-dom"
 import { XCircle } from "lucide-react"
+import { useShallow } from "zustand/react/shallow"
 import { browser } from "wxt/browser"
 import {
   IngestWizardProvider,
@@ -62,6 +63,11 @@ import {
   isDbMessageDuplicate,
 } from "./QuickIngest/constants"
 import { isQuickIngestPlaylistPreflightDetail } from "@/utils/quick-ingest-open"
+import {
+  DEFAULT_PRESET,
+  DEFAULT_PRESETS,
+  type PresetMap,
+} from "./QuickIngest/presets"
 
 // ---------------------------------------------------------------------------
 // Props
@@ -72,6 +78,9 @@ type QuickIngestWizardModalProps = {
   onClose: () => void
   /** When true, automatically skip to processing on mount (compat with old modal). */
   autoProcessQueued?: boolean
+  presetMap?: PresetMap
+  openRevision?: number
+  createNewDraft?: () => QuickIngestSessionRecord
 }
 
 type QuickIngestEntryType = "auto" | "html" | "pdf" | "document" | "audio" | "video"
@@ -127,6 +136,13 @@ const RESULT_SUCCESS_STATUS_TOKENS = [
 const RESULT_CANCELLED_STATUS_TOKENS = ["cancelled", "canceled"]
 const FILE_REATTACH_WARNING = "Reattach this file after refresh to process it."
 const PERSISTED_REATTACH_POLL_INTERVAL_MS = 1_500
+const QUICK_INGEST_MODAL_STYLES = {
+  body: {
+    padding: "0 16px 16px",
+    maxHeight: "calc(100vh - 180px)",
+    overflowY: "auto" as const,
+  },
+}
 
 const mapDetectedTypeToEntryType = (
   detectedType: DetectedMediaType
@@ -642,6 +658,34 @@ const buildSessionPatchFromWizardState = (
   }
 }
 
+const buildWizardPersistenceSignature = (
+  patch: Partial<QuickIngestSessionRecord>
+): string => {
+  const resultSummary = patch.resultSummary
+  return JSON.stringify({
+    ...patch,
+    completedAt: patch.completedAt == null ? null : true,
+    resultSummary: resultSummary
+      ? {
+          ...resultSummary,
+          attemptedAt: resultSummary.attemptedAt == null ? null : true,
+          completedAt: resultSummary.completedAt == null ? null : true,
+        }
+      : resultSummary,
+  })
+}
+
+const cancelQuickIngestSessionBestEffort = (
+  request: Parameters<typeof cancelQuickIngestSession>[0]
+): void => {
+  void cancelQuickIngestSession(request).catch((error) => {
+    console.warn("[QuickIngest] Failed to cancel session.", {
+      sessionId: request.sessionId,
+      error,
+    })
+  })
+}
+
 const mapReattachedJobStatusToProgress = (
   status: string,
   result?: unknown
@@ -832,6 +876,8 @@ type WizardModalContentProps = {
   session: QuickIngestSessionRecord
   markProcessingTracking: (tracking: PersistedQuickIngestTracking) => void
   markInterrupted: (reason?: string) => void
+  showSession: () => void
+  replaceWithNewDraft: () => QuickIngestSessionRecord
   shouldAttemptPersistedReattach: boolean
 }
 
@@ -842,6 +888,8 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   session,
   markProcessingTracking,
   markInterrupted,
+  showSession,
+  replaceWithNewDraft,
   shouldAttemptPersistedReattach,
 }) => {
   const { t } = useTranslation(["option"])
@@ -849,14 +897,17 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     state,
     minimize,
     restore,
-    cancelProcessing,
     skipToProcessing,
     updateItemProgress,
     updateProcessingState,
     setResults,
+    goToStep,
     goNext,
   } = useIngestWizard()
   const { currentStep, queueItems, processingState, presetConfig, results } = state
+  const [analysisProviderWarning, setAnalysisProviderWarning] = useState<
+    string | null
+  >(null)
   const connectionState = useConnectionStore((store) => store.state)
   const checkConnection = useConnectionStore((store) => store.checkOnce)
   const activeSessionIdRef = useRef<string | null>(null)
@@ -864,6 +915,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   const hasStartedRunRef = useRef(false)
   const runStartedAtRef = useRef<number | null>(null)
   const cancelledSessionIdsRef = useRef<Set<string>>(new Set())
+  const cancelRequestedRef = useRef(false)
   const validQueueItems = useMemo(
     () =>
       queueItems.filter(
@@ -939,6 +991,17 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   }, [checkConnection])
 
   useEffect(() => {
+    if (!analysisProviderWarning) return
+    const providerWarning = getQuickIngestAnalysisProviderWarning({
+      common: presetConfig.common,
+      advancedValues: presetConfig.advancedValues,
+    })
+    if (!providerWarning) {
+      setAnalysisProviderWarning(null)
+    }
+  }, [analysisProviderWarning, presetConfig.advancedValues, presetConfig.common])
+
+  useEffect(() => {
     resultsRef.current = results
   }, [results])
 
@@ -1002,17 +1065,6 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
 
   // Auto-process on mount if autoProcessQueued is set and there are queued items
   const autoProcessedRef = useRef(false)
-  useEffect(() => {
-    if (
-      autoProcessQueued &&
-      !autoProcessedRef.current &&
-      validQueueItems.length > 0 &&
-      isOnlineForIngest
-    ) {
-      autoProcessedRef.current = true
-      skipToProcessing()
-    }
-  }, [autoProcessQueued, isOnlineForIngest, skipToProcessing, validQueueItems.length])
 
   // Whether processing is actively running
   const isProcessingActive = processingState.status === "running"
@@ -1293,6 +1345,31 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     [finalizeRun, trackedQueueItems, validQueueItems]
   )
 
+  const handleCancelAll = useCallback(() => {
+    if (cancelRequestedRef.current) return
+    cancelRequestedRef.current = true
+
+    if (persistedReattachTimerRef.current != null) {
+      window.clearTimeout(persistedReattachTimerRef.current)
+      persistedReattachTimerRef.current = null
+    }
+
+    const persistedTracking = persistedTrackingRef.current
+    const sessionId = String(
+      activeSessionIdRef.current || persistedTracking?.sessionId || ""
+    ).trim()
+    if (sessionId) {
+      cancelledSessionIdsRef.current.add(sessionId)
+      cancelQuickIngestSessionBestEffort({
+        sessionId,
+        batchIds: resolveTrackingBatchIds(persistedTracking),
+        reason: "user_cancelled",
+      })
+    }
+
+    finalizeFailure("Cancelled by user.", "cancelled")
+  }, [finalizeFailure])
+
   const markRunActive = useCallback(() => {
     runStartedAtRef.current = Date.now()
     for (const item of validQueueItems) {
@@ -1314,10 +1391,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       if (!sessionId || sessionId !== String(activeSessionIdRef.current || "").trim()) {
         return
       }
-      if (
-        cancelledSessionIdsRef.current.has(sessionId) &&
-        message.type !== "tldw:quick-ingest/progress"
-      ) {
+      if (cancelledSessionIdsRef.current.has(sessionId)) {
         return
       }
 
@@ -1385,7 +1459,6 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   const startRun = useCallback(async () => {
     if (hasStartedRunRef.current || validQueueItems.length === 0) return
     hasStartedRunRef.current = true
-    markRunActive()
 
     try {
       try {
@@ -1393,6 +1466,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       } catch {
         // Best effort; background proxy handles auth for direct runtimes.
       }
+      if (cancelRequestedRef.current) return
 
       const requestPayload = await buildQuickIngestPayload(
         validQueueItems,
@@ -1405,16 +1479,49 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
           typeDefaults: presetConfig.typeDefaults,
         }
       )
-      const analysisProviderWarning = getQuickIngestAnalysisProviderWarning({
+      if (cancelRequestedRef.current) return
+
+      const providerWarning = getQuickIngestAnalysisProviderWarning({
         common: requestPayload.common,
         advancedValues: requestPayload.advancedValues,
       })
-      if (analysisProviderWarning) {
-        finalizeFailure(analysisProviderWarning, "failed")
+      if (providerWarning) {
+        setAnalysisProviderWarning(
+          qi(
+            "analysisProvider.required",
+            "Choose an analysis provider before running ingest analysis."
+          )
+        )
+        updateProcessingState({
+          status: "idle",
+          perItemProgress: [],
+          elapsed: 0,
+          estimatedRemaining: 0,
+        })
+        hasStartedRunRef.current = false
+        activeSessionIdRef.current = null
+        restore()
+        showSession()
+        goToStep(2)
         return
       }
 
+      markRunActive()
+
       const startAck = await startQuickIngestSession(requestPayload)
+      if (cancelRequestedRef.current) {
+        const cancelledSessionId = String(startAck?.sessionId || "").trim()
+        if (startAck?.ok && cancelledSessionId) {
+          cancelledSessionIdsRef.current.add(cancelledSessionId)
+          if (!cancelledSessionId.startsWith("qi-direct-")) {
+            cancelQuickIngestSessionBestEffort({
+              sessionId: cancelledSessionId,
+              reason: "user_cancelled",
+            })
+          }
+        }
+        return
+      }
       if (!startAck?.ok || !startAck?.sessionId) {
         finalizeFailure(
           startAck?.error ||
@@ -1477,6 +1584,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
 
       finalizeRun("complete", normalizedResults)
     } catch (error) {
+      if (cancelRequestedRef.current) return
       finalizeFailure(
         error instanceof Error ? error.message : "Quick ingest failed.",
         "failed"
@@ -1492,7 +1600,12 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     presetConfig.storeRemote,
     presetConfig.typeDefaults,
     state.conferenceBatchMetadata,
+    goToStep,
+    restore,
+    showSession,
     markProcessingTracking,
+    qi,
+    updateProcessingState,
     validQueueItems,
   ])
 
@@ -1508,24 +1621,6 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     }
     void startRun()
   }, [currentStep, processingState.status, session.lifecycle, session.tracking, startRun])
-
-  useEffect(() => {
-    if (processingState.status !== "cancelled") return
-    const persistedTracking = persistedTrackingRef.current
-    const sessionId = String(
-      activeSessionIdRef.current || persistedTracking?.sessionId || ""
-    ).trim()
-    if (!sessionId || cancelledSessionIdsRef.current.has(sessionId)) return
-    cancelledSessionIdsRef.current.add(sessionId)
-    void cancelQuickIngestSession({
-      sessionId,
-      batchIds: resolveTrackingBatchIds(persistedTracking),
-      reason: "user_cancelled",
-    }).catch(() => {
-      // best effort cancellation
-    })
-    finalizeFailure("Cancelled by user.", "cancelled")
-  }, [finalizeFailure, processingState.status])
 
   // Modal title with item count
   const modalTitle = useMemo(() => {
@@ -1558,7 +1653,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
               danger
               onClick={() => {
                 Modal.destroyAll()
-                cancelProcessing()
+                handleCancelAll()
                 onClose()
               }}
             >
@@ -1578,13 +1673,67 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     } else {
       onClose()
     }
-  }, [isProcessingActive, qi, minimize, cancelProcessing, onClose])
+  }, [handleCancelAll, isProcessingActive, qi, minimize, onClose])
 
   // Quick-process callback for AddContentStep (skip to processing with defaults)
   const handleQuickProcess = useCallback(() => {
     if (!isOnlineForIngest || isCheckingConnection) return
+    const providerWarning = getQuickIngestAnalysisProviderWarning({
+      common: presetConfig.common,
+      advancedValues: presetConfig.advancedValues,
+    })
+    if (providerWarning) {
+      setAnalysisProviderWarning(
+        qi(
+          "analysisProvider.required",
+          "Choose an analysis provider before running ingest analysis."
+        )
+      )
+      if (currentStep === 1) {
+        goNext()
+      } else {
+        goToStep(2)
+      }
+      return
+    }
+    setAnalysisProviderWarning(null)
     skipToProcessing()
-  }, [isCheckingConnection, isOnlineForIngest, skipToProcessing])
+  }, [
+    currentStep,
+    goNext,
+    goToStep,
+    isCheckingConnection,
+    isOnlineForIngest,
+    presetConfig.advancedValues,
+    presetConfig.common,
+    qi,
+    skipToProcessing,
+  ])
+
+  useEffect(() => {
+    if (!open || !autoProcessQueued) {
+      autoProcessedRef.current = false
+    }
+  }, [autoProcessQueued, open])
+
+  useEffect(() => {
+    if (
+      autoProcessQueued &&
+      !autoProcessedRef.current &&
+      validQueueItems.length > 0 &&
+      isOnlineForIngest &&
+      !isCheckingConnection
+    ) {
+      autoProcessedRef.current = true
+      handleQuickProcess()
+    }
+  }, [
+    autoProcessQueued,
+    handleQuickProcess,
+    isCheckingConnection,
+    isOnlineForIngest,
+    validQueueItems.length,
+  ])
 
   // Navigation callbacks for WizardResultsStep CTAs
   const navigate = useNavigate()
@@ -1593,6 +1742,10 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     navigate("/knowledge")
     onClose()
   }, [navigate, onClose])
+
+  const handleIngestMore = useCallback(() => {
+    replaceWithNewDraft()
+  }, [replaceWithNewDraft])
 
   const handleOpenWorkspace = useCallback(
     (item: WizardResultItem) => {
@@ -1645,6 +1798,8 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
         return (
           <WizardConfigureStep
             isStepVisible={open && !state.isMinimized && currentStep === 2}
+            analysisProviderWarning={analysisProviderWarning}
+            focusAnalysisProvider={Boolean(analysisProviderWarning)}
           />
         )
       case 3:
@@ -1657,11 +1812,12 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
           />
         )
       case 4:
-        return <ProcessingStep />
+        return <ProcessingStep onCancelAll={handleCancelAll} />
       case 5:
         return (
           <WizardResultsStep
             onClose={onClose}
+            onIngestMore={handleIngestMore}
             onOpenMedia={handleOpenMedia}
             onSearchKnowledge={handleSearchKnowledge}
             onOpenWorkspace={handleOpenWorkspace}
@@ -1674,9 +1830,11 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   }, [
     connectionRecoveryMessage,
     currentStep,
+    handleCancelAll,
     handleOpenMedia,
     handleOpenCollection,
     handleOpenWorkspace,
+    handleIngestMore,
     handleQuickProcess,
     handleRetryConnection,
     handleSearchKnowledge,
@@ -1684,6 +1842,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     isOnlineForIngest,
     onClose,
     open,
+    analysisProviderWarning,
     state.isMinimized,
   ])
 
@@ -1696,13 +1855,8 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
         footer={null}
         width={800}
         className="quick-ingest-modal quick-ingest-wizard-modal"
-        styles={{
-          body: {
-            padding: "0 16px 16px",
-            maxHeight: "calc(100vh - 180px)",
-            overflowY: "auto",
-          },
-        }}
+        getContainer={false}
+        styles={QUICK_INGEST_MODAL_STYLES}
       >
         {/* Stepper navigation */}
         <IngestWizardStepper />
@@ -1725,6 +1879,9 @@ export const QuickIngestWizardModal: React.FC<QuickIngestWizardModalProps> = ({
   open,
   onClose,
   autoProcessQueued = false,
+  presetMap = DEFAULT_PRESETS,
+  openRevision = 0,
+  createNewDraft,
 }) => {
   const {
     session,
@@ -1732,20 +1889,30 @@ export const QuickIngestWizardModal: React.FC<QuickIngestWizardModalProps> = ({
     markProcessingTracking,
     markInterrupted,
     createDraftSession,
+    showSession,
+    replaceWithNewDraft,
   } =
-    useQuickIngestSessionStore((store) => ({
-      session: store.session,
-      upsertSession: store.upsertSession,
-      markProcessingTracking: store.markProcessingTracking,
-      markInterrupted: store.markInterrupted,
-      createDraftSession: store.createDraftSession,
-    }))
+    useQuickIngestSessionStore(
+      useShallow((store) => ({
+        session: store.session,
+        upsertSession: store.upsertSession,
+        markProcessingTracking: store.markProcessingTracking,
+        markInterrupted: store.markInterrupted,
+        createDraftSession: store.createDraftSession,
+        showSession: store.showSession,
+        replaceWithNewDraft: store.replaceWithNewDraft,
+      }))
+    )
 
   const initialState = useMemo(
     () => (session ? buildInitialWizardState(session) : undefined),
     [session]
   )
   const sessionRef = useRef(session)
+  const lastPersistedSignatureRef = useRef<{
+    sessionId: string
+    signature: string
+  } | null>(null)
 
   useEffect(() => {
     sessionRef.current = session
@@ -1753,25 +1920,52 @@ export const QuickIngestWizardModal: React.FC<QuickIngestWizardModalProps> = ({
 
   useEffect(() => {
     if (!open || session) return
-    createDraftSession()
-  }, [createDraftSession, open, session])
+    createDraftSession({
+      selectedPreset: DEFAULT_PRESET,
+      customBasePreset: DEFAULT_PRESET,
+      presetConfig: presetMap[DEFAULT_PRESET],
+      customOptions: {},
+    })
+  }, [createDraftSession, open, presetMap, session])
 
   const persistWizardState = useCallback(
     (state: IngestWizardState) => {
       const currentSession = sessionRef.current
       if (!currentSession) return
-      upsertSession(buildSessionPatchFromWizardState(state, currentSession))
+      const patch = buildSessionPatchFromWizardState(state, currentSession)
+      if (patch.completedAt == null) {
+        lastPersistedSignatureRef.current = null
+        upsertSession(patch)
+        return
+      }
+      const signature = buildWizardPersistenceSignature(patch)
+      // React may replay queued reducer updates after this synchronous Zustand
+      // write rerenders the parent. Persist each semantic snapshot only once.
+      if (
+        lastPersistedSignatureRef.current?.sessionId === currentSession.id &&
+        lastPersistedSignatureRef.current.signature === signature
+      ) {
+        return
+      }
+      lastPersistedSignatureRef.current = {
+        sessionId: currentSession.id,
+        signature,
+      }
+      upsertSession(patch)
     },
     [upsertSession]
   )
 
   if (!session || !initialState) return null
 
+  const providerKey = `${session.id}:${openRevision}`
+
   return (
     <IngestWizardProvider
-      key={session.id}
+      key={providerKey}
       initialState={initialState}
       onStateChange={persistWizardState}
+      presetMap={presetMap}
     >
       <WizardModalContent
         open={open}
@@ -1780,6 +1974,8 @@ export const QuickIngestWizardModal: React.FC<QuickIngestWizardModalProps> = ({
         session={session}
         markProcessingTracking={markProcessingTracking}
         markInterrupted={markInterrupted}
+        showSession={showSession}
+        replaceWithNewDraft={createNewDraft ?? replaceWithNewDraft}
         shouldAttemptPersistedReattach={
           session.lifecycle === "processing" &&
           session.tracking?.mode === "webui-direct" &&

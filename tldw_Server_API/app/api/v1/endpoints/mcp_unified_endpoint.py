@@ -44,6 +44,10 @@ from tldw_Server_API.app.core.AuthNZ.settings import (
     get_settings,
     is_single_user_profile_mode,
 )
+from tldw_Server_API.app.core.AuthNZ.websocket_session_auth import (
+    cookie_websocket_rejection_code,
+    resolve_single_user_cookie_websocket,
+)
 from tldw_Server_API.app.core.feature_flags import is_mcp_hub_policy_enforcement_enabled
 from tldw_Server_API.app.core.MCP_unified import MCPRequest, MCPResponse, get_config, get_mcp_server
 from tldw_Server_API.app.core.MCP_unified.auth import UserRole
@@ -885,6 +889,12 @@ async def websocket_endpoint(
     };
     ```
     """
+    await resolve_single_user_cookie_websocket(websocket)
+    cookie_close_code = cookie_websocket_rejection_code(websocket)
+    if cookie_close_code is not None:
+        await websocket.close(code=cookie_close_code)
+        return
+
     server = get_mcp_server()
 
     # Ensure server is initialized

@@ -3376,5 +3376,74 @@
   },
   "dataManagement_navTitle": {
     "message": "Dataadministrasjon"
+  },
+  "navigation_setupRecovery": {
+    "message": "Oppsett og gjenoppretting"
+  },
+  "navigation_preferencesWorkflow": {
+    "message": "Innstillinger og arbeidsflyt"
+  },
+  "navigation_dataAdmin": {
+    "message": "Data og administrasjon"
+  },
+  "preferencesSettings_navTitle": {
+    "message": "Innstillinger"
+  },
+  "preferencesSettings_title": {
+    "message": "Generelle innstillinger"
+  },
+  "setupRecovery_title": {
+    "message": "Oppsett og gjenoppretting"
+  },
+  "quickIngestSettings_ocrDefaults_title": {
+    "message": "OCR-standarder"
+  },
+  "quickIngestSettings_ocrDefaults_description": {
+    "message": "Brukes av importflyter som trekker ut tekst fra bilder eller skannede dokumenter."
+  },
+  "sidepanelSettings_shortcuts_title": {
+    "message": "Innstillingssnarveier"
+  },
+  "sidepanelSettings_shortcuts_description": {
+    "message": "Gå til den fulle innstillingssiden som eier endringen."
+  },
+  "sidepanelSettings_shortcuts_setupRecovery_label": {
+    "message": "Oppsett og gjenoppretting"
+  },
+  "sidepanelSettings_shortcuts_setupRecovery_description": {
+    "message": "Tilkobling, autentisering, leverandørnøkler, modeller og diagnostikk."
+  },
+  "sidepanelSettings_shortcuts_preferences_label": {
+    "message": "Innstillinger"
+  },
+  "sidepanelSettings_shortcuts_preferences_description": {
+    "message": "Språk, varsler, persona, veiledninger og nettsøk."
+  },
+  "sidepanelSettings_shortcuts_ui_label": {
+    "message": "UI-tilpasning"
+  },
+  "sidepanelSettings_shortcuts_ui_description": {
+    "message": "Tema, snarveier, visningsstandarder og visuell oppførsel."
+  },
+  "sidepanelSettings_shortcuts_dataAdmin_label": {
+    "message": "Data og administrasjon"
+  },
+  "sidepanelSettings_shortcuts_dataAdmin_description": {
+    "message": "Datahåndtering, moderering, evalueringer og adminverktøy."
+  },
+  "sidepanelSettings_shortcuts_serverAuth_label": {
+    "message": "Server og autentisering"
+  },
+  "sidepanelSettings_shortcuts_serverAuth_description": {
+    "message": "Endre server-URL eller API-nøkkel."
+  },
+  "sidepanelSettings_shortcuts_health_label": {
+    "message": "Full diagnostikk"
+  },
+  "sidepanelSettings_shortcuts_health_description": {
+    "message": "Åpne detaljerte server- og undersystemkontroller."
+  },
+  "sidepanelSettings_local_title": {
+    "message": "Sidepaneloppførsel"
   }
 }

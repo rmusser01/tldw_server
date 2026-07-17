@@ -19,6 +19,10 @@ describe("voice conversation cross-surface contract", () => {
     expect(sidepanelFormSource).toContain("voiceConversationAvailability.message")
     expect(playgroundFormSource).toContain("voiceConversationAvailability.available")
     expect(sidepanelFormSource).toContain("voiceConversationAvailability.available")
+    expect(playgroundFormSource).toContain("isVoiceConversationAuthReady(")
+    expect(sidepanelFormSource).toContain("isVoiceConversationAuthReady(")
+    expect(playgroundFormSource).toContain("canonicalConnectionConfig?.authSource")
+    expect(sidepanelFormSource).toContain("canonicalConnectionConfig?.authSource")
   })
 
   it("routes voice chat runtime failures through normalized interruption handling", () => {

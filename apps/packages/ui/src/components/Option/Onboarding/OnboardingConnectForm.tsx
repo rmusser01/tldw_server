@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef, useReducer, type ReactNode } from "react"
-import { Input, Button, Tooltip, message, Select } from "antd"
+import { Input, Button, Checkbox, Tooltip, message, Select } from "antd"
 import type { InputRef } from "antd"
 import {
   Check,
@@ -28,7 +28,7 @@ import { useTranslation } from "react-i18next"
 import { useStorage } from "@plasmohq/storage/hook"
 import { useNavigate } from "react-router-dom"
 import { DOCUMENTATION_URL } from "@/config/constants"
-import { tldwClient } from "@/services/tldw/TldwApiClient"
+import { tldwClient, type TldwConfig } from "@/services/tldw/TldwApiClient"
 import { tldwAuth } from "@/services/tldw/TldwAuth"
 import { mapMultiUserLoginErrorMessage } from "@/services/auth-errors"
 import { emitSplashAfterSingleUserAuthSuccess } from "@/services/splash-auth"
@@ -70,6 +70,7 @@ import {
   validateMagicLinkAuth,
   categorizeConnectionError,
   isConnectivityErrorKind,
+  shouldClearManualApiKeyForServerChange,
   type ConnectionErrorKind,
   type ValidationResult,
 } from "./validation"
@@ -295,6 +296,8 @@ export function OnboardingConnectForm({
   const [serverUrl, setServerUrl] = useState("")
   const [authMode, setAuthMode] = useState<AuthMode>("single-user")
   const [apiKey, setApiKey] = useState(DEFAULT_TLDW_API_KEY)
+  const [rememberApiKey, setRememberApiKey] = useState(true)
+  const [authSource, setAuthSource] = useState<TldwConfig["authSource"]>()
   const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
   const [loginMethod, setLoginMethod] = useState<LoginMethod>("magic-link")
@@ -435,6 +438,7 @@ export function OnboardingConnectForm({
 
   const urlInputRef = useRef<InputRef | null>(null)
   const apiKeyInputRef = useRef<InputRef | null>(null)
+  const configuredApiKeyServerUrlRef = useRef("")
   const usernameInputRef = useRef<InputRef | null>(null)
   const magicEmailInputRef = useRef<InputRef | null>(null)
   const hasLoadedInitialConfigRef = useRef(false)
@@ -448,9 +452,18 @@ export function OnboardingConnectForm({
       try {
         actions.beginOnboarding()
         const cfg = await tldwClient.getConfig()
-        if (cfg?.serverUrl) setServerUrl(cfg.serverUrl)
+        if (cfg?.serverUrl) {
+          setServerUrl(cfg.serverUrl)
+          configuredApiKeyServerUrlRef.current = cfg.serverUrl
+        }
         if (cfg?.authMode) setAuthMode(cfg.authMode)
-        if (cfg?.apiKey) setApiKey(cfg.apiKey)
+        if (cfg?.authSource) setAuthSource(cfg.authSource)
+        if (cfg?.apiKeyPersistence) {
+          setRememberApiKey(cfg.apiKeyPersistence === "device")
+        }
+        if (cfg?.apiKey) {
+          setApiKey(cfg.apiKey)
+        }
 
         if (!cfg?.serverUrl) {
           const fallback = await getTldwServerURL()
@@ -511,7 +524,8 @@ export function OnboardingConnectForm({
 
   const authValidation = useMemo(() => {
     if (authMode === "single-user") {
-      const missingApiKey = apiKey.trim().length === 0
+      const missingApiKey =
+        authSource !== "cookie-session" && apiKey.trim().length === 0
       return {
         valid: !missingApiKey,
         missingApiKey,
@@ -545,7 +559,7 @@ export function OnboardingConnectForm({
       missingMagicEmail: false,
       missingMagicToken: false,
     }
-  }, [authMode, apiKey, username, password, loginMethod, magicEmail, magicToken])
+  }, [authMode, authSource, apiKey, username, password, loginMethod, magicEmail, magicToken])
 
   const showAuthErrors = authTouched && !authValidation.valid
 
@@ -614,7 +628,9 @@ export function OnboardingConnectForm({
           )
         }
       })
-      await actions.setConfigPartial({ serverUrl })
+      if (authMode !== "single-user") {
+        await actions.setConfigPartial({ serverUrl })
+      }
 
       // Give a moment for the UI to show "checking"
       await new Promise((r) => setTimeout(r, 300))
@@ -635,9 +651,38 @@ export function OnboardingConnectForm({
         authResult = await validateMultiUserAuth(username, password, t)
       } else if (authMode === "multi-user" && loginMethod === "magic-link" && magicToken) {
         authResult = await validateMagicLinkAuth(magicToken, t)
-      } else if (authMode === "single-user" && apiKey) {
+      } else if (
+        authMode === "single-user" &&
+        authSource !== "cookie-session" &&
+        apiKey
+      ) {
         // Validate API key before saving
-        authResult = await validateApiKey(serverUrl, apiKey, t)
+        const requestedPersistence = rememberApiKey ? "device" : "session"
+        authResult = await validateApiKey(
+          serverUrl,
+          apiKey,
+          t,
+          requestedPersistence
+        )
+        if (authResult.success && authResult.persistence === "memory") {
+          message.warning(
+            t(
+              "settings:onboarding.rememberApiKey.memoryFallback",
+              "This key is available only on this page and will be lost on reload."
+            )
+          )
+        } else if (
+          authResult.success &&
+          requestedPersistence === "device" &&
+          authResult.persistence === "session"
+        ) {
+          message.warning(
+            t(
+              "settings:onboarding.rememberApiKey.deviceFallback",
+              "Couldn’t remember the key on this device; it will be kept until this browser closes."
+            )
+          )
+        }
       }
 
       if (authResult && !authResult.success) {
@@ -661,10 +706,12 @@ export function OnboardingConnectForm({
         return
       }
 
-      await actions.setConfigPartial({
-        authMode,
-        apiKey: authMode === "single-user" ? apiKey : undefined,
-      })
+      if (authMode === "single-user") {
+        configuredApiKeyServerUrlRef.current = serverUrl
+        await actions.setConfigPartial({ serverUrl, authMode })
+      } else {
+        await actions.setConfigPartial({ authMode })
+      }
 
       // Phase 3: Run full connection test (authentication is verified here)
       dispatchUi({
@@ -738,7 +785,9 @@ export function OnboardingConnectForm({
     authValidation.valid,
     serverUrl,
     authMode,
+    authSource,
     apiKey,
+    rememberApiKey,
     username,
     password,
     loginMethod,
@@ -1602,7 +1651,22 @@ export function OnboardingConnectForm({
                 "http://127.0.0.1:8000"
               )}
               value={serverUrl}
-              onChange={(e) => setServerUrl(e.target.value)}
+              onChange={(e) => {
+                const nextServerUrl = e.target.value
+                if (
+                  apiKey &&
+                  (configuredApiKeyServerUrlRef.current
+                    ? shouldClearManualApiKeyForServerChange(
+                        configuredApiKeyServerUrlRef.current,
+                        nextServerUrl
+                      )
+                    : nextServerUrl !== serverUrl)
+                ) {
+                  setApiKey("")
+                  setAuthSource(undefined)
+                }
+                setServerUrl(nextServerUrl)
+              }}
               status={
                 serverUrl && !urlValidation.valid ? "error" : undefined
               }
@@ -1721,7 +1785,25 @@ export function OnboardingConnectForm({
         </div>
 
         {/* Auth Fields — extension always uses API key, even if server is multi-user */}
-        {authMode === "single-user" || (authMode === "multi-user" && isExtensionRuntime()) ? (
+        {authMode === "single-user" && authSource === "cookie-session" ? (
+          <div
+            className="rounded-xl border border-success/30 bg-success/10 px-3 py-2"
+            role="status"
+          >
+            <p className="text-sm font-medium text-text">
+              {t(
+                "settings:onboarding.rememberApiKey.cookieSession",
+                "Connected securely through this WebUI."
+              )}
+            </p>
+            <p className="mt-1 text-xs text-text-muted">
+              {t(
+                "settings:onboarding.rememberApiKey.cookieSessionHelp",
+                "Your API key stays on the server and is not stored in this browser."
+              )}
+            </p>
+          </div>
+        ) : authMode === "single-user" || (authMode === "multi-user" && isExtensionRuntime()) ? (
           <div>
             <label className="mb-1.5 flex items-center gap-2 text-sm font-medium text-text">
               <Key className="size-4" />
@@ -1735,7 +1817,17 @@ export function OnboardingConnectForm({
                 "Enter your API key"
               )}
               value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
+              onChange={(e) => {
+                const nextApiKey = e.target.value
+                if (nextApiKey && !configuredApiKeyServerUrlRef.current) {
+                  if (urlValidation.valid) {
+                    configuredApiKeyServerUrlRef.current = serverUrl
+                  }
+                } else if (!nextApiKey) {
+                  configuredApiKeyServerUrlRef.current = ""
+                }
+                setApiKey(nextApiKey)
+              }}
               disabled={isConnecting}
               size="large"
               className="rounded-2xl"
@@ -1767,6 +1859,29 @@ export function OnboardingConnectForm({
                 )}
               </p>
             )}
+            <div className="mt-3">
+              <Checkbox
+                checked={rememberApiKey}
+                disabled={isConnecting}
+                onChange={(event) => setRememberApiKey(event.target.checked)}
+              >
+                {t(
+                  "settings:onboarding.rememberApiKey.label",
+                  "Remember on this device"
+                )}
+              </Checkbox>
+              <p className="mt-1 text-xs text-text-muted">
+                {rememberApiKey
+                  ? t(
+                      "settings:onboarding.rememberApiKey.deviceHelp",
+                      "Stores this API key in this browser until you disconnect or clear browser data. Turn this off on a shared device."
+                    )
+                  : t(
+                      "settings:onboarding.rememberApiKey.sessionHelp",
+                      "Keep signed in until this browser closes."
+                    )}
+              </p>
+            </div>
           </div>
         ) : (
           <div className="space-y-3">

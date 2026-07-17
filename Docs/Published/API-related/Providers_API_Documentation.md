@@ -198,8 +198,24 @@ Tip: For chat-only models, use `/api/v1/llm/models?type=chat`.
       "id": "image/stable_diffusion_cpp",
       "name": "stable_diffusion_cpp",
       "type": "image",
-      "capabilities": {"image_generation": true},
+      "capabilities": {
+        "image_generation": true,
+        "image_reference_input": false
+      },
       "modalities": {"input": ["text"], "output": ["image"]},
+      "supported_formats": ["png", "jpg", "webp"],
+      "is_configured": true
+    },
+    {
+      "provider": "image",
+      "id": "image/modelstudio",
+      "name": "modelstudio",
+      "type": "image",
+      "capabilities": {
+        "image_generation": true,
+        "image_reference_input": true
+      },
+      "modalities": {"input": ["text", "image"], "output": ["image"]},
       "supported_formats": ["png", "jpg", "webp"],
       "is_configured": true
     }
@@ -207,6 +223,11 @@ Tip: For chat-only models, use `/api/v1/llm/models?type=chat`.
   "total": 2
 }
 ```
+
+Image capability notes:
+- `capabilities.image_reference_input` indicates whether the backend or resolved backend/model combination accepts a managed image reference input for `POST /api/v1/files/create`.
+- Clients should treat missing or false `image_reference_input` as unsupported and avoid assuming prompt-only fallback.
+- Reference-guided requests use `payload.reference_file_id` and are expected to source eligible files from `GET /api/v1/files/reference-images`.
 
 ## Notes
 - The presence and values for models depend on your `tldw_Server_API/Config_Files/config.txt` and environment variables. Some providers may be listed as not configured if API keys or endpoints are missing.

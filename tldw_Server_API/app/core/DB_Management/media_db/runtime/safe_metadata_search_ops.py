@@ -66,9 +66,13 @@ def search_by_safe_metadata(
                     params.append(xform(val))
                 else:
                     if op == "eq":
-                        frag = f'"{field}":"{val}"'
-                        filter_exprs.append("dv.safe_metadata LIKE ?")
-                        params.append(f"%{frag}%")
+                        filter_exprs.append("(dv.safe_metadata LIKE ? OR dv.safe_metadata LIKE ?)")
+                        params.extend(
+                            [
+                                f'%"{field}":"{val}"%',
+                                f'%"{field}": "{val}"%',
+                            ]
+                        )
                     elif op == "icontains":
                         filter_exprs.append("LOWER(dv.safe_metadata) LIKE ?")
                         params.append(f"%{str(val).lower()}%")

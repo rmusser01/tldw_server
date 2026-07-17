@@ -3376,5 +3376,74 @@
   },
   "dataManagement_navTitle": {
     "message": "データ管理"
+  },
+  "navigation_setupRecovery": {
+    "message": "セットアップと復旧"
+  },
+  "navigation_preferencesWorkflow": {
+    "message": "設定とワークフロー"
+  },
+  "navigation_dataAdmin": {
+    "message": "データと管理"
+  },
+  "preferencesSettings_navTitle": {
+    "message": "設定"
+  },
+  "preferencesSettings_title": {
+    "message": "一般設定"
+  },
+  "setupRecovery_title": {
+    "message": "セットアップと復旧"
+  },
+  "quickIngestSettings_ocrDefaults_title": {
+    "message": "OCR の既定値"
+  },
+  "quickIngestSettings_ocrDefaults_description": {
+    "message": "画像やスキャン文書からテキストを抽出する取り込みフローで使用されます。"
+  },
+  "sidepanelSettings_shortcuts_title": {
+    "message": "設定ショートカット"
+  },
+  "sidepanelSettings_shortcuts_description": {
+    "message": "変更を管理する完全な設定ページへ移動します。"
+  },
+  "sidepanelSettings_shortcuts_setupRecovery_label": {
+    "message": "セットアップと復旧"
+  },
+  "sidepanelSettings_shortcuts_setupRecovery_description": {
+    "message": "接続、認証、プロバイダーキー、モデル、診断。"
+  },
+  "sidepanelSettings_shortcuts_preferences_label": {
+    "message": "設定"
+  },
+  "sidepanelSettings_shortcuts_preferences_description": {
+    "message": "言語、通知、ペルソナ、チュートリアル、Web 検索。"
+  },
+  "sidepanelSettings_shortcuts_ui_label": {
+    "message": "UI カスタマイズ"
+  },
+  "sidepanelSettings_shortcuts_ui_description": {
+    "message": "テーマ、ショートカット、表示既定値、視覚的な動作。"
+  },
+  "sidepanelSettings_shortcuts_dataAdmin_label": {
+    "message": "データと管理"
+  },
+  "sidepanelSettings_shortcuts_dataAdmin_description": {
+    "message": "データ管理、モデレーション、評価、管理ツール。"
+  },
+  "sidepanelSettings_shortcuts_serverAuth_label": {
+    "message": "サーバーと認証"
+  },
+  "sidepanelSettings_shortcuts_serverAuth_description": {
+    "message": "サーバー URL または API キーを変更します。"
+  },
+  "sidepanelSettings_shortcuts_health_label": {
+    "message": "完全な診断"
+  },
+  "sidepanelSettings_shortcuts_health_description": {
+    "message": "サーバーとサブシステムの詳細チェックを開きます。"
+  },
+  "sidepanelSettings_local_title": {
+    "message": "サイドパネルの動作"
   }
 }

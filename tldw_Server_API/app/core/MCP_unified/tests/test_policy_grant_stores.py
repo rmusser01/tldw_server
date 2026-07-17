@@ -50,6 +50,30 @@ def test_memory_store_creates_and_finds_normalized_approval_grant() -> None:
     assert found.grant_id == grant.grant_id
 
 
+def test_memory_store_normalizes_skill_approval_grants() -> None:
+    from mcp_unified.policy_grants import InMemoryPolicyGrantStore
+
+    store = InMemoryPolicyGrantStore()
+    grant = store.create_grant(
+        profile_id="researcher",
+        grant_type="approval",
+        subject_type="skill",
+        value="Review-Paper",
+        ttl_seconds=900,
+    )
+
+    assert grant.value == "review-paper"
+    assert (
+        store.find_active_grant(
+            profile_id="researcher",
+            grant_type="approval",
+            subject_type="skill",
+            value="REVIEW-PAPER",
+        )
+        == grant
+    )
+
+
 def test_memory_store_find_misses_on_mismatched_dimensions() -> None:
     from mcp_unified.policy_grants import InMemoryPolicyGrantStore
 
@@ -100,8 +124,8 @@ def test_memory_store_expired_grant_is_not_found(monkeypatch: pytest.MonkeyPatch
     store.create_grant(
         profile_id="researcher",
         grant_type="approval",
-        subject_type="domain",
-        value="example.com",
+        subject_type="skill",
+        value="Review-Paper",
         ttl_seconds=10,
     )
 
@@ -110,8 +134,8 @@ def test_memory_store_expired_grant_is_not_found(monkeypatch: pytest.MonkeyPatch
         store.find_active_grant(
             profile_id="researcher",
             grant_type="approval",
-            subject_type="domain",
-            value="example.com",
+            subject_type="skill",
+            value="review-paper",
         )
         is None
     )
@@ -262,7 +286,7 @@ def test_memory_store_rejects_invalid_grants() -> None:
         store.create_grant(
             profile_id="researcher",
             grant_type="approval",
-            subject_type="skill",
+            subject_type="unknown",
             value="anything",
             ttl_seconds=900,
         )
@@ -318,14 +342,14 @@ def test_sqlite_store_persists_grants_across_instances(tmp_path: Path) -> None:
         grant = first.create_grant(
             profile_id="researcher",
             grant_type="approval",
-            subject_type="domain",
-            value="https://Example.com/private",
+            subject_type="skill",
+            value="Review-Paper",
             ttl_seconds=900,
             session_id="session-1",
             granted_by="operator",
             reason="one-off research fetch",
         )
-        assert grant.value == "example.com"
+        assert grant.value == "review-paper"
     finally:
         first.close()
 
@@ -334,8 +358,8 @@ def test_sqlite_store_persists_grants_across_instances(tmp_path: Path) -> None:
         found = second.find_active_grant(
             profile_id="researcher",
             grant_type="approval",
-            subject_type="domain",
-            value="example.com",
+            subject_type="skill",
+            value="REVIEW-PAPER",
             session_id="session-1",
         )
         assert found is not None
@@ -348,8 +372,8 @@ def test_sqlite_store_persists_grants_across_instances(tmp_path: Path) -> None:
             second.find_active_grant(
                 profile_id="researcher",
                 grant_type="approval",
-                subject_type="domain",
-                value="example.com",
+                subject_type="skill",
+                value="review-paper",
                 session_id="session-1",
             )
             is None
@@ -371,8 +395,8 @@ def test_sqlite_store_expired_grant_is_not_found(
         store.create_grant(
             profile_id="researcher",
             grant_type="approval",
-            subject_type="domain",
-            value="example.com",
+            subject_type="skill",
+            value="Review-Paper",
             ttl_seconds=10,
         )
 
@@ -381,8 +405,8 @@ def test_sqlite_store_expired_grant_is_not_found(
             store.find_active_grant(
                 profile_id="researcher",
                 grant_type="approval",
-                subject_type="domain",
-                value="example.com",
+                subject_type="skill",
+                value="review-paper",
             )
             is None
         )

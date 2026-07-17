@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import AnyUrl, BaseModel, ConfigDict, Field, field_validator, model_validator
+
 from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
 
 SourceType = Literal["rss", "site", "forum"]  # forums are feature-flagged for Phase 3
-WatchlistDomain = Literal["cti_osint", "news", "general"]
+WatchlistDomain = Literal["cti_osint", "news", "sports", "culture", "creator", "general"]
 WatchlistStatus = Literal["active", "paused", "archived"]
 WatchlistPriority = Literal["low", "medium", "high", "critical"]
 WatchlistContentAlertRuleKind = Literal["keyword", "regex", "descriptor", "classification", "entity", "ioc", "cve"]
@@ -435,6 +437,16 @@ class JobCreateRequest(BaseModel):
         description="Optional job-level filters payload (bridge from SUBS Import Rules)",
     )
     watchlist_id: int | None = Field(default=None, ge=1)
+
+
+class WatchlistSchedulePreviewRequest(BaseModel):
+    schedule_expr: str = Field(min_length=1, max_length=255)
+    timezone: str = Field(default="UTC", min_length=1, max_length=128)
+
+
+class WatchlistSchedulePreviewResponse(BaseModel):
+    next_run_at: datetime | None
+    following_run_at: datetime | None
 
 
 class JobUpdateRequest(BaseModel):
@@ -1035,6 +1047,136 @@ class WatchlistRunAudioResponse(BaseModel):
     stale: bool | None = None
     superseded_by: str | int | None = None
     error: str | None = None
+
+
+class WatchlistBriefingStage(BaseModel):
+    """Typed status for one briefing fulfillment stage."""
+
+    status: Literal["not_started", "queued", "running", "ready", "failed", "skipped", "cancelled"]
+    code: str | None = None
+    retryable: bool = False
+    started_at: str | None = None
+    finished_at: str | None = None
+    outcome: Literal["sending", "successful", "partial", "failed", "unknown"] | None = None
+    artifact_id: str | int | None = None
+    artifact_version: int | None = None
+    attempt_count: int | None = None
+    audio_request_id: str | None = None
+    scheduler_task_id: str | None = None
+    task_id: str | None = None
+    workflow_run_id: str | None = None
+
+
+class WatchlistBriefingCastSpeaker(BaseModel):
+    """Public, bounded speaker identity for the latest briefing surface."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    label: str = Field(..., min_length=1, max_length=128)
+    role: str | None = Field(default=None, max_length=128)
+    voice: str | None = Field(default=None, max_length=128)
+    synthetic: bool = True
+
+
+class WatchlistBriefingCast(BaseModel):
+    """Public cast summary without internal IDs or persona configuration."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    speaker_count: int = Field(..., ge=0, le=4)
+    speakers: list[WatchlistBriefingCastSpeaker] = Field(default_factory=list, max_length=4)
+
+
+class WatchlistBriefingShowIdentity(BaseModel):
+    """Bounded public show identity."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(default=None, max_length=128)
+    premise: str | None = Field(default=None, max_length=280)
+
+
+class WatchlistBriefingEditorial(BaseModel):
+    """Allowlisted editorial fields needed by the latest briefing UI."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    program_format: Literal[
+        "concise_briefing",
+        "solo_update",
+        "host_discussion",
+        "sportscast",
+        "culture_roundtable",
+        "custom",
+    ] = "concise_briefing"
+    outcome_noun: Literal["briefing", "episode"] = "briefing"
+    show_name: str | None = Field(default=None, max_length=128)
+    show_identity: WatchlistBriefingShowIdentity = Field(default_factory=WatchlistBriefingShowIdentity)
+    show_notes: bool = False
+    target_minutes: int | None = Field(default=None, ge=1, le=60)
+    cast: WatchlistBriefingCast | None = None
+
+
+class WatchlistBriefingDeliverySummary(BaseModel):
+    """Privacy-safe destination summary for one delivery adapter."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    adapter: Literal["email", "chatbook"]
+    recipient_count: int = Field(default=0, ge=0, le=1000)
+    masked_label: str = Field(..., min_length=1, max_length=128)
+
+
+class WatchlistBriefingProjection(BaseModel):
+    """Effective artifact and delivery state for one briefing occurrence."""
+
+    occurrence_id: int
+    run_id: int
+    job_id: int
+    artifact_status: Literal["running", "ready", "failed", "cancelled"]
+    delivery_status: Literal[
+        "not_configured",
+        "waiting_for_artifacts",
+        "delivering",
+        "delivered",
+        "partially_delivered",
+        "failed",
+        "unknown",
+    ]
+    stages: dict[str, WatchlistBriefingStage]
+    output: dict[str, Any] | None = None
+    audio: WatchlistRunAudioResponse | None = None
+    editorial: WatchlistBriefingEditorial = Field(default_factory=WatchlistBriefingEditorial)
+    delivery: dict[str, WatchlistBriefingDeliverySummary] = Field(default_factory=dict)
+    selection: dict[str, int] = Field(default_factory=dict)
+    next_run_at: str | None = None
+    timezone: str = "UTC"
+    recovery: dict[str, bool] = Field(default_factory=dict)
+
+
+class WatchlistBriefingRetryRequest(BaseModel):
+    """Narrow retry request for one safe briefing stage or delivery adapter."""
+
+    stage: str
+    regenerate: bool = False
+    confirm_unknown_delivery_retry: bool = False
+
+    @field_validator("stage")
+    @classmethod
+    def _validate_stage(cls, value: str) -> str:
+        allowed = {
+            "render_text",
+            "persist_text",
+            "compose_audio_script",
+            "persist_audio_script",
+            "generate_audio",
+            "persist_audio",
+            "deliver:email",
+            "deliver:chatbook",
+        }
+        if value not in allowed:
+            raise ValueError("unsupported_briefing_retry_stage")
+        return value
 
 
 class WatchlistOutputCreateRequest(BaseModel):

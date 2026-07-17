@@ -249,6 +249,89 @@ describe("submitQuickIngestBatch", () => {
     })
   })
 
+  it("marks duplicate direct HTML scrape responses as skipped", async () => {
+    mocks.bgRequest.mockResolvedValue({
+      status: "duplicate",
+      media_ids: [],
+      total_articles: 1,
+      stored_articles: 0,
+      skipped_articles: 1,
+      duplicate_articles: 1,
+      errors: null
+    })
+
+    const result = await submitQuickIngestBatch({
+      entries: [
+        {
+          id: "entry-duplicate-html",
+          url: "http://localhost:8080/e2e/quick-ingest-source.html?repeat=1",
+          type: "html"
+        }
+      ],
+      files: [],
+      storeRemote: true,
+      processOnly: false,
+      common: {
+        perform_analysis: false,
+        perform_chunking: false,
+        overwrite_existing: false
+      },
+      advancedValues: {},
+      __quickIngestSessionId: "qi-direct-duplicate-html"
+    })
+
+    expect(result.ok).toBe(true)
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/media/process-web-scraping",
+        method: "POST"
+      })
+    )
+    expect(result.results?.[0]).toMatchObject({
+      id: "entry-duplicate-html",
+      status: "ok",
+      outcome: "skipped",
+      message: DUPLICATE_SKIP_MESSAGE
+    })
+  })
+
+  it("surfaces direct HTML scrape responses with zero stored articles as failed", async () => {
+    mocks.bgRequest.mockResolvedValue({
+      status: "persist-ok",
+      media_ids: [],
+      total_articles: 1,
+      stored_articles: 0,
+      errors: ["Failed to extract: http://localhost:8080/e2e/source.html"]
+    })
+
+    const result = await submitQuickIngestBatch({
+      entries: [
+        {
+          id: "entry-failed-html",
+          url: "http://localhost:8080/e2e/source.html",
+          type: "html"
+        }
+      ],
+      files: [],
+      storeRemote: true,
+      processOnly: false,
+      common: {
+        perform_analysis: false,
+        perform_chunking: false,
+        overwrite_existing: false
+      },
+      advancedValues: {},
+      __quickIngestSessionId: "qi-direct-failed-html"
+    })
+
+    expect(result.ok).toBe(true)
+    expect(result.results?.[0]).toMatchObject({
+      id: "entry-failed-html",
+      status: "error",
+      error: "Failed to extract: http://localhost:8080/e2e/source.html"
+    })
+  })
+
   it("defaults perform_chunking to true when common options are omitted", async () => {
     mocks.bgUpload.mockResolvedValue({
       batch_id: "batch-default-chunking",
@@ -1048,6 +1131,45 @@ describe("submitQuickIngestBatch", () => {
     })
   })
 
+  it.each([true, false])(
+    "maps perform_analysis=%s to summarize_checkbox without extraction-order fields",
+    async (performAnalysis) => {
+      mocks.bgRequest.mockResolvedValue({
+        status: "persist-ok",
+        media_ids: [123],
+        total_articles: 1
+      })
+
+      await submitQuickIngestBatch({
+        entries: [
+          {
+            id: `entry-analysis-${performAnalysis}`,
+            url: "https://example.com/article",
+            type: "html"
+          }
+        ],
+        files: [],
+        storeRemote: true,
+        processOnly: false,
+        common: {
+          perform_analysis: performAnalysis,
+          perform_chunking: true,
+          overwrite_existing: false
+        },
+        advancedValues: {}
+      })
+
+      const scrapeCall = mocks.bgRequest.mock.calls.find(
+        ([request]) => request?.path === "/api/v1/media/process-web-scraping"
+      )
+      const body = scrapeCall?.[0]?.body
+
+      expect(body).toMatchObject({ summarize_checkbox: performAnalysis })
+      expect(body).not.toHaveProperty("strategy_order")
+      expect(body).not.toHaveProperty("extraction_strategy_order")
+    }
+  )
+
   it("keeps direct Markdown URLs on the document ingest job route", async () => {
     mocks.bgUpload.mockResolvedValue({
       batch_id: "batch-markdown-url",
@@ -1486,6 +1608,134 @@ describe("submitQuickIngestBatch", () => {
         durableMode: "durable_collection"
       })
     )
+  })
+
+  it.each([
+    {
+      label: "duplicate",
+      terminalData: {
+        status: "duplicate",
+        media_ids: [],
+        stored_articles: 0,
+        duplicate_articles: 1,
+        errors: null
+      },
+      expectedStatus: "skipped_existing"
+    },
+    {
+      label: "result error",
+      terminalData: {
+        status: "persist-ok",
+        media_ids: [],
+        stored_articles: 0,
+        errors: ["Storage failed for article"]
+      },
+      expectedStatus: "failed"
+    },
+    {
+      label: "duplicate with result error",
+      terminalData: {
+        status: "duplicate",
+        media_ids: [],
+        stored_articles: 0,
+        duplicate_articles: 1,
+        errors: ["Storage failed for article"]
+      },
+      expectedStatus: "skipped_existing"
+    },
+    {
+      label: "ordinary success",
+      terminalData: {
+        status: "persist-ok",
+        media_ids: [901],
+        stored_articles: 1,
+        errors: null
+      },
+      expectedStatus: "completed"
+    }
+  ])("patches a conference item to $expectedStatus for $label", async ({
+    terminalData,
+    expectedStatus
+  }) => {
+    mocks.bgRequest.mockImplementation(async (request: { path?: string; body?: any }) => {
+      const path = String(request?.path || "")
+      if (path === "/api/v1/media/collections") {
+        return {
+          id: 13,
+          name: "Conference Batch",
+          kind: "conference",
+          metadata: {},
+          default_tags: [],
+          items: []
+        }
+      }
+      if (path === "/api/v1/media/collections/13/items") {
+        return {
+          id: 131,
+          collection_id: 13,
+          ordinal: 1,
+          source_url: request.body?.source_url,
+          duplicate_status: "new",
+          status: "planned",
+          retry_count: 0,
+          warnings: [],
+          metadata: {},
+          tags: []
+        }
+      }
+      if (path === "/api/v1/media/process-web-scraping") {
+        return terminalData
+      }
+      if (path === "/api/v1/media/collections/13/items/131") {
+        return {
+          id: 131,
+          collection_id: 13,
+          source_url: "https://example.com/talk",
+          status: request.body?.status
+        }
+      }
+      throw new Error(`Unexpected bgRequest path: ${path}`)
+    })
+
+    await submitQuickIngestBatch({
+      entries: [
+        {
+          id: "conference-html",
+          url: "https://example.com/talk",
+          type: "html",
+          conferenceOverride: { selected: true, title: "Conference Talk" }
+        }
+      ],
+      files: [],
+      storeRemote: true,
+      processOnly: false,
+      conferenceBatchMetadata: {
+        collectionName: "Conference Batch",
+        sharedTags: []
+      },
+      common: {
+        perform_analysis: false,
+        perform_chunking: false,
+        overwrite_existing: false
+      },
+      advancedValues: {}
+    } as any)
+
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/media/collections/13/items/131",
+        method: "PATCH",
+        body: expect.objectContaining({ status: expectedStatus })
+      })
+    )
+    const terminalPatchStatuses = mocks.bgRequest.mock.calls
+      .filter(
+        ([request]) =>
+          request?.path === "/api/v1/media/collections/13/items/131" &&
+          request?.method === "PATCH"
+      )
+      .map(([request]) => request.body?.status)
+    expect(terminalPatchStatuses).toEqual([expectedStatus])
   })
 
   it("skips direct ingest submission for existing conference items when policy includes existing", async () => {

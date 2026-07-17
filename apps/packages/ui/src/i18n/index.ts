@@ -20,6 +20,7 @@ const NAMESPACES = [
     "sources",
     "evaluations",
     "audiobook",
+    "watchlists",
     "tutorials"
 ] as const
 
@@ -69,7 +70,7 @@ const normalizeLanguage = (lng: string) => {
 
 // import.meta.glob is Vite-only; use empty object in Next.js/non-Vite environments
 const localeModules: Record<string, () => Promise<unknown>> =
-    typeof import.meta?.glob === "function"
+    typeof import.meta.glob === "function"
         ? import.meta.glob("../assets/locale/*/*.json")
         : {}
 const loadingNamespaces = new Map<string, Promise<void>>()

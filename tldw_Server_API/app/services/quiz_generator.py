@@ -5,7 +5,7 @@ import contextlib
 import json
 import time
 from collections.abc import Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
@@ -13,12 +13,22 @@ from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import DEFAULT_LLM_
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
 from tldw_Server_API.app.core.Chat.chat_helpers import extract_response_content
 from tldw_Server_API.app.core.Chat.chat_service import resolve_provider_api_key
+from tldw_Server_API.app.core.Claims_Extraction.artifact_verification import (
+    ArtifactVerificationResult,
+    ArtifactVerificationUnit,
+    verify_generated_artifact_against_sources,
+)
 from tldw_Server_API.app.core.config import load_and_log_configs
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.exceptions import BadRequestError
 from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
+from tldw_Server_API.app.core.RAG.rag_service.types import Document
 from tldw_Server_API.app.core.testing import is_test_mode
 from tldw_Server_API.app.services.quiz_source_resolver import resolve_quiz_sources
+
+if TYPE_CHECKING:
+    from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 
 DEFAULT_QUESTION_TYPES = ["multiple_choice", "true_false", "fill_blank"]
 SUPPORTED_GENERATED_QUESTION_TYPES = [
@@ -28,11 +38,116 @@ SUPPORTED_GENERATED_QUESTION_TYPES = [
     "true_false",
     "fill_blank",
 ]
+DEFAULT_GENERATION_PROFILE = "standard_recall"
+BEST_OF_FIVE_TAG = "best_of_five"
+ASSERTION_REASONING_TAG = "assertion_reasoning"
+ASSERTION_REASONING_OPTIONS = (
+    "Both the assertion and reason are true, and the reason correctly explains the assertion.",
+    "Both the assertion and reason are true, but the reason does not explain the assertion.",
+    "The assertion is true, but the reason is false.",
+    "The assertion is false, but the reason is true.",
+    "Both the assertion and reason are false.",
+)
 MAX_CONTENT_CHARS = 15000
+MAX_EMQ_GROUP_ID_LENGTH = 128
+MAX_EMQ_GROUP_PROMPT_LENGTH = 2000
+MAX_EMQ_OPTIONS = 10
+MAX_ASSERTION_REASONING_TEXT_LENGTH = 2000
+
+_QUIZ_GENERATION_PROFILES: list[dict[str, Any]] = [
+    {
+        "id": "standard_recall",
+        "label": "Standard Recall",
+        "description": "Balanced source-grounded recall and application questions.",
+        "status": "available",
+        "default_num_questions": 10,
+        "default_difficulty": "mixed",
+        "default_question_types": DEFAULT_QUESTION_TYPES,
+        "allowed_question_types": SUPPORTED_GENERATED_QUESTION_TYPES,
+        "prompt_instruction": "Use concise recall and application questions across the selected question types.",
+    },
+    {
+        "id": "mixed_assessment",
+        "label": "Mixed Assessment",
+        "description": "A broader mix of recall, interpretation, and applied understanding.",
+        "status": "available",
+        "default_num_questions": 10,
+        "default_difficulty": "mixed",
+        "default_question_types": DEFAULT_QUESTION_TYPES,
+        "allowed_question_types": SUPPORTED_GENERATED_QUESTION_TYPES,
+        "prompt_instruction": "Mix recall, interpretation, and applied understanding while preserving citations.",
+    },
+    {
+        "id": "best_of_five",
+        "label": "Best of Five",
+        "description": "Single-best-answer questions with five plausible options.",
+        "status": "available",
+        "default_num_questions": 5,
+        "default_difficulty": "mixed",
+        "default_question_types": ["multiple_choice"],
+        "allowed_question_types": ["multiple_choice"],
+        "prompt_instruction": (
+            "Best of Five: every question must be multiple_choice with exactly five answer options, "
+            "one best answer, and plausible distractors."
+        ),
+    },
+    {
+        "id": "emq",
+        "label": "EMQ",
+        "description": "Extended matching questions with shared option banks.",
+        "status": "available",
+        "default_num_questions": 5,
+        "default_difficulty": "mixed",
+        "default_question_types": ["multiple_choice"],
+        "allowed_question_types": ["multiple_choice"],
+        "prompt_instruction": (
+            "Create each group with one shared option bank and at least two stems; repeat the same "
+            "group_id, group_prompt, and options on every multiple_choice stem."
+        ),
+    },
+    {
+        "id": "assertion_reasoning",
+        "label": "Assertion / Reasoning",
+        "description": "Assertion and reason pairs with concise evidence-backed rationales.",
+        "status": "available",
+        "default_num_questions": 5,
+        "default_difficulty": "mixed",
+        "default_question_types": ["multiple_choice"],
+        "allowed_question_types": ["multiple_choice"],
+        "prompt_instruction": (
+            "Provide separate assertion and reason fields, then classify each pair using exactly one "
+            "canonical outcome: A. Both the assertion and reason are true, and the reason correctly "
+            "explains the assertion. B. Both the assertion and reason are true, but the reason does not "
+            "explain the assertion. C. The assertion is true, but the reason is false. D. The assertion "
+            "is false, but the reason is true. E. Both the assertion and reason are false. Include a "
+            "concise evidence-backed rationale. Do not provide hidden chain-of-thought."
+        ),
+    },
+    {
+        "id": "osce_scenario",
+        "label": "OSCE Scenario",
+        "description": "Scenario practice with checklist and rubric feedback.",
+        "status": "planned",
+        "default_num_questions": 3,
+        "default_difficulty": "mixed",
+        "default_question_types": ["fill_blank"],
+        "allowed_question_types": ["fill_blank"],
+        "prompt_instruction": "",
+    },
+]
+_PROFILE_BY_ID = {profile["id"]: profile for profile in _QUIZ_GENERATION_PROFILES}
 
 
 class QuizProvenanceValidationError(ValueError):
     """Raised when generated quiz questions fail strict source provenance validation."""
+
+
+class QuizClaimVerificationError(ValueError):
+    """Raised when generated quiz questions fail ClaimsEngine verification."""
+
+    def __init__(self, claim_verification: dict[str, Any]):
+        super().__init__("Quiz claim verification failed")
+        self.claim_verification = claim_verification
 
 
 QUIZ_GENERATION_PROMPT = """You are a quiz generator. Based on the following content, generate {num_questions} quiz questions.
@@ -53,8 +168,12 @@ Return a JSON object in this exact format:
     {{
       "question_type": "multiple_choice" | "true_false" | "fill_blank",
       "question_text": "The question text",
-      "options": ["A", "B", "C", "D"],
-      "correct_answer": 0 | 1 | 2 | 3 | "true" | "false" | "the answer",
+      "assertion": "Optional assertion for assertion_reasoning",
+      "reason": "Optional reason for assertion_reasoning",
+      "group_id": "Optional EMQ group identifier",
+      "group_prompt": "Optional shared EMQ group prompt",
+      "options": ["A", "B", "C", "D", "E if required by the profile"],
+      "correct_answer": 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | "true" | "false" | "the answer",
       "explanation": "Brief explanation of why this is correct",
       "hint": "Optional short hint shown on request",
       "hint_penalty_points": 0,
@@ -68,13 +187,17 @@ Return a JSON object in this exact format:
           "timestamp_seconds": 0
         }}
       ],
+      "tags": ["optional topic or difficulty tag"],
       "points": 1
     }}
   ]
 }}
 
 Important:
-- For multiple_choice: options must be array of 4 strings, correct_answer is 0-based index (0-3)
+- For multiple_choice: options must be an array of answer strings, correct_answer is the 0-based index
+- For Best of Five: multiple_choice options must be exactly 5 strings
+- For EMQ: create at least two stems per group; repeat one nonempty group_id, group_prompt, and shared bank of 2-10 options on every stem; correct_answer is a 0-based index into that bank
+- For Assertion / Reasoning: use multiple_choice, provide separate assertion and reason fields, use the canonical A-E outcomes from the profile instruction, and include a concise evidence-backed explanation. Do not provide hidden chain-of-thought, reasoning_steps, or chain_of_thought fields
 - For true_false: correct_answer must be exactly "true" or "false"
 - For fill_blank: question_text should contain ___ where answer goes, correct_answer is the word/phrase
 - hint_penalty_points must be a non-negative integer
@@ -117,19 +240,67 @@ def _normalize_question_type(value: Any) -> str | None:
     return aliases.get(text, text)
 
 
-def _coerce_question_types(question_types: Sequence[Any] | None) -> list[str]:
+def _normalize_generation_profile(value: Any) -> str:
+    raw = getattr(value, "value", value)
+    text = str(raw or DEFAULT_GENERATION_PROFILE).strip().lower().replace("-", "_")
+    aliases = {
+        "standard": "standard_recall",
+        "recall": "standard_recall",
+        "mixed": "mixed_assessment",
+        "bof": "best_of_five",
+        "best of five": "best_of_five",
+        "best-of-five": "best_of_five",
+        "assertion reasoning": "assertion_reasoning",
+        "assertion/reasoning": "assertion_reasoning",
+        "osce": "osce_scenario",
+    }
+    profile_id = aliases.get(text, text)
+    profile = _PROFILE_BY_ID.get(profile_id)
+    if profile is None:
+        raise BadRequestError(f"Unknown quiz generation profile: {raw}")
+    if profile["status"] != "available":
+        raise BadRequestError(f"Quiz generation profile '{profile_id}' is not available yet")
+    return profile_id
+
+
+def get_quiz_generation_profiles() -> list[dict[str, Any]]:
+    return [
+        {key: value for key, value in profile.items() if key not in {"allowed_question_types", "prompt_instruction"}}
+        for profile in _QUIZ_GENERATION_PROFILES
+    ]
+
+
+def _build_generation_profile_instruction(generation_profile: Any) -> str:
+    profile_id = _normalize_generation_profile(generation_profile)
+    profile = _PROFILE_BY_ID[profile_id]
+    return f"- Generation profile: {profile['label']}. {profile['prompt_instruction']}"
+
+
+def _coerce_question_types(
+    question_types: Sequence[Any] | None,
+    *,
+    generation_profile: Any = DEFAULT_GENERATION_PROFILE,
+) -> list[str]:
+    profile = _PROFILE_BY_ID[_normalize_generation_profile(generation_profile)]
+    defaults = list(profile["default_question_types"])
+    allowed_types = set(profile["allowed_question_types"])
     if not question_types:
-        return list(DEFAULT_QUESTION_TYPES)
+        return defaults
     normalized: list[str] = []
     for item in question_types:
         raw = getattr(item, "value", item)
         q_type = _normalize_question_type(raw)
-        if q_type in DEFAULT_QUESTION_TYPES and q_type not in normalized:
+        if q_type in SUPPORTED_GENERATED_QUESTION_TYPES and q_type in allowed_types and q_type not in normalized:
             normalized.append(q_type)
-    return normalized or list(DEFAULT_QUESTION_TYPES)
+    return normalized or defaults
 
 
-def _coerce_options(raw: Any, expected_count: int | None = None) -> list[str]:
+def _coerce_options(
+    raw: Any,
+    expected_count: int | None = None,
+    *,
+    max_options: int | None = 4,
+) -> list[str]:
     if isinstance(raw, list):
         options = [str(opt).strip() for opt in raw if str(opt).strip()]
     elif isinstance(raw, str):
@@ -147,9 +318,52 @@ def _coerce_options(raw: Any, expected_count: int | None = None) -> list[str]:
         if len(options) != expected_count:
             raise ValueError(f"Expected {expected_count} options, got {len(options)}")
         return options
-    if len(options) > 4:
-        options = options[:4]
+    if max_options is not None and len(options) > max_options:
+        options = options[:max_options]
     return options
+
+
+def _coerce_question_tags(raw: Any, *, generation_profile: Any) -> list[str] | None:
+    tags: list[str] = []
+    seen: set[str] = set()
+    profile_id = _normalize_generation_profile(generation_profile)
+
+    if isinstance(raw, list):
+        candidates = raw
+    elif isinstance(raw, str) and raw.strip():
+        candidates = [part.strip() for part in raw.replace(";", ",").split(",")]
+    else:
+        candidates = []
+
+    for candidate in candidates:
+        tag = str(candidate).strip()
+        if not tag:
+            continue
+        normalized = tag.lower().replace("-", "_").replace(" ", "_")
+        reserved_normalized = "_".join(
+            tag.lower().replace("-", " ").replace("_", " ").replace("/", " ").split()
+        )
+        if reserved_normalized in {BEST_OF_FIVE_TAG, "bof"}:
+            if profile_id != "best_of_five":
+                continue
+            tag = BEST_OF_FIVE_TAG
+            normalized = BEST_OF_FIVE_TAG
+        elif reserved_normalized == ASSERTION_REASONING_TAG:
+            if profile_id != ASSERTION_REASONING_TAG:
+                continue
+            tag = ASSERTION_REASONING_TAG
+            normalized = ASSERTION_REASONING_TAG
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        tags.append(tag)
+
+    if profile_id == "best_of_five" and BEST_OF_FIVE_TAG not in seen:
+        tags.append(BEST_OF_FIVE_TAG)
+    elif profile_id == ASSERTION_REASONING_TAG and ASSERTION_REASONING_TAG not in seen:
+        tags.append(ASSERTION_REASONING_TAG)
+
+    return tags or None
 
 
 def _normalize_mc_answer(raw: Any, options: list[str]) -> int:
@@ -166,7 +380,7 @@ def _normalize_mc_answer(raw: Any, options: list[str]) -> int:
         if 0 <= idx < len(options):
             return idx
         return 0
-    if len(text) == 1 and text.isalpha():
+    if options and len(text) == 1 and "A" <= text.upper() <= chr(ord("A") + len(options) - 1):
         idx = ord(text.upper()) - ord("A")
         if 0 <= idx < len(options):
             return idx
@@ -176,6 +390,147 @@ def _normalize_mc_answer(raw: Any, options: list[str]) -> int:
             if option.strip().lower() == text.lower():
                 return idx
     return 0
+
+
+def _normalize_emq_mc_answer(raw: Any, options: list[str]) -> int:
+    if isinstance(raw, bool):
+        raise ValueError("EMQ correct_answer must be a valid option index, letter, or exact label")
+    if isinstance(raw, int):
+        if 0 <= raw < len(options):
+            return raw
+        raise ValueError("EMQ correct_answer index is out of range")
+    if not isinstance(raw, str):
+        raise ValueError("EMQ correct_answer must be a valid option index, letter, or exact label")
+
+    text = raw.strip()
+    candidates: set[int] = set()
+    if text.isdigit():
+        index = int(text)
+        if 0 <= index < len(options):
+            candidates.add(index)
+    if len(text) == 1 and "A" <= text.upper() <= chr(ord("A") + len(options) - 1):
+        candidates.add(ord(text.upper()) - ord("A"))
+    candidates.update(index for index, option in enumerate(options) if option == text)
+
+    if len(candidates) == 1:
+        return candidates.pop()
+    if candidates:
+        raise ValueError("EMQ correct_answer is ambiguous")
+    raise ValueError("EMQ correct_answer must be a valid option index, letter, or exact label")
+
+
+def _normalize_assertion_reasoning_answer(raw: Any) -> int:
+    if isinstance(raw, bool):
+        raise ValueError("Assertion / Reasoning correct_answer must be an integer, A-E letter, or exact label")
+    if isinstance(raw, int):
+        if 0 <= raw < len(ASSERTION_REASONING_OPTIONS):
+            return raw
+        raise ValueError("Assertion / Reasoning correct_answer index is out of range")
+    if not isinstance(raw, str):
+        raise ValueError("Assertion / Reasoning correct_answer must be an integer, A-E letter, or exact label")
+
+    text = raw.strip()
+    if len(text) == 1 and "A" <= text.upper() <= "E":
+        return ord(text.upper()) - ord("A")
+
+    normalized = text.casefold()
+    for index, option in enumerate(ASSERTION_REASONING_OPTIONS):
+        if option.casefold() == normalized:
+            return index
+    raise ValueError("Assertion / Reasoning correct_answer must be an integer, A-E letter, or exact label")
+
+
+def _require_assertion_reasoning_text(raw: Any, field: str) -> str:
+    if not isinstance(raw, str):
+        raise ValueError(f"Assertion / Reasoning {field} must contain 1-2000 characters")
+    text = raw.strip()
+    if not text or len(text) > MAX_ASSERTION_REASONING_TEXT_LENGTH:
+        raise ValueError(f"Assertion / Reasoning {field} must contain 1-2000 characters")
+    return text
+
+
+def _validate_assertion_reasoning_questions(questions: Sequence[dict[str, Any]]) -> None:
+    if not questions:
+        raise ValueError("Assertion / Reasoning generation must include at least one question")
+
+    assertion_prefix = "**Assertion:** "
+    reason_separator = "\n\n**Reason:** "
+    for question in questions:
+        if question.get("question_type") != "multiple_choice":
+            raise ValueError("Assertion / Reasoning questions must use the multiple_choice question type")
+
+        question_text = question.get("question_text")
+        if not isinstance(question_text, str) or not question_text.startswith(assertion_prefix):
+            raise ValueError("Assertion / Reasoning question_text must contain labeled assertion and reason text")
+        assertion, separator, reason = question_text[len(assertion_prefix) :].partition(reason_separator)
+        if not separator:
+            raise ValueError("Assertion / Reasoning question_text must contain labeled assertion and reason text")
+        _require_assertion_reasoning_text(assertion, "assertion")
+        _require_assertion_reasoning_text(reason, "reason")
+        _require_assertion_reasoning_text(question.get("explanation"), "explanation")
+
+        if question.get("options") != list(ASSERTION_REASONING_OPTIONS):
+            raise ValueError("Assertion / Reasoning options must use the canonical A-E scale")
+        correct_answer = question.get("correct_answer")
+        if (
+            isinstance(correct_answer, bool)
+            or not isinstance(correct_answer, int)
+            or not 0 <= correct_answer < len(ASSERTION_REASONING_OPTIONS)
+        ):
+            raise ValueError("Assertion / Reasoning correct_answer must be a zero-based integer from 0 to 4")
+        if question.get("group_id") is not None or question.get("group_prompt") is not None:
+            raise ValueError("Assertion / Reasoning group_id and group_prompt must be null")
+
+        tags = question.get("tags")
+        normalized_tags = _coerce_question_tags(tags, generation_profile=ASSERTION_REASONING_TAG)
+        if tags != normalized_tags:
+            raise ValueError("Assertion / Reasoning questions must include exactly one canonical subtype tag")
+
+
+def _validate_emq_groups(questions: Sequence[dict[str, Any]]) -> None:
+    groups: dict[str, dict[str, Any]] = {}
+    normalized_answers: list[tuple[dict[str, Any], int]] = []
+    for question in questions:
+        if question.get("question_type") != "multiple_choice":
+            raise ValueError("EMQ questions must use the multiple_choice question type")
+
+        group_id = str(question.get("group_id") or "").strip()
+        if not group_id or len(group_id) > MAX_EMQ_GROUP_ID_LENGTH:
+            raise ValueError(f"EMQ group_id must contain 1-{MAX_EMQ_GROUP_ID_LENGTH} characters")
+
+        group_prompt = str(question.get("group_prompt") or "").strip()
+        if not group_prompt or len(group_prompt) > MAX_EMQ_GROUP_PROMPT_LENGTH:
+            raise ValueError(
+                f"EMQ group_prompt must contain 1-{MAX_EMQ_GROUP_PROMPT_LENGTH} characters"
+            )
+
+        explanation = str(question.get("explanation") or "").strip()
+        if not explanation:
+            raise ValueError("Each EMQ stem must include a nonempty explanation")
+
+        options = question.get("options")
+        if not isinstance(options, list) or not 2 <= len(options) <= MAX_EMQ_OPTIONS:
+            raise ValueError(f"EMQ options must contain 2-{MAX_EMQ_OPTIONS} entries")
+
+        normalized_answers.append(
+            (question, _normalize_emq_mc_answer(question.get("correct_answer"), options))
+        )
+        group = groups.setdefault(
+            group_id,
+            {"group_prompt": group_prompt, "options": options, "count": 0},
+        )
+        if group["group_prompt"] != group_prompt:
+            raise ValueError("Every stem in an EMQ group must use the same group_prompt")
+        if group["options"] != options:
+            raise ValueError("Every stem in an EMQ group must use the same option bank")
+        group["count"] += 1
+
+    if not groups:
+        raise ValueError("EMQ generation must include at least one group")
+    if any(group["count"] < 2 for group in groups.values()):
+        raise ValueError("Every EMQ group must include at least two stems")
+    for question, correct_answer in normalized_answers:
+        question["correct_answer"] = correct_answer
 
 
 def _normalize_tf_answer(raw: Any) -> str:
@@ -212,15 +567,26 @@ def _coerce_generation_plan(
     num_questions: int,
     question_types: Sequence[Any] | None = None,
     question_plan: Sequence[Any] | None = None,
+    generation_profile: Any = DEFAULT_GENERATION_PROFILE,
 ) -> list[dict[str, Any]]:
     """Normalize legacy question types or a structured question plan."""
+    profile_id = _normalize_generation_profile(generation_profile)
+    allowed_types = set(_PROFILE_BY_ID[profile_id]["allowed_question_types"])
     if question_plan:
+        if profile_id not in {"standard_recall", "mixed_assessment"}:
+            raise ValueError(
+                "question_plan is only supported for standard_recall and mixed_assessment profiles"
+            )
         plan: list[dict[str, Any]] = []
         seen_types: set[str] = set()
         for item in question_plan:
             q_type = _normalize_question_type(_plan_value(item, "question_type"))
             if q_type not in SUPPORTED_GENERATED_QUESTION_TYPES:
                 raise ValueError(f"Unsupported generated question type: {q_type}")
+            if q_type not in allowed_types:
+                raise ValueError(
+                    f"Question type '{q_type}' is not allowed for generation profile '{profile_id}'"
+                )
             if q_type in seen_types:
                 raise ValueError("question_plan cannot contain duplicate question_type rows")
             seen_types.add(q_type)
@@ -231,7 +597,7 @@ def _coerce_generation_plan(
             if q_type in {"multiple_choice", "multi_select"}:
                 if _plan_has_value(item, "pair_count"):
                     raise ValueError("pair_count is only valid for matching questions")
-                option_count = _plan_int(item, "option_count", 4)
+                option_count = 5 if profile_id == "best_of_five" else _plan_int(item, "option_count", 4)
                 if not 2 <= option_count <= 6:
                     raise ValueError("option_count must be between 2 and 6")
                 row["option_count"] = option_count
@@ -249,7 +615,7 @@ def _coerce_generation_plan(
             raise ValueError("question_plan counts must sum to num_questions")
         return plan
 
-    types = _coerce_question_types(question_types)
+    types = _coerce_question_types(question_types, generation_profile=profile_id)
     base, extra = divmod(max(0, int(num_questions)), len(types))
     return [
         {"question_type": q_type, "count": base + (1 if index < extra else 0)}
@@ -462,12 +828,14 @@ def _format_quiz_generation_prompt(
     focus_instruction: str,
     source_contract: str,
     question_plan: Sequence[Any] | None = None,
+    generation_profile: Any = DEFAULT_GENERATION_PROFILE,
 ) -> str:
     """Render the quiz generation prompt, including structured plan instructions."""
     plan = _coerce_generation_plan(
         num_questions=num_questions,
         question_types=question_types,
         question_plan=question_plan,
+        generation_profile=generation_profile,
     )
     template = QUIZ_GENERATION_PROMPT
     if question_plan:
@@ -581,17 +949,38 @@ def _normalize_questions(
     raw_questions: Sequence[Any],
     default_source_type: str,
     default_source_id: str,
+    generation_profile: Any = DEFAULT_GENERATION_PROFILE,
 ) -> list[dict[str, Any]]:
+    profile_id = _normalize_generation_profile(generation_profile)
+    is_emq = profile_id == "emq"
+    is_assertion_reasoning = profile_id == ASSERTION_REASONING_TAG
+    mc_option_count = None if is_emq else 5 if profile_id == "best_of_five" else 4
     normalized: list[dict[str, Any]] = []
     for raw in raw_questions:
         if not isinstance(raw, dict):
+            if is_emq or is_assertion_reasoning:
+                raise ValueError(f"Each {profile_id} question must be a JSON object")
             continue
         q_type = _normalize_question_type(raw.get("question_type"))
-        if q_type not in DEFAULT_QUESTION_TYPES:
+        if is_assertion_reasoning and q_type != "multiple_choice":
+            raise ValueError("Assertion / Reasoning questions must use the multiple_choice question type")
+        if q_type not in DEFAULT_QUESTION_TYPES and not is_emq:
             continue
-        question_text = str(raw.get("question_text") or raw.get("question") or "").strip()
-        if not question_text:
-            continue
+        if is_assertion_reasoning:
+            assertion = _require_assertion_reasoning_text(raw.get("assertion"), "assertion")
+            reason = _require_assertion_reasoning_text(raw.get("reason"), "reason")
+            question_text = f"**Assertion:** {assertion}\n\n**Reason:** {reason}"
+            explanation = _require_assertion_reasoning_text(
+                raw.get("explanation"),
+                "explanation",
+            )
+        else:
+            question_text = str(raw.get("question_text") or raw.get("question") or "").strip()
+            if not question_text:
+                if is_emq:
+                    raise ValueError("Each EMQ stem must include question_text")
+                continue
+            explanation = str(raw.get("explanation") or "").strip() or None
         points = raw.get("points", 1)
         try:
             points_val = int(points)
@@ -608,30 +997,50 @@ def _normalize_questions(
             default_source_type=default_source_type,
             default_source_id=default_source_id,
         )
+        tags = _coerce_question_tags(raw.get("tags"), generation_profile=profile_id)
 
         options: list[str] | None = None
-        correct_answer: int | str
+        correct_answer: Any
         if q_type == "multiple_choice":
-            options = _coerce_options(raw.get("options"))
-            correct_answer = _normalize_mc_answer(raw.get("correct_answer"), options)
+            if is_assertion_reasoning:
+                options = list(ASSERTION_REASONING_OPTIONS)
+                correct_answer = _normalize_assertion_reasoning_answer(raw.get("correct_answer"))
+            else:
+                options = _coerce_options(raw.get("options"), max_options=mc_option_count)
+                if profile_id == "best_of_five" and len(options) != 5:
+                    raise ValueError("Best-of-Five questions must include exactly 5 options")
+                correct_answer = (
+                    raw.get("correct_answer")
+                    if is_emq
+                    else _normalize_mc_answer(raw.get("correct_answer"), options)
+                )
         elif q_type == "true_false":
             correct_answer = _normalize_tf_answer(raw.get("correct_answer"))
-        else:
+        elif q_type == "fill_blank":
             correct_answer = str(raw.get("correct_answer") or "").strip()
+        else:
+            correct_answer = raw.get("correct_answer")
 
-        normalized.append(
-            {
-                "question_type": q_type,
-                "question_text": question_text,
-                "options": options,
-                "correct_answer": correct_answer,
-                "explanation": str(raw.get("explanation") or "").strip() or None,
-                "hint": hint,
-                "hint_penalty_points": hint_penalty_points,
-                "source_citations": source_citations,
-                "points": points_val if points_val >= 0 else 1,
-            }
-        )
+        question_payload = {
+            "question_type": q_type,
+            "question_text": question_text,
+            "group_id": (str(raw.get("group_id") or "").strip() or None) if is_emq else None,
+            "group_prompt": (str(raw.get("group_prompt") or "").strip() or None) if is_emq else None,
+            "options": options,
+            "correct_answer": correct_answer,
+            "explanation": explanation,
+            "hint": hint,
+            "hint_penalty_points": hint_penalty_points,
+            "source_citations": source_citations,
+            "points": points_val if points_val >= 0 else 1,
+        }
+        if tags:
+            question_payload["tags"] = tags
+        normalized.append(question_payload)
+    if is_assertion_reasoning:
+        _validate_assertion_reasoning_questions(normalized)
+    if is_emq:
+        _validate_emq_groups(normalized)
     return normalized
 
 
@@ -684,6 +1093,29 @@ def _normalize_planned_questions(
         raise ValueError(f"Generated question plan mismatch: expected {expected_total}, got {len(raw_questions)}")
 
     return [question for item in plan for question in grouped[item["question_type"]]]
+
+
+def _limit_questions_by_profile(
+    questions: Sequence[dict[str, Any]],
+    *,
+    num_questions: int,
+    generation_profile: Any,
+) -> list[dict[str, Any]]:
+    limited = list(questions)
+    if not num_questions or len(limited) <= num_questions:
+        return limited
+    if _normalize_generation_profile(generation_profile) != "emq":
+        return limited[:num_questions]
+
+    selected_group_ids = {
+        str(question.get("group_id") or "").strip()
+        for question in limited[:num_questions]
+    }
+    return [
+        question
+        for question in limited
+        if str(question.get("group_id") or "").strip() in selected_group_ids
+    ]
 
 
 def _normalize_sources(sources: Sequence[Any]) -> list[dict[str, str]]:
@@ -779,13 +1211,16 @@ def _build_test_mode_questions(
     num_questions: int,
     question_types: Sequence[Any] | None,
     question_plan: Sequence[Any] | None = None,
+    generation_profile: Any = DEFAULT_GENERATION_PROFILE,
 ) -> list[dict[str, Any]]:
     """Build deterministic quiz questions that preserve evidence provenance in test mode."""
+    profile_id = _normalize_generation_profile(generation_profile)
     if question_plan:
         plan = _coerce_generation_plan(
             num_questions=num_questions,
             question_types=question_types,
             question_plan=question_plan,
+            generation_profile=profile_id,
         )
         planned_types = [
             (item["question_type"], copy_index, item)
@@ -794,13 +1229,23 @@ def _build_test_mode_questions(
         ]
         total_questions = len(planned_types)
     else:
-        normalized_types = _coerce_question_types(question_types)
-        total_questions = max(1, num_questions)
+        normalized_types = _coerce_question_types(
+            question_types,
+            generation_profile=profile_id,
+        )
+        total_questions = max(2 if profile_id == "emq" else 1, num_questions)
         planned_types = [
             (normalized_types[index % len(normalized_types)], index, {})
             for index in range(total_questions)
         ]
     questions: list[dict[str, Any]] = []
+    emq_options = [
+        "Supported by the selected source evidence.",
+        "Contradicted by the selected source evidence.",
+        "Not addressed by the selected source evidence.",
+        "Requires evidence from a different source.",
+    ]
+    emq_group_prompt = "Choose the option that best characterizes the evidence for each stem."
 
     for index in range(total_questions):
         source = normalized_sources[index % len(normalized_sources)]
@@ -822,28 +1267,66 @@ def _build_test_mode_questions(
         question_type, copy_index, plan_item = planned_types[index]
 
         if question_type == "multiple_choice":
-            option_count = int(plan_item.get("option_count", 4) or 4)
-            questions.append(
-                {
-                    "question_type": "multiple_choice",
-                    "question_text": (
-                        f"Which statement is directly supported by "
-                        f"{citation_source_type}:{citation_source_id}?"
-                    ),
-                    "options": [
-                        excerpt,
-                        "A conflicting claim with no evidence.",
-                        "An empty workspace selection.",
-                        "A discarded draft artifact.",
-                    ][:option_count] + [f"Unused distractor {option_idx}" for option_idx in range(5, option_count + 1)],
-                    "correct_answer": 0,
-                    "explanation": "The first option quotes the selected source evidence.",
-                    "hint": "Look for the excerpt copied from the selected source.",
-                    "hint_penalty_points": 0,
-                    "source_citations": [citation],
-                    "points": 1,
-                }
-            )
+            if profile_id == ASSERTION_REASONING_TAG:
+                options = list(ASSERTION_REASONING_OPTIONS)
+                question_text = (
+                    f"**Assertion:** {excerpt}\n\n**Reason:** The selected source directly supports this assertion."
+                )
+                explanation = (
+                    "Both statements are true and the reason explains the assertion because the "
+                    "citation quotes the selected source evidence."
+                )
+            elif profile_id == "emq":
+                options = list(emq_options)
+                question_text = (
+                    f"Stem {index + 1}: how is this claim characterized by "
+                    f"{citation_source_type}:{citation_source_id}?"
+                )
+                explanation = (
+                    f"Stem {index + 1} is supported because its citation quotes the selected source evidence."
+                )
+            else:
+                option_count = (
+                    5
+                    if profile_id == "best_of_five"
+                    else int(plan_item.get("option_count", 4) or 4)
+                )
+                options = [
+                    excerpt,
+                    "A conflicting claim with no evidence.",
+                    "An empty workspace selection.",
+                    "A discarded draft artifact.",
+                ]
+                if option_count >= 5:
+                    options.append("A plausible but unsupported alternate answer.")
+                if option_count > len(options):
+                    options.extend(
+                        f"Unused distractor {option_idx}"
+                        for option_idx in range(len(options) + 1, option_count + 1)
+                    )
+                options = options[:option_count]
+                question_text = (
+                    f"Which statement is the best answer supported by "
+                    f"{citation_source_type}:{citation_source_id}?"
+                )
+                explanation = "The first option is the best answer because it quotes the selected source evidence."
+            question_payload = {
+                "question_type": "multiple_choice",
+                "question_text": question_text,
+                "group_id": "emq-test-1" if profile_id == "emq" else None,
+                "group_prompt": emq_group_prompt if profile_id == "emq" else None,
+                "options": options,
+                "correct_answer": 0,
+                "explanation": explanation,
+                "hint": "Look for the excerpt copied from the selected source.",
+                "hint_penalty_points": 0,
+                "source_citations": [citation],
+                "points": 1,
+            }
+            tags = _coerce_question_tags(None, generation_profile=profile_id)
+            if tags:
+                question_payload["tags"] = tags
+            questions.append(question_payload)
             continue
 
         if question_type == "multi_select":
@@ -1016,6 +1499,141 @@ def _resolve_generated_quiz_metadata(
     )
 
 
+def _answer_text_for_question(question: dict[str, Any]) -> str:
+    question_type = str(question.get("question_type") or "").strip()
+    answer = question.get("correct_answer")
+    if question_type == "multiple_choice":
+        options = question.get("options") if isinstance(question.get("options"), list) else []
+        if isinstance(answer, int) and 0 <= answer < len(options):
+            return str(options[answer]).strip()
+    return str(answer or "").strip()
+
+
+def _strip_true_false_prefix(question_text: str) -> str:
+    normalized = question_text.strip()
+    prefix = "true or false:"
+    if normalized.lower().startswith(prefix):
+        return normalized[len(prefix):].strip()
+    return normalized
+
+
+def _build_quiz_verification_units(questions: Sequence[dict[str, Any]]) -> list[ArtifactVerificationUnit]:
+    units: list[ArtifactVerificationUnit] = []
+    for index, question in enumerate(questions, start=1):
+        question_text = str(question.get("question_text") or "").strip()
+        question_type = str(question.get("question_type") or "").strip()
+        explanation = str(question.get("explanation") or "").strip()
+        answer_text = _answer_text_for_question(question)
+
+        claims: list[str] = []
+        if question_type == "multiple_choice" and question_text and answer_text:
+            claims.append(f"For the question '{question_text}', the correct answer is '{answer_text}'.")
+        elif question_type == "true_false" and question_text:
+            statement = _strip_true_false_prefix(question_text)
+            if _normalize_tf_answer(question.get("correct_answer")) == "true":
+                claims.append(statement)
+            elif explanation:
+                claims.append(explanation)
+        elif question_type == "fill_blank" and question_text and answer_text:
+            claims.append(question_text.replace("___", answer_text))
+
+        if explanation and explanation not in claims:
+            claims.append(explanation)
+
+        text_parts = [part for part in [question_text, f"Correct answer: {answer_text}" if answer_text else "", explanation] if part]
+        text = " ".join(text_parts).strip()
+        if not text:
+            continue
+
+        units.append(
+            ArtifactVerificationUnit(
+                unit_id=f"quiz-question:{index}",
+                text=text,
+                claims=claims or [text],
+                metadata={
+                    "question_index": index,
+                    "question_type": question_type,
+                    "source_citations": question.get("source_citations") or [],
+                },
+            )
+        )
+    return units
+
+
+def _build_quiz_source_documents(evidence_items: Sequence[dict[str, Any]]) -> list[Document]:
+    documents: list[Document] = []
+    seen_ids: set[str] = set()
+    for index, item in enumerate(evidence_items, start=1):
+        text = str(item.get("text") or "").strip()
+        if not text:
+            continue
+        source_type = str(item.get("source_type") or "source").strip() or "source"
+        source_id = str(item.get("source_id") or index).strip() or str(index)
+        chunk_id = str(item.get("chunk_id") or "").strip()
+        document_id = f"{source_type}:{source_id}"
+        if chunk_id:
+            document_id = f"{document_id}:{chunk_id}"
+        if document_id in seen_ids:
+            document_id = f"{document_id}:{index}"
+        seen_ids.add(document_id)
+        documents.append(
+            Document(
+                id=document_id,
+                content=text,
+                metadata={
+                    "source_type": source_type,
+                    "source_id": source_id,
+                    "chunk_id": chunk_id or None,
+                    "label": str(item.get("label") or "").strip() or None,
+                },
+            )
+        )
+    return documents
+
+
+async def _verify_quiz_questions_against_sources(
+    *,
+    questions: list[dict[str, Any]],
+    evidence: Sequence[dict[str, Any]],
+    generation_provider: str | None,
+    generation_model: str | None,
+    verification_provider: str | None = None,
+    verification_model: str | None = None,
+) -> ArtifactVerificationResult:
+    if is_test_mode():
+        provider = verification_provider or generation_provider
+        model = verification_model or generation_model
+        differs_from_generation = provider != generation_provider or model != generation_model
+        return ArtifactVerificationResult(
+            verdict="grounded",
+            report={"total_claims": len(questions), "claims": []},
+            unit_results=[],
+            metadata={
+                "artifact_type": "quiz",
+                "generation_provider": generation_provider,
+                "generation_model": generation_model,
+                "verification_provider": provider,
+                "verification_model": model,
+                "verification_provider_configured": verification_provider is not None,
+                "verification_model_configured": verification_model is not None,
+                "verification_llm_is_default": not differs_from_generation,
+                "verification_llm_differs_from_generation": differs_from_generation,
+                "test_mode": True,
+            },
+        )
+
+    return await verify_generated_artifact_against_sources(
+        artifact_type="quiz",
+        units=_build_quiz_verification_units(questions),
+        source_documents=_build_quiz_source_documents(evidence),
+        generation_provider=generation_provider,
+        generation_model=generation_model,
+        verification_provider=verification_provider,
+        verification_model=verification_model,
+        generation_context={"query": "generated quiz questions"},
+    )
+
+
 def _persist_generated_quiz(
     *,
     db: CharactersRAGDB,
@@ -1048,6 +1666,9 @@ def _persist_generated_quiz(
             source_citations=question.get("source_citations"),
             points=question.get("points", 1),
             order_index=idx,
+            tags=question.get("tags"),
+            group_id=question.get("group_id"),
+            group_prompt=question.get("group_prompt"),
         )
 
     quiz = db.get_quiz(quiz_id)
@@ -1067,15 +1688,19 @@ async def generate_quiz_from_sources(
     sources: Sequence[Any],
     num_questions: int = 10,
     question_types: list[Any] | None = None,
+    generation_profile: Any = DEFAULT_GENERATION_PROFILE,
     difficulty: str = "mixed",
     focus_topics: list[str] | None = None,
     question_plan: Sequence[Any] | None = None,
     model: str | None = None,
     api_provider: str | None = None,
+    claims_verification_provider: str | None = None,
+    claims_verification_model: str | None = None,
     workspace_id: str | None = None,
     workspace_tag: str | None = None,
 ) -> dict[str, Any]:
     """Generate a quiz from mixed sources (media, notes, flashcard decks/cards)."""
+    normalized_profile = _normalize_generation_profile(generation_profile)
     normalized_sources = _normalize_sources(sources)
     evidence = await asyncio.to_thread(
         resolve_quiz_sources,
@@ -1088,11 +1713,13 @@ async def generate_quiz_from_sources(
         num_questions=num_questions,
         question_types=question_types,
         question_plan=question_plan,
+        generation_profile=normalized_profile,
     )
     normalized_types = [item["question_type"] for item in plan]
-    focus_instruction = ""
+    focus_instructions = [_build_generation_profile_instruction(normalized_profile)]
     if focus_topics:
-        focus_instruction = f"- Focus on these topics: {', '.join(t for t in focus_topics if t)}"
+        focus_instructions.append(f"- Focus on these topics: {', '.join(t for t in focus_topics if t)}")
+    focus_instruction = "\n".join(focus_instructions)
     source_contract = _build_source_contract(normalized_sources)
     primary_media_id = _resolve_primary_media_id(normalized_sources)
     quiz_title, quiz_description = await asyncio.to_thread(
@@ -1109,9 +1736,30 @@ async def generate_quiz_from_sources(
             num_questions=num_questions,
             question_types=normalized_types,
             question_plan=plan if question_plan else None,
+            generation_profile=normalized_profile,
         )
+        questions = _limit_questions_by_profile(
+            questions,
+            num_questions=num_questions,
+            generation_profile=normalized_profile,
+        )
+        if normalized_profile == "emq":
+            _validate_emq_groups(questions)
         _validate_strict_provenance(questions, normalized_sources)
-        return await asyncio.to_thread(
+        if normalized_profile == ASSERTION_REASONING_TAG:
+            _validate_assertion_reasoning_questions(questions)
+        claim_verification = await _verify_quiz_questions_against_sources(
+            questions=questions,
+            evidence=evidence,
+            generation_provider=api_provider or DEFAULT_LLM_PROVIDER,
+            generation_model=model,
+            verification_provider=claims_verification_provider,
+            verification_model=claims_verification_model,
+        )
+        claim_verification_payload = claim_verification.to_dict()
+        if claim_verification.verdict != "grounded":
+            raise QuizClaimVerificationError(claim_verification_payload)
+        result = await asyncio.to_thread(
             _persist_generated_quiz,
             db=db,
             normalized_sources=normalized_sources,
@@ -1122,17 +1770,21 @@ async def generate_quiz_from_sources(
             workspace_id=workspace_id,
             workspace_tag=workspace_tag,
         )
+        result["claim_verification"] = claim_verification_payload
+        return result
 
     content = _build_content_from_evidence(evidence)
 
+    prompt_question_count = max(2, num_questions) if normalized_profile == "emq" else num_questions
     prompt = _format_quiz_generation_prompt(
-        num_questions=num_questions,
+        num_questions=prompt_question_count,
         content=content,
         difficulty=difficulty,
         question_types=normalized_types,
         focus_instruction=focus_instruction,
         source_contract=source_contract,
         question_plan=plan if question_plan else None,
+        generation_profile=normalized_profile,
     )
 
     llm_kwargs: dict[str, Any] = {
@@ -1150,7 +1802,7 @@ async def generate_quiz_from_sources(
         raise ValueError("LLM response did not include a questions list")
 
     default_source = normalized_sources[0]
-    if question_plan:
+    if question_plan and normalized_profile in {"standard_recall", "mixed_assessment"}:
         questions = _normalize_planned_questions(
             raw_questions,
             plan,
@@ -1162,14 +1814,34 @@ async def generate_quiz_from_sources(
             raw_questions,
             default_source_type=default_source["source_type"],
             default_source_id=default_source["source_id"],
+            generation_profile=normalized_profile,
         )
-        if num_questions and len(questions) > num_questions:
-            questions = questions[:num_questions]
+        questions = _limit_questions_by_profile(
+            questions,
+            num_questions=num_questions,
+            generation_profile=normalized_profile,
+        )
     if not questions:
         raise ValueError("No valid questions generated")
+    if normalized_profile == "emq":
+        _validate_emq_groups(questions)
     _validate_strict_provenance(questions, normalized_sources)
+    if normalized_profile == ASSERTION_REASONING_TAG:
+        _validate_assertion_reasoning_questions(questions)
 
-    return await asyncio.to_thread(
+    claim_verification = await _verify_quiz_questions_against_sources(
+        questions=questions,
+        evidence=evidence,
+        generation_provider=api_provider or DEFAULT_LLM_PROVIDER,
+        generation_model=model,
+        verification_provider=claims_verification_provider,
+        verification_model=claims_verification_model,
+    )
+    claim_verification_payload = claim_verification.to_dict()
+    if claim_verification.verdict != "grounded":
+        raise QuizClaimVerificationError(claim_verification_payload)
+
+    result = await asyncio.to_thread(
         _persist_generated_quiz,
         db=db,
         normalized_sources=normalized_sources,
@@ -1180,6 +1852,8 @@ async def generate_quiz_from_sources(
         workspace_id=workspace_id,
         workspace_tag=workspace_tag,
     )
+    result["claim_verification"] = claim_verification_payload
+    return result
 
 
 async def generate_quiz_from_media(
@@ -1189,10 +1863,13 @@ async def generate_quiz_from_media(
     media_id: int,
     num_questions: int = 10,
     question_types: list[Any] | None = None,
+    generation_profile: Any = DEFAULT_GENERATION_PROFILE,
     difficulty: str = "mixed",
     focus_topics: list[str] | None = None,
     model: str | None = None,
     api_provider: str | None = None,
+    claims_verification_provider: str | None = None,
+    claims_verification_model: str | None = None,
     workspace_id: str | None = None,
     workspace_tag: str | None = None,
 ) -> dict[str, Any]:
@@ -1203,10 +1880,13 @@ async def generate_quiz_from_media(
         sources=[{"source_type": "media", "source_id": str(media_id)}],
         num_questions=num_questions,
         question_types=question_types,
+        generation_profile=generation_profile,
         difficulty=difficulty,
         focus_topics=focus_topics,
         model=model,
         api_provider=api_provider,
+        claims_verification_provider=claims_verification_provider,
+        claims_verification_model=claims_verification_model,
         workspace_id=workspace_id,
         workspace_tag=workspace_tag,
     )

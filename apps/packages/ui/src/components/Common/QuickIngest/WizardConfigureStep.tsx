@@ -1,5 +1,14 @@
 import React from "react"
-import { Button, Input, Segmented, Select, Switch, Tooltip, Typography } from "antd"
+import {
+  AutoComplete,
+  Button,
+  Input,
+  Segmented,
+  Select,
+  Switch,
+  Tooltip,
+  Typography,
+} from "antd"
 import { useTranslation } from "react-i18next"
 import { ArrowLeft, ArrowRight, ChevronRight } from "lucide-react"
 
@@ -54,10 +63,14 @@ const nextTypeDefaults = (
 
 type WizardConfigureStepProps = {
   isStepVisible?: boolean
+  analysisProviderWarning?: string | null
+  focusAnalysisProvider?: boolean
 }
 
 export const WizardConfigureStep: React.FC<WizardConfigureStepProps> = ({
   isStepVisible = true,
+  analysisProviderWarning = null,
+  focusAnalysisProvider = false,
 }) => {
   const { t } = useTranslation(["option"])
   const { state, setPreset, setCustomOptions, goNext, goBack } = useIngestWizard()
@@ -85,6 +98,12 @@ export const WizardConfigureStep: React.FC<WizardConfigureStepProps> = ({
   const [transcriptionModels, setTranscriptionModels] = React.useState<string[]>([])
   const [transcriptionModelsLoading, setTranscriptionModelsLoading] =
     React.useState(false)
+  const [analysisProviders, setAnalysisProviders] = React.useState<string[]>([])
+  const [analysisProvidersLoading, setAnalysisProvidersLoading] =
+    React.useState(false)
+  const analysisProviderRef = React.useRef<
+    React.ComponentRef<typeof AutoComplete>
+  >(null)
   const [showAdvanced, setShowAdvanced] = React.useState(false)
   const chunkingMode =
     presetConfig.common.chunking_mode === "manual" ? "manual" : "auto"
@@ -117,6 +136,88 @@ export const WizardConfigureStep: React.FC<WizardConfigureStepProps> = ({
     typeof rawTranscriptionModel === "string" ? rawTranscriptionModel.trim() : ""
   const shouldLoadTranscriptionModels =
     hasTranscriptionItems && isStepVisible
+  const normalizedAnalysisProvider =
+    typeof presetConfig.advancedValues?.api_name === "string"
+      ? presetConfig.advancedValues.api_name.trim()
+      : ""
+  const shouldLoadAnalysisProviders =
+    isStepVisible && presetConfig.common.perform_analysis
+
+  React.useEffect(() => {
+    if (focusAnalysisProvider) {
+      analysisProviderRef.current?.focus()
+    }
+  }, [focusAnalysisProvider])
+
+  React.useEffect(() => {
+    if (!shouldLoadAnalysisProviders) {
+      setAnalysisProviders([])
+      setAnalysisProvidersLoading(false)
+      return
+    }
+
+    let cancelled = false
+    const loadProviders = async () => {
+      setAnalysisProvidersLoading(true)
+      try {
+        const result = await tldwClient.getProvidersStatus()
+        const providers: string[] = []
+        const seen = new Set<string>()
+        for (const entry of result?.providers ?? []) {
+          const name = String(entry?.name ?? "").trim()
+          if (!entry?.configured || !name || seen.has(name)) {
+            continue
+          }
+          seen.add(name)
+          providers.push(name)
+        }
+        if (!cancelled) {
+          setAnalysisProviders(providers)
+        }
+      } catch (error) {
+        console.warn("[QuickIngest] Failed to load analysis providers", error)
+        if (!cancelled) {
+          setAnalysisProviders([])
+        }
+      } finally {
+        if (!cancelled) {
+          setAnalysisProvidersLoading(false)
+        }
+      }
+    }
+
+    void loadProviders()
+
+    return () => {
+      cancelled = true
+    }
+  }, [shouldLoadAnalysisProviders])
+
+  const analysisProviderOptions = React.useMemo(() => {
+    const providers = [...analysisProviders]
+    if (
+      normalizedAnalysisProvider &&
+      !providers.includes(normalizedAnalysisProvider)
+    ) {
+      providers.push(normalizedAnalysisProvider)
+    }
+    return providers.map((provider) => ({
+      value: provider,
+      label: provider,
+    }))
+  }, [analysisProviders, normalizedAnalysisProvider])
+
+  const handleAnalysisProviderChange = React.useCallback(
+    (nextValue: string) => {
+      const provider = nextValue.trim()
+      setCustomOptions({
+        advancedValues: {
+          api_name: provider || undefined,
+        },
+      })
+    },
+    [setCustomOptions]
+  )
 
   React.useEffect(() => {
     if (!shouldLoadTranscriptionModels) {
@@ -593,6 +694,66 @@ export const WizardConfigureStep: React.FC<WizardConfigureStepProps> = ({
               </div>
             </Tooltip>
           </div>
+
+          {presetConfig.common.perform_analysis ? (
+            <div className="rounded-md border border-border bg-surface2 p-3">
+              <label
+                id="quick-ingest-analysis-provider-label"
+                htmlFor="quick-ingest-analysis-provider"
+                className="mb-1 block text-sm font-medium text-text"
+              >
+                {qi("analysisProvider.label", "Analysis provider")}
+              </label>
+              <AutoComplete
+                ref={analysisProviderRef}
+                id="quick-ingest-analysis-provider"
+                className="w-full"
+                aria-label={qi("analysisProvider.label", "Analysis provider")}
+                aria-describedby={`quick-ingest-analysis-provider-help${analysisProviderWarning ? " quick-ingest-analysis-provider-warning" : ""}`}
+                aria-invalid={analysisProviderWarning ? true : undefined}
+                autoFocus={focusAnalysisProvider}
+                value={normalizedAnalysisProvider}
+                options={analysisProviderOptions}
+                allowClear
+                placeholder={qi(
+                  "analysisProvider.placeholder",
+                  "Choose or enter a provider"
+                )}
+                notFoundContent={
+                  analysisProvidersLoading
+                    ? qi(
+                        "analysisProvider.loading",
+                        "Loading configured providers…"
+                      )
+                    : qi(
+                        "analysisProvider.empty",
+                        "No configured providers found. Enter a provider name."
+                      )
+                }
+                onChange={handleAnalysisProviderChange}
+                onClear={() => handleAnalysisProviderChange("")}
+              />
+              <p
+                id="quick-ingest-analysis-provider-help"
+                className="mt-1 text-xs text-text-muted"
+              >
+                {qi(
+                  "analysisProvider.help",
+                  "Configured providers are suggestions. This choice is only for this ingest."
+                )}
+              </p>
+              {analysisProviderWarning ? (
+                <p
+                  id="quick-ingest-analysis-provider-warning"
+                  role="alert"
+                  aria-live="assertive"
+                  className="mt-1 text-xs text-danger"
+                >
+                  {analysisProviderWarning}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
 
           {presetConfig.common.perform_chunking && (
             <div className="rounded-md border border-border bg-surface2 p-3">

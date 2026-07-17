@@ -46,6 +46,7 @@ describe("TldwApiClient Chatbooks OpenWebUI import contract", () => {
     await client.exportChatbook({
       name: "Backup all",
       description: "Full account backup",
+      format_version: "1.1.0",
       async_mode: true
     })
 
@@ -57,6 +58,7 @@ describe("TldwApiClient Chatbooks OpenWebUI import contract", () => {
         body: {
           name: "Backup all",
           description: "Full account backup",
+          format_version: "1.1.0",
           async_mode: true
         }
       })

@@ -445,8 +445,14 @@ class _UnexpectedPromptStudioStream:
 @pytest.mark.parametrize(
     ("endpoint_name", "kwargs"),
     [
-        ("websocket_endpoint_base", {}),
-        ("websocket_endpoint", {"project_id": 7, "db": None}),
+        (
+            "websocket_endpoint_base",
+            {"token": None, "api_key": None, "project_id": None},
+        ),
+        (
+            "websocket_endpoint",
+            {"project_id": 7, "token": None, "api_key": None},
+        ),
     ],
 )
 async def test_prompt_studio_websockets_reject_new_connections_while_draining(
@@ -464,8 +470,24 @@ async def test_prompt_studio_websockets_reject_new_connections_while_draining(
         connect_calls.append("called")
         raise AssertionError("Prompt Studio connect should not run while draining")
 
+    async def _allow_auth(*args, **kwargs) -> str:
+        return "1"
+
+    async def _allow_project(*args, **kwargs) -> bool:
+        return True
+
     monkeypatch.setattr(prompt_studio_websocket, "WebSocketStream", _UnexpectedPromptStudioStream)
     monkeypatch.setattr(prompt_studio_websocket.connection_manager, "connect", _unexpected_connect)
+    monkeypatch.setattr(
+        prompt_studio_websocket,
+        "_allow_prompt_studio_cookie_websocket",
+        _allow_auth,
+    )
+    monkeypatch.setattr(
+        prompt_studio_websocket,
+        "_authorize_prompt_studio_project",
+        _allow_project,
+    )
 
     endpoint = getattr(prompt_studio_websocket, endpoint_name)
     await endpoint(websocket, **kwargs)

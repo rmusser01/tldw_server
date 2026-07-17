@@ -22,6 +22,7 @@ import type {
   TraceableArtifactReviewMetadata,
   TraceableArtifactVersionMetadata,
   WorkspaceSource,
+  WorkspaceSourceReviewUpdate,
   WorkspaceSourceType
 } from "../types/workspace"
 
@@ -390,6 +391,17 @@ const normalizeExportTargets = (
   return targets.size > 0 ? Array.from(targets) : undefined
 }
 
+export const mapServerSourceReviewFields = (
+  source: WorkspaceSourceApiResponse
+): Omit<WorkspaceSourceReviewUpdate, "id"> => ({
+  reviewState: source.review_state ?? "unset",
+  reviewStateUpdatedAt: source.review_state_updated_at
+    ? new Date(source.review_state_updated_at)
+    : undefined,
+  reviewedAt: source.reviewed_at ? new Date(source.reviewed_at) : undefined,
+  reviewedByUserId: source.reviewed_by_user_id || undefined
+})
+
 const mapServerSourceToLocal = (
   source: WorkspaceSourceApiResponse
 ): WorkspaceSource => ({
@@ -399,7 +411,8 @@ const mapServerSourceToLocal = (
   type: normalizeWorkspaceSourceType(source.source_type),
   status: "ready",
   url: source.url || undefined,
-  addedAt: new Date(source.added_at)
+  addedAt: new Date(source.added_at),
+  ...mapServerSourceReviewFields(source)
 })
 
 const mapServerArtifactToLocal = (

@@ -63,21 +63,42 @@ const importAndAwaitBootstrap = async () => {
   return mod
 }
 
-const stubRuntimeConfigFetch = (apiKey: string) => {
-  const fetchMock = vi.fn(async () => ({
-    ok: true,
-    json: async () => ({
-      runtimeAuth: {
-        available: true,
-        authMode: "single-user",
-        apiKey
-      },
-      networking: {
-        deploymentMode: "quickstart",
-        serverUrl: ""
+const stubCookieRuntimeFetch = ({
+  bootstrapOk = true,
+  probeOk = true
+}: {
+  bootstrapOk?: boolean
+  probeOk?: boolean
+} = {}) => {
+  const fetchMock = vi.fn(async (
+    input: RequestInfo | URL,
+    _init?: RequestInit
+  ) => {
+    const url = String(input)
+    if (url === "/api/_tldw-webui/runtime-config") {
+      return {
+        ok: true,
+        json: async () => ({
+          runtimeAuth: {
+            available: true,
+            authMode: "single-user",
+            transport: "cookie-session"
+          },
+          networking: {
+            deploymentMode: "quickstart",
+            serverUrl: ""
+          }
+        })
       }
-    })
-  }))
+    }
+    if (url === "/api/_tldw-webui/session") {
+      return { ok: bootstrapOk }
+    }
+    if (url === "/api/v1/users/me/profile") {
+      return { ok: probeOk }
+    }
+    throw new Error(`Unexpected request: ${url}`)
+  })
   vi.stubGlobal("fetch", fetchMock)
   return fetchMock
 }
@@ -86,9 +107,12 @@ describe("runtime-bootstrap chrome shim", () => {
   beforeEach(() => {
     vi.resetModules()
     localStorage.clear()
+    sessionStorage.clear()
   })
 
   afterEach(() => {
+    vi.useRealTimers()
+    vi.restoreAllMocks()
     restoreGlobal("chrome", chromeDescriptor)
     restoreGlobal("browser", browserDescriptor)
     if (originalApiUrl === undefined) {
@@ -194,52 +218,6 @@ describe("runtime-bootstrap chrome shim", () => {
     ).toBe("true")
   })
 
-  it("canonicalizes quickstart webui bootstrap to the current page origin", async () => {
-    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
-    delete process.env.NEXT_PUBLIC_API_URL
-    localStorage.setItem(
-      "tldwConfig",
-      JSON.stringify({
-        authMode: "single-user",
-        apiKey: "frontend-key",
-        serverUrl: "http://127.0.0.1:8000"
-      })
-    )
-
-    await importAndAwaitBootstrap()
-
-    expect(localStorage.getItem("tldw-api-host")).toBe(window.location.origin)
-    await vi.waitFor(() => {
-      expect(readStoredValue("tldwServerUrl")).toBe(window.location.origin)
-
-      const nextConfig = readStoredValue("tldwConfig") as Record<string, unknown>
-      expect(nextConfig.serverUrl).toBe(window.location.origin)
-      expect(nextConfig.apiKey).toBeUndefined()
-      expect(localStorage.getItem("tldwConfig")).not.toContain("frontend-key")
-    })
-  })
-
-  it("seeds first-run quickstart config from the public single-user API key", async () => {
-    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
-    process.env.NEXT_PUBLIC_X_API_KEY = "quickstart-api-key"
-    delete process.env.NEXT_PUBLIC_API_URL
-
-    await import("@web/extension/shims/runtime-bootstrap")
-
-    expect(localStorage.getItem("tldw-api-host")).toBe(window.location.origin)
-    await vi.waitFor(() => {
-      expect(readStoredValue("tldwServerUrl")).toBe(window.location.origin)
-
-      const nextConfig = readStoredValue("tldwConfig") as Record<string, unknown>
-      expect(nextConfig).toMatchObject({
-        authMode: "single-user",
-        serverUrl: window.location.origin
-      })
-      expect(nextConfig.apiKey).toBeUndefined()
-      expect(localStorage.getItem("tldwConfig")).not.toContain("quickstart-api-key")
-    })
-  })
-
   it("ignores a stale WebUI page-origin host in advanced mode", async () => {
     process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "advanced"
     process.env.NEXT_PUBLIC_API_URL = "http://127.0.0.1:8000"
@@ -253,7 +231,7 @@ describe("runtime-bootstrap chrome shim", () => {
       })
     )
 
-    await import("@web/extension/shims/runtime-bootstrap")
+    await importAndAwaitBootstrap()
 
     expect(localStorage.getItem("tldw-api-host")).toBe("http://127.0.0.1:8000")
     await vi.waitFor(() => {
@@ -261,156 +239,61 @@ describe("runtime-bootstrap chrome shim", () => {
 
       const nextConfig = readStoredValue("tldwConfig") as Record<string, unknown>
       expect(nextConfig.serverUrl).toBe("http://127.0.0.1:8000")
-      expect(nextConfig.apiKey).toBeUndefined()
-      expect(localStorage.getItem("tldwConfig")).not.toContain("frontend-key")
+      expect(nextConfig.apiKey).toBe("frontend-key")
     })
   })
 
-  it("shares the env single-user API key with tldw request auth in advanced mode", async () => {
-    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "advanced"
-    process.env.NEXT_PUBLIC_API_URL = "http://127.0.0.1:8000"
-    process.env.NEXT_PUBLIC_X_API_KEY = "advanced-api-key"
-
-    await importAndAwaitBootstrap()
-
-    const { getRuntimeSingleUserApiKeyOverride } = await import(
-      "@/services/tldw/runtime-auth-override"
-    )
-
-    expect(getRuntimeSingleUserApiKeyOverride()).toBe("advanced-api-key")
-    await vi.waitFor(() => {
-      const nextConfig = readStoredValue("tldwConfig") as Record<string, unknown>
-      expect(nextConfig).toMatchObject({
-        authMode: "single-user",
-        serverUrl: "http://127.0.0.1:8000"
-      })
-      expect(nextConfig.apiKey).toBeUndefined()
-      expect(localStorage.getItem("tldwConfig")).not.toContain("advanced-api-key")
-    })
-  })
-
-  it("uses an existing stored single-user key as a runtime override before scrubbing it", async () => {
+  it("preserves manual multi-user tokens without replacement runtime auth", async () => {
     process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "advanced"
     process.env.NEXT_PUBLIC_API_URL = "http://127.0.0.1:8000"
     delete process.env.NEXT_PUBLIC_X_API_KEY
-    localStorage.setItem(
-      "tldwConfig",
-      JSON.stringify({
-        authMode: "single-user",
-        apiKey: "manual-user-key",
-        serverUrl: "http://127.0.0.1:8000"
-      })
-    )
-
-    await importAndAwaitBootstrap()
-    const { getRuntimeSingleUserApiKeyOverride } = await import(
-      "@/services/tldw/runtime-auth-override"
-    )
-
-    expect(getRuntimeSingleUserApiKeyOverride()).toBe("manual-user-key")
-    await vi.waitFor(() => {
-      const nextConfig = readStoredValue("tldwConfig") as Record<string, unknown>
-      expect(nextConfig.serverUrl).toBe("http://127.0.0.1:8000")
-      expect(nextConfig.apiKey).toBeUndefined()
-      expect(localStorage.getItem("tldwConfig")).not.toContain("manual-user-key")
-    })
-  })
-
-  it("does not persist a scrubbed manual single-user key across module reloads", async () => {
-    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "advanced"
-    process.env.NEXT_PUBLIC_API_URL = "http://127.0.0.1:8000"
-    delete process.env.NEXT_PUBLIC_X_API_KEY
-    localStorage.setItem(
-      "tldwConfig",
-      JSON.stringify({
-        authMode: "single-user",
-        apiKey: "manual-user-key",
-        serverUrl: "http://127.0.0.1:8000"
-      })
-    )
-
-    await importAndAwaitBootstrap()
-    let runtimeAuth = await import("@/services/tldw/runtime-auth-override")
-
-    expect(runtimeAuth.getRuntimeSingleUserApiKeyOverride()).toBe(
-      "manual-user-key"
-    )
-    expect(localStorage.getItem("tldwConfig")).not.toContain("manual-user-key")
-
-    vi.resetModules()
-    await importAndAwaitBootstrap()
-    runtimeAuth = await import("@/services/tldw/runtime-auth-override")
-
-    expect(runtimeAuth.getRuntimeSingleUserApiKeyOverride()).toBeNull()
-    expect(localStorage.getItem("tldwConfig")).not.toContain("manual-user-key")
-  })
-
-  it("does not rehydrate a scrubbed key when stored single-user config has a blank apiKey", async () => {
-    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "advanced"
-    process.env.NEXT_PUBLIC_API_URL = "http://127.0.0.1:8000"
-    delete process.env.NEXT_PUBLIC_X_API_KEY
-    localStorage.setItem(
-      "tldwConfig",
-      JSON.stringify({
-        authMode: "single-user",
-        apiKey: "manual-user-key",
-        serverUrl: "http://127.0.0.1:8000"
-      })
-    )
-
-    await importAndAwaitBootstrap()
-    expect(localStorage.getItem("tldwConfig")).not.toContain("manual-user-key")
-
-    localStorage.setItem(
-      "tldwConfig",
-      JSON.stringify({
-        authMode: "single-user",
-        apiKey: "",
-        serverUrl: "http://127.0.0.1:8000"
-      })
-    )
-
-    vi.resetModules()
-    await importAndAwaitBootstrap()
-    const runtimeAuth = await import("@/services/tldw/runtime-auth-override")
-
-    expect(runtimeAuth.getRuntimeSingleUserApiKeyOverride()).toBeNull()
-    expect(localStorage.getItem("tldwConfig")).not.toContain("manual-user-key")
-  })
-
-  it("clears the session key when stored config switches away from single-user auth", async () => {
-    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "advanced"
-    process.env.NEXT_PUBLIC_API_URL = "http://127.0.0.1:8000"
-    delete process.env.NEXT_PUBLIC_X_API_KEY
-    localStorage.setItem(
-      "tldwConfig",
-      JSON.stringify({
-        authMode: "single-user",
-        apiKey: "manual-user-key",
-        serverUrl: "http://127.0.0.1:8000"
-      })
-    )
-
-    await importAndAwaitBootstrap()
-    let runtimeAuth = await import("@/services/tldw/runtime-auth-override")
-    expect(runtimeAuth.getRuntimeSingleUserApiKeyOverride()).toBe(
-      "manual-user-key"
-    )
-
+    delete process.env.NEXT_PUBLIC_API_BEARER
     localStorage.setItem(
       "tldwConfig",
       JSON.stringify({
         authMode: "multi-user",
         accessToken: "user-token",
-        serverUrl: "http://127.0.0.1:8000"
+        refreshToken: "user-refresh",
+        serverUrl: "http://127.0.0.1:8000/"
       })
     )
 
-    vi.resetModules()
     await importAndAwaitBootstrap()
-    runtimeAuth = await import("@/services/tldw/runtime-auth-override")
 
-    expect(runtimeAuth.getRuntimeSingleUserApiKeyOverride()).toBeNull()
+    expect(readStoredValue("tldwConfig")).toMatchObject({
+      authMode: "multi-user",
+      accessToken: "user-token",
+      refreshToken: "user-refresh",
+      serverUrl: "http://127.0.0.1:8000"
+    })
+  })
+
+  it("clears manual multi-user tokens when the target server changes", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "advanced"
+    process.env.NEXT_PUBLIC_API_URL = "https://new-api.example.test"
+    delete process.env.NEXT_PUBLIC_X_API_KEY
+    delete process.env.NEXT_PUBLIC_API_BEARER
+    localStorage.setItem(
+      "tldwConfig",
+      JSON.stringify({
+        authMode: "multi-user",
+        accessToken: "old-access-token",
+        refreshToken: "old-refresh-token",
+        serverUrl: "https://old-api.example.test"
+      })
+    )
+
+    await importAndAwaitBootstrap()
+
+    expect(readStoredValue("tldwConfig")).toEqual(
+      expect.objectContaining({
+        authMode: "multi-user",
+        serverUrl: "https://new-api.example.test"
+      })
+    )
+    const nextConfig = readStoredValue("tldwConfig") as Record<string, unknown>
+    expect(nextConfig.accessToken).toBeUndefined()
+    expect(nextConfig.refreshToken).toBeUndefined()
   })
 
   it("repairs a stale env LAN host to the current browser host during bootstrap", async () => {
@@ -447,8 +330,7 @@ describe("runtime-bootstrap chrome shim", () => {
 
       const nextConfig = readStoredValue("tldwConfig") as Record<string, unknown>
       expect(nextConfig.serverUrl).toBe("http://localhost:8000")
-      expect(nextConfig.apiKey).toBeUndefined()
-      expect(localStorage.getItem("tldwConfig")).not.toContain("frontend-key")
+      expect(nextConfig.apiKey).toBe("frontend-key")
     })
   })
 
@@ -474,346 +356,415 @@ describe("runtime-bootstrap chrome shim", () => {
     })
   })
 
-  it("seeds runtime auth before stale build-time env auth", async () => {
+  it("bootstraps cookie auth, probes it, and stores no runtime secret", async () => {
     process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
-    process.env.NEXT_PUBLIC_X_API_KEY = "stale-build-key"
-    const fetchMock = stubRuntimeConfigFetch("runtime-key")
-
-    await importAndAwaitBootstrap()
-    const { getApiKey } = await import("@web/lib/authStorage")
-
-    const nextConfig = readStoredValue("tldwConfig") as Record<string, unknown>
-    const metadata = readStoredValue("tldwRuntimeAuthMetadata") as Record<string, unknown>
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/_tldw-webui/runtime-config",
-      expect.objectContaining({
-        credentials: "same-origin",
-        cache: "no-store"
-      })
-    )
-    expect(getApiKey()).toBe("runtime-key")
-    expect(nextConfig.authMode).toBe("single-user")
-    expect(nextConfig.apiKey).toBeUndefined()
-    expect(nextConfig.serverUrl).toBe(window.location.origin)
-    expect(localStorage.getItem("tldwConfig")).not.toContain("runtime-key")
-    expect(readStoredValue("tldwServerUrl")).toBe(window.location.origin)
-    expect(metadata.source).toBe("webui-runtime")
-    expect(metadata.version).toBe(1)
-    expect(typeof metadata.keyFingerprint).toBe("string")
-  })
-
-  it("scrubs a manual stored key while runtime auth wins request precedence", async () => {
-    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
-    process.env.NEXT_PUBLIC_X_API_KEY = "stale-build-key"
+    process.env.NEXT_PUBLIC_X_API_KEY = "stale-public-key"
     localStorage.setItem(
       "tldwConfig",
       JSON.stringify({
         authMode: "single-user",
-        apiKey: "manual-user-key",
+        apiKey: "legacy-runtime-key",
         serverUrl: "http://127.0.0.1:8000"
       })
     )
-    stubRuntimeConfigFetch("runtime-key")
-
-    await importAndAwaitBootstrap()
-    const { getApiKey } = await import("@web/lib/authStorage")
-
-    const nextConfig = readStoredValue("tldwConfig") as Record<string, unknown>
-    expect(getApiKey()).toBe("runtime-key")
-    expect(nextConfig.authMode).toBe("single-user")
-    expect(nextConfig.apiKey).toBeUndefined()
-    expect(nextConfig.serverUrl).toBe(window.location.origin)
-    expect(localStorage.getItem("tldwConfig")).not.toContain("manual-user-key")
-    expect(readStoredValue("tldwServerUrl")).toBe(window.location.origin)
-    expect(readStoredValue("tldwRuntimeAuthMetadata")).toBeNull()
-  })
-
-  it("uses runtime auth for shared requests after scrubbing a manual single-user key", async () => {
-    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+    localStorage.setItem("apiKey", "legacy-bridge-key")
     localStorage.setItem(
-      "tldwConfig",
-      JSON.stringify({
-        authMode: "single-user",
-        apiKey: "manual-user-key",
-        serverUrl: "http://127.0.0.1:8000"
-      })
+      "tldwRuntimeAuthMetadata",
+      JSON.stringify({ source: "webui-runtime", keyFingerprint: "legacy" })
     )
-    stubRuntimeConfigFetch("runtime-key")
+    sessionStorage.setItem(
+      "tldwManualSessionApiKey",
+      JSON.stringify({ apiKey: "ambiguous-session-key" })
+    )
+    const fetchMock = stubCookieRuntimeFetch()
 
     await importAndAwaitBootstrap()
-    const { tldwRequest } = await import("@/services/tldw/request-core")
-    const requestFetch = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ ok: true }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" }
-      })
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/_tldw-webui/session",
+      expect.objectContaining({ method: "POST", credentials: "include" })
     )
-
-    await tldwRequest(
-      {
-        path: "/api/v1/config/docs-info",
-        method: "GET"
-      },
-      {
-        getConfig: async () =>
-          readStoredValue("tldwConfig") as Record<string, unknown>,
-        fetchFn: requestFetch
-      }
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "/api/v1/users/me/profile",
+      expect.objectContaining({ method: "GET", credentials: "same-origin" })
     )
-
-    expect(requestFetch).toHaveBeenCalledWith(
-      "/api/v1/config/docs-info",
-      expect.objectContaining({
-        headers: expect.objectContaining({
-          "X-API-KEY": "runtime-key"
-        })
-      })
-    )
-  })
-
-  it("scrubs manual multi-user credentials while runtime auth wins request precedence", async () => {
-    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
-    localStorage.setItem(
-      "tldwConfig",
-      JSON.stringify({
-        authMode: "multi-user",
-        apiBearer: "manual-bearer",
-        accessToken: "manual-token",
-        refreshToken: "manual-refresh",
-        serverUrl: "http://127.0.0.1:8000"
-      })
-    )
-    stubRuntimeConfigFetch("runtime-key")
-
-    await importAndAwaitBootstrap()
-    const { getApiKey } = await import("@web/lib/authStorage")
-
-    const nextConfig = readStoredValue("tldwConfig") as Record<string, unknown>
-    expect(getApiKey()).toBe("runtime-key")
-    expect(nextConfig.authMode).toBe("single-user")
-    expect(nextConfig.apiBearer).toBeUndefined()
-    expect(nextConfig.accessToken).toBeUndefined()
-    expect(nextConfig.refreshToken).toBeUndefined()
-    expect(nextConfig.apiKey).toBeUndefined()
-    expect(nextConfig.serverUrl).toBe(window.location.origin)
-    expect(localStorage.getItem("tldwConfig")).not.toContain("manual-bearer")
-    expect(localStorage.getItem("tldwConfig")).not.toContain("manual-token")
-    expect(localStorage.getItem("tldwConfig")).not.toContain("manual-refresh")
-    expect(readStoredValue("tldwServerUrl")).toBe(window.location.origin)
-    expect(readStoredValue("tldwRuntimeAuthMetadata")).toBeNull()
-  })
-
-  it("uses runtime auth for shared requests after scrubbing manual multi-user credentials", async () => {
-    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
-    localStorage.setItem(
-      "tldwConfig",
-      JSON.stringify({
-        authMode: "multi-user",
-        accessToken: "manual-token",
-        serverUrl: "http://127.0.0.1:8000"
-      })
-    )
-    stubRuntimeConfigFetch("runtime-key")
-
-    await importAndAwaitBootstrap()
-    const { tldwRequest } = await import("@/services/tldw/request-core")
-    const requestFetch = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ ok: true }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" }
-      })
-    )
-
-    await tldwRequest(
-      {
-        path: "/api/v1/config/docs-info",
-        method: "GET"
-      },
-      {
-        getConfig: async () =>
-          readStoredValue("tldwConfig") as Record<string, unknown>,
-        fetchFn: requestFetch
-      }
-    )
-
-    expect(requestFetch).toHaveBeenCalledWith(
-      "/api/v1/config/docs-info",
-      expect.objectContaining({
-        headers: expect.objectContaining({
-          "X-API-KEY": "runtime-key"
-        })
-      })
-    )
-    const requestHeaders = requestFetch.mock.calls[0]?.[1]?.headers as Record<
-      string,
-      string
-    >
-    expect(requestHeaders.Authorization).toBeUndefined()
-  })
-
-  it("does not mark a matching manual key as runtime-owned without prior metadata", async () => {
-    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
-    localStorage.setItem(
-      "tldwConfig",
-      JSON.stringify({
-        authMode: "single-user",
-        apiKey: "runtime-key",
-        serverUrl: "http://127.0.0.1:8000"
-      })
-    )
-    stubRuntimeConfigFetch("runtime-key")
-
-    await importAndAwaitBootstrap()
-    const { getApiKey } = await import("@web/lib/authStorage")
-
-    let nextConfig = readStoredValue("tldwConfig") as Record<string, unknown>
-    expect(getApiKey()).toBe("runtime-key")
-    expect(nextConfig.apiKey).toBeUndefined()
-    expect(nextConfig.serverUrl).toBe(window.location.origin)
-    expect(localStorage.getItem("tldwConfig")).not.toContain("runtime-key")
-    expect(readStoredValue("tldwRuntimeAuthMetadata")).toBeNull()
-
-    vi.resetModules()
-    stubRuntimeConfigFetch("rotated-runtime-key")
-    await importAndAwaitBootstrap()
-
-    const authStorage = await import("@web/lib/authStorage")
-    nextConfig = readStoredValue("tldwConfig") as Record<string, unknown>
-    expect(authStorage.getApiKey()).toBe("rotated-runtime-key")
-    expect(nextConfig.apiKey).toBeUndefined()
-    expect(localStorage.getItem("tldwConfig")).not.toContain("rotated-runtime-key")
-    expect(readStoredValue("tldwRuntimeAuthMetadata")).toMatchObject({
-      source: "webui-runtime",
-      version: 1,
-      authMode: "single-user"
+    expect(readStoredValue("tldwCookieSessionConfig")).toEqual({
+      authMode: "single-user",
+      authSource: "cookie-session",
+      serverUrl: window.location.origin
     })
+    expect(readStoredValue("tldwConfig")).toEqual({
+      authMode: "single-user",
+      serverUrl: "http://127.0.0.1:8000"
+    })
+    expect(localStorage.getItem("apiKey")).toBeNull()
+    expect(localStorage.getItem("tldwRuntimeAuthMetadata")).toBeNull()
+    expect(sessionStorage.getItem("tldwManualSessionApiKey")).toBeNull()
+    expect(JSON.stringify([...Array(localStorage.length)].map((_, index) => {
+      const key = localStorage.key(index)
+      return key ? [key, localStorage.getItem(key)] : null
+    }))).not.toContain("stale-public-key")
+    const { getApiKey } = await import("@web/lib/authStorage")
+    expect(getApiKey()).toBeNull()
+
+    const signals = fetchMock.mock.calls.map(([, init]) => init?.signal)
+    expect(signals).toHaveLength(3)
+    expect(signals.every((signal) => signal instanceof AbortSignal)).toBe(true)
+    expect(new Set(signals)).toHaveLength(3)
   })
 
-  it.each(["CHANGE_ME_TO_SECURE_API_KEY", "test-key"])(
-    "replaces persisted placeholder key %s with runtime auth metadata",
-    async (placeholderKey) => {
+  it.each([
+    ["runtime config", "/api/_tldw-webui/runtime-config"],
+    ["session bootstrap", "/api/_tldw-webui/session"],
+    ["profile probe", "/api/v1/users/me/profile"]
+  ])(
+    "bounds a never-settling %s request and preserves manual configuration",
+    async (_label, stalledUrl) => {
+      vi.useFakeTimers()
       process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+      const existing = {
+        authMode: "single-user",
+        apiKey: "manual-key",
+        credentialSource: "manual",
+        apiKeyPersistence: "device",
+        apiKeyServerOrigin: "https://remote.example.test",
+        serverUrl: "https://remote.example.test"
+      }
+      localStorage.setItem("tldwConfig", JSON.stringify(existing))
+      localStorage.setItem("apiKey", "legacy-key")
       localStorage.setItem(
-        "tldwConfig",
+        "tldwCookieSessionConfig",
         JSON.stringify({
           authMode: "single-user",
-          apiKey: placeholderKey,
-          serverUrl: "http://127.0.0.1:8000"
+          authSource: "cookie-session",
+          serverUrl: window.location.origin
         })
       )
-      stubRuntimeConfigFetch("runtime-key")
 
-      await importAndAwaitBootstrap()
+      const fetchMock = vi.fn(
+        async (input: RequestInfo | URL, _init?: RequestInit) => {
+          const url = String(input)
+          if (url === stalledUrl) {
+            return await new Promise<Response>(() => undefined)
+          }
+          if (url === "/api/_tldw-webui/runtime-config") {
+            return {
+              ok: true,
+              json: async () => ({
+                runtimeAuth: {
+                  available: true,
+                  authMode: "single-user",
+                  transport: "cookie-session"
+                }
+              })
+            } as Response
+          }
+          return { ok: true } as Response
+        }
+      )
+      vi.stubGlobal("fetch", fetchMock)
 
-      const nextConfig = readStoredValue("tldwConfig") as Record<string, unknown>
-      const metadata = readStoredValue("tldwRuntimeAuthMetadata") as Record<string, unknown>
-      expect(nextConfig.apiKey).toBeUndefined()
-      expect(localStorage.getItem("tldwConfig")).not.toContain("runtime-key")
-      expect(metadata).toMatchObject({
-        source: "webui-runtime",
-        version: 1,
-        authMode: "single-user"
+      const mod = await import("@web/extension/shims/runtime-bootstrap")
+      await vi.advanceTimersByTimeAsync(0)
+      expect(fetchMock).toHaveBeenCalledWith(
+        stalledUrl,
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
+      )
+
+      let settled = false
+      void mod.runtimeBootstrapReady.then(() => {
+        settled = true
       })
+      await vi.advanceTimersByTimeAsync(7_999)
+      await Promise.resolve()
+      expect(settled).toBe(false)
+
+      await vi.advanceTimersByTimeAsync(1)
+      await mod.runtimeBootstrapReady
+
+      expect(readStoredValue("tldwConfig")).toEqual(existing)
+      expect(localStorage.getItem("apiKey")).toBe("legacy-key")
+      expect(readStoredValue("tldwCookieSessionConfig")).toBeNull()
     }
   )
 
-  it("replaces a previous runtime-owned key when the runtime key changes", async () => {
+  it("preserves manual config and legacy slots when session bootstrap fails", async () => {
     process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
-    stubRuntimeConfigFetch("old-runtime-key")
+    const existing = {
+      authMode: "single-user",
+      apiKey: "manual-key",
+      credentialSource: "manual",
+      apiKeyPersistence: "device",
+      apiKeyServerOrigin: "https://remote.example.test",
+      serverUrl: "https://remote.example.test"
+    }
+    localStorage.setItem("tldwConfig", JSON.stringify(existing))
+    localStorage.setItem("apiKey", "legacy-key")
+    const fetchMock = stubCookieRuntimeFetch({ bootstrapOk: false })
 
     await importAndAwaitBootstrap()
-    const oldMetadata = readStoredValue("tldwRuntimeAuthMetadata") as Record<string, unknown>
 
-    vi.resetModules()
-    stubRuntimeConfigFetch("new-runtime-key")
-    await importAndAwaitBootstrap()
-
-    const nextConfig = readStoredValue("tldwConfig") as Record<string, unknown>
-    const newMetadata = readStoredValue("tldwRuntimeAuthMetadata") as Record<string, unknown>
-
-    expect(nextConfig.apiKey).toBeUndefined()
-    expect(localStorage.getItem("tldwConfig")).not.toContain("new-runtime-key")
-    expect(newMetadata.source).toBe("webui-runtime")
-    expect(newMetadata.keyFingerprint).not.toBe(oldMetadata.keyFingerprint)
+    expect(readStoredValue("tldwConfig")).toEqual(existing)
+    expect(localStorage.getItem("apiKey")).toBe("legacy-key")
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/api/v1/users/me/profile",
+      expect.anything()
+    )
   })
 
-  it("writes runtime auth metadata without storing a duplicate secret", async () => {
+  it.each([
+    [
+      "device persistence",
+      {
+        authMode: "single-user",
+        credentialSource: "manual",
+        apiKeyPersistence: "device",
+        apiKeyServerOrigin: "https://remote.example.test",
+        serverUrl: "https://remote.example.test"
+      }
+    ],
+    [
+      "cookie auth",
+      {
+        authMode: "single-user",
+        authSource: "cookie-session",
+        serverUrl: "https://remote.example.test"
+      }
+    ],
+    [
+      "incomplete manual metadata",
+      {
+        authMode: "single-user",
+        credentialSource: "manual",
+        serverUrl: "https://remote.example.test"
+      }
+    ],
+    [
+      "different-origin metadata",
+      {
+        authMode: "single-user",
+        credentialSource: "manual",
+        apiKeyPersistence: "session",
+        apiKeyServerOrigin: "https://other.example.test",
+        serverUrl: "https://remote.example.test"
+      }
+    ],
+    [
+      "noncanonical origin metadata",
+      {
+        authMode: "single-user",
+        credentialSource: "manual",
+        apiKeyPersistence: "session",
+        apiKeyServerOrigin: "https://remote.example.test/path",
+        serverUrl: "https://remote.example.test"
+      }
+    ]
+  ])("scrubs a session secret beside %s", async (_label, config) => {
     process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
-    stubRuntimeConfigFetch("runtime-key")
-
-    await importAndAwaitBootstrap()
-
-    const rawMetadata = localStorage.getItem("tldwRuntimeAuthMetadata")
-    const metadata = readStoredValue("tldwRuntimeAuthMetadata") as Record<string, unknown>
-
-    expect(metadata).toMatchObject({
-      source: "webui-runtime",
-      version: 1,
-      authMode: "single-user"
-    })
-    expect(rawMetadata).not.toContain("runtime-key")
-  })
-
-  it("falls back to existing env bootstrap when runtime config fetch fails", async () => {
-    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
-    process.env.NEXT_PUBLIC_X_API_KEY = "env-key"
-    localStorage.setItem(
-      "tldwConfig",
+    localStorage.setItem("tldwConfig", JSON.stringify(config))
+    sessionStorage.setItem(
+      "tldwManualSessionApiKey",
       JSON.stringify({
-        authMode: "multi-user",
-        apiBearer: "stale-env-bearer",
-        accessToken: "stale-env-access",
-        refreshToken: "stale-env-refresh"
+        credentialSource: "manual",
+        apiKeyPersistence: "session",
+        apiKeyServerOrigin: "https://remote.example.test",
+        apiKey: "manual-session-key"
       })
     )
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => {
-        throw new Error("offline")
-      })
-    )
+    stubCookieRuntimeFetch()
 
     await importAndAwaitBootstrap()
-    const { getApiKey } = await import("@web/lib/authStorage")
 
-    const nextConfig = readStoredValue("tldwConfig") as Record<string, unknown>
-    expect(getApiKey()).toBe("env-key")
-    expect(nextConfig.apiKey).toBeUndefined()
-    expect(nextConfig.apiBearer).toBeUndefined()
-    expect(nextConfig.accessToken).toBeUndefined()
-    expect(nextConfig.refreshToken).toBeUndefined()
-    expect(localStorage.getItem("tldwConfig")).not.toContain("env-key")
-    expect(localStorage.getItem("tldwConfig")).not.toContain("stale-env-bearer")
-    expect(localStorage.getItem("tldwConfig")).not.toContain("stale-env-access")
-    expect(localStorage.getItem("tldwConfig")).not.toContain("stale-env-refresh")
-    expect(readStoredValue("tldwRuntimeAuthMetadata")).toBeNull()
+    expect(sessionStorage.getItem("tldwManualSessionApiKey")).toBeNull()
   })
 
-  it("does not reapply env single-user auth after an explicit browser opt-out", async () => {
-    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "advanced"
-    process.env.NEXT_PUBLIC_API_URL = "http://127.0.0.1:8000"
-    process.env.NEXT_PUBLIC_X_API_KEY = "env-key"
-    localStorage.setItem("tldwRuntimeEnvAuthOptOut", "true")
+  it("scrubs a complete session secret for the active quickstart origin", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+    const origin = window.location.origin
     localStorage.setItem(
       "tldwConfig",
       JSON.stringify({
         authMode: "single-user",
-        serverUrl: "http://127.0.0.1:8000"
+        credentialSource: "manual",
+        apiKeyPersistence: "session",
+        apiKeyServerOrigin: origin,
+        serverUrl: origin
       })
+    )
+    sessionStorage.setItem(
+      "tldwManualSessionApiKey",
+      JSON.stringify({
+        credentialSource: "manual",
+        apiKeyPersistence: "session",
+        apiKeyServerOrigin: origin,
+        apiKey: "same-origin-session-key"
+      })
+    )
+    stubCookieRuntimeFetch()
+
+    await importAndAwaitBootstrap()
+
+    expect(sessionStorage.getItem("tldwManualSessionApiKey")).toBeNull()
+  })
+
+  it("preserves a complete manual session connection beside the active cookie session", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+    localStorage.setItem(
+      "tldwConfig",
+      JSON.stringify({
+        authMode: "single-user",
+        credentialSource: "manual",
+        apiKeyPersistence: "session",
+        apiKeyServerOrigin: "https://remote.example.test",
+        serverUrl: "https://remote.example.test/api"
+      })
+    )
+    sessionStorage.setItem(
+      "tldwManualSessionApiKey",
+      JSON.stringify({
+        credentialSource: "manual",
+        apiKeyPersistence: "session",
+        apiKeyServerOrigin: "https://remote.example.test",
+        apiKey: "manual-session-key"
+      })
+    )
+    stubCookieRuntimeFetch()
+
+    await importAndAwaitBootstrap()
+
+    const manualConfig = {
+      authMode: "single-user",
+      credentialSource: "manual",
+      apiKeyPersistence: "session",
+      apiKeyServerOrigin: "https://remote.example.test",
+      serverUrl: "https://remote.example.test/api"
+    }
+    expect(readStoredValue("tldwConfig")).toEqual(manualConfig)
+    expect(readStoredValue("tldwCookieSessionConfig")).toEqual({
+      authMode: "single-user",
+      authSource: "cookie-session",
+      serverUrl: window.location.origin
+    })
+    expect(sessionStorage.getItem("tldwManualSessionApiKey")).toContain(
+      "manual-session-key"
+    )
+    const { resolveManualCredential } = await import(
+      "@/services/tldw/single-user-credential"
+    )
+    await expect(
+      resolveManualCredential(manualConfig, {
+        session: {
+          get: async (key: string) => {
+            const raw = sessionStorage.getItem(key)
+            return raw ? JSON.parse(raw) : null
+          },
+          set: async () => undefined,
+          remove: async () => undefined
+        }
+      })
+    ).resolves.toBe("manual-session-key")
+    const { getApiKey } = await import("@web/lib/authStorage")
+    expect(getApiKey()).toBeNull()
+
+    vi.resetModules()
+    stubCookieRuntimeFetch()
+    await importAndAwaitBootstrap()
+
+    expect(readStoredValue("tldwConfig")).toEqual(manualConfig)
+  })
+
+  it("preserves manual config and legacy slots when the cookie probe fails", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+    const existing = {
+      authMode: "single-user",
+      apiKey: "manual-key",
+      credentialSource: "manual",
+      apiKeyPersistence: "device",
+      apiKeyServerOrigin: "https://remote.example.test",
+      serverUrl: "https://remote.example.test"
+    }
+    localStorage.setItem("tldwConfig", JSON.stringify(existing))
+    localStorage.setItem("apiKey", "legacy-key")
+    stubCookieRuntimeFetch({ probeOk: false })
+
+    await importAndAwaitBootstrap()
+
+    expect(readStoredValue("tldwConfig")).toEqual(existing)
+    expect(localStorage.getItem("apiKey")).toBe("legacy-key")
+  })
+
+  it("does not fall back to public runtime key storage when capability is unavailable", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+    process.env.NEXT_PUBLIC_X_API_KEY = "public-runtime-key"
+    const existing = {
+      authMode: "single-user",
+      apiKey: "manual-key",
+      serverUrl: "https://remote.example.test"
+    }
+    localStorage.setItem("tldwConfig", JSON.stringify(existing))
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({ runtimeAuth: { available: false } })
+      }))
     )
 
     await importAndAwaitBootstrap()
 
-    const { getApiKey, hasEnvApiAuth } = await import("@web/lib/authStorage")
-    const { getRuntimeSingleUserApiKeyOverride } = await import(
-      "@/services/tldw/runtime-auth-override"
+    expect(readStoredValue("tldwConfig")).toEqual(existing)
+    expect(JSON.stringify(readStoredValue("tldwConfig"))).not.toContain(
+      "public-runtime-key"
+    )
+  })
+
+  it("invalidates a stale cookie marker in memory when persistent removal fails", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+    const manualConfig = {
+      authMode: "single-user" as const,
+      apiKey: "manual-device-key",
+      credentialSource: "manual" as const,
+      apiKeyPersistence: "device" as const,
+      apiKeyServerOrigin: "https://remote.example.test",
+      serverUrl: "https://remote.example.test"
+    }
+    localStorage.setItem("tldwConfig", JSON.stringify(manualConfig))
+    localStorage.setItem(
+      "tldwCookieSessionConfig",
+      JSON.stringify({
+        authMode: "single-user",
+        authSource: "cookie-session",
+        serverUrl: window.location.origin
+      })
+    )
+    const { Storage } = await import("@plasmohq/storage")
+    vi.spyOn(Storage.prototype, "remove").mockRejectedValueOnce(
+      new Error("storage unavailable")
+    )
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({ runtimeAuth: { available: false } })
+      }))
     )
 
-    expect(getApiKey()).toBeNull()
-    expect(hasEnvApiAuth()).toBe(false)
-    expect(getRuntimeSingleUserApiKeyOverride()).toBeNull()
-    expect(localStorage.getItem("tldwConfig")).not.toContain("env-key")
+    const { TldwApiClient } = await import("@/services/tldw/TldwApiClient")
+    const client = new TldwApiClient()
+    expect(await client.getConfig()).toEqual({
+      authMode: "single-user",
+      authSource: "cookie-session",
+      serverUrl: window.location.origin
+    })
+
+    await importAndAwaitBootstrap()
+    const config = await client.getConfig()
+
+    expect(config).toEqual(manualConfig)
+    expect(readStoredValue("tldwConfig")).toEqual(manualConfig)
+    expect(readStoredValue("tldwCookieSessionConfig")).not.toBeNull()
   })
 
   it("does not fetch runtime config for extension protocols", async () => {

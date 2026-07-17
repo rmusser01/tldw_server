@@ -46,23 +46,25 @@ from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.Collections.embedding_queue import enqueue_embeddings_job_for_item
 from tldw_Server_API.app.core.Collections.utils import hash_text_sha256, truncate_text, word_count
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
-from tldw_Server_API.app.core.DB_Management.media_db.api import get_media_repository
-from tldw_Server_API.app.core.DB_Management.media_db.api import managed_media_database
-from tldw_Server_API.app.core.DB_Management.Personalization_DB import PersonalizationDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.DB_Management.media_db.api import get_media_repository, managed_media_database
+from tldw_Server_API.app.core.DB_Management.Personalization_DB import PersonalizationDB
 from tldw_Server_API.app.core.DB_Management.scope_context import get_scope
 from tldw_Server_API.app.core.DB_Management.Watchlists_DB import SourceRow, WatchlistsDatabase
-from tldw_Server_API.app.core.Personalization.companion_activity import build_watchlist_item_added_activity
 from tldw_Server_API.app.core.feature_flags import is_personalization_enabled
+from tldw_Server_API.app.core.Personalization.companion_activity import build_watchlist_item_added_activity
+from tldw_Server_API.app.core.testing import env_flag_enabled, is_test_mode
+from tldw_Server_API.app.core.Watchlists.briefing_contract import (
+    get_briefing_contract,
+)
+from tldw_Server_API.app.core.Watchlists.content_alerts import evaluate_content_alert_rules_for_item
 from tldw_Server_API.app.core.Watchlists.fetchers import (
     fetch_rss_feed,
     fetch_rss_feed_history,
     fetch_site_article_async,
     fetch_site_items_with_rules,
 )
-from tldw_Server_API.app.core.Watchlists.content_alerts import evaluate_content_alert_rules_for_item
 from tldw_Server_API.app.core.Watchlists.filters import evaluate_filters, normalize_filters
-from tldw_Server_API.app.core.testing import env_flag_enabled, is_test_mode
 
 try:
     import bleach as _bleach  # type: ignore
@@ -540,142 +542,30 @@ def _resolve_watchlist_tenant_id(explicit_tenant_id: str | None) -> str:
     return "default"
 
 
-async def _maybe_auto_generate_output(
-    *,
-    db: WatchlistsDatabase,
-    collections_db: CollectionsDatabase,
-    user_id: int,
-    run,
-    job,
-    job_output_prefs: dict[str, Any],
-    stats: dict[str, Any],
-) -> int | None:
-    """Generate a briefing output automatically if configured in job output_prefs.
-
-    Returns the output artifact ID, or None if skipped.
-    """
-    auto_cfg = job_output_prefs.get("auto_output")
-    if not isinstance(auto_cfg, dict) or not auto_cfg.get("enabled"):
-        return None
-    if stats.get("items_ingested", 0) <= 0:
-        return None
-
-    # Lazy imports to avoid circular dependencies
-    from tldw_Server_API.app.core.Watchlists import template_store
-    from tldw_Server_API.app.services.outputs_service import (
-        _build_output_filename,
-        _outputs_dir_for_user,
-        _resolve_output_path_for_user,
-        build_items_context_from_content_items,
-        render_output_template,
-    )
-
-    items_rows, _ = db.list_items(run_id=run.id, status="ingested", limit=1000, offset=0)
-    if not items_rows:
-        return None
-
-    output_type = str(auto_cfg.get("type", "briefing_markdown"))
-    template_name = auto_cfg.get("template_name")
-    if not template_name:
-        template_defaults = job_output_prefs.get("template") or {}
-        template_name = template_defaults.get("default_name")
-
-    # Resolve template content
-    template_content: str | None = None
-    template_format = "md"
-    if template_name:
-        try:
-            tpl = template_store.load_template(str(template_name))
-            template_content = tpl.content
-            template_format = tpl.format or "md"
-        except _WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS:
-            logger.debug(f"auto-output: template {template_name!r} not found, using default")
-
-    # Build context (reuses shared helper for consistent dict shape)
-    job_name = getattr(job, "name", None) or f"Job-{getattr(job, 'id', '?')}"
-    title = f"{job_name}-Auto-{run.id}"
-    items_payload = build_items_context_from_content_items(items_rows)
-
-    if template_content:
-        context = {
-            "title": title,
-            "generated_at": _utcnow_iso(),
-            "items": items_payload,
-            "item_count": len(items_payload),
+def _fulfillment_stats_projection(result: Any) -> dict[str, Any]:
+    """Return the compact run-stats compatibility view of an occurrence."""
+    projection: dict[str, Any] = {
+        "briefing_occurrence": {
+            "id": result.occurrence_id,
+            "artifact_status": result.artifact_status,
+            "delivery_status": result.delivery_status,
+            "output_id": result.output_id,
+            "audio_task_id": result.audio_task_id,
+            "selected_count": result.selected_count,
+            "omitted_count": result.omitted_count,
         }
-        rendered = render_output_template(template_content, context)
-    else:
-        # Default markdown briefing
-        lines = [f"# {title}", ""]
-        for idx, itm in enumerate(items_payload, 1):
-            item_title = itm.get("title") or "Untitled"
-            item_url = itm.get("url") or ""
-            item_summary = itm.get("summary") or ""
-            if item_url:
-                lines.append(f"{idx}. [{item_title}]({item_url})")
-            else:
-                lines.append(f"{idx}. {item_title}")
-            if item_summary:
-                lines.append(f"   {item_summary[:200]}")
-            lines.append("")
-        rendered = "\n".join(lines)
-
-    # Write file
-    out_dir = _outputs_dir_for_user(user_id)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    filename = _build_output_filename(title, "auto", ts, template_format)
-    path = _resolve_output_path_for_user(user_id, filename)
-    path.write_text(rendered, encoding="utf-8")
-
-    # Persist artifact
-    metadata = {
-        "item_count": len(items_payload),
-        "format": template_format,
-        "type": output_type,
-        "origin": "watchlists",
-        "generation_mode": "auto_output",
-        "auto_output": True,
-        "run_id": run.id,
-        "job_id": getattr(job, "id", None),
     }
-    artifact = collections_db.create_output_artifact(
-        type_=output_type,
-        title=title,
-        format_=template_format,
-        storage_path=filename,
-        metadata_json=json.dumps(metadata),
-        job_id=getattr(job, "id", None),
-        run_id=run.id,
-    )
-    return artifact.id
-
-
-def _update_auto_output_audio_metadata(
-    collections_db: CollectionsDatabase,
-    output_id: int,
-    audio_result: Any,
-) -> None:
-    """Attach audio trigger state to an auto-generated output artifact."""
-    from tldw_Server_API.app.core.Watchlists.audio_briefing_workflow import (
-        apply_audio_briefing_result_metadata,
-    )
-
-    row = collections_db.get_output_artifact(output_id)
-    metadata: dict[str, Any] = {}
-    raw_metadata = getattr(row, "metadata_json", None)
-    if raw_metadata:
-        try:
-            parsed = json.loads(raw_metadata)
-            if isinstance(parsed, dict):
-                metadata = parsed
-        except _WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS:
-            metadata = {}
-    apply_audio_briefing_result_metadata(metadata, audio_result, requested=True)
-    collections_db.update_output_artifact_metadata(
-        output_id,
-        metadata_json=json.dumps(metadata),
-    )
+    if result.output_id is not None:
+        projection["auto_output_id"] = result.output_id
+    audio_stage = result.stages.get("compose_audio_script", {})
+    if result.audio_task_id:
+        projection["audio_briefing_task_id"] = result.audio_task_id
+        projection["audio_briefing_status"] = "queued"
+    elif audio_stage.get("status") == "failed":
+        projection["audio_briefing_status"] = audio_stage.get("trigger_status") or "failed"
+        if audio_stage.get("code"):
+            projection["audio_briefing_reason"] = audio_stage["code"]
+    return projection
 
 
 async def run_watchlist_job(
@@ -723,6 +613,7 @@ async def run_watchlist_job(
         persist_to_media_db = bool(job_output_prefs.get("persist_to_media_db"))
 
     stack = contextlib.ExitStack()
+    collection_succeeded = False
     try:
         # Resolve per-user media DB path and instantiate when requested
         mdb = None
@@ -1354,11 +1245,11 @@ async def run_watchlist_job(
                             )
                             continue
 
-                    # Update last_scraped_at/status for source
+                        # Update last_scraped_at/status for source
                         with contextlib.suppress(_WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS):
                             db.update_source_scrape_meta(int(src.id), last_scraped_at=_utcnow_iso(), status="ok", consec_errors=0)
 
-                    # Apply retention policy if configured
+                        # Apply retention policy if configured
                         _apply_feed_retention(collections_db, collections_origin, src)
 
                 elif src_type in {"site", "forum"}:
@@ -1781,6 +1672,7 @@ async def run_watchlist_job(
             return {"run_id": run.id, "status": "cancelled", **stats}
 
         db.update_run(run.id, status="succeeded", finished_at=_utcnow_iso(), stats_json=json.dumps(stats))
+        collection_succeeded = True
 
         # Update job history
         next_run = _compute_next_run(job.schedule_expr, job.schedule_timezone)
@@ -1791,51 +1683,37 @@ async def run_watchlist_job(
         except _WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS as exc:
             logger.debug(f"collections schedule auto-promote failed for job {job_id}: {exc}")
 
-        # Auto-generate output if configured
-        try:
-            auto_output_id = await _maybe_auto_generate_output(
-                db=db,
-                collections_db=collections_db,
-                user_id=user_id,
-                run=run,
-                job=job,
-                job_output_prefs=job_output_prefs,
-                stats=stats,
+        contract = get_briefing_contract(
+            job_output_prefs,
+            scheduled=bool(getattr(job, "schedule_expr", None)),
+        )
+        text_enabled = bool(contract["text"]["enabled"])
+        audio_enabled = bool(contract["audio"]["enabled"])
+
+        if text_enabled or audio_enabled:
+            from tldw_Server_API.app.core.Watchlists.briefing_fulfillment import (
+                fulfill_watchlist_briefing,
             )
-            if auto_output_id:
-                stats["auto_output_id"] = auto_output_id
-        except _WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug(f"auto-output generation failed for run {run.id}: {exc}")
 
-        # Trigger audio briefing workflow if configured
-        try:
-            if isinstance(job_output_prefs, dict) and job_output_prefs.get("generate_audio"):
-                from tldw_Server_API.app.core.Watchlists.audio_briefing_workflow import (
-                    apply_audio_briefing_result_metadata,
-                    trigger_audio_briefing,
-                )
-
-                audio_result = await trigger_audio_briefing(
+            try:
+                fulfillment = await fulfill_watchlist_briefing(
                     user_id=user_id,
-                    job_id=job_id,
-                    run_id=run.id,
-                    output_prefs=job_output_prefs,
-                    db=db,
+                    job=job,
+                    run=db.get_run(run.id),
+                    watchlists_db=db,
+                    collections_db=collections_db,
+                    tenant_id=effective_tenant_id,
                 )
-                apply_audio_briefing_result_metadata(stats, audio_result)
-                if auto_output_id:
-                    try:
-                        _update_auto_output_audio_metadata(collections_db, int(auto_output_id), audio_result)
-                    except _WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS as exc:
-                        logger.debug(f"auto-output audio metadata update failed for output {auto_output_id}: {exc}")
-        except _WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS as exc:
-            logger.warning(
-                "Audio briefing trigger failed for job {} (error_type={})",
-                job_id,
-                type(exc).__name__,
-            )
+                stats.update(_fulfillment_stats_projection(fulfillment))
+            except Exception as exc:  # noqa: BLE001 - fulfillment is downstream of durable collection success
+                logger.error(
+                    "Briefing occurrence could not be persisted for job {} (error_type={})",
+                    job_id,
+                    type(exc).__name__,
+                )
+                stats["briefing_fulfillment_error"] = "occurrence_persistence_failed"
 
-        # Persist post-run augmentation fields (e.g., auto_output_id, audio_briefing_task_id).
+        # Run stats retain only a compatibility projection; the occurrence is authoritative.
         try:
             db.update_run(run.id, stats_json=json.dumps(stats))
         except _WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS as exc:
@@ -1843,22 +1721,24 @@ async def run_watchlist_job(
 
         return {"run_id": run.id, **stats}
     except asyncio.CancelledError:
-        with contextlib.suppress(_WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS):
-            db.update_run(
-                run.id,
-                status="cancelled",
-                finished_at=_utcnow_iso(),
-                error_msg="cancelled",
-            )
+        if not collection_succeeded:
+            with contextlib.suppress(_WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS):
+                db.update_run(
+                    run.id,
+                    status="cancelled",
+                    finished_at=_utcnow_iso(),
+                    error_msg="cancelled",
+                )
         raise
     except Exception as exc:
-        with contextlib.suppress(_WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS):
-            db.update_run(
-                run.id,
-                status="failed",
-                finished_at=_utcnow_iso(),
-                error_msg=_safe_source_error_text(exc) or type(exc).__name__,
-            )
+        if not collection_succeeded:
+            with contextlib.suppress(_WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS):
+                db.update_run(
+                    run.id,
+                    status="failed",
+                    finished_at=_utcnow_iso(),
+                    error_msg=_safe_source_error_text(exc) or type(exc).__name__,
+                )
         raise
     finally:
         stack.close()

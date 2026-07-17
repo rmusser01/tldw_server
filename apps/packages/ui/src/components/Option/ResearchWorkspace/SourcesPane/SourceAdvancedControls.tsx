@@ -1,4 +1,5 @@
 import React from "react"
+import { WORKSPACE_SOURCE_SAVED_VIEW_SORTS } from "@/types/workspace-source-saved-view"
 import {
   SOURCE_LIST_SORT_LABELS,
   hasActiveSourceFilters,
@@ -28,21 +29,10 @@ const parseOptionalNumber = (value: string): number | null => {
   return Number.isFinite(parsed) ? parsed : null
 }
 
-const SORT_OPTIONS: SourceListSortOption[] = [
-  "manual",
-  "name_asc",
-  "name_desc",
-  "added_desc",
-  "added_asc",
-  "source_created_desc",
-  "source_created_asc",
-  "file_size_desc",
-  "file_size_asc",
-  "duration_desc",
-  "duration_asc",
-  "page_count_desc",
-  "page_count_asc"
-]
+const humanizeLifecycleState = (value: string): string => {
+  const label = value.replaceAll("_", " ")
+  return label[0].toUpperCase() + label.slice(1)
+}
 
 export const SourceAdvancedControls: React.FC<SourceAdvancedControlsProps> = ({
   viewState,
@@ -54,6 +44,7 @@ export const SourceAdvancedControls: React.FC<SourceAdvancedControlsProps> = ({
   onResetAdvancedFilters
 }) => {
   const showClearFilters = hasActiveSourceFilters(viewState) || viewState.sort !== "manual"
+  const reviewStateFilters = viewState.reviewStateFilters ?? []
 
   return (
     <div className="mt-2 rounded-lg border border-border/70 bg-surface/50 px-3 py-2">
@@ -82,6 +73,31 @@ export const SourceAdvancedControls: React.FC<SourceAdvancedControlsProps> = ({
         ) : null}
       </div>
 
+      {viewState.lifecycleStateFilters.length > 0 ? (
+        <div className="mt-2 flex flex-wrap gap-2">
+          {viewState.lifecycleStateFilters.map((lifecycleState) => {
+            const label = humanizeLifecycleState(lifecycleState)
+            return (
+              <button
+                key={lifecycleState}
+                type="button"
+                aria-label={`Clear lifecycle filter ${label}`}
+                onClick={() =>
+                  onPatchViewState({
+                    lifecycleStateFilters: viewState.lifecycleStateFilters.filter(
+                      (value) => value !== lifecycleState
+                    )
+                  })
+                }
+                className="rounded border border-border bg-surface px-2 py-1 text-[11px] text-text-muted transition hover:bg-surface2 hover:text-text"
+              >
+                {`Lifecycle: ${label} x`}
+              </button>
+            )
+          })}
+        </div>
+      ) : null}
+
       {viewState.expanded ? (
         <div className="mt-3 space-y-3">
           <div className="space-y-1">
@@ -101,6 +117,37 @@ export const SourceAdvancedControls: React.FC<SourceAdvancedControlsProps> = ({
                     }
                   />
                   <span>{`Status ${status[0].toUpperCase()}${status.slice(1)}`}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-1">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-text-muted">
+              Review
+            </p>
+            <div className="flex flex-wrap gap-3 text-sm text-text">
+              {(
+                [
+                  ["unset", "Unreviewed"],
+                  ["needs_review", "Needs review"],
+                  ["reviewed", "Reviewed"]
+                ] as const
+              ).map(([reviewState, label]) => (
+                <label key={reviewState} className="inline-flex items-center gap-1.5">
+                  <input
+                    type="checkbox"
+                    checked={reviewStateFilters.includes(reviewState)}
+                    onChange={() =>
+                      onPatchViewState({
+                        reviewStateFilters: toggleListValue(
+                          reviewStateFilters,
+                          reviewState
+                        )
+                      })
+                    }
+                  />
+                  <span>{label}</span>
                 </label>
               ))}
             </div>
@@ -145,7 +192,7 @@ export const SourceAdvancedControls: React.FC<SourceAdvancedControlsProps> = ({
                 }
                 className="w-full rounded border border-border bg-surface px-2 py-1.5 text-sm text-text"
               >
-                {SORT_OPTIONS.map((option) => (
+                {WORKSPACE_SOURCE_SAVED_VIEW_SORTS.map((option) => (
                   <option key={option} value={option}>
                     {option === "manual" ? "Manual order" : SOURCE_LIST_SORT_LABELS[option]}
                   </option>
@@ -268,6 +315,7 @@ export const SourceAdvancedControls: React.FC<SourceAdvancedControlsProps> = ({
                     <input
                       aria-label="File size min"
                       type="number"
+                      min={0}
                       value={viewState.fileSizeMin ?? ""}
                       onChange={(event) =>
                         onPatchViewState({
@@ -284,6 +332,7 @@ export const SourceAdvancedControls: React.FC<SourceAdvancedControlsProps> = ({
                     <input
                       aria-label="File size max"
                       type="number"
+                      min={0}
                       value={viewState.fileSizeMax ?? ""}
                       onChange={(event) =>
                         onPatchViewState({
@@ -305,6 +354,7 @@ export const SourceAdvancedControls: React.FC<SourceAdvancedControlsProps> = ({
                     <input
                       aria-label="Duration min"
                       type="number"
+                      min={0}
                       value={viewState.durationMin ?? ""}
                       onChange={(event) =>
                         onPatchViewState({
@@ -321,6 +371,7 @@ export const SourceAdvancedControls: React.FC<SourceAdvancedControlsProps> = ({
                     <input
                       aria-label="Duration max"
                       type="number"
+                      min={0}
                       value={viewState.durationMax ?? ""}
                       onChange={(event) =>
                         onPatchViewState({
@@ -342,6 +393,7 @@ export const SourceAdvancedControls: React.FC<SourceAdvancedControlsProps> = ({
                     <input
                       aria-label="Page count min"
                       type="number"
+                      min={0}
                       value={viewState.pageCountMin ?? ""}
                       onChange={(event) =>
                         onPatchViewState({
@@ -358,6 +410,7 @@ export const SourceAdvancedControls: React.FC<SourceAdvancedControlsProps> = ({
                     <input
                       aria-label="Page count max"
                       type="number"
+                      min={0}
                       value={viewState.pageCountMax ?? ""}
                       onChange={(event) =>
                         onPatchViewState({

@@ -9,7 +9,17 @@ const mocks = vi.hoisted(() => ({
   contextMenusCreate: vi.fn(),
   contextMenusRemove: vi.fn(),
   alarmsClear: vi.fn(),
-  alarmsCreate: vi.fn()
+  alarmsCreate: vi.fn(),
+  sessionStorage: new Map<string, unknown>()
+}))
+
+vi.mock("@/utils/safe-storage", () => ({
+  createSafeStorage: (options?: { area?: string }) => ({
+    get: async (key: string) =>
+      options?.area === "session" ? mocks.sessionStorage.get(key) : undefined,
+    set: vi.fn(async () => undefined),
+    remove: vi.fn(async () => undefined)
+  })
 }))
 
 vi.mock("@/services/action", () => ({
@@ -64,6 +74,7 @@ const flushPromises = async () => {
 describe("background clipper rollout guard", () => {
   const watchHandlers: Record<string, ((value: any) => void) | undefined> = {}
   let storedTldwConfig: Record<string, unknown>
+  let storedCookieSessionConfig: Record<string, unknown> | null
   const storage = {
     watch: vi.fn((handlers: Record<string, (value: any) => void>) => {
       Object.assign(watchHandlers, handlers)
@@ -71,6 +82,9 @@ describe("background clipper rollout guard", () => {
     get: vi.fn(async (key: string) => {
       if (key === "tldwConfig") {
         return storedTldwConfig
+      }
+      if (key === "tldwCookieSessionConfig") {
+        return storedCookieSessionConfig
       }
       return null
     }),
@@ -104,10 +118,12 @@ describe("background clipper rollout guard", () => {
     mocks.contextMenusRemoveAll.mockResolvedValue(undefined)
     mocks.alarmsClear.mockResolvedValue(undefined)
     mocks.alarmsCreate.mockResolvedValue(undefined)
+    mocks.sessionStorage.clear()
     storedTldwConfig = {
       serverUrl: "http://127.0.0.1:8000",
       authMode: "single-user"
     }
+    storedCookieSessionConfig = null
   })
 
   it("creates the clipper menu only when the connected server advertises support", async () => {
@@ -152,7 +168,10 @@ describe("background clipper rollout guard", () => {
     storedTldwConfig = {
       serverUrl: window.location.origin,
       authMode: "single-user",
-      apiKey: "test-api-key"
+      apiKey: "test-api-key",
+      credentialSource: "manual",
+      apiKeyPersistence: "device",
+      apiKeyServerOrigin: window.location.origin
     }
     try {
       await initBackground({
@@ -198,7 +217,10 @@ describe("background clipper rollout guard", () => {
     storedTldwConfig = {
       serverUrl: window.location.origin,
       authMode: "single-user",
-      apiKey: "test-api-key"
+      apiKey: "test-api-key",
+      credentialSource: "manual",
+      apiKeyPersistence: "device",
+      apiKeyServerOrigin: window.location.origin
     }
     try {
       await initBackground({
@@ -230,6 +252,73 @@ describe("background clipper rollout guard", () => {
           headers: { "X-API-KEY": "test-api-key" }
         })
       )
+    } finally {
+      vi.stubGlobal("fetch", previousFetch)
+      if (previousMode === undefined) {
+        delete process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
+      } else {
+        process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = previousMode
+      }
+    }
+  })
+
+  it("hydrates extension session auth for OpenAPI checks and ignores cookie markers", async () => {
+    const previousFetch = globalThis.fetch
+    const previousMode = process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
+    const fetchSpy = vi.fn(async () => ({ ok: false }))
+    vi.stubGlobal("fetch", fetchSpy)
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "advanced"
+    storedTldwConfig = {
+      serverUrl: "https://api.example.test",
+      authMode: "single-user",
+      authSource: "manual",
+      credentialSource: "manual",
+      apiKeyPersistence: "session",
+      apiKeyServerOrigin: "https://api.example.test"
+    }
+    storedCookieSessionConfig = {
+      serverUrl: window.location.origin,
+      authMode: "single-user",
+      authSource: "cookie-session"
+    }
+    mocks.sessionStorage.set("tldwManualSessionApiKey", {
+      apiKey: "background-init-session-key",
+      credentialSource: "manual",
+      apiKeyPersistence: "session",
+      apiKeyServerOrigin: "https://api.example.test"
+    })
+
+    try {
+      await initBackground({
+        storage: storage as never,
+        contextMenuId: { webui: "open-web-ui-pa", sidePanel: "open-side-panel-pa" },
+        saveToClipperMenuId: "save-to-clipper-pa",
+        saveToCompanionMenuId: "save-to-companion-pa",
+        saveToNotesMenuId: "save-to-notes-pa",
+        narrateSelectionMenuId: "narrate-selection-pa",
+        transcribeMenuId: {
+          transcribe: "transcribe-media-pa",
+          transcribeAndSummarize: "transcribe-and-summarize-media-pa"
+        },
+        warmModels,
+        capabilities: {
+          sendToTldw: false,
+          processLocal: false,
+          transcribe: false,
+          openApiCheck: true
+        },
+        onActionIconClickChange: vi.fn(),
+        onContextMenuClickChange: vi.fn()
+      })
+      await flushPromises()
+
+      expect(fetchSpy).toHaveBeenCalledWith(
+        "https://api.example.test/openapi.json",
+        expect.objectContaining({
+          headers: { "X-API-KEY": "background-init-session-key" }
+        })
+      )
+      expect(storedTldwConfig).not.toHaveProperty("apiKey")
     } finally {
       vi.stubGlobal("fetch", previousFetch)
       if (previousMode === undefined) {

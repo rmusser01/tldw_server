@@ -17,6 +17,57 @@ and this project adheres to Some kind of Versioning
 ### Removed
 
 
+## [0.1.41] - 2026-07-16
+
+> Rollup coverage: this entry covers the frozen `dev` release train after
+> `0.1.40` through PR #2744. It includes PRs #2600, #2609, #2611, #2626,
+> #2629, #2633, #2701, #2703, #2704, #2705, #2706, #2707, #2708, #2709,
+> #2710, #2711, #2712, #2713, #2714, #2715, #2716, #2717, #2718, #2719,
+> #2725, #2726, #2728, #2729, #2730, #2731, #2732, #2739, #2740, #2741,
+> #2742, #2743, and #2744.
+
+### Added
+
+- **Research And Source-Grounded Learning** — Added source-grounded spaced
+  repetition and advanced quiz controls, Paperless source review/saved-view
+  workflows, Research Workspace source discovery and PDF handoff foundations,
+  beginner UAT coverage, workspace status rails, and decision/reconciliation
+  records for the current research experience.
+- **Skills And Service Prompt Foundations** — Added Skills MCP catalog
+  rendering, render-tool binding, UX and extension parity, Skills UAT quality
+  gates, and the reviewed groundwork for user-customizable service prompts.
+- **Operations And Briefing Workflows** — Added Jobs admission/operations
+  extraction and hardened the Watchlists briefing contract across backend and
+  shared product surfaces.
+
+### Changed
+
+- **Release Metadata** — Bumped package, FastAPI, README, release-note, and
+  MkDocs metadata to `0.1.41` for the frozen release from `dev` into `main`.
+- **Authentication And Request Recovery** — Improved single-user API-key
+  device persistence, media auth refresh behavior, metadata-only ingestion
+  guards, and stale-session recovery after WebUI relaunch.
+- **Local Provider Egress Policy** — Centralized checked outbound access for
+  configured local providers and public custom OpenAI-compatible adapters.
+- **Published Documentation** — Made the curated public documentation refresh
+  deterministic, repaired the inherited broken-link baseline, and restored
+  zero-warning strict MkDocs validation in pull-request and deployment CI.
+
+### Fixed
+
+- **Quick Ingest Reliability** — Fixed advanced transport without a persisted
+  server URL, default/render-loop behavior, preset provider selection, and E2E
+  analysis-provider guards.
+- **Frontend And Audio Regressions** — Fixed extension launch/cancellation
+  races, Parakeet ONNX feature configuration, Chatbooks post-merge UAT issues,
+  frontend CodeQL alerts, and related review regressions.
+- **Research And Skills Hardening** — Closed review, cancellation, discovery,
+  rendering, extension-parity, and release-readiness gaps found across the
+  Research Workspace and Skills release train.
+
+### Removed
+
+
 ## [0.1.40] - 2026-07-10
 
 > Rollup coverage: this entry covers current `dev` work queued for `main`

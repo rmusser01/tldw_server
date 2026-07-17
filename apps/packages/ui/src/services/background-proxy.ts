@@ -3,11 +3,21 @@ import { Storage } from "@plasmohq/storage"
 import { createSafeStorage } from "@/utils/safe-storage"
 import { formatErrorMessage } from "@/utils/format-error-message"
 import {
+  isUnsafeMethod,
   parseRetryAfter,
+  readBrowserCookie,
   resolveBrowserRequestTransport,
   tldwRequest
 } from "@/services/tldw/request-core"
+import {
+  isCookieSessionBrowserTransport,
+  resolveAdvancedRequestTransportGuard
+} from "@/services/tldw/browser-networking"
 import { getRuntimeSingleUserApiKeyOverride } from "@/services/tldw/runtime-auth-override"
+import {
+  resolveDirectBrowserConfig as resolveDirectConfig,
+  type DirectRuntimeStorage
+} from "@/services/tldw/direct-browser-config"
 import {
   BACKEND_UNREACHABLE_EVENT,
   type BackendUnreachableDetail
@@ -22,8 +32,7 @@ import type {
 } from "@/services/tldw/openapi-guard"
 import {
   isAbsoluteUrlAllowlisted,
-  isSameOriginAbsoluteUrlForConfiguredServer,
-  parseHttpOrigin
+  isSameOriginAbsoluteUrlForConfiguredServer
 } from "@/utils/absolute-url-guard"
 
 const ERROR_LOG_THROTTLE_MS = 15_000
@@ -451,11 +460,6 @@ const pruneRateLimitedGetResults = () => {
   }
 }
 
-type DirectRuntimeStorage = Pick<
-  ReturnType<typeof createSafeStorage>,
-  "get" | "set"
->
-
 // Module-level single-flight for the web/direct fallback token refresh. Mirrors
 // the extension worker's `refreshInFlight`: concurrent 401s (a common pattern
 // when many components refetch on a page load) trigger exactly ONE refresh
@@ -469,9 +473,7 @@ const refreshAuthDirect = async (
   if (!webRefreshInFlight) {
     webRefreshInFlight = (async () => {
       const cfg =
-        ((await storage.get("tldwConfig").catch(() => null)) as
-          | Record<string, unknown>
-          | null) || null
+        (await resolveDirectConfig(storage)) || null
       const refreshToken = String((cfg?.refreshToken as string) || "").trim()
       // Signal failure (throw) rather than resolving silently: request-core
       // treats a resolved refreshAuth as success and would retry with the stale
@@ -488,7 +490,7 @@ const refreshAuthDirect = async (
           body: { refresh_token: refreshToken },
           noAuth: true
         },
-        { getConfig: () => storage.get("tldwConfig").catch(() => null) }
+        { getConfig: () => resolveDirectConfig(storage) }
       )
       const tokens = (resp?.ok ? resp.data : null) as
         | { access_token?: string; refresh_token?: string }
@@ -499,13 +501,10 @@ const refreshAuthDirect = async (
         )
       }
       const latest =
-        ((await storage.get("tldwConfig").catch(() => null)) as
-          | Record<string, unknown>
-          | null) ||
-        cfg ||
-        {}
+        (await resolveDirectConfig(storage)) ||
+        cfg
       await storage.set("tldwConfig", {
-        ...latest,
+        ...(latest || {}),
         accessToken: tokens.access_token,
         refreshToken:
           tokens.refresh_token ||
@@ -523,7 +522,7 @@ const refreshAuthDirect = async (
 // request-core's 401 refresh-and-retry runs in the browser (not just inside the
 // extension worker), and single-flights it across concurrent callers.
 const createDirectRuntime = (storage: DirectRuntimeStorage) => ({
-  getConfig: () => storage.get("tldwConfig").catch(() => null),
+  getConfig: () => resolveDirectConfig(storage),
   refreshAuth: () => refreshAuthDirect(storage)
 })
 
@@ -641,11 +640,11 @@ async function bgRequestImpl<
   const noAuthExplicit = Object.prototype.hasOwnProperty.call(init, "noAuth")
   let resolvedNoAuth = noAuthExplicit ? noAuth : (noAuth || isAbsoluteUrl)
   if (!noAuthExplicit && isAbsoluteUrl) {
-    const storage = createSafeStorage()
-    const cfg = (await storage.get<Record<string, unknown>>("tldwConfig").catch(() => null)) || null
+    const storage = createSafeStorage({ area: "local" })
+    const cfg = await resolveDirectConfig(storage)
     const sameOriginAbsolute = isSameOriginAbsoluteUrlForConfiguredServer(
       String(path),
-      cfg
+      cfg as unknown as Record<string, unknown>
     )
     resolvedNoAuth = noAuth || !sameOriginAbsolute
   }
@@ -714,7 +713,7 @@ async function bgRequestImpl<
     headers?: Record<string, string>
   }
   const requestDirectArrayBufferFallback = async () => {
-    const storage = createSafeStorage()
+    const storage = createSafeStorage({ area: "local" })
     return await tldwRequest(
       {
         path,
@@ -767,7 +766,7 @@ async function bgRequestImpl<
 
   // Some binary responses do not survive extension message serialization.
   if (shouldBypassBackground) {
-    const storage = createSafeStorage()
+    const storage = createSafeStorage({ area: "local" })
     const resp = await tldwRequest(
       {
         path,
@@ -967,7 +966,7 @@ async function bgRequestImpl<
   }
 
   // Fallback: direct fetch (web/dev context)
-  const storage = createSafeStorage()
+  const storage = createSafeStorage({ area: "local" })
   const resp = await tldwRequest(
     {
       path,
@@ -1023,6 +1022,7 @@ export interface BgStreamInit<
   body?: any
   streamIdleTimeoutMs?: number
   abortSignal?: AbortSignal
+  onOpen?: () => void
 }
 
 const deriveStreamIdleTimeout = (cfg: any, path: string, override?: number) => {
@@ -1077,10 +1077,10 @@ async function* bgStreamDirect<
   P extends AllowedPath = AllowedPath,
   M extends AllowedMethodFor<P> = AllowedMethodFor<P>
 >(
-  { path, method = 'POST' as UpperLower<M>, headers = {}, body, streamIdleTimeoutMs, abortSignal }: BgStreamInit<P, M>
+  { path, method = 'POST' as UpperLower<M>, headers = {}, body, streamIdleTimeoutMs, abortSignal, onOpen }: BgStreamInit<P, M>
 ): AsyncGenerator<string> {
-  const storage = createSafeStorage()
-  const cfg = (await storage.get<Record<string, unknown>>("tldwConfig").catch(() => null)) || null
+  const storage = createSafeStorage({ area: "local" })
+  const cfg = (await resolveDirectConfig(storage)) || null
   const normalizedPath = normalizeKnownPathQuirks(path)
   const isAbsolute = typeof normalizedPath === "string" && /^https?:/i.test(normalizedPath)
   const absolutePath = isAbsolute ? String(normalizedPath) : ""
@@ -1092,37 +1092,78 @@ async function* bgStreamDirect<
         })
       : null
   const hostedMode = transport?.mode === "hosted"
-  const advancedTransportOrigin =
-    transport?.mode === "advanced" ? parseHttpOrigin(transport?.url) : null
-  if (isAbsolute && !isAbsoluteUrlAllowlisted(absolutePath, cfg)) {
+  const advancedTransportGuard = resolveAdvancedRequestTransportGuard({
+    transport,
+    hasConfiguredServerUrl: Boolean(cfg?.serverUrl),
+    isAbsolute
+  })
+  if (
+    isAbsolute &&
+    !isAbsoluteUrlAllowlisted(
+      absolutePath,
+      cfg as unknown as Record<string, unknown>
+    )
+  ) {
     throw new Error(ABSOLUTE_URL_BLOCK_ERROR)
   }
-  if (
-    !cfg?.serverUrl &&
-    !isAbsolute &&
-    transport?.mode === "advanced" &&
-    !advancedTransportOrigin
-  ) {
+  if (advancedTransportGuard.isUnconfigured) {
     throw new Error("tldw server not configured")
   }
   const baseUrl =
-    advancedTransportOrigin ||
+    advancedTransportGuard.origin ||
     (cfg?.serverUrl ? String(cfg.serverUrl).replace(/\/$/, "") : "")
   const url = isAbsolute
     ? absolutePath
     : transport?.url ||
       `${baseUrl}${String(normalizedPath).startsWith("/") ? "" : "/"}${String(normalizedPath)}`
   const sameOriginAbsolute = isAbsolute
-    ? isSameOriginAbsoluteUrlForConfiguredServer(absolutePath, cfg)
+    ? isSameOriginAbsoluteUrlForConfiguredServer(
+        absolutePath,
+        cfg as unknown as Record<string, unknown>
+      )
     : false
   const shouldSkipAuth = isAbsolute && !sameOriginAbsolute
+  const pageOrigin =
+    typeof window === "undefined" ? null : String(window.location?.origin || "")
+  const samePageOriginAbsolute =
+    isAbsolute && pageOrigin
+      ? isSameOriginAbsoluteUrlForConfiguredServer(absolutePath, {
+          serverUrl: pageOrigin
+        })
+      : false
+  const absoluteCookieTransport =
+    isAbsolute && sameOriginAbsolute && samePageOriginAbsolute
+      ? resolveBrowserRequestTransport({
+          config: cfg,
+          path: absolutePath,
+          pageOrigin
+        })
+      : null
+  const cookieSession = isCookieSessionBrowserTransport({
+    authMode: cfg?.authMode,
+    authSource: cfg?.authSource,
+    transportMode: absoluteCookieTransport?.mode || transport?.mode,
+    transportKind: absoluteCookieTransport?.kind || transport?.kind,
+    pageOrigin
+  })
   const resolvedHeaders: Record<string, string> = { ...(headers || {}) }
   for (const k of Object.keys(resolvedHeaders)) {
     const kl = k.toLowerCase()
-    if (kl === "x-api-key" || kl === "authorization") delete resolvedHeaders[k]
+    if (
+      kl === "x-api-key" ||
+      kl === "authorization" ||
+      (cookieSession && kl === "x-csrf-token")
+    ) {
+      delete resolvedHeaders[k]
+    }
   }
 
-  if (!shouldSkipAuth && !hostedMode && cfg?.authMode === "single-user") {
+  if (cookieSession) {
+    if (!shouldSkipAuth && isUnsafeMethod(String(method))) {
+      const csrfToken = readBrowserCookie("csrf_token")
+      if (csrfToken) resolvedHeaders["X-CSRF-Token"] = csrfToken
+    }
+  } else if (!shouldSkipAuth && !hostedMode && cfg?.authMode === "single-user") {
     const runtimeApiKey = String(getRuntimeSingleUserApiKeyOverride() || "").trim()
     const key = runtimeApiKey || String(cfg?.apiKey || "").trim()
     if (!key) {
@@ -1209,9 +1250,7 @@ async function* bgStreamDirect<
         const tokens = await refreshResp.json().catch(() => null)
         if (tokens?.access_token) {
           const latestCfg =
-            (await storage
-              .get<Record<string, unknown>>("tldwConfig")
-              .catch(() => null)) || null
+            (await resolveDirectConfig(storage)) || null
           const updated = {
             ...(latestCfg || cfg || {}),
             accessToken: tokens.access_token,
@@ -1234,15 +1273,20 @@ async function* bgStreamDirect<
     const errorInfo = await parseStreamError(resp)
     const error = new Error(
       formatErrorMessage(errorInfo.message, `HTTP ${resp.status}`)
-    ) as Error & { status?: number; details?: unknown }
+    ) as Error & { status?: number; details?: unknown; retryAfter?: number }
     error.status = resp.status
     if (errorInfo.details) error.details = errorInfo.details
+    const retryAfterMs = parseRetryAfter(resp.headers.get("retry-after"))
+    if (typeof retryAfterMs === "number" && retryAfterMs > 0) {
+      error.retryAfter = retryAfterMs / 1_000
+    }
     throw error
   }
   if (!resp.body) {
     throw new Error("No response body")
   }
 
+  onOpen?.()
   const reader = resp.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ""
@@ -1307,10 +1351,16 @@ export async function* bgStream<
   P extends AllowedPath = AllowedPath,
   M extends AllowedMethodFor<P> = AllowedMethodFor<P>
 >(
-  { path, method = 'POST' as UpperLower<M>, headers = {}, body, streamIdleTimeoutMs, abortSignal }: BgStreamInit<P, M>
+  { path, method = 'POST' as UpperLower<M>, headers = {}, body, streamIdleTimeoutMs, abortSignal, onOpen }: BgStreamInit<P, M>
 ): AsyncGenerator<string> {
   const hasHttpStatus = (value: unknown): boolean =>
     extractHttpStatus(value) !== null
+  let openNotified = false
+  const notifyOpen = () => {
+    if (openNotified) return
+    openNotified = true
+    onOpen?.()
+  }
 
   const canUseRuntimePortTransport = async (): Promise<boolean> => {
     const hasRuntimePort = Boolean(browser?.runtime?.connect && browser?.runtime?.id)
@@ -1348,15 +1398,15 @@ export async function* bgStream<
 
   const hasRuntimePort = await canUseRuntimePortTransport()
   if (!hasRuntimePort) {
-    yield* bgStreamDirect({ path, method, headers, body, streamIdleTimeoutMs, abortSignal })
+    yield* bgStreamDirect({ path, method, headers, body, streamIdleTimeoutMs, abortSignal, onOpen: notifyOpen })
     return
   }
 
-  // Derive the connection (time-to-first-token) timeout from config instead of a
-  // hard-coded 5s. Time-to-first-byte over 5s is normal for large prompts, RAG,
+  // Derive the response-acquisition timeout from config instead of a hard-coded
+  // 5s. Time-to-response over 5s is normal for large prompts, RAG,
   // or a cold local model, and a premature disconnect used to replay the whole
   // request. Reuse the stream idle-timeout budget (chat default 45s).
-  const streamStorage = createSafeStorage()
+  const streamStorage = createSafeStorage({ area: "local" })
   const streamCfg =
     (await streamStorage
       .get<Record<string, unknown>>("tldwConfig")
@@ -1376,7 +1426,7 @@ export async function* bgStream<
     port = browser.runtime.connect({ name: 'tldw:stream' })
   } catch (connectError) {
     if (!abortSignal?.aborted) {
-      yield* bgStreamDirect({ path, method, headers, body, streamIdleTimeoutMs, abortSignal })
+      yield* bgStreamDirect({ path, method, headers, body, streamIdleTimeoutMs, abortSignal, onOpen: notifyOpen })
       return
     }
     throw connectError
@@ -1385,12 +1435,13 @@ export async function* bgStream<
   let done = false
   let error: any = null
   let firstDataReceived = false
+  let streamOpened = false
   let connectionTimedOut = false
 
-  // Connection timeout - if no first token arrives within the derived window,
+  // Connection timeout - if no response body is acquired within the derived window,
   // give up on the port. Whether we may then replay depends on idempotency.
   const connectionTimer = setTimeout(() => {
-    if (!firstDataReceived && !done) {
+    if (!streamOpened && !done) {
       connectionTimedOut = true
       done = true
       try { port.disconnect() } catch {}
@@ -1398,7 +1449,16 @@ export async function* bgStream<
   }, connectionTimeoutMs)
 
   const onMessage = (msg: any) => {
-    if (msg?.event === 'data') {
+    if (msg?.event === 'open') {
+      streamOpened = true
+      clearTimeout(connectionTimer)
+      notifyOpen()
+    } else if (msg?.event === 'data') {
+      if (!streamOpened) {
+        streamOpened = true
+        clearTimeout(connectionTimer)
+        notifyOpen()
+      }
       if (!firstDataReceived) {
         firstDataReceived = true
         clearTimeout(connectionTimer)
@@ -1410,12 +1470,19 @@ export async function* bgStream<
       const streamError = new Error(msg.message || 'Stream error') as Error & {
         status?: number
         details?: unknown
+        retryAfter?: number
       }
       if (typeof msg.status === "number" && Number.isFinite(msg.status)) {
         streamError.status = Math.trunc(msg.status)
       }
       if (typeof msg.details !== "undefined" && msg.details !== null) {
         streamError.details = sanitizeResponseData(msg.details)
+      }
+      const retryAfterMs = parseRetryAfter(
+        typeof msg.retryAfter === "string" ? msg.retryAfter : null
+      )
+      if (typeof retryAfterMs === "number" && retryAfterMs > 0) {
+        streamError.retryAfter = retryAfterMs / 1_000
       }
       error = streamError
       done = true
@@ -1472,17 +1539,17 @@ export async function* bgStream<
         sliceStartedAt = Date.now()
       }
     }
-    // If connection timed out before receiving any data, only idempotent
+    // If connection timed out before acquiring a response body, only idempotent
     // requests may be replayed via direct fetch. The worker may already be
     // generating server-side for a non-idempotent POST, so replaying it would
     // double-generate and persist a duplicate message — surface a timeout error.
     if (connectionTimedOut) {
       if (methodAllowsStreamReplay) {
-        yield* bgStreamDirect({ path, method, headers, body, streamIdleTimeoutMs, abortSignal })
+        yield* bgStreamDirect({ path, method, headers, body, streamIdleTimeoutMs, abortSignal, onOpen: notifyOpen })
         return
       }
       throw createStreamInterruptedError(
-        `Stream connection timed out after ${connectionTimeoutMs}ms without a first token`
+        `Stream connection timed out after ${connectionTimeoutMs}ms before response acquisition`
       )
     }
     const shouldFallbackAfterEarlyError =
@@ -1494,7 +1561,7 @@ export async function* bgStream<
       // Same rule for an early transport failure: replay idempotent requests
       // only; never re-send a non-idempotent generation POST.
       if (methodAllowsStreamReplay) {
-        yield* bgStreamDirect({ path, method, headers, body, streamIdleTimeoutMs, abortSignal })
+        yield* bgStreamDirect({ path, method, headers, body, streamIdleTimeoutMs, abortSignal, onOpen: notifyOpen })
         return
       }
       throw createStreamInterruptedError(
@@ -1678,7 +1745,7 @@ export async function bgUpload<T = any, P extends AllowedPath = AllowedPath, M e
     )
   }
 
-  const storage = createSafeStorage()
+  const storage = createSafeStorage({ area: "local" })
   const resp = await tldwRequest(
     { path, method, body: formData, timeoutMs, responseType },
     createDirectRuntime(storage)

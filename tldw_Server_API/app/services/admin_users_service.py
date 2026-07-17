@@ -72,6 +72,98 @@ def _parse_user_metadata(raw_metadata: Any) -> dict[str, Any]:
     return {}
 
 
+async def _lock_user_for_role_change(db, *, user_id: int, is_pg: bool) -> None:
+    """Verify and serialize the target user before replacing role membership."""
+    if is_pg:
+        row = await db.fetchrow(
+            "SELECT id FROM users WHERE id = $1 FOR UPDATE",
+            user_id,
+        )
+    else:
+        cursor = await db.execute(
+            "SELECT id FROM users WHERE id = ?",
+            (user_id,),
+        )
+        row = await cursor.fetchone()
+    if not row:
+        raise UserNotFoundError(f"User {user_id}")
+
+
+async def _sync_system_role_membership(
+    db,
+    *,
+    user_id: int,
+    role_name: str,
+    is_pg: bool,
+) -> None:
+    """Replace system-role membership while preserving custom role grants."""
+    if is_pg:
+        role_row = await db.fetchrow(
+            "SELECT id, is_system FROM roles WHERE name = $1",
+            role_name,
+        )
+        if not role_row or not bool(role_row["is_system"]):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Unknown role '{role_name}'",
+            )
+        role_id = int(role_row["id"])
+        await db.execute(
+            """
+            DELETE FROM user_roles AS ur
+            USING roles AS r
+            WHERE ur.role_id = r.id
+              AND ur.user_id = $1
+              AND r.is_system = TRUE
+              AND ur.role_id <> $2
+            """,
+            user_id,
+            role_id,
+        )
+        await db.execute(
+            """
+            INSERT INTO user_roles (user_id, role_id)
+            VALUES ($1, $2)
+            ON CONFLICT (user_id, role_id)
+            DO UPDATE SET expires_at = NULL
+            """,
+            user_id,
+            role_id,
+        )
+        return
+
+    cursor = await db.execute(
+        "SELECT id, is_system FROM roles WHERE name = ?",
+        (role_name,),
+    )
+    role_row = await cursor.fetchone()
+    if not role_row or not bool(role_row[1]):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unknown role '{role_name}'",
+        )
+    role_id = int(role_row[0])
+    await db.execute(
+        """
+        DELETE FROM user_roles
+        WHERE user_id = ?
+          AND role_id IN (
+              SELECT id FROM roles
+              WHERE is_system = 1 AND id <> ?
+          )
+        """,
+        (user_id, role_id),
+    )
+    await db.execute(
+        """
+        INSERT INTO user_roles (user_id, role_id)
+        VALUES (?, ?)
+        ON CONFLICT(user_id, role_id) DO UPDATE SET expires_at = NULL
+        """,
+        (user_id, role_id),
+    )
+
+
 async def create_user(
     payload: AdminUserCreateRequest,
     principal: AuthPrincipal,
@@ -279,6 +371,8 @@ async def update_user(
             param_count += 1
             updates.append(f"role = ${param_count}" if is_pg else "role = ?")
             params.append(request.role)
+            if request.role != "admin":
+                updates.append("is_superuser = FALSE" if is_pg else "is_superuser = 0")
 
         if request.is_active is not None:
             param_count += 1
@@ -310,6 +404,19 @@ async def update_user(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="No fields to update",
+            )
+
+        if request.role is not None:
+            await _lock_user_for_role_change(
+                db,
+                user_id=user_id,
+                is_pg=is_pg,
+            )
+            await _sync_system_role_membership(
+                db,
+                user_id=user_id,
+                role_name=request.role,
+                is_pg=is_pg,
             )
 
         param_count += 1

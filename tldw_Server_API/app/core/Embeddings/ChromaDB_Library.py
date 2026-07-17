@@ -19,7 +19,7 @@ import chromadb
 import numpy as np
 from chromadb.api.models.Collection import Collection
 from chromadb.api.types import QueryResult
-from chromadb.errors import ChromaError
+from chromadb.errors import ChromaError, NotFoundError
 
 _CHROMA_IMPORT_EXCEPTIONS = (ImportError, AttributeError, RuntimeError)
 _CHROMA_EMBEDDINGS_IMPORT_EXCEPTIONS = (ImportError, OSError, RuntimeError)
@@ -451,9 +451,17 @@ class ChromaDBManager:
                 else:
                     # ChromaDB PersistentClient uses an internal system service
                     system = getattr(client, "_system", None)
+                    identifier = getattr(client, "_identifier", None)
                     stop_fn = getattr(system, "stop", None) if system is not None else None
                     if callable(stop_fn):
                         stop_fn()
+                        system_cache = getattr(type(client), "_identifier_to_system", None)
+                        if (
+                            identifier is not None
+                            and isinstance(system_cache, dict)
+                            and system_cache.get(identifier) is system
+                        ):
+                            system_cache.pop(identifier, None)
             except _CHROMA_NONCRITICAL_EXCEPTIONS as e:
                 # Best-effort close; log and continue
                 logger.warning(f"User '{self.user_id}': Error while closing ChromaDB client: {e}")
@@ -1844,7 +1852,7 @@ class ChromaDBManager:
         with self._lock:
             try:
                 return self.client.get_collection(name=collection_name)
-            except (KeyError, ValueError) as e:
+            except (KeyError, ValueError, NotFoundError) as e:
                 raise KeyError(f"Collection '{collection_name}' does not exist") from e
             except _CHROMA_NONCRITICAL_EXCEPTIONS as e:
                 logger.error(

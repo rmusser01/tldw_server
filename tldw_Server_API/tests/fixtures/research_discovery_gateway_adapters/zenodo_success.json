@@ -1,0 +1,46 @@
+{
+  "hits": {
+    "hits": [
+      {
+        "id": 1001,
+        "doi": "10.5555/shared.discovery.2026",
+        "links": {
+          "self_html": "https://zenodo.org/records/1001",
+          "self": "https://zenodo.org/api/records/1001"
+        },
+        "files": [
+          {
+            "id": "file-1000",
+            "key": "shared-discovery-metadata.json",
+            "size": 256,
+            "checksum": "md5:d41d8cd98f00b204e9800998ecf8427e",
+            "links": {
+              "self": "https://zenodo.org/api/records/1001/files/shared-discovery-metadata.json/content"
+            }
+          },
+          {
+            "id": "file-1001",
+            "key": "shared-discovery.pdf",
+            "size": 1024,
+            "checksum": "md5:d41d8cd98f00b204e9800998ecf8427e",
+            "links": {
+              "self": "https://zenodo.org/api/records/1001/files/shared-discovery.pdf/content"
+            }
+          }
+        ],
+        "metadata": {
+          "title": "Shared Discovery Record",
+          "description": "A sanitized description for discovery adapter testing.",
+          "doi": "10.5555/shared.discovery.2026",
+          "creators": [
+            {
+              "name": "Researcher, Ada",
+              "orcid": "0000-0002-1825-0097"
+            }
+          ]
+        }
+      }
+    ],
+    "total": 1
+  }
+}

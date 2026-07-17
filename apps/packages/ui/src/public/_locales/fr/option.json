@@ -239,9 +239,6 @@
   "header_omniSearchStartChat": {
     "message": "Démarrer un nouveau chat « {{query}} »"
   },
-  "header_connectionCard.connectedCaption": {
-    "message": "Le chat et les outils sont maintenant disponibles dans les Paramètres et la barre latérale."
-  },
   "header_quickIngestQueuedAria": {
     "message": "{{label}} — {{count}} éléments en file d’attente — cliquez pour revoir et traiter"
   },
@@ -2755,5 +2752,8 @@
   },
   "repo2txt_status_generated": {
     "message": "Generated output for {{count}} files ({{tokenCount}} tokens)."
+  },
+  "header_connectionCard_connectedCaption": {
+    "message": "Le chat et les outils sont maintenant disponibles dans les Paramètres et la barre latérale."
   }
 }

@@ -48,6 +48,10 @@ describe("workspace store API-first mutations", () => {
           url: "https://example.test/doc",
           selected: true,
           added_at: "2026-05-06T12:00:00Z",
+          review_state: "reviewed",
+          review_state_updated_at: "2026-05-07T12:00:00Z",
+          reviewed_at: "2026-05-07T12:00:00Z",
+          reviewed_by_user_id: "reviewer-7",
           version: 1
         }
       ],
@@ -76,7 +80,11 @@ describe("workspace store API-first mutations", () => {
       mediaId: 42,
       title: "Quarterly strategy doc",
       type: "document",
-      status: "ready"
+      status: "ready",
+      reviewState: "reviewed",
+      reviewStateUpdatedAt: new Date("2026-05-07T12:00:00Z"),
+      reviewedAt: new Date("2026-05-07T12:00:00Z"),
+      reviewedByUserId: "reviewer-7"
     })
     expect(state.selectedSourceIds).toEqual(["src-1"])
     expect(state.artifacts[0]).toMatchObject({

@@ -4,10 +4,12 @@ import {
   fetchWatchlistJobs,
   fetchWatchlistOutputs,
   fetchWatchlistRuns,
-  fetchWatchlistSources
+  fetchWatchlistSources,
+  getLatestWatchlistBriefing
 } from "@/services/watchlists"
 import type {
   PaginatedResponse,
+  WatchlistBriefingProjection,
   WatchlistJob,
   WatchlistOutput,
   WatchlistRun,
@@ -71,6 +73,7 @@ export interface WatchlistsOverviewHealthModel {
 
 export interface WatchlistsOverviewData {
   fetchedAt: string
+  latestBriefing: WatchlistBriefingProjection | null
   sources: {
     total: number
     healthy: number
@@ -82,6 +85,11 @@ export interface WatchlistsOverviewData {
     total: number
     active: number
     nextRunAt: string | null
+    nextActiveJob: {
+      id: number
+      nextRunAt: string | null
+      timezone: string
+    } | null
     attention: number
   }
   items: {
@@ -288,6 +296,21 @@ export const getEarliestNextRunAt = (
   return earliestIso
 }
 
+const getEarliestActiveJob = (jobs: WatchlistJob[]): WatchlistsOverviewData["jobs"]["nextActiveJob"] => {
+  const active = jobs.filter((job) => job.active)
+  if (!active.length) return null
+  const scheduled = active
+    .map((job) => ({ job, epochMs: parseEpochMs(job.next_run_at) }))
+    .filter((entry): entry is { job: WatchlistJob; epochMs: number } => entry.epochMs !== null)
+    .sort((left, right) => left.epochMs - right.epochMs)
+  const job = scheduled[0]?.job || active[0]
+  return {
+    id: job.id,
+    nextRunAt: job.next_run_at || null,
+    timezone: job.timezone || "UTC"
+  }
+}
+
 const classifyOutputsAttention = (
   outputs: Pick<WatchlistOutput, "id" | "expired" | "metadata">[]
 ): { expired: number; deliveryIssues: number; audioIssues: number; attention: number } => {
@@ -426,7 +449,8 @@ export const fetchWatchlistsOverviewData = async (
     pendingResult,
     failedResult,
     recentRunsResult,
-    outputsResult
+    outputsResult,
+    latestBriefing
   ] = await Promise.all([
     fetchAllPages((pageParams) => fetchWatchlistSources({ ...scopedParams, ...pageParams })),
     fetchAllPages((pageParams) => fetchWatchlistJobs({ ...scopedParams, ...pageParams })),
@@ -436,7 +460,8 @@ export const fetchWatchlistsOverviewData = async (
     fetchWatchlistRuns({ ...scopedParams, q: "pending", page: 1, size: 1 }),
     fetchWatchlistRuns({ ...scopedParams, q: "failed", page: 1, size: 5 }),
     fetchWatchlistRuns({ ...scopedParams, page: 1, size: 10 }),
-    fetchWatchlistOutputs({ ...scopedParams, page: 1, size: 100 })
+    fetchWatchlistOutputs({ ...scopedParams, page: 1, size: 100 }),
+    getLatestWatchlistBriefing(scopedParams)
   ])
 
   let healthy = 0
@@ -510,6 +535,7 @@ export const fetchWatchlistsOverviewData = async (
 
   return {
     fetchedAt: new Date().toISOString(),
+    latestBriefing,
     sources: {
       total: asFiniteNumber(sourcesResult.total, sourcesResult.items.length),
       healthy,
@@ -521,6 +547,7 @@ export const fetchWatchlistsOverviewData = async (
       total: asFiniteNumber(jobsResult.total, jobs.length),
       active: activeJobs,
       nextRunAt: getEarliestNextRunAt(jobs),
+      nextActiveJob: getEarliestActiveJob(jobs),
       attention: jobsWithoutSchedule
     },
     items: {

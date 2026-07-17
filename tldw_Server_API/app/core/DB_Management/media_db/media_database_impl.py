@@ -11,6 +11,7 @@ import sqlite3
 from typing import Any
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
+from tldw_Server_API.app.core.DB_Management.media_db.errors import ConflictError, DatabaseError
 from tldw_Server_API.app.core.DB_Management.sqlite_policy import begin_immediate_if_needed
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.sqlite_bootstrap import (
     apply_sqlite_connection_pragmas,
@@ -1710,6 +1711,80 @@ class MediaDatabase:
             source_key = f"legacy-media:{tenant_id}"
 
         return provider, source_key, source_message_id
+
+    def set_media_vector_embedding(
+        self,
+        media_id: int,
+        vector_embedding: bytes | bytearray | memoryview,
+    ) -> dict[str, int | str]:
+        """Attach a media vector with optimistic versioning and sync logging."""
+        if not isinstance(media_id, int) or media_id <= 0:
+            raise ValueError("media_id must be a positive integer")
+        if not isinstance(vector_embedding, (bytes, bytearray, memoryview)):
+            raise TypeError("vector_embedding must be bytes-like")
+        vector_bytes = bytes(vector_embedding)
+        if not vector_bytes:
+            raise ValueError("vector_embedding must not be empty")
+
+        try:
+            with self.transaction() as conn:
+                media_row = self._fetchone_with_connection(
+                    conn,
+                    "SELECT uuid, version FROM Media WHERE id = ? AND deleted = 0",
+                    (media_id,),
+                )
+                if not media_row:
+                    raise ValueError(f"Media {media_id} was not found")
+
+                media_uuid = str(media_row["uuid"])
+                current_version = int(media_row.get("version") or 1)
+                next_version = current_version + 1
+                now = self._get_current_utc_timestamp_str()
+                cursor = self._execute_with_connection(
+                    conn,
+                    """
+                    UPDATE Media
+                       SET vector_embedding = ?, last_modified = ?, version = ?, client_id = ?
+                     WHERE id = ? AND version = ? AND deleted = 0
+                    """,
+                    (
+                        vector_bytes,
+                        now,
+                        next_version,
+                        self.client_id,
+                        media_id,
+                        current_version,
+                    ),
+                )
+                if getattr(cursor, "rowcount", 0) != 1:
+                    raise ConflictError(
+                        "Concurrent modification detected for media vector update.",
+                        entity="Media",
+                        identifier=media_id,
+                    )
+                updated_row = self._fetchone_with_connection(
+                    conn,
+                    "SELECT * FROM Media WHERE id = ?",
+                    (media_id,),
+                ) or {}
+                self._log_sync_event(
+                    conn,
+                    "Media",
+                    media_uuid,
+                    "update",
+                    next_version,
+                    dict(updated_row),
+                )
+        except (ValueError, TypeError, ConflictError, DatabaseError):
+            raise
+        except sqlite3.Error as exc:
+            raise DatabaseError(f"Failed to update media vector embedding: {exc}") from exc
+
+        return {
+            "media_id": media_id,
+            "media_uuid": media_uuid,
+            "version": next_version,
+        }
 
     @contextmanager
     def transaction(self):

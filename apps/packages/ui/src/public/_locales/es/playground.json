@@ -1004,18 +1004,6 @@
   "actor_presetPlaceholder": {
     "message": "Elige un preajuste"
   },
-  "actor_preset.sliceOfLife": {
-    "message": "Vida cotidiana"
-  },
-  "actor_preset.dungeonCrawl": {
-    "message": "Aventura de mazmorra"
-  },
-  "actor_preset.romance": {
-    "message": "Romance"
-  },
-  "actor_preset.workSession": {
-    "message": "Sesión de trabajo"
-  },
   "actor_applyPreset": {
     "message": "Aplicar"
   },
@@ -1036,15 +1024,6 @@
   },
   "actor_templateModeHelp": {
     "message": "Controla cómo Actor interactúa con plantillas de escena activas. Combinar mantiene ambos; Reemplazar permite que Actor sustituya campos superpuestos; Ignorar omite Actor cuando las plantillas están activas."
-  },
-  "actor_templateMode.merge": {
-    "message": "Combinar con plantillas"
-  },
-  "actor_templateMode.override": {
-    "message": "Reemplazar plantillas"
-  },
-  "actor_templateMode.ignore": {
-    "message": "Ignorar cuando las plantillas estén activas"
   },
   "actor_bladeAspectsTitle": {
     "message": "Aspectos"
@@ -1468,5 +1447,29 @@
   },
   "acp_workspace_title": {
     "message": "Terminal del espacio de trabajo"
+  },
+  "tts_routeTitle": {
+    "message": "Texto a voz"
+  },
+  "actor_preset_sliceOfLife": {
+    "message": "Vida cotidiana"
+  },
+  "actor_preset_dungeonCrawl": {
+    "message": "Aventura de mazmorra"
+  },
+  "actor_preset_romance": {
+    "message": "Romance"
+  },
+  "actor_preset_workSession": {
+    "message": "Sesión de trabajo"
+  },
+  "actor_templateMode_merge": {
+    "message": "Combinar con plantillas"
+  },
+  "actor_templateMode_override": {
+    "message": "Reemplazar plantillas"
+  },
+  "actor_templateMode_ignore": {
+    "message": "Ignorar cuando las plantillas estén activas"
   }
 }

@@ -18,6 +18,7 @@ export type WorkspaceSourceType =
   | "text"
 
 export type WorkspaceSourceStatus = "processing" | "ready" | "error"
+export type WorkspaceSourceReviewState = "unset" | "needs_review" | "reviewed"
 
 export type WorkspaceSourceLifecycleState =
   | "queued"
@@ -83,6 +84,18 @@ export interface WorkspaceSource {
   fileSize?: number
   duration?: number // For audio/video in seconds
   pageCount?: number // For PDFs
+  reviewState?: WorkspaceSourceReviewState
+  reviewStateUpdatedAt?: Date
+  reviewedAt?: Date
+  reviewedByUserId?: string
+}
+
+export interface WorkspaceSourceReviewUpdate {
+  id: string
+  reviewState: WorkspaceSourceReviewState
+  reviewStateUpdatedAt?: Date
+  reviewedAt?: Date
+  reviewedByUserId?: string
 }
 
 export interface WorkspaceSourceFolder {
@@ -346,6 +359,7 @@ export interface WorkspaceStudyArtifactData {
   workspaceId?: string | null
   sourceMediaIds?: number[]
   sourceBundle?: WorkspaceStudyArtifactSource[]
+  claimVerification?: Record<string, unknown> | null
   questions?: Array<{
     question?: string
     question_text?: string

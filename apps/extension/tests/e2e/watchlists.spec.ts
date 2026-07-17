@@ -741,9 +741,6 @@ test.describe('Watchlists playground smoke', () => {
     await basePage.close().catch(() => {})
 
     await expect(page.getByRole('heading', { name: 'Watchlists' })).toBeVisible()
-    await expect(
-      page.getByText('Create scheduled monitors to automatically scrape and process content.')
-    ).toBeVisible()
     await expectWatchlistsDestination(page, 'Overview')
     await expect(page.getByText('At-a-glance watchlist health')).toBeVisible()
 

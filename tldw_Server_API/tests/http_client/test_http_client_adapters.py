@@ -38,6 +38,7 @@ class DummyAsyncResponse:
 
 def test_httpx_adapter_request_passes_through(monkeypatch):
     from tldw_Server_API.app.core import http_client as hc
+    from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
 
     calls = {}
 
@@ -48,17 +49,26 @@ def test_httpx_adapter_request_passes_through(monkeypatch):
     monkeypatch.setattr(hc, "_fetch_httpx_response", fake_fetch_httpx_response)
 
     adapter = hc.HttpxAdapter()
-    resp = adapter.request(method="GET", url="http://example.com", headers={"x": "y"}, client=object())
+    scope = ConfiguredEndpointScope.from_url("http://example.com")
+    resp = adapter.request(
+        method="GET",
+        url="http://example.com",
+        headers={"x": "y"},
+        client=object(),
+        configured_endpoint=scope,
+    )
 
     assert isinstance(resp, DummySyncResponse)
     assert calls["kwargs"]["method"] == "GET"
     assert calls["kwargs"]["url"] == "http://example.com"
     assert calls["kwargs"]["headers"] == {"x": "y"}
+    assert calls["kwargs"]["configured_endpoint"] is scope
 
 
 @pytest.mark.asyncio
 async def test_httpx_adapter_arequest_passes_through(monkeypatch):
     from tldw_Server_API.app.core import http_client as hc
+    from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
 
     calls = {}
 
@@ -69,12 +79,20 @@ async def test_httpx_adapter_arequest_passes_through(monkeypatch):
     monkeypatch.setattr(hc, "_afetch_httpx", fake_afetch_httpx)
 
     adapter = hc.HttpxAdapter()
-    resp = await adapter.arequest(method="POST", url="http://example.com", json={"k": "v"}, client=object())
+    scope = ConfiguredEndpointScope.from_url("http://example.com")
+    resp = await adapter.arequest(
+        method="POST",
+        url="http://example.com",
+        json={"k": "v"},
+        client=object(),
+        configured_endpoint=scope,
+    )
 
     assert isinstance(resp, DummyAsyncResponse)
     assert calls["kwargs"]["method"] == "POST"
     assert calls["kwargs"]["url"] == "http://example.com"
     assert calls["kwargs"]["json"] == {"k": "v"}
+    assert calls["kwargs"]["configured_endpoint"] is scope
 
 
 @pytest.mark.asyncio
@@ -120,6 +138,7 @@ def test_aiohttp_adapter_request_not_supported():
 @pytest.mark.asyncio
 async def test_aiohttp_adapter_arequest_passes_through(monkeypatch):
     from tldw_Server_API.app.core import http_client as hc
+    from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
 
     calls = {}
 
@@ -130,10 +149,28 @@ async def test_aiohttp_adapter_arequest_passes_through(monkeypatch):
     monkeypatch.setattr(hc, "_afetch_aiohttp", fake_afetch_aiohttp)
 
     adapter = hc.AiohttpAdapter()
-    resp = await adapter.arequest(method="GET", url="http://example.com", client=object())
+    scope = ConfiguredEndpointScope.from_url("http://example.com")
+    resp = await adapter.arequest(
+        method="GET",
+        url="http://example.com",
+        client=object(),
+        configured_endpoint=scope,
+    )
 
     assert isinstance(resp, DummyAsyncResponse)
     assert calls["kwargs"]["url"] == "http://example.com"
+    assert calls["kwargs"]["configured_endpoint"] is scope
+
+
+def test_async_stream_adapter_signatures_remain_unscoped():
+    import inspect
+
+    from tldw_Server_API.app.core import http_client as hc
+
+    assert "configured_endpoint" not in inspect.signature(hc.astream_bytes).parameters
+    assert "configured_endpoint" not in inspect.signature(hc.astream_sse).parameters
+    assert "configured_endpoint" not in inspect.signature(hc.HttpxAdapter.stream_bytes).parameters
+    assert "configured_endpoint" not in inspect.signature(hc.HttpxAdapter.stream_sse).parameters
 
 
 @pytest.mark.asyncio

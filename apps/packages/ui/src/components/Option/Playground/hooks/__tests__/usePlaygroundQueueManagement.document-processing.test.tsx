@@ -14,6 +14,12 @@ vi.mock("@/services/chat-document-processing", () => ({
   prepareChatDocumentAttachmentsForSend
 }))
 
+vi.mock("@/services/tldw", () => ({
+  tldwModels: {
+    subscribeInvalidation: vi.fn(() => () => undefined)
+  }
+}))
+
 vi.mock("@/components/Chat/composer/hooks/useComposerQueue", () => ({
   useComposerQueue: (args: any) => {
     queueMock.args = args
@@ -284,6 +290,12 @@ describe("usePlaygroundQueueManagement document processing", () => {
     expect(deps.setSelectedModel).not.toHaveBeenCalled()
     expect(deps.setChatMode).not.toHaveBeenCalled()
     expect(deps.setWebSearch).not.toHaveBeenCalled()
+    expect(deps.setCompareMode).not.toHaveBeenCalled()
+    expect(deps.setCompareSelectedModels).not.toHaveBeenCalled()
+    expect(deps.setSelectedSystemPrompt).not.toHaveBeenCalled()
+    expect(deps.setSelectedQuickPrompt).not.toHaveBeenCalled()
+    expect(deps.setToolChoice).not.toHaveBeenCalled()
+    expect(deps.setUseOCR).not.toHaveBeenCalled()
     expect(deps.setLastSubmittedContext).not.toHaveBeenCalled()
   })
 })

@@ -3,6 +3,7 @@ import {
   Segmented,
   Space,
   Input,
+  Checkbox,
   Form,
   Modal,
   Button,
@@ -13,6 +14,7 @@ import React from "react"
 import type { TFunction } from "i18next"
 import { isFirefoxTarget } from "@/config/platform"
 import { Alert } from "@/components/ui/primitives"
+import { shouldClearManualApiKeyForServerChange } from "@/components/Option/Onboarding/validation"
 import {
   getCoreStatusLabel,
   getRagStatusLabel,
@@ -25,6 +27,11 @@ export type LoginMethod = "magic-link" | "password"
 export type TldwConnectionSettingsProps = {
   t: TFunction
   form: FormInstance
+  configuredServerUrl: string
+  authSource?: "manual" | "cookie-session"
+  rememberApiKey: boolean
+  setRememberApiKey: (remember: boolean) => void
+  onManualServerOriginChange: () => void
   authMode: "single-user" | "multi-user"
   setAuthMode: (mode: "single-user" | "multi-user") => void
   isLoggedIn: boolean
@@ -39,6 +46,7 @@ export type TldwConnectionSettingsProps = {
   setMagicSent: (sent: boolean) => void
   magicSending: boolean
   testingConnection: boolean
+  logoutLoading: boolean
   connectionStatus: "success" | "error" | null
   connectionDetail: string
   coreStatus: CoreStatus
@@ -77,6 +85,11 @@ const ragStatusColor = (status: RagStatus) => {
 export const TldwConnectionSettings = ({
   t,
   form,
+  configuredServerUrl,
+  authSource,
+  rememberApiKey,
+  setRememberApiKey,
+  onManualServerOriginChange,
   authMode,
   setAuthMode,
   isLoggedIn,
@@ -91,6 +104,7 @@ export const TldwConnectionSettings = ({
   setMagicSent,
   magicSending,
   testingConnection,
+  logoutLoading,
   connectionStatus,
   connectionDetail,
   coreStatus,
@@ -122,6 +136,17 @@ export const TldwConnectionSettings = ({
             'settings:tldw.fields.serverUrl.placeholder',
             'http://127.0.0.1:8000'
           ) as string}
+          onChange={(event) => {
+            if (
+              shouldClearManualApiKeyForServerChange(
+                configuredServerUrl,
+                event.target.value
+              )
+            ) {
+              form.setFieldValue('apiKey', '')
+              onManualServerOriginChange()
+            }
+          }}
         />
       </Form.Item>
       <Form.Item
@@ -164,15 +189,67 @@ export const TldwConnectionSettings = ({
           }}
         />
       </Form.Item>
-      {authMode === 'single-user' && (
-        <Form.Item
-          label={t('settings:tldw.fields.apiKey.label', 'API Key')}
-          name="apiKey"
-          rules={[{ required: true, message: t('settings:tldw.fields.apiKey.required', 'Please enter your API key') }]}
-          extra={t('settings:tldw.fields.apiKey.extra', 'Your tldw_server API key for authentication')}
+      {authMode === 'single-user' && authSource === 'cookie-session' && (
+        <Alert
+          title={t(
+            'settings:tldw.rememberApiKey.cookieSession',
+            'Connected securely through this WebUI.'
+          )}
+          action={{
+            label: t('settings:tldw.buttons.logout', 'Logout'),
+            onClick: onLogout,
+            loading: logoutLoading,
+            variant: 'danger'
+          }}
+          variant="success"
+          className="mb-4"
         >
-          <Input.Password placeholder={t('settings:tldw.fields.apiKey.placeholder', 'Enter your API key')} />
-        </Form.Item>
+          {t(
+            'settings:tldw.rememberApiKey.cookieSessionHelp',
+            'Your API key stays on the server and is not stored in this browser.'
+          )}
+        </Alert>
+      )}
+
+      {authMode === 'single-user' && authSource !== 'cookie-session' && (
+        <>
+          <Form.Item
+            label={t('settings:tldw.fields.apiKey.label', 'API Key')}
+            name="apiKey"
+            rules={[{ required: true, message: t('settings:tldw.fields.apiKey.required', 'Please enter your API key') }]}
+            extra={t('settings:tldw.fields.apiKey.extra', 'Your tldw_server API key for authentication')}
+          >
+            <Input.Password placeholder={t('settings:tldw.fields.apiKey.placeholder', 'Enter your API key')} />
+          </Form.Item>
+          <Form.Item
+            name="rememberApiKey"
+            valuePropName="checked"
+            initialValue={rememberApiKey}
+          >
+            <Checkbox
+              onChange={(event) => {
+                const nextValue = event.target.checked
+                setRememberApiKey(nextValue)
+              }}
+            >
+              {t(
+                'settings:tldw.rememberApiKey.label',
+                'Remember on this device'
+              )}
+            </Checkbox>
+          </Form.Item>
+          <p className="-mt-4 mb-4 text-xs text-text-muted">
+            {rememberApiKey
+              ? t(
+                  'settings:tldw.rememberApiKey.deviceHelp',
+                  'Stores this API key in this browser until you disconnect or clear browser data. Turn this off on a shared device.'
+                )
+              : t(
+                  'settings:tldw.rememberApiKey.sessionHelp',
+                  'Keep signed in until this browser closes.'
+                )}
+          </p>
+        </>
       )}
 
       {authMode === 'multi-user' && !isLoggedIn && (
@@ -272,6 +349,7 @@ export const TldwConnectionSettings = ({
             {
               label: t('settings:tldw.buttons.logout', 'Logout'),
               onClick: onLogout,
+              loading: logoutLoading,
               variant: "danger",
             }
           }

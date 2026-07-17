@@ -4,6 +4,9 @@ from typing import Any, Dict, List
 
 import pytest
 
+from tldw_Server_API.app.core.Chat.Chat_Deps import ChatBadRequestError
+from tldw_Server_API.app.core.exceptions import EgressPolicyError
+
 
 class _FakeResponse:
     def __init__(self, status_code: int = 200, json_obj: Dict[str, Any] | None = None, lines: List[str] | None = None):
@@ -25,8 +28,11 @@ class _FakeResponse:
         return self._json
 
     def iter_lines(self):
-        for l in self._lines:
-            yield l
+        for line in self._lines:
+            yield line
+
+    def close(self):
+        return None
 
 
 class _FakeStreamCtx:
@@ -40,24 +46,6 @@ class _FakeStreamCtx:
         return False
 
 
-class _FakeClient:
-    def __init__(self, *args, **kwargs):
-        pass
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc, tb):
-        return False
-
-    def post(self, url: str, json: Dict[str, Any], headers: Dict[str, str]):
-        assert "chat/completions" in url
-        return _FakeResponse(200)
-
-    def stream(self, method: str, url: str, json: Dict[str, Any], headers: Dict[str, str]):
-        return _FakeStreamCtx(_FakeResponse(200))
-
-
 @pytest.fixture(autouse=True)
 def _enable(monkeypatch):
     monkeypatch.setenv("LLM_ADAPTERS_NATIVE_HTTP_CUSTOM_OPENAI", "1")
@@ -67,9 +55,14 @@ def _enable(monkeypatch):
 
 def test_custom_openai_adapter_native_http_non_streaming(monkeypatch):
     from tldw_Server_API.app.core.LLM_Calls.providers.custom_openai_adapter import CustomOpenAIAdapter
-    import tldw_Server_API.app.core.LLM_Calls.providers.custom_openai_adapter as co_mod
-    monkeypatch.setattr(co_mod, "http_client_factory", lambda *a, **k: _FakeClient(*a, **k))
     a = CustomOpenAIAdapter()
+    monkeypatch.setenv("CUSTOM_OPENAI_API_IP", "http://127.0.0.1:11434/v1")
+
+    def _fetch(**kwargs):
+        assert kwargs["configured_endpoint"].matches(kwargs["url"])
+        return _FakeResponse(200)
+
+    a.http_fetcher = _fetch
     request = {
         "messages": [{"role": "user", "content": "hi"}],
         "model": "my-model",
@@ -82,9 +75,14 @@ def test_custom_openai_adapter_native_http_non_streaming(monkeypatch):
 
 def test_custom_openai_adapter_native_http_streaming(monkeypatch):
     from tldw_Server_API.app.core.LLM_Calls.providers.custom_openai_adapter import CustomOpenAIAdapter2
-    import tldw_Server_API.app.core.LLM_Calls.providers.custom_openai_adapter as co_mod
-    monkeypatch.setattr(co_mod, "http_client_factory", lambda *a, **k: _FakeClient(*a, **k))
     a = CustomOpenAIAdapter2()
+    monkeypatch.setenv("CUSTOM_OPENAI_API_IP_2", "http://127.0.0.1:11434")
+
+    def _stream(**kwargs):
+        assert kwargs["configured_endpoint"].matches(kwargs["url"])
+        return _FakeStreamCtx(_FakeResponse(200))
+
+    a.http_streamer = _stream
     request = {
         "messages": [{"role": "user", "content": "hi"}],
         "model": "my-model",
@@ -144,3 +142,319 @@ def test_numbered_custom_openai_adapters_require_explicit_base_url(monkeypatch):
 
     with pytest.raises(RuntimeError, match="requires an explicit base URL"):
         make_custom_openai_adapter_class(37)()._resolve_base({"app_config": {}})
+
+
+@pytest.mark.parametrize("provenance", ["byok", "request_override"])
+def test_configured_custom_explicit_endpoint_uses_ordinary_checked_egress_without_scope(
+    monkeypatch,
+    provenance: str,
+):
+    from tldw_Server_API.app.core.LLM_Calls.providers.custom_openai_adapter import CustomOpenAIAdapter
+
+    captured: dict[str, Any] = {}
+
+    def _fetch(**kwargs):
+        captured.update(kwargs)
+        return _FakeResponse(200)
+
+    adapter = CustomOpenAIAdapter()
+    adapter.http_fetcher = _fetch
+    adapter.chat(
+        {
+            "messages": [{"role": "user", "content": "hi"}],
+            "model": "model",
+            "base_url": "http://explicit-user-endpoint:18090/v1",
+            "_endpoint_provenance": provenance,
+            "configured_endpoint_scope": object(),
+            "http_fetcher": object(),
+        }
+    )
+
+    assert captured["url"] == "http://explicit-user-endpoint:18090/v1/chat/completions"
+    assert captured["configured_endpoint"] is None
+
+
+@pytest.mark.parametrize(
+    "endpoint_key",
+    [
+        "base_url",
+        "api_base_url",
+        "api_base",
+        "api_url",
+        "api_ip",
+        "custom_openai_api_ip",
+        "custom_openai_api_base",
+        "custom_openai_api_url",
+        "custom_openai_api_base_url",
+        "custom_openai_base_url",
+        "custom_openai_api_ip_1",
+    ],
+)
+def test_configured_custom_resolves_raw_endpoint_then_strips_reserved_context(
+    monkeypatch: pytest.MonkeyPatch,
+    endpoint_key: str,
+) -> None:
+    from tldw_Server_API.app.core.LLM_Calls.providers import custom_openai_adapter
+
+    validated: list[dict[str, Any]] = []
+    captured: dict[str, Any] = {}
+
+    def _validate(_provider: str, request: dict[str, Any]) -> dict[str, Any]:
+        validated.append(dict(request))
+        return request
+
+    def _fetch(**kwargs: Any) -> _FakeResponse:
+        captured.update(kwargs)
+        return _FakeResponse(200)
+
+    monkeypatch.setattr(custom_openai_adapter, "validate_payload", _validate)
+    adapter = custom_openai_adapter.CustomOpenAIAdapter()
+    adapter.http_fetcher = _fetch
+    reserved = {
+        endpoint_key,
+        "app_config",
+        "_endpoint_provenance",
+        "endpoint_provenance",
+        "configured_endpoint_base_url",
+        "configured_endpoint_scope",
+        "configured_endpoint",
+        "http_client_factory",
+        "http_fetcher",
+        "http_streamer",
+        "trusted_base_url_override",
+    }
+    adapter.chat(
+        {
+            "messages": [{"role": "user", "content": "hi"}],
+            "model": "model",
+            endpoint_key: "http://explicit-user-endpoint:18092/v1",
+            "app_config": {
+                "custom_openai_api": {"api_ip": "http://stale-request-config:18093/v1"}
+            },
+            "_endpoint_provenance": "request_override",
+            "endpoint_provenance": "server_config",
+            "configured_endpoint_base_url": "http://attacker.invalid/v1",
+            "configured_endpoint_scope": object(),
+            "configured_endpoint": object(),
+            "http_client_factory": object(),
+            "http_fetcher": object(),
+            "http_streamer": object(),
+            "trusted_base_url_override": True,
+        }
+    )
+
+    assert captured["url"] == "http://explicit-user-endpoint:18092/v1/chat/completions"
+    assert captured["configured_endpoint"] is None
+    assert reserved.isdisjoint(validated[0])
+    assert reserved.isdisjoint(captured["json"])
+
+
+def test_configured_custom_byok_app_config_is_used_then_stripped_before_validation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.LLM_Calls.providers import custom_openai_adapter
+
+    validated: list[dict[str, Any]] = []
+    captured: dict[str, Any] = {}
+
+    def _validate(_provider: str, request: dict[str, Any]) -> dict[str, Any]:
+        validated.append(dict(request))
+        return request
+
+    def _fetch(**kwargs: Any) -> _FakeResponse:
+        captured.update(kwargs)
+        return _FakeResponse(200)
+
+    monkeypatch.setattr(custom_openai_adapter, "validate_payload", _validate)
+    adapter = custom_openai_adapter.CustomOpenAIAdapter()
+    adapter.http_fetcher = _fetch
+    adapter.chat(
+        {
+            "messages": [{"role": "user", "content": "hi"}],
+            "model": "model",
+            "app_config": {
+                "custom_openai_api": {"api_base_url": "http://byok-endpoint:18094/v1"}
+            },
+            "_endpoint_provenance": "byok",
+        }
+    )
+
+    assert captured["url"] == "http://byok-endpoint:18094/v1/chat/completions"
+    assert captured["configured_endpoint"] is None
+    assert "app_config" not in validated[0]
+    assert "_endpoint_provenance" not in validated[0]
+    assert "app_config" not in captured["json"]
+
+
+@pytest.mark.parametrize("adapter_name", ["novita", "poe", "together"])
+def test_public_custom_subclasses_use_checked_ordinary_egress_and_strip_context(
+    monkeypatch: pytest.MonkeyPatch,
+    adapter_name: str,
+):
+    from tldw_Server_API.app.core.LLM_Calls.adapter_registry import ChatProviderRegistry
+    from tldw_Server_API.app.core.LLM_Calls.providers import custom_openai_adapter
+
+    validated: list[dict[str, Any]] = []
+    captured: dict[str, Any] = {}
+
+    def _validate(_provider: str, request: dict[str, Any]) -> dict[str, Any]:
+        validated.append(dict(request))
+        return request
+
+    def _fetch(**kwargs: Any) -> _FakeResponse:
+        captured.update(kwargs)
+        return _FakeResponse(200)
+
+    monkeypatch.setattr(custom_openai_adapter, "validate_payload", _validate)
+    monkeypatch.setattr(
+        custom_openai_adapter,
+        "http_client_factory",
+        lambda **_kwargs: pytest.fail("public provider used legacy client factory"),
+        raising=False,
+    )
+
+    adapter = ChatProviderRegistry().get_adapter(adapter_name)
+    assert adapter is not None
+    adapter.http_fetcher = _fetch
+    reserved = {
+        "configured_endpoint",
+        "configured_endpoint_base_url",
+        "configured_endpoint_scope",
+        "http_client_factory",
+        "http_fetcher",
+        "http_streamer",
+    }
+    result = adapter.chat(
+        {
+            "messages": [{"role": "user", "content": "hi"}],
+            "model": "model",
+            "configured_endpoint": object(),
+            "configured_endpoint_base_url": "http://attacker.invalid/v1",
+            "configured_endpoint_scope": object(),
+            "http_client_factory": object(),
+            "http_fetcher": object(),
+            "http_streamer": object(),
+        }
+    )
+
+    assert result["choices"][0]["message"]["content"] == "ok"
+    assert captured["configured_endpoint"] is None
+    assert reserved.isdisjoint(validated[0])
+    assert reserved.isdisjoint(captured["json"])
+
+
+def test_public_custom_subclass_does_not_accept_configured_custom_endpoint_alias(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.LLM_Calls.providers.custom_openai_adapter import NovitaAdapter
+
+    monkeypatch.delenv("NOVITA_BASE_URL", raising=False)
+    monkeypatch.delenv("NOVITA_API_BASE_URL", raising=False)
+    adapter = NovitaAdapter()
+    with pytest.raises(ChatBadRequestError):
+        adapter.chat(
+            {
+                "messages": [{"role": "user", "content": "hi"}],
+                "model": "model",
+                "novita_base_url": "http://attacker.invalid/v1",
+            }
+        )
+
+
+@pytest.mark.parametrize("reason_code", ["origin_mismatch", "tls_pin_mismatch", "dns_unresolved"])
+def test_public_custom_preserves_egress_policy_error_sync_and_async(
+    monkeypatch: pytest.MonkeyPatch,
+    reason_code: str,
+):
+    import asyncio
+    from contextlib import contextmanager
+
+    from tldw_Server_API.app.core.LLM_Calls.providers import custom_openai_adapter
+
+    error = EgressPolicyError("sanitized", reason_code=reason_code)
+
+    def _fetch(**_kwargs):
+        raise error
+
+    @contextmanager
+    def _stream(**_kwargs):
+        raise error
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(
+        custom_openai_adapter,
+        "http_client_factory",
+        lambda **_kwargs: pytest.fail("public provider used legacy client factory"),
+        raising=False,
+    )
+    adapter = custom_openai_adapter.NovitaAdapter()
+    adapter.http_fetcher = _fetch
+    adapter.http_streamer = _stream
+    request = {"messages": [{"role": "user", "content": "hi"}], "model": "model"}
+
+    with pytest.raises(EgressPolicyError) as sync_exc:
+        adapter.chat(request)
+    assert sync_exc.value.reason_code == reason_code
+
+    with pytest.raises(EgressPolicyError) as stream_exc:
+        list(adapter.stream(request))
+    assert stream_exc.value.reason_code == reason_code
+
+    with pytest.raises(EgressPolicyError) as async_exc:
+        asyncio.run(adapter.achat(request))
+    assert async_exc.value.reason_code == reason_code
+
+    async def _consume() -> None:
+        async for _item in adapter.astream(request):
+            pass
+
+    with pytest.raises(EgressPolicyError) as astream_exc:
+        asyncio.run(_consume())
+    assert astream_exc.value.reason_code == reason_code
+
+
+@pytest.mark.parametrize("reason_code", ["origin_mismatch", "tls_pin_mismatch", "dns_unresolved"])
+def test_configured_custom_preserves_egress_policy_error_sync_and_async(
+    monkeypatch,
+    reason_code: str,
+):
+    import asyncio
+    from contextlib import contextmanager
+
+    from tldw_Server_API.app.core.LLM_Calls.providers.custom_openai_adapter import CustomOpenAIAdapter
+
+    monkeypatch.setenv("CUSTOM_OPENAI_API_IP", "http://configured-custom:18091/v1")
+    error = EgressPolicyError("sanitized", reason_code=reason_code)
+
+    def _fetch(**_kwargs):
+        raise error
+
+    @contextmanager
+    def _stream(**_kwargs):
+        raise error
+        yield  # pragma: no cover
+
+    adapter = CustomOpenAIAdapter()
+    adapter.http_fetcher = _fetch
+    adapter.http_streamer = _stream
+    request = {"messages": [{"role": "user", "content": "hi"}], "model": "model"}
+
+    with pytest.raises(EgressPolicyError) as sync_exc:
+        adapter.chat(request)
+    assert sync_exc.value.reason_code == reason_code
+
+    with pytest.raises(EgressPolicyError) as stream_exc:
+        list(adapter.stream(request))
+    assert stream_exc.value.reason_code == reason_code
+
+    with pytest.raises(EgressPolicyError) as async_exc:
+        asyncio.run(adapter.achat(request))
+    assert async_exc.value.reason_code == reason_code
+
+    async def _consume() -> None:
+        async for _item in adapter.astream(request):
+            pass
+
+    with pytest.raises(EgressPolicyError) as astream_exc:
+        asyncio.run(_consume())
+    assert astream_exc.value.reason_code == reason_code

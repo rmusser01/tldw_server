@@ -1,6 +1,8 @@
 # PocketTTS Voice Cloning Guide
 
-A step-by-step guide to installing PocketTTS, cloning a voice from a reference audio sample, and setting the cloned voice as your default TTS output.
+A step-by-step guide to installing PocketTTS (`pocket_tts`, the Python/ONNX runtime), cloning a voice from a reference audio sample, and setting the cloned voice as your default TTS output.
+
+If you want the separate compiled-native runtime, use `pocket_tts_cpp` and its installer helper instead. That provider has different runtime expectations and is documented in the general TTS guides, not in this ONNX-specific guide.
 
 ## What is PocketTTS?
 
@@ -30,7 +32,7 @@ Install PocketTTS runtime dependencies and the HuggingFace Hub CLI (for model do
 
 ```bash
 pip install -e '.[TTS_pocket_tts]'
-pip install huggingface-hub
+pip install -U "huggingface_hub"
 ```
 
 ## Step 2: Download PocketTTS Models
@@ -56,7 +58,7 @@ Useful flags:
 ### Option B: Manual Download
 
 ```bash
-huggingface-cli download KevinAHM/pocket-tts-onnx \
+hf download KevinAHM/pocket-tts-onnx \
   --local-dir models/pocket_tts_onnx \
   --local-dir-use-symlinks False \
   --include "onnx/**" "tokenizer.model" "pocket_tts_onnx/**" "pocket_tts_onnx.py"
@@ -357,7 +359,7 @@ After any of these changes, restart the server for the new defaults to take effe
 ## Quick Reference
 
 ```
-Install:     pip install -e '.[TTS_pocket_tts]' && pip install huggingface-hub
+Install:     pip install -e '.[TTS_pocket_tts]' && pip install -U "huggingface_hub"
 Download:    python Helper_Scripts/TTS_Installers/install_tts_pocket_tts_onnx.py
 Config:      tldw_Server_API/Config_Files/tts_providers_config.yaml
 Providers:   GET  /api/v1/audio/providers

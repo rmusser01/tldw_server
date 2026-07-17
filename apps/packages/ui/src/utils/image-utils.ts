@@ -1,3 +1,5 @@
+import { safeExternalUrl } from "./safe-external-url"
+
 export const ALLOWED_IMAGE_MIME_TYPES = new Set([
   "image/png",
   "image/jpeg",
@@ -228,6 +230,37 @@ export function createImageDataUrl(base64: string): string | null {
   if (declaredMime && declaredMime !== mime) return null
 
   return `data:${mime};base64,${payload}`
+}
+
+/**
+ * Returns a validated raster data URL or a URL with an explicit safe image
+ * source prefix. Bare relative paths are made explicit for downstream sinks.
+ */
+export function safeImageUrl(value: unknown): string | null {
+  if (typeof value !== "string") return null
+
+  const dataUrl = createImageDataUrl(value)
+  if (dataUrl) return dataUrl
+
+  const safeUrl = safeExternalUrl(value)
+  if (!safeUrl) return null
+  if (safeUrl.includes("\\")) return null
+
+  const lowerSafeUrl = safeUrl.toLowerCase()
+  if (lowerSafeUrl.startsWith("https:")) return `https:${safeUrl.slice(6)}`
+  if (lowerSafeUrl.startsWith("http:")) return `http:${safeUrl.slice(5)}`
+  if (safeUrl.startsWith("//")) return `https:${safeUrl}`
+  if (
+    safeUrl.startsWith("/") ||
+    safeUrl.startsWith("./") ||
+    safeUrl.startsWith("../") ||
+    safeUrl.startsWith("#")
+  ) {
+    return safeUrl
+  }
+  if (safeUrl.includes(":")) return null
+
+  return `./${safeUrl}`
 }
 
 /**

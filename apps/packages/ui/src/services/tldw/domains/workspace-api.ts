@@ -8,6 +8,9 @@ import type {
   SkillBulkDeleteResponse,
   SkillExecutionResult,
   SkillImportPreviewResponse,
+  SkillResponse,
+  SkillsTrashListParams,
+  SkillsTrashListResponse,
   SkillsListParams,
   SkillsListResponse
 } from "@/types/skill"
@@ -18,8 +21,13 @@ import type {
   WorkspaceAssistantDefaultDegradedReason,
   WorkspaceAssistantDefaults,
   WorkspaceAssistantKind,
-  WorkspacePersonaMemoryMode
+  WorkspacePersonaMemoryMode,
+  WorkspaceSourceReviewState
 } from "@/types/workspace"
+import type {
+  WorkspaceSourceSavedViewInvalidReason,
+  WorkspaceSourceSavedViewStateV1
+} from "@/types/workspace-source-saved-view"
 import {
   normalizeEffectiveWorkspaceAssistantDefault,
   normalizeWorkspaceAssistantDefaults
@@ -42,6 +50,30 @@ type SkillsListPayload = SkillsListResponse & {
 
 export interface ExecuteSkillOptions {
   dryRun?: boolean
+  signal?: AbortSignal
+}
+
+interface SkillRequestOptions {
+  signal?: AbortSignal
+}
+
+const throwIfSkillRequestAborted = (signal?: AbortSignal): void => {
+  if (!signal?.aborted) return
+  const error = new Error("Skills request was cancelled")
+  error.name = "AbortError"
+  throw error
+}
+
+const resolveSkillApiPath = async (
+  client: TldwApiClientCore,
+  key: string,
+  candidates: string[],
+  signal?: AbortSignal
+): Promise<AllowedPath> => {
+  throwIfSkillRequestAborted(signal)
+  const path = await client.resolveApiPath(key, candidates)
+  throwIfSkillRequestAborted(signal)
+  return path
 }
 
 export type WorkspaceArtifactJsonRecord = Record<string, unknown>
@@ -134,6 +166,10 @@ export interface WorkspaceSourceApiResponse {
   position: number
   selected: boolean
   added_at: string
+  review_state?: WorkspaceSourceReviewState
+  review_state_updated_at?: string | null
+  reviewed_at?: string | null
+  reviewed_by_user_id?: string | null
   version: number
 }
 
@@ -179,6 +215,10 @@ export interface WorkspaceSourceStatusApiResponse {
   source_type: string
   url: string | null
   selected: boolean
+  review_state?: WorkspaceSourceReviewState
+  review_state_updated_at?: string | null
+  reviewed_at?: string | null
+  reviewed_by_user_id?: string | null
   state: WorkspaceSourceLifecycleState
   status_reason: string
   readiness: WorkspaceSourceReadiness
@@ -205,6 +245,82 @@ export interface WorkspaceSourceStatusListResponse {
   workspace_id: string
   sources: WorkspaceSourceStatusApiResponse[]
   summary: WorkspaceSourceStatusSummary
+}
+
+interface WorkspaceSourceSavedViewResponseBase {
+  id: string
+  workspace_id: string
+  name: string
+  schema_version: number
+  version: number
+  created_at: string
+  updated_at: string
+}
+
+export interface WorkspaceSourceSavedViewValidResponse extends WorkspaceSourceSavedViewResponseBase {
+  state: WorkspaceSourceSavedViewStateV1
+  valid: true
+  invalid_reason: null
+}
+
+export interface WorkspaceSourceSavedViewInvalidResponse extends WorkspaceSourceSavedViewResponseBase {
+  state: null
+  valid: false
+  invalid_reason: WorkspaceSourceSavedViewInvalidReason
+}
+
+export type WorkspaceSourceSavedViewResponse =
+  | WorkspaceSourceSavedViewValidResponse
+  | WorkspaceSourceSavedViewInvalidResponse
+
+export interface WorkspaceSourceSavedViewListResponse {
+  items: WorkspaceSourceSavedViewResponse[]
+}
+
+export interface WorkspaceSourceSavedViewCreateRequest {
+  name: string
+  schema_version: 1
+  state: WorkspaceSourceSavedViewStateV1
+}
+
+export type WorkspaceSourceSavedViewPatchRequest =
+  | { version: number; name: string }
+  | {
+      version: number
+      schema_version: 1
+      state: WorkspaceSourceSavedViewStateV1
+    }
+  | {
+      version: number
+      name: string
+      schema_version: 1
+      state: WorkspaceSourceSavedViewStateV1
+    }
+
+export interface WorkspaceSourceSavedViewNameExistsDetail {
+  code: "source_view_name_exists"
+  view_id: string
+  version: number
+}
+
+export interface WorkspaceSourceSavedViewLimitReachedDetail {
+  code: "source_view_limit_reached"
+  limit: 100
+}
+
+export interface WorkspaceSourceSavedViewVersionConflictDetail {
+  code: "source_view_version_conflict"
+  view_id: string
+  current_version: number
+}
+
+export type WorkspaceSourceSavedViewConflictDetail =
+  | WorkspaceSourceSavedViewNameExistsDetail
+  | WorkspaceSourceSavedViewLimitReachedDetail
+  | WorkspaceSourceSavedViewVersionConflictDetail
+
+export interface WorkspaceSourceSavedViewConflictResponse {
+  detail: WorkspaceSourceSavedViewConflictDetail
 }
 
 export type WorkspaceCapabilityServiceState =
@@ -679,6 +795,7 @@ export interface WorkspaceSourceCreateRequest {
   url?: string | null
   position?: number
   selected?: boolean
+  review_state?: Exclude<WorkspaceSourceReviewState, "reviewed">
 }
 
 export interface WorkspaceSourceUpdateRequest {
@@ -687,7 +804,13 @@ export interface WorkspaceSourceUpdateRequest {
   url?: string | null
   position?: number
   selected?: boolean
+  review_state?: WorkspaceSourceReviewState | null
   version: number
+}
+
+export interface WorkspaceSourceReviewStateBatchRequest {
+  source_ids: string[]
+  review_state: WorkspaceSourceReviewState
 }
 
 export type WorkspaceArtifactReviewState =
@@ -966,10 +1089,10 @@ export const workspaceApiMethods = {
         }
       : undefined
     const query = buildQuery(normalizedParams)
-    const base = await this.resolveApiPath("skills.list", [
+    const base = await resolveSkillApiPath(this, "skills.list", [
       "/api/v1/skills",
       "/api/v1/skills/"
-    ])
+    ], abortSignal)
     return await bgRequest<SkillsListPayload>({
       path: appendPathQuery(base, query),
       method: "GET",
@@ -979,14 +1102,19 @@ export const workspaceApiMethods = {
 
   async getSkill(
     this: TldwApiClientCore,
-    name: string
+    name: string,
+    options: SkillRequestOptions = {}
   ): Promise<any> {
-    const base = await this.resolveApiPath("skills.get", [
+    const base = await resolveSkillApiPath(this, "skills.get", [
       "/api/v1/skills/{name}",
       "/api/v1/skills/{name}/"
-    ])
+    ], options.signal)
     const path = this.fillPathParams(base, name)
-    return await bgRequest<any>({ path, method: "GET" })
+    return await bgRequest<any>({
+      path,
+      method: "GET",
+      ...(options.signal ? { abortSignal: options.signal } : {})
+    })
   },
 
   async createSkill(
@@ -995,17 +1123,19 @@ export const workspaceApiMethods = {
       name: string
       content: string
       supporting_files?: Record<string, string> | null
-    }
+    },
+    options: SkillRequestOptions = {}
   ): Promise<any> {
-    const base = await this.resolveApiPath("skills.create", [
+    const base = await resolveSkillApiPath(this, "skills.create", [
       "/api/v1/skills",
       "/api/v1/skills/"
-    ])
+    ], options.signal)
     return await bgRequest<any>({
       path: base,
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: payload
+      body: payload,
+      ...(options.signal ? { abortSignal: options.signal } : {})
     })
   },
 
@@ -1016,29 +1146,37 @@ export const workspaceApiMethods = {
       content?: string
       supporting_files?: Record<string, string | null> | null
     },
-    version?: number
+    version?: number,
+    options: SkillRequestOptions = {}
   ): Promise<any> {
-    const base = await this.resolveApiPath("skills.update", [
+    const base = await resolveSkillApiPath(this, "skills.update", [
       "/api/v1/skills/{name}",
       "/api/v1/skills/{name}/"
-    ])
+    ], options.signal)
     const path = this.fillPathParams(base, name)
     const headers: Record<string, string> = { "Content-Type": "application/json" }
     if (version != null) {
       headers["If-Match"] = String(version)
     }
-    return await bgRequest<any>({ path, method: "PUT", headers, body: payload })
+    return await bgRequest<any>({
+      path,
+      method: "PUT",
+      headers,
+      body: payload,
+      ...(options.signal ? { abortSignal: options.signal } : {})
+    })
   },
 
   async deleteSkill(
     this: TldwApiClientCore,
     name: string,
-    version?: number
+    version?: number,
+    options: SkillRequestOptions = {}
   ): Promise<void> {
-    const base = await this.resolveApiPath("skills.delete", [
+    const base = await resolveSkillApiPath(this, "skills.delete", [
       "/api/v1/skills/{name}",
       "/api/v1/skills/{name}/"
-    ])
+    ], options.signal)
     const path = this.fillPathParams(base, name)
     const headers = isValidSkillVersion(version)
       ? { "If-Match": String(version) }
@@ -1046,18 +1184,20 @@ export const workspaceApiMethods = {
     await bgRequest<any>({
       path,
       method: "DELETE",
-      ...(headers ? { headers } : {})
+      ...(headers ? { headers } : {}),
+      ...(options.signal ? { abortSignal: options.signal } : {})
     })
   },
 
   async bulkDeleteSkills(
     this: TldwApiClientCore,
-    skills: SkillBulkDeleteItem[]
+    skills: SkillBulkDeleteItem[],
+    options: SkillRequestOptions = {}
   ): Promise<SkillBulkDeleteResponse> {
-    const base = await this.resolveApiPath("skills.bulkDelete", [
+    const base = await resolveSkillApiPath(this, "skills.bulkDelete", [
       "/api/v1/skills/bulk-delete",
       "/api/v1/skills/bulk-delete/"
-    ])
+    ], options.signal)
     return await bgRequest<SkillBulkDeleteResponse>({
       path: base,
       method: "POST",
@@ -1067,7 +1207,68 @@ export const workspaceApiMethods = {
           name,
           ...(isValidSkillVersion(version) ? { version } : {})
         }))
-      }
+      },
+      ...(options.signal ? { abortSignal: options.signal } : {})
+    })
+  },
+
+  async listSkillTrash(
+    this: TldwApiClientCore,
+    params?: SkillsTrashListParams
+  ): Promise<SkillsTrashListResponse> {
+    const { abortSignal, ...queryParams } = params ?? {}
+    const base = await resolveSkillApiPath(this, "skills.trash.list", [
+      "/api/v1/skills/trash",
+      "/api/v1/skills/trash/"
+    ], abortSignal)
+    return await bgRequest<SkillsTrashListResponse>({
+      path: appendPathQuery(base, buildQuery(queryParams)),
+      method: "GET",
+      abortSignal
+    })
+  },
+
+  async restoreSkill(
+    this: TldwApiClientCore,
+    name: string,
+    version?: number,
+    options: SkillRequestOptions = {}
+  ): Promise<SkillResponse> {
+    const base = await resolveSkillApiPath(this, "skills.trash.restore", [
+      "/api/v1/skills/{name}/restore",
+      "/api/v1/skills/{name}/restore/"
+    ], options.signal)
+    const path = this.fillPathParams(base, name)
+    const headers = isValidSkillVersion(version)
+      ? { "If-Match": String(version) }
+      : undefined
+    return await bgRequest<SkillResponse>({
+      path,
+      method: "POST",
+      ...(headers ? { headers } : {}),
+      ...(options.signal ? { abortSignal: options.signal } : {})
+    })
+  },
+
+  async purgeSkill(
+    this: TldwApiClientCore,
+    name: string,
+    version?: number,
+    options: SkillRequestOptions = {}
+  ): Promise<void> {
+    const base = await resolveSkillApiPath(this, "skills.trash.purge", [
+      "/api/v1/skills/{name}/purge",
+      "/api/v1/skills/{name}/purge/"
+    ], options.signal)
+    const path = this.fillPathParams(base, name)
+    const headers = isValidSkillVersion(version)
+      ? { "If-Match": String(version) }
+      : undefined
+    await bgRequest<unknown>({
+      path,
+      method: "DELETE",
+      ...(headers ? { headers } : {}),
+      ...(options.signal ? { abortSignal: options.signal } : {})
     })
   },
 
@@ -1078,17 +1279,20 @@ export const workspaceApiMethods = {
       content: string
       supporting_files?: Record<string, string> | null
       overwrite?: boolean
-    }
+      expected_version?: number
+    },
+    options: SkillRequestOptions = {}
   ): Promise<any> {
-    const base = await this.resolveApiPath("skills.import", [
+    const base = await resolveSkillApiPath(this, "skills.import", [
       "/api/v1/skills/import",
       "/api/v1/skills/import/"
-    ])
+    ], options.signal)
     return await bgRequest<any>({
       path: base,
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: payload
+      body: payload,
+      ...(options.signal ? { abortSignal: options.signal } : {})
     })
   },
 
@@ -1098,28 +1302,34 @@ export const workspaceApiMethods = {
       name?: string
       content: string
       supporting_files?: Record<string, string> | null
-    }
+    },
+    options: { signal?: AbortSignal } = {}
   ): Promise<SkillImportPreviewResponse> {
-    const base = await this.resolveApiPath("skills.import.preview", [
+    const base = await resolveSkillApiPath(this, "skills.import.preview", [
       "/api/v1/skills/import/preview",
       "/api/v1/skills/import/preview/"
-    ])
+    ], options.signal)
     return await bgRequest<SkillImportPreviewResponse>({
       path: base,
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: payload
+      body: payload,
+      ...(options.signal ? { abortSignal: options.signal } : {})
     })
   },
 
   async previewSkillImportFile(
     this: TldwApiClientCore,
-    file: File
+    file: File,
+    options: SkillRequestOptions = {}
   ): Promise<SkillImportPreviewResponse> {
+    throwIfSkillRequestAborted(options.signal)
     const data = await file.arrayBuffer()
+    throwIfSkillRequestAborted(options.signal)
     return await this.upload<SkillImportPreviewResponse>({
       path: "/api/v1/skills/import/file/preview" as AllowedPath,
       method: "POST",
+      ...(options.signal ? { abortSignal: options.signal } : {}),
       fileFieldName: "file",
       file: {
         name: file.name || "skill-import",
@@ -1134,13 +1344,21 @@ export const workspaceApiMethods = {
     file: File,
     options?: {
       overwrite?: boolean
+      expectedVersion?: number
+      signal?: AbortSignal
     }
   ): Promise<any> {
+    throwIfSkillRequestAborted(options?.signal)
     const data = await file.arrayBuffer()
-    const query = buildQuery({ overwrite: options?.overwrite })
+    throwIfSkillRequestAborted(options?.signal)
+    const query = buildQuery({
+      overwrite: options?.overwrite,
+      expected_version: options?.expectedVersion
+    })
     return await this.upload<any>({
       path: appendPathQuery("/api/v1/skills/import/file" as AllowedPath, query),
       method: "POST",
+      ...(options?.signal ? { abortSignal: options.signal } : {}),
       fileFieldName: "file",
       file: {
         name: file.name || "skill-import",
@@ -1154,30 +1372,37 @@ export const workspaceApiMethods = {
     this: TldwApiClientCore,
     params?: {
       overwrite?: boolean
-    }
+    },
+    options: SkillRequestOptions = {}
   ): Promise<any> {
     const query = buildQuery(params)
-    const base = await this.resolveApiPath("skills.seed", [
+    const base = await resolveSkillApiPath(this, "skills.seed", [
       "/api/v1/skills/seed",
       "/api/v1/skills/seed/"
-    ])
+    ], options.signal)
     return await bgRequest<any>({
       path: appendPathQuery(base, query),
-      method: "POST"
+      method: "POST",
+      ...(options.signal ? { abortSignal: options.signal } : {})
     })
   },
 
   async exportSkill(
     this: TldwApiClientCore,
-    name: string
+    name: string,
+    options: SkillRequestOptions = {}
   ): Promise<SkillExportDownload> {
+    throwIfSkillRequestAborted(options.signal)
     await this.ensureConfigForRequest(true)
+    throwIfSkillRequestAborted(options.signal)
     const response = await bgRequest<BinaryResponsePayload, AllowedPath>({
       path: `/api/v1/skills/${encodeURIComponent(name)}/export` as AllowedPath,
       method: "GET",
       responseType: "arrayBuffer",
-      returnResponse: true
+      returnResponse: true,
+      ...(options.signal ? { abortSignal: options.signal } : {})
     })
+    throwIfSkillRequestAborted(options.signal)
     const exportErrorContext = `Export failed for skill ${name}`
     if (!response) {
       throw new Error(`${exportErrorContext}: missing response`)
@@ -1210,10 +1435,10 @@ export const workspaceApiMethods = {
     args?: string,
     options?: ExecuteSkillOptions
   ): Promise<SkillExecutionResult> {
-    const base = await this.resolveApiPath("skills.execute", [
+    const base = await resolveSkillApiPath(this, "skills.execute", [
       "/api/v1/skills/{name}/execute",
       "/api/v1/skills/{name}/execute/"
-    ])
+    ], options?.signal)
     const path = this.fillPathParams(base, name)
     return await bgRequest<SkillExecutionResult>({
       path,
@@ -1222,7 +1447,8 @@ export const workspaceApiMethods = {
       body: {
         args: args || "",
         dry_run: Boolean(options?.dryRun)
-      }
+      },
+      abortSignal: options?.signal
     })
   },
 
@@ -1461,6 +1687,57 @@ export const workspaceApiMethods = {
     })
   },
 
+  async listWorkspaceSourceViews(
+    workspaceId: string
+  ): Promise<WorkspaceSourceSavedViewListResponse> {
+    return await bgRequest<WorkspaceSourceSavedViewListResponse>({
+      path: workspacePath(workspaceId, "/source-views"),
+      method: "GET",
+      // Reconciliation must not join an older in-flight list request.
+      abortSignal: new AbortController().signal
+    })
+  },
+
+  async createWorkspaceSourceView(
+    workspaceId: string,
+    data: WorkspaceSourceSavedViewCreateRequest
+  ): Promise<WorkspaceSourceSavedViewResponse> {
+    return await bgRequest<WorkspaceSourceSavedViewResponse>({
+      path: workspacePath(workspaceId, "/source-views"),
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: data,
+      expectedStatuses: [409]
+    })
+  },
+
+  async updateWorkspaceSourceView(
+    workspaceId: string,
+    viewId: string,
+    data: WorkspaceSourceSavedViewPatchRequest
+  ): Promise<WorkspaceSourceSavedViewResponse> {
+    const encodedViewId = encodeWorkspacePathSegment(viewId, "viewId")
+    return await bgRequest<WorkspaceSourceSavedViewResponse>({
+      path: workspacePath(workspaceId, `/source-views/${encodedViewId}`),
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: data,
+      expectedStatuses: [404, 409]
+    })
+  },
+
+  async deleteWorkspaceSourceView(
+    workspaceId: string,
+    viewId: string
+  ): Promise<void> {
+    const encodedViewId = encodeWorkspacePathSegment(viewId, "viewId")
+    await bgRequest<unknown>({
+      path: workspacePath(workspaceId, `/source-views/${encodedViewId}`),
+      method: "DELETE",
+      expectedStatuses: [404]
+    })
+  },
+
   async getWorkspaceSourcesStatus(
     workspaceId: string
   ): Promise<WorkspaceSourceStatusListResponse> {
@@ -1553,6 +1830,23 @@ export const workspaceApiMethods = {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: data
+    })
+  },
+
+  async updateWorkspaceSourceReviewState(
+    workspaceId: string,
+    sourceIds: string[],
+    reviewState: WorkspaceSourceReviewState
+  ): Promise<WorkspaceSourceApiResponse[]> {
+    const body: WorkspaceSourceReviewStateBatchRequest = {
+      source_ids: sourceIds,
+      review_state: reviewState
+    }
+    return await bgRequest<WorkspaceSourceApiResponse[]>({
+      path: workspacePath(workspaceId, "/sources/review-state"),
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body
     })
   },
 

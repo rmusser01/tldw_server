@@ -85,6 +85,7 @@ async def _ensure_pg_extras(db_pool: object) -> None:
             ensure_authnz_core_tables_pg,
             ensure_generated_files_table_pg,
             ensure_llm_provider_overrides_pg,
+            ensure_notification_permissions_pg,
             ensure_privilege_snapshots_table_pg,
             ensure_tool_catalogs_tables_pg,
             ensure_usage_tables_pg,
@@ -95,6 +96,7 @@ async def _ensure_pg_extras(db_pool: object) -> None:
         pg_ensures = [
             ("users timestamp time zones", ensure_user_timestamp_timezones_pg),
             ("AuthNZ core tables", ensure_authnz_core_tables_pg),
+            ("notification permissions", ensure_notification_permissions_pg),
             ("generated_files table", ensure_generated_files_table_pg),
             ("tool catalogs tables", ensure_tool_catalogs_tables_pg),
             ("privilege_snapshots table", ensure_privilege_snapshots_table_pg),
@@ -108,5 +110,10 @@ async def _ensure_pg_extras(db_pool: object) -> None:
             ok = await ensure_fn(db_pool)
             if ok:
                 logger.info(f"App Startup: Ensured PG {label}")
+            else:
+                logger.warning(
+                    f"App Startup: PG {label} ensure returned False; "
+                    "canonical database state may be incomplete"
+                )
     except _STARTUP_GUARD_EXCEPTIONS as exc:
         logger.debug(f"App Startup: PG extras ensure failed/skipped: {exc}")

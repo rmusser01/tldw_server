@@ -6,6 +6,7 @@ import type {
   WatchlistPriority,
   WatchlistSourceCreate
 } from "@/types/watchlists"
+import { toCanonicalWatchlistJobPayload } from "../shared/briefing-contract"
 
 export type WatchlistSetupPreset = "cti_osint" | "news" | "general" | "blank"
 export type WatchlistSetupStartMode = "sources" | "topic" | "report_goal"
@@ -208,19 +209,28 @@ export const buildWatchlistSetupJobPayload = (
     )
   )
   const reportGoal = trimText(values.reportGoal)
+  const schedule = resolveSchedule(values.schedulePreset)
   const payload: WatchlistJobCreate = {
     name: trimText(values.monitorName) || `${trimText(values.name) || "Watchlist"} monitor`,
     description: reportGoal ? `Report goal: ${reportGoal}` : undefined,
     scope: { sources: normalizedSourceIds },
     active: true,
-    ...resolveSchedule(values.schedulePreset)
+    ...schedule
   }
 
   if (values.startMode === "report_goal" || reportGoal.length > 0) {
-    payload.output_prefs = {
-      template_name: "briefing_md",
-      generate_audio: Boolean(values.includeAudioBriefing)
-    }
+    return toCanonicalWatchlistJobPayload({
+      monitorName: payload.name,
+      description: payload.description,
+      scope: payload.scope,
+      active: true,
+      scheduleExpr: payload.schedule_expr,
+      timezone: payload.timezone,
+      templateName: "briefing_md",
+      templateFormat: "md",
+      audioEnabled: Boolean(values.includeAudioBriefing),
+      audioVoice: values.includeAudioBriefing ? "alloy" : undefined
+    })
   }
 
   return payload

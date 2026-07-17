@@ -3,6 +3,7 @@ import { bgRequest } from "@/services/background-proxy"
 import { emitSplashAfterLoginSuccess } from "@/services/splash-events"
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
 import { getRuntimeSingleUserApiKeyOverride } from "@/services/tldw/runtime-auth-override"
+import { clearSourceReviewHandoffs } from "@/services/tldw/source-review-handoff"
 
 export interface LoginCredentials {
   username: string
@@ -200,7 +201,19 @@ export class TldwAuthService {
    */
   async logout(): Promise<void> {
     const config = await tldwClient.getConfig()
-    if (!config || config.authMode !== 'multi-user') {
+    if (!config) {
+      return
+    }
+    if (config.authMode === 'single-user') {
+      if (config.authSource === 'cookie-session') {
+        await bgRequest<any>({
+          path: '/api/v1/auth/single-user/session',
+          method: 'DELETE'
+        })
+        await tldwClient.clearCookieSingleUserSession()
+        return
+      }
+      await tldwClient.clearManualSingleUserCredentials()
       return
     }
 
@@ -212,6 +225,8 @@ export class TldwAuthService {
     } catch (error) {
       console.error('Server logout failed:', error)
     }
+
+    clearSourceReviewHandoffs()
 
     // Clear local tokens
     await tldwClient.updateConfig({
@@ -368,6 +383,7 @@ export class TldwAuthService {
       const response = await fetch(validationUrl, {
         method: 'GET',
         headers: { 'X-API-KEY': apiKey },
+        credentials: 'omit',
         signal: controller.signal
       })
 
@@ -453,7 +469,7 @@ export class TldwAuthService {
     }
 
     if (config.authMode === 'single-user') {
-      return !!config.apiKey
+      return config.authSource === 'cookie-session' || !!config.apiKey
     } else if (config.authMode === 'multi-user') {
       return !!config.accessToken
     }

@@ -143,6 +143,34 @@ describe("research workspace server reconciliation", () => {
     expect(result.errors).toEqual([])
   })
 
+  it("sends needs-review only for sources explicitly added for review", async () => {
+    const client = makeClient()
+
+    await reconcileResearchWorkspaceServerState({
+      client,
+      workspaceId: "workspace-1",
+      sources: [
+        makeSource({ id: "source-default", mediaId: 601 }),
+        makeSource({
+          id: "source-review",
+          mediaId: 602,
+          reviewState: "needs_review"
+        })
+      ]
+    })
+
+    expect(client.addWorkspaceSource).toHaveBeenNthCalledWith(
+      1,
+      "workspace-1",
+      expect.not.objectContaining({ review_state: expect.anything() })
+    )
+    expect(client.addWorkspaceSource).toHaveBeenNthCalledWith(
+      2,
+      "workspace-1",
+      expect.objectContaining({ review_state: "needs_review" })
+    )
+  })
+
   it("reconciles existing backend rows to the canonical local selected source ids", async () => {
     const client = makeClient([
       {

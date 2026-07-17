@@ -2,6 +2,8 @@ import type { Storage } from "@plasmohq/storage"
 import { browser } from "wxt/browser"
 import { getInitialConfig } from "@/services/action"
 import { getServerCapabilities } from "@/services/tldw/server-capabilities"
+import { createSafeStorage } from "@/utils/safe-storage"
+import { resolveEffectiveTldwConfig } from "@/services/tldw/single-user-credential"
 
 export type BackgroundCapabilities = {
   sendToTldw: boolean
@@ -175,7 +177,10 @@ const isSameOriginWebUiOpenApiBase = (base: string): boolean => {
 const checkOpenApiDrift = async (storage: Storage) => {
   let timeout: ReturnType<typeof setTimeout> | null = null
   try {
-    const cfg = await storage.get<any>("tldwConfig")
+    const cfg = await resolveEffectiveTldwConfig({
+      persistent: storage,
+      session: createSafeStorage({ area: "session" })
+    })
     const base = String(cfg?.serverUrl || "").replace(/\/$/, "")
     if (!base) return
     if (isSameOriginWebUiOpenApiBase(base)) return

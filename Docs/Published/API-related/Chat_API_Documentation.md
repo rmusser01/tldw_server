@@ -84,6 +84,11 @@ Key fields:
     - `assistant_prefill` is context-only and is not saved as a separate message turn.
 
 Provider-specific extensions:
+- Paid-provider prompt cache intent:
+  - `billing_prompt_cache_intent` is ignored unless `{ "enabled": true }` is provided.
+  - Supported first-class translations are limited to documented OpenAI, Anthropic, Gemini, and OpenRouter prompt-cache controls.
+  - `extra_body` remains an escape hatch for provider-specific fields, but cache usage is considered proven only by provider usage metadata such as cached/read/write token fields.
+  - Local providers such as vLLM and llama.cpp should treat this as non-billing diagnostic context; runtime prefix-cache diagnostics are tracked separately.
 - Bedrock guardrails:
   - `extra_headers`: include Bedrock guardrail headers like `X-Amzn-Bedrock-GuardrailIdentifier`, `X-Amzn-Bedrock-GuardrailVersion`, optional `X-Amzn-Bedrock-Trace`.
   - `extra_body`: include `amazon-bedrock-guardrailConfig` object when needed.
@@ -348,6 +353,12 @@ Configurable under `[Chat-Module]` in `Config_Files/config.txt`:
 - `rate_limit_per_conversation_per_minute`
 - `rate_limit_tokens_per_minute`
 When exceeded, the endpoint returns `429`.
+
+Prompt cost guardrails (optional):
+- Disabled by default. Enable with `CHAT_PROMPT_GUARDRAILS_ENABLED=1` or `[Chat-Module] prompt_guardrails_enabled = true`.
+- Warning thresholds add bounded `tldw_prompt_guardrails` metadata to non-streaming chat responses and log equivalent diagnostics for streaming/character-chat paths.
+- Hard caps such as `prompt_guardrails_block_total_estimated_tokens` reject before provider dispatch with `413` and never include raw prompt text in the response.
+- The same prompt-size checks apply to local providers such as vLLM and llama.cpp; for local inference these are runtime/cache-efficiency diagnostics rather than third-party billing claims.
 
 Queued execution (optional):
 - Enable job-queue processing for chat calls to smooth bursts.

@@ -20,6 +20,11 @@ import {
   buildQuizAssessmentRouteFromFlashcards,
   parseFlashcardsStudyIntentFromLocation
 } from "@/services/tldw/quiz-flashcards-handoff"
+import {
+  buildSourceReviewQuizRoute,
+  type SourceReviewFlashcardsIntent,
+  type SourceReviewHandoffPayload
+} from "@/services/tldw/source-review-handoff"
 
 const { Text } = Typography
 
@@ -123,6 +128,11 @@ export const FlashcardsManager: React.FC = () => {
     task: TransferTaskKey
     key: string
   } | null>(null)
+  const [sourceReviewGenerateIntent, setSourceReviewGenerateIntent] =
+    React.useState<SourceReviewFlashcardsIntent | null>(null)
+  const clearSourceReviewGenerateIntent = React.useCallback(() => {
+    setSourceReviewGenerateIntent(null)
+  }, [])
   const deckHandoffCounterRef = React.useRef(0)
   const transferTaskHandoffCounterRef = React.useRef(0)
   const nextDeckHandoffKey = React.useCallback((prefix: string, deckId: number) => {
@@ -178,6 +188,9 @@ export const FlashcardsManager: React.FC = () => {
   }, [])
 
   React.useEffect(() => {
+    if (currentGenerateIntent || currentStudyPackIntent) {
+      setSourceReviewGenerateIntent(null)
+    }
     const nextTab =
       currentTab ?? (currentGenerateIntent || currentStudyPackIntent ? "importExport" : null)
     if (nextTab) {
@@ -187,12 +200,15 @@ export const FlashcardsManager: React.FC = () => {
       ) {
         setTransferTaskHandoff(null)
       }
+      if (nextTab !== "importExport") {
+        clearSourceReviewGenerateIntent()
+      }
       setActiveTab(nextTab)
     }
     if (currentStudyIntent?.deckId !== undefined) {
       applyReviewDeckChange(currentStudyIntent.deckId ?? undefined)
     }
-  }, [applyReviewDeckChange, currentGenerateIntent, currentStudyIntent?.deckId, currentStudyPackIntent, currentTab])
+  }, [applyReviewDeckChange, clearSourceReviewGenerateIntent, currentGenerateIntent, currentStudyIntent?.deckId, currentStudyPackIntent, currentTab])
 
   React.useEffect(() => {
     if (hasNoInitialDecks && activeTab === "scheduler" && schedulerDirty) {
@@ -254,6 +270,7 @@ export const FlashcardsManager: React.FC = () => {
   const navigateToTransferTask = React.useCallback(
     (task: TransferTaskKey) => {
       clearDeckHandoffs()
+      setSourceReviewGenerateIntent(null)
       requestTransferTask(task)
       setActiveTab("importExport")
     },
@@ -268,6 +285,7 @@ export const FlashcardsManager: React.FC = () => {
   const navigateToExportDeck = React.useCallback(
     (deckId: number) => {
       applyReviewDeckChange(deckId)
+      setSourceReviewGenerateIntent(null)
       setExportDeckHandoff({
         deckId,
         key: nextDeckHandoffKey("export", deckId)
@@ -276,6 +294,22 @@ export const FlashcardsManager: React.FC = () => {
       setActiveTab("importExport")
     },
     [applyReviewDeckChange, nextDeckHandoffKey, requestTransferTask]
+  )
+
+  const handleSourceReviewGenerate = React.useCallback(
+    (intent: SourceReviewFlashcardsIntent) => {
+      clearDeckHandoffs()
+      setSourceReviewGenerateIntent(intent)
+      requestTransferTask("create")
+      setActiveTab("importExport")
+    },
+    [clearDeckHandoffs, requestTransferTask]
+  )
+  const handleSourceReviewQuiz = React.useCallback(
+    (payload: SourceReviewHandoffPayload) => {
+      navigate(buildSourceReviewQuizRoute(payload))
+    },
+    [navigate]
   )
 
   const quizCtaRoute = React.useMemo(() => {
@@ -311,11 +345,13 @@ export const FlashcardsManager: React.FC = () => {
 
       if (nextTab === "importExport") {
         setTransferTaskHandoff(null)
+      } else {
+        clearSourceReviewGenerateIntent()
       }
 
       setActiveTab(nextTab)
     },
-    [activeTab, discardSchedulerChanges, schedulerDirty, t]
+    [activeTab, clearSourceReviewGenerateIntent, discardSchedulerChanges, schedulerDirty, t]
   )
 
   const schedulerEmptyPreview = (
@@ -426,6 +462,8 @@ export const FlashcardsManager: React.FC = () => {
                 onNavigateToManageDeck={navigateToManageDeck}
                 onNavigateToSchedulerDeck={navigateToSchedulerDeck}
                 onNavigateToExportDeck={navigateToExportDeck}
+                onSourceReviewGenerate={handleSourceReviewGenerate}
+                onSourceReviewQuiz={handleSourceReviewQuiz}
               />
             )
           },
@@ -460,11 +498,13 @@ export const FlashcardsManager: React.FC = () => {
             children: (
               <ImportExportTab
                 generateIntent={currentGenerateIntent}
+                sourceReviewIntent={sourceReviewGenerateIntent}
                 studyPackIntent={currentStudyPackIntent}
                 initialTask={transferTaskHandoff?.task ?? null}
                 initialTaskHandoffKey={transferTaskHandoff?.key ?? null}
                 initialExportDeckId={exportDeckHandoff?.deckId ?? null}
                 initialExportDeckHandoffKey={exportDeckHandoff?.key ?? null}
+                onSourceReviewIntentExit={clearSourceReviewGenerateIntent}
               />
             )
           },

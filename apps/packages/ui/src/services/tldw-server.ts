@@ -1,4 +1,3 @@
-import { Storage } from "@plasmohq/storage"
 import { tldwClient, tldwModels } from "./tldw"
 import { setNoOfRetrievedDocs, setTotalFilePerKB } from "./app"
 import { createSafeStorage } from "@/utils/safe-storage"
@@ -6,8 +5,9 @@ import {
   resolveWebUiQuickstartServerUrl,
   type BrowserSurface
 } from "@/services/tldw/browser-networking"
+import { readTldwSetting } from "@/services/tldw-settings-storage"
 
-const storage = createSafeStorage()
+const storage = createSafeStorage({ area: "local" })
 
 // Default local tldw_server endpoint
 const DEFAULT_TLDW_URL = "http://127.0.0.1:8000"
@@ -59,7 +59,7 @@ export const DEFAULT_TLDW_API_KEY = import.meta?.env?.VITE_TLDW_API_KEY || ""
  */
 export const getStoredTldwServerURL = async (): Promise<string | null> => {
   try {
-    const url = await storage.get("tldwServerUrl")
+    const url = await readTldwSetting<string>("tldwServerUrl")
     if (typeof url === "string") {
       const trimmed = url.trim()
       if (trimmed.length > 0) {
@@ -93,7 +93,7 @@ export const getTldwServerURL = async () => {
 export const setTldwServerURL = async (url: string) => {
   await storage.set("tldwServerUrl", url)
   await tldwClient.updateConfig({ serverUrl: url })
-  clearChatModelsCache()
+  await tldwModels.clearCache()
 }
 
 export const isTldwServerRunning = async () => {
@@ -175,11 +175,13 @@ const mapTldwModelToUi = (model: any) => ({
 })
 
 const CHAT_MODELS_CACHE_TTL_MS = 60_000
+const CHAT_MODELS_INVALIDATION_HISTORY_LIMIT = 64
 let chatModelsCache: { value: any[]; expiresAt: number } | null = null
 let chatModelsInFlight: Promise<any[]> | null = null
+let chatModelsCacheGeneration = 0
 
 type ChatModelsCacheListenerState = {
-  clear: () => void
+  requestInvalidation: () => void
   listenersAdded: boolean
 }
 
@@ -255,9 +257,33 @@ const dedupeChatModelsByModel = (models: any[]) => {
 }
 
 export const clearChatModelsCache = () => {
+  chatModelsCacheGeneration += 1
   chatModelsCache = null
   chatModelsInFlight = null
 }
+
+let chatModelsLastInvalidationToken: string | null = null
+const chatModelsSeenInvalidationTokens = new Set<string>()
+tldwModels.subscribeInvalidation?.((token) => {
+  const normalizedToken = token.trim()
+  if (
+    !normalizedToken ||
+    normalizedToken === chatModelsLastInvalidationToken ||
+    chatModelsSeenInvalidationTokens.has(normalizedToken)
+  ) {
+    return
+  }
+  chatModelsSeenInvalidationTokens.add(normalizedToken)
+  if (
+    chatModelsSeenInvalidationTokens.size >
+    CHAT_MODELS_INVALIDATION_HISTORY_LIMIT
+  ) {
+    const oldestToken = chatModelsSeenInvalidationTokens.values().next().value
+    if (oldestToken) chatModelsSeenInvalidationTokens.delete(oldestToken)
+  }
+  chatModelsLastInvalidationToken = normalizedToken
+  clearChatModelsCache()
+})
 
 const getChatModelsCacheListenerState = (): ChatModelsCacheListenerState => {
   const globalWindow = window as typeof window & {
@@ -268,7 +294,9 @@ const getChatModelsCacheListenerState = (): ChatModelsCacheListenerState => {
     return existing
   }
   const created: ChatModelsCacheListenerState = {
-    clear: clearChatModelsCache,
+    requestInvalidation: () => {
+      void tldwModels.clearCache()
+    },
     listenersAdded: false
   }
   globalWindow[CHAT_MODELS_CACHE_LISTENER_KEY] = created
@@ -277,14 +305,16 @@ const getChatModelsCacheListenerState = (): ChatModelsCacheListenerState => {
 
 if (typeof window !== "undefined") {
   const listenerState = getChatModelsCacheListenerState()
-  listenerState.clear = clearChatModelsCache
+  listenerState.requestInvalidation = () => {
+    void tldwModels.clearCache()
+  }
   if (!listenerState.listenersAdded) {
     window.addEventListener("tldw:config-updated", () => {
-      listenerState.clear()
+      listenerState.requestInvalidation()
     })
     window.addEventListener("storage", (event) => {
       if (!event.key || event.key === "tldwConfig") {
-        listenerState.clear()
+        listenerState.requestInvalidation()
       }
     })
     listenerState.listenersAdded = true
@@ -323,6 +353,7 @@ export const fetchChatModels = async ({
   refreshOpenRouter?: boolean
   allowNetwork?: boolean
 } = {}) => {
+  const fetchGeneration = chatModelsCacheGeneration
   const now = Date.now()
   if (!forceRefresh && chatModelsCache && chatModelsCache.expiresAt > now) {
     return chatModelsCache.value
@@ -334,7 +365,18 @@ export const fetchChatModels = async ({
 
     const cachedChatModels = await tldwModels.getCachedChatModels()
     const resolved = dedupeChatModelsByModel(cachedChatModels.map(mapTldwModelToUi))
-    if (resolved.length > 0) {
+    if (fetchGeneration !== chatModelsCacheGeneration) {
+      return await fetchChatModels({
+        returnEmpty,
+        forceRefresh,
+        refreshOpenRouter,
+        allowNetwork
+      })
+    }
+    if (
+      resolved.length > 0 &&
+      fetchGeneration === chatModelsCacheGeneration
+    ) {
       chatModelsCache = {
         value: resolved,
         expiresAt: Date.now() + CHAT_MODELS_CACHE_TTL_MS
@@ -346,8 +388,9 @@ export const fetchChatModels = async ({
     return await chatModelsInFlight
   }
 
+  let fetchPromise: Promise<any[]> | null = null
   try {
-    const fetchPromise = (async () => {
+    fetchPromise = (async () => {
       // Primary: tldw_server aggregated models
       const chatModels = await tldwModels.getChatModels(forceRefresh, {
         refreshOpenRouter: refreshOpenRouter || forceRefresh
@@ -365,7 +408,22 @@ export const fetchChatModels = async ({
       }
 
       const resolved = dedupeChatModelsByModel(combined)
-      if (resolved.length > 0) {
+      if (fetchGeneration !== chatModelsCacheGeneration) {
+        const currentFetch = chatModelsInFlight
+        if (currentFetch && currentFetch !== fetchPromise) {
+          return await currentFetch
+        }
+        return await fetchChatModels({
+          returnEmpty,
+          forceRefresh,
+          refreshOpenRouter,
+          allowNetwork
+        })
+      }
+      if (
+        resolved.length > 0 &&
+        fetchGeneration === chatModelsCacheGeneration
+      ) {
         chatModelsCache = {
           value: resolved,
           expiresAt: Date.now() + CHAT_MODELS_CACHE_TTL_MS
@@ -377,6 +435,18 @@ export const fetchChatModels = async ({
     chatModelsInFlight = fetchPromise
     return await fetchPromise
   } catch (e) {
+    if (fetchGeneration !== chatModelsCacheGeneration) {
+      const currentFetch = chatModelsInFlight
+      if (currentFetch && currentFetch !== fetchPromise) {
+        return await currentFetch
+      }
+      return await fetchChatModels({
+        returnEmpty,
+        forceRefresh,
+        refreshOpenRouter,
+        allowNetwork
+      })
+    }
     console.error("Failed to fetch chat models:", e)
     if (chatModelsCache?.value?.length) {
       return chatModelsCache.value
@@ -384,7 +454,9 @@ export const fetchChatModels = async ({
     if (returnEmpty) return []
     throw e
   } finally {
-    chatModelsInFlight = null
+    if (fetchPromise && chatModelsInFlight === fetchPromise) {
+      chatModelsInFlight = null
+    }
   }
 }
 
@@ -456,7 +528,7 @@ Follow-up question: {question}
 `
 
 export const getPageShareUrl = async () => {
-  const pageShareUrl = await storage.get("pageShareUrl")
+  const pageShareUrl = await readTldwSetting<string>("pageShareUrl")
   if (!pageShareUrl || typeof pageShareUrl !== "string" || pageShareUrl.length === 0) {
     return DEFAULT_PAGE_SHARE_URL
   }
@@ -468,7 +540,7 @@ export const setPageShareUrl = async (pageShareUrl: string) => {
 }
 
 export const systemPromptForNonRag = async () => {
-  const prompt = await storage.get("systemPromptForNonRag")
+  const prompt = await readTldwSetting<string>("systemPromptForNonRag")
   if (typeof prompt !== "string" || prompt.length === 0) {
     return undefined
   }
@@ -480,7 +552,7 @@ export const setSystemPromptForNonRag = async (prompt: string) => {
 }
 
 export const systemPromptForNonRagOption = async () => {
-  const prompt = await storage.get("systemPromptForNonRagOption")
+  const prompt = await readTldwSetting<string>("systemPromptForNonRagOption")
   if (typeof prompt !== "string" || prompt.length === 0) {
     return undefined
   }
@@ -492,8 +564,8 @@ export const setSystemPromptForNonRagOption = async (prompt: string) => {
 }
 
 export const promptForRag = async () => {
-  const prompt = await storage.get("systemPromptForRag")
-  const questionPrompt = await storage.get("questionPromptForRag")
+  const prompt = await readTldwSetting<string>("systemPromptForRag")
+  const questionPrompt = await readTldwSetting<string>("questionPromptForRag")
 
   let ragPrompt = typeof prompt === "string" ? prompt : undefined
   let ragQuestionPrompt = typeof questionPrompt === "string" ? questionPrompt : undefined

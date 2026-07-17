@@ -15,6 +15,10 @@ export const useSourceListViewState = () => {
     []
   )
 
+  const applySourceListViewState = React.useCallback((next: SourceListViewState) => {
+    setSourceListViewState(next)
+  }, [])
+
   const resetAdvancedSourceFilters = React.useCallback(() => {
     setSourceListViewState((current) => ({
       ...DEFAULT_SOURCE_LIST_VIEW_STATE,
@@ -25,6 +29,7 @@ export const useSourceListViewState = () => {
   return {
     sourceListViewState,
     patchSourceListViewState,
+    applySourceListViewState,
     resetAdvancedSourceFilters
   }
 }

@@ -27,6 +27,10 @@ from tldw_Server_API.app.api.v1.endpoints.agent_client_protocol import (
 )
 from tldw_Server_API.app.core.Agent_Client_Protocol.multiplex.manager import MultiplexManager
 from tldw_Server_API.app.core.Agent_Client_Protocol.multiplex.protocol import MultiplexMessage
+from tldw_Server_API.app.core.AuthNZ.websocket_session_auth import (
+    cookie_websocket_rejection_code,
+    resolve_single_user_cookie_websocket,
+)
 
 router = APIRouter(prefix="/acp", tags=["acp-multiplex"])
 
@@ -43,15 +47,20 @@ async def acp_multiplex_ws(
     shared session event-bus registry, and loops reading client frames until
     disconnect.
     """
-    user_id = await _authenticate_ws(
-        websocket,
-        token=token,
-        api_key=api_key,
-        required_scope="write",
+    cookie_identity = await resolve_single_user_cookie_websocket(websocket)
+    user_id = (
+        cookie_identity.user_id
+        if cookie_identity is not None
+        else await _authenticate_ws(
+            websocket,
+            token=token,
+            api_key=api_key,
+            required_scope="write",
+        )
     )
     if user_id is None:
         with contextlib.suppress(_ACP_ENDPOINT_NONCRITICAL_EXCEPTIONS):
-            await websocket.close(code=4401)
+            await websocket.close(code=cookie_websocket_rejection_code(websocket) or 4401)
         return
 
     try:

@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   tldwRequest: vi.fn(),
   getRuntimeSingleUserApiKeyOverride: vi.fn(),
   storageGet: vi.fn(async (_key?: string) => null),
+  sessionStorageGet: vi.fn(async (_key?: string) => null),
   storageSet: vi.fn(async () => undefined)
 }))
 
@@ -33,9 +34,11 @@ vi.mock("@/services/tldw/request-core", async () => {
 })
 
 vi.mock("@/utils/safe-storage", () => ({
-  createSafeStorage: () => ({
-    get: (...args: unknown[]) =>
-      (mocks.storageGet as (...args: unknown[]) => unknown)(...args),
+  createSafeStorage: (options?: { area?: string }) => ({
+    get: async (...args: unknown[]) =>
+      await (options?.area === "session"
+        ? (mocks.sessionStorageGet as (...args: unknown[]) => unknown)(...args)
+        : (mocks.storageGet as (...args: unknown[]) => unknown)(...args)),
     set: (...args: unknown[]) =>
       (mocks.storageSet as (...args: unknown[]) => unknown)(...args)
   })
@@ -43,7 +46,8 @@ vi.mock("@/utils/safe-storage", () => ({
 
 vi.mock("@/services/tldw/runtime-auth-override", () => ({
   getRuntimeSingleUserApiKeyOverride: (...args: unknown[]) =>
-    (mocks.getRuntimeSingleUserApiKeyOverride as (...args: unknown[]) => unknown)(...args)
+    (mocks.getRuntimeSingleUserApiKeyOverride as (...args: unknown[]) => unknown)(...args),
+  isCookieSessionConfigInvalidated: () => false
 }))
 
 const importProxy = async () => import("@/services/background-proxy")
@@ -57,9 +61,11 @@ describe("background proxy fallback safety", () => {
     mocks.tldwRequest.mockReset()
     mocks.getRuntimeSingleUserApiKeyOverride.mockReset()
     mocks.storageGet.mockReset()
+    mocks.sessionStorageGet.mockReset()
     mocks.storageSet.mockReset()
     mocks.getRuntimeSingleUserApiKeyOverride.mockReturnValue(null)
     mocks.storageGet.mockResolvedValue(null)
+    mocks.sessionStorageGet.mockResolvedValue(null)
     mocks.storageSet.mockResolvedValue(undefined)
   })
 
@@ -106,7 +112,10 @@ describe("background proxy fallback safety", () => {
         return {
           serverUrl: "https://api.example.com",
           authMode: "single-user",
-          apiKey: "test-key-not-placeholder"
+          apiKey: "test-key-not-placeholder",
+          credentialSource: "manual",
+          apiKeyPersistence: "device",
+          apiKeyServerOrigin: "https://api.example.com"
         }
       }
       return null
@@ -137,7 +146,10 @@ describe("background proxy fallback safety", () => {
         return {
           serverUrl: "https://api.example.com",
           authMode: "single-user",
-          apiKey: "test-key-not-placeholder"
+          apiKey: "test-key-not-placeholder",
+          credentialSource: "manual",
+          apiKeyPersistence: "device",
+          apiKeyServerOrigin: "https://api.example.com"
         }
       }
       return null
@@ -728,6 +740,177 @@ describe("background proxy fallback safety", () => {
     expect(mocks.tldwRequest).toHaveBeenCalledTimes(1)
   })
 
+  it("hydrates an origin-bound session key for direct uploads without persisting it", async () => {
+    const persistentConfig = {
+      serverUrl: "https://api.example.test",
+      authMode: "single-user",
+      authSource: "manual",
+      credentialSource: "manual",
+      apiKeyPersistence: "session",
+      apiKeyServerOrigin: "https://api.example.test"
+    }
+    mocks.storageGet.mockImplementation(async (key: string) =>
+      key === "tldwConfig" ? persistentConfig : null
+    )
+    mocks.sessionStorageGet.mockImplementation(async (key: string) =>
+      key === "tldwManualSessionApiKey"
+        ? {
+            apiKey: "session-upload-key",
+            credentialSource: "manual",
+            apiKeyPersistence: "session",
+            apiKeyServerOrigin: "https://api.example.test"
+          }
+        : null
+    )
+    mocks.tldwRequest.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { ok: true }
+    })
+
+    const { bgUpload } = await importProxy()
+    await bgUpload({
+      path: "/api/v1/media/ingest/jobs",
+      method: "POST",
+      fields: { media_type: "document" },
+      preferDirect: true
+    })
+
+    const runtime = mocks.tldwRequest.mock.calls[0]?.[1] as {
+      getConfig: () => Promise<Record<string, unknown>>
+    }
+    await expect(runtime.getConfig()).resolves.toMatchObject({
+      apiKey: "session-upload-key"
+    })
+    expect(persistentConfig).not.toHaveProperty("apiKey")
+    expect(mocks.storageSet).not.toHaveBeenCalledWith(
+      "tldwConfig",
+      expect.objectContaining({ apiKey: "session-upload-key" })
+    )
+  })
+
+  it("hydrates an origin-bound session key for direct HTTP streams without persisting it", async () => {
+    const persistentConfig = {
+      serverUrl: "https://api.example.test",
+      authMode: "single-user",
+      authSource: "manual",
+      credentialSource: "manual",
+      apiKeyPersistence: "session",
+      apiKeyServerOrigin: "https://api.example.test"
+    }
+    mocks.sendMessage.mockResolvedValue({ ok: false })
+    mocks.storageGet.mockImplementation(async (key: string) =>
+      key === "tldwConfig" ? persistentConfig : null
+    )
+    mocks.sessionStorageGet.mockImplementation(async (key: string) =>
+      key === "tldwManualSessionApiKey"
+        ? {
+            apiKey: "session-stream-key",
+            credentialSource: "manual",
+            apiKeyPersistence: "session",
+            apiKeyServerOrigin: "https://api.example.test"
+          }
+        : null
+    )
+    const fetchSpy = vi.fn(async () =>
+      new Response('data: {"ok":true}\n\ndata: [DONE]\n\n', {
+        status: 200,
+        headers: { "content-type": "text/event-stream" }
+      })
+    )
+    vi.stubGlobal("fetch", fetchSpy as any)
+
+    try {
+      const { bgStream } = await importProxy()
+      const chunks: string[] = []
+      for await (const chunk of bgStream({
+        path: "/api/v1/chat/completions",
+        method: "POST",
+        body: { stream: true }
+      })) {
+        chunks.push(chunk)
+      }
+
+      expect(chunks).toContain('{"ok":true}')
+      const headers = new Headers(fetchSpy.mock.calls[0]?.[1]?.headers)
+      expect(headers.get("X-API-KEY")).toBe("session-stream-key")
+      expect(persistentConfig).not.toHaveProperty("apiKey")
+      expect(mocks.storageSet).not.toHaveBeenCalledWith(
+        "tldwConfig",
+        expect.objectContaining({ apiKey: "session-stream-key" })
+      )
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it.each(["POST", "PATCH"])(
+    "uses cookie auth with current CSRF for direct %s streams",
+    async (method) => {
+      const previousMode = process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
+      process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+      document.cookie = "csrf_token=stream-csrf; Path=/"
+      mocks.sendMessage.mockResolvedValue({ ok: false })
+      mocks.storageGet.mockImplementation(async (key: string) => {
+        if (key === "tldwConfig") {
+          return {
+            serverUrl: "https://remote.example.test",
+            authMode: "single-user",
+            authSource: "manual",
+            apiKey: "preserved-remote-key",
+            credentialSource: "manual",
+            apiKeyPersistence: "device",
+            apiKeyServerOrigin: "https://remote.example.test"
+          }
+        }
+        if (key === "tldwCookieSessionConfig") {
+          return {
+            serverUrl: window.location.origin,
+            authMode: "single-user",
+            authSource: "cookie-session"
+          }
+        }
+        return null
+      })
+      const fetchSpy = vi.fn(async () =>
+        new Response("data: [DONE]\n\n", {
+          status: 200,
+          headers: { "content-type": "text/event-stream" }
+        })
+      )
+      vi.stubGlobal("fetch", fetchSpy as any)
+
+      try {
+        const { bgStream } = await importProxy()
+        for await (const _chunk of bgStream({
+          path: "/api/v1/chat/completions",
+          method: method as "POST",
+          headers: {
+            "X-API-KEY": "stale-key",
+            Authorization: "Bearer stale-token",
+            "X-CSRF-Token": "stale-csrf"
+          },
+          body: { stream: true }
+        })) {
+          // no-op
+        }
+
+        const headers = new Headers(fetchSpy.mock.calls[0]?.[1]?.headers)
+        expect(headers.get("X-CSRF-Token")).toBe("stream-csrf")
+        expect(headers.has("X-API-KEY")).toBe(false)
+        expect(headers.has("Authorization")).toBe(false)
+      } finally {
+        vi.unstubAllGlobals()
+        document.cookie = "csrf_token=; Max-Age=0; Path=/"
+        if (previousMode === undefined) {
+          delete process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
+        } else {
+          process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = previousMode
+        }
+      }
+    }
+  )
+
   it("appends multiple named files for direct-preferred uploads", async () => {
     mocks.tldwRequest.mockResolvedValue({
       ok: true,
@@ -890,7 +1073,10 @@ describe("background proxy fallback safety", () => {
         return {
           serverUrl: "http://127.0.0.1:8000",
           authMode: "single-user",
-          apiKey: "not-a-real-key"
+          apiKey: "not-a-real-key",
+          credentialSource: "manual",
+          apiKeyPersistence: "device",
+          apiKeyServerOrigin: "http://127.0.0.1:8000"
         }
       }
       return null
@@ -960,7 +1146,10 @@ describe("background proxy fallback safety", () => {
         return {
           serverUrl: "http://127.0.0.1:8000",
           authMode: "single-user",
-          apiKey: "not-a-real-key"
+          apiKey: "not-a-real-key",
+          credentialSource: "manual",
+          apiKeyPersistence: "device",
+          apiKeyServerOrigin: "http://127.0.0.1:8000"
         }
       }
       return null
@@ -997,7 +1186,7 @@ describe("background proxy fallback safety", () => {
     expect(chunks.some((chunk) => chunk.includes('"event":"run_started"'))).toBe(true)
   })
 
-  it("does not replay a non-idempotent POST after a connection (first-token) timeout", async () => {
+  it("does not replay a non-idempotent POST after a response-acquisition timeout", async () => {
     vi.useFakeTimers()
     mocks.sendMessage.mockResolvedValue({ ok: true })
     mocks.storageGet.mockImplementation(async (key: string) => {
@@ -1006,6 +1195,9 @@ describe("background proxy fallback safety", () => {
           serverUrl: "http://127.0.0.1:8000",
           authMode: "single-user",
           apiKey: "not-a-real-key",
+          credentialSource: "manual",
+          apiKeyPersistence: "device",
+          apiKeyServerOrigin: "http://127.0.0.1:8000",
           // Small idle timeout so the connection window is easy to advance past.
           streamIdleTimeoutMs: 1000
         }
@@ -1023,7 +1215,7 @@ describe("background proxy fallback safety", () => {
         addListener: (listener: () => void) => onDisconnectListeners.add(listener),
         removeListener: (listener: () => void) => onDisconnectListeners.delete(listener)
       },
-      // Never emit any data: simulate a slow/stuck first token.
+      // Never emit an open event: simulate a stalled response acquisition.
       postMessage: vi.fn(),
       disconnect: vi.fn(() => {
         onDisconnectListeners.forEach((listener) => listener())
@@ -1074,7 +1266,10 @@ describe("background proxy fallback safety", () => {
         return {
           serverUrl: "http://127.0.0.1:8000",
           authMode: "single-user",
-          apiKey: "test-key-not-placeholder"
+          apiKey: "test-key-not-placeholder",
+          credentialSource: "manual",
+          apiKeyPersistence: "device",
+          apiKeyServerOrigin: "http://127.0.0.1:8000"
         }
       }
       return null
@@ -1224,7 +1419,10 @@ describe("background proxy fallback safety", () => {
         return {
           serverUrl: "http://127.0.0.1:8000",
           authMode: "single-user",
-          apiKey: "test-key-not-placeholder"
+          apiKey: "test-key-not-placeholder",
+          credentialSource: "manual",
+          apiKeyPersistence: "device",
+          apiKeyServerOrigin: "http://127.0.0.1:8000"
         }
       }
       return null
@@ -1277,8 +1475,9 @@ describe("background proxy fallback safety", () => {
         onMessageListeners.forEach((listener) =>
           listener({
             event: "error",
-            status: 401,
-            message: "Unauthorized"
+            status: 429,
+            message: "Too Many Requests",
+            retryAfter: "40"
           })
         )
       }),
@@ -1312,10 +1511,57 @@ describe("background proxy fallback safety", () => {
 
     try {
       await expect(consume()).rejects.toMatchObject({
-        message: "Unauthorized",
-        status: 401
+        message: "Too Many Requests",
+        status: 429,
+        retryAfter: 40
       })
       expect(fetchSpy).not.toHaveBeenCalled()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it("preserves Retry-After on direct stream fallback errors", async () => {
+    mocks.sendMessage.mockResolvedValue({ ok: true })
+    mocks.connect.mockImplementation(() => {
+      throw new Error("runtime port unavailable")
+    })
+    mocks.storageGet.mockImplementation(async (key: string) => {
+      if (key === "tldwConfig") {
+        return {
+          serverUrl: "http://127.0.0.1:8000",
+          authMode: "single-user",
+          apiKey: "not-a-real-key"
+        }
+      }
+      return null
+    })
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(null, {
+          status: 503,
+          statusText: "Service Unavailable",
+          headers: { "Retry-After": "40" }
+        })
+      ) as any
+    )
+
+    const { bgStream } = await importProxy()
+    const consume = async () => {
+      for await (const _chunk of bgStream({
+        path: "/api/v1/notifications/stream" as unknown as `/${string}`,
+        method: "GET"
+      })) {
+        // no-op
+      }
+    }
+
+    try {
+      await expect(consume()).rejects.toMatchObject({
+        status: 503,
+        retryAfter: 40
+      })
     } finally {
       vi.unstubAllGlobals()
     }
@@ -1328,7 +1574,10 @@ describe("background proxy fallback safety", () => {
         return {
           serverUrl: "https://api.example.com",
           authMode: "single-user",
-          apiKey: "test-key-not-placeholder"
+          apiKey: "test-key-not-placeholder",
+          credentialSource: "manual",
+          apiKeyPersistence: "device",
+          apiKeyServerOrigin: "https://api.example.com"
         }
       }
       return null
@@ -1369,7 +1618,11 @@ describe("background proxy fallback safety", () => {
         return {
           serverUrl: "https://api.example.com",
           authMode: "single-user",
-          apiKey: "test-key-not-placeholder"
+          authSource: "manual",
+          apiKey: "test-key-not-placeholder",
+          credentialSource: "manual",
+          apiKeyPersistence: "device",
+          apiKeyServerOrigin: "https://api.example.com"
         }
       }
       return null
@@ -1464,7 +1717,10 @@ describe("background proxy fallback safety", () => {
         return {
           serverUrl: "https://api.example.com",
           authMode: "single-user",
-          apiKey: "persisted-stream-key"
+          apiKey: "persisted-stream-key",
+          credentialSource: "manual",
+          apiKeyPersistence: "device",
+          apiKeyServerOrigin: "https://api.example.com"
         }
       }
       return null
@@ -1806,7 +2062,10 @@ describe("background proxy fallback safety", () => {
         return {
           serverUrl: "http://127.0.0.1:8000",
           authMode: "single-user",
-          apiKey: "test-key-not-placeholder"
+          apiKey: "test-key-not-placeholder",
+          credentialSource: "manual",
+          apiKeyPersistence: "device",
+          apiKeyServerOrigin: "http://127.0.0.1:8000"
         }
       }
       return null
@@ -1899,6 +2158,39 @@ describe("background proxy fallback safety", () => {
 
     expect(chunks).toHaveLength(180)
     expect(rafSpy).toHaveBeenCalled()
+  })
+
+  it("signals response acquisition before the first stream data item", async () => {
+    mocks.sendMessage.mockResolvedValue({ ok: true })
+    const onMessageListeners = new Set<(msg: any) => void>()
+    const port = {
+      onMessage: {
+        addListener: (listener: (msg: any) => void) => onMessageListeners.add(listener),
+        removeListener: (listener: (msg: any) => void) => onMessageListeners.delete(listener)
+      },
+      onDisconnect: {
+        addListener: vi.fn(),
+        removeListener: vi.fn()
+      },
+      postMessage: vi.fn(() => {
+        onMessageListeners.forEach((listener) => listener({ event: "open" }))
+        onMessageListeners.forEach((listener) => listener({ event: "done" }))
+      }),
+      disconnect: vi.fn()
+    }
+    mocks.connect.mockReturnValue(port as any)
+    const onOpen = vi.fn()
+
+    const { bgStream } = await importProxy()
+    for await (const _chunk of bgStream({
+      path: "/api/v1/notifications/stream" as unknown as `/${string}`,
+      method: "GET",
+      onOpen
+    })) {
+      // The open signal is deliberately independent of stream data.
+    }
+
+    expect(onOpen).toHaveBeenCalledTimes(1)
   })
 
   it("preserves chunk ordering when draining queued stream data", async () => {

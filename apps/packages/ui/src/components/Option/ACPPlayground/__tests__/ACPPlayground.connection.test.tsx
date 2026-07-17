@@ -62,36 +62,40 @@ vi.mock("@/hooks/useACPSession", () => ({
   })
 }))
 
-vi.mock("@/services/acp/client", () => ({
-  ACPRestClient: class {
-    private config: {
-      serverUrl: string
-      getAuthHeaders: () => Promise<Record<string, string>>
-      getAuthParams: () => Promise<{ token?: string; api_key?: string }>
-    }
+vi.mock("@/services/acp/client", async (importActual) => {
+  const actual = await importActual<typeof import("@/services/acp/client")>()
+  return {
+    ...actual,
+    ACPRestClient: class {
+      private config: {
+        serverUrl: string
+        getAuthHeaders: () => Promise<Record<string, string>>
+        getAuthParams: () => Promise<{ token?: string; api_key?: string }>
+      }
 
-    constructor(config: {
-      serverUrl: string
-      getAuthHeaders: () => Promise<Record<string, string>>
-      getAuthParams: () => Promise<{ token?: string; api_key?: string }>
-    }) {
-      this.config = config
-      acpMocks.constructedConfigs.push(config)
-    }
+      constructor(config: {
+        serverUrl: string
+        getAuthHeaders: () => Promise<Record<string, string>>
+        getAuthParams: () => Promise<{ token?: string; api_key?: string }>
+      }) {
+        this.config = config
+        acpMocks.constructedConfigs.push(config)
+      }
 
-    async listSessions(params: { limit: number; offset: number }) {
-      return acpMocks.listSessions(this.config, params)
-    }
+      async listSessions(params: { limit: number; offset: number }) {
+        return acpMocks.listSessions(this.config, params)
+      }
 
-    async getSessionDetail(sessionId: string) {
-      return acpMocks.getSessionDetail(this.config, sessionId)
-    }
+      async getSessionDetail(sessionId: string) {
+        return acpMocks.getSessionDetail(this.config, sessionId)
+      }
 
-    async getSessionUsage(sessionId: string) {
-      return acpMocks.getSessionUsage(this.config, sessionId)
+      async getSessionUsage(sessionId: string) {
+        return acpMocks.getSessionUsage(this.config, sessionId)
+      }
     }
   }
-}))
+})
 
 vi.mock("antd", () => ({
   Drawer: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
@@ -193,6 +197,35 @@ describe("ACPPlayground canonical connection config", () => {
         offset: 0
       })
     })
+  })
+
+  it("routes health through the shared cookie-aware ACP transport", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+    configMocks.getConfig.mockResolvedValue({
+      serverUrl: window.location.origin,
+      authMode: "single-user",
+      authSource: "cookie-session"
+    })
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ overall: "ok" })
+    })
+    vi.stubGlobal("fetch", fetchMock)
+    renderPlayground()
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/v1/acp/health",
+        expect.objectContaining({ credentials: "same-origin" })
+      )
+    })
+    const headers = new Headers(fetchMock.mock.calls[0][1].headers)
+    expect(headers.get("X-API-KEY")).toBeNull()
+    expect(headers.get("Authorization")).toBeNull()
+    vi.unstubAllGlobals()
+    delete process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
   })
 
   it("activates ACP sessions and session views from history deep links", async () => {

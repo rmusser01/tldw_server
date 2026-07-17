@@ -73,7 +73,18 @@ const statusSummary = (
   ).length
   const failed = files.filter((file) => file.processingStatus === "failed").length
   const ready = files.filter((file) => file.processingStatus === "ready").length
-  const pending = Math.max(0, files.length - ready - blocked - failed)
+  const processing = files.filter(
+    (file) => file.processingStatus === "processing"
+  ).length
+  const cancelled = files.filter(
+    (file) => file.processingStatus === "cancelled"
+  ).length
+  const pending = files.filter(
+    (file) =>
+      file.processingStatus == null ||
+      file.processingStatus === "preflighting" ||
+      file.processingStatus === "pending"
+  ).length
   const parts = [
     String(
       t("playground:documentProcessing.readyCount", "{{count}} ready", {
@@ -87,6 +98,17 @@ const statusSummary = (
         t("playground:documentProcessing.pendingCount", "{{count}} pending", {
           count: pending
         })
+      )
+    )
+  }
+  if (processing > 0) {
+    parts.push(
+      String(
+        t(
+          "playground:documentProcessing.processingCount",
+          "{{count}} processing",
+          { count: processing }
+        )
       )
     )
   }
@@ -105,6 +127,17 @@ const statusSummary = (
         t("playground:documentProcessing.failedCount", "{{count}} failed", {
           count: failed
         })
+      )
+    )
+  }
+  if (cancelled > 0) {
+    parts.push(
+      String(
+        t(
+          "playground:documentProcessing.cancelledCount",
+          "{{count}} cancelled",
+          { count: cancelled }
+        )
       )
     )
   }

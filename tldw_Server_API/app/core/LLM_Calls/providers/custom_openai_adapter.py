@@ -5,16 +5,20 @@ import os
 from collections.abc import AsyncIterator, Iterable
 from typing import Any
 
-from tldw_Server_API.app.core.http_client import (
-    create_client as _hc_create_client,
-)
 from tldw_Server_API.app.core.custom_openai_providers import (
     custom_openai_endpoint_env_keys,
     custom_openai_provider_name,
     custom_openai_section_name,
 )
+from tldw_Server_API.app.core.exceptions import EgressPolicyError
+from tldw_Server_API.app.core.http_client import fetch as _hc_fetch
+from tldw_Server_API.app.core.http_client import stream_response as _hc_stream_response
 from tldw_Server_API.app.core.LLM_Calls.capability_registry import validate_payload
 from tldw_Server_API.app.core.LLM_Calls.payload_utils import merge_extra_body, merge_extra_headers
+from tldw_Server_API.app.core.LLM_Calls.provider_config_resolution import (
+    TrustedProviderEndpoint,
+    resolve_trusted_provider_endpoint,
+)
 from tldw_Server_API.app.core.LLM_Calls.sse import (
     finalize_stream,
     is_done_line,
@@ -26,14 +30,36 @@ from tldw_Server_API.app.core.testing import is_truthy
 
 from .base import ChatProvider
 
-http_client_factory = _hc_create_client
-
 
 class CustomOpenAIAdapter(ChatProvider):
     name = "custom-openai-api"
     config_section = "custom_openai_api"
     default_base_url = "http://127.0.0.1:11434/v1"
     default_base_url_env: tuple[str, ...] = custom_openai_endpoint_env_keys(1)
+    http_fetcher = staticmethod(_hc_fetch)
+    http_streamer = staticmethod(_hc_stream_response)
+
+    _GENERIC_ENDPOINT_KEYS = (
+        "base_url",
+        "api_base_url",
+        "api_base",
+        "api_url",
+        "api_ip",
+    )
+
+    _RESERVED_CONTEXT_KEYS = frozenset(
+        {
+            "app_config",
+            "configured_endpoint",
+            "configured_endpoint_base_url",
+            "configured_endpoint_scope",
+            "endpoint_provenance",
+            "http_client_factory",
+            "http_fetcher",
+            "http_streamer",
+            "trusted_base_url_override",
+        }
+    )
 
     def capabilities(self) -> dict[str, Any]:
         return {
@@ -95,9 +121,10 @@ class CustomOpenAIAdapter(ChatProvider):
 
     def _resolve_base(self, request: dict[str, Any]) -> str:
         """Resolve the endpoint base URL from request, app config, env, or defaults."""
-        override = (request or {}).get("base_url")
-        if isinstance(override, str) and override.strip():
-            return override.strip().rstrip("/")
+        for key in self._request_endpoint_keys():
+            override = (request or {}).get(key)
+            if isinstance(override, str) and override.strip():
+                return override.strip().rstrip("/")
 
         cfg = request.get("app_config") or {}
         section = cfg.get(self.config_section) or {}
@@ -114,6 +141,47 @@ class CustomOpenAIAdapter(ChatProvider):
             else:
                 raise RuntimeError(f"{self.name} requires an explicit base URL")
         return str(base).rstrip("/")
+
+    def _is_configured_custom(self) -> bool:
+        """Return whether this adapter is a configured custom slot, not a public service."""
+        from tldw_Server_API.app.core.custom_openai_providers import custom_openai_provider_number
+
+        return custom_openai_provider_number(self.name) is not None
+
+    def _request_endpoint_keys(self) -> tuple[str, ...]:
+        """Return supported raw endpoint fields in compatibility precedence order."""
+        if not self._is_configured_custom():
+            return ("base_url",)
+        return tuple(
+            dict.fromkeys(
+                (*self._GENERIC_ENDPOINT_KEYS, *(key.lower() for key in self.default_base_url_env))
+            )
+        )
+
+    def _sanitize_request(self, request: dict[str, Any]) -> dict[str, Any]:
+        """Strip request-owned authorization and transport context before validation."""
+        sanitized = dict(request or {})
+        for key in (*self._RESERVED_CONTEXT_KEYS, *self._request_endpoint_keys()):
+            sanitized.pop(key, None)
+        sanitized.pop("_endpoint_provenance", None)
+        return sanitized
+
+    def _resolve_transport_context(
+        self,
+        request: dict[str, Any],
+    ) -> tuple[str, TrustedProviderEndpoint | None]:
+        """Resolve a scoped server endpoint or an explicit ordinary-egress endpoint."""
+        if not self._is_configured_custom():
+            return self._resolve_base(request), None
+
+        provenance = request.get("_endpoint_provenance")
+        if provenance in {"byok", "request_override"}:
+            return self._resolve_base(request), None
+
+        endpoint = resolve_trusted_provider_endpoint(self.name)
+        if endpoint is None:
+            raise RuntimeError(f"{self.name} requires an explicit configured base URL")
+        return endpoint.base_url, endpoint
 
     @staticmethod
     def _build_chat_completions_url(base: str) -> str:
@@ -168,58 +236,83 @@ class CustomOpenAIAdapter(ChatProvider):
         return data
 
     def chat(self, request: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
-        request = validate_payload(self.name, request or {})
+        raw_request = dict(request or {})
+        base, endpoint = self._resolve_transport_context(raw_request)
+        request = validate_payload(self.name, self._sanitize_request(raw_request))
         if self._use_native_http():
             api_key = request.get("api_key")
             headers = self._headers(api_key)
-            base = self._resolve_base(request)
             url = self._build_chat_completions_url(base)
             payload = self._build_payload(request)
             payload["stream"] = False
             payload = merge_extra_body(payload, request)
             headers = merge_extra_headers(headers, request)
             try:
-                with http_client_factory(timeout=timeout or 120.0) as client:
-                    resp = client.post(url, headers=headers, json=payload)
+                redirect_options = (
+                    {} if self._is_configured_custom() else {"allow_redirects": False}
+                )
+                resp = self.http_fetcher(
+                    method="POST",
+                    url=url,
+                    configured_endpoint=endpoint.scope if endpoint else None,
+                    headers=headers,
+                    json=payload,
+                    timeout=timeout or 120.0,
+                    **redirect_options,
+                )
+                try:
                     resp.raise_for_status()
                     return self._normalize_response(resp.json())
+                finally:
+                    resp.close()
+            except EgressPolicyError:
+                raise
             except Exception as e:
                 raise self.normalize_error(e) from e
         raise RuntimeError("CustomOpenAIAdapter native HTTP disabled by configuration")
 
     def stream(self, request: dict[str, Any], *, timeout: float | None = None) -> Iterable[str]:
-        request = validate_payload(self.name, request or {})
+        raw_request = dict(request or {})
+        base, endpoint = self._resolve_transport_context(raw_request)
+        request = validate_payload(self.name, self._sanitize_request(raw_request))
         if self._use_native_http():
             api_key = request.get("api_key")
             headers = self._headers(api_key)
-            base = self._resolve_base(request)
             url = self._build_chat_completions_url(base)
             payload = self._build_payload(request)
             payload["stream"] = True
             payload = merge_extra_body(payload, request)
             headers = merge_extra_headers(headers, request)
             try:
-                with http_client_factory(timeout=timeout or 120.0) as client:
-                    with client.stream("POST", url, headers=headers, json=payload) as resp:
-                        resp.raise_for_status()
-                        seen_done = False
-                        for raw in resp.iter_lines():
-                            if not raw:
-                                continue
-                            try:
-                                line = raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else str(raw)
-                            except Exception:
-                                line = str(raw)
-                            if is_done_line(line):
-                                if not seen_done:
-                                    seen_done = True
-                                    yield sse_done()
-                                continue
-                            normalized = normalize_provider_line(line)
-                            if normalized is not None:
-                                yield normalized
-                        yield from finalize_stream(response=resp, done_already=seen_done)
+                with self.http_streamer(
+                    method="POST",
+                    url=url,
+                    configured_endpoint=endpoint.scope if endpoint else None,
+                    headers=headers,
+                    json=payload,
+                    timeout=timeout or 120.0,
+                ) as resp:
+                    resp.raise_for_status()
+                    seen_done = False
+                    for raw in resp.iter_lines():
+                        if not raw:
+                            continue
+                        try:
+                            line = raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else str(raw)
+                        except Exception:
+                            line = str(raw)
+                        if is_done_line(line):
+                            if not seen_done:
+                                seen_done = True
+                                yield sse_done()
+                            continue
+                        normalized = normalize_provider_line(line)
+                        if normalized is not None:
+                            yield normalized
+                    yield from finalize_stream(response=resp, done_already=seen_done)
                 return
+            except EgressPolicyError:
+                raise
             except Exception as e:
                 raise self.normalize_error(e) from e
         raise RuntimeError("CustomOpenAIAdapter native HTTP disabled by configuration")

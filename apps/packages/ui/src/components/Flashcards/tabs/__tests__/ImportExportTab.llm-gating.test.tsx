@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ImportExportTab } from "../ImportExportTab"
 import {
@@ -28,8 +28,10 @@ const messageSpies = {
   destroy: vi.fn()
 }
 
-const { useQueryMock } = vi.hoisted(() => ({
-  useQueryMock: vi.fn()
+const { useQueryMock, generateFlashcardsMock, createFlashcardMock } = vi.hoisted(() => ({
+  useQueryMock: vi.fn(),
+  generateFlashcardsMock: vi.fn(),
+  createFlashcardMock: vi.fn()
 }))
 
 vi.mock("@tanstack/react-query", async () => {
@@ -139,11 +141,11 @@ if (!(Element.prototype as any).scrollIntoView) {
 
 function setupMutationMocks() {
   vi.mocked(useGenerateFlashcardsMutation).mockReturnValue({
-    mutateAsync: vi.fn(),
+    mutateAsync: generateFlashcardsMock,
     isPending: false
   } as any)
   vi.mocked(useCreateFlashcardMutation).mockReturnValue({
-    mutateAsync: vi.fn(),
+    mutateAsync: createFlashcardMock,
     isPending: false
   } as any)
   vi.mocked(useCreateFlashcardsBulkMutation).mockReturnValue({
@@ -299,5 +301,131 @@ describe("ImportExportTab LLM provider gating", () => {
     expect(
       screen.queryByTestId("flashcards-generate-no-llm-banner")
     ).not.toBeInTheDocument()
+  })
+
+  it("prefills cloze source reviews without starting generation", () => {
+    useQueryMock.mockImplementation((opts: { queryKey: string[] }) => {
+      if (opts?.queryKey?.[1] === "llm-providers") {
+        return {
+          data: { ok: true, status: 200, data: { providers: [{ id: "openai" }], total_configured: 1 } },
+          isLoading: false,
+          isError: false
+        }
+      }
+      return { data: 42, isLoading: false, isError: false }
+    })
+
+    render(
+      <ImportExportTab
+        sourceReviewIntent={{
+          activity_type: "cloze",
+          text: "Grounded source excerpt",
+          source_items: [
+            {
+              source_type: "note",
+              source_id: "note-42",
+              label: "Cardiac physiology"
+            }
+          ]
+        }}
+      />
+    )
+
+    expect(screen.getByTestId("flashcards-generate-text")).toHaveValue(
+      "Grounded source excerpt"
+    )
+    expect(screen.getByTestId("flashcards-generate-card-type")).toHaveTextContent(
+      "Cloze"
+    )
+    expect(generateFlashcardsMock).not.toHaveBeenCalled()
+  })
+
+  it("activates the create task when a source review intent arrives", async () => {
+    const view = render(
+      <ImportExportTab
+        initialTask="import"
+        initialTaskHandoffKey="import:1"
+      />
+    )
+    expect(screen.getByTestId("flashcards-create-task-panel")).toHaveClass(
+      "hidden"
+    )
+
+    view.rerender(
+      <ImportExportTab
+        initialTask="import"
+        initialTaskHandoffKey="import:1"
+        sourceReviewIntent={{
+          activity_type: "flashcards",
+          text: "New grounded source",
+          source_items: [{ source_type: "note", source_id: "note-42" }]
+        }}
+      />
+    )
+
+    await waitFor(() =>
+      expect(screen.getByTestId("flashcards-create-task-panel")).not.toHaveClass(
+        "hidden"
+      )
+    )
+  })
+
+  it("clears source review provenance when leaving the create task", async () => {
+    const onSourceReviewIntentExit = vi.fn()
+    render(
+      <ImportExportTab
+        sourceReviewIntent={{
+          activity_type: "flashcards",
+          text: "Grounded source excerpt",
+          source_items: [{ source_type: "note", source_id: "note-42" }]
+        }}
+        {...({ onSourceReviewIntentExit } as any)}
+      />
+    )
+
+    fireEvent.click(screen.getByText("Import file"))
+
+    await waitFor(() => expect(onSourceReviewIntentExit).toHaveBeenCalled())
+  })
+
+  it("does not assign one source reference to multi-source generated cards", async () => {
+    useQueryMock.mockImplementation((opts: { queryKey: string[] }) => {
+      if (opts?.queryKey?.[1] === "llm-providers") {
+        return {
+          data: { ok: true, status: 200, data: { providers: [{ id: "openai" }] } },
+          isLoading: false,
+          isError: false
+        }
+      }
+      return { data: 42, isLoading: false, isError: false }
+    })
+    generateFlashcardsMock.mockResolvedValue({
+      flashcards: [{ front: "Question", back: "Answer", model_type: "basic" }]
+    })
+    createFlashcardMock.mockResolvedValue({ uuid: "generated-card" })
+
+    render(
+      <ImportExportTab
+        sourceReviewIntent={{
+          activity_type: "flashcards",
+          text: "First source\n\nSecond source",
+          source_items: [
+            { source_type: "note", source_id: "note-1" },
+            { source_type: "media", source_id: "2" }
+          ]
+        }}
+      />
+    )
+
+    fireEvent.click(screen.getByTestId("flashcards-generate-button"))
+    fireEvent.click(await screen.findByTestId("flashcards-generate-save-button"))
+
+    await waitFor(() => expect(createFlashcardMock).toHaveBeenCalledTimes(1))
+    expect(createFlashcardMock.mock.calls[0][0]).not.toHaveProperty(
+      "source_ref_type"
+    )
+    expect(createFlashcardMock.mock.calls[0][0]).not.toHaveProperty(
+      "source_ref_id"
+    )
   })
 })

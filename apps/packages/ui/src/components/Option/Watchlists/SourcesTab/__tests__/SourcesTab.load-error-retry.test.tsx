@@ -264,7 +264,7 @@ describe("SourcesTab load-error retry", () => {
     await waitFor(() => {
       expect(screen.getByRole("table", { name: "Feeds table" })).toBeInTheDocument()
       expect(screen.getByText("Enabled")).toBeInTheDocument()
-      expect(screen.getByRole("button", { name: "Toggle active for AI Feed" })).toBeInTheDocument()
+      expect(screen.getByRole("button", { name: "Toggle active: AI Feed" })).toBeInTheDocument()
     })
   })
 })

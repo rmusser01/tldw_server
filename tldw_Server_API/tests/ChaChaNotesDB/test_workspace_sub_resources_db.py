@@ -1,7 +1,10 @@
 """Tests for workspace sub-resource tables: sources, artifacts, notes."""
+import sqlite3
+from datetime import datetime
+
 import pytest
 
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, ConflictError
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, ConflictError, InputError
 
 
 @pytest.fixture
@@ -22,7 +25,55 @@ class TestWorkspaceSources:
         })
         assert src["id"] == "src-1"
         assert src["media_id"] == 42
+        assert src["review_state"] == "unset"
+        assert src["review_state_updated_at"]
+        assert src["reviewed_at"] is None
+        assert src["reviewed_by_user_id"] is None
         assert src["version"] == 1
+
+    def test_add_source_with_needs_review_state(self, db):
+        src = db.add_workspace_source("ws-1", {
+            "id": "src-1", "media_id": 42, "title": "My Video",
+            "source_type": "video", "review_state": "needs_review",
+        })
+
+        assert src["review_state"] == "needs_review"
+        assert src["review_state_updated_at"]
+        assert src["reviewed_at"] is None
+        assert src["reviewed_by_user_id"] is None
+
+    @pytest.mark.parametrize("review_state", [None, "", "  "])
+    def test_add_source_normalizes_blank_review_state_to_unset(self, db, review_state):
+        src = db.add_workspace_source("ws-1", {
+            "id": f"src-{review_state!r}", "media_id": 42, "title": "My Video",
+            "source_type": "video", "review_state": review_state,
+        })
+
+        assert src["review_state"] == "unset"
+
+    @pytest.mark.parametrize("review_state", ["reviewed", "invalid"])
+    def test_add_source_rejects_reviewed_and_invalid_review_states(self, db, review_state):
+        with pytest.raises(InputError):
+            db.add_workspace_source("ws-1", {
+                "id": "src-1", "media_id": 42, "title": "My Video",
+                "source_type": "video", "review_state": review_state,
+            })
+
+    @pytest.mark.parametrize(
+        ("review_state", "source_id"),
+        [
+            (False, "src-false"),
+            (0, "src-zero"),
+            ([], "src-list"),
+            ({}, "src-dict"),
+        ],
+    )
+    def test_add_source_rejects_falsey_non_string_review_states(self, db, review_state, source_id):
+        with pytest.raises(InputError):
+            db.add_workspace_source("ws-1", {
+                "id": source_id, "media_id": 42, "title": "My Video",
+                "source_type": "video", "review_state": review_state,
+            })
 
     def test_list_sources_ordered_by_position(self, db):
         db.add_workspace_source("ws-1", {
@@ -55,6 +106,77 @@ class TestWorkspaceSources:
         with pytest.raises(ConflictError):
             db.update_workspace_source("ws-1", "src-1", {"title": "Z"}, expected_version=1)
 
+    def test_update_source_review_state_sets_and_clears_review_metadata(self, db):
+        created = db.add_workspace_source("ws-1", {
+            "id": "src-1", "media_id": 1, "title": "X",
+            "source_type": "video", "review_state": "needs_review",
+        })
+
+        reviewed = db.update_workspace_source(
+            "ws-1",
+            "src-1",
+            {"review_state": "reviewed"},
+            expected_version=created["version"],
+            actor_user_id=" reviewer-1 ",
+        )
+
+        assert reviewed["review_state"] == "reviewed"
+        assert reviewed["review_state_updated_at"] != created["review_state_updated_at"]
+        assert reviewed["reviewed_at"] == reviewed["review_state_updated_at"]
+        assert reviewed["reviewed_by_user_id"] == "reviewer-1"
+        assert reviewed["version"] == created["version"] + 1
+
+        needs_review = db.update_workspace_source(
+            "ws-1",
+            "src-1",
+            {"review_state": "needs_review"},
+            expected_version=reviewed["version"],
+        )
+
+        assert needs_review["review_state"] == "needs_review"
+        assert needs_review["review_state_updated_at"] != reviewed["review_state_updated_at"]
+        assert needs_review["reviewed_at"] is None
+        assert needs_review["reviewed_by_user_id"] is None
+        assert needs_review["version"] == reviewed["version"] + 1
+
+    @pytest.mark.parametrize(
+        "actor_user_id",
+        [None, "", "   ", 123],
+        ids=["none", "empty", "blank", "non-string"],
+    )
+    def test_update_source_reviewed_requires_non_empty_string_actor(self, db, actor_user_id):
+        created = db.add_workspace_source("ws-1", {
+            "id": "src-1", "media_id": 1, "title": "X",
+            "source_type": "video", "review_state": "needs_review",
+        })
+
+        with pytest.raises(InputError):
+            db.update_workspace_source(
+                "ws-1",
+                "src-1",
+                {"review_state": "reviewed"},
+                expected_version=created["version"],
+                actor_user_id=actor_user_id,
+            )
+
+        unchanged = db.get_workspace_source("ws-1", "src-1")
+        assert unchanged["review_state"] == "needs_review"
+        assert unchanged["version"] == created["version"]
+
+    def test_update_source_rejects_invalid_review_state(self, db):
+        created = db.add_workspace_source("ws-1", {
+            "id": "src-1", "media_id": 1, "title": "X",
+            "source_type": "video",
+        })
+
+        with pytest.raises(InputError):
+            db.update_workspace_source(
+                "ws-1",
+                "src-1",
+                {"review_state": "invalid"},
+                expected_version=created["version"],
+            )
+
     def test_delete_source(self, db):
         db.add_workspace_source("ws-1", {
             "id": "src-1", "media_id": 1, "title": "X",
@@ -78,6 +200,123 @@ class TestWorkspaceSources:
         assert sel["src-a"] in (True, 1)
         assert sel["src-b"] in (False, 0)
 
+    def test_batch_update_review_state_deduplicates_ids_and_leaves_unrelated_rows_unchanged(self, db):
+        for source_id in ("src-a", "src-b", "src-c"):
+            db.add_workspace_source("ws-1", {
+                "id": source_id, "media_id": 1, "title": source_id,
+                "source_type": "video", "review_state": "needs_review",
+            })
+
+        updated = db.update_workspace_source_review_states(
+            "ws-1",
+            ["src-a", "src-a", "src-b"],
+            "reviewed",
+            " reviewer-1 ",
+        )
+
+        assert [source["id"] for source in updated] == ["src-a", "src-b"]
+        assert all(source["review_state"] == "reviewed" for source in updated)
+        assert all(source["reviewed_at"] == source["review_state_updated_at"] for source in updated)
+        assert all(source["reviewed_by_user_id"] == "reviewer-1" for source in updated)
+        assert all(source["version"] == 2 for source in updated)
+        unrelated = db.get_workspace_source("ws-1", "src-c")
+        assert unrelated["review_state"] == "needs_review"
+        assert unrelated["version"] == 1
+
+    def test_batch_update_review_state_preserves_exact_source_ids(self, db):
+        for source_id in ("src", " src "):
+            db.add_workspace_source("ws-1", {
+                "id": source_id, "media_id": 1, "title": repr(source_id),
+                "source_type": "video",
+            })
+
+        updated = db.update_workspace_source_review_states(
+            "ws-1",
+            [" src "],
+            "needs_review",
+            None,
+        )
+
+        assert [source["id"] for source in updated] == [" src "]
+        assert db.get_workspace_source("ws-1", " src ")["review_state"] == "needs_review"
+        assert db.get_workspace_source("ws-1", "src")["review_state"] == "unset"
+
+    @pytest.mark.parametrize(
+        "source_id",
+        ["", "   ", None, 0],
+        ids=["empty", "blank", "none", "non-string"],
+    )
+    def test_batch_update_review_state_rejects_invalid_source_ids(self, db, source_id):
+        with pytest.raises(InputError, match="source_ids"):
+            db.update_workspace_source_review_states(
+                "ws-1",
+                [source_id],
+                "needs_review",
+                None,
+            )
+
+    def test_postgres_review_backfill_statement_emits_iso_utc_text(self):
+        class RecordingBackend:
+            def __init__(self):
+                self.statements = []
+
+            def execute(self, statement, *, connection):
+                self.statements.append(statement)
+
+        backend = RecordingBackend()
+        db = type("RecordingDB", (), {"backend": backend})()
+
+        CharactersRAGDB._ensure_workspace_subresource_schema_postgres(db, object())
+
+        backfill = next(
+            statement
+            for statement in backend.statements
+            if "SET review_state_updated_at" in statement
+        )
+        assert "to_char(" in backfill
+        assert 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"' in backfill
+
+    def test_batch_update_review_state_fails_atomically_for_missing_source(self, db):
+        created = db.add_workspace_source("ws-1", {
+            "id": "src-a", "media_id": 1, "title": "A",
+            "source_type": "video", "review_state": "needs_review",
+        })
+
+        with pytest.raises(ConflictError):
+            db.update_workspace_source_review_states(
+                "ws-1",
+                ["src-a", "missing"],
+                "reviewed",
+                "reviewer-1",
+            )
+
+        unchanged = db.get_workspace_source("ws-1", "src-a")
+        assert unchanged["review_state"] == "needs_review"
+        assert unchanged["version"] == created["version"]
+
+    @pytest.mark.parametrize(
+        "actor_user_id",
+        [None, "", "   ", 123],
+        ids=["none", "empty", "blank", "non-string"],
+    )
+    def test_batch_update_reviewed_requires_non_empty_string_actor(self, db, actor_user_id):
+        created = db.add_workspace_source("ws-1", {
+            "id": "src-1", "media_id": 1, "title": "X",
+            "source_type": "video", "review_state": "needs_review",
+        })
+
+        with pytest.raises(InputError):
+            db.update_workspace_source_review_states(
+                "ws-1",
+                ["src-1"],
+                "reviewed",
+                actor_user_id,
+            )
+
+        unchanged = db.get_workspace_source("ws-1", "src-1")
+        assert unchanged["review_state"] == "needs_review"
+        assert unchanged["version"] == created["version"]
+
     def test_batch_reorder(self, db):
         db.add_workspace_source("ws-1", {
             "id": "src-a", "media_id": 1, "title": "A",
@@ -93,6 +332,67 @@ class TestWorkspaceSources:
         assert sources[0]["position"] == 0
         assert sources[1]["id"] == "src-a"
         assert sources[1]["position"] == 1
+
+    def test_existing_workspace_source_schema_is_backfilled(self, tmp_path):
+        db_path = tmp_path / "pre-review.db"
+        seed = CharactersRAGDB(db_path=str(db_path), client_id="user-1")
+        seed.upsert_workspace("ws-1", "Test WS")
+        seed.close_all_connections()
+
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.execute("DROP TABLE workspace_sources")
+            conn.execute("""
+                CREATE TABLE workspace_sources (
+                    id            TEXT NOT NULL,
+                    workspace_id  TEXT NOT NULL,
+                    media_id      INTEGER NOT NULL,
+                    title         TEXT NOT NULL,
+                    source_type   TEXT NOT NULL,
+                    url           TEXT,
+                    position      INTEGER NOT NULL DEFAULT 0,
+                    selected      BOOLEAN NOT NULL DEFAULT 1,
+                    added_at      TEXT NOT NULL,
+                    version       INTEGER NOT NULL DEFAULT 1,
+                    PRIMARY KEY (workspace_id, id)
+                )
+            """)
+            conn.executemany(
+                "INSERT INTO workspace_sources "
+                "(id, workspace_id, media_id, title, source_type, added_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                [
+                    ("src-1", "ws-1", 1, "Existing", "pdf", "2026-01-02T03:04:05.000Z"),
+                    ("src-blank-added-at", "ws-1", 2, "Malformed", "pdf", "   "),
+                ],
+            )
+
+        migrated = CharactersRAGDB(db_path=str(db_path), client_id="user-1")
+        try:
+            source = migrated.get_workspace_source("ws-1", "src-1")
+            assert source["review_state"] == "unset"
+            assert source["review_state_updated_at"] == source["added_at"]
+            assert source["reviewed_at"] is None
+            assert source["reviewed_by_user_id"] is None
+
+            malformed = migrated.get_workspace_source("ws-1", "src-blank-added-at")
+            assert malformed["review_state_updated_at"].strip()
+            assert malformed["review_state_updated_at"] != malformed["added_at"]
+            assert datetime.fromisoformat(
+                malformed["review_state_updated_at"].replace("Z", "+00:00")
+            ).tzinfo is not None
+        finally:
+            migrated.close_all_connections()
+
+    def test_workspace_source_schema_ensure_is_operationally_idempotent(self, db):
+        db.add_workspace_source("ws-1", {
+            "id": "src-1", "media_id": 1, "title": "X",
+            "source_type": "video",
+        })
+
+        with db.transaction() as conn:
+            changes_before = conn.total_changes
+            db._ensure_workspace_subresource_schema_sqlite(conn)
+            assert conn.total_changes == changes_before
 
 
 class TestWorkspaceArtifacts:

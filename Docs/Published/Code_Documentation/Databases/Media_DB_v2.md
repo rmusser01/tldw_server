@@ -1,8 +1,8 @@
-# MediaDatabase (Media_DB_v2)
+# MediaDatabase
 
 ## Overview
 
-The `Media_DB_v2` module provides a robust content database tailored for media content and related metadata. It is designed with a focus on multi-instance database management, where each `MediaDatabase` object corresponds to a distinct database (SQLite by default; PostgreSQL is supported via a backend abstraction). A key feature is its internal handling of synchronization metadata and Full-Text Search (FTS) updates, simplifying client-side logic.
+The package-native `media_db` layer provides a robust content database tailored for media content and related metadata. It is designed with a focus on multi-instance database management, where each `MediaDatabase` object corresponds to a distinct database (SQLite by default; PostgreSQL is supported via a backend abstraction). A key feature is its internal handling of synchronization metadata and Full-Text Search (FTS) updates, simplifying client-side logic.
 
 Each `MediaDatabase` instance requires a `client_id` upon initialization, which is used to attribute all changes made through that instance. The library automatically logs create, update, delete, link, and unlink operations to an internal `sync_log` table. This log is intended for consumption by external synchronization mechanisms to keep multiple database instances consistent.
 
@@ -90,7 +90,7 @@ export TLDW_CONTENT_PG_SSLMODE=prefer
 
 Then instantiate normally (backend is auto-resolved):
 ```python
-from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import MediaDatabase
+from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 db = MediaDatabase(db_path=str(DatabasePaths.get_media_db_path(DatabasePaths.get_single_user_id())), client_id="pg_client")
 ```
@@ -99,7 +99,7 @@ db = MediaDatabase(db_path=str(DatabasePaths.get_media_db_path(DatabasePaths.get
 ```python
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseConfig
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
-from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import MediaDatabase
+from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 
 cfg = DatabaseConfig(
     backend_type=BackendType.POSTGRESQL,
@@ -361,7 +361,7 @@ The `Claims` subsystem stores ingestion-time factual statements associated with 
 
 Example (Claims):
 ```python
-from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import MediaDatabase
+from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 db = MediaDatabase(db_path=str(DatabasePaths.get_media_db_path(DatabasePaths.get_single_user_id())), client_id="example")
@@ -416,7 +416,7 @@ Manage reusable chunking templates stored in the `ChunkingTemplates` table. Buil
 
 Example (Chunking Templates):
 ```python
-from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import MediaDatabase
+from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 db = MediaDatabase(db_path=str(DatabasePaths.get_media_db_path(DatabasePaths.get_single_user_id())), client_id="example")
@@ -585,7 +585,8 @@ Database triggers validate updates on major tables (`version` must increment by 
 
 ```python
 from pathlib import Path
-from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import MediaDatabase, InputError, ConflictError
+from tldw_Server_API.app.core.DB_Management.media_db.errors import ConflictError, InputError
+from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 
 # Initialize a MediaDatabase instance for a specific user/DB file
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths

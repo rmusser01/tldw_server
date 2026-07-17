@@ -17,8 +17,16 @@ import type {
   ACPWSServerMessage,
 } from "./types"
 import { shouldRetryACPWebSocketClose } from "./constants"
-import { resolveBrowserRequestTransport } from "@/services/tldw/request-core"
-import { resolveBrowserWebSocketBase } from "@/services/tldw/browser-websocket"
+import {
+  isUnsafeMethod,
+  readBrowserCookie,
+  resolveBrowserRequestTransport
+} from "@/services/tldw/request-core"
+import { isCookieSessionBrowserTransport } from "@/services/tldw/browser-networking"
+import {
+  resolveCookieSessionWebSocketBase,
+  resolveBrowserWebSocketBase,
+} from "@/services/tldw/browser-websocket"
 
 // -----------------------------------------------------------------------------
 // Configuration
@@ -26,8 +34,61 @@ import { resolveBrowserWebSocketBase } from "@/services/tldw/browser-websocket"
 
 export interface ACPClientConfig {
   serverUrl: string
+  authMode?: "single-user" | "multi-user"
+  authSource?: "manual" | "cookie-session"
   getAuthHeaders: () => Promise<Record<string, string>>
   getAuthParams: () => Promise<{ token?: string; api_key?: string }>
+}
+
+export const fetchACPRequest = async (
+  config: ACPClientConfig,
+  path: string,
+  options: RequestInit = {}
+): Promise<Response> => {
+  const transport = resolveBrowserRequestTransport({
+    config: {
+      serverUrl: config.serverUrl,
+      authMode: config.authMode,
+      authSource: config.authSource
+    },
+    path
+  })
+  const cookieSession = isCookieSessionBrowserTransport({
+    authMode: config.authMode,
+    authSource: config.authSource,
+    transportMode: transport.mode,
+    transportKind: transport.kind,
+    pageOrigin:
+      typeof window === "undefined" ? null : String(window.location?.origin || "")
+  })
+  const authHeaders =
+    transport.mode === "hosted" || cookieSession
+      ? {}
+      : await config.getAuthHeaders()
+  const baseHeaders = {
+    "Content-Type": "application/json",
+    ...authHeaders,
+    ...options.headers
+  }
+  const requestHeaders: HeadersInit = cookieSession
+    ? new Headers(baseHeaders)
+    : baseHeaders
+  if (cookieSession) {
+    const cookieHeaders = requestHeaders as Headers
+    cookieHeaders.delete("Authorization")
+    cookieHeaders.delete("X-API-KEY")
+    cookieHeaders.delete("X-CSRF-Token")
+    if (isUnsafeMethod(options.method || "GET")) {
+      const csrfToken = readBrowserCookie("csrf_token")
+      if (csrfToken) cookieHeaders.set("X-CSRF-Token", csrfToken)
+    }
+  }
+
+  return fetch(transport.url, {
+    ...options,
+    headers: requestHeaders,
+    ...(cookieSession ? { credentials: "same-origin" as const } : {})
+  })
 }
 
 // -----------------------------------------------------------------------------
@@ -58,21 +119,7 @@ export class ACPRestClient {
     path: string,
     options: RequestInit = {}
   ): Promise<T> {
-    const transport = resolveBrowserRequestTransport({
-      config: { serverUrl: this.config.serverUrl },
-      path
-    })
-    const headers =
-      transport.mode === "hosted" ? {} : await this.config.getAuthHeaders()
-
-    const response = await fetch(transport.url, {
-      ...options,
-      headers: {
-        "Content-Type": "application/json",
-        ...headers,
-        ...options.headers,
-      },
-    })
+    const response = await fetchACPRequest(this.config, path, options)
 
     if (!response.ok) {
       const errorBody = await response.json().catch(() => ({ detail: response.statusText }))
@@ -245,15 +292,16 @@ export class ACPWebSocketClient {
     }
 
     this.isClosedManually = false
-    const authParams = await this.config.getAuthParams()
-
-    // Build WebSocket URL
-    const wsUrl = resolveBrowserWebSocketBase(this.config.serverUrl)
+    const cookieBase = resolveCookieSessionWebSocketBase(this.config)
+    const cookieSession = Boolean(cookieBase)
+    const authParams = cookieSession ? {} : await this.config.getAuthParams()
+    const wsUrl = cookieBase || resolveBrowserWebSocketBase(this.config.serverUrl)
     const params = new URLSearchParams()
     if (authParams.token) params.set("token", authParams.token)
     if (authParams.api_key) params.set("api_key", authParams.api_key)
 
-    const url = `${wsUrl}/api/v1/acp/sessions/${sessionId}/stream?${params.toString()}`
+    const query = params.toString()
+    const url = `${wsUrl}/api/v1/acp/sessions/${sessionId}/stream${query ? `?${query}` : ""}`
 
     this.ws = new WebSocket(url)
 

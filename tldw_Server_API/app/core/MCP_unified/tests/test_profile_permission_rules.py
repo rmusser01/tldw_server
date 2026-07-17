@@ -66,6 +66,20 @@ def test_parse_permission_rule_classifies_mixed_case_mcp_rules() -> None:
     assert decision.outcome == "ask"
 
 
+def test_skill_permission_rules_canonicalize_mixed_case_patterns_and_subjects() -> None:
+    rule = parse_permission_rule("Skill(REVIEW-*)", outcome="allow")
+
+    decision = evaluate_permission_rule_decision(
+        [rule],
+        subject_type="skill",
+        value="Review-Paper",
+    )
+
+    assert rule.pattern == "review-*"
+    assert decision.outcome == "allow"
+    assert decision.subject.normalized == "review-paper"
+
+
 @pytest.mark.parametrize(
     "pattern,match",
     [

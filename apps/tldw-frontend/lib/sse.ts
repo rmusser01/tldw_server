@@ -18,7 +18,21 @@ export interface SSEOptions {
   credentials?: RequestCredentials;
 }
 
-async function openSSEStream(url: string, options: SSEOptions): Promise<ReadableStreamDefaultReader<Uint8Array>> {
+const readRetryAfterSeconds = (headers: Headers): number | undefined => {
+  const raw = headers.get('retry-after');
+  if (!raw) return undefined;
+  const seconds = Number(raw);
+  if (Number.isFinite(seconds) && seconds > 0) return seconds;
+  const retryAt = Date.parse(raw);
+  if (!Number.isFinite(retryAt)) return undefined;
+  const remainingMs = retryAt - Date.now();
+  return remainingMs > 0 ? Math.ceil(remainingMs / 1_000) : undefined;
+};
+
+async function openSSEStream(
+  url: string,
+  options: SSEOptions
+): Promise<ReadableStreamDefaultReader<Uint8Array>> {
   const res = await fetch(url, {
     method: options.method || 'GET',
     headers: options.headers,
@@ -29,7 +43,11 @@ async function openSSEStream(url: string, options: SSEOptions): Promise<Readable
   captureSessionIdFromHeaders(res.headers);
 
   if (!res.ok || !res.body) {
-    throw new Error(`Stream error: ${res.status} ${res.statusText}`);
+    const { ApiError } = await import('@web/lib/api');
+    throw new ApiError(`Stream error: ${res.status} ${res.statusText}`, {
+      status: res.ok ? undefined : res.status,
+      retryAfter: readRetryAfterSeconds(res.headers),
+    });
   }
 
   return res.body.getReader();
@@ -39,9 +57,11 @@ export async function streamStructuredSSE(
   url: string,
   options: SSEOptions,
   onEvent: StructuredSSEHandler,
-  onDone?: () => void
+  onDone?: () => void,
+  onOpen?: () => void
 ): Promise<void> {
   const reader = await openSSEStream(url, options);
+  onOpen?.();
   const decoder = new TextDecoder('utf-8');
   let buffer = '';
   let doneSent = false;

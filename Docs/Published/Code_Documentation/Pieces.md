@@ -43,7 +43,7 @@ Last updated: v0.1.0
    - `core/LLM_Calls/Summarization_General_Lib.analyze` can generate summaries over raw content or over chunked text (direct, chunked, or recursive options).
 
 3) Persistence to the Media DB (when using /media/add or /media/mediawiki/ingest-dump)
-   - Database: `Media_DB_v2` stores versions and pieces:
+   - Database: the package-native MediaDatabase layer stores versions and pieces:
      - `DocumentVersions`: versioned content + analysis
      - `UnvectorizedMediaChunks`: chunk text, indices, offsets, type, metadata
      - `MediaChunks`: legacy/simple chunk storage
@@ -96,7 +96,7 @@ Claims include:
 - Audio APIs (file + WebSocket): `tldw_Server_API/app/api/v1/endpoints/audio.py`
 - Chunking module (strategies, templates, helpers): `tldw_Server_API/app/core/Chunking/`
 - LLM analysis/summarization: `tldw_Server_API/app/core/LLM_Calls/Summarization_General_Lib.py`
-- Media DB v2 (schema incl. chunks, versions, claims): `tldw_Server_API/app/core/DB_Management/Media_DB_v2.py`
+- Media DB package (schema incl. chunks, versions, claims): `tldw_Server_API/app/core/DB_Management/media_db/native_class.py`
 
 ## Related Documentation
 

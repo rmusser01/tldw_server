@@ -2,10 +2,24 @@
 from __future__ import annotations
 
 import json
+import math
 import re
-from typing import Any, Literal
+from datetime import date
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, StrictBool, ValidationInfo, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    RootModel,
+    StrictBool,
+    StrictInt,
+    StrictStr,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
 
 from tldw_Server_API.app.core.Workspaces.membership_models import (
     WORKSPACE_MEMBERSHIP_MAX_METADATA_BYTES,
@@ -86,6 +100,341 @@ WorkspaceMembershipRole = Literal[
     "reference",
 ]
 WorkspaceMembershipTransferPolicy = Literal["link", "copy", "promote", "import"]
+
+WorkspaceSourceSavedViewType = Literal["pdf", "video", "audio", "website", "document", "text"]
+WorkspaceSourceSavedViewStatus = Literal["processing", "ready", "error"]
+WorkspaceSourceSavedViewReviewState = Literal["unset", "needs_review", "reviewed"]
+WorkspaceSourceSavedViewLifecycleState = Literal[
+    "queued",
+    "ingesting",
+    "extracting",
+    "chunking",
+    "indexing",
+    "queryable",
+    "partially_queryable",
+    "failed",
+    "retrying",
+    "missing_media",
+    "blocked_by_permissions",
+    "unknown",
+]
+WorkspaceSourceSavedViewDateField = Literal["added_at", "source_created_at"]
+WorkspaceSourceSavedViewSort = Literal[
+    "manual",
+    "name_asc",
+    "name_desc",
+    "added_desc",
+    "added_asc",
+    "source_created_desc",
+    "source_created_asc",
+    "file_size_desc",
+    "file_size_asc",
+    "duration_desc",
+    "duration_asc",
+    "page_count_desc",
+    "page_count_asc",
+]
+WorkspaceSourceSavedViewInvalidReason = Literal[
+    "invalid_json",
+    "invalid_state",
+    "unsupported_schema_version",
+]
+
+_SOURCE_VIEW_TYPES = ("pdf", "video", "audio", "website", "document", "text")
+_SOURCE_VIEW_STATUSES = ("processing", "ready", "error")
+_SOURCE_VIEW_REVIEW_STATES = ("unset", "needs_review", "reviewed")
+_SOURCE_VIEW_LIFECYCLE_STATES = (
+    "queued",
+    "ingesting",
+    "extracting",
+    "chunking",
+    "indexing",
+    "queryable",
+    "partially_queryable",
+    "failed",
+    "retrying",
+    "missing_media",
+    "blocked_by_permissions",
+    "unknown",
+)
+_SOURCE_VIEW_MAX_INTEGER = 2_147_483_647
+SourceViewSchemaVersionV1 = Annotated[StrictInt, Field(ge=1, le=1)]
+SourceViewOptimisticVersion = Annotated[StrictInt, Field(ge=1, le=_SOURCE_VIEW_MAX_INTEGER)]
+SourceViewStoredSchemaVersion = Annotated[StrictInt, Field(ge=1, le=_SOURCE_VIEW_MAX_INTEGER)]
+SourceViewNonnegativeNumber = Annotated[float, Field(ge=0, allow_inf_nan=False)]
+
+
+class WorkspaceSourceSavedViewStateV1(BaseModel):
+    """Canonical version-one source-list filter and sort state."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type_filters: list[WorkspaceSourceSavedViewType] = Field(default_factory=list)
+    status_filters: list[WorkspaceSourceSavedViewStatus] = Field(default_factory=list)
+    review_state_filters: list[WorkspaceSourceSavedViewReviewState] = Field(default_factory=list)
+    lifecycle_state_filters: list[WorkspaceSourceSavedViewLifecycleState] = Field(default_factory=list)
+    date_field: WorkspaceSourceSavedViewDateField = "added_at"
+    date_from: StrictStr | None = None
+    date_to: StrictStr | None = None
+    require_url: StrictBool = False
+    require_file_size: StrictBool = False
+    require_duration: StrictBool = False
+    require_page_count: StrictBool = False
+    file_size_min: SourceViewNonnegativeNumber | None = None
+    file_size_max: SourceViewNonnegativeNumber | None = None
+    duration_min: SourceViewNonnegativeNumber | None = None
+    duration_max: SourceViewNonnegativeNumber | None = None
+    page_count_min: SourceViewNonnegativeNumber | None = None
+    page_count_max: SourceViewNonnegativeNumber | None = None
+    sort: WorkspaceSourceSavedViewSort = "manual"
+
+    @field_validator("type_filters")
+    @classmethod
+    def _canonicalize_types(
+        cls, value: list[WorkspaceSourceSavedViewType]
+    ) -> list[WorkspaceSourceSavedViewType]:
+        """Return type filters in canonical wire order without duplicates."""
+        return [item for item in _SOURCE_VIEW_TYPES if item in value]
+
+    @field_validator("status_filters")
+    @classmethod
+    def _canonicalize_statuses(
+        cls, value: list[WorkspaceSourceSavedViewStatus]
+    ) -> list[WorkspaceSourceSavedViewStatus]:
+        """Return status filters in canonical wire order without duplicates."""
+        return [item for item in _SOURCE_VIEW_STATUSES if item in value]
+
+    @field_validator("review_state_filters")
+    @classmethod
+    def _canonicalize_review_states(
+        cls, value: list[WorkspaceSourceSavedViewReviewState]
+    ) -> list[WorkspaceSourceSavedViewReviewState]:
+        """Return review-state filters in canonical wire order without duplicates."""
+        return [item for item in _SOURCE_VIEW_REVIEW_STATES if item in value]
+
+    @field_validator("lifecycle_state_filters")
+    @classmethod
+    def _canonicalize_lifecycle_states(
+        cls, value: list[WorkspaceSourceSavedViewLifecycleState]
+    ) -> list[WorkspaceSourceSavedViewLifecycleState]:
+        """Return lifecycle filters in canonical wire order without duplicates."""
+        return [item for item in _SOURCE_VIEW_LIFECYCLE_STATES if item in value]
+
+    @field_validator("date_from", "date_to")
+    @classmethod
+    def _validate_calendar_date(cls, value: str | None) -> str | None:
+        """Require an exact ISO calendar date when a bound is present."""
+        if value is None:
+            return None
+        try:
+            parsed = date.fromisoformat(value)
+        except ValueError as exc:
+            raise ValueError("must be a real YYYY-MM-DD calendar date") from exc
+        if parsed.isoformat() != value:
+            raise ValueError("must be a real YYYY-MM-DD calendar date")
+        return value
+
+    @field_validator(
+        "file_size_min",
+        "file_size_max",
+        "duration_min",
+        "duration_max",
+        "page_count_min",
+        "page_count_max",
+        mode="before",
+    )
+    @classmethod
+    def _validate_nonnegative_number(cls, value: Any) -> float | None:
+        """Normalize finite nonnegative JSON numbers for persisted filters."""
+        if value is None:
+            return None
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError("must be a JSON integer or number")
+        try:
+            normalized = float(value)
+        except (OverflowError, ValueError) as exc:
+            raise ValueError("must be finite and nonnegative") from exc
+        if not math.isfinite(normalized) or normalized < 0:
+            raise ValueError("must be finite and nonnegative")
+        return normalized
+
+    @model_validator(mode="after")
+    def _validate_ranges(self) -> WorkspaceSourceSavedViewStateV1:
+        """Require every persisted lower bound to precede its upper bound."""
+        if self.date_from is not None and self.date_to is not None and self.date_from > self.date_to:
+            raise ValueError("date_from must be less than or equal to date_to")
+        for minimum, maximum in (
+            ("file_size_min", "file_size_max"),
+            ("duration_min", "duration_max"),
+            ("page_count_min", "page_count_max"),
+        ):
+            lower = getattr(self, minimum)
+            upper = getattr(self, maximum)
+            if lower is not None and upper is not None and lower > upper:
+                raise ValueError(f"{minimum} must be less than or equal to {maximum}")
+        return self
+
+
+class WorkspaceSourceSavedViewCreateRequest(BaseModel):
+    """Create one named V1 source view."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: StrictStr = Field(min_length=1, max_length=120)
+    schema_version: SourceViewSchemaVersionV1
+    state: WorkspaceSourceSavedViewStateV1
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def _trim_name(cls, value: Any) -> Any:
+        """Trim saved-view display names before length validation."""
+        return value.strip() if isinstance(value, str) else value
+
+
+class _WorkspaceSourceSavedViewPatchBase(BaseModel):
+    """Strict common fields for every valid saved-view patch shape."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    version: SourceViewOptimisticVersion
+
+
+class WorkspaceSourceSavedViewRenamePatch(_WorkspaceSourceSavedViewPatchBase):
+    """Rename-only saved-view patch."""
+
+    name: StrictStr = Field(min_length=1, max_length=120)
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def _trim_name(cls, value: Any) -> Any:
+        """Trim saved-view display names before length validation."""
+        return value.strip() if isinstance(value, str) else value
+
+
+class WorkspaceSourceSavedViewStatePatch(_WorkspaceSourceSavedViewPatchBase):
+    """State-only saved-view patch with its required schema version."""
+
+    schema_version: SourceViewSchemaVersionV1
+    state: WorkspaceSourceSavedViewStateV1
+
+
+class WorkspaceSourceSavedViewCombinedPatch(_WorkspaceSourceSavedViewPatchBase):
+    """Atomic saved-view rename and state replacement."""
+
+    name: StrictStr = Field(min_length=1, max_length=120)
+    schema_version: SourceViewSchemaVersionV1
+    state: WorkspaceSourceSavedViewStateV1
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def _trim_name(cls, value: Any) -> Any:
+        """Trim saved-view display names before length validation."""
+        return value.strip() if isinstance(value, str) else value
+
+
+class WorkspaceSourceSavedViewPatchRequest(
+    RootModel[
+        WorkspaceSourceSavedViewRenamePatch
+        | WorkspaceSourceSavedViewStatePatch
+        | WorkspaceSourceSavedViewCombinedPatch
+    ]
+):
+    """Every structurally valid saved-view PATCH body."""
+
+
+class _WorkspaceSourceSavedViewResponseBase(BaseModel):
+    """Metadata shared by valid and recoverable-invalid responses."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    workspace_id: str
+    name: str
+    schema_version: SourceViewStoredSchemaVersion
+    version: SourceViewOptimisticVersion
+    created_at: str
+    updated_at: str
+
+
+class WorkspaceSourceSavedViewValidResponse(_WorkspaceSourceSavedViewResponseBase):
+    """Saved view with a canonical applicable state."""
+
+    state: WorkspaceSourceSavedViewStateV1
+    valid: Literal[True]
+    invalid_reason: None
+
+
+class WorkspaceSourceSavedViewInvalidResponse(_WorkspaceSourceSavedViewResponseBase):
+    """Saved view retained for reset or deletion after state recovery failed."""
+
+    state: None
+    valid: Literal[False]
+    invalid_reason: WorkspaceSourceSavedViewInvalidReason
+
+
+class WorkspaceSourceSavedViewResponse(
+    RootModel[WorkspaceSourceSavedViewValidResponse | WorkspaceSourceSavedViewInvalidResponse]
+):
+    """Structurally valid saved-view response union."""
+
+
+class WorkspaceSourceSavedViewNotFoundResponse(BaseModel):
+    """No-leak response for inaccessible workspaces or views."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    detail: Literal["Source view not found"]
+
+
+class WorkspaceSourceSavedViewNameExistsDetail(BaseModel):
+    """Owned duplicate-name metadata."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    code: Literal["source_view_name_exists"]
+    view_id: str
+    version: SourceViewOptimisticVersion
+
+
+class WorkspaceSourceSavedViewLimitReachedDetail(BaseModel):
+    """Per-workspace saved-view limit metadata."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    code: Literal["source_view_limit_reached"]
+    limit: Literal[100]
+
+
+class WorkspaceSourceSavedViewVersionConflictDetail(BaseModel):
+    """Optimistic-lock conflict metadata."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    code: Literal["source_view_version_conflict"]
+    view_id: str
+    current_version: SourceViewOptimisticVersion
+
+
+WorkspaceSourceSavedViewConflictDetail = Annotated[
+    WorkspaceSourceSavedViewNameExistsDetail
+    | WorkspaceSourceSavedViewLimitReachedDetail
+    | WorkspaceSourceSavedViewVersionConflictDetail,
+    Field(discriminator="code"),
+]
+
+
+class WorkspaceSourceSavedViewConflictResponse(BaseModel):
+    """Typed conflict envelope returned by create and patch."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    detail: WorkspaceSourceSavedViewConflictDetail
+
+
+class WorkspaceSourceSavedViewListResponse(BaseModel):
+    """Deterministically ordered personal saved source views."""
+
+    items: list[WorkspaceSourceSavedViewResponse]
 
 
 def _json_size_bytes(value: Any) -> int:
@@ -434,6 +783,10 @@ class WorkspaceEligibilityCheckResponse(BaseModel):
 
 # --- Source schemas ---
 
+WorkspaceSourceReviewState = Literal["unset", "needs_review", "reviewed"]
+WorkspaceSourceCreateReviewState = Literal["unset", "needs_review"]
+
+
 class WorkspaceSourceCreateRequest(BaseModel):
     id: str
     media_id: int
@@ -442,6 +795,7 @@ class WorkspaceSourceCreateRequest(BaseModel):
     url: str | None = None
     position: int = 0
     selected: bool = True
+    review_state: WorkspaceSourceCreateReviewState = "unset"
 
 
 class WorkspaceSourceUpdateRequest(BaseModel):
@@ -450,7 +804,21 @@ class WorkspaceSourceUpdateRequest(BaseModel):
     url: str | None = None
     position: int | None = None
     selected: bool | None = None
+    review_state: WorkspaceSourceReviewState | None = None
     version: int = Field(..., description="Current version for optimistic locking")
+
+
+class WorkspaceSourceReviewStateBatchRequest(BaseModel):
+    source_ids: list[str] = Field(..., min_length=1, max_length=500)
+    review_state: WorkspaceSourceReviewState
+
+    @field_validator("source_ids")
+    @classmethod
+    def validate_source_ids(cls, value: list[str]) -> list[str]:
+        """Reject blank source IDs without changing valid identifiers."""
+        if any(not source_id.strip() for source_id in value):
+            raise ValueError("source_ids entries must be non-empty strings")
+        return value
 
 
 class WorkspaceSourceResponse(BaseModel):
@@ -463,6 +831,10 @@ class WorkspaceSourceResponse(BaseModel):
     position: int = 0
     selected: bool = True
     added_at: str
+    review_state: WorkspaceSourceReviewState = "unset"
+    review_state_updated_at: str | None = None
+    reviewed_at: str | None = None
+    reviewed_by_user_id: str | None = None
     version: int
 
 
@@ -528,6 +900,10 @@ class WorkspaceSourceStatusResponse(BaseModel):
     source_type: str
     url: str | None = None
     selected: bool = True
+    review_state: WorkspaceSourceReviewState = "unset"
+    review_state_updated_at: str | None = None
+    reviewed_at: str | None = None
+    reviewed_by_user_id: str | None = None
     state: WorkspaceSourceLifecycleState
     status_reason: str
     readiness: WorkspaceSourceReadiness
@@ -913,6 +1289,10 @@ class WorkspaceContextSource(BaseModel):
     position: int = 0
     selected: bool = True
     added_at: str
+    review_state: WorkspaceSourceReviewState = "unset"
+    review_state_updated_at: str | None = None
+    reviewed_at: str | None = None
+    reviewed_by_user_id: str | None = None
     version: int
     state: WorkspaceSourceLifecycleState
     status_reason: str

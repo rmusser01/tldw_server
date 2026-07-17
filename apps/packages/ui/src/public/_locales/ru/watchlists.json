@@ -43,5 +43,1118 @@
   },
   "items_queue_generateReport": {
     "message": "Создать отчет из очереди"
+  },
+  "setupWizard_title": {
+    "message": "Создать список наблюдения"
+  },
+  "setupWizard_containerTitle": {
+    "message": "Создать список наблюдения"
+  },
+  "setupWizard_containerHelp": {
+    "message": "Сначала создайте контейнер проекта. Источники, периодичность, сводка, доставка и тест настраиваются в одном процессе."
+  },
+  "setupWizard_actions_continue": {
+    "message": "Перейти к источникам"
+  },
+  "setupWizard_sections_preset": {
+    "message": "Профиль области"
+  },
+  "setupWizard_fields_name": {
+    "message": "Название списка наблюдения"
+  },
+  "setupWizard_fields_objective": {
+    "message": "Цель"
+  },
+  "setupWizard_validation_nameRequired": {
+    "message": "Введите название списка наблюдения."
+  },
+  "setupWizard_errors_createFailed": {
+    "message": "Не удалось создать список наблюдения."
+  },
+  "setupWizard_presets_cti_osint_label": {
+    "message": "CTI / OSINT"
+  },
+  "setupWizard_presets_cti_osint_description": {
+    "message": "Отслеживайте уязвимости, вредоносные программы, участников, рекомендации и изменения источников."
+  },
+  "setupWizard_presets_news_label": {
+    "message": "Новости"
+  },
+  "setupWizard_presets_news_description": {
+    "message": "Отслеживайте развивающиеся события, людей, организации и разнообразие источников."
+  },
+  "setupWizard_presets_general_label": {
+    "message": "Общий"
+  },
+  "setupWizard_presets_general_description": {
+    "message": "Отслеживайте тему и собирайте обновления для просмотра."
+  },
+  "setupWizard_presets_blank_label": {
+    "message": "Пустой"
+  },
+  "setupWizard_presets_blank_description": {
+    "message": "Начните с пустого списка наблюдения и настройте его самостоятельно."
+  },
+  "setupWizard_startModes_sources_label": {
+    "message": "Начать с источников"
+  },
+  "setupWizard_startModes_sources_description": {
+    "message": "Создайте список наблюдения с начальными лентами и необязательным монитором."
+  },
+  "setupWizard_startModes_topic_label": {
+    "message": "Начать с темы"
+  },
+  "setupWizard_startModes_topic_description": {
+    "message": "Сначала задайте цель списка, затем добавьте ленты до начала сбора."
+  },
+  "setupWizard_startModes_report_goal_label": {
+    "message": "Начать с цели отчёта"
+  },
+  "setupWizard_startModes_report_goal_description": {
+    "message": "Сначала задайте цель сводки, затем подключите источники и шаблоны."
+  },
+  "setupWizard_boundaries_alerts": {
+    "message": "Оповещения о совпадениях содержимого настраиваются позже. Здесь определяется список наблюдения и начальный охват сбора."
+  },
+  "overview_pipelineSetup_title": {
+    "message": "Настроить сводку"
+  },
+  "overview_pipelineSetup_open": {
+    "message": "Настроить сводку"
+  },
+  "overview_pipelineSetup_progress": {
+    "message": "Этапы настройки сводки"
+  },
+  "overview_pipelineSetup_steps_sources": {
+    "message": "Источники"
+  },
+  "overview_pipelineSetup_steps_cadence": {
+    "message": "Периодичность"
+  },
+  "overview_pipelineSetup_steps_briefing": {
+    "message": "Сводка"
+  },
+  "overview_pipelineSetup_steps_delivery": {
+    "message": "Доставка"
+  },
+  "overview_pipelineSetup_steps_test": {
+    "message": "Тест"
+  },
+  "overview_pipelineSetup_actions_next": {
+    "message": "Перейти к этапу «{{step}}»"
+  },
+  "overview_pipelineSetup_source_existing": {
+    "message": "Использовать существующие источники"
+  },
+  "overview_pipelineSetup_source_new": {
+    "message": "Добавить новый источник"
+  },
+  "overview_pipelineSetup_source_fallback": {
+    "message": "Источник {{id}}"
+  },
+  "overview_pipelineSetup_sources_help": {
+    "message": "Выберите существующие источники или добавьте новый, затем проверьте подключение."
+  },
+  "overview_pipelineSetup_sourcesLoading": {
+    "message": "Загрузка источников..."
+  },
+  "overview_pipelineSetup_sourcesError": {
+    "message": "Не удалось загрузить ленты для настройки."
+  },
+  "overview_pipelineSetup_sourceTest_action": {
+    "message": "Проверить источник"
+  },
+  "overview_pipelineSetup_sourceTest_ready": {
+    "message": "Источник готов."
+  },
+  "overview_pipelineSetup_sourceTest_cancelled": {
+    "message": "Проверка источника отменена."
+  },
+  "overview_pipelineSetup_sourceTest_failed": {
+    "message": "Не удалось проверить источник. {{message}}"
+  },
+  "overview_pipelineSetup_sourceTest_summary": {
+    "message": "готово: {{ready}}, отфильтровано: {{filtered}}"
+  },
+  "overview_pipelineSetup_sourceTest_sample": {
+    "message": "Примеры материалов"
+  },
+  "overview_pipelineSetup_sourceTest_readyItem": {
+    "message": "Готово"
+  },
+  "overview_pipelineSetup_sourceTest_filteredItem": {
+    "message": "Отфильтровано"
+  },
+  "overview_pipelineSetup_sourceTest_untitled": {
+    "message": "Материал без названия"
+  },
+  "overview_pipelineSetup_fields_sources": {
+    "message": "Источники"
+  },
+  "overview_pipelineSetup_fields_sourceName": {
+    "message": "Название источника"
+  },
+  "overview_pipelineSetup_fields_sourceUrl": {
+    "message": "URL источника"
+  },
+  "overview_pipelineSetup_fields_monitorName": {
+    "message": "Название монитора"
+  },
+  "overview_pipelineSetup_fields_schedule": {
+    "message": "Расписание"
+  },
+  "overview_pipelineSetup_fields_timezone": {
+    "message": "Часовой пояс"
+  },
+  "overview_pipelineSetup_fields_intervalEvery": {
+    "message": "Каждые"
+  },
+  "overview_pipelineSetup_fields_intervalUnit": {
+    "message": "Единица интервала"
+  },
+  "overview_pipelineSetup_fields_weekday": {
+    "message": "День недели"
+  },
+  "overview_pipelineSetup_fields_hour": {
+    "message": "Час"
+  },
+  "overview_pipelineSetup_fields_minute": {
+    "message": "Минута"
+  },
+  "overview_pipelineSetup_fields_cronExpression": {
+    "message": "Выражение cron"
+  },
+  "overview_pipelineSetup_fields_showName": {
+    "message": "Название программы"
+  },
+  "overview_pipelineSetup_fields_premise": {
+    "message": "Концепция программы"
+  },
+  "overview_pipelineSetup_fields_includeAudio": {
+    "message": "Аудио"
+  },
+  "overview_pipelineSetup_fields_audioHelp": {
+    "message": "Добавить воспроизводимую озвученную версию."
+  },
+  "overview_pipelineSetup_fields_audioMinutes": {
+    "message": "Целевая длительность в минутах"
+  },
+  "overview_pipelineSetup_fields_speakerCount": {
+    "message": "Количество участников"
+  },
+  "overview_pipelineSetup_fields_template": {
+    "message": "Шаблон отчёта"
+  },
+  "overview_pipelineSetup_fields_audioProvider": {
+    "message": "Другой поставщик аудио"
+  },
+  "overview_pipelineSetup_fields_audioModel": {
+    "message": "Другая модель аудио"
+  },
+  "overview_pipelineSetup_fields_customInstructions": {
+    "message": "Пользовательские редакционные инструкции"
+  },
+  "overview_pipelineSetup_fields_emailDelivery": {
+    "message": "Электронная почта"
+  },
+  "overview_pipelineSetup_fields_emailRecipients": {
+    "message": "Получатели писем"
+  },
+  "overview_pipelineSetup_fields_chatbookDelivery": {
+    "message": "Chatbook"
+  },
+  "overview_pipelineSetup_fields_chatbookTitle": {
+    "message": "Название Chatbook"
+  },
+  "overview_pipelineSetup_schedule_manual": {
+    "message": "Только вручную"
+  },
+  "overview_pipelineSetup_schedule_interval": {
+    "message": "Каждые N часов или минут"
+  },
+  "overview_pipelineSetup_schedule_daily": {
+    "message": "Ежедневно"
+  },
+  "overview_pipelineSetup_schedule_weekdays": {
+    "message": "По будням"
+  },
+  "overview_pipelineSetup_schedule_weekly": {
+    "message": "Еженедельно"
+  },
+  "overview_pipelineSetup_schedule_advanced": {
+    "message": "Расширенный cron"
+  },
+  "overview_pipelineSetup_intervalUnits_hours": {
+    "message": "Часы"
+  },
+  "overview_pipelineSetup_intervalUnits_minutes": {
+    "message": "Минуты"
+  },
+  "overview_pipelineSetup_weekdays_monday": {
+    "message": "Понедельник"
+  },
+  "overview_pipelineSetup_weekdays_tuesday": {
+    "message": "Вторник"
+  },
+  "overview_pipelineSetup_weekdays_wednesday": {
+    "message": "Среда"
+  },
+  "overview_pipelineSetup_weekdays_thursday": {
+    "message": "Четверг"
+  },
+  "overview_pipelineSetup_weekdays_friday": {
+    "message": "Пятница"
+  },
+  "overview_pipelineSetup_weekdays_saturday": {
+    "message": "Суббота"
+  },
+  "overview_pipelineSetup_weekdays_sunday": {
+    "message": "Воскресенье"
+  },
+  "overview_pipelineSetup_advancedCron": {
+    "message": "Расширенный cron"
+  },
+  "overview_pipelineSetup_nextOccurrence": {
+    "message": "Следующий запуск"
+  },
+  "overview_pipelineSetup_manualOccurrence": {
+    "message": "Только вручную"
+  },
+  "overview_pipelineSetup_nextOccurrencePending": {
+    "message": "Сохраните допустимое расписание, чтобы вычислить точное время."
+  },
+  "overview_pipelineSetup_briefing_question": {
+    "message": "Что вы создаёте?"
+  },
+  "overview_pipelineSetup_briefing_help": {
+    "message": "Выберите редакционный формат. Все варианты основаны на выбранных источниках."
+  },
+  "overview_pipelineSetup_briefing_advanced": {
+    "message": "Расширенные настройки сводки"
+  },
+  "overview_pipelineSetup_formats_concise_briefing": {
+    "message": "Краткая сводка"
+  },
+  "overview_pipelineSetup_formats_solo_update": {
+    "message": "Сольное обновление"
+  },
+  "overview_pipelineSetup_formats_host_discussion": {
+    "message": "Обсуждение ведущих"
+  },
+  "overview_pipelineSetup_formats_sportscast": {
+    "message": "Спортивный выпуск"
+  },
+  "overview_pipelineSetup_formats_culture_roundtable": {
+    "message": "Культурный круглый стол"
+  },
+  "overview_pipelineSetup_formats_custom": {
+    "message": "Свой формат"
+  },
+  "overview_pipelineSetup_speaker_defaultLabel": {
+    "message": "Участник {{index}}"
+  },
+  "overview_pipelineSetup_speaker_defaultRole": {
+    "message": "Ведущий"
+  },
+  "overview_pipelineSetup_speaker_labelField": {
+    "message": "Метка участника {{index}}"
+  },
+  "overview_pipelineSetup_speaker_roleField": {
+    "message": "Роль участника {{index}}"
+  },
+  "overview_pipelineSetup_speaker_voiceField": {
+    "message": "Голос участника {{index}}"
+  },
+  "overview_pipelineSetup_speaker_personaField": {
+    "message": "Образ участника {{index}}"
+  },
+  "overview_pipelineSetup_preview_generate": {
+    "message": "Предпросмотр отчёта"
+  },
+  "overview_pipelineSetup_preview_diagnostics": {
+    "message": "Диагностика предпросмотра"
+  },
+  "overview_pipelineSetup_preview_context": {
+    "message": "Запуск предпросмотра: {{runId}}"
+  },
+  "overview_pipelineSetup_preview_noRunContext": {
+    "message": "Успешно запустите монитор перед предпросмотром этого отчёта."
+  },
+  "overview_pipelineSetup_preview_templateRequired": {
+    "message": "Выберите шаблон перед созданием предпросмотра."
+  },
+  "overview_pipelineSetup_preview_templateEmpty": {
+    "message": "Выбранный шаблон пуст."
+  },
+  "overview_pipelineSetup_preview_emptyResult": {
+    "message": "Предпросмотр не вернул готового содержимого."
+  },
+  "overview_pipelineSetup_preview_error": {
+    "message": "Не удалось создать предпросмотр."
+  },
+  "overview_pipelineSetup_delivery_help": {
+    "message": "Отчёты включены всегда. Внешняя доставка ждёт готовности выбранных артефактов."
+  },
+  "overview_pipelineSetup_delivery_reports": {
+    "message": "Отчёты"
+  },
+  "overview_pipelineSetup_delivery_required": {
+    "message": "Обязательное хранилище"
+  },
+  "overview_pipelineSetup_delivery_alwaysOn": {
+    "message": "Всегда включено"
+  },
+  "overview_pipelineSetup_receipt_labels_schedule": {
+    "message": "Расписание"
+  },
+  "overview_pipelineSetup_receipt_labels_sources": {
+    "message": "Источники"
+  },
+  "overview_pipelineSetup_receipt_labels_artifacts": {
+    "message": "Артефакты"
+  },
+  "overview_pipelineSetup_receipt_labels_format": {
+    "message": "Формат"
+  },
+  "overview_pipelineSetup_receipt_labels_showName": {
+    "message": "Название программы"
+  },
+  "overview_pipelineSetup_receipt_labels_cast": {
+    "message": "Участники"
+  },
+  "overview_pipelineSetup_receipt_labels_duration": {
+    "message": "Целевая длительность"
+  },
+  "overview_pipelineSetup_receipt_labels_destinations": {
+    "message": "Назначения"
+  },
+  "overview_pipelineSetup_receipt_schedule_manual": {
+    "message": "Только вручную"
+  },
+  "overview_pipelineSetup_receipt_schedule_scheduled": {
+    "message": "{{date}} ({{timezone}})"
+  },
+  "overview_pipelineSetup_receipt_sources": {
+    "message": "Источников: {{count}}"
+  },
+  "overview_pipelineSetup_receipt_artifacts_textReport": {
+    "message": "текстовый отчёт"
+  },
+  "overview_pipelineSetup_receipt_artifacts_showNotes": {
+    "message": "заметки программы"
+  },
+  "overview_pipelineSetup_receipt_artifacts_audio": {
+    "message": "аудио"
+  },
+  "overview_pipelineSetup_receipt_formats_concise_briefing": {
+    "message": "краткая сводка"
+  },
+  "overview_pipelineSetup_receipt_formats_solo_update": {
+    "message": "сольное обновление"
+  },
+  "overview_pipelineSetup_receipt_formats_host_discussion": {
+    "message": "обсуждение ведущих"
+  },
+  "overview_pipelineSetup_receipt_formats_sportscast": {
+    "message": "спортивный выпуск"
+  },
+  "overview_pipelineSetup_receipt_formats_culture_roundtable": {
+    "message": "культурный круглый стол"
+  },
+  "overview_pipelineSetup_receipt_formats_custom": {
+    "message": "пользовательская программа"
+  },
+  "overview_pipelineSetup_receipt_speakerStyle_1": {
+    "message": "один ведущий"
+  },
+  "overview_pipelineSetup_receipt_speakerStyle_2": {
+    "message": "два ведущих"
+  },
+  "overview_pipelineSetup_receipt_speakerStyle_3": {
+    "message": "три ведущих"
+  },
+  "overview_pipelineSetup_receipt_speakerStyle_4": {
+    "message": "четыре ведущих"
+  },
+  "overview_pipelineSetup_receipt_programWithSpeakers": {
+    "message": "{{format}}, {{speakers}}"
+  },
+  "overview_pipelineSetup_receipt_cast": {
+    "message": "Участников: {{count}}"
+  },
+  "overview_pipelineSetup_receipt_duration": {
+    "message": "цель — {{count}} мин."
+  },
+  "overview_pipelineSetup_receipt_destinations_email": {
+    "message": "Почта: {{recipients}}"
+  },
+  "overview_pipelineSetup_receipt_destinations_chatbook": {
+    "message": "Chatbook: {{title}}"
+  },
+  "overview_pipelineSetup_receipt_untitledChatbook": {
+    "message": "Без названия"
+  },
+  "overview_pipelineSetup_receipt_dstChange": {
+    "message": "Следующий запуск использует {{timezoneName}} после перехода на летнее или зимнее время: {{date}}."
+  },
+  "overview_pipelineSetup_test_providerDisclosure": {
+    "message": "Тесты используют настроенных поставщиков LLM и синтеза речи. Образец ограничен 60 секундами, а полный тест использует целевую длительность."
+  },
+  "overview_pipelineSetup_test_textProviderDisclosure": {
+    "message": "Тесты используют настроенного поставщика LLM. В текстовых тестах синтез речи не применяется."
+  },
+  "overview_pipelineSetup_test_receipt": {
+    "message": "Сводка активации"
+  },
+  "overview_pipelineSetup_test_manualReceipt": {
+    "message": "Эта сводка запускается вручную, сохраняет выбранные артефакты в разделе «Отчёты» и не обращается к внешним назначениям, пока вы не выберете «Отправить тест»."
+  },
+  "overview_pipelineSetup_test_progress": {
+    "message": "Ход теста"
+  },
+  "overview_pipelineSetup_test_stages_collection": {
+    "message": "Собрать источники"
+  },
+  "overview_pipelineSetup_test_stages_selection": {
+    "message": "Выбрать обновления"
+  },
+  "overview_pipelineSetup_test_stages_text": {
+    "message": "Создать отчёт"
+  },
+  "overview_pipelineSetup_test_stages_audio": {
+    "message": "Создать аудио"
+  },
+  "overview_pipelineSetup_test_stages_persistence": {
+    "message": "Сохранить в отчётах"
+  },
+  "overview_pipelineSetup_test_stages_audioScript": {
+    "message": "Составить аудиосценарий"
+  },
+  "overview_pipelineSetup_test_stages_audioScriptPersistence": {
+    "message": "Сохранить аудиосценарий"
+  },
+  "overview_pipelineSetup_test_stages_audioPersistence": {
+    "message": "Сохранить аудио в отчётах"
+  },
+  "overview_pipelineSetup_test_stages_delivery": {
+    "message": "Проверить тестовую доставку"
+  },
+  "overview_pipelineSetup_test_stages_deliveryAdapter": {
+    "message": "Доставить через {{adapter}}"
+  },
+  "overview_pipelineSetup_test_stages_unknown": {
+    "message": "Этап {{stage}}"
+  },
+  "overview_pipelineSetup_test_sample": {
+    "message": "Создать 60-секундный образец"
+  },
+  "overview_pipelineSetup_test_full": {
+    "message": "Создать полный тестовый выпуск"
+  },
+  "overview_pipelineSetup_test_text": {
+    "message": "Создать тестовый отчёт"
+  },
+  "overview_pipelineSetup_test_send": {
+    "message": "Отправить тест"
+  },
+  "overview_pipelineSetup_test_activate": {
+    "message": "Активировать расписание"
+  },
+  "overview_pipelineSetup_test_ready": {
+    "message": "Тест завершён. Сводка готова. Черновик останется неактивным, пока вы не активируете его расписание."
+  },
+  "overview_pipelineSetup_test_cancelled": {
+    "message": "Тест отменён. Черновик сохранён."
+  },
+  "overview_pipelineSetup_test_failed": {
+    "message": "Тест завершился ошибкой. Черновик сохранён. {{message}}"
+  },
+  "overview_pipelineSetup_test_status_not_started": {
+    "message": "Не начато"
+  },
+  "overview_pipelineSetup_test_status_queued": {
+    "message": "В очереди"
+  },
+  "overview_pipelineSetup_test_status_running": {
+    "message": "Выполняется"
+  },
+  "overview_pipelineSetup_test_status_ready": {
+    "message": "Готово"
+  },
+  "overview_pipelineSetup_test_status_failed": {
+    "message": "Ошибка"
+  },
+  "overview_pipelineSetup_test_status_skipped": {
+    "message": "Пропущено"
+  },
+  "overview_pipelineSetup_test_status_cancelled": {
+    "message": "Отменено"
+  },
+  "overview_pipelineSetup_activate_ready": {
+    "message": "Расписание активировано."
+  },
+  "overview_pipelineSetup_activate_failed": {
+    "message": "Не удалось активировать расписание. Черновик сохранён. {{message}}"
+  },
+  "overview_pipelineSetup_validation_sourcesRequired": {
+    "message": "Выберите хотя бы один источник."
+  },
+  "overview_pipelineSetup_validation_sourceNameRequired": {
+    "message": "Введите название источника."
+  },
+  "overview_pipelineSetup_validation_sourceUrlInvalid": {
+    "message": "Введите допустимый HTTP- или HTTPS-адрес источника."
+  },
+  "overview_pipelineSetup_validation_monitorNameRequired": {
+    "message": "Введите название монитора."
+  },
+  "overview_pipelineSetup_validation_timezoneInvalid": {
+    "message": "Введите допустимый часовой пояс IANA."
+  },
+  "overview_pipelineSetup_validation_intervalInvalid": {
+    "message": "Введите поддерживаемый интервал расписания."
+  },
+  "overview_pipelineSetup_validation_hourInvalid": {
+    "message": "Введите час от 0 до 23."
+  },
+  "overview_pipelineSetup_validation_minuteInvalid": {
+    "message": "Введите минуту от 0 до 59."
+  },
+  "overview_pipelineSetup_validation_cronInvalid": {
+    "message": "Введите допустимое выражение cron из пяти полей."
+  },
+  "overview_pipelineSetup_validation_cronTooFrequent": {
+    "message": "Выберите расписание с интервалом не менее пяти минут."
+  },
+  "overview_pipelineSetup_validation_templateRequired": {
+    "message": "Введите шаблон отчёта."
+  },
+  "overview_pipelineSetup_validation_castSizeInvalid": {
+    "message": "Выберите от одного до четырёх участников."
+  },
+  "overview_pipelineSetup_validation_castIdsInvalid": {
+    "message": "Каждому участнику нужна уникальная идентичность."
+  },
+  "overview_pipelineSetup_validation_castVoicesRequired": {
+    "message": "Выберите голос для каждого участника."
+  },
+  "overview_pipelineSetup_validation_audioMinutesInvalid": {
+    "message": "Введите длительность от 1 до 60 минут."
+  },
+  "overview_pipelineSetup_validation_emailInvalid": {
+    "message": "Введите хотя бы один допустимый адрес электронной почты."
+  },
+  "overview_pipelineSetup_validationError": {
+    "message": "Проверьте выделенные поля перед продолжением."
+  },
+  "overview_pipelineSetup_receipt_sources_one": {
+    "message": "{{count}} источник"
+  },
+  "overview_pipelineSetup_receipt_sources_few": {
+    "message": "{{count}} источника"
+  },
+  "overview_pipelineSetup_receipt_sources_many": {
+    "message": "{{count}} источников"
+  },
+  "overview_pipelineSetup_receipt_sources_other": {
+    "message": "{{count}} источника"
+  },
+  "overview_pipelineSetup_receipt_cast_one": {
+    "message": "{{count}} участник"
+  },
+  "overview_pipelineSetup_receipt_cast_few": {
+    "message": "{{count}} участника"
+  },
+  "overview_pipelineSetup_receipt_cast_many": {
+    "message": "{{count}} участников"
+  },
+  "overview_pipelineSetup_receipt_cast_other": {
+    "message": "{{count}} участника"
+  },
+  "overview_pipelineSetup_receipt_duration_one": {
+    "message": "цель — {{count}} минута"
+  },
+  "overview_pipelineSetup_receipt_duration_few": {
+    "message": "цель — {{count}} минуты"
+  },
+  "overview_pipelineSetup_receipt_duration_many": {
+    "message": "цель — {{count}} минут"
+  },
+  "overview_pipelineSetup_receipt_duration_other": {
+    "message": "цель — {{count}} минуты"
+  },
+  "overview_pipelineSetup_schedulePreview_loading": {
+    "message": "Вычисляется точное расписание…"
+  },
+  "overview_pipelineSetup_schedulePreview_error": {
+    "message": "Не удалось вычислить точное расписание. Проверьте выражение cron и часовой пояс."
+  },
+  "overview_pipelineSetup_test_running": {
+    "message": "Запуск {{runId}} всё ещё выполняется: {{stage}}. Можно закрыть настройку и следить за ним в Обзоре."
+  },
+  "overview_pipelineSetup_test_failedStage": {
+    "message": "Этап «{{stage}}» завершился ошибкой. Откройте запуск {{runId}} и повторите этот этап."
+  },
+  "overview_pipelineSetup_test_failedWithCode": {
+    "message": "Этап «{{stage}}» завершился ошибкой ({{code}}). Откройте запуск {{runId}} и повторите этот этап."
+  },
+  "overview_pipelineSetup_test_cancelledStage": {
+    "message": "Этап «{{stage}}» отменён. Черновик сохранён."
+  },
+  "overview_pipelineSetup_test_cancelledWithCode": {
+    "message": "Этап «{{stage}}» отменён ({{code}}). Черновик сохранён."
+  },
+  "overview_latest_heading_briefing": {
+    "message": "Последний дайджест"
+  },
+  "overview_latest_heading_episode": {
+    "message": "Последний эпизод"
+  },
+  "overview_latest_empty_scheduled": {
+    "message": "дайджест: {{date}}."
+  },
+  "overview_latest_empty_manual": {
+    "message": "Не начато. Проверить сейчас."
+  },
+  "overview_latest_generatedAt": {
+    "message": "Создано {{date}}"
+  },
+  "overview_latest_untitled": {
+    "message": "дайджест {{runId}}"
+  },
+  "overview_latest_artifacts": {
+    "message": "отчёт / аудио"
+  },
+  "overview_latest_audio": {
+    "message": "аудио"
+  },
+  "overview_latest_audioFailed": {
+    "message": "аудио ошибка"
+  },
+  "overview_latest_ready": {
+    "message": "Готово"
+  },
+  "overview_latest_saved": {
+    "message": "Сохранено"
+  },
+  "overview_latest_waiting": {
+    "message": "Ожидание"
+  },
+  "overview_latest_script": {
+    "message": "аудио отчёт"
+  },
+  "overview_latest_stageWithStatus": {
+    "message": "{{stage}}: {{status}}"
+  },
+  "overview_latest_noUpdates": {
+    "message": "Подходящих обновлений не найдено. Сохранён статусный материал «{{noun}}»."
+  },
+  "overview_latest_nextRun": {
+    "message": "Следующий запуск: {{date}}"
+  },
+  "overview_latest_nextRunRelative": {
+    "message": "Следующий запуск: {{relative}}"
+  },
+  "overview_latest_counts": {
+    "message": "дайджест: Включено, Непрочитано, Новое"
+  },
+  "overview_latest_count_included": {
+    "message": "Включено {{count}}"
+  },
+  "overview_latest_count_unread": {
+    "message": "Непрочитано {{count}}"
+  },
+  "overview_latest_count_new": {
+    "message": "Новое {{count}}"
+  },
+  "overview_latest_provenance_sources": {
+    "message": "{{count}} отслеживаемых источника"
+  },
+  "overview_latest_provenance_sources_zero": {
+    "message": "{{count}} отслеживаемых источника"
+  },
+  "overview_latest_provenance_sources_one": {
+    "message": "{{count}} отслеживаемый источник"
+  },
+  "overview_latest_provenance_sources_two": {
+    "message": "{{count}} отслеживаемых источника"
+  },
+  "overview_latest_provenance_sources_few": {
+    "message": "{{count}} отслеживаемых источника"
+  },
+  "overview_latest_provenance_sources_many": {
+    "message": "{{count}} отслеживаемых источника"
+  },
+  "overview_latest_provenance_sources_other": {
+    "message": "{{count}} отслеживаемых источника"
+  },
+  "overview_latest_delivery_reports": {
+    "message": "Все отчёты"
+  },
+  "overview_latest_delivery_retryAria": {
+    "message": "Повторить {{adapter}}: {{name}}"
+  },
+  "overview_latest_delivery_retryUnknownAria": {
+    "message": "Результат неизвестен. Повторить {{adapter}}: {{name}}"
+  },
+  "overview_latest_delivery_reviewRetry": {
+    "message": "Проверить и повторить"
+  },
+  "overview_latest_delivery_unknownConfirmation": {
+    "message": "Провайдер не подтвердил доставку через {{adapter}}. Повторная попытка может отправить дубликат. Проверьте адрес назначения и продолжайте, только если этот риск приемлем. ({{destination}})"
+  },
+  "overview_latest_playback_region": {
+    "message": "аудио: {{name}}"
+  },
+  "overview_latest_playback_playAria": {
+    "message": "Воспроизвести {{name}}"
+  },
+  "overview_latest_playback_pauseAria": {
+    "message": "Приостановить {{name}}"
+  },
+  "overview_latest_playback_resumeAria": {
+    "message": "Продолжить {{name}}"
+  },
+  "overview_latest_playback_seekAria": {
+    "message": "аудио: {{name}}"
+  },
+  "overview_latest_playback_loading": {
+    "message": "Загрузка аудио"
+  },
+  "overview_latest_playback_error": {
+    "message": "аудио ошибка. Открыть отчёт / Создать заново аудио."
+  },
+  "overview_latest_playback_play": {
+    "message": "Воспроизвести"
+  },
+  "overview_latest_playback_pause": {
+    "message": "Пауза"
+  },
+  "overview_latest_playback_resume": {
+    "message": "Продолжить"
+  },
+  "overview_latest_actions_label": {
+    "message": "Последний дайджест"
+  },
+  "overview_latest_actions_openReport": {
+    "message": "Открыть {{report}}"
+  },
+  "overview_latest_actions_openReportAria": {
+    "message": "Открыть {{report}}: {{name}}"
+  },
+  "overview_latest_actions_regenerateAudio": {
+    "message": "Создать заново аудио"
+  },
+  "overview_latest_actions_regenerateAudioAria": {
+    "message": "Создать заново {{style}} {{noun}} аудио: {{name}}"
+  },
+  "overview_latest_actions_retry": {
+    "message": "Повторить"
+  },
+  "overview_latest_actions_retrySaveAria": {
+    "message": "Повторить сохранено отчёт: {{name}}"
+  },
+  "overview_latest_actions_retryTextAria": {
+    "message": "Повторить отчёт: {{name}}"
+  },
+  "overview_latest_actions_retryStage": {
+    "message": "Повторить: {{stage}}"
+  },
+  "overview_latest_actions_inspect": {
+    "message": "Проверить запуск"
+  },
+  "overview_latest_actions_inspectAria": {
+    "message": "Проверить запуск {{runId}}: {{name}}"
+  },
+  "overview_latest_actions_viewReports": {
+    "message": "Все отчёты"
+  },
+  "overview_latest_actions_testNow": {
+    "message": "Проверить сейчас"
+  },
+  "overview_latest_announcements_blockingFailure": {
+    "message": "{{name}} ошибка. Проверить запуск {{runId}}."
+  },
+  "overview_latest_announcements_delivered": {
+    "message": "{{name}}: доставлено."
+  },
+  "overview_latest_announcements_nextRunUpdated": {
+    "message": "{{name}}: следующий запуск."
+  },
+  "overview_latest_announcements_partialAudioFailure": {
+    "message": "{{name}}: заметки к выпуску готово, аудио ошибка."
+  },
+  "overview_latest_announcements_readyText": {
+    "message": "{{name}}: отчёт готово."
+  },
+  "overview_latest_announcements_readyWithAudio": {
+    "message": "{{name}}: Готово. аудио / заметки к выпуску."
+  },
+  "overview_latest_announcements_stageProgress": {
+    "message": "{{name}}: {{stage}} {{status}}."
+  },
+  "overview_latest_announcements_testQueued": {
+    "message": "Проверить сейчас: в очереди."
+  },
+  "overview_latest_retryError": {
+    "message": "Повторить ошибка. Проверить запуск."
+  },
+  "overview_latest_regenerateError": {
+    "message": "Создать заново аудио: ошибка."
+  },
+  "overview_latest_testError": {
+    "message": "Проверить сейчас: ошибка."
+  },
+  "overview_latest_status_ready": {
+    "message": "Готово"
+  },
+  "overview_latest_status_failed": {
+    "message": "Ошибка"
+  },
+  "overview_latest_status_saved": {
+    "message": "Сохранено"
+  },
+  "overview_latest_status_waiting": {
+    "message": "Ожидание"
+  },
+  "overview_latest_status_running": {
+    "message": "Выполняется"
+  },
+  "overview_latest_status_queued": {
+    "message": "В очереди"
+  },
+  "overview_latest_status_notStarted": {
+    "message": "Не начато"
+  },
+  "overview_latest_status_notSelected": {
+    "message": "Не выбрано"
+  },
+  "overview_latest_status_cancelled": {
+    "message": "Отменено"
+  },
+  "overview_latest_status_delivered": {
+    "message": "Доставлено"
+  },
+  "overview_latest_status_unknown": {
+    "message": "Результат неизвестен"
+  },
+  "overview_latest_status_sending": {
+    "message": "Отправляется"
+  },
+  "overview_latest_stages_renderText": {
+    "message": "отчёт"
+  },
+  "overview_latest_stages_persistText": {
+    "message": "Сохранено отчёт"
+  },
+  "overview_latest_stages_composeScript": {
+    "message": "аудио отчёт"
+  },
+  "overview_latest_stages_persistScript": {
+    "message": "Сохранено аудио отчёт"
+  },
+  "overview_latest_stages_generateAudio": {
+    "message": "аудио"
+  },
+  "overview_latest_stages_persistAudio": {
+    "message": "Сохранено аудио"
+  },
+  "overview_latest_nouns_briefing": {
+    "message": "дайджест"
+  },
+  "overview_latest_nouns_episode": {
+    "message": "эпизод"
+  },
+  "overview_latest_nouns_report": {
+    "message": "отчёт"
+  },
+  "overview_latest_nouns_showNotes": {
+    "message": "заметки к выпуску"
+  },
+  "outputs_openInNewTabAria": {
+    "message": "Открыть в новой вкладке: {{title}}"
+  },
+  "outputs_chatAboutAria": {
+    "message": "Обсудить: {{title}}"
+  },
+  "outputs_downloadAria": {
+    "message": "Скачать: {{title}}"
+  },
+  "overview_latest_delivery_chatbookDestination": {
+    "message": "Chatbook"
+  },
+  "overview_latest_delivery_confirmRetry": {
+    "message": "Повторить доставку"
+  },
+  "overview_latest_delivery_confirmRetryAria": {
+    "message": "Повторить {{adapter}} доставку"
+  },
+  "overview_latest_delivery_recipientCount": {
+    "message": "{{count}} получателей"
+  },
+  "overview_latest_delivery_recipientCount_zero": {
+    "message": "{{count}} получателей"
+  },
+  "overview_latest_delivery_recipientCount_one": {
+    "message": "{{count}} получателей"
+  },
+  "overview_latest_delivery_recipientCount_two": {
+    "message": "{{count}} получателей"
+  },
+  "overview_latest_delivery_recipientCount_few": {
+    "message": "{{count}} получателей"
+  },
+  "overview_latest_delivery_recipientCount_many": {
+    "message": "{{count}} получателей"
+  },
+  "overview_latest_delivery_recipientCount_other": {
+    "message": "{{count}} получателей"
+  },
+  "overview_latest_delivery_reviewAcknowledgement": {
+    "message": "Я проверил адрес назначения и принимаю риск повторной доставки."
+  },
+  "overview_latest_delivery_reviewSettings": {
+    "message": "Проверить настройки"
+  },
+  "overview_latest_delivery_reviewTitle": {
+    "message": "Проверить {{adapter}} доставку"
+  },
+  "overview_latest_playback_accessError": {
+    "message": "аудио: Ошибка доступа. Проверьте вход и подключение к серверу."
+  },
+  "overview_latest_playback_missing": {
+    "message": "аудио больше недоступен."
+  },
+  "overview_latest_actions_downloadAudio": {
+    "message": "Скачать аудио"
+  },
+  "overview_latest_actions_downloadAudioAria": {
+    "message": "Скачать аудио: {{name}}"
+  },
+  "overview_latest_actions_retryExactAria": {
+    "message": "Повторить {{stage}}: {{name}}"
+  },
+  "overview_latest_actions_reviewScript": {
+    "message": "Проверить аудио отчёт"
+  },
+  "overview_latest_actions_reviewScriptAria": {
+    "message": "Проверить аудио отчёт: {{name}}"
+  },
+  "overview_latest_scriptAccessError": {
+    "message": "аудио отчёт: Ошибка доступа. Проверьте вход и подключение к серверу."
+  },
+  "overview_latest_scriptLoading": {
+    "message": "Загрузка аудио отчёт"
+  },
+  "overview_latest_scriptMissing": {
+    "message": "аудио отчёт больше недоступен."
+  },
+  "overview_latest_recovery_renderText": {
+    "message": "Создание отчёт"
+  },
+  "overview_latest_recovery_persistText": {
+    "message": "Сохранение отчёт"
+  },
+  "overview_latest_recovery_composeScript": {
+    "message": "Подготовка аудио отчёт"
+  },
+  "overview_latest_recovery_persistScript": {
+    "message": "Сохранение аудио отчёт"
+  },
+  "overview_latest_recovery_generateAudio": {
+    "message": "Создание аудио"
+  },
+  "overview_latest_recovery_persistAudio": {
+    "message": "Сохранение аудио"
+  },
+  "outputs_artifactMissing": {
+    "message": "больше недоступен."
+  },
+  "outputs_artifactAuthError": {
+    "message": "Доступ запрещён. Проверьте вход в систему."
+  },
+  "outputs_artifactAccessError": {
+    "message": "Ошибка доступа. Проверьте вход и подключение к серверу."
+  },
+  "overview_latest_status_stale": {
+    "message": "Устарело"
+  },
+  "overview_latest_status_superseded": {
+    "message": "Заменено"
+  },
+  "overview_latest_status_unavailable": {
+    "message": "Недоступно"
+  },
+  "overview_latest_status_partial": {
+    "message": "Частично"
+  },
+  "accessibilityHardening_source_toggleActive": {
+    "message": "Переключить активность: {{name}}"
+  },
+  "accessibilityHardening_source_checkNow": {
+    "message": "Проверить сейчас: {{name}}"
+  },
+  "accessibilityHardening_source_openWebsite": {
+    "message": "Открыть сайт источника: {{name}}"
+  },
+  "accessibilityHardening_source_openHealth": {
+    "message": "Открыть состояние источника: {{name}}"
+  },
+  "accessibilityHardening_source_edit": {
+    "message": "Изменить источник: {{name}}"
+  },
+  "accessibilityHardening_source_delete": {
+    "message": "Удалить источник: {{name}}"
+  },
+  "accessibilityHardening_item_open": {
+    "message": "Открыть обновление: {{title}}"
+  },
+  "accessibilityHardening_item_select": {
+    "message": "Выбрать обновление: {{title}}"
+  },
+  "accessibilityHardening_item_description": {
+    "message": "{{state}}. Источник: {{source}}."
+  },
+  "accessibilityHardening_output_openNewTab": {
+    "message": "Открыть {{title}} в новой вкладке"
+  },
+  "accessibilityHardening_output_chat": {
+    "message": "Обсудить {{title}}"
+  },
+  "accessibilityHardening_output_download": {
+    "message": "Скачать {{title}}"
+  },
+  "accessibilityHardening_output_close": {
+    "message": "Закрыть предпросмотр: {{title}}"
+  },
+  "accessibilityHardening_health_show": {
+    "message": "Показать сведения о состоянии списков наблюдения"
+  },
+  "accessibilityHardening_health_hide": {
+    "message": "Скрыть сведения о состоянии списков наблюдения"
+  },
+  "accessibilityHardening_health_refresh": {
+    "message": "Обновить состояние списков наблюдения"
+  },
+  "accessibilityHardening_health_settings": {
+    "message": "Открыть настройки списков наблюдения"
+  },
+  "accessibilityHardening_delivery_email": {
+    "message": "При включении отправлять каждый отчёт настроенным получателям."
+  },
+  "accessibilityHardening_delivery_chatbook": {
+    "message": "При включении публиковать каждый отчёт в Chatbook."
+  },
+  "accessibilityHardening_help_open": {
+    "message": "Открыть справку по спискам наблюдения"
+  },
+  "accessibilityHardening_help_title": {
+    "message": "Справка по спискам наблюдения"
+  },
+  "overview_pipelineSetup_test_scheduledReceipt": {
+    "message": "{{schedule}}: собрать обновления из {{sources}}, создать {{artifacts}} в формате {{program}}{{duration}}, затем сохранить и доставить их в {{destinations}}."
+  },
+  "overview_pipelineSetup_test_audioTestRequired": {
+    "message": "Перед активацией успешно создайте аудиообразец или полный тест."
   }
 }

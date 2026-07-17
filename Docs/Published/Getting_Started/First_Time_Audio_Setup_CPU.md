@@ -21,7 +21,8 @@ For a local-first CPU setup in the current repo:
 | Goal | STT | TTS | Why |
 | --- | --- | --- | --- |
 | Recommended first local stack | `parakeet-tdt-0.6b-v3-onnx` | `supertonic` | Keeps the stack local-first and avoids mandatory voice-cloning input on every TTS request |
-| If you need local voice cloning immediately | `parakeet-tdt-0.6b-v3-onnx` | `pocket_tts` | Still local-first, but every request needs reference audio |
+| If you need local voice cloning immediately | `parakeet-tdt-0.6b-v3-onnx` | `pocket_tts` | Python/ONNX runtime; still local-first, but every request needs reference audio |
+| If you want the native compiled runtime | `parakeet-tdt-0.6b-v3-onnx` | `pocket_tts_cpp` | Separate installer and runtime layout; streaming only works when the local CLI probe proves incremental |
 | Better but more demanding | `parakeet-tdt-0.6b-v3-onnx` or `faster-whisper` | `qwen3_tts` | Strong upgrade path after the basic stack already works |
 
 Important current-repo realities:
@@ -163,9 +164,9 @@ Important Docker note:
 - Host-side edits to `tldw_Server_API/Config_Files/config.txt` or local model assets require a rebuild, `Dockerfiles/docker-compose.host-storage.yml`, or a custom image path.
 - If you use `/setup` inside the running container, those changes are container-local unless you also persist or reproduce them in your chosen image/storage path.
 
-## Step 2: Pin CPU STT Defaults
+## Step 2: Set the CPU STT Defaults
 
-The shipped `auto` default already resolves to ONNX on Linux/Windows. To pin CPU STT explicitly, edit [config.txt](../../../tldw_Server_API/Config_Files/config.txt):
+The shipped `auto` default already resolves to ONNX on Linux/Windows. To pin CPU STT explicitly, edit [config.txt](https://github.com/rmusser01/tldw_server/blob/main/tldw_Server_API/Config_Files/config.txt):
 
 ```ini
 [STT-Settings]
@@ -220,7 +221,7 @@ This path currently assumes:
 
 ### 3B. Enable the provider
 
-Edit [tts_providers_config.yaml](../../../tldw_Server_API/Config_Files/tts_providers_config.yaml):
+Edit [tts_providers_config.yaml](https://github.com/rmusser01/tldw_server/blob/main/tldw_Server_API/Config_Files/tts_providers_config.yaml):
 
 ```yaml
 providers:
@@ -242,7 +243,7 @@ providers:
 
 ### 3C. Make `supertonic` the default TTS provider
 
-Edit [config.txt](../../../tldw_Server_API/Config_Files/config.txt):
+Edit [config.txt](https://github.com/rmusser01/tldw_server/blob/main/tldw_Server_API/Config_Files/config.txt):
 
 ```ini
 [TTS-Settings]
@@ -366,19 +367,21 @@ Success means:
 - the `text` field is close to `This is the CPU audio setup smoke test`
 - the server does not silently switch to the wrong provider/model
 
-## Optional Alternative: `pocket_tts` When Voice Cloning Matters More
+## Optional Alternatives: PocketTTS Runtimes
 
-Choose `pocket_tts` instead of `supertonic` if you specifically need local voice cloning on day one.
+Choose a PocketTTS runtime instead of `supertonic` if you specifically need local voice cloning on day one.
 
 Use:
 
-- [PocketTTS Voice Cloning Guide](../User_Guides/WebUI_Extension/PocketTTS_Voice_Cloning_Guide.md)
+- [PocketTTS Voice Cloning Guide](../User_Guides/WebUI_Extension/PocketTTS_Voice_Cloning_Guide.md) for `pocket_tts` (Python/ONNX)
+- `python Helper_Scripts/TTS_Installers/install_tts_pocket_tts_cpp.py` for `pocket_tts_cpp` (compiled native runtime)
 
-Important tradeoff:
+Important tradeoffs:
 
-- `pocket_tts` is not a better "first sound out of the box" default
-- it is a better local-first choice when cloning is mandatory
-- every request needs a reference clip or a previously prepared voice path
+- `pocket_tts` is the Python/ONNX runtime and keeps the model packaging straightforward.
+- `pocket_tts_cpp` is a separate compiled runtime with its own installer and runtime layout.
+- Both are local-first, but every request still needs either a direct `voice_reference` clip or a stored `custom:<voice_id>` voice.
+- `pocket_tts_cpp` streaming is only available when the local CLI probe proves incremental on this install; otherwise streaming requests fail closed.
 
 ## Better But More Demanding: `qwen3_tts`
 
@@ -386,7 +389,7 @@ Use `qwen3_tts` after the basic CPU stack already works.
 
 Use:
 
-- [QWEN3_TTS_SETUP.md](../../../Docs/STT-TTS/QWEN3_TTS_SETUP.md)
+- [QWEN3_TTS_SETUP.md](https://github.com/rmusser01/tldw_server/blob/main/Docs/STT-TTS/QWEN3_TTS_SETUP.md)
 
 Treat it as a second-step upgrade, not the first-run baseline.
 
@@ -400,7 +403,7 @@ Treat it as a second-step upgrade, not the first-run baseline.
 
 ### Supertonic does not appear in `/audio/health`
 
-- confirm `providers.supertonic.enabled: true` in [tts_providers_config.yaml](../../../tldw_Server_API/Config_Files/tts_providers_config.yaml)
+- confirm `providers.supertonic.enabled: true` in [tts_providers_config.yaml](https://github.com/rmusser01/tldw_server/blob/main/tldw_Server_API/Config_Files/tts_providers_config.yaml)
 - confirm the asset directories exist:
   - `models/supertonic/onnx`
   - `models/supertonic/voice_styles`
@@ -414,7 +417,7 @@ Treat it as a second-step upgrade, not the first-run baseline.
 
 ### STT health shows the wrong model/provider
 
-- re-open [config.txt](../../../tldw_Server_API/Config_Files/config.txt)
+- re-open [config.txt](https://github.com/rmusser01/tldw_server/blob/main/tldw_Server_API/Config_Files/config.txt)
 - make sure both `default_batch_transcription_model` and `default_streaming_transcription_model` are set to `auto` or explicitly to `parakeet-tdt-0.6b-v3-onnx`
 - make sure `default_transcriber = parakeet`
 - restart the server
@@ -440,4 +443,5 @@ Then come back to this guide if you want to move from the bundle defaults to:
 - `parakeet-tdt-0.6b-v3-onnx` (`parakeet-onnx` remains accepted as a legacy alias)
 - `supertonic`
 - `pocket_tts`
+- `pocket_tts_cpp`
 - `qwen3_tts`

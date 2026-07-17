@@ -274,6 +274,36 @@ Skill instructions here.
         assert "context: fork" in result
         assert "Full skill content" in result
 
+    def test_rewrite_frontmatter_name_preserves_unknown_fields(self, parser):
+        content = """---
+name: original-name
+custom-review-key: preserve-me
+context: fork
+---
+
+Body content.
+"""
+
+        result = parser.rewrite_frontmatter_name(content, "override-name")
+
+        assert "name: override-name" in result
+        assert "custom-review-key: preserve-me" in result
+        assert "context: fork" in result
+        assert result.endswith("\nBody content.\n")
+
+    def test_rewrite_frontmatter_name_preserves_matching_source(self, parser):
+        content = """---
+name: canonical-name # preserve this comment
+custom-review-key: preserve-me
+---
+
+Body content.
+"""
+
+        result = parser.rewrite_frontmatter_name(content, "canonical-name")
+
+        assert result == content
+
     def test_serialize_skill_omits_defaults(self, parser):
         """Test that default values are omitted from serialization."""
         fm = SkillFrontmatter(

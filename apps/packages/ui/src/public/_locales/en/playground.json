@@ -1193,18 +1193,6 @@
   "actor_presetPlaceholder": {
     "message": "Choose a preset"
   },
-  "actor_preset.sliceOfLife": {
-    "message": "Slice of life"
-  },
-  "actor_preset.dungeonCrawl": {
-    "message": "Dungeon crawl"
-  },
-  "actor_preset.romance": {
-    "message": "Romance"
-  },
-  "actor_preset.workSession": {
-    "message": "Work session"
-  },
   "actor_applyPreset": {
     "message": "Apply"
   },
@@ -1225,15 +1213,6 @@
   },
   "actor_templateModeHelp": {
     "message": "Controls how Actor interacts with active scene templates. Merge keeps both; Override lets Actor replace overlapping fields; Ignore skips Actor when templates are active."
-  },
-  "actor_templateMode.merge": {
-    "message": "Merge with templates"
-  },
-  "actor_templateMode.override": {
-    "message": "Override templates"
-  },
-  "actor_templateMode.ignore": {
-    "message": "Ignore when templates active"
   },
   "actor_bladeAspectsTitle": {
     "message": "Aspects"
@@ -3103,5 +3082,26 @@
   },
   "cockpit_empty": {
     "message": "Empty"
+  },
+  "actor_preset_sliceOfLife": {
+    "message": "Slice of life"
+  },
+  "actor_preset_dungeonCrawl": {
+    "message": "Dungeon crawl"
+  },
+  "actor_preset_romance": {
+    "message": "Romance"
+  },
+  "actor_preset_workSession": {
+    "message": "Work session"
+  },
+  "actor_templateMode_merge": {
+    "message": "Merge with templates"
+  },
+  "actor_templateMode_override": {
+    "message": "Override templates"
+  },
+  "actor_templateMode_ignore": {
+    "message": "Ignore when templates active"
   }
 }

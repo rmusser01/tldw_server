@@ -25,7 +25,16 @@ import { useNavigate } from "react-router-dom";
 import { useGenerateQuizMutation } from "../hooks";
 import { useDebounce } from "@/hooks/useDebounce";
 import { tldwClient } from "@/services/tldw";
-import type { QuestionType, QuizGenerateSource } from "@/services/quizzes";
+import {
+  QUIZ_GENERATION_PROFILES,
+  listQuizGenerationProfiles,
+  type AvailableQuizGenerationProfile,
+  type QuestionType,
+  type QuizGenerateSource,
+  type QuizGenerationProfile,
+  type QuizGenerationProfileDefinition,
+  type QuizQuestionPlanItem,
+} from "@/services/quizzes";
 import {
   createDeck,
   createFlashcard,
@@ -33,16 +42,23 @@ import {
   listDecks,
   listFlashcards,
   type FlashcardGeneratedDraft,
+  type StudyPackSourceSelection,
 } from "@/services/flashcards";
 import { buildFlashcardsGenerateRoute } from "@/services/tldw/flashcards-generate-handoff";
 import { buildFlashcardsStudyRouteFromQuiz } from "@/services/tldw/quiz-flashcards-handoff";
+import type { SourceReviewHandoffPayload } from "@/services/tldw/source-review-handoff";
 import type { TakeTabNavigationIntent } from "../navigation";
-import type { QuizQuestionPlanItem } from "@/services/quizzes";
 
 interface GenerateTabProps {
+  initialSourceReviewIntent?: SourceReviewQuizIntent | null;
   onNavigateToTake: (intent?: TakeTabNavigationIntent) => void;
   onNavigateToManage?: () => void;
 }
+
+export type SourceReviewQuizIntent = {
+  payload: SourceReviewHandoffPayload | null;
+  error: "missing_token" | "expired_or_missing" | null;
+};
 
 interface MediaItem {
   id: number;
@@ -93,6 +109,39 @@ const MEDIA_PAGE_SIZE = 50;
 const MAX_FLASHCARDS_IN_STUDY_FLOW = 30;
 const MAX_FLASHCARD_SOURCE_TEXT_CHARS = 20_000;
 
+type AvailableGenerationProfileDefinition = Omit<
+  QuizGenerationProfileDefinition,
+  "id" | "status"
+> & {
+  id: AvailableQuizGenerationProfile;
+  status: "available";
+};
+
+const isAvailableGenerationProfile = (
+  profile: QuizGenerationProfileDefinition,
+): profile is AvailableGenerationProfileDefinition =>
+  profile.status === "available" && profile.id !== "osce_scenario";
+
+const DEFAULT_GENERATION_PROFILE = QUIZ_GENERATION_PROFILES[0] as AvailableGenerationProfileDefinition;
+
+const getGenerationProfile = (
+  profiles: QuizGenerationProfileDefinition[],
+  value: unknown,
+): AvailableGenerationProfileDefinition => {
+  const profileId = typeof value === "string" ? value : "standard_recall";
+  return (
+    profiles.find(
+      (profile): profile is AvailableGenerationProfileDefinition =>
+        profile.id === profileId && isAvailableGenerationProfile(profile),
+    ) ?? DEFAULT_GENERATION_PROFILE
+  );
+};
+
+const usesQuestionPlanShape = (
+  profileId: AvailableQuizGenerationProfile,
+): boolean =>
+  profileId === "standard_recall" || profileId === "mixed_assessment";
+
 type QuestionPlanRowState = QuizQuestionPlanItem & {
   enabled: boolean;
   labelKey: string;
@@ -104,6 +153,61 @@ type SelectedSourceSummary = {
   typeLabel: string;
   label: string;
   onRemove: () => void;
+};
+
+type InitialSourceReviewSelection = {
+  mediaId: number | null;
+  noteIds: string[];
+  snapshots: StudyPackSourceSelection[];
+  labels: Map<string, string>;
+};
+
+const sourceReviewString = (value: unknown): string =>
+  typeof value === "string" ? value.trim() : "";
+
+const sourceReviewItemLabel = (item: StudyPackSourceSelection): string =>
+  sourceReviewString(item.label) ||
+  sourceReviewString(item.source_title) ||
+  `${String(item.source_type || "snapshot")} ${String(item.source_id || "")}`.trim();
+
+const parseMediaSourceId = (sourceId: string): number | null => {
+  if (!/^[1-9]\d*$/.test(sourceId)) return null;
+  const id = Number(sourceId);
+  return Number.isSafeInteger(id) ? id : null;
+};
+
+const buildInitialSourceReviewSelection = (
+  payload: SourceReviewHandoffPayload | null | undefined,
+): InitialSourceReviewSelection => {
+  let mediaId: number | null = null;
+  const noteIds: string[] = [];
+  const snapshots: StudyPackSourceSelection[] = [];
+  const labels = new Map<string, string>();
+
+  for (const item of payload?.source_bundle.items ?? []) {
+    const sourceType = String(item.source_type);
+    const sourceId = String(item.source_id ?? "").trim();
+    labels.set(`${sourceType}:${sourceId}`, sourceReviewItemLabel(item));
+
+    if (sourceType === "media") {
+      const candidateId = parseMediaSourceId(sourceId);
+      if (candidateId != null && mediaId == null) {
+        mediaId = candidateId;
+      } else if (candidateId == null || candidateId !== mediaId) {
+        snapshots.push(item);
+      }
+      continue;
+    }
+
+    if (sourceType === "note" && sourceId) {
+      if (!noteIds.includes(sourceId)) noteIds.push(sourceId);
+      continue;
+    }
+
+    snapshots.push(item);
+  }
+
+  return { mediaId, noteIds, snapshots, labels };
 };
 
 const DEFAULT_QUESTION_PLAN_ROWS: QuestionPlanRowState[] = [
@@ -487,16 +591,23 @@ const buildGeneratedDeckName = (quizName: string): string => {
 };
 
 export const GenerateTab: React.FC<GenerateTabProps> = ({
+  initialSourceReviewIntent,
   onNavigateToTake,
   onNavigateToManage,
 }) => {
   const { t } = useTranslation(["option", "common", "settings"]);
   const navigate = useNavigate();
   const [form] = Form.useForm();
-  const [selectedMediaId, setSelectedMediaId] = React.useState<number | null>(
-    null,
+  const initialSourceReviewSelection = React.useMemo(
+    () => buildInitialSourceReviewSelection(initialSourceReviewIntent?.payload),
+    [initialSourceReviewIntent?.payload],
   );
-  const [selectedNoteIds, setSelectedNoteIds] = React.useState<string[]>([]);
+  const [selectedMediaId, setSelectedMediaId] = React.useState<number | null>(
+    initialSourceReviewSelection.mediaId,
+  );
+  const [selectedNoteIds, setSelectedNoteIds] = React.useState<string[]>(
+    initialSourceReviewSelection.noteIds,
+  );
   const [selectedDeckIds, setSelectedDeckIds] = React.useState<number[]>([]);
   const [selectedCardIds, setSelectedCardIds] = React.useState<string[]>([]);
   const [messageApi, contextHolder] = message.useMessage();
@@ -519,7 +630,40 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
   const debouncedMediaSearch = useDebounce(mediaSearchInput, 300);
   const debouncedNotesSearch = useDebounce(notesSearchInput, 300);
   const generateAbortRef = React.useRef<AbortController | null>(null);
+  const { data: serverGenerationProfiles } = useQuery<
+    QuizGenerationProfileDefinition[]
+  >({
+    queryKey: ["quiz-generation-profiles"],
+    queryFn: ({ signal }) => listQuizGenerationProfiles({ signal }),
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  });
+  const generationProfiles = React.useMemo(
+    () =>
+      serverGenerationProfiles?.some(isAvailableGenerationProfile)
+        ? serverGenerationProfiles
+        : QUIZ_GENERATION_PROFILES,
+    [serverGenerationProfiles],
+  );
+  const generationProfileOptions = React.useMemo(
+    () =>
+      generationProfiles
+        .filter(isAvailableGenerationProfile)
+        .map((profile) => ({
+          label: profile.label,
+          value: profile.id,
+          description: profile.description,
+        })),
+    [generationProfiles],
+  );
   const selectedDifficulty = Form.useWatch("difficulty", form) ?? "mixed";
+  const selectedGenerationProfile = getGenerationProfile(
+    generationProfiles,
+    Form.useWatch("generationProfile", form),
+  );
+  const profileLocksQuestionShape = !usesQuestionPlanShape(
+    selectedGenerationProfile.id,
+  );
   const shouldGenerateStudyMaterials = Boolean(
     Form.useWatch("generateStudyMaterials", form),
   );
@@ -739,14 +883,23 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
     return options;
   }, [loadedMediaItems, selectedMediaId, t]);
 
-  const noteOptions = React.useMemo(
-    () =>
-      notesData.map((item) => ({
+  const noteOptions = React.useMemo(() => {
+    const options = notesData.map((item) => ({
         value: item.id,
         label: item.title,
-      })),
-    [notesData],
-  );
+      }));
+    const knownIds = new Set(options.map((option) => option.value));
+    selectedNoteIds.forEach((noteId) => {
+      if (knownIds.has(noteId)) return;
+      options.push({
+        value: noteId,
+        label:
+          initialSourceReviewSelection.labels.get(`note:${noteId}`) ??
+          `Note ${noteId}`,
+      });
+    });
+    return options;
+  }, [initialSourceReviewSelection.labels, notesData, selectedNoteIds]);
 
   const deckOptions = React.useMemo(
     () =>
@@ -842,7 +995,10 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
     const items: SelectedSourceSummary[] = [];
 
     if (selectedMediaId != null) {
-      const label = selectedMedia?.title || `Media #${selectedMediaId}`;
+      const label =
+        selectedMedia?.title ||
+        initialSourceReviewSelection.labels.get(`media:${selectedMediaId}`) ||
+        `Media #${selectedMediaId}`;
       items.push({
         key: `media:${selectedMediaId}`,
         typeLabel: t("option:quiz.mediaSources", { defaultValue: "Media" }),
@@ -896,6 +1052,7 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
   }, [
     cardOptions,
     deckOptions,
+    initialSourceReviewSelection.labels,
     noteOptions,
     selectedCardIds,
     selectedDeckIds,
@@ -987,6 +1144,32 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
     if (!generationInFlight) return;
     generateAbortRef.current?.abort();
   }, [generationInFlight]);
+
+  const handleGenerationProfileChange = React.useCallback(
+    (value: QuizGenerationProfile) => {
+      const profile = getGenerationProfile(generationProfiles, value);
+      form.setFieldValue("difficulty", profile.default_difficulty);
+      setQuestionPlanRows((rows) => {
+        if (usesQuestionPlanShape(profile.id)) {
+          return DEFAULT_QUESTION_PLAN_ROWS.map((row) => ({ ...row }));
+        }
+
+        const enabledTypes = new Set<QuestionType>(profile.default_question_types);
+        return rows.map((row) => ({
+          ...row,
+          enabled: enabledTypes.has(row.question_type),
+          count: enabledTypes.has(row.question_type)
+            ? profile.default_num_questions
+            : row.count,
+          option_count:
+            row.question_type === "multiple_choice" && profile.id === "best_of_five"
+              ? 5
+              : row.option_count,
+        }));
+      });
+    },
+    [form, generationProfiles],
+  );
 
   const generateStudyMaterialsFlashcards = React.useCallback(
     async (params: {
@@ -1176,6 +1359,11 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
       setGeneratedPreview(null);
 
       const focusTopics = normalizeFocusTopics(values.focusTopics);
+      const generationProfile = getGenerationProfile(
+        generationProfiles,
+        values.generationProfile,
+      );
+      const usesQuestionPlan = usesQuestionPlanShape(generationProfile.id);
       const shouldGenerateStudyMaterials = Boolean(
         values.generateStudyMaterials,
       );
@@ -1186,8 +1374,11 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
       const generated = await generateMutation.mutateAsync({
         request: {
           sources: selectedSources,
+          generation_profile: generationProfile.id,
           num_questions: totalQuestions,
-          question_plan: enabledPlanRows,
+          ...(usesQuestionPlan
+            ? { question_plan: enabledPlanRows }
+            : { question_types: generationProfile.default_question_types }),
           difficulty: values.difficulty,
           focus_topics: focusTopics.length > 0 ? focusTopics : undefined,
         },
@@ -1293,6 +1484,42 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
     <div className="mx-auto max-w-6xl">
       {contextHolder}
 
+      {initialSourceReviewIntent?.error ? (
+        <Alert
+          className="mb-4"
+          type="warning"
+          showIcon
+          data-testid="generate-source-review-handoff-error"
+          title={
+            initialSourceReviewIntent.error === "missing_token"
+              ? t("option:quiz.sourceReviewHandoffMissingToken", {
+                  defaultValue:
+                    "This source review link is incomplete. Select sources to continue.",
+                })
+              : t("option:quiz.sourceReviewHandoffUnavailable", {
+                  defaultValue:
+                    "This source review link expired or is unavailable. Select sources to continue.",
+                })
+          }
+        />
+      ) : initialSourceReviewIntent?.payload ? (
+        <Alert
+          className="mb-4"
+          type="info"
+          showIcon
+          data-testid="generate-source-review-handoff-summary"
+          title={t("option:quiz.sourceReviewHandoffLoaded", {
+            defaultValue: "Scheduled review sources loaded",
+          })}
+          description={
+            initialSourceReviewIntent.payload.plan_title?.trim() ||
+            t("option:quiz.sourceReviewHandoffDefaultTitle", {
+              defaultValue: "Review the selected source context before generating.",
+            })
+          }
+        />
+      ) : null}
+
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1.35fr)_minmax(22rem,0.85fr)] lg:items-start">
         <div className="space-y-6">
           <Card
@@ -1379,6 +1606,46 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
                   </p>
                 )}
               </div>
+
+              {initialSourceReviewSelection.snapshots.length > 0 ? (
+                <div
+                  className="rounded-md border border-border-subtle bg-surface2/50 p-3"
+                  data-testid="generate-source-review-snapshots"
+                >
+                  <div className="text-xs font-semibold uppercase tracking-wide text-text-subtle">
+                    {t("option:quiz.sourceReviewSnapshotContext", {
+                      defaultValue: "Snapshot context",
+                    })}
+                  </div>
+                  <p className="mt-1 text-xs text-text-muted">
+                    {t("option:quiz.sourceReviewSnapshotHelp", {
+                      defaultValue: "Reference only; not included in generation.",
+                    })}
+                  </p>
+                  <div className="mt-3 space-y-2">
+                    {initialSourceReviewSelection.snapshots.map((item, index) => (
+                      <div
+                        key={`${String(item.source_type)}:${item.source_id}:${index}`}
+                        className="rounded border border-border bg-surface px-3 py-2"
+                      >
+                        <div className="flex flex-wrap items-center gap-2 text-xs">
+                          <span className="font-medium text-text">
+                            {sourceReviewItemLabel(item)}
+                          </span>
+                          <span className="text-text-subtle">
+                            {String(item.source_type)}
+                          </span>
+                        </div>
+                        {sourceReviewString(item.excerpt_text) ? (
+                          <p className="mt-2 max-h-32 overflow-y-auto whitespace-pre-wrap break-words text-xs text-text-muted">
+                            {sourceReviewString(item.excerpt_text)}
+                          </p>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
 
               <div className="space-y-2">
                 <div className="text-xs font-medium text-text-subtle">
@@ -1606,11 +1873,34 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
               form={form}
               layout="vertical"
               initialValues={{
+                generationProfile: "standard_recall",
                 difficulty: "mixed",
                 focusTopics: [],
                 generateStudyMaterials: false,
               }}
             >
+              <Form.Item
+                name="generationProfile"
+                label={t("option:quiz.generationProfile", {
+                  defaultValue: "Generation Profile",
+                })}
+                extra={t("option:quiz.generationProfileHelp", {
+                  defaultValue:
+                    "Choose an assessment style; selecting a profile applies its recommended defaults.",
+                })}
+              >
+                <Select
+                  options={generationProfileOptions.map((profile) => ({
+                    value: profile.value,
+                    label: profile.label,
+                    title: profile.description,
+                  }))}
+                  onChange={handleGenerationProfileChange}
+                  disabled={generationInFlight}
+                  data-testid="generate-profile-select"
+                />
+              </Form.Item>
+
               <div className="mb-6 space-y-3">
                 <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
                   <div>
@@ -1650,7 +1940,7 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
                     >
                       <Checkbox
                         checked={row.enabled}
-                        disabled={generationInFlight}
+                        disabled={generationInFlight || profileLocksQuestionShape}
                         onChange={(event) =>
                           updateQuestionPlanRow(row.question_type, {
                             enabled: event.target.checked,
@@ -1709,7 +1999,11 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
                                 value={row.option_count}
                                 aria-label={`${rowLabel} options`}
                                 className="w-full"
-                                disabled={generationInFlight || !row.enabled}
+                                disabled={
+                                  generationInFlight ||
+                                  profileLocksQuestionShape ||
+                                  !row.enabled
+                                }
                                 onChange={(value) => {
                                   const next = sanitizeInputNumber(value, 2, 6);
                                   if (next != null) {
@@ -1740,7 +2034,11 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
                                   count,
                                   label: rowLabel,
                                 })}
-                                disabled={generationInFlight || !row.enabled}
+                                disabled={
+                                  generationInFlight ||
+                                  profileLocksQuestionShape ||
+                                  !row.enabled
+                                }
                                 onClick={() =>
                                   updateQuestionPlanRow(row.question_type, {
                                     option_count: count,
@@ -1770,7 +2068,11 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
                               value={row.pair_count}
                               aria-label={`${rowLabel} pairs`}
                               className="w-full"
-                              disabled={generationInFlight || !row.enabled}
+                              disabled={
+                                generationInFlight ||
+                                profileLocksQuestionShape ||
+                                !row.enabled
+                              }
                               onChange={(value) => {
                                 const next = sanitizeInputNumber(value, 2, 6);
                                 if (next != null) {

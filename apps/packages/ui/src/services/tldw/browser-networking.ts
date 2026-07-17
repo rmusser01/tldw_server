@@ -15,11 +15,41 @@ export type BrowserNetworkingIssue = {
   pageOrigin: string
 }
 
+export const COOKIE_SESSION_CONFIG_KEY = "tldwCookieSessionConfig"
+
+export type CookieSessionBrowserTransportInput = {
+  authMode?: unknown
+  authSource?: unknown
+  transportMode?: unknown
+  transportKind?: unknown
+  pageOrigin?: string | null
+}
+
+export type CookieSessionConfigInput = CookieSessionBrowserTransportInput & {
+  serverUrl?: string | null
+}
+
 type ResolveBrowserTransportInput = {
   surface: BrowserSurface
   deploymentMode?: string | null
   pageOrigin?: string | null
   apiOrigin?: string | null
+}
+
+type AdvancedRequestTransportLike = {
+  mode: string
+  url: string
+}
+
+type ResolveAdvancedRequestTransportGuardInput = {
+  transport?: AdvancedRequestTransportLike | null
+  hasConfiguredServerUrl: boolean
+  isAbsolute: boolean
+}
+
+export type AdvancedRequestTransportGuard = {
+  origin: string | null
+  isUnconfigured: boolean
 }
 
 const trimTrailingSlash = (value: string): string => value.replace(/\/+$/, "")
@@ -44,6 +74,32 @@ const parseHttpOrigin = (value?: string | null): URL | null => {
   }
 }
 
+export const isCookieSessionBrowserTransport = (
+  input: CookieSessionBrowserTransportInput
+): boolean =>
+  input.authMode === "single-user" &&
+  input.authSource === "cookie-session" &&
+  input.transportMode === "quickstart" &&
+  input.transportKind === "same-origin" &&
+  parseHttpOrigin(input.pageOrigin) !== null
+
+export const isExactOriginCookieSessionConfig = (
+  config: CookieSessionConfigInput | null | undefined,
+  expectedOrigin?: string | null
+): boolean => {
+  const origin = parseHttpOrigin(expectedOrigin)?.origin
+  return Boolean(
+    origin &&
+      config?.serverUrl === origin &&
+      isCookieSessionBrowserTransport({
+        ...config,
+        transportMode: "quickstart",
+        transportKind: "same-origin",
+        pageOrigin: origin
+      })
+  )
+}
+
 const normalizeOrigin = (value?: string | null): string => {
   const parsed = parseHttpOrigin(value)
   if (parsed) {
@@ -51,6 +107,25 @@ const normalizeOrigin = (value?: string | null): string => {
   }
 
   return trimTrailingSlash(normalizeString(value))
+}
+
+export const resolveAdvancedRequestTransportGuard = ({
+  transport,
+  hasConfiguredServerUrl,
+  isAbsolute
+}: ResolveAdvancedRequestTransportGuardInput): AdvancedRequestTransportGuard => {
+  const parsedOrigin =
+    transport?.mode === "advanced" ? parseHttpOrigin(transport.url) : null
+  const origin = parsedOrigin?.origin.toLowerCase() ?? null
+
+  return {
+    origin,
+    isUnconfigured:
+      !hasConfiguredServerUrl &&
+      !isAbsolute &&
+      transport?.mode === "advanced" &&
+      !origin
+  }
 }
 
 export const resolveBrowserTransportMode = (

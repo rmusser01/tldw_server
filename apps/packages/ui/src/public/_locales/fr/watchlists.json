@@ -43,5 +43,1109 @@
   },
   "items_queue_generateReport": {
     "message": "Générer un rapport depuis la file"
+  },
+  "setupWizard_title": {
+    "message": "Créer une liste de veille"
+  },
+  "setupWizard_containerTitle": {
+    "message": "Créer une liste de veille"
+  },
+  "setupWizard_containerHelp": {
+    "message": "Créez d’abord le conteneur du projet. Les sources, la cadence, le briefing, la diffusion et le test suivent dans un même parcours de configuration."
+  },
+  "setupWizard_actions_continue": {
+    "message": "Continuer vers Sources"
+  },
+  "setupWizard_sections_preset": {
+    "message": "Préréglage du domaine"
+  },
+  "setupWizard_fields_name": {
+    "message": "Nom de la liste de veille"
+  },
+  "setupWizard_fields_objective": {
+    "message": "Objectif"
+  },
+  "setupWizard_validation_nameRequired": {
+    "message": "Ajoutez un nom de liste de veille."
+  },
+  "setupWizard_errors_createFailed": {
+    "message": "Impossible de créer la liste de veille."
+  },
+  "setupWizard_presets_cti_osint_label": {
+    "message": "CTI / OSINT"
+  },
+  "setupWizard_presets_cti_osint_description": {
+    "message": "Suivez les vulnérabilités, logiciels malveillants, acteurs, avis et changements de sources."
+  },
+  "setupWizard_presets_news_label": {
+    "message": "Actualités"
+  },
+  "setupWizard_presets_news_description": {
+    "message": "Suivez les événements en cours, les personnes, les organisations et la diversité des sources."
+  },
+  "setupWizard_presets_general_label": {
+    "message": "Général"
+  },
+  "setupWizard_presets_general_description": {
+    "message": "Suivez un sujet et collectez les mises à jour à examiner."
+  },
+  "setupWizard_presets_blank_label": {
+    "message": "Vide"
+  },
+  "setupWizard_presets_blank_description": {
+    "message": "Commencez avec une liste de veille vide et configurez vous-même les détails."
+  },
+  "setupWizard_startModes_sources_label": {
+    "message": "Commencer par les sources"
+  },
+  "setupWizard_startModes_sources_description": {
+    "message": "Créez une liste de veille avec des flux initiaux et un moniteur facultatif."
+  },
+  "setupWizard_startModes_topic_label": {
+    "message": "Commencer par le sujet"
+  },
+  "setupWizard_startModes_topic_description": {
+    "message": "Créez d’abord l’objectif de la liste, puis ajoutez les flux avant le début de la collecte."
+  },
+  "setupWizard_startModes_report_goal_label": {
+    "message": "Commencer par l’objectif du rapport"
+  },
+  "setupWizard_startModes_report_goal_description": {
+    "message": "Définissez d’abord l’objectif du briefing, puis reliez les sources et les modèles."
+  },
+  "setupWizard_boundaries_alerts": {
+    "message": "Les alertes de correspondance de contenu viennent plus tard. Cette configuration définit la liste de veille et son périmètre de collecte initial."
+  },
+  "overview_pipelineSetup_title": {
+    "message": "Configurer le briefing"
+  },
+  "overview_pipelineSetup_open": {
+    "message": "Configurer le briefing"
+  },
+  "overview_pipelineSetup_progress": {
+    "message": "Étapes de configuration du briefing"
+  },
+  "overview_pipelineSetup_steps_sources": {
+    "message": "Sources"
+  },
+  "overview_pipelineSetup_steps_cadence": {
+    "message": "Cadence"
+  },
+  "overview_pipelineSetup_steps_briefing": {
+    "message": "Briefing"
+  },
+  "overview_pipelineSetup_steps_delivery": {
+    "message": "Diffusion"
+  },
+  "overview_pipelineSetup_steps_test": {
+    "message": "Test"
+  },
+  "overview_pipelineSetup_actions_next": {
+    "message": "Continuer vers {{step}}"
+  },
+  "overview_pipelineSetup_source_existing": {
+    "message": "Utiliser des sources existantes"
+  },
+  "overview_pipelineSetup_source_new": {
+    "message": "Ajouter une nouvelle source"
+  },
+  "overview_pipelineSetup_source_fallback": {
+    "message": "Source {{id}}"
+  },
+  "overview_pipelineSetup_sources_help": {
+    "message": "Choisissez des sources existantes ou ajoutez-en une, puis testez la connexion."
+  },
+  "overview_pipelineSetup_sourcesLoading": {
+    "message": "Chargement des sources..."
+  },
+  "overview_pipelineSetup_sourcesError": {
+    "message": "Impossible de charger les flux pour le configurateur."
+  },
+  "overview_pipelineSetup_sourceTest_action": {
+    "message": "Tester la source"
+  },
+  "overview_pipelineSetup_sourceTest_ready": {
+    "message": "La source est prête."
+  },
+  "overview_pipelineSetup_sourceTest_cancelled": {
+    "message": "Test de la source annulé."
+  },
+  "overview_pipelineSetup_sourceTest_failed": {
+    "message": "Échec du test de la source. {{message}}"
+  },
+  "overview_pipelineSetup_sourceTest_summary": {
+    "message": "{{ready}} prêtes, {{filtered}} filtrées"
+  },
+  "overview_pipelineSetup_sourceTest_sample": {
+    "message": "Éléments d’exemple"
+  },
+  "overview_pipelineSetup_sourceTest_readyItem": {
+    "message": "Prête"
+  },
+  "overview_pipelineSetup_sourceTest_filteredItem": {
+    "message": "Filtré"
+  },
+  "overview_pipelineSetup_sourceTest_untitled": {
+    "message": "Élément sans titre"
+  },
+  "overview_pipelineSetup_fields_sources": {
+    "message": "Sources"
+  },
+  "overview_pipelineSetup_fields_sourceName": {
+    "message": "Nom de la source"
+  },
+  "overview_pipelineSetup_fields_sourceUrl": {
+    "message": "URL de la source"
+  },
+  "overview_pipelineSetup_fields_monitorName": {
+    "message": "Nom du moniteur"
+  },
+  "overview_pipelineSetup_fields_schedule": {
+    "message": "Planification"
+  },
+  "overview_pipelineSetup_fields_timezone": {
+    "message": "Fuseau horaire"
+  },
+  "overview_pipelineSetup_fields_intervalEvery": {
+    "message": "Toutes les"
+  },
+  "overview_pipelineSetup_fields_intervalUnit": {
+    "message": "Unité de l’intervalle"
+  },
+  "overview_pipelineSetup_fields_weekday": {
+    "message": "Jour de la semaine"
+  },
+  "overview_pipelineSetup_fields_hour": {
+    "message": "Heure"
+  },
+  "overview_pipelineSetup_fields_minute": {
+    "message": "Minute"
+  },
+  "overview_pipelineSetup_fields_cronExpression": {
+    "message": "Expression cron"
+  },
+  "overview_pipelineSetup_fields_showName": {
+    "message": "Nom de l’émission"
+  },
+  "overview_pipelineSetup_fields_premise": {
+    "message": "Concept de l’émission"
+  },
+  "overview_pipelineSetup_fields_includeAudio": {
+    "message": "Audio"
+  },
+  "overview_pipelineSetup_fields_audioHelp": {
+    "message": "Ajoutez une version parlée lisible."
+  },
+  "overview_pipelineSetup_fields_audioMinutes": {
+    "message": "Durée cible en minutes"
+  },
+  "overview_pipelineSetup_fields_speakerCount": {
+    "message": "Taille de la distribution"
+  },
+  "overview_pipelineSetup_fields_template": {
+    "message": "Modèle de rapport"
+  },
+  "overview_pipelineSetup_fields_audioProvider": {
+    "message": "Remplacement du fournisseur audio"
+  },
+  "overview_pipelineSetup_fields_audioModel": {
+    "message": "Remplacement du modèle audio"
+  },
+  "overview_pipelineSetup_fields_customInstructions": {
+    "message": "Instructions éditoriales personnalisées"
+  },
+  "overview_pipelineSetup_fields_emailDelivery": {
+    "message": "E-mail"
+  },
+  "overview_pipelineSetup_fields_emailRecipients": {
+    "message": "Destinataires de l’e-mail"
+  },
+  "overview_pipelineSetup_fields_chatbookDelivery": {
+    "message": "Chatbook"
+  },
+  "overview_pipelineSetup_fields_chatbookTitle": {
+    "message": "Titre du Chatbook"
+  },
+  "overview_pipelineSetup_schedule_manual": {
+    "message": "Manuel uniquement"
+  },
+  "overview_pipelineSetup_schedule_interval": {
+    "message": "Toutes les N heures ou minutes"
+  },
+  "overview_pipelineSetup_schedule_daily": {
+    "message": "Chaque jour"
+  },
+  "overview_pipelineSetup_schedule_weekdays": {
+    "message": "Jours ouvrés"
+  },
+  "overview_pipelineSetup_schedule_weekly": {
+    "message": "Chaque semaine"
+  },
+  "overview_pipelineSetup_schedule_advanced": {
+    "message": "Cron avancé"
+  },
+  "overview_pipelineSetup_intervalUnits_hours": {
+    "message": "Heures"
+  },
+  "overview_pipelineSetup_intervalUnits_minutes": {
+    "message": "Minutes"
+  },
+  "overview_pipelineSetup_weekdays_monday": {
+    "message": "Lundi"
+  },
+  "overview_pipelineSetup_weekdays_tuesday": {
+    "message": "Mardi"
+  },
+  "overview_pipelineSetup_weekdays_wednesday": {
+    "message": "Mercredi"
+  },
+  "overview_pipelineSetup_weekdays_thursday": {
+    "message": "Jeudi"
+  },
+  "overview_pipelineSetup_weekdays_friday": {
+    "message": "Vendredi"
+  },
+  "overview_pipelineSetup_weekdays_saturday": {
+    "message": "Samedi"
+  },
+  "overview_pipelineSetup_weekdays_sunday": {
+    "message": "Dimanche"
+  },
+  "overview_pipelineSetup_advancedCron": {
+    "message": "Cron avancé"
+  },
+  "overview_pipelineSetup_nextOccurrence": {
+    "message": "Prochaine exécution"
+  },
+  "overview_pipelineSetup_manualOccurrence": {
+    "message": "Manuel uniquement"
+  },
+  "overview_pipelineSetup_nextOccurrencePending": {
+    "message": "Enregistrez une planification valide pour calculer l’heure exacte."
+  },
+  "overview_pipelineSetup_briefing_question": {
+    "message": "Que créez-vous ?"
+  },
+  "overview_pipelineSetup_briefing_help": {
+    "message": "Choisissez la forme éditoriale. Chaque option reste fondée sur les sources sélectionnées."
+  },
+  "overview_pipelineSetup_briefing_advanced": {
+    "message": "Paramètres avancés du briefing"
+  },
+  "overview_pipelineSetup_formats_concise_briefing": {
+    "message": "Briefing concis"
+  },
+  "overview_pipelineSetup_formats_solo_update": {
+    "message": "Mise à jour en solo"
+  },
+  "overview_pipelineSetup_formats_host_discussion": {
+    "message": "Discussion entre animateurs"
+  },
+  "overview_pipelineSetup_formats_sportscast": {
+    "message": "Émission sportive"
+  },
+  "overview_pipelineSetup_formats_culture_roundtable": {
+    "message": "Table ronde culturelle"
+  },
+  "overview_pipelineSetup_formats_custom": {
+    "message": "Personnalisé"
+  },
+  "overview_pipelineSetup_speaker_defaultLabel": {
+    "message": "Intervenant {{index}}"
+  },
+  "overview_pipelineSetup_speaker_defaultRole": {
+    "message": "Animateur"
+  },
+  "overview_pipelineSetup_speaker_labelField": {
+    "message": "Libellé de l’intervenant {{index}}"
+  },
+  "overview_pipelineSetup_speaker_roleField": {
+    "message": "Rôle de l’intervenant {{index}}"
+  },
+  "overview_pipelineSetup_speaker_voiceField": {
+    "message": "Voix de l’intervenant {{index}}"
+  },
+  "overview_pipelineSetup_speaker_personaField": {
+    "message": "Personnalité de l’intervenant {{index}}"
+  },
+  "overview_pipelineSetup_preview_generate": {
+    "message": "Aperçu du rapport"
+  },
+  "overview_pipelineSetup_preview_diagnostics": {
+    "message": "Diagnostic de l’aperçu"
+  },
+  "overview_pipelineSetup_preview_context": {
+    "message": "Exécution d’aperçu : {{runId}}"
+  },
+  "overview_pipelineSetup_preview_noRunContext": {
+    "message": "Exécutez un moniteur avec succès avant de prévisualiser ce rapport."
+  },
+  "overview_pipelineSetup_preview_templateRequired": {
+    "message": "Sélectionnez un modèle avant de générer l’aperçu."
+  },
+  "overview_pipelineSetup_preview_templateEmpty": {
+    "message": "Le modèle sélectionné est vide."
+  },
+  "overview_pipelineSetup_preview_emptyResult": {
+    "message": "L’aperçu n’a renvoyé aucun contenu rendu."
+  },
+  "overview_pipelineSetup_preview_error": {
+    "message": "Impossible de générer l’aperçu."
+  },
+  "overview_pipelineSetup_delivery_help": {
+    "message": "Les rapports sont toujours inclus. La diffusion externe attend que les artefacts sélectionnés soient prêts."
+  },
+  "overview_pipelineSetup_delivery_reports": {
+    "message": "Rapports"
+  },
+  "overview_pipelineSetup_delivery_required": {
+    "message": "Stockage obligatoire"
+  },
+  "overview_pipelineSetup_delivery_alwaysOn": {
+    "message": "Toujours actif"
+  },
+  "overview_pipelineSetup_receipt_labels_schedule": {
+    "message": "Planification"
+  },
+  "overview_pipelineSetup_receipt_labels_sources": {
+    "message": "Sources"
+  },
+  "overview_pipelineSetup_receipt_labels_artifacts": {
+    "message": "Artefacts"
+  },
+  "overview_pipelineSetup_receipt_labels_format": {
+    "message": "Format"
+  },
+  "overview_pipelineSetup_receipt_labels_showName": {
+    "message": "Nom de l’émission"
+  },
+  "overview_pipelineSetup_receipt_labels_cast": {
+    "message": "Distribution"
+  },
+  "overview_pipelineSetup_receipt_labels_duration": {
+    "message": "Durée cible"
+  },
+  "overview_pipelineSetup_receipt_labels_destinations": {
+    "message": "Destinations"
+  },
+  "overview_pipelineSetup_receipt_schedule_manual": {
+    "message": "Manuel uniquement"
+  },
+  "overview_pipelineSetup_receipt_schedule_scheduled": {
+    "message": "{{date}} ({{timezone}})"
+  },
+  "overview_pipelineSetup_receipt_sources": {
+    "message": "{{count}} sources"
+  },
+  "overview_pipelineSetup_receipt_artifacts_textReport": {
+    "message": "rapport texte"
+  },
+  "overview_pipelineSetup_receipt_artifacts_showNotes": {
+    "message": "notes d’émission"
+  },
+  "overview_pipelineSetup_receipt_artifacts_audio": {
+    "message": "audio"
+  },
+  "overview_pipelineSetup_receipt_formats_concise_briefing": {
+    "message": "briefing concis"
+  },
+  "overview_pipelineSetup_receipt_formats_solo_update": {
+    "message": "mise à jour en solo"
+  },
+  "overview_pipelineSetup_receipt_formats_host_discussion": {
+    "message": "discussion entre animateurs"
+  },
+  "overview_pipelineSetup_receipt_formats_sportscast": {
+    "message": "émission sportive"
+  },
+  "overview_pipelineSetup_receipt_formats_culture_roundtable": {
+    "message": "table ronde culturelle"
+  },
+  "overview_pipelineSetup_receipt_formats_custom": {
+    "message": "programme personnalisé"
+  },
+  "overview_pipelineSetup_receipt_speakerStyle_1": {
+    "message": "solo"
+  },
+  "overview_pipelineSetup_receipt_speakerStyle_2": {
+    "message": "à deux animateurs"
+  },
+  "overview_pipelineSetup_receipt_speakerStyle_3": {
+    "message": "à trois animateurs"
+  },
+  "overview_pipelineSetup_receipt_speakerStyle_4": {
+    "message": "à quatre animateurs"
+  },
+  "overview_pipelineSetup_receipt_programWithSpeakers": {
+    "message": "{{format}} {{speakers}}"
+  },
+  "overview_pipelineSetup_receipt_cast": {
+    "message": "{{count}} intervenants"
+  },
+  "overview_pipelineSetup_receipt_duration": {
+    "message": "durée cible de {{count}} minutes"
+  },
+  "overview_pipelineSetup_receipt_destinations_email": {
+    "message": "E-mail : {{recipients}}"
+  },
+  "overview_pipelineSetup_receipt_destinations_chatbook": {
+    "message": "Chatbook : {{title}}"
+  },
+  "overview_pipelineSetup_receipt_untitledChatbook": {
+    "message": "Sans titre"
+  },
+  "overview_pipelineSetup_receipt_dstChange": {
+    "message": "L’exécution suivante utilise {{timezoneName}} après le changement d’heure : {{date}}."
+  },
+  "overview_pipelineSetup_test_providerDisclosure": {
+    "message": "Les tests utilisent vos fournisseurs LLM et de synthèse vocale configurés. Un extrait est limité à 60 secondes ; un test complet utilise la durée cible."
+  },
+  "overview_pipelineSetup_test_textProviderDisclosure": {
+    "message": "Les tests utilisent votre fournisseur LLM configuré. Les tests texte uniquement n’utilisent pas la synthèse vocale."
+  },
+  "overview_pipelineSetup_test_receipt": {
+    "message": "Récapitulatif d’activation"
+  },
+  "overview_pipelineSetup_test_manualReceipt": {
+    "message": "Ce briefing s’exécute manuellement, enregistre les artefacts sélectionnés dans Rapports et ne contacte aucune destination externe sauf si vous choisissez Envoyer le test."
+  },
+  "overview_pipelineSetup_test_progress": {
+    "message": "Progression du test"
+  },
+  "overview_pipelineSetup_test_stages_collection": {
+    "message": "Collecter les sources"
+  },
+  "overview_pipelineSetup_test_stages_selection": {
+    "message": "Sélectionner les mises à jour"
+  },
+  "overview_pipelineSetup_test_stages_text": {
+    "message": "Créer le rapport"
+  },
+  "overview_pipelineSetup_test_stages_audio": {
+    "message": "Créer l’audio"
+  },
+  "overview_pipelineSetup_test_stages_persistence": {
+    "message": "Enregistrer dans Rapports"
+  },
+  "overview_pipelineSetup_test_stages_audioScript": {
+    "message": "Composer le script audio"
+  },
+  "overview_pipelineSetup_test_stages_audioScriptPersistence": {
+    "message": "Enregistrer le script audio"
+  },
+  "overview_pipelineSetup_test_stages_audioPersistence": {
+    "message": "Enregistrer l’audio dans Rapports"
+  },
+  "overview_pipelineSetup_test_stages_delivery": {
+    "message": "Vérifier la diffusion du test"
+  },
+  "overview_pipelineSetup_test_stages_deliveryAdapter": {
+    "message": "Diffuser vers {{adapter}}"
+  },
+  "overview_pipelineSetup_test_stages_unknown": {
+    "message": "Étape {{stage}}"
+  },
+  "overview_pipelineSetup_test_sample": {
+    "message": "Générer un extrait de 60 secondes"
+  },
+  "overview_pipelineSetup_test_full": {
+    "message": "Générer l’épisode de test complet"
+  },
+  "overview_pipelineSetup_test_text": {
+    "message": "Générer le rapport de test"
+  },
+  "overview_pipelineSetup_test_send": {
+    "message": "Envoyer le test"
+  },
+  "overview_pipelineSetup_test_activate": {
+    "message": "Activer la planification"
+  },
+  "overview_pipelineSetup_test_ready": {
+    "message": "Test terminé. Votre briefing est prêt. Ce brouillon reste inactif jusqu’à l’activation de sa planification."
+  },
+  "overview_pipelineSetup_test_cancelled": {
+    "message": "Test annulé. Votre brouillon est enregistré."
+  },
+  "overview_pipelineSetup_test_failed": {
+    "message": "Échec du test. Votre brouillon est enregistré. {{message}}"
+  },
+  "overview_pipelineSetup_test_status_not_started": {
+    "message": "Non démarré"
+  },
+  "overview_pipelineSetup_test_status_queued": {
+    "message": "En attente"
+  },
+  "overview_pipelineSetup_test_status_running": {
+    "message": "En cours"
+  },
+  "overview_pipelineSetup_test_status_ready": {
+    "message": "Prêt"
+  },
+  "overview_pipelineSetup_test_status_failed": {
+    "message": "Échec"
+  },
+  "overview_pipelineSetup_test_status_skipped": {
+    "message": "Ignoré"
+  },
+  "overview_pipelineSetup_test_status_cancelled": {
+    "message": "Annulé"
+  },
+  "overview_pipelineSetup_activate_ready": {
+    "message": "Planification activée."
+  },
+  "overview_pipelineSetup_activate_failed": {
+    "message": "Impossible d’activer la planification. Votre brouillon est enregistré. {{message}}"
+  },
+  "overview_pipelineSetup_validation_sourcesRequired": {
+    "message": "Choisissez au moins une source avant de continuer."
+  },
+  "overview_pipelineSetup_validation_sourceNameRequired": {
+    "message": "Saisissez un nom de source."
+  },
+  "overview_pipelineSetup_validation_sourceUrlInvalid": {
+    "message": "Saisissez une URL de source HTTP ou HTTPS valide."
+  },
+  "overview_pipelineSetup_validation_monitorNameRequired": {
+    "message": "Saisissez un nom de moniteur."
+  },
+  "overview_pipelineSetup_validation_timezoneInvalid": {
+    "message": "Saisissez un fuseau horaire IANA valide."
+  },
+  "overview_pipelineSetup_validation_intervalInvalid": {
+    "message": "Saisissez un intervalle de planification pris en charge."
+  },
+  "overview_pipelineSetup_validation_hourInvalid": {
+    "message": "Saisissez une heure de 0 à 23."
+  },
+  "overview_pipelineSetup_validation_minuteInvalid": {
+    "message": "Saisissez une minute de 0 à 59."
+  },
+  "overview_pipelineSetup_validation_cronInvalid": {
+    "message": "Saisissez une expression cron valide à cinq champs."
+  },
+  "overview_pipelineSetup_validation_cronTooFrequent": {
+    "message": "Choisissez une planification espacée d’au moins cinq minutes."
+  },
+  "overview_pipelineSetup_validation_templateRequired": {
+    "message": "Saisissez un modèle de rapport."
+  },
+  "overview_pipelineSetup_validation_castSizeInvalid": {
+    "message": "Choisissez de un à quatre intervenants."
+  },
+  "overview_pipelineSetup_validation_castIdsInvalid": {
+    "message": "Chaque intervenant doit avoir une identité unique."
+  },
+  "overview_pipelineSetup_validation_castVoicesRequired": {
+    "message": "Choisissez une voix pour chaque intervenant."
+  },
+  "overview_pipelineSetup_validation_audioMinutesInvalid": {
+    "message": "Saisissez une durée de 1 à 60 minutes."
+  },
+  "overview_pipelineSetup_validation_emailInvalid": {
+    "message": "Saisissez au moins une adresse e-mail valide."
+  },
+  "overview_pipelineSetup_validationError": {
+    "message": "Vérifiez les champs en surbrillance avant de continuer."
+  },
+  "overview_pipelineSetup_receipt_sources_one": {
+    "message": "{{count}} source"
+  },
+  "overview_pipelineSetup_receipt_sources_many": {
+    "message": "{{count}} sources"
+  },
+  "overview_pipelineSetup_receipt_sources_other": {
+    "message": "{{count}} sources"
+  },
+  "overview_pipelineSetup_receipt_cast_one": {
+    "message": "{{count}} intervenant"
+  },
+  "overview_pipelineSetup_receipt_cast_many": {
+    "message": "{{count}} intervenants"
+  },
+  "overview_pipelineSetup_receipt_cast_other": {
+    "message": "{{count}} intervenants"
+  },
+  "overview_pipelineSetup_receipt_duration_one": {
+    "message": "durée cible de {{count}} minute"
+  },
+  "overview_pipelineSetup_receipt_duration_many": {
+    "message": "durée cible de {{count}} minutes"
+  },
+  "overview_pipelineSetup_receipt_duration_other": {
+    "message": "durée cible de {{count}} minutes"
+  },
+  "overview_pipelineSetup_schedulePreview_loading": {
+    "message": "Calcul de la planification exacte…"
+  },
+  "overview_pipelineSetup_schedulePreview_error": {
+    "message": "Impossible de calculer la planification exacte. Vérifiez l’expression cron et le fuseau horaire."
+  },
+  "overview_pipelineSetup_test_running": {
+    "message": "L’exécution {{runId}} est toujours en cours : {{stage}}. Vous pouvez fermer la configuration et la suivre dans Vue d’ensemble."
+  },
+  "overview_pipelineSetup_test_failedStage": {
+    "message": "{{stage}} a échoué. Ouvrez l’exécution {{runId}} et relancez cette étape."
+  },
+  "overview_pipelineSetup_test_failedWithCode": {
+    "message": "{{stage}} a échoué ({{code}}). Ouvrez l’exécution {{runId}} et relancez cette étape."
+  },
+  "overview_pipelineSetup_test_cancelledStage": {
+    "message": "{{stage}} a été annulée. Votre brouillon est enregistré."
+  },
+  "overview_pipelineSetup_test_cancelledWithCode": {
+    "message": "{{stage}} a été annulée ({{code}}). Votre brouillon est enregistré."
+  },
+  "overview_latest_heading_briefing": {
+    "message": "Dernier briefing"
+  },
+  "overview_latest_heading_episode": {
+    "message": "Dernier épisode"
+  },
+  "overview_latest_empty_scheduled": {
+    "message": "Votre premier briefing est prévu pour le {{date}}."
+  },
+  "overview_latest_empty_manual": {
+    "message": "Non démarré. Tester maintenant."
+  },
+  "overview_latest_generatedAt": {
+    "message": "Généré {{date}}"
+  },
+  "overview_latest_untitled": {
+    "message": "briefing {{runId}}"
+  },
+  "overview_latest_artifacts": {
+    "message": "rapport / audio"
+  },
+  "overview_latest_audio": {
+    "message": "audio"
+  },
+  "overview_latest_audioFailed": {
+    "message": "audio échec"
+  },
+  "overview_latest_ready": {
+    "message": "Prêt"
+  },
+  "overview_latest_saved": {
+    "message": "Enregistré"
+  },
+  "overview_latest_waiting": {
+    "message": "En attente"
+  },
+  "overview_latest_script": {
+    "message": "audio rapport"
+  },
+  "overview_latest_stageWithStatus": {
+    "message": "{{stage}}: {{status}}"
+  },
+  "overview_latest_noUpdates": {
+    "message": "Aucune mise à jour correspondante n’a été trouvée. Un {{noun}} de statut a été enregistré."
+  },
+  "overview_latest_nextRun": {
+    "message": "Prochaine exécution: {{date}}"
+  },
+  "overview_latest_nextRunRelative": {
+    "message": "Prochaine exécution: {{relative}}"
+  },
+  "overview_latest_counts": {
+    "message": "briefing: Inclus, Non lu, Nouveau"
+  },
+  "overview_latest_count_included": {
+    "message": "Inclus {{count}}"
+  },
+  "overview_latest_count_unread": {
+    "message": "Non lu {{count}}"
+  },
+  "overview_latest_count_new": {
+    "message": "Nouveau {{count}}"
+  },
+  "overview_latest_provenance_sources": {
+    "message": "{{count}} sources suivies"
+  },
+  "overview_latest_provenance_sources_zero": {
+    "message": "{{count}} sources suivies"
+  },
+  "overview_latest_provenance_sources_one": {
+    "message": "{{count}} source suivie"
+  },
+  "overview_latest_provenance_sources_two": {
+    "message": "{{count}} sources suivies"
+  },
+  "overview_latest_provenance_sources_few": {
+    "message": "{{count}} sources suivies"
+  },
+  "overview_latest_provenance_sources_many": {
+    "message": "{{count}} sources suivies"
+  },
+  "overview_latest_provenance_sources_other": {
+    "message": "{{count}} sources suivies"
+  },
+  "overview_latest_delivery_reports": {
+    "message": "Voir tous les rapports"
+  },
+  "overview_latest_delivery_retryAria": {
+    "message": "Réessayer {{adapter}}: {{name}}"
+  },
+  "overview_latest_delivery_retryUnknownAria": {
+    "message": "Résultat inconnu. Réessayer {{adapter}}: {{name}}"
+  },
+  "overview_latest_delivery_reviewRetry": {
+    "message": "Vérifier et réessayer"
+  },
+  "overview_latest_delivery_unknownConfirmation": {
+    "message": "Le fournisseur n’a pas confirmé la livraison via {{adapter}}. Réessayer peut envoyer un doublon. Vérifiez la destination et continuez uniquement si ce risque est acceptable. ({{destination}})"
+  },
+  "overview_latest_playback_region": {
+    "message": "audio: {{name}}"
+  },
+  "overview_latest_playback_playAria": {
+    "message": "Lire {{name}}"
+  },
+  "overview_latest_playback_pauseAria": {
+    "message": "Mettre {{name}} en pause"
+  },
+  "overview_latest_playback_resumeAria": {
+    "message": "Reprendre {{name}}"
+  },
+  "overview_latest_playback_seekAria": {
+    "message": "audio: {{name}}"
+  },
+  "overview_latest_playback_loading": {
+    "message": "Chargement audio"
+  },
+  "overview_latest_playback_error": {
+    "message": "audio échec. Ouvrir rapport / Régénérer audio."
+  },
+  "overview_latest_playback_play": {
+    "message": "Lire"
+  },
+  "overview_latest_playback_pause": {
+    "message": "Pause"
+  },
+  "overview_latest_playback_resume": {
+    "message": "Reprendre"
+  },
+  "overview_latest_actions_label": {
+    "message": "Dernier briefing"
+  },
+  "overview_latest_actions_openReport": {
+    "message": "Ouvrir {{report}}"
+  },
+  "overview_latest_actions_openReportAria": {
+    "message": "Ouvrir {{report}}: {{name}}"
+  },
+  "overview_latest_actions_regenerateAudio": {
+    "message": "Régénérer audio"
+  },
+  "overview_latest_actions_regenerateAudioAria": {
+    "message": "Régénérer {{style}} {{noun}} audio: {{name}}"
+  },
+  "overview_latest_actions_retry": {
+    "message": "Réessayer"
+  },
+  "overview_latest_actions_retrySaveAria": {
+    "message": "Réessayer enregistré rapport: {{name}}"
+  },
+  "overview_latest_actions_retryTextAria": {
+    "message": "Réessayer rapport: {{name}}"
+  },
+  "overview_latest_actions_retryStage": {
+    "message": "Réessayer: {{stage}}"
+  },
+  "overview_latest_actions_inspect": {
+    "message": "Inspecter l’exécution"
+  },
+  "overview_latest_actions_inspectAria": {
+    "message": "Inspecter l’exécution {{runId}}: {{name}}"
+  },
+  "overview_latest_actions_viewReports": {
+    "message": "Voir tous les rapports"
+  },
+  "overview_latest_actions_testNow": {
+    "message": "Tester maintenant"
+  },
+  "overview_latest_announcements_blockingFailure": {
+    "message": "{{name}} échec. Inspecter l’exécution {{runId}}."
+  },
+  "overview_latest_announcements_delivered": {
+    "message": "{{name}}: livré."
+  },
+  "overview_latest_announcements_nextRunUpdated": {
+    "message": "{{name}}: prochaine exécution."
+  },
+  "overview_latest_announcements_partialAudioFailure": {
+    "message": "{{name}}: notes d’émission prêt, audio échec."
+  },
+  "overview_latest_announcements_readyText": {
+    "message": "{{name}}: rapport prêt."
+  },
+  "overview_latest_announcements_readyWithAudio": {
+    "message": "{{name}}: Prêt. audio / notes d’émission."
+  },
+  "overview_latest_announcements_stageProgress": {
+    "message": "{{name}}: {{stage}} {{status}}."
+  },
+  "overview_latest_announcements_testQueued": {
+    "message": "Tester maintenant: en file."
+  },
+  "overview_latest_retryError": {
+    "message": "Réessayer échec. Inspecter l’exécution."
+  },
+  "overview_latest_regenerateError": {
+    "message": "Régénérer audio: échec."
+  },
+  "overview_latest_testError": {
+    "message": "Tester maintenant: échec."
+  },
+  "overview_latest_status_ready": {
+    "message": "Prêt"
+  },
+  "overview_latest_status_failed": {
+    "message": "Échec"
+  },
+  "overview_latest_status_saved": {
+    "message": "Enregistré"
+  },
+  "overview_latest_status_waiting": {
+    "message": "En attente"
+  },
+  "overview_latest_status_running": {
+    "message": "En cours"
+  },
+  "overview_latest_status_queued": {
+    "message": "En file"
+  },
+  "overview_latest_status_notStarted": {
+    "message": "Non démarré"
+  },
+  "overview_latest_status_notSelected": {
+    "message": "Non sélectionné"
+  },
+  "overview_latest_status_cancelled": {
+    "message": "Annulé"
+  },
+  "overview_latest_status_delivered": {
+    "message": "Livré"
+  },
+  "overview_latest_status_unknown": {
+    "message": "Résultat inconnu"
+  },
+  "overview_latest_status_sending": {
+    "message": "Envoi"
+  },
+  "overview_latest_stages_renderText": {
+    "message": "rapport"
+  },
+  "overview_latest_stages_persistText": {
+    "message": "Enregistré rapport"
+  },
+  "overview_latest_stages_composeScript": {
+    "message": "audio rapport"
+  },
+  "overview_latest_stages_persistScript": {
+    "message": "Enregistré audio rapport"
+  },
+  "overview_latest_stages_generateAudio": {
+    "message": "audio"
+  },
+  "overview_latest_stages_persistAudio": {
+    "message": "Enregistré audio"
+  },
+  "overview_latest_nouns_briefing": {
+    "message": "briefing"
+  },
+  "overview_latest_nouns_episode": {
+    "message": "épisode"
+  },
+  "overview_latest_nouns_report": {
+    "message": "rapport"
+  },
+  "overview_latest_nouns_showNotes": {
+    "message": "notes d’émission"
+  },
+  "outputs_openInNewTabAria": {
+    "message": "Ouvrir dans un nouvel onglet: {{title}}"
+  },
+  "outputs_chatAboutAria": {
+    "message": "Discuter de ceci: {{title}}"
+  },
+  "outputs_downloadAria": {
+    "message": "Télécharger: {{title}}"
+  },
+  "overview_latest_delivery_chatbookDestination": {
+    "message": "Chatbook"
+  },
+  "overview_latest_delivery_confirmRetry": {
+    "message": "Réessayer livraison"
+  },
+  "overview_latest_delivery_confirmRetryAria": {
+    "message": "Réessayer {{adapter}} livraison"
+  },
+  "overview_latest_delivery_recipientCount": {
+    "message": "{{count}} destinataires"
+  },
+  "overview_latest_delivery_recipientCount_zero": {
+    "message": "{{count}} destinataires"
+  },
+  "overview_latest_delivery_recipientCount_one": {
+    "message": "{{count}} destinataires"
+  },
+  "overview_latest_delivery_recipientCount_two": {
+    "message": "{{count}} destinataires"
+  },
+  "overview_latest_delivery_recipientCount_few": {
+    "message": "{{count}} destinataires"
+  },
+  "overview_latest_delivery_recipientCount_many": {
+    "message": "{{count}} destinataires"
+  },
+  "overview_latest_delivery_recipientCount_other": {
+    "message": "{{count}} destinataires"
+  },
+  "overview_latest_delivery_reviewAcknowledgement": {
+    "message": "J’ai vérifié la destination et j’accepte le risque d’un envoi en double."
+  },
+  "overview_latest_delivery_reviewSettings": {
+    "message": "Vérifier paramètres"
+  },
+  "overview_latest_delivery_reviewTitle": {
+    "message": "Vérifier {{adapter}} livraison"
+  },
+  "overview_latest_playback_accessError": {
+    "message": "audio: Échec de l’accès. Vérifiez votre connexion et celle au serveur."
+  },
+  "overview_latest_playback_missing": {
+    "message": "audio n’est plus disponible."
+  },
+  "overview_latest_actions_downloadAudio": {
+    "message": "Télécharger audio"
+  },
+  "overview_latest_actions_downloadAudioAria": {
+    "message": "Télécharger audio: {{name}}"
+  },
+  "overview_latest_actions_retryExactAria": {
+    "message": "Réessayer {{stage}}: {{name}}"
+  },
+  "overview_latest_actions_reviewScript": {
+    "message": "Vérifier audio rapport"
+  },
+  "overview_latest_actions_reviewScriptAria": {
+    "message": "Vérifier audio rapport: {{name}}"
+  },
+  "overview_latest_scriptAccessError": {
+    "message": "audio rapport: Échec de l’accès. Vérifiez votre connexion et celle au serveur."
+  },
+  "overview_latest_scriptLoading": {
+    "message": "Chargement audio rapport"
+  },
+  "overview_latest_scriptMissing": {
+    "message": "audio rapport n’est plus disponible."
+  },
+  "overview_latest_recovery_renderText": {
+    "message": "Génération rapport"
+  },
+  "overview_latest_recovery_persistText": {
+    "message": "Enregistrement rapport"
+  },
+  "overview_latest_recovery_composeScript": {
+    "message": "Rédaction audio rapport"
+  },
+  "overview_latest_recovery_persistScript": {
+    "message": "Enregistrement audio rapport"
+  },
+  "overview_latest_recovery_generateAudio": {
+    "message": "Génération audio"
+  },
+  "overview_latest_recovery_persistAudio": {
+    "message": "Enregistrement audio"
+  },
+  "outputs_artifactMissing": {
+    "message": "n’est plus disponible."
+  },
+  "outputs_artifactAuthError": {
+    "message": "Accès refusé. Vérifiez votre connexion."
+  },
+  "outputs_artifactAccessError": {
+    "message": "Échec de l’accès. Vérifiez votre connexion et celle au serveur."
+  },
+  "overview_latest_status_stale": {
+    "message": "Obsolète"
+  },
+  "overview_latest_status_superseded": {
+    "message": "Remplacé"
+  },
+  "overview_latest_status_unavailable": {
+    "message": "Indisponible"
+  },
+  "overview_latest_status_partial": {
+    "message": "Partiel"
+  },
+  "accessibilityHardening_source_toggleActive": {
+    "message": "Basculer l’état actif : {{name}}"
+  },
+  "accessibilityHardening_source_checkNow": {
+    "message": "Vérifier maintenant : {{name}}"
+  },
+  "accessibilityHardening_source_openWebsite": {
+    "message": "Ouvrir le site de la source : {{name}}"
+  },
+  "accessibilityHardening_source_openHealth": {
+    "message": "Ouvrir l’état de la source : {{name}}"
+  },
+  "accessibilityHardening_source_edit": {
+    "message": "Modifier la source : {{name}}"
+  },
+  "accessibilityHardening_source_delete": {
+    "message": "Supprimer la source : {{name}}"
+  },
+  "accessibilityHardening_item_open": {
+    "message": "Ouvrir la mise à jour : {{title}}"
+  },
+  "accessibilityHardening_item_select": {
+    "message": "Sélectionner la mise à jour : {{title}}"
+  },
+  "accessibilityHardening_item_description": {
+    "message": "{{state}}. Source : {{source}}."
+  },
+  "accessibilityHardening_output_openNewTab": {
+    "message": "Ouvrir {{title}} dans un nouvel onglet"
+  },
+  "accessibilityHardening_output_chat": {
+    "message": "Discuter de {{title}}"
+  },
+  "accessibilityHardening_output_download": {
+    "message": "Télécharger {{title}}"
+  },
+  "accessibilityHardening_output_close": {
+    "message": "Fermer l’aperçu : {{title}}"
+  },
+  "accessibilityHardening_health_show": {
+    "message": "Afficher les détails d’état des listes de suivi"
+  },
+  "accessibilityHardening_health_hide": {
+    "message": "Masquer les détails d’état des listes de suivi"
+  },
+  "accessibilityHardening_health_refresh": {
+    "message": "Actualiser l’état des listes de suivi"
+  },
+  "accessibilityHardening_health_settings": {
+    "message": "Ouvrir les paramètres des listes de suivi"
+  },
+  "accessibilityHardening_delivery_email": {
+    "message": "Envoyer chaque rapport aux destinataires configurés lorsque cette option est activée."
+  },
+  "accessibilityHardening_delivery_chatbook": {
+    "message": "Publier chaque rapport dans Chatbook lorsque cette option est activée."
+  },
+  "accessibilityHardening_help_open": {
+    "message": "Ouvrir l’aide des listes de suivi"
+  },
+  "accessibilityHardening_help_title": {
+    "message": "Aide des listes de suivi"
+  },
+  "overview_pipelineSetup_test_scheduledReceipt": {
+    "message": "{{schedule}}, collectez les mises à jour de {{sources}}, générez {{artifacts}} sous forme de {{program}}{{duration}}, puis enregistrez-les et livrez-les à {{destinations}}."
+  },
+  "overview_pipelineSetup_test_audioTestRequired": {
+    "message": "Générez avec succès un échantillon audio ou un test complet avant l’activation."
   }
 }

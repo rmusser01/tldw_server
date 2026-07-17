@@ -50,6 +50,17 @@ class _UsageLog:
         pass
 
 
+class _LoggerStub:
+    def __init__(self):
+        self.warnings: list[str] = []
+
+    def warning(self, message, *args, **kwargs):  # noqa: ARG002
+        self.warnings.append(str(message).format(*args))
+
+    def __getattr__(self, _name):
+        return lambda *args, **kwargs: None
+
+
 @pytest.fixture(autouse=True)
 def _enable_legacy_web_scraping_fallback(monkeypatch):
     monkeypatch.setenv("TLDW_ENABLE_LEGACY_WEB_SCRAPING_FALLBACK", "1")
@@ -100,8 +111,10 @@ async def test_fallback_url_level_rejects_threshold_control(monkeypatch):
 @pytest.mark.asyncio
 async def test_fallback_url_level_ephemeral_smoke_applies_max_pages_cap(monkeypatch):
     _force_fallback(monkeypatch)
+    captured = {}
 
-    async def fake_scrape_by_url_level(base_url, level):
+    async def fake_scrape_by_url_level(base_url, level, *, allow_llm_extraction=None):
+        captured["allow_llm_extraction"] = allow_llm_extraction
         return [
             {"url": "https://example.com/1", "title": "A", "content": "c1", "extraction_successful": True},
             {"url": "https://example.com/2", "title": "B", "content": "c2", "extraction_successful": True},
@@ -133,6 +146,7 @@ async def test_fallback_url_level_ephemeral_smoke_applies_max_pages_cap(monkeypa
     assert result["engine"] == "legacy_fallback"
     assert result["total_articles"] == 2
     assert len(result["results"]) == 2
+    assert captured["allow_llm_extraction"] is False
     fallback_context = result["fallback_context"]
     assert fallback_context["enabled"] is True
     assert fallback_context["trigger_error_type"] == "RuntimeError"
@@ -142,7 +156,10 @@ async def test_fallback_url_level_ephemeral_smoke_applies_max_pages_cap(monkeypa
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_ingest_web_content_skips_analysis_without_provider(monkeypatch):
-    async def fake_scrape_article(url, custom_cookies=None):
+    captured = {}
+
+    async def fake_scrape_article(url, custom_cookies=None, *, allow_llm_extraction=None):
+        captured["allow_llm_extraction"] = allow_llm_extraction
         return {
             "url": url,
             "title": "Example",
@@ -168,6 +185,7 @@ async def test_ingest_web_content_skips_analysis_without_provider(monkeypatch):
 
     assert result is not None
     assert result[0]["analysis"] is None
+    assert captured["allow_llm_extraction"] is True
     assert result[0]["analysis_status"] == "skipped"
     assert result[0]["analysis_error"] == "Choose an analysis provider before running ingest analysis."
 
@@ -244,8 +262,10 @@ async def test_fallback_url_level_sanitizes_unexpected_runtime_error(monkeypatch
 @pytest.mark.asyncio
 async def test_fallback_ephemeral_result_retrievable_within_ttl(monkeypatch):
     _force_fallback(monkeypatch)
+    captured = {}
 
-    async def fake_scrape_by_url_level(base_url, level):
+    async def fake_scrape_by_url_level(base_url, level, *, allow_llm_extraction=None):
+        captured["allow_llm_extraction"] = allow_llm_extraction
         return [
             {"url": "https://example.com/a", "title": "A", "content": "c1", "extraction_successful": True},
             {"url": "https://example.com/b", "title": "B", "content": "c2", "extraction_successful": True},
@@ -279,6 +299,7 @@ async def test_fallback_ephemeral_result_retrievable_within_ttl(monkeypatch):
     stored = local_store.get_data(ephemeral_id)
     assert isinstance(stored, dict)
     assert len(stored.get("articles", [])) == 2
+    assert captured["allow_llm_extraction"] is False
 
     state["now"] = 300.0
     assert local_store.get_data(ephemeral_id) is None
@@ -470,9 +491,128 @@ async def test_fallback_persist_uses_media_repository_api(monkeypatch, tmp_path)
 
 
 @pytest.mark.unit
-def test_process_web_scraping_endpoint_fallback_contract_error_for_url_level_controls(
-    client_user_only, monkeypatch
-):
+@pytest.mark.asyncio
+async def test_fallback_persist_skips_articles_without_body_content(monkeypatch, tmp_path):
+    _force_fallback(monkeypatch)
+    logger_stub = _LoggerStub()
+
+    class _FakeDbNoLegacyInsert:
+        def __init__(self):
+            self.closed = False
+
+        def close_connection(self):
+            self.closed = True
+
+    class _FakeRepo:
+        def __init__(self):
+            self.calls = []
+
+        def add_media_with_keywords(self, **kwargs):
+            self.calls.append(kwargs)
+            return 71, "repo-71", "stored"
+
+    fake_db = _FakeDbNoLegacyInsert()
+    fake_repo = _FakeRepo()
+
+    @contextmanager
+    def _fake_managed_media_database(*args, **kwargs):  # noqa: ARG001
+        try:
+            yield fake_db
+        finally:
+            fake_db.close_connection()
+
+    async def fake_scrape_and_summarize_multiple(**kwargs):
+        return [
+            {
+                "url": "https://example.com/valid",
+                "title": "Valid",
+                "content": "Article body",
+                "extraction_successful": True,
+            },
+            {
+                "url": "https://example.com/wrapped",
+                "title": "Wrapped",
+                "content": '[METADATA]{"source":"old"}[/METADATA]\nWrapped body',
+                "extraction_successful": True,
+            },
+            {
+                "url": "https://example.com/none",
+                "content": None,
+                "extraction_successful": True,
+            },
+            {
+                "url": "https://example.com/number",
+                "content": 42,
+                "extraction_successful": True,
+            },
+            {
+                "url": "https://user:password@example.com/whitespace?token=secret#fragment",
+                "content": "  \n",
+                "extraction_successful": True,
+            },
+            {
+                "url": "https://example.com/envelope",
+                "content": '[METADATA]{"url":"https://example.com/envelope"}[/METADATA]\n  ',
+                "extraction_successful": True,
+            },
+        ]
+
+    monkeypatch.setattr(
+        ws_service,
+        "scrape_and_summarize_multiple",
+        fake_scrape_and_summarize_multiple,
+        raising=True,
+    )
+    monkeypatch.setattr(
+        ws_service,
+        "managed_media_database",
+        _fake_managed_media_database,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        ws_service,
+        "get_user_media_db_path",
+        lambda _user_id: str(tmp_path / "fallback-media.db"),
+        raising=True,
+    )
+    monkeypatch.setattr(
+        ws_service,
+        "get_media_repository",
+        lambda db: fake_repo,
+        raising=False,
+    )
+    monkeypatch.setattr(ws_service, "logger", logger_stub)
+
+    result = await ws_service.process_web_scraping_task(
+        **_base_kwargs(
+            scrape_method="Individual URLs",
+            url_input="https://example.com/valid",
+            mode="persist",
+            user_id=1,
+            perform_chunking=False,
+        )
+    )
+
+    assert result["status"] == "persist-ok"
+    assert result["media_ids"] == [71, 71]
+    assert result["total_articles"] == 6
+    assert len(fake_repo.calls) == 2
+    assert fake_repo.calls[0]["url"] == "https://example.com/valid"
+    assert fake_repo.calls[1]["content"] == "Wrapped body"
+    assert result["errors"] == [
+        "No extracted content: https://example.com/none",
+        "No extracted content: https://example.com/number",
+        "No extracted content: https://user:password@example.com/whitespace?token=secret#fragment",
+        "No extracted content: https://example.com/envelope",
+    ]
+    warning_text = "\n".join(logger_stub.warnings)
+    assert "password" not in warning_text
+    assert "token=secret" not in warning_text
+    assert "#fragment" not in warning_text
+
+
+@pytest.mark.unit
+def test_process_web_scraping_endpoint_fallback_contract_error_for_url_level_controls(client_user_only, monkeypatch):
     _force_fallback(monkeypatch)
 
     payload = {
@@ -490,9 +630,7 @@ def test_process_web_scraping_endpoint_fallback_contract_error_for_url_level_con
 
 
 @pytest.mark.unit
-def test_process_web_scraping_endpoint_rejects_when_legacy_fallback_disabled(
-    client_user_only, monkeypatch
-):
+def test_process_web_scraping_endpoint_rejects_when_legacy_fallback_disabled(client_user_only, monkeypatch):
     _force_fallback(monkeypatch)
     monkeypatch.setenv("TLDW_ENABLE_LEGACY_WEB_SCRAPING_FALLBACK", "0")
 

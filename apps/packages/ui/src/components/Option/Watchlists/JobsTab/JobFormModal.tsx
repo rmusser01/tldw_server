@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { Button, Collapse, Form, Input, InputNumber, Modal, Radio, Select, Switch, Tag, message } from "antd"
 import { useTranslation } from "react-i18next"
 import {
@@ -58,6 +58,10 @@ import {
   type WatchlistsPreventionRule
 } from "@/utils/watchlists-prevention-telemetry"
 import { applyOutputPresetToPrefs } from "./output-presets"
+import {
+  normalizeLegacyBriefingContract,
+  toCanonicalWatchlistJobPayload
+} from "../shared/briefing-contract"
 
 interface JobFormModalProps {
   open: boolean
@@ -103,6 +107,9 @@ interface ConfidenceRisk {
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value)
+
+const recordOrEmpty = (value: unknown): Record<string, unknown> =>
+  isRecord(value) ? value : {}
 
 type WatchlistsValidationErrorDetail = {
   code?: string
@@ -226,7 +233,6 @@ const OUTPUT_PRESETS: Record<
     format: OutputFormat
     emailEnabled: boolean
     emailBodyFormat: EmailBodyFormat
-    createScheduledOutput: boolean
   }
 > = {
   briefing_md: {
@@ -234,21 +240,18 @@ const OUTPUT_PRESETS: Record<
     format: "md",
     emailEnabled: false,
     emailBodyFormat: "auto",
-    createScheduledOutput: true,
   },
   newsletter_html: {
     templateName: "newsletter_html",
     format: "html",
     emailEnabled: true,
     emailBodyFormat: "html",
-    createScheduledOutput: true,
   },
   mece_md: {
     templateName: "mece_markdown",
     format: "md",
     emailEnabled: false,
     emailBodyFormat: "auto",
-    createScheduledOutput: true,
   },
 }
 
@@ -306,7 +309,6 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
   const [outputTemplateName, setOutputTemplateName] = useState<string | undefined>(undefined)
   const [outputTemplateVersion, setOutputTemplateVersion] = useState<number | null>(null)
   const [outputTemplateFormat, setOutputTemplateFormat] = useState<OutputFormat | undefined>(undefined)
-  const [createScheduledOutput, setCreateScheduledOutput] = useState(false)
   const [retentionDefaultDuration, setRetentionDefaultDuration] = useState<DurationInputValue>({
     value: null,
     unit: "days"
@@ -343,37 +345,40 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
 
   const watchedName = Form.useWatch("name", form)
 
-  const applyOutputPrefsState = (
+  const applyOutputPrefsState = useCallback((
     prefs: JobOutputPrefs | null | undefined,
-    options?: { updateBase?: boolean }
+    options?: { updateBase?: boolean; scheduled?: boolean }
   ) => {
-    const prefsRecord = isRecord(prefs) ? prefs : {}
+    const normalized = normalizeLegacyBriefingContract(prefs, {
+      scheduled: Boolean(options?.scheduled)
+    })
+    const prefsRecord = normalized.outputPrefs
+    const contract = normalized.contract
     if (options?.updateBase) {
       setOutputPrefsBase(cloneRecord(prefsRecord) as JobOutputPrefs)
     }
-    const templateRecord = isRecord(prefsRecord.template) ? prefsRecord.template : {}
+    const templateRecord = recordOrEmpty(contract.text)
     const retentionRecord = isRecord(prefsRecord.retention) ? prefsRecord.retention : {}
-    const deliveriesRecord = isRecord(prefsRecord.deliveries) ? prefsRecord.deliveries : {}
+    const deliveriesRecord = recordOrEmpty(contract.delivery)
     const emailRecord = isRecord(deliveriesRecord.email) ? deliveriesRecord.email : null
     const chatbookRecord = isRecord(deliveriesRecord.chatbook) ? deliveriesRecord.chatbook : null
-    const autoOutputRecord = isRecord(prefsRecord.auto_output) ? prefsRecord.auto_output : null
+    const audioRecord = recordOrEmpty(contract.audio)
 
     setOutputTemplateName(
-      typeof templateRecord.default_name === "string" && templateRecord.default_name.trim().length > 0
-        ? templateRecord.default_name
+      typeof templateRecord.template_name === "string" && templateRecord.template_name.trim().length > 0
+        ? templateRecord.template_name
         : undefined
     )
 
-    const parsedTemplateVersion = Number(templateRecord.default_version)
+    const parsedTemplateVersion = Number(templateRecord.template_version)
     setOutputTemplateVersion(
       Number.isFinite(parsedTemplateVersion) && parsedTemplateVersion > 0
         ? Math.floor(parsedTemplateVersion)
         : null
     )
     setOutputTemplateFormat(
-      isOutputFormat(templateRecord.default_format) ? templateRecord.default_format : undefined
+      isOutputFormat(templateRecord.format) ? templateRecord.format : undefined
     )
-    setCreateScheduledOutput(Boolean(autoOutputRecord) && autoOutputRecord.enabled === true)
     const parsedDefaultRetention = Number(retentionRecord.default_seconds)
     setRetentionDefaultDuration(
       secondsToDurationInput(
@@ -424,20 +429,20 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
         : null
     )
 
-    setAudioBriefingEnabled(Boolean(prefsRecord.generate_audio))
+    setAudioBriefingEnabled(Boolean(audioRecord.enabled))
     setAudioVoice(
-      typeof prefsRecord.audio_voice === "string" && prefsRecord.audio_voice.trim().length > 0
-        ? prefsRecord.audio_voice.trim()
+      typeof audioRecord.voice === "string" && audioRecord.voice.trim().length > 0
+        ? audioRecord.voice.trim()
         : DEFAULT_AUDIO_VOICE
     )
-    setAudioSpeed(normalizeAudioSpeed(prefsRecord.audio_speed))
-    setAudioTargetMinutes(normalizeAudioTargetMinutes(prefsRecord.target_audio_minutes))
+    setAudioSpeed(normalizeAudioSpeed(audioRecord.speed))
+    setAudioTargetMinutes(normalizeAudioTargetMinutes(audioRecord.target_minutes))
     const normalizedBackgroundUri =
-      typeof prefsRecord.background_audio_uri === "string"
-        ? prefsRecord.background_audio_uri.trim()
+      typeof audioRecord.background_audio_uri === "string"
+        ? audioRecord.background_audio_uri.trim()
         : ""
     setAudioBackgroundUri(normalizedBackgroundUri)
-    const voiceMapNormalization = normalizeAudioVoiceMap(prefsRecord.voice_map)
+    const voiceMapNormalization = normalizeAudioVoiceMap(audioRecord.voice_map)
     setAudioVoiceMapText(
       voiceMapNormalization.value
         ? JSON.stringify(voiceMapNormalization.value, null, 2)
@@ -446,35 +451,15 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
     setShowAdvancedAudioOptions(
       normalizedBackgroundUri.length > 0 || Boolean(voiceMapNormalization.value)
     )
-  }
+  }, [])
 
   const buildOutputPrefs = (
     options?: { audioVoiceMap?: Record<string, string> | null; forPreset?: boolean }
-  ): JobOutputPrefs | undefined => {
-    const basePrefs = isRecord(outputPrefsBase) ? cloneRecord(outputPrefsBase) : {}
-
-    const templatePrefs = isRecord(basePrefs.template) ? { ...basePrefs.template } : {}
-    const normalizedTemplateName = outputTemplateName?.trim() || ""
-    if (normalizedTemplateName) {
-      templatePrefs.default_name = normalizedTemplateName
-    } else {
-      delete templatePrefs.default_name
-    }
-    if (typeof outputTemplateVersion === "number" && outputTemplateVersion > 0) {
-      templatePrefs.default_version = Math.floor(outputTemplateVersion)
-    } else {
-      delete templatePrefs.default_version
-    }
-    if (isOutputFormat(outputTemplateFormat)) {
-      templatePrefs.default_format = outputTemplateFormat
-    } else {
-      delete templatePrefs.default_format
-    }
-    if (Object.keys(templatePrefs).length > 0) {
-      basePrefs.template = templatePrefs
-    } else {
-      delete basePrefs.template
-    }
+  ): JobOutputPrefs => {
+    const normalizedBase = normalizeLegacyBriefingContract(outputPrefsBase, {
+      scheduled: Boolean(schedule?.trim()) || Boolean(options?.forPreset)
+    })
+    const basePrefs = cloneRecord(normalizedBase.outputPrefs) as JobOutputPrefs
 
     const retentionPrefs = isRecord(basePrefs.retention) ? { ...basePrefs.retention } : {}
     const defaultRetentionSeconds = durationToSeconds(retentionDefaultDuration)
@@ -495,7 +480,10 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
       delete basePrefs.retention
     }
 
-    const deliveriesPrefs = isRecord(basePrefs.deliveries) ? { ...basePrefs.deliveries } : {}
+    const contract = isRecord(basePrefs.briefing_pipeline)
+      ? cloneRecord(basePrefs.briefing_pipeline)
+      : {}
+    const deliveriesPrefs = isRecord(contract.delivery) ? { ...contract.delivery } : {}
 
     const normalizedEmailSubject = deliveryEmailSubject.trim()
     const shouldPersistEmail = (
@@ -511,8 +499,22 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
       } else {
         delete emailPrefs.recipients
       }
-      emailPrefs.attach_file = deliveryEmailAttachFile
-      emailPrefs.body_format = deliveryEmailBodyFormat
+      if (
+        Object.prototype.hasOwnProperty.call(emailPrefs, "attach_file") ||
+        !deliveryEmailAttachFile
+      ) {
+        emailPrefs.attach_file = deliveryEmailAttachFile
+      } else {
+        delete emailPrefs.attach_file
+      }
+      if (
+        Object.prototype.hasOwnProperty.call(emailPrefs, "body_format") ||
+        deliveryEmailBodyFormat !== "auto"
+      ) {
+        emailPrefs.body_format = deliveryEmailBodyFormat
+      } else {
+        delete emailPrefs.body_format
+      }
       if (normalizedEmailSubject.length > 0) {
         emailPrefs.subject = normalizedEmailSubject
       } else {
@@ -520,7 +522,11 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
       }
       deliveriesPrefs.email = emailPrefs
     } else {
-      delete deliveriesPrefs.email
+      deliveriesPrefs.email = {
+        ...recordOrEmpty(deliveriesPrefs.email),
+        enabled: false,
+        recipients: []
+      }
     }
 
     const shouldPersistChatbook = (
@@ -549,83 +555,72 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
       }
       deliveriesPrefs.chatbook = chatbookPrefs
     } else {
-      delete deliveriesPrefs.chatbook
+      deliveriesPrefs.chatbook = {
+        ...recordOrEmpty(deliveriesPrefs.chatbook),
+        enabled: false
+      }
     }
 
-    if (Object.keys(deliveriesPrefs).length > 0) {
-      basePrefs.deliveries = deliveriesPrefs
-    } else {
-      delete basePrefs.deliveries
+    deliveriesPrefs.reports = {
+      ...recordOrEmpty(deliveriesPrefs.reports),
+      enabled: true
     }
+    contract.delivery = deliveriesPrefs
 
+    const audioPrefs = isRecord(contract.audio) ? { ...contract.audio } : {}
     if (audioBriefingEnabled) {
-      basePrefs.generate_audio = true
-      basePrefs.audio_voice = audioVoice.trim() || DEFAULT_AUDIO_VOICE
-      basePrefs.audio_speed = normalizeAudioSpeed(audioSpeed)
-      basePrefs.target_audio_minutes = normalizeAudioTargetMinutes(audioTargetMinutes)
-      if (audioBackgroundUri.trim().length > 0) {
-        basePrefs.background_audio_uri = audioBackgroundUri.trim()
+      audioPrefs.enabled = true
+      audioPrefs.voice = audioVoice.trim() || DEFAULT_AUDIO_VOICE
+      const normalizedSpeed = normalizeAudioSpeed(audioSpeed)
+      if (
+        Object.prototype.hasOwnProperty.call(audioPrefs, "speed") ||
+        normalizedSpeed !== DEFAULT_AUDIO_SPEED
+      ) {
+        audioPrefs.speed = normalizedSpeed
       } else {
-        delete basePrefs.background_audio_uri
+        delete audioPrefs.speed
+      }
+      audioPrefs.target_minutes = normalizeAudioTargetMinutes(audioTargetMinutes)
+      if (audioBackgroundUri.trim().length > 0) {
+        audioPrefs.background_audio_uri = audioBackgroundUri.trim()
+      } else {
+        delete audioPrefs.background_audio_uri
       }
       if (options?.audioVoiceMap && Object.keys(options.audioVoiceMap).length > 0) {
-        basePrefs.voice_map = options.audioVoiceMap
+        audioPrefs.voice_map = options.audioVoiceMap
       } else {
-        delete basePrefs.voice_map
+        delete audioPrefs.voice_map
       }
     } else {
-      delete basePrefs.audio_voice
-      delete basePrefs.audio_speed
-      delete basePrefs.target_audio_minutes
-      delete basePrefs.background_audio_uri
-      delete basePrefs.voice_map
-      if ("generate_audio" in basePrefs) {
-        basePrefs.generate_audio = false
-      }
+      audioPrefs.enabled = false
+      delete audioPrefs.voice
+      delete audioPrefs.speed
+      delete audioPrefs.target_minutes
+      delete audioPrefs.background_audio_uri
+      delete audioPrefs.voice_map
     }
+    contract.audio = audioPrefs
+    basePrefs.briefing_pipeline = contract as unknown as JobOutputPrefs["briefing_pipeline"]
 
-    const hasRecurringSchedule = Boolean(schedule && schedule.trim().length > 0)
-    const existingAutoOutput = isRecord(basePrefs.auto_output)
-      ? { ...basePrefs.auto_output }
-      : {}
-    const shouldAutoOutput = options?.forPreset
-      ? createScheduledOutput
-      : (hasRecurringSchedule && createScheduledOutput)
-    existingAutoOutput.enabled = shouldAutoOutput
-    if (shouldAutoOutput) {
-      existingAutoOutput.type =
-        typeof existingAutoOutput.type === "string" && existingAutoOutput.type.trim().length > 0
-          ? existingAutoOutput.type.trim()
-          : "briefing_markdown"
-      if (isOutputFormat(outputTemplateFormat)) {
-        existingAutoOutput.format = outputTemplateFormat
-      } else {
-        delete existingAutoOutput.format
-      }
-      if (normalizedTemplateName) {
-        existingAutoOutput.template_name = normalizedTemplateName
-      } else {
-        delete existingAutoOutput.template_name
-      }
-      if (typeof outputTemplateVersion === "number" && outputTemplateVersion > 0) {
-        existingAutoOutput.template_version = Math.floor(outputTemplateVersion)
-      } else {
-        delete existingAutoOutput.template_version
-      }
-      basePrefs.auto_output = existingAutoOutput
-    } else if (isEditing && isRecord(basePrefs.auto_output)) {
-      basePrefs.auto_output = existingAutoOutput
-    } else {
-      delete basePrefs.auto_output
-    }
-
-    if (Object.keys(basePrefs).length > 0) {
-      return basePrefs as JobOutputPrefs
-    }
-    if (isEditing) {
-      return {}
-    }
-    return undefined
+    return toCanonicalWatchlistJobPayload({
+      monitorName: String(form.getFieldValue("name") || initialValues?.name || ""),
+      scope,
+      active: form.getFieldValue("active") !== false,
+      scheduleExpr: schedule,
+      timezone,
+      templateName: outputTemplateName?.trim() || "",
+      templateFormat: outputTemplateFormat,
+      templateVersion: outputTemplateVersion || undefined,
+      audioEnabled: audioBriefingEnabled,
+      audioVoice: audioBriefingEnabled ? audioVoice : undefined,
+      targetAudioMinutes: audioBriefingEnabled ? audioTargetMinutes : undefined,
+      voiceMap: options?.audioVoiceMap || undefined,
+      emailEnabled: deliveryEmailEnabled,
+      emailRecipients: deliveryEmailRecipients,
+      chatbookEnabled: deliveryChatbookEnabled,
+      chatbookTitle: deliveryChatbookTitle,
+      preservedOutputPrefs: basePrefs
+    }).output_prefs || {}
   }
 
   const applyPreset = (presetId: OutputPresetId | undefined) => {
@@ -637,7 +632,6 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
     setOutputTemplateFormat(preset.format)
     setDeliveryEmailEnabled(preset.emailEnabled)
     setDeliveryEmailBodyFormat(preset.emailBodyFormat)
-    setCreateScheduledOutput(preset.createScheduledOutput)
     setOutputPreset(presetId)
     message.success(t("watchlists:jobs.form.presetApplied", "Preset applied"))
   }
@@ -803,7 +797,10 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
         baseOutputPrefs: outputPrefsBase,
         presetOutputPrefs: selectedSavedOutputPreset.output_prefs
       })
-      applyOutputPrefsState(outputPrefs, { updateBase: true })
+      applyOutputPrefsState(outputPrefs, {
+        updateBase: true,
+        scheduled: Boolean(schedule?.trim())
+      })
       setOutputPresetName(selectedSavedOutputPreset.name)
       message.success(t("watchlists:jobs.form.outputPresetApplied", "Saved preset applied"))
     } catch (err) {
@@ -975,7 +972,10 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
         setOutputPreset(undefined)
         setSelectedOutputPresetId(undefined)
         setOutputPresetName("")
-        applyOutputPrefsState(initialValues.output_prefs, { updateBase: true })
+        applyOutputPrefsState(initialValues.output_prefs, {
+          updateBase: true,
+          scheduled: Boolean(initialValues.schedule_expr?.trim())
+        })
       } else {
         form.resetFields()
         form.setFieldsValue({
@@ -998,10 +998,10 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
         setOutputPreset(undefined)
         setSelectedOutputPresetId(undefined)
         setOutputPresetName("")
-        applyOutputPrefsState(null, { updateBase: true })
+        applyOutputPrefsState(null, { updateBase: true, scheduled: false })
       }
     }
-  }, [open, initialValues, form])
+  }, [open, initialValues, form, applyOutputPrefsState])
 
   useEffect(() => {
     return () => {
@@ -1296,20 +1296,31 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
 
       const outputPrefs = buildOutputPrefs({ audioVoiceMap: parsedAudioVoiceMap })
 
-      const jobData: WatchlistJobCreate = {
-        name: values.name,
+      const jobData: WatchlistJobCreate = toCanonicalWatchlistJobPayload({
+        monitorName: values.name,
         description: values.description || undefined,
         active: values.active,
         scope,
-        schedule_expr: schedule || undefined,
-        timezone: timezone || undefined,
-        output_prefs: isEditing ? (outputPrefs || {}) : outputPrefs,
-        job_filters: filters.length > 0 ? { filters } : undefined,
-        watchlist_id: watchlistId ?? undefined
-      }
+        scheduleExpr: schedule,
+        timezone,
+        templateName: outputTemplateName?.trim() || "",
+        templateFormat: outputTemplateFormat,
+        templateVersion: outputTemplateVersion || undefined,
+        audioEnabled: audioBriefingEnabled,
+        audioVoice: audioBriefingEnabled ? audioVoice : undefined,
+        targetAudioMinutes: audioBriefingEnabled ? audioTargetMinutes : undefined,
+        voiceMap: parsedAudioVoiceMap || undefined,
+        emailEnabled: deliveryEmailEnabled,
+        emailRecipients: deliveryEmailRecipients,
+        chatbookEnabled: deliveryChatbookEnabled,
+        chatbookTitle: deliveryChatbookTitle,
+        preservedOutputPrefs: outputPrefs,
+        jobFilters: filters.length > 0 ? { filters } : undefined,
+        watchlistId
+      })
 
       const confirmationItems: string[] = []
-      if (createScheduledOutput && deliveryEmailEnabled) {
+      if (deliveryEmailEnabled) {
         confirmationItems.push(
           t(
             "watchlists:jobs.form.confirmationEmail",
@@ -1321,7 +1332,7 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
           )
         )
       }
-      if (createScheduledOutput && deliveryChatbookEnabled) {
+      if (deliveryChatbookEnabled) {
         confirmationItems.push(
           t(
             "watchlists:jobs.form.confirmationChatbook",
@@ -1469,7 +1480,6 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
     filters.length > 0 ||
     retentionDefaultDuration.value !== null ||
     retentionTemporaryDuration.value !== null ||
-    createScheduledOutput ||
     deliveryEmailEnabled ||
     deliveryEmailRecipients.length > 0 ||
     deliveryEmailSubject.trim().length > 0 ||
@@ -1567,21 +1577,18 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
     ? t("watchlists:jobs.form.confidenceNeedsAttention", "Needs attention")
     : t("watchlists:jobs.form.confidenceReady", "Ready to save")
   const confidenceStatusColor = confidenceHasBlockingRisk ? "orange" : "green"
-  const outputScheduleSummaryText = createScheduledOutput
-    ? hasScheduleSelection
-      ? t(
-        "watchlists:jobs.form.liveSummary.scheduledOutput",
-        "Create a report after each scheduled run"
-      )
-      : t(
-        "watchlists:jobs.form.liveSummary.scheduledOutputNeedsSchedule",
-        "Add a schedule to create reports automatically"
-      )
+  const outputScheduleSummaryText = hasScheduleSelection
+    ? t(
+      "watchlists:jobs.form.liveSummary.scheduledOutput",
+      "Save a text report after each scheduled run"
+    )
     : t(
       "watchlists:jobs.form.liveSummary.manualOutput",
-      "Manual/test reports only"
+      "Save a text report after each manual or test run"
     )
-  const deliverySummaryParts: string[] = []
+  const deliverySummaryParts: string[] = [
+    t("watchlists:jobs.form.liveSummary.deliveryReportsOnly", "Reports (required)")
+  ]
   if (deliveryEmailEnabled) {
     deliverySummaryParts.push(
       t(
@@ -1599,14 +1606,11 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
       t("watchlists:jobs.form.liveSummary.deliveryChatbook", "Save to Chatbook")
     )
   }
-  const deliverySummaryText =
-    deliverySummaryParts.length > 0
-      ? deliverySummaryParts.join(" + ")
-      : t("watchlists:jobs.form.liveSummary.deliveryReportsOnly", "Reports tab only")
+  const deliverySummaryText = deliverySummaryParts.join(" + ")
   const audioSummaryText = audioBriefingEnabled
     ? t(
       "watchlists:jobs.form.liveSummary.audioEnabled",
-      "Audio briefing requested ({{voice}}, {{minutes}} min target)",
+      "Audio briefing targeting {{minutes}} minutes ({{voice}})",
       {
         voice: audioVoice,
         minutes: audioTargetMinutes
@@ -1916,29 +1920,26 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
             <div className="flex items-center justify-between gap-3">
               <div>
                 <div className="text-sm font-medium">
-                  {t("watchlists:jobs.form.createScheduledOutput", "Scheduled reports")}
+                  {t("watchlists:jobs.form.createScheduledOutput", "Reports storage")}
                 </div>
-                <div className="text-xs text-text-muted">
+                <div id="job-form-report-output-description" className="text-xs text-text-muted">
                   {t(
                     "watchlists:jobs.form.createScheduledOutputHint",
-                    "Create a report after each scheduled run. Leave off for manual/test reports only."
+                    "Every briefing includes a required text report saved in Reports."
                   )}
                 </div>
               </div>
               <Switch
-                checked={createScheduledOutput}
-                onChange={setCreateScheduledOutput}
+                checked
+                disabled
+                aria-label={t(
+                  "watchlists:jobs.form.createScheduledOutput",
+                  "Reports storage"
+                )}
+                aria-describedby="job-form-report-output-description"
                 data-testid="job-form-create-scheduled-output-switch"
               />
             </div>
-            {createScheduledOutput && !hasScheduleSelection && (
-              <div className="mt-2 text-xs text-text-muted">
-                {t(
-                  "watchlists:jobs.form.createScheduledOutputNeedsSchedule",
-                  "Add a schedule before saving if this monitor should generate recurring reports."
-                )}
-              </div>
-            )}
           </div>
 
           <div className="rounded-lg border border-border p-3">
@@ -2096,10 +2097,20 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
 
           <div className="rounded-lg border border-border p-3">
             <div className="mb-3 flex items-center justify-between gap-3">
-              <div className="text-sm font-medium">
+              <div>
+                <div id="job-form-email-delivery-label" className="text-sm font-medium">
                 {t("watchlists:jobs.form.emailDelivery", "Email delivery")}
+                </div>
+                <div id="job-form-email-delivery-description" className="text-xs text-text-muted">
+                  {t("watchlists:accessibilityHardening.delivery.email", "Send each report to the configured recipients when enabled.")}
+                </div>
               </div>
-              <Switch checked={deliveryEmailEnabled} onChange={setDeliveryEmailEnabled} />
+              <Switch
+                checked={deliveryEmailEnabled}
+                onChange={setDeliveryEmailEnabled}
+                aria-labelledby="job-form-email-delivery-label"
+                aria-describedby="job-form-email-delivery-description"
+              />
             </div>
             <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
               <div>
@@ -2154,20 +2165,31 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
               </div>
             </div>
             <div className="mt-3 flex items-center justify-between rounded-md bg-surface px-3 py-2 text-sm">
-              <span>{t("watchlists:jobs.form.emailAttachFile", "Attach output file")}</span>
+              <span id="job-form-email-attach-label">{t("watchlists:jobs.form.emailAttachFile", "Attach output file")}</span>
               <Switch
                 checked={deliveryEmailAttachFile}
                 onChange={setDeliveryEmailAttachFile}
+                aria-labelledby="job-form-email-attach-label"
               />
             </div>
               </div>
 
               <div className="rounded-lg border border-border p-3">
             <div className="mb-3 flex items-center justify-between gap-3">
-              <div className="text-sm font-medium">
+              <div>
+                <div id="job-form-chatbook-delivery-label" className="text-sm font-medium">
                 {t("watchlists:jobs.form.chatbookDelivery", "Chatbook delivery")}
+                </div>
+                <div id="job-form-chatbook-delivery-description" className="text-xs text-text-muted">
+                  {t("watchlists:accessibilityHardening.delivery.chatbook", "Publish each report to Chatbook when enabled.")}
+                </div>
               </div>
-              <Switch checked={deliveryChatbookEnabled} onChange={setDeliveryChatbookEnabled} />
+              <Switch
+                checked={deliveryChatbookEnabled}
+                onChange={setDeliveryChatbookEnabled}
+                aria-labelledby="job-form-chatbook-delivery-label"
+                aria-describedby="job-form-chatbook-delivery-description"
+              />
             </div>
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
               <Input
@@ -2201,12 +2223,14 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
 
           <div className="rounded-lg border border-border p-3">
             <div className="mb-3 flex items-center justify-between gap-3">
-              <div className="text-sm font-medium">
+              <div id="job-form-audio-label" className="text-sm font-medium">
                 {t("watchlists:jobs.form.audioBriefing", "Audio briefing")}
               </div>
               <Switch
                 checked={audioBriefingEnabled}
                 onChange={handleAudioBriefingToggle}
+                aria-labelledby="job-form-audio-label"
+                aria-describedby="job-form-audio-description"
                 data-testid="job-form-audio-enabled-switch"
               />
             </div>
@@ -2261,7 +2285,7 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
                 />
               </div>
             </div>
-            <div className="mt-2 text-xs text-text-muted">
+            <div id="job-form-audio-description" className="mt-2 text-xs text-text-muted">
               {t(
                 "watchlists:jobs.form.audioHint",
                 "Enable spoken briefings alongside text outputs. Keep defaults for fastest setup."

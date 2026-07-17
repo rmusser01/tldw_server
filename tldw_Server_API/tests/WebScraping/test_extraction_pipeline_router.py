@@ -7,6 +7,17 @@ from tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib import (
 from tldw_Server_API.app.core.Web_Scraping.scraper_router import ScraperRouter
 
 
+def test_default_extraction_strategy_order_includes_llm_after_regex():
+    assert DEFAULT_EXTRACTION_STRATEGY_ORDER == [
+        "jsonld",
+        "schema",
+        "regex",
+        "llm",
+        "cluster",
+        "trafilatura",
+    ]
+
+
 def test_pipeline_trace_default_order(monkeypatch):
     from tldw_Server_API.app.core.Chat import chat_service
 
@@ -38,12 +49,107 @@ def test_pipeline_trace_default_order(monkeypatch):
     assert [entry["strategy"] for entry in result["extraction_trace"]] == expected[:stop_at]
 
 
+def test_default_pipeline_omits_only_llm_when_disallowed(monkeypatch):
+    from tldw_Server_API.app.core.Chat import chat_service
+
+    llm_calls = []
+
+    def _fake_llm_call(**kwargs):
+        llm_calls.append(kwargs)
+        return {"choices": [{"message": {"content": ""}}], "usage": {}}
+
+    monkeypatch.setattr(chat_service, "perform_chat_api_call", _fake_llm_call)
+
+    result = extract_article_with_pipeline(
+        """
+        <html>
+          <body>
+            <p>Plain article content without structured metadata.</p>
+            <p>Another paragraph for fallback extraction.</p>
+          </body>
+        </html>
+        """,
+        "https://example.com/plain",
+        allow_llm_extraction=False,
+    )
+
+    assert result["extraction_successful"] is True
+    assert llm_calls == []
+    assert result["extraction_strategy_order"] == [
+        strategy for strategy in DEFAULT_EXTRACTION_STRATEGY_ORDER if strategy != "llm"
+    ]
+    assert all(entry["strategy"] != "llm" for entry in result["extraction_trace"])
+
+
+def test_default_pipeline_preserves_llm_when_allowed(monkeypatch):
+    from tldw_Server_API.app.core.Chat import chat_service
+
+    monkeypatch.setattr(
+        chat_service,
+        "perform_chat_api_call",
+        lambda **_kwargs: {"choices": [{"message": {"content": ""}}], "usage": {}},
+    )
+
+    result = extract_article_with_pipeline(
+        "<html><body><p>Plain article content.</p></body></html>",
+        "https://example.com/default-allowed",
+        allow_llm_extraction=True,
+    )
+
+    assert result["extraction_strategy_order"] == DEFAULT_EXTRACTION_STRATEGY_ORDER
+
+
+@pytest.mark.parametrize("allow_llm_extraction", [False, True])
+def test_custom_pipeline_filters_only_llm_when_disallowed(
+    monkeypatch,
+    allow_llm_extraction,
+):
+    from tldw_Server_API.app.core.Chat import chat_service
+
+    llm_calls = []
+
+    def fake_llm_call(**kwargs):
+        llm_calls.append(kwargs)
+        return {"choices": [{"message": {"content": ""}}], "usage": {}}
+
+    monkeypatch.setattr(
+        chat_service,
+        "perform_chat_api_call",
+        fake_llm_call,
+    )
+    custom_order = ["llm", "trafilatura"]
+
+    def fake_extractor(_html: str, url: str):
+        return {
+            "url": url,
+            "title": "Test",
+            "author": "N/A",
+            "date": "N/A",
+            "content": "Fallback content",
+            "extraction_successful": True,
+        }
+
+    result = extract_article_with_pipeline(
+        "<html><body><p>Custom ordered article content.</p></body></html>",
+        "https://example.com/custom-order",
+        strategy_order=custom_order,
+        allow_llm_extraction=allow_llm_extraction,
+        fallback_extractor=fake_extractor,
+    )
+
+    expected_order = custom_order if allow_llm_extraction else ["trafilatura"]
+    expected_trace = expected_order
+    assert len(llm_calls) == (1 if allow_llm_extraction else 0)
+    assert [entry["strategy"] for entry in result["extraction_trace"]] == expected_trace
+    assert result["extraction_strategy_order"] == expected_order
+
+
 def test_pipeline_strategy_order_override_from_router():
     rules = ScraperRouter.validate_rules(
         {
             "domains": {
                 "example.com": {
-                    "strategy_order": ["schema", "trafilatura"],
+                    "strategy_order": ["schema", "llm", "trafilatura"],
                 }
             }
         }
@@ -51,7 +157,7 @@ def test_pipeline_strategy_order_override_from_router():
     router = ScraperRouter(rules)
     plan = router.resolve("https://example.com/page")
 
-    assert plan.strategy_order == ["schema", "trafilatura"]
+    assert plan.strategy_order == ["schema", "llm", "trafilatura"]
 
     def fake_extractor(html: str, url: str):  # noqa: ANN001
         return {
@@ -68,8 +174,10 @@ def test_pipeline_strategy_order_override_from_router():
         "https://example.com/page",
         strategy_order=plan.strategy_order,
         fallback_extractor=fake_extractor,
+        allow_llm_extraction=False,
     )
     assert [entry["strategy"] for entry in result["extraction_trace"]] == ["schema", "trafilatura"]
+    assert result["extraction_strategy_order"] == ["schema", "trafilatura"]
 
 
 def test_pipeline_handler_stage_short_circuits():

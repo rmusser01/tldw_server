@@ -9,7 +9,9 @@ on:
       - README.md
       - Docs/**
       - Helper_Scripts/docs/**
+      - Helper_Scripts/refresh_docs_published.sh
       - tldw_Server_API/tests/Docs/**
+      - .github/workflows/mkdocs.yml
       - .github/workflows/onboarding-docs-gate.yml
       - .github/workflows/onboarding-docs-smoke-nightly.yml
   push:
@@ -20,7 +22,9 @@ on:
       - README.md
       - Docs/**
       - Helper_Scripts/docs/**
+      - Helper_Scripts/refresh_docs_published.sh
       - tldw_Server_API/tests/Docs/**
+      - .github/workflows/mkdocs.yml
       - .github/workflows/onboarding-docs-gate.yml
       - .github/workflows/onboarding-docs-smoke-nightly.yml
   workflow_dispatch:
@@ -70,6 +74,10 @@ jobs:
           chmod +x Helper_Scripts/refresh_docs_published.sh || true
           bash Helper_Scripts/refresh_docs_published.sh
 
+      - name: Check public/private docs boundary
+        run: |
+          python Helper_Scripts/docs/check_public_private_boundary.py
+
       - name: Onboarding command boundary check
         run: |
           python Helper_Scripts/docs/check_onboarding_command_boundaries.py
@@ -86,4 +94,4 @@ jobs:
 
       - name: MkDocs build
         run: |
-          mkdocs build -f Docs/mkdocs.yml
+          mkdocs build --strict -f Docs/mkdocs.yml

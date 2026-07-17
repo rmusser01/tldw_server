@@ -3373,5 +3373,74 @@
   },
   "dataManagement_navTitle": {
     "message": "مدیریت داده"
+  },
+  "navigation_setupRecovery": {
+    "message": "راه‌اندازی و بازیابی"
+  },
+  "navigation_preferencesWorkflow": {
+    "message": "ترجیحات و گردش کار"
+  },
+  "navigation_dataAdmin": {
+    "message": "داده‌ها و مدیریت"
+  },
+  "preferencesSettings_navTitle": {
+    "message": "ترجیحات"
+  },
+  "preferencesSettings_title": {
+    "message": "ترجیحات عمومی"
+  },
+  "setupRecovery_title": {
+    "message": "راه‌اندازی و بازیابی"
+  },
+  "quickIngestSettings_ocrDefaults_title": {
+    "message": "پیش‌فرض‌های OCR"
+  },
+  "quickIngestSettings_ocrDefaults_description": {
+    "message": "در جریان‌های ورود که متن را از تصاویر یا اسناد اسکن‌شده استخراج می‌کنند استفاده می‌شود."
+  },
+  "sidepanelSettings_shortcuts_title": {
+    "message": "میانبرهای تنظیمات"
+  },
+  "sidepanelSettings_shortcuts_description": {
+    "message": "به صفحه کامل تنظیماتی بروید که مالک این تغییر است."
+  },
+  "sidepanelSettings_shortcuts_setupRecovery_label": {
+    "message": "راه‌اندازی و بازیابی"
+  },
+  "sidepanelSettings_shortcuts_setupRecovery_description": {
+    "message": "اتصال، احراز هویت، کلیدهای ارائه‌دهنده، مدل‌ها و عیب‌یابی."
+  },
+  "sidepanelSettings_shortcuts_preferences_label": {
+    "message": "ترجیحات"
+  },
+  "sidepanelSettings_shortcuts_preferences_description": {
+    "message": "زبان، اعلان‌ها، شخصیت، آموزش‌ها و جستجوی وب."
+  },
+  "sidepanelSettings_shortcuts_ui_label": {
+    "message": "سفارشی‌سازی رابط کاربری"
+  },
+  "sidepanelSettings_shortcuts_ui_description": {
+    "message": "پوسته، میانبرها، پیش‌فرض‌های نمایش و رفتار بصری."
+  },
+  "sidepanelSettings_shortcuts_dataAdmin_label": {
+    "message": "داده‌ها و مدیریت"
+  },
+  "sidepanelSettings_shortcuts_dataAdmin_description": {
+    "message": "مدیریت داده، نظارت، ارزیابی‌ها و ابزارهای مدیریتی."
+  },
+  "sidepanelSettings_shortcuts_serverAuth_label": {
+    "message": "سرور و احراز هویت"
+  },
+  "sidepanelSettings_shortcuts_serverAuth_description": {
+    "message": "نشانی سرور یا کلید API را تغییر دهید."
+  },
+  "sidepanelSettings_shortcuts_health_label": {
+    "message": "عیب‌یابی کامل"
+  },
+  "sidepanelSettings_shortcuts_health_description": {
+    "message": "بررسی‌های دقیق سرور و زیرسیستم‌ها را باز کنید."
+  },
+  "sidepanelSettings_local_title": {
+    "message": "رفتار پنل کناری"
   }
 }

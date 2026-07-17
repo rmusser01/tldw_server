@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import os
 from collections.abc import AsyncIterator, Iterable
 from typing import Any, Callable
 
@@ -22,6 +21,9 @@ from tldw_Server_API.app.core.http_client import (
 from tldw_Server_API.app.core.http_client import (
     fetch as _hc_fetch,
 )
+from tldw_Server_API.app.core.http_client import (
+    stream_response as _hc_stream_response,
+)
 from tldw_Server_API.app.core.LLM_Calls.capability_registry import validate_payload
 from tldw_Server_API.app.core.LLM_Calls.error_utils import (
     get_http_error_text,
@@ -37,6 +39,9 @@ from tldw_Server_API.app.core.LLM_Calls.payload_utils import (
     merge_extra_body,
     merge_extra_headers,
 )
+from tldw_Server_API.app.core.LLM_Calls.provider_config_resolution import (
+    resolve_trusted_provider_endpoint,
+)
 from tldw_Server_API.app.core.LLM_Calls.sse import (
     finalize_stream,
     is_done_line,
@@ -46,6 +51,7 @@ from tldw_Server_API.app.core.LLM_Calls.sse import (
     sse_done,
 )
 from tldw_Server_API.app.core.LLM_Calls.streaming import wrap_sync_stream
+from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
 from tldw_Server_API.app.core.Utils.Utils import logging
 
 from .base import ChatProvider, apply_tool_choice
@@ -152,6 +158,8 @@ def _chat_with_openai_compatible_local_server(
         filter_unknown_params: bool = False,
         http_client_factory: Callable[[int], Any] | None = None,
         http_fetcher: Callable[..., Any] | None = None,  # Mirrors signature of _hc_fetch(method=..., url=..., ...)
+        http_streamer: Callable[..., Any] | None = None,
+        configured_endpoint_scope: ConfiguredEndpointScope | None = None,
         extra_headers: dict[str, str] | None = None,
         extra_body: dict[str, Any] | None = None,
         app_config: dict[str, Any] | None = None,
@@ -289,8 +297,7 @@ def _chat_with_openai_compatible_local_server(
     logging.debug(f"{provider_name}: Payload metadata: {payload_metadata}")
 
 
-    is_test = bool(os.getenv("PYTEST_CURRENT_TEST"))
-    # Use centralized client (egress/TLS enforcement); allow test overrides via factory.
+    # All requests, including tests, use the checked central transport.
     session_factory = http_client_factory or _hc_create_client
     try:
         session = session_factory(timeout=timeout)
@@ -305,7 +312,16 @@ def _chat_with_openai_compatible_local_server(
                 response_obj = None
                 try:
                     try:
-                        with session.stream("POST", full_api_url, headers=headers, json=payload, timeout=timeout + 60) as response:
+                        stream_impl = http_streamer or _hc_stream_response
+                        with stream_impl(
+                            method="POST",
+                            url=full_api_url,
+                            configured_endpoint=configured_endpoint_scope,
+                            client=session,
+                            headers=headers,
+                            json=payload,
+                            timeout=timeout + 60,
+                        ) as response:
                             response_obj = response
                             response.raise_for_status()
                             logging.debug(f"{provider_name}: Streaming response received.")
@@ -379,38 +395,28 @@ def _chat_with_openai_compatible_local_server(
                         session.close()
             return stream_generator()
         else:
-            if is_test:
-                response = session.post(full_api_url, headers=headers, json=payload, timeout=timeout)
-                try:
-                    response.raise_for_status()
-                    data = response.json()
-                    logging.debug(f"{provider_name}: Non-streaming request successful.")
-                    return attach_cache_diagnostics(data)
-                finally:
-                    with contextlib.suppress(_LOCAL_ADAPTERS_NONCRITICAL_EXCEPTIONS):
-                        response.close()
-            else:
-                # Centralized client fetch with retries for prod
-                attempts = max(1, int(api_retries)) + 1
-                base_ms = max(50, int(api_retry_delay * 1000))
-                policy = _HC_RetryPolicy(attempts=attempts, backoff_base_ms=base_ms)
-                fetch_impl = http_fetcher or _hc_fetch
-                response = fetch_impl(
-                    method="POST",
-                    url=full_api_url,
-                    headers=headers,
-                    json=payload,
-                    timeout=timeout,
-                    retry=policy,
-                )
-                try:
-                    response.raise_for_status()
-                    data = response.json()
-                    logging.debug(f"{provider_name}: Non-streaming request successful.")
-                    return attach_cache_diagnostics(data)
-                finally:
-                    with contextlib.suppress(_LOCAL_ADAPTERS_NONCRITICAL_EXCEPTIONS):
-                        response.close()
+            attempts = max(1, int(api_retries)) + 1
+            base_ms = max(50, int(api_retry_delay * 1000))
+            policy = _HC_RetryPolicy(attempts=attempts, backoff_base_ms=base_ms)
+            fetch_impl = http_fetcher or _hc_fetch
+            response = fetch_impl(
+                method="POST",
+                url=full_api_url,
+                configured_endpoint=configured_endpoint_scope,
+                client=session,
+                headers=headers,
+                json=payload,
+                timeout=timeout,
+                retry=policy,
+            )
+            try:
+                response.raise_for_status()
+                data = response.json()
+                logging.debug(f"{provider_name}: Non-streaming request successful.")
+                return attach_cache_diagnostics(data)
+            finally:
+                with contextlib.suppress(_LOCAL_ADAPTERS_NONCRITICAL_EXCEPTIONS):
+                    response.close()
     except _LOCAL_ADAPTERS_NONCRITICAL_EXCEPTIONS as e_http:
         if is_http_status_error(e_http):
             logging.error(
@@ -472,6 +478,9 @@ def _local_llm_request(
         app_config: dict[str, Any] | None = None,
         http_client_factory: Callable[[int], Any] | None = None,
         http_fetcher: Callable[..., Any] | None = None,
+        http_streamer: Callable[..., Any] | None = None,
+        configured_endpoint_base_url: str | None = None,
+        configured_endpoint_scope: ConfiguredEndpointScope | None = None,
         extra_headers: dict[str, str] | None = None,
         extra_body: dict[str, Any] | None = None,
 ):
@@ -490,7 +499,7 @@ def _local_llm_request(
     cfg_section = 'local_llm' # Generic section for "local-llm" type
     cfg = loaded_config_data.get(cfg_section, {})
 
-    api_base_url = cfg.get('api_ip', 'http://127.0.0.1:8080') # Default from config
+    api_base_url = configured_endpoint_base_url or cfg.get('api_ip', 'http://127.0.0.1:8080')
     api_key = cfg.get('api_key') # Local servers might not need a key
 
     current_model = model or cfg.get('model')
@@ -598,6 +607,8 @@ def _local_llm_request(
         filter_unknown_params=bool(cfg.get('strict_openai_compat', False)),
         http_client_factory=http_client_factory,
         http_fetcher=http_fetcher,
+        http_streamer=http_streamer,
+        configured_endpoint_scope=configured_endpoint_scope,
         extra_headers=extra_headers,
         extra_body=extra_body,
     )
@@ -632,6 +643,9 @@ def _llama_request(
         app_config: dict[str, Any] | None = None,
         http_client_factory: Callable[[int], Any] | None = None,
         http_fetcher: Callable[..., Any] | None = None,
+        http_streamer: Callable[..., Any] | None = None,
+        configured_endpoint_base_url: str | None = None,
+        configured_endpoint_scope: ConfiguredEndpointScope | None = None,
         extra_headers: dict[str, str] | None = None,
         extra_body: dict[str, Any] | None = None,
         inference_prefix_cache_intent: dict[str, Any] | None = None,
@@ -650,7 +664,7 @@ def _llama_request(
     loaded_config_data = app_config or load_settings()
     cfg = loaded_config_data.get('llama_api', {})
 
-    current_api_base_url = api_url or cfg.get('api_ip')
+    current_api_base_url = configured_endpoint_base_url or cfg.get('api_ip')
     if not current_api_base_url:
         raise ChatConfigurationError(provider="llama.cpp", message="Llama.cpp API URL/IP is required but not found in config or arguments.")
 
@@ -746,6 +760,8 @@ def _llama_request(
         filter_unknown_params=bool(cfg.get('strict_openai_compat', False)),
         http_client_factory=http_client_factory,
         http_fetcher=http_fetcher,
+        http_streamer=http_streamer,
+        configured_endpoint_scope=configured_endpoint_scope,
         extra_headers=extra_headers,
         extra_body=extra_body,
         app_config=loaded_config_data,
@@ -771,6 +787,11 @@ def _kobold_request(
         num_responses: int | None = None, # Mapped from 'n'
         seed: int | None = None, # Mapped from 'seed'
         app_config: dict[str, Any] | None = None,
+        http_client_factory: Callable[[int], Any] | None = None,
+        http_fetcher: Callable[..., Any] | None = None,
+        http_streamer: Callable[..., Any] | None = None,
+        configured_endpoint_base_url: str | None = None,
+        configured_endpoint_scope: ConfiguredEndpointScope | None = None,
         extra_headers: dict[str, str] | None = None,
         extra_body: dict[str, Any] | None = None,
 ):
@@ -781,7 +802,7 @@ def _kobold_request(
     cfg = loaded_config_data.get('kobold_api', {})
 
     current_api_key = api_key or cfg.get('api_key')
-    api_url = cfg.get('api_ip') # URL for /api/v1/generate
+    api_url = configured_endpoint_base_url or cfg.get('api_ip')
     # Kobold's native /api/v1/generate doesn't take 'model' in payload, it's server-fixed.
     # The 'model' param from chat_api_call is noted here if cfg needs it for other reasons.
     # cfg_model = model or cfg.get('model') # if needed for logic, not for payload
@@ -898,8 +919,20 @@ def _kobold_request(
 
     try:
         policy = _HC_RetryPolicy(attempts=max(1, int(api_retries)) + 1, backoff_base_ms=max(50, int(api_retry_delay * 1000)))
-        response = _hc_fetch(method="POST", url=api_url, headers=headers, json=payload, retry=policy)
-        response_data = response.json()
+        fetch_impl = http_fetcher or _hc_fetch
+        response = fetch_impl(
+            method="POST",
+            url=api_url,
+            configured_endpoint=configured_endpoint_scope,
+            headers=headers,
+            json=payload,
+            retry=policy,
+        )
+        try:
+            response.raise_for_status()
+            response_data = response.json()
+        finally:
+            response.close()
 
         if response_data and 'results' in response_data and len(response_data['results']) > 0:
             # Kobold /generate usually returns a list of results, each with 'text'
@@ -967,6 +1000,9 @@ def _ooba_request(
     app_config: dict[str, Any] | None = None,
     http_client_factory: Callable[[int], Any] | None = None,
     http_fetcher: Callable[..., Any] | None = None,
+    http_streamer: Callable[..., Any] | None = None,
+    configured_endpoint_base_url: str | None = None,
+    configured_endpoint_scope: ConfiguredEndpointScope | None = None,
     extra_headers: dict[str, str] | None = None,
     extra_body: dict[str, Any] | None = None,
 ):
@@ -984,7 +1020,7 @@ def _ooba_request(
     loaded_config_data = app_config or load_settings()
     cfg = loaded_config_data.get('ooba_api', {})
 
-    current_api_base_url = api_url or cfg.get('api_ip')
+    current_api_base_url = configured_endpoint_base_url or cfg.get('api_ip')
     if not current_api_base_url:
         raise ChatConfigurationError(provider="ooba", message="Oobabooga API URL/IP is required.")
 
@@ -1076,6 +1112,8 @@ def _ooba_request(
         filter_unknown_params=bool(cfg.get('strict_openai_compat', False)),
         http_client_factory=http_client_factory,
         http_fetcher=http_fetcher,
+        http_streamer=http_streamer,
+        configured_endpoint_scope=configured_endpoint_scope,
         extra_headers=extra_headers,
         extra_body=extra_body,
     )
@@ -1113,6 +1151,9 @@ def _tabbyapi_request(
     api_url: str | None = None,
     http_client_factory: Callable[[int], Any] | None = None,
     http_fetcher: Callable[..., Any] | None = None,
+    http_streamer: Callable[..., Any] | None = None,
+    configured_endpoint_base_url: str | None = None,
+    configured_endpoint_scope: ConfiguredEndpointScope | None = None,
     extra_headers: dict[str, str] | None = None,
     extra_body: dict[str, Any] | None = None,
 ):
@@ -1130,7 +1171,7 @@ def _tabbyapi_request(
     loaded_config_data = app_config or load_settings()
     cfg = loaded_config_data.get('tabby_api', {})
 
-    api_base_url = api_url or cfg.get('api_ip')
+    api_base_url = configured_endpoint_base_url or cfg.get('api_ip')
     if not api_base_url:
         raise ChatConfigurationError(provider="tabbyapi", message="TabbyAPI URL (api_ip) is required.")
 
@@ -1239,6 +1280,8 @@ def _tabbyapi_request(
         filter_unknown_params=bool(cfg.get('strict_openai_compat', False)),
         http_client_factory=http_client_factory,
         http_fetcher=http_fetcher,
+        http_streamer=http_streamer,
+        configured_endpoint_scope=configured_endpoint_scope,
         extra_headers=extra_headers,
         extra_body=extra_body,
         # Add other OpenAI params here if TabbyAPI supports them
@@ -1278,6 +1321,9 @@ def _vllm_request(
     app_config: dict[str, Any] | None = None,
     http_client_factory: Callable[[int], Any] | None = None,
     http_fetcher: Callable[..., Any] | None = None,
+    http_streamer: Callable[..., Any] | None = None,
+    configured_endpoint_base_url: str | None = None,
+    configured_endpoint_scope: ConfiguredEndpointScope | None = None,
     extra_headers: dict[str, str] | None = None,
     extra_body: dict[str, Any] | None = None,
     inference_prefix_cache_intent: dict[str, Any] | None = None,
@@ -1298,7 +1344,7 @@ def _vllm_request(
 
     # vllm_api_url is a specific argument for this function if it's set up in legacy dispatch
     # otherwise, it falls back to config.
-    current_api_base_url = vllm_api_url or cfg.get('api_ip')
+    current_api_base_url = configured_endpoint_base_url or cfg.get('api_ip')
     if not current_api_base_url:
         raise ChatConfigurationError(provider="vllm", message="vLLM API URL (api_ip / vllm_api_url) is required.")
 
@@ -1409,6 +1455,8 @@ def _vllm_request(
         filter_unknown_params=bool(cfg.get('strict_openai_compat', False)),
         http_client_factory=http_client_factory,
         http_fetcher=http_fetcher,
+        http_streamer=http_streamer,
+        configured_endpoint_scope=configured_endpoint_scope,
         extra_headers=extra_headers,
         extra_body=extra_body,
         app_config=loaded_config_data,
@@ -1449,6 +1497,9 @@ def _aphrodite_request(
     app_config: dict[str, Any] | None = None,
     http_client_factory: Callable[[int], Any] | None = None,
     http_fetcher: Callable[..., Any] | None = None,
+    http_streamer: Callable[..., Any] | None = None,
+    configured_endpoint_base_url: str | None = None,
+    configured_endpoint_scope: ConfiguredEndpointScope | None = None,
     extra_headers: dict[str, str] | None = None,
     extra_body: dict[str, Any] | None = None,
     # top_logprobs, tools, tool_choice not in Aphrodite's map currently
@@ -1466,7 +1517,7 @@ def _aphrodite_request(
     loaded_config_data = app_config or load_settings()
     cfg = loaded_config_data.get('aphrodite_api', {})
 
-    api_base_url = api_url or cfg.get('api_ip')
+    api_base_url = configured_endpoint_base_url or cfg.get('api_ip')
     if not api_base_url:
         raise ChatConfigurationError(provider="aphrodite", message="Aphrodite API URL (api_ip) is required.")
 
@@ -1570,6 +1621,8 @@ def _aphrodite_request(
         filter_unknown_params=bool(cfg.get('strict_openai_compat', False)),
         http_client_factory=http_client_factory,
         http_fetcher=http_fetcher,
+        http_streamer=http_streamer,
+        configured_endpoint_scope=configured_endpoint_scope,
         extra_headers=extra_headers,
         extra_body=extra_body,
     )
@@ -1613,6 +1666,9 @@ def _ollama_request(
     app_config: dict[str, Any] | None = None,
     http_client_factory: Callable[[int], Any] | None = None,
     http_fetcher: Callable[..., Any] | None = None,
+    http_streamer: Callable[..., Any] | None = None,
+    configured_endpoint_base_url: str | None = None,
+    configured_endpoint_scope: ConfiguredEndpointScope | None = None,
     extra_headers: dict[str, str] | None = None,
     extra_body: dict[str, Any] | None = None,
     # _chat_with_openai_compatible_local_server supports extra OpenAI fields (logit_bias, n, tools, etc.).
@@ -1634,7 +1690,7 @@ def _ollama_request(
     loaded_config_data = app_config or load_settings()
     cfg = loaded_config_data.get('ollama_api', {})
 
-    current_api_base_url = api_url or cfg.get('api_url') # api_url from args takes precedence
+    current_api_base_url = configured_endpoint_base_url or cfg.get('api_url')
     if not current_api_base_url:
         raise ChatConfigurationError(provider="ollama", message="Ollama API URL (api_url) is required.")
 
@@ -1756,6 +1812,8 @@ def _ollama_request(
         filter_unknown_params=bool(cfg.get('strict_openai_compat', False)),
         http_client_factory=http_client_factory,
         http_fetcher=http_fetcher,
+        http_streamer=http_streamer,
+        configured_endpoint_scope=configured_endpoint_scope,
         extra_headers=extra_headers,
         extra_body=extra_body,
     )
@@ -1768,8 +1826,25 @@ class _LocalAdapterBase(ChatProvider):
     supports_tools = False
     default_timeout_seconds = 120
     max_output_tokens_default: int | None = 4096
-    accepts_internal_http_hooks = True
     _handler = None
+    http_client_factory: Callable[..., Any] = staticmethod(_hc_create_client)
+    http_fetcher: Callable[..., Any] = staticmethod(_hc_fetch)
+    http_streamer: Callable[..., Any] = staticmethod(_hc_stream_response)
+
+    _RESERVED_CONTEXT_KEYS = frozenset(
+        {
+            "base_url",
+            "api_base_url",
+            "api_url",
+            "configured_endpoint_base_url",
+            "configured_endpoint_scope",
+            "endpoint_provenance",
+            "_endpoint_provenance",
+            "http_client_factory",
+            "http_fetcher",
+            "http_streamer",
+        }
+    )
 
     def capabilities(self) -> dict[str, Any]:
         return {
@@ -1779,13 +1854,13 @@ class _LocalAdapterBase(ChatProvider):
             "max_output_tokens_default": self.max_output_tokens_default,
         }
 
-    def _split_internal(self, request: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    def _sanitize_request(self, request: dict[str, Any]) -> dict[str, Any]:
+        """Discard all request-owned endpoint and transport context."""
         sanitized = dict(request or {})
-        internal: dict[str, Any] = {}
-        for key in ("http_client_factory", "http_fetcher"):
-            if key in sanitized:
-                internal[key] = sanitized.pop(key)
-        return sanitized, internal
+        for key in tuple(sanitized):
+            if key in self._RESERVED_CONTEXT_KEYS or key.endswith("_api_url"):
+                sanitized.pop(key, None)
+        return sanitized
 
     def _to_handler_args(self, request: dict[str, Any], *, streaming: bool | None) -> dict[str, Any]:
         raise NotImplementedError
@@ -1797,12 +1872,24 @@ class _LocalAdapterBase(ChatProvider):
         yield sse_done()
 
     def _call_handler(self, request: dict[str, Any], *, streaming: bool | None) -> Any:
-        sanitized, internal = self._split_internal(request or {})
+        sanitized = self._sanitize_request(request or {})
         sanitized = validate_payload(self.name, sanitized)
         args = self._to_handler_args(sanitized, streaming=streaming)
-        for key, value in internal.items():
-            if value is not None:
-                args[key] = value
+        endpoint = resolve_trusted_provider_endpoint(self.name)
+        if endpoint is None:
+            raise ChatConfigurationError(
+                provider=self.name,
+                message=f"{self.name} endpoint is not configured.",
+            )
+        args.update(
+            {
+                "configured_endpoint_base_url": endpoint.base_url,
+                "configured_endpoint_scope": endpoint.scope,
+                "http_client_factory": self.http_client_factory,
+                "http_fetcher": self.http_fetcher,
+                "http_streamer": self.http_streamer,
+            }
+        )
         handler = self._handler
         if handler is None:
             raise RuntimeError(f"{self.name} adapter missing handler")

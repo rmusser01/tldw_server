@@ -18,6 +18,7 @@ vi.mock("@/services/resource-client", () => ({
 
 import {
   generateQuiz,
+  listQuizGenerationProfiles,
   QUIZ_GENERATION_TIMEOUT_MS
 } from "@/services/quizzes"
 
@@ -70,6 +71,37 @@ describe("quizzes service", () => {
         body: expect.objectContaining({
           sources: [{ source_type: "note", source_id: "note-1" }]
         })
+      })
+    )
+  })
+
+  it("sends generation profile in quiz generation body", async () => {
+    await generateQuiz({
+      media_id: 42,
+      generation_profile: "best_of_five"
+    })
+
+    expect(mockBgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/quizzes/generate",
+        method: "POST",
+        body: expect.objectContaining({
+          generation_profile: "best_of_five"
+        })
+      })
+    )
+  })
+
+  it("loads generation profiles from the quizzes profile endpoint", async () => {
+    mockBgRequest.mockResolvedValueOnce([{ id: "best_of_five" }])
+
+    const result = await listQuizGenerationProfiles()
+
+    expect(result).toEqual([{ id: "best_of_five" }])
+    expect(mockBgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/quizzes/generation-profiles",
+        method: "GET"
       })
     )
   })

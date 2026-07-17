@@ -1,3 +1,4 @@
+import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -61,14 +62,16 @@ def test_generate_presentation_metric_error_log_is_sanitized(monkeypatch):
     monkeypatch.setattr(slides_ep, "get_metrics_registry", lambda: _RaisingMetrics())
 
     with pytest.raises(HTTPException) as exc_info:
-        slides_ep._generate_presentation(
-            response=Response(),
-            db=SimpleNamespace(client_id="1"),
-            request=_request(),
-            source_text="Source text",
-            source_type="prompt",
-            source_ref=None,
-            source_query=None,
+        asyncio.run(
+            slides_ep._generate_presentation(
+                response=Response(),
+                db=SimpleNamespace(client_id="1"),
+                request=_request(),
+                source_text="Source text",
+                source_type="prompt",
+                source_ref=None,
+                source_query=None,
+            )
         )
 
     assert exc_info.value.status_code == 500
@@ -137,14 +140,16 @@ def test_generate_presentation_latency_metric_log_is_sanitized(monkeypatch):
     monkeypatch.setattr(slides_ep, "SlidesGenerator", _ReturningGenerator)
     monkeypatch.setattr(slides_ep, "get_metrics_registry", lambda: _RaisingMetrics())
 
-    response = slides_ep._generate_presentation(
-        response=Response(),
-        db=_PresentationDB(),
-        request=_request(),
-        source_text="Source text",
-        source_type="prompt",
-        source_ref=None,
-        source_query=None,
+    response = asyncio.run(
+        slides_ep._generate_presentation(
+            response=Response(),
+            db=_PresentationDB(),
+            request=_request(),
+            source_text="Source text",
+            source_type="prompt",
+            source_ref=None,
+            source_query=None,
+        )
     )
 
     assert response.id == "presentation-1"

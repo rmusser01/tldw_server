@@ -2,20 +2,211 @@ import { describe, expect, it, vi } from "vitest"
 import {
   buildPipelineWizardReviewSummary,
   createDefaultPipelineWizardDraft,
+  getPipelineWizardBriefingOutcome,
+  getPipelineWizardBriefingStatus,
+  getPipelineWizardSourceSignature,
+  normalizePipelineWizardSpeakers,
+  projectPipelineWizardOccurrences,
   toBriefingPipelineDraft,
   toPipelineWizardSourcePayload,
   validatePipelineWizardCron,
-  validatePipelineWizardDraft
+  validatePipelineWizardDraft,
+  waitForPipelineWizardBriefing
 } from "../pipeline-wizard-state"
 import { toPipelineJobCreatePayload } from "../pipeline-contract"
 
 describe("watchlists pipeline wizard state", () => {
+  it("binds persisted sources to normalized draft identity", () => {
+    const base = createDefaultPipelineWizardDraft()
+    expect(getPipelineWizardSourceSignature({
+      ...base,
+      sourceMode: "new",
+      sourceName: " Feed ",
+      sourceUrl: " https://example.com/feed.xml "
+    })).toBe(getPipelineWizardSourceSignature({
+      ...base,
+      sourceMode: "new",
+      sourceName: "Feed",
+      sourceUrl: "https://example.com/feed.xml"
+    }))
+    expect(getPipelineWizardSourceSignature({
+      ...base,
+      sourceIds: [3, 1, 3]
+    })).toBe(getPipelineWizardSourceSignature({
+      ...base,
+      sourceIds: [1, 3]
+    }))
+  })
+
+  it("polls the exact run and stops on an observed stage failure", async () => {
+    const projection = (stageStatus: "running" | "failed") => ({
+      occurrence_id: 1,
+      run_id: 44,
+      job_id: 7,
+      artifact_status: "running" as const,
+      delivery_status: "waiting_for_artifacts" as const,
+      stages: { select: { status: stageStatus, retryable: stageStatus === "failed" } },
+      output: null,
+      audio: null,
+      editorial: {},
+      selection: {},
+      next_run_at: null,
+      recovery: {}
+    })
+    const getBriefing = vi.fn()
+      .mockResolvedValueOnce(projection("running"))
+      .mockResolvedValueOnce(projection("failed"))
+    const onProgress = vi.fn()
+
+    const result = await waitForPipelineWizardBriefing(44, getBriefing, onProgress, {
+      intervalMs: 0,
+      maxAttempts: 3,
+      waitForDelivery: true
+    })
+
+    expect(getBriefing).toHaveBeenCalledTimes(2)
+    expect(onProgress).toHaveBeenCalledTimes(2)
+    expect(result.stages.select?.status).toBe("failed")
+  })
+
+  it("aborts the current sleep and makes no further polling requests", async () => {
+    const controller = new AbortController()
+    const projection = {
+      occurrence_id: 1,
+      run_id: 44,
+      job_id: 7,
+      artifact_status: "running" as const,
+      delivery_status: "waiting_for_artifacts" as const,
+      stages: { select: { status: "running" as const } },
+      output: null,
+      audio: null,
+      editorial: {},
+      selection: {},
+      next_run_at: null,
+      recovery: {}
+    }
+    const getBriefing = vi.fn().mockResolvedValue(projection)
+    const polling = waitForPipelineWizardBriefing(
+      44,
+      getBriefing,
+      () => controller.abort(),
+      { intervalMs: 10_000, maxAttempts: 3, signal: controller.signal }
+    )
+
+    await expect(polling).rejects.toMatchObject({ name: "AbortError" })
+    expect(getBriefing).toHaveBeenCalledTimes(1)
+    expect(getBriefing).toHaveBeenCalledWith(44, controller.signal)
+  })
+
+  it("returns a still-running projection at the foreground polling bound", async () => {
+    const projection = {
+      occurrence_id: 19,
+      run_id: 44,
+      job_id: 7,
+      artifact_status: "running" as const,
+      delivery_status: "waiting_for_artifacts" as const,
+      stages: { generate_audio: { status: "running" as const } },
+      output: { id: 90 },
+      audio: null,
+      editorial: {},
+      selection: {},
+      next_run_at: null,
+      recovery: {}
+    }
+    const getBriefing = vi.fn().mockResolvedValue(projection)
+
+    await expect(waitForPipelineWizardBriefing(44, getBriefing, vi.fn(), {
+      intervalMs: 0,
+      maxAttempts: 2
+    })).resolves.toBe(projection)
+    expect(getPipelineWizardBriefingStatus(projection)).toBe("running")
+    expect(getBriefing).toHaveBeenCalledTimes(2)
+  })
+
+  it("derives terminal status from aggregate, stages, and blocking delivery", () => {
+    const projection = {
+      occurrence_id: 1,
+      run_id: 44,
+      job_id: 7,
+      artifact_status: "ready" as const,
+      delivery_status: "failed" as const,
+      stages: { persist_text: { status: "ready" as const, code: "persisted" } },
+      output: { id: 90 },
+      audio: null,
+      editorial: {},
+      selection: {},
+      next_run_at: null,
+      recovery: {}
+    }
+
+    expect(getPipelineWizardBriefingStatus(projection)).toBe("ready")
+    expect(getPipelineWizardBriefingStatus(projection, true)).toBe("failed")
+    expect(getPipelineWizardBriefingStatus({
+      ...projection,
+      artifact_status: "running",
+      delivery_status: "waiting_for_artifacts",
+      stages: { generate_audio: { status: "failed", code: "tts_unavailable" } }
+    })).toBe("failed")
+    expect(getPipelineWizardBriefingStatus({
+      ...projection,
+      artifact_status: "cancelled",
+      delivery_status: "waiting_for_artifacts",
+      stages: { generate_audio: { status: "cancelled", code: "user_cancelled" } }
+    })).toBe("cancelled")
+  })
+
+  it("leaves advanced cron occurrence projection to the backend", () => {
+    const base = {
+      ...createDefaultPipelineWizardDraft(),
+      scheduleMode: "advanced" as const,
+      scheduleAdvancedCron: "0 8 * * MON-FRI",
+      timezone: "UTC"
+    }
+
+    expect(projectPipelineWizardOccurrences(base, new Date("2026-07-12T07:59:00Z"))).toEqual({})
+  })
+
+  it("classifies briefing outcomes without embedding user-facing prose", () => {
+    const projection = {
+      occurrence_id: 1,
+      run_id: 44,
+      job_id: 7,
+      artifact_status: "running" as const,
+      delivery_status: "waiting_for_artifacts" as const,
+      stages: { generate_audio: { status: "failed" as const, code: "tts_unavailable" } },
+      output: null,
+      audio: null,
+      editorial: {},
+      selection: {},
+      next_run_at: null,
+      recovery: {}
+    }
+
+    expect(getPipelineWizardBriefingOutcome(projection)).toEqual({
+      status: "failed",
+      stage: "generate_audio",
+      code: "tts_unavailable",
+      runId: 44
+    })
+    expect(JSON.stringify(getPipelineWizardBriefingOutcome(projection))).not.toContain("failed (")
+  })
+
+  it("normalizes internal speaker ids so duplicate ids never become user errors", () => {
+    const speakers = normalizePipelineWizardSpeakers([
+      { id: "host", label: "Host", voice: "alloy" },
+      { id: "host", label: "Analyst", voice: "nova" },
+      { id: "", label: "Guest", voice: "echo" }
+    ])
+
+    expect(speakers.map((speaker) => speaker.id)).toEqual(["host", "speaker_2", "speaker_3"])
+    expect(new Set(speakers.map((speaker) => speaker.id))).toHaveProperty("size", 3)
+  })
   it("validates source, monitor, digest, delivery, and optional audio requirements", () => {
     const base = createDefaultPipelineWizardDraft()
 
     expect(validatePipelineWizardDraft(base)).toEqual({
       valid: false,
-      errors: expect.arrayContaining(["sourceIds", "monitorName", "templateName"])
+      errors: expect.arrayContaining(["sourceIds", "monitorName"])
     })
 
     expect(
@@ -48,7 +239,6 @@ describe("watchlists pipeline wizard state", () => {
         "scheduleIntervalValue",
         "emailRecipients",
         "audioSpeakers",
-        "audioSpeakerIds",
         "audioSpeakerVoices",
         "targetAudioMinutes"
       ])
@@ -131,13 +321,13 @@ describe("watchlists pipeline wizard state", () => {
         scheduleExpr: "15 */5 * * *",
         timezone: "UTC",
         templateName: "newsletter_markdown",
-        createScheduledOutput: false,
+        createScheduledOutput: true,
         includeAudio: true,
         audioCast: {
           speaker_count: 2,
           speakers: [
-            { id: "host", label: "Host", role: "host", voice: "alloy" },
-            { id: "analyst", label: "Analyst", role: "analyst", voice: "nova" }
+            expect.objectContaining({ id: "host", label: "Host", role: "host", voice: "alloy" }),
+            expect.objectContaining({ id: "analyst", label: "Analyst", role: "analyst", voice: "nova" })
           ]
         },
         voiceMap: {
@@ -150,7 +340,7 @@ describe("watchlists pipeline wizard state", () => {
     timezoneSpy.mockRestore()
   })
 
-  it("keeps scheduled wizard monitors manual/test-only until scheduled reports are selected", () => {
+  it("keeps required Reports output canonical for scheduled wizard monitors", () => {
     const timezoneSpy = vi
       .spyOn(Intl, "DateTimeFormat")
       .mockImplementation(
@@ -171,20 +361,21 @@ describe("watchlists pipeline wizard state", () => {
       audioSpeakers: []
     }
 
-    expect(toPipelineJobCreatePayload(toBriefingPipelineDraft(scheduledDraft)).output_prefs).not.toHaveProperty("auto_output")
+    const expectedContract = toPipelineJobCreatePayload(
+      toBriefingPipelineDraft(scheduledDraft)
+    ).output_prefs?.briefing_pipeline
+    expect(expectedContract).toMatchObject({
+      text: { enabled: true, type: "briefing_markdown" },
+      delivery: { reports: { enabled: true } }
+    })
     expect(
       toPipelineJobCreatePayload(
         toBriefingPipelineDraft({
           ...scheduledDraft,
           createScheduledOutput: true
         })
-      ).output_prefs
-    ).toMatchObject({
-      auto_output: {
-        enabled: true,
-        type: "briefing_markdown"
-      }
-    })
+      ).output_prefs?.briefing_pipeline
+    ).toEqual(expectedContract)
 
     timezoneSpy.mockRestore()
   })

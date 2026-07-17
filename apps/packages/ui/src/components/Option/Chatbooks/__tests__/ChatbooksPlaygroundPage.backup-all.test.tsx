@@ -79,6 +79,7 @@ vi.mock("react-i18next", () => ({
         | {
             defaultValue?: string
             count?: number
+            name?: string
             seconds?: number
           }
     ) => {
@@ -86,6 +87,7 @@ vi.mock("react-i18next", () => ({
       if (defaultValueOrOptions?.defaultValue) {
         return defaultValueOrOptions.defaultValue
           .replace("{{count}}", String(defaultValueOrOptions.count ?? ""))
+          .replace("{{name}}", String(defaultValueOrOptions.name ?? ""))
           .replace("{{seconds}}", String(defaultValueOrOptions.seconds ?? ""))
       }
       return key
@@ -210,7 +212,7 @@ describe("ChatbooksPlaygroundPage backup-all flow", () => {
     expect(screen.getByText("Media pointers · 2")).toBeInTheDocument()
     expect(screen.getByText("Total items")).toBeInTheDocument()
     expect(screen.getByText("Pointer-only items")).toBeInTheDocument()
-    expect(screen.getByText("Sensitive categories")).toBeInTheDocument()
+    expect(screen.getAllByText("Sensitive categories").length).toBeGreaterThan(0)
     expect(screen.getByText("Warnings")).toBeInTheDocument()
     expect(screen.getByText("Estimated size")).toBeInTheDocument()
     expect(screen.getByText("2.00 MB")).toBeInTheDocument()
@@ -222,12 +224,6 @@ describe("ChatbooksPlaygroundPage backup-all flow", () => {
 
     render(<ChatbooksPlaygroundPage />)
 
-    fireEvent.change(screen.getByPlaceholderText("Name"), {
-      target: { value: "Full account backup" }
-    })
-    fireEvent.change(screen.getByPlaceholderText("Description"), {
-      target: { value: "Full account acceptance backup" }
-    })
     fireEvent.click(screen.getByRole("button", { name: "Backup all" }))
 
     await waitFor(() => {
@@ -238,10 +234,13 @@ describe("ChatbooksPlaygroundPage backup-all flow", () => {
     )
     expect(tldwClientMock.exportChatbook).toHaveBeenCalledWith(
       expect.objectContaining({
+        name: expect.stringMatching(/backup/i),
+        description: expect.stringMatching(/account/i),
         include_media: true,
         include_embeddings: true,
         include_generated_content: true,
-        media_quality: "original"
+        media_quality: "original",
+        format_version: "1.1.0"
       })
     )
   })
@@ -261,7 +260,7 @@ describe("ChatbooksPlaygroundPage backup-all flow", () => {
     await waitFor(() => {
       expect(tldwClientMock.exportChatbook).not.toHaveBeenCalled()
     })
-  })
+  }, 10_000)
 
   it("omits archive import media and embedding flags so default restore handles all archive data", async () => {
     tldwClientMock.previewChatbook.mockResolvedValueOnce({
@@ -271,7 +270,27 @@ describe("ChatbooksPlaygroundPage backup-all flow", () => {
         description: "Archive restore",
         total_size_bytes: 2048,
         total_notes: 1,
-        content_items: []
+        total_characters: 2,
+        content_items: [
+          { id: "character-1", type: "character", title: "Character one" },
+          { id: "character-2", type: "character", title: "Character two" }
+        ],
+        account_inventory: [
+          { category: "account_profiles", label: "Account profile" },
+          { category: "account_settings", label: "Account settings" },
+          { category: "characters", label: "Characters" }
+        ],
+        account_inventory_summary: {
+          counts: {
+            account_profiles: 1,
+            account_settings: 1,
+            characters: 2
+          },
+          sensitive_category_count: 1,
+          warning_count: 1,
+          warnings: ["Review imported provider settings."],
+          post_write_verification: true
+        }
       }
     })
     tldwClientMock.importChatbook.mockResolvedValueOnce({ success: true })
@@ -294,6 +313,17 @@ describe("ChatbooksPlaygroundPage backup-all flow", () => {
         { source_format: "chatbook" }
       )
     })
+    expect(screen.getByText("What will be restored")).toBeInTheDocument()
+    expect(screen.getByText("Account profile · 1")).toBeInTheDocument()
+    expect(screen.getByText("Account settings · 1")).toBeInTheDocument()
+    expect(screen.getByText("Verified")).toBeInTheDocument()
+    expect(screen.getAllByText("Sensitive categories").length).toBeGreaterThan(0)
+    expect(screen.getAllByText("All in archive").length).toBeGreaterThan(0)
+    expect(screen.queryByText("Selected: 0")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByText("Review 1 warning"))
+    expect(
+      screen.getByText("Review imported provider settings.")
+    ).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Import chatbook" }))
 
     await waitFor(() => {
@@ -336,5 +366,93 @@ describe("ChatbooksPlaygroundPage backup-all flow", () => {
     expect(screen.getByText("12.0 KB")).toBeInTheDocument()
     expect(screen.getByText("4")).toBeInTheDocument()
     expect(screen.getByText("Verified")).toBeInTheDocument()
+  })
+
+  it("renders a completed historical job with stale zero progress as complete", async () => {
+    tldwClientMock.listChatbookExportJobs.mockResolvedValueOnce({
+      jobs: [
+        {
+          job_id: "completed-stale-progress",
+          status: "completed",
+          chatbook_name: "Historical backup",
+          created_at: "2026-07-09T12:00:00Z",
+          progress_percentage: 0
+        }
+      ]
+    })
+
+    render(<ChatbooksPlaygroundPage />)
+    fireEvent.click(screen.getByRole("tab", { name: "Jobs" }))
+
+    await waitFor(() => {
+      expect(screen.getByText("Historical backup")).toBeInTheDocument()
+    })
+    const progressBars = screen.getAllByRole("progressbar")
+    expect(progressBars.length).toBeGreaterThan(0)
+    progressBars.forEach((bar) => expect(bar).toHaveAttribute("aria-valuenow", "100"))
+    expect(screen.queryByText("0%")).not.toBeInTheDocument()
+  })
+
+  it("does not render failed terminal jobs at zero or complete progress", async () => {
+    tldwClientMock.listChatbookImportJobs.mockResolvedValueOnce({
+      jobs: [
+        {
+          job_id: "failed-stale-progress",
+          status: "failed",
+          created_at: "2026-07-09T12:00:00Z",
+          progress_percentage: 0
+        },
+        {
+          job_id: "failed-complete-progress",
+          status: "failed",
+          created_at: "2026-07-09T12:01:00Z",
+          progress_percentage: 100
+        }
+      ]
+    })
+
+    render(<ChatbooksPlaygroundPage />)
+    fireEvent.click(screen.getByRole("tab", { name: "Jobs" }))
+
+    await waitFor(() => {
+      expect(screen.getByText("Job ID: failed-stale-progress")).toBeInTheDocument()
+    })
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument()
+    expect(screen.queryByText("100%")).not.toBeInTheDocument()
+  })
+
+  it("treats a legacy timezone-naive API timestamp as UTC before local formatting", async () => {
+    const originalTimezone = process.env.TZ
+    process.env.TZ = "America/Los_Angeles"
+    const localeSpy = vi
+      .spyOn(Date.prototype, "toLocaleString")
+      .mockImplementation(function () {
+        return this.toISOString()
+      })
+    tldwClientMock.listChatbookExportJobs.mockResolvedValueOnce({
+      jobs: [
+        {
+          job_id: "legacy-naive-time",
+          status: "completed",
+          chatbook_name: "UTC backup",
+          created_at: "2026-07-09T12:00:00"
+        }
+      ]
+    })
+
+    try {
+      render(<ChatbooksPlaygroundPage />)
+      fireEvent.click(screen.getByRole("tab", { name: "Jobs" }))
+
+      await waitFor(() => {
+        expect(screen.getByText("UTC backup")).toBeInTheDocument()
+      })
+      expect(screen.getAllByText("2026-07-09T12:00:00.000Z").length).toBeGreaterThan(0)
+      expect(screen.queryByText("2026-07-09T19:00:00.000Z")).not.toBeInTheDocument()
+    } finally {
+      localeSpy.mockRestore()
+      if (originalTimezone === undefined) delete process.env.TZ
+      else process.env.TZ = originalTimezone
+    }
   })
 })

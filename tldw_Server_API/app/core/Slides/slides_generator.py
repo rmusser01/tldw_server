@@ -61,8 +61,14 @@ _SYSTEM_PROMPT = (
     "  ]\n"
     "}\n\n"
     "Guidelines:\n"
-    "- 5-12 slides typical length\n"
-    "- Title slide first, conclusion/summary last\n"
+    "- Use only facts explicitly supported by the source material.\n"
+    "- Do not invent recommendations, next steps, objectives, methods, trial status, comparisons, "
+    "or conclusions unless the source explicitly states them.\n"
+    "- Speaker notes must stay source-grounded and must not add presenter chatter or unsupported claims.\n"
+    "- Short sources may produce 2-5 slides; do not stretch the deck by adding unsourced content.\n"
+    "- Omit conclusion or summary slides for short sources unless the source states conclusions.\n"
+    "- 5-12 slides typical length for longer source material\n"
+    "- Title slide first; use a final source-facts slide only when enough supported facts remain\n"
     "- Use markdown formatting (bullets, bold, code)\n"
     "- 3-6 bullet points per content slide\n"
     "- Add speaker_notes for details that do not fit slides\n"
@@ -73,6 +79,31 @@ DEFAULT_MAX_SOURCE_TOKENS = 50_000
 DEFAULT_MAX_SOURCE_CHARS = 200_000
 MAX_SOURCE_CHUNKS = 20
 MAX_CHUNK_SIZE_TOKENS = 4_000
+_SLIDE_PLACEHOLDER_TEXTS = {
+    "invalid",
+    "slide goes here",
+    "slides go here",
+    "content goes here",
+    "todo",
+    "tbd",
+}
+
+
+def _is_placeholder_slide_text(value: Any) -> bool:
+    if not isinstance(value, str):
+        return True
+    normalized = re.sub(r"\s+", " ", value.strip().lower())
+    return not normalized or normalized in _SLIDE_PLACEHOLDER_TEXTS
+
+
+def _has_usable_slide_content(slide: dict[str, Any]) -> bool:
+    layout = str(slide.get("layout") or "").strip().lower()
+    title_ok = not _is_placeholder_slide_text(slide.get("title"))
+    content_ok = not _is_placeholder_slide_text(slide.get("content"))
+    notes_ok = not _is_placeholder_slide_text(slide.get("speaker_notes"))
+    if layout == "title":
+        return title_ok or content_ok or notes_ok
+    return content_ok or notes_ok
 
 
 def _positive_int_setting(name: str, default: int) -> int:
@@ -423,6 +454,8 @@ class SlidesGenerator:
             slide.setdefault("speaker_notes", None)
             slide.setdefault("metadata", {})
             slide = apply_visual_block_fallback(slide)
+            if not _has_usable_slide_content(slide):
+                raise SlidesGenerationOutputError("slide_content_missing")
             normalized_slides.append(slide)
         title = payload.get("title")
         if not isinstance(title, str) or not title.strip():

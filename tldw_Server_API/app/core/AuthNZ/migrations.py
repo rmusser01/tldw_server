@@ -1046,6 +1046,54 @@ def migration_089_seed_mcp_prompts_read_permission(conn: sqlite3.Connection) -> 
     logger.info("Migration 089: Seeded MCP prompts.read permission")
 
 
+def migration_090_seed_notification_permissions(conn: sqlite3.Connection) -> None:
+    """Seed notification permissions, role grants, and canonical legacy memberships."""
+    logger.info("Migration 090: START seed notification permissions and role memberships")
+
+    required_rbac_tables = ("roles", "permissions", "role_permissions")
+    if not all(_sqlite_table_exists(conn, table_name) for table_name in required_rbac_tables):
+        logger.info("Migration 090: RBAC tables missing; skipping notification permission seed")
+        return
+
+    permissions = (
+        ("notifications.read", "Read personal notifications", "notifications"),
+        ("notifications.control", "Manage personal notifications", "notifications"),
+    )
+    interactive_roles = ("admin", "user", "moderator", "reviewer", "viewer")
+
+    conn.executemany(
+        """
+        INSERT OR IGNORE INTO permissions (name, description, category)
+        VALUES (?, ?, ?)
+        """,
+        permissions,
+    )
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO role_permissions (role_id, permission_id)
+        SELECT r.id, p.id
+        FROM roles r
+        CROSS JOIN permissions p
+        WHERE r.name IN (?, ?, ?, ?, ?)
+          AND p.name IN (?, ?)
+        """,
+        (*interactive_roles, *(permission[0] for permission in permissions)),
+    )
+
+    if _sqlite_table_exists(conn, "users") and _sqlite_table_exists(conn, "user_roles"):
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO user_roles (user_id, role_id)
+            SELECT u.id, r.id
+            FROM users u
+            JOIN roles r ON r.name = u.role
+            """
+        )
+
+    conn.commit()
+    logger.info("Migration 090: Seeded notification permissions and role memberships")
+
+
 def rollback_086_drop_prototype_workspace_tables(conn: sqlite3.Connection) -> None:
     """Rollback migration 086 by dropping prototype workspace metadata tables."""
     conn.execute("DROP TABLE IF EXISTS prototype_promotion_requests")
@@ -5311,6 +5359,11 @@ def get_authnz_migrations() -> list[Migration]:
             89,
             "Seed MCP prompts.read permission",
             migration_089_seed_mcp_prompts_read_permission,
+        ),
+        Migration(
+            90,
+            "Seed notification permissions and role memberships",
+            migration_090_seed_notification_permissions,
         ),
     ]
 

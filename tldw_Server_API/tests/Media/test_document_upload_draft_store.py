@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+import sqlite3
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -44,6 +45,67 @@ def test_expired_drafts_are_removed_before_quota_is_enforced(tmp_path) -> None:
     created = store.create(owner="1", payload={"draft": "replacement"})
 
     assert store.get(owner="1", draft_id=created.draft_id) is not None
+
+
+def test_get_filters_expired_drafts_without_cleanup_write(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """Reads must filter expired rows without issuing cleanup writes."""
+    current_time = [datetime(2026, 7, 9, tzinfo=timezone.utc)]
+    store = DocumentUploadDraftStore(
+        db_path=tmp_path / "document-upload-drafts.db",
+        ttl_seconds=1,
+        clock=lambda: current_time[0],
+    )
+    created = store.create(owner="1", payload={"draft": "expired"})
+    current_time[0] += timedelta(seconds=2)
+    monkeypatch.setattr(
+        store,
+        "_cleanup_expired",
+        lambda *_args: pytest.fail("get() performed a cleanup write"),
+    )
+
+    assert store.get(owner="1", draft_id=created.draft_id) is None
+
+
+def test_store_operations_explicitly_close_connections(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """Every operation must close its SQLite connection deterministically."""
+    store = DocumentUploadDraftStore(db_path=tmp_path / "document-upload-drafts.db")
+    original_connect = store._connect
+    opened = 0
+    closed = 0
+
+    class TrackedConnection:
+        def __init__(self, connection: sqlite3.Connection) -> None:
+            nonlocal opened
+            opened += 1
+            self._connection = connection
+
+        def __getattr__(self, name: str):
+            return getattr(self._connection, name)
+
+        def __enter__(self):
+            self._connection.__enter__()
+            return self
+
+        def __exit__(self, *args: object):
+            return self._connection.__exit__(*args)
+
+        def close(self) -> None:
+            nonlocal closed
+            closed += 1
+            self._connection.close()
+
+    monkeypatch.setattr(store, "_connect", lambda: TrackedConnection(original_connect()))
+
+    created = store.create(owner="1", payload={"draft": "tracked"})
+    assert store.get(owner="1", draft_id=created.draft_id) is not None
+    assert store.delete(owner="1", draft_id=created.draft_id)
+    assert opened == closed == 3
 
 
 def test_global_draft_quota_is_shared_by_all_owners(tmp_path) -> None:

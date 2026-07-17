@@ -4,6 +4,7 @@ Scheduler task handler for Watchlists runs.
 Task names:
 - 'watchlist_run'
 - 'watchlists_enrich_output'
+- 'watchlists_deliver_briefing'
 Inputs expected in payload:
   payload = {
     'inputs': { 'watchlist_job_id': <int> },
@@ -22,7 +23,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from tldw_Server_API.app.core.Scheduler.base.registry import task
-from tldw_Server_API.app.core.Watchlists import output_enrichment_handler
+from tldw_Server_API.app.core.Watchlists import briefing_delivery, output_enrichment_handler
 from tldw_Server_API.app.core.Watchlists.pipeline import run_watchlist_job
 
 
@@ -99,3 +100,30 @@ async def watchlists_enrich_output(payload: dict[str, Any]) -> dict[str, Any]:
         summary_config=summary_config,
     )
     return {"output_id": output_id_int, "status": "completed"}
+
+
+@task(name="watchlists_deliver_briefing", max_retries=0, timeout=300, queue="watchlists")
+async def watchlists_deliver_briefing(payload: dict[str, Any]) -> dict[str, Any]:
+    """Deliver ready artifacts for one owned briefing occurrence."""
+    try:
+        user_id = int(payload["user_id"])
+        occurrence_id = int(payload["occurrence_id"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("watchlists_deliver_briefing: invalid user_id or occurrence_id") from exc
+    requested = payload.get("requested_adapters") or []
+    confirmed = payload.get("confirmed_unknown_adapters") or []
+    if not isinstance(requested, list) or not isinstance(confirmed, list):
+        raise ValueError("watchlists_deliver_briefing: adapter lists must be lists")
+    audio_dependency_task_id = payload.get("audio_dependency_task_id")
+    if audio_dependency_task_id:
+        briefing_delivery.assert_audio_dependency_ready(
+            user_id=user_id,
+            occurrence_id=occurrence_id,
+            audio_task_id=str(audio_dependency_task_id),
+        )
+    return await briefing_delivery.deliver_briefing_for_user(
+        user_id=user_id,
+        occurrence_id=occurrence_id,
+        requested_adapters={str(adapter) for adapter in requested},
+        confirmed_unknown_adapters={str(adapter) for adapter in confirmed},
+    )

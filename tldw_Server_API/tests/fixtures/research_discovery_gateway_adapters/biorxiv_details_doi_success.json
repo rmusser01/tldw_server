@@ -1,0 +1,28 @@
+{
+  "messages": [
+    {
+      "status": "ok",
+      "category": "all"
+    }
+  ],
+  "collection": [
+    {
+      "title": "Bounded bioRxiv details lookup",
+      "authors": "Ada Example; Grace Sample",
+      "author_corresponding": "Ada Example",
+      "author_corresponding_institution": "Synthetic Institute",
+      "doi": "10.5555/biorxiv.details.synthetic",
+      "date": "2026-06-10",
+      "version": "1",
+      "type": "new results",
+      "license": "cc_by",
+      "category": "neuroscience",
+      "jatsxml": "https://provider.example.invalid/content.xml?token=fixture-secret",
+      "abstract": "A sanitized bioRxiv details abstract.",
+      "funder": "Synthetic Research Fund",
+      "published": "NA",
+      "server": "bioRxiv",
+      "unknownFixtureField": "must-not-survive"
+    }
+  ]
+}

@@ -1308,4 +1308,4 @@ Configuration notes for providers: API keys are read from environment variables 
 
 ---
 
-*For more information about the tldw_server project, visit the [main documentation](README.md).*
+*For more information about the tldw_server project, visit the [main documentation](API_README.md).*

@@ -30,6 +30,84 @@ describe("tldwRequest quickstart and advanced transport", () => {
     })
   })
 
+  it("uses cookie auth and csrf for same-origin mutations without stale headers", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+    document.cookie = "csrf_token=csrf-123; Path=/"
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      })
+    )
+
+    const { tldwRequest } = await import("@/services/tldw/request-core")
+    const result = await tldwRequest(
+      {
+        path: "/api/v1/notes",
+        method: "POST",
+        headers: {
+          Authorization: "Bearer stale-token",
+          "X-API-KEY": "stale-key",
+          "x-csrf-token": "stale-csrf"
+        },
+        body: { title: "Cookie note" }
+      },
+      {
+        getConfig: async () => ({
+          serverUrl: "https://remote.example.test",
+          authMode: "single-user",
+          authSource: "cookie-session",
+          apiKey: "stale-key"
+        }),
+        fetchFn: fetchMock
+      }
+    )
+
+    expect(result.ok).toBe(true)
+    const [url, init] = fetchMock.mock.calls[0]
+    const requestHeaders = new Headers(init.headers)
+    expect(url).toBe("/api/v1/notes")
+    expect(init.credentials).toBe("same-origin")
+    expect(requestHeaders.get("X-CSRF-Token")).toBe("csrf-123")
+    expect(requestHeaders.get("X-API-KEY")).toBeNull()
+    expect(requestHeaders.get("Authorization")).toBeNull()
+  })
+
+  it("uses cookie auth on safe methods without attaching csrf", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+    document.cookie = "csrf_token=csrf-123; Path=/"
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      })
+    )
+
+    const { tldwRequest } = await import("@/services/tldw/request-core")
+    await tldwRequest(
+      {
+        path: "/api/v1/users/me/profile",
+        method: "GET",
+        headers: { "X-CSRF-Token": "stale-csrf" }
+      },
+      {
+        getConfig: async () => ({
+          serverUrl: window.location.origin,
+          authMode: "single-user",
+          authSource: "cookie-session",
+          apiKey: "stale-key"
+        }),
+        fetchFn: fetchMock
+      }
+    )
+
+    const [, init] = fetchMock.mock.calls[0]
+    const requestHeaders = new Headers(init.headers)
+    expect(init.credentials).toBe("same-origin")
+    expect(requestHeaders.get("X-CSRF-Token")).toBeNull()
+    expect(requestHeaders.get("X-API-KEY")).toBeNull()
+  })
+
   it("uses same-origin quickstart requests with self-host auth headers", async () => {
     process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
 
@@ -141,5 +219,36 @@ describe("tldwRequest quickstart and advanced transport", () => {
     } finally {
       runtimeAuth.clearRuntimeAuthOverride()
     }
+  })
+
+  it("keeps explicit remote auth when cookie source is not on a same-origin transport", async () => {
+    delete process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      })
+    )
+
+    const { tldwRequest } = await import("@/services/tldw/request-core")
+    await tldwRequest(
+      { path: "/api/v1/health", method: "GET" },
+      {
+        getConfig: async () => ({
+          serverUrl: "https://api.example.test",
+          authMode: "single-user",
+          authSource: "cookie-session",
+          apiKey: "manual-remote-key"
+        }),
+        fetchFn: fetchMock
+      }
+    )
+
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe("https://api.example.test/api/v1/health")
+    expect(init.credentials).toBeUndefined()
+    expect(new Headers(init.headers).get("X-API-KEY")).toBe(
+      "manual-remote-key"
+    )
   })
 })

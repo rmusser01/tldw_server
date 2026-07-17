@@ -7,8 +7,6 @@ This guide explains how to enable image generation in tldw_server using the stab
 - Inline PNG/JPG/WebP output in the response (no server-side files).
 - Backend selection via config + `payload.backend`.
 - Remote image backends with API-key auth and backend-specific timeouts.
-- Optional single-image reference-guided generation via `payload.reference_file_id`.
-- Eligible managed reference-image discovery via `GET /api/v1/files/reference-images`.
 
 ## Prerequisites
 - A working `sd-cli` binary from stable-diffusion.cpp.
@@ -125,7 +123,7 @@ together_image_timeout_seconds = 120
 # Optional explicit endpoint override (leave blank to use region preset)
 modelstudio_image_base_url =
 modelstudio_image_api_key =
-modelstudio_image_default_model = qwen-image-2.0
+modelstudio_image_default_model = qwen-image
 # Region presets for base URL routing: sg | cn | us
 modelstudio_image_region = sg
 # sync | async | auto (auto prefers sync endpoint, then falls back)
@@ -133,9 +131,6 @@ modelstudio_image_mode = auto
 modelstudio_image_poll_interval_seconds = 2
 modelstudio_image_timeout_seconds = 180
 modelstudio_image_allowed_extra_params = []
-# Optional explicit allowlist for reference-image capable Model Studio models.
-# Unknown models stay unsupported until listed here or built into the resolver.
-modelstudio_image_reference_supported_models = ["qwen-image-2.0", "qwen-image-edit"]
 ```
 
 Notes:
@@ -145,8 +140,6 @@ Notes:
 - `sd_cpp_allowed_extra_params` controls which `extra_params` keys are accepted (default: deny all).
 - For Model Studio, set `modelstudio_image_region` to `sg`, `cn`, or `us` and provide `modelstudio_image_api_key` (or env `DASHSCOPE_API_KEY` / `QWEN_API_KEY`). Leave `modelstudio_image_base_url` blank unless you need a custom endpoint override.
 - For Model Studio mode control, set `modelstudio_image_mode` globally or pass `payload.extra_params.mode` (`sync` or `async`) per request.
-- `payload.reference_file_id` accepts one eligible managed image file and is rejected when the chosen backend/model does not advertise reference-image support.
-- The Playground image-generation modal uses `GET /api/v1/files/reference-images` to populate the reference-image picker with only eligible managed images.
 
 ## Security Considerations (Binary Execution)
 - **Treat the CLI as privileged**: `sd_cpp_binary_path` is executed directly. Only use trusted binaries from known sources.
@@ -187,30 +180,6 @@ Prompt refinement:
 - `payload.prompt_refinement` accepts `true|false` or `basic|auto|off`.
 - `auto` (default) keeps detailed prompts unchanged and enriches sparse prompts with a quality suffix.
 - `off` keeps the prompt unchanged (after whitespace normalization).
-
-### Reference-guided generation example
-
-```bash
-curl -sS http://127.0.0.1:8000/api/v1/files/create \
-  -H "Content-Type: application/json" \
-  -H "X-API-KEY: <your-key>" \
-  -d '{
-    "file_type": "image",
-    "payload": {
-      "backend": "modelstudio",
-      "prompt": "Turn this portrait into a watercolor travel poster",
-      "reference_file_id": 123,
-      "model": "qwen-image-2.0"
-    },
-    "export": {"format": "png", "mode": "inline", "async_mode": "sync"},
-    "options": {"persist": true}
-  }'
-```
-
-Notes:
-- `reference_file_id` must point to one eligible managed image returned by `GET /api/v1/files/reference-images`.
-- V1 supports exactly one reference image.
-- When the selected backend/model does not support reference inputs, the request fails instead of falling back to prompt-only generation.
 
 ### Model Studio example (`backend=modelstudio`)
 

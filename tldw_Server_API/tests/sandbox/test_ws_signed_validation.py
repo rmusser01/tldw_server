@@ -1,14 +1,19 @@
 from __future__ import annotations
 
-import time
-import hmac
 import hashlib
+import hmac
+import time
 import urllib.parse
+from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi.testclient import TestClient
-from tldw_Server_API.app.core.config import clear_config_cache
+from starlette.websockets import WebSocketDisconnect
 
+from tldw_Server_API.app.core.AuthNZ.single_user_session import SingleUserSessionIdentity
+from tldw_Server_API.app.core.config import clear_config_cache
 
 pytestmark = pytest.mark.sandbox_ws_signed
 
@@ -57,12 +62,111 @@ def _client_signed(secret: str, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     return TestClient(_app)
 
 
+def _enable_cookie_websocket_auth(monkeypatch: pytest.MonkeyPatch, client: TestClient) -> None:
+    from tldw_Server_API.app.core.AuthNZ import websocket_session_auth
+
+    settings = SimpleNamespace(
+        AUTH_MODE="single_user",
+        SINGLE_USER_SESSION_COOKIE_NAME="tldw_single_user_session",
+    )
+    identity = SingleUserSessionIdentity(
+        session_id=9,
+        user_id=1,
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+    )
+    monkeypatch.setattr(websocket_session_auth, "get_settings", lambda: settings)
+    monkeypatch.setattr(websocket_session_auth, "trusted_webui_origins", lambda: {"http://testserver"})
+    monkeypatch.setattr(
+        websocket_session_auth,
+        "validate_single_user_session",
+        AsyncMock(return_value=identity),
+    )
+    monkeypatch.setattr(
+        websocket_session_auth,
+        "get_single_user_instance",
+        lambda: SimpleNamespace(
+            username="single-user",
+            email=None,
+            roles=["admin"],
+            role="admin",
+            permissions=[],
+            is_admin=True,
+        ),
+    )
+    client.cookies.set("tldw_single_user_session", "opaque", path="/api")
+
+
+def _create_signed_run(client: TestClient) -> tuple[str, str]:
+    from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+
+    response = client.post(
+        "/api/v1/sandbox/runs",
+        headers={"X-API-KEY": get_settings().SINGLE_USER_API_KEY},
+        json={
+            "spec_version": "1.0",
+            "runtime": "docker",
+            "base_image": "python:3.11-slim",
+            "command": ["bash", "-lc", "echo run"],
+            "timeout_sec": 5,
+        },
+    )
+    assert response.status_code == 200
+    url = response.json()["log_stream_url"]
+    return response.json()["id"], url
+
+
+@pytest.mark.unit
+@pytest.mark.sandbox_ws_auth
+@pytest.mark.sandbox_no_auth
+def test_ws_signed_valid_token_accepts_cookie_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    with _client_signed("test-secret", monkeypatch) as client:
+        _enable_cookie_websocket_auth(monkeypatch, client)
+        _run_id, url = _create_signed_run(client)
+
+        with client.websocket_connect(url, headers={"origin": "http://testserver"}) as ws:
+            assert ws.receive_json()["type"] in {"event", "heartbeat"}
+
+
+@pytest.mark.unit
+@pytest.mark.sandbox_ws_auth
+@pytest.mark.sandbox_no_auth
+@pytest.mark.parametrize("signature_state", ["invalid", "expired"])
+def test_ws_signed_invalid_or_expired_token_rejects_cookie_identity(
+    signature_state: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    secret = "test-secret"
+    with _client_signed(secret, monkeypatch) as client:
+        _enable_cookie_websocket_auth(monkeypatch, client)
+        run_id, signed_url = _create_signed_run(client)
+        parsed = urllib.parse.urlparse(signed_url)
+        query = urllib.parse.parse_qs(parsed.query)
+        if signature_state == "invalid":
+            token = query["token"][0]
+            token = token[:-1] + ("0" if token[-1] != "0" else "1")
+            exp = int(query["exp"][0])
+        else:
+            exp = int(time.time()) - 1
+            token = hmac.new(
+                secret.encode("utf-8"),
+                f"{run_id}:{exp}".encode(),
+                hashlib.sha256,
+            ).hexdigest()
+        url = f"{parsed.path}?token={token}&exp={exp}"
+
+        with pytest.raises(WebSocketDisconnect) as exc_info:
+            with client.websocket_connect(url, headers={"origin": "http://testserver"}):
+                pass
+        assert exc_info.value.code == 1008
+
+
 @pytest.mark.unit
 def test_ws_signed_valid_token_connects(monkeypatch: pytest.MonkeyPatch) -> None:
     secret = "test-secret"
     with _client_signed(secret, monkeypatch) as client:
         # Sanity: verify settings reflect env
         import os as _os
+
         from tldw_Server_API.app.core.config import settings as app_settings
         assert _os.getenv("SANDBOX_WS_SIGNING_SECRET") == secret
         # Signed URLs flag may be obtained from env fallback in issuance/handler
@@ -81,14 +185,14 @@ def test_ws_signed_valid_token_connects(monkeypatch: pytest.MonkeyPatch) -> None
         url = j.get("log_stream_url")
         assert isinstance(url, str) and url.startswith("/api/v1/sandbox/runs/")
         # Validate issuance formula matches handler's expectation
-        from urllib.parse import urlparse, parse_qs
+        from urllib.parse import parse_qs, urlparse
         p = urlparse(url)
         qs = parse_qs(p.query)
         tok = qs.get("token", [""])[0]
         exps = qs.get("exp", [""])[0]
         assert tok and exps
         exp_i = int(exps)
-        msg = f"{run_id}:{exp_i}".encode("utf-8")
+        msg = f"{run_id}:{exp_i}".encode()
         expect = hmac.new(secret.encode("utf-8"), msg, hashlib.sha256).hexdigest()
         assert expect == tok
         with client.websocket_connect(url) as ws:
@@ -117,11 +221,11 @@ def test_ws_signed_expired_token_rejected(monkeypatch: pytest.MonkeyPatch) -> No
         run_id = r.json()["id"]
         # Build an expired token with exp in the past
         exp = int(time.time()) - 10
-        msg = f"{run_id}:{exp}".encode("utf-8")
+        msg = f"{run_id}:{exp}".encode()
         token = hmac.new(secret.encode("utf-8"), msg, hashlib.sha256).hexdigest()
         path = f"/api/v1/sandbox/runs/{run_id}/stream?token={token}&exp={exp}"
         # Expect handshake to be refused
-        with pytest.raises(Exception):
+        with pytest.raises(WebSocketDisconnect):
             with client.websocket_connect(path):
                 pass
 
@@ -140,7 +244,6 @@ def test_ws_signed_tampered_token_rejected(monkeypatch: pytest.MonkeyPatch) -> N
         r = client.post("/api/v1/sandbox/runs", json=body)
         assert r.status_code == 200
         j = r.json()
-        run_id = j["id"]
         signed = j.get("log_stream_url")
         assert isinstance(signed, str)
         # Tamper token by flipping last char
@@ -151,6 +254,6 @@ def test_ws_signed_tampered_token_rejected(monkeypatch: pytest.MonkeyPatch) -> N
         assert token and exp
         bad_token = token[:-1] + ("0" if token[-1] != "0" else "1")
         tampered = f"{parsed.path}?token={bad_token}&exp={exp}"
-        with pytest.raises(Exception):
+        with pytest.raises(WebSocketDisconnect):
             with client.websocket_connect(tampered):
                 pass

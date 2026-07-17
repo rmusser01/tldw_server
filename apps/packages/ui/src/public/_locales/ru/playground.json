@@ -896,18 +896,6 @@
   "actor_presetPlaceholder": {
     "message": "Выберите пресет"
   },
-  "actor_preset.sliceOfLife": {
-    "message": "Повседневность"
-  },
-  "actor_preset.dungeonCrawl": {
-    "message": "Покорение подземелий"
-  },
-  "actor_preset.romance": {
-    "message": "Романтика"
-  },
-  "actor_preset.workSession": {
-    "message": "Рабочая сессия"
-  },
   "actor_applyPreset": {
     "message": "Применить"
   },
@@ -928,15 +916,6 @@
   },
   "actor_templateModeHelp": {
     "message": "Определяет, как Actor взаимодействует с активными шаблонами сцен. Объединить сохраняет оба; Переопределить позволяет Actor заменить перекрывающиеся поля; Игнорировать пропускает Actor, когда шаблоны активны."
-  },
-  "actor_templateMode.merge": {
-    "message": "Объединить с шаблонами"
-  },
-  "actor_templateMode.override": {
-    "message": "Переопределить шаблоны"
-  },
-  "actor_templateMode.ignore": {
-    "message": "Игнорировать при активных шаблонах"
   },
   "actor_bladeAspectsTitle": {
     "message": "Аспекты"
@@ -1465,5 +1444,29 @@
   },
   "acp_workspace_title": {
     "message": "Терминал рабочего пространства"
+  },
+  "tts_routeTitle": {
+    "message": "Преобразование текста в речь"
+  },
+  "actor_preset_sliceOfLife": {
+    "message": "Повседневность"
+  },
+  "actor_preset_dungeonCrawl": {
+    "message": "Покорение подземелий"
+  },
+  "actor_preset_romance": {
+    "message": "Романтика"
+  },
+  "actor_preset_workSession": {
+    "message": "Рабочая сессия"
+  },
+  "actor_templateMode_merge": {
+    "message": "Объединить с шаблонами"
+  },
+  "actor_templateMode_override": {
+    "message": "Переопределить шаблоны"
+  },
+  "actor_templateMode_ignore": {
+    "message": "Игнорировать при активных шаблонах"
   }
 }

@@ -183,6 +183,7 @@ export interface PlaygroundSendControlProps {
   isProMode: boolean
   isMobileViewport: boolean
   isSending: boolean
+  isPreparingDocuments?: boolean
   isConnectionReady: boolean
   sendWhenEnter: boolean
   onSendWhenEnterChange: (checked: boolean) => void
@@ -210,6 +211,7 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
       isProMode,
       isMobileViewport,
       isSending,
+      isPreparingDocuments = false,
       isConnectionReady,
       sendWhenEnter,
       onSendWhenEnterChange,
@@ -229,6 +231,11 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
     const shouldQueuePrimaryAction = isSending || !isConnectionReady
     const primaryActionLabel = activeCharacterSendBlocker
       ? characterChatSendBlocker.actionLabel
+      : isPreparingDocuments
+        ? t(
+            "playground:documentProcessing.preparingForSend",
+            "Preparing documents"
+          )
       : shouldQueuePrimaryAction
       ? t("common:queue", "Queue")
       : sendLabel
@@ -242,6 +249,11 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
         ) as string)
       : activeCharacterSendBlocker
         ? characterChatSendBlocker.title
+        : isPreparingDocuments
+          ? (t(
+              "playground:documentProcessing.preparingForSend",
+              "Preparing documents"
+            ) as string)
       : shouldQueuePrimaryAction
         ? ((isSending
             ? t(
@@ -265,6 +277,11 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
             ) as string)
     const primaryActionAriaLabel = activeCharacterSendBlocker
       ? characterChatSendBlocker.actionLabel
+      : isPreparingDocuments
+        ? (t(
+            "playground:documentProcessing.preparingForSend",
+            "Preparing documents"
+          ) as string)
       : shouldQueuePrimaryAction
         ? (t(
             "playground:composer.queue.primaryAria",
@@ -309,7 +326,7 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
                 : "submit"
             }
             onClick={handlePrimaryButtonClick}
-            disabled={compareNeedsMoreModels}
+            disabled={compareNeedsMoreModels || isPreparingDocuments}
             className={
               isMobileViewport
                 ? "min-h-[44px] min-w-[44px]"
@@ -360,7 +377,7 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
           <Dropdown
             open={sendMenuOpen}
             onOpenChange={(open) => onSendMenuChange(open)}
-            disabled={compareNeedsMoreModels}
+            disabled={compareNeedsMoreModels || isPreparingDocuments}
             trigger={["click"]}
             menu={{
               items: [
@@ -388,7 +405,7 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
                     ? "middle"
                     : "small"
               }
-              disabled={compareNeedsMoreModels}
+              disabled={compareNeedsMoreModels || isPreparingDocuments}
               className={
                 isMobileViewport
                   ? "min-h-[44px] min-w-[44px]"

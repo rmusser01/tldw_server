@@ -1,9 +1,12 @@
 // @vitest-environment jsdom
 
 import React from "react"
+import i18next from "i18next"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { SourcesTab } from "../SourcesTab"
+import commonEn from "@/assets/locale/en/common.json"
+import watchlistsEn from "@/assets/locale/en/watchlists.json"
 
 const ADVANCED_COLUMNS_STORAGE_KEY = "watchlists:sources:advanced-columns:v1"
 
@@ -31,23 +34,25 @@ const mocks = vi.hoisted(() => ({
   getSourceSeenStatsMock: vi.fn(),
   exportOpmlMock: vi.fn(),
   checkWatchlistSourcesNowMock: vi.fn(),
+  modalConfirmMock: vi.fn(),
   createWatchlistSourceMock: vi.fn(),
   deleteWatchlistSourceMock: vi.fn(),
   restoreWatchlistSourceMock: vi.fn(),
   updateWatchlistSourceMock: vi.fn(),
   sourceFormModalProps: { current: null as any },
   showUndoNotificationMock: vi.fn(),
-  tMock: (key: string, defaultValue?: unknown, options?: Record<string, unknown>) => {
-    if (typeof defaultValue !== "string") return key
-    if (!options) return defaultValue
-    return defaultValue.replace(/\{\{(\w+)\}\}/g, (_, token) => String(options[token] ?? ""))
+  i18nRef: { current: null as ReturnType<typeof i18next.createInstance> | null },
+  translate: (key: string, defaultValue?: unknown, options?: Record<string, unknown>) => {
+    const fallback = typeof defaultValue === "string" ? defaultValue : undefined
+    return mocks.i18nRef.current?.t(key, { defaultValue: fallback, ...options }) ?? key
   },
-  storeStateRef: { current: {} as Record<string, any> }
+  storeStateRef: { current: {} as Record<string, any> },
+  viewportRef: { isConstrained: false }
 }))
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: mocks.tMock
+    t: mocks.translate
   })
 }))
 
@@ -56,7 +61,7 @@ vi.mock("antd", () => {
     <button
       type="button"
       disabled={Boolean(loading || disabled)}
-      onClick={() => onClick?.()}
+      onClick={(event) => onClick?.(event)}
       {...rest}
     >
       {children}
@@ -98,11 +103,26 @@ vi.mock("antd", () => {
     </select>
   )
 
-  const Table = ({ dataSource = [], columns = [] }: any) => (
+  const Table = ({ dataSource = [], columns = [], rowSelection }: any) => (
     <table data-testid="sources-table">
       <tbody>
         {dataSource.map((record: SourceRecord, rowIndex: number) => (
           <tr key={record.id ?? rowIndex}>
+            {rowSelection ? (
+              <td>
+                <input
+                  type="checkbox"
+                  aria-label={`Select ${record.name}`}
+                  checked={rowSelection.selectedRowKeys.includes(record.id)}
+                  onChange={() => {
+                    const nextKeys = rowSelection.selectedRowKeys.includes(record.id)
+                      ? rowSelection.selectedRowKeys.filter((key: React.Key) => key !== record.id)
+                      : [...rowSelection.selectedRowKeys, record.id]
+                    rowSelection.onChange(nextKeys)
+                  }}
+                />
+              </td>
+            ) : null}
             {columns.map((column: any, columnIndex: number) => {
               const key = String(column.key ?? column.dataIndex ?? columnIndex)
               const value = column.dataIndex ? record[column.dataIndex as keyof SourceRecord] : undefined
@@ -131,10 +151,18 @@ vi.mock("antd", () => {
       </div>
     ),
     Input: { Search },
-    Modal: { confirm: vi.fn() },
+    Modal: { confirm: (...args: unknown[]) => mocks.modalConfirmMock(...args) },
     Select,
     Space: ({ children }: any) => <>{children}</>,
-    Switch: () => null,
+    Switch: ({ checked, onChange, ...rest }: any) => (
+      <button
+        type="button"
+        role="switch"
+        aria-checked={Boolean(checked)}
+        onClick={() => onChange?.(!checked)}
+        {...rest}
+      />
+    ),
     Table,
     Tag: ({ children }: any) => <span>{children}</span>,
     Tooltip: ({ children }: any) => <>{children}</>,
@@ -173,6 +201,10 @@ vi.mock("@/services/watchlists", () => ({
 vi.mock("@/store/watchlists", () => ({
   useWatchlistsStore: (selector: (state: any) => unknown) =>
     selector(mocks.storeStateRef.current)
+}))
+
+vi.mock("../../shared/useWatchlistsViewport", () => ({
+  useWatchlistsViewport: () => mocks.viewportRef
 }))
 
 vi.mock("../SourceFormModal", () => ({
@@ -283,9 +315,28 @@ const baseState = (overrides: Record<string, unknown> = {}) => ({
 })
 
 describe("SourcesTab advanced details disclosure", () => {
+  beforeAll(async () => {
+    const instance = i18next.createInstance()
+    await instance.init({
+      lng: "en",
+      fallbackLng: false,
+      resources: {
+        en: {
+          common: commonEn,
+          watchlists: watchlistsEn
+        }
+      },
+      ns: ["watchlists", "common"],
+      defaultNS: "watchlists",
+      interpolation: { escapeValue: false }
+    })
+    mocks.i18nRef.current = instance
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     localStorage.removeItem(ADVANCED_COLUMNS_STORAGE_KEY)
+    mocks.viewportRef.isConstrained = false
 
     mocks.storeStateRef.current = baseState()
     mocks.fetchWatchlistSourcesMock.mockResolvedValue({
@@ -331,6 +382,114 @@ describe("SourcesTab advanced details disclosure", () => {
     expect(localStorage.getItem(ADVANCED_COLUMNS_STORAGE_KEY)).toBe("1")
   })
 
+  it("binds source actions to each record name", async () => {
+    const sources = [
+      { ...buildSource(101), name: "BBC" },
+      { ...buildSource(102), name: "NPR" },
+      { ...buildSource(103), name: "The Guardian" }
+    ]
+    mocks.storeStateRef.current = baseState({ sources, sourcesTotal: sources.length })
+    mocks.fetchWatchlistSourcesMock.mockResolvedValue({
+      items: sources,
+      total: sources.length,
+      page: 1,
+      size: 20,
+      has_more: false
+    })
+
+    render(<SourcesTab />)
+
+    for (const name of ["BBC", "NPR", "The Guardian"]) {
+      expect(await screen.findByRole("switch", { name: `Toggle active: ${name}` })).toBeVisible()
+      expect(screen.getByRole("button", { name: `Check now: ${name}` })).toBeVisible()
+      expect(screen.getByRole("link", { name: `Open source website: ${name}` })).toBeVisible()
+      expect(screen.getByRole("button", { name: `Edit source: ${name}` })).toBeVisible()
+      expect(screen.getByRole("button", { name: `Open source health: ${name}` })).toBeVisible()
+      expect(screen.getByRole("button", { name: `Delete source: ${name}` })).toBeVisible()
+    }
+  })
+
+  it("separates constrained source selection from uniquely named website and record actions", async () => {
+    const sources = [
+      { ...buildSource(101), name: "BBC", url: "https://bbc.example/feed" },
+      { ...buildSource(102), name: "NPR", url: "https://npr.example/feed" },
+      { ...buildSource(103), name: "The Guardian", url: "https://guardian.example/feed" }
+    ]
+    mocks.viewportRef.isConstrained = true
+    mocks.storeStateRef.current = baseState({ sources, sourcesTotal: sources.length })
+    mocks.fetchWatchlistSourcesMock.mockResolvedValue({
+      items: sources,
+      total: sources.length,
+      page: 1,
+      size: 20,
+      has_more: false
+    })
+
+    render(<SourcesTab />)
+
+    for (const name of ["BBC", "NPR", "The Guardian"]) {
+      const checkbox = await screen.findByRole("checkbox", { name: `Select ${name}` })
+      const website = screen.getByRole("link", { name: `Open source website: ${name}` })
+
+      expect(screen.getAllByRole("checkbox", { name: `Select ${name}` })).toHaveLength(1)
+      expect(screen.getAllByRole("link", { name: `Open source website: ${name}` })).toHaveLength(1)
+      expect(screen.getAllByRole("button", { name: `Check now: ${name}` })).toHaveLength(1)
+      for (const actionName of [
+        `Check now: ${name}`,
+        `Open source health: ${name}`,
+        `Clone ${name}`,
+        `Edit source: ${name}`,
+        `Delete source: ${name}`
+      ]) {
+        expect(screen.getByRole("button", { name: actionName })).toHaveClass("min-h-11", "min-w-11")
+      }
+      expect(website).not.toHaveTextContent("https://")
+
+      fireEvent.click(website)
+      expect(checkbox).not.toBeChecked()
+      expect(mocks.checkWatchlistSourcesNowMock).not.toHaveBeenCalled()
+    }
+  })
+
+  it("keeps selected row checks record-specific and exposes one named bulk check", async () => {
+    const sources = [
+      { ...buildSource(101), name: "BBC" },
+      { ...buildSource(102), name: "NPR" },
+      { ...buildSource(103), name: "The Guardian" }
+    ]
+    mocks.storeStateRef.current = baseState({ sources, sourcesTotal: sources.length })
+    mocks.fetchWatchlistSourcesMock.mockResolvedValue({
+      items: sources,
+      total: sources.length,
+      page: 1,
+      size: 20,
+      has_more: false
+    })
+    mocks.checkWatchlistSourcesNowMock.mockResolvedValue({ success: 1, failed: 0, items: [] })
+
+    render(<SourcesTab />)
+
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Select BBC" }))
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select NPR" }))
+
+    for (const name of ["BBC", "NPR", "The Guardian"]) {
+      expect(screen.getAllByRole("button", { name: `Check now: ${name}` })).toHaveLength(1)
+    }
+
+    fireEvent.click(screen.getByRole("button", { name: "Check now: BBC" }))
+    await waitFor(() => expect(mocks.checkWatchlistSourcesNowMock).toHaveBeenCalledWith([101]))
+
+    fireEvent.click(screen.getByRole("button", { name: "Check now: NPR" }))
+    await waitFor(() => expect(mocks.checkWatchlistSourcesNowMock).toHaveBeenCalledWith([102]))
+
+    const bulkCheck = screen.getByRole("button", { name: "Check now for 2 selected sources" })
+    expect(screen.getAllByRole("button", { name: "Check now for 2 selected sources" })).toHaveLength(1)
+    fireEvent.click(bulkCheck)
+    expect(mocks.modalConfirmMock).toHaveBeenCalledTimes(1)
+    await mocks.modalConfirmMock.mock.calls[0][0].onOk()
+    await waitFor(() => expect(mocks.checkWatchlistSourcesNowMock).toHaveBeenCalledWith([101, 102]))
+  })
+
   it.each([1, 10, 50])(
     "keeps feed table summaries actionable for %i feeds in compact and advanced density modes",
     async (feedCount) => {
@@ -363,43 +522,121 @@ describe("SourcesTab advanced details disclosure", () => {
     }
   )
 
-  it("reuses cached group OPML URLs across refreshes while cache is fresh", async () => {
-    const sourceA = buildSource(301)
-    const sourceB = {
-      ...buildSource(302),
-      url: "https://example.com/other-feed.xml"
-    }
-    const sources = [sourceA, sourceB]
-
+  it("filters a selected group through the paginated sources API", async () => {
+    const source = buildSource(301)
     mocks.storeStateRef.current = baseState({
       selectedGroupId: 7,
       groups: [{ id: 7, name: "Priority", description: null, parent_group_id: null }],
-      sources,
-      sourcesTotal: 2
+      sources: [source],
+      sourcesTotal: 41,
+      sourcesPage: 3,
+      sourcesPageSize: 10
     })
     mocks.fetchWatchlistSourcesMock.mockResolvedValue({
-      items: sources,
-      total: 2,
-      page: 1,
-      size: 200,
+      items: [source],
+      total: 41,
+      page: 3,
+      size: 10,
       has_more: false
     })
-    mocks.exportOpmlMock.mockResolvedValue(
-      `<opml><body><outline text="Priority"><outline xmlUrl="${sourceA.url}" /></outline></body></opml>`
-    )
 
     render(<SourcesTab />)
 
     await waitFor(() => {
-      expect(mocks.exportOpmlMock).toHaveBeenCalledTimes(1)
+      expect(mocks.fetchWatchlistSourcesMock).toHaveBeenCalledWith({
+        watchlist_id: 42,
+        q: undefined,
+        tags: undefined,
+        groups: [7],
+        page: 3,
+        size: 10
+      })
+    })
+    expect(mocks.exportOpmlMock).not.toHaveBeenCalled()
+  })
+
+  it("does not treat a defensive zero group id as an empty selection", async () => {
+    const source = buildSource(302)
+    mocks.storeStateRef.current = baseState({
+      selectedGroupId: 0,
+      groups: [{ id: 0, name: "Defensive", description: null, parent_group_id: null }],
+      sources: [source],
+      sourcesTotal: 1
+    })
+    mocks.fetchWatchlistSourcesMock.mockResolvedValue({
+      items: [source],
+      total: 1,
+      page: 1,
+      size: 25,
+      has_more: false
     })
 
-    fireEvent.click(screen.getByText("Refresh"))
+    render(<SourcesTab />)
+
+    await waitFor(() => {
+      expect(mocks.fetchWatchlistSourcesMock).toHaveBeenCalledWith(
+        expect.objectContaining({ groups: [0] })
+      )
+    })
+  })
+
+  it("server-filters every group page before client-side type filtering and paging", async () => {
+    const firstRssSource = buildSource(501)
+    const secondRssSource = buildSource(502)
+    const firstPage = [
+      firstRssSource,
+      ...Array.from({ length: 199 }, (_unused, index) => ({
+        ...buildSource(600 + index),
+        source_type: "site" as const
+      }))
+    ]
+
+    mocks.storeStateRef.current = baseState({
+      selectedGroupId: 7,
+      groups: [{ id: 7, name: "Priority", description: null, parent_group_id: null }],
+      sources: [secondRssSource],
+      sourcesTotal: 201,
+      sourcesPage: 2,
+      sourcesPageSize: 1
+    })
+    mocks.fetchWatchlistSourcesMock.mockImplementation(async ({ page, size }) => {
+      if (size === 1) {
+        return {
+          items: [secondRssSource],
+          total: 201,
+          page: 2,
+          size: 1,
+          has_more: true
+        }
+      }
+      return page === 1
+        ? { items: firstPage, total: 201, page: 1, size: 200, has_more: true }
+        : { items: [secondRssSource], total: 201, page: 2, size: 200, has_more: false }
+    })
+
+    render(<SourcesTab />)
+
+    await waitFor(() => {
+      expect(mocks.fetchWatchlistSourcesMock).toHaveBeenCalledWith(
+        expect.objectContaining({ groups: [7], page: 2, size: 1 })
+      )
+    })
+    mocks.fetchWatchlistSourcesMock.mockClear()
+    mocks.storeStateRef.current.setSources.mockClear()
+
+    fireEvent.change(screen.getByLabelText("Filter by type"), {
+      target: { value: "rss" }
+    })
 
     await waitFor(() => {
       expect(mocks.fetchWatchlistSourcesMock).toHaveBeenCalledTimes(2)
     })
-    expect(mocks.exportOpmlMock).toHaveBeenCalledTimes(1)
+    expect(mocks.fetchWatchlistSourcesMock.mock.calls.map(([params]) => params)).toEqual([
+      expect.objectContaining({ groups: [7], page: 1, size: 200 }),
+      expect.objectContaining({ groups: [7], page: 2, size: 200 })
+    ])
+    expect(mocks.storeStateRef.current.setSources).toHaveBeenCalledWith([secondRssSource], 2)
+    expect(mocks.exportOpmlMock).not.toHaveBeenCalled()
   })
 
   it("opens cloned feeds in the source form before creating so duplicate URLs can be edited", async () => {

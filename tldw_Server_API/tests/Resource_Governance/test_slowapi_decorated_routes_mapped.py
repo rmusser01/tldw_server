@@ -54,6 +54,7 @@ async def test_rg_route_map_covers_rate_limited_paths():
         "/api/v1/chatbooks/preview",
         "/api/v1/chatbooks/download/test-id",
         "/api/v1/media/search",
+        "/api/v1/skills/trash",
     ]
 
     for path in decorated_paths:

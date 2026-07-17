@@ -192,6 +192,7 @@ def _get_db(user_id: str):
             db_path=db_path,
             backend=backend,
         )
+        db.user_id = str(user_id)
         _DB_CACHE[user_id] = db
         _DB_CACHE.move_to_end(user_id)
         _evict_cache_entries_if_needed()

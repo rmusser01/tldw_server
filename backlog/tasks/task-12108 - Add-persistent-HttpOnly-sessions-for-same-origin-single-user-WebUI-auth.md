@@ -1,0 +1,150 @@
+---
+id: TASK-12108
+title: Add persistent HttpOnly sessions for same-origin single-user WebUI auth
+status: Done
+assignee: []
+created_date: ''
+updated_date: 2026-07-10 22:44
+labels: []
+dependencies: []
+references:
+- TASK-12106
+- TASK-12030
+- TASK-12127
+- https://github.com/rmusser01/tldw_server/issues/2590
+documentation:
+- Docs/superpowers/specs/2026-07-10-single-user-http-only-session-design.md
+- docs/superpowers/plans/2026-07-10-single-user-http-only-session-implementation-plan.md
+- .superpowers/sdd/http-task-2-report.md
+- .superpowers/sdd/http-task-3-report.md
+- .superpowers/sdd/http-task-4-report.md
+- .superpowers/sdd/http-task-5-report.md
+- .superpowers/sdd/http-task-6-report.md
+priority: high
+modified_files:
+- tldw_Server_API/app/core/AuthNZ/auth_principal_resolver.py
+- tldw_Server_API/tests/AuthNZ/unit/test_auth_principal_service_and_single_user_tokens.py
+- tldw_Server_API/app/core/AuthNZ/websocket_session_auth.py
+- tldw_Server_API/app/api/v1/endpoints/agent_client_protocol.py
+- tldw_Server_API/app/api/v1/endpoints/acp_multiplex.py
+- tldw_Server_API/app/api/v1/endpoints/persona.py
+- tldw_Server_API/app/api/v1/endpoints/watchlists.py
+- tldw_Server_API/app/api/v1/endpoints/workflows.py
+- tldw_Server_API/app/api/v1/endpoints/meetings.py
+- tldw_Server_API/app/api/v1/API_Deps/Meetings_DB_Deps.py
+- tldw_Server_API/app/api/v1/endpoints/prompt_studio/prompt_studio_websocket.py
+- tldw_Server_API/app/api/v1/endpoints/sandbox.py
+- tldw_Server_API/app/api/v1/endpoints/mcp_unified_endpoint.py
+- tldw_Server_API/app/core/MCP_unified/server.py
+- tldw_Server_API/app/api/v1/endpoints/voice_assistant.py
+- tldw_Server_API/app/api/v1/endpoints/audio/audio_streaming.py
+- tldw_Server_API/app/core/Audio/streaming_service.py
+- tldw_Server_API/tests/AuthNZ/unit/test_websocket_session_auth.py
+- tldw_Server_API/tests/AuthNZ/test_websocket_cookie_route_contract.py
+- tldw_Server_API/tests/Audio/test_audio_streaming_service_core.py
+- tldw_Server_API/tests/sandbox/test_ws_signed_validation.py
+- apps/tldw-frontend/pages/api/_tldw-webui/runtime-auth-policy.ts
+- apps/tldw-frontend/pages/api/_tldw-webui/session.ts
+- apps/tldw-frontend/pages/api/_tldw-webui/runtime-config.ts
+- apps/tldw-frontend/scripts/validate-networking-config.mjs
+- apps/tldw-frontend/__tests__/pages/api/runtime-config.test.ts
+- apps/tldw-frontend/__tests__/pages/api/runtime-session.test.ts
+- apps/tldw-frontend/__tests__/frontend-quickstart-networking.test.ts
+- Dockerfiles/docker-compose.yml
+- Dockerfiles/docker-compose.single-user.yml
+- Dockerfiles/docker-compose.host-storage.yml
+- Dockerfiles/docker-compose.webui.yml
+- tldw_Server_API/app/core/AuthNZ/settings.py
+- tldw_Server_API/tests/AuthNZ/unit/test_settings_single_user_session_cookie.py
+- apps/tldw-frontend/extension/shims/runtime-bootstrap.ts
+- apps/tldw-frontend/lib/authStorage.ts
+- apps/tldw-frontend/__tests__/extension/runtime-bootstrap.test.ts
+- apps/packages/ui/src/services/tldw/TldwApiClient.ts
+- apps/packages/ui/src/services/tldw/request-core.ts
+- apps/packages/ui/src/services/tldw/browser-websocket.ts
+- apps/packages/ui/src/services/persona-stream.ts
+- apps/packages/ui/src/services/watchlists-stream.ts
+- apps/packages/ui/src/services/prompt-studio-stream.ts
+- apps/packages/ui/src/services/acp/connection.ts
+- apps/packages/ui/src/services/acp/client.ts
+- apps/packages/ui/src/services/tldw/voice-conversation.ts
+- apps/packages/ui/src/hooks/useCanonicalConnectionConfig.ts
+- apps/packages/ui/src/hooks/useACPSession.tsx
+- apps/packages/ui/src/hooks/useVoiceChatStream.tsx
+- apps/packages/ui/src/components/Option/Speech/SpeechPlaygroundPage.tsx
+- apps/packages/ui/src/services/tldw/__tests__/request-core.quickstart.test.ts
+- apps/packages/ui/src/services/__tests__/persona-stream.test.ts
+- apps/packages/ui/src/services/__tests__/watchlists-stream.test.ts
+- apps/packages/ui/src/services/__tests__/prompt-studio-stream.test.ts
+- apps/packages/ui/src/services/acp/__tests__/client.test.ts
+- apps/packages/ui/src/hooks/__tests__/useACPSession.test.tsx
+- apps/packages/ui/src/services/__tests__/voice-conversation.test.ts
+- apps/packages/ui/src/services/__tests__/tldw-api-client.quickstart-auth.test.ts
+- apps/packages/ui/src/services/__tests__/background-proxy.test.ts
+- Dockerfiles/README.md
+- apps/tldw-frontend/e2e/login.spec.ts
+- apps/tldw-frontend/e2e/single-user-cookie-lifecycle.spec.ts
+- apps/tldw-frontend/scripts/playwright-cookie-lifecycle.mjs
+- apps/tldw-frontend/package.json
+- apps/tldw-frontend/playwright.config.ts
+- Docs/superpowers/plans/2026-07-10-single-user-http-only-session-implementation-plan.md
+- .superpowers/sdd/http-task-6-report.md
+---
+
+## Description
+
+<!-- SECTION:DESCRIPTION:BEGIN -->
+Replace browser-visible runtime API-key provisioning in the runtime-enabled loopback quickstart WebUI with a backend-issued persistent HttpOnly session cookie, including CSRF protection, API-key-rotation invalidation, logout revocation, WebSocket compatibility, and browser relaunch coverage.
+<!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+- [x] #1 Runtime-enabled loopback quickstart WebUI bootstrap authenticates without returning the API key to browser JavaScript.
+- [x] #2 The persistent session cookie is HttpOnly, host-only, SameSite=Lax, Secure outside explicit loopback HTTP, and has a bounded lifetime.
+- [x] #3 Cookie-authenticated state-changing requests require the existing double-submit CSRF token while header-authenticated API clients remain unaffected.
+- [x] #4 A single-user API-key rotation invalidates previously issued cookie sessions after settings reload/process restart.
+- [x] #5 Logout revokes the current server-side session and clears the session cookie.
+- [x] #6 Regression coverage includes hard reload, close/reopen of the same browser profile, and representative same-origin WebSockets without API-key re-entry.
+- [x] #7 Runtime bootstrap fails closed and does not fall back to exposing or persisting the API key in browser JavaScript.
+<!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+All six implementation tasks are complete. Design and execution plan: Docs/superpowers/plans/2026-07-10-single-user-http-only-session-implementation-plan.md. Exact final evidence: .superpowers/sdd/http-task-6-report.md.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Hybrid design: reuse the existing AuthNZ SessionManager/sessions table for a high-entropy opaque single-user session, authenticate loopback quickstart WebUI requests through an HttpOnly host-only cookie, and reuse the existing double-submit CSRF middleware. Independent review added shared HTTP/WebSocket cookie-principal resolution, exact trusted-Origin WebSocket checks, upgraded-profile key scrubbing, and CSRF_BIND_TO_USER pre-resolution. Final pre-implementation corrections: do not path-exclude session mint; fail closed if effective CSRF is disabled; use a constant single-user-cookie:v1 type tag and existing API-key-derived HMAC token hashes for rotation; retain the current quickstart/loopback/no-forwarding guard; activate atomically across HTTP, CSRF, and WebSockets; preserve multiple Set-Cookie headers with getSetCookie semantics. Design: Docs/superpowers/specs/2026-07-10-single-user-http-only-session-design.md
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Implemented persistent opaque HttpOnly single-user sessions for the runtime-enabled same-origin loopback WebUI. The API key remains server-side; cookie-authenticated HTTP and representative WebSockets use exact Origin/CSRF protections, logout revokes the active session, and API-key rotation invalidates prior cookies. Added documented loopback compose defaults and a dynamic-port Playwright lifecycle covering hard reload, browser close/reopen with the same profile, secret inventory, WebSockets, hostile-Origin rejection, logout, reprovisioning, and rotation. Verification: lifecycle passed; configured frontend gate 312/312; focused suites 183/183; compose, ESLint, and diff-check passed; Bandit 0 high/medium (18 low token-label heuristics). Full AuthNZ with process-wide CSRF forcing: 934 passed and 36 legacy multi-user integration tests failed because they do not send CSRF tokens; all feature-specific AuthNZ/CSRF/WebSocket tests and the real CSRF-enabled lifecycle passed.
+<!-- SECTION:FINAL_SUMMARY:END -->
+
+<!-- SECTION:FINAL_SUMMARY:END -->
+
+<!-- SECTION:FINAL_SUMMARY:END -->
+
+## Definition of Done
+<!-- DOD:BEGIN -->
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
+<!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Task 5 review follow-up from base 56ed4dbb74 fixed all five findings. Active keyless cookie auth is separate from canonical manual tldwConfig via non-secret tldwCookieSessionConfig; repeated bootstrap/client initialization preserves manual credentials. Central transport predicate gates cookie behavior to single-user quickstart same-origin HTTP(S). Voice gates and ACP direct HTTP/SSH paths are covered. TDD RED: 11 initial, 2 voice, 3 ACP. GREEN: 17 files/138 tests plus 45 background tests (183 total). ESLint zero errors; frontend tsc zero touched-path diagnostics (15 unrelated baseline); UI tsc existing 4 GB OOM; diff check passed; Bandit not applicable. Full evidence: .superpowers/sdd/http-task-5-report.md.
+
+Remaining Task 5 review follow-up from base 14f64ba33c serializes startup before config consumers mount, canonicalizes cookie-mode ACP SSH to the page-origin session route while preserving manual absolute URLs, invalidates stale cookie markers in memory even when persistent removal fails, and makes Speech streaming readiness use the centralized cookie transport resolution. RED covered a real deferred TldwApiClient child lifecycle, rejected bootstrap, absolute/protocol-relative ACP URLs, a pre-cached stale marker with remove failure, and stale advanced Speech auth. GREEN: prior focused suites plus new regressions passed 18 files/171 tests; background transport passed 45 tests. ESLint reported zero errors (legacy warnings only), frontend touched-path tsc completed with no diagnostics, git diff --check passed, and Bandit is not applicable to this TypeScript/TSX-only follow-up. Full evidence: .superpowers/sdd/http-task-5-report.md.
+Final Task 5 availability follow-up from base fbdf675ed7 bounds runtime-config GET, session POST, and profile probe operations at 8 seconds with a fresh AbortController signal and explicit timer race per call, without depending on AbortSignal.timeout. AbortError/TimeoutError follow the existing failed-bootstrap path: active cookie selection is invalidated, complete manual configuration is preserved, and _app exits its loader into fail-closed auth/config UI. Fake-timer RED/GREEN covers all three never-settling hops, 7,999/8,000 ms settlement, distinct success signals, and the _app provider/config tree. GREEN: startup pair 2 files/41 tests, Task 5 aggregate 18 files/175 tests, background 1 file/45 tests. ESLint zero errors (one pre-existing warning), frontend tsc zero touched-path diagnostics amid dependency baseline, diff check passed; Bandit not applicable. Exact evidence: .superpowers/sdd/http-task-5-report.md.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->

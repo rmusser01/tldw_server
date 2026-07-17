@@ -1,4 +1,12 @@
 {
+  "accessibilityHardening": {
+    "source": { "toggleActive": "Cambiar estado activo: {{name}}", "checkNow": "Comprobar ahora: {{name}}", "openWebsite": "Abrir sitio de la fuente: {{name}}", "openHealth": "Abrir estado de la fuente: {{name}}", "edit": "Editar fuente: {{name}}", "delete": "Eliminar fuente: {{name}}" },
+    "item": { "open": "Abrir actualización: {{title}}", "select": "Seleccionar actualización: {{title}}", "description": "{{state}}. Fuente: {{source}}." },
+    "output": { "openNewTab": "Abrir {{title}} en una pestaña nueva", "chat": "Conversar sobre {{title}}", "download": "Descargar {{title}}", "close": "Cerrar vista previa: {{title}}" },
+    "health": { "show": "Mostrar detalles de estado de las listas de seguimiento", "hide": "Ocultar detalles de estado de las listas de seguimiento", "refresh": "Actualizar estado de las listas de seguimiento", "settings": "Abrir ajustes de las listas de seguimiento" },
+    "delivery": { "email": "Enviar cada informe a los destinatarios configurados cuando esté activado.", "chatbook": "Publicar cada informe en Chatbook cuando esté activado." },
+    "help": { "open": "Abrir ayuda de listas de seguimiento", "title": "Ayuda de listas de seguimiento" }
+  },
   "items": {
     "queuedForBriefing": "En cola para informe",
     "includeInNextBriefing": "Incluir en el próximo informe",
@@ -17,5 +25,470 @@
       "generateError": "No se pudo generar un informe a partir de los elementos en cola.",
       "generateReport": "Generar informe desde la cola"
     }
+  },
+  "setupWizard": {
+    "title": "Crear lista de seguimiento",
+    "containerTitle": "Crear lista de seguimiento",
+    "containerHelp": "Crea primero el contenedor del proyecto. Las fuentes, la cadencia, el informe, la entrega y la prueba continúan en un único flujo de configuración.",
+    "actions": {
+      "continue": "Continuar a Fuentes"
+    },
+    "sections": {
+      "preset": "Preajuste de dominio"
+    },
+    "fields": {
+      "name": "Nombre de la lista de seguimiento",
+      "objective": "Objetivo"
+    },
+    "validation": {
+      "nameRequired": "Añade un nombre para la lista de seguimiento."
+    },
+    "errors": {
+      "createFailed": "No se pudo crear la lista de seguimiento."
+    },
+    "presets": {
+      "cti_osint": {
+        "label": "CTI / OSINT",
+        "description": "Supervisa vulnerabilidades, malware, actores, avisos y cambios en las fuentes."
+      },
+      "news": {
+        "label": "Noticias",
+        "description": "Supervisa acontecimientos en desarrollo, personas, organizaciones y diversidad de fuentes."
+      },
+      "general": {
+        "label": "General",
+        "description": "Supervisa un tema y recopila actualizaciones para revisarlas."
+      },
+      "blank": {
+        "label": "En blanco",
+        "description": "Empieza con una lista de seguimiento vacía y configura los detalles."
+      }
+    },
+    "startModes": {
+      "sources": {
+        "label": "Empezar desde fuentes",
+        "description": "Crea una lista de seguimiento con fuentes iniciales y un monitor opcional."
+      },
+      "topic": {
+        "label": "Empezar desde un tema",
+        "description": "Define primero el objetivo de la lista y añade fuentes antes de iniciar la recopilación."
+      },
+      "report_goal": {
+        "label": "Empezar desde el objetivo del informe",
+        "description": "Define primero el objetivo del informe y después conecta fuentes y plantillas."
+      }
+    },
+    "boundaries": {
+      "alerts": "Las alertas por coincidencia de contenido se configuran más adelante. Esta configuración define la lista de seguimiento y su alcance inicial de recopilación."
+    }
+  },
+  "overview": {
+    "pipelineSetup": {
+      "title": "Configurar informe",
+      "open": "Configurar informe",
+      "progress": "Pasos de configuración del informe",
+      "steps": {
+        "sources": "Fuentes",
+        "cadence": "Cadencia",
+        "briefing": "Informe",
+        "delivery": "Entrega",
+        "test": "Prueba"
+      },
+      "actions": {
+        "next": "Continuar a {{step}}"
+      },
+      "source": {
+        "existing": "Usar fuentes existentes",
+        "new": "Añadir una fuente nueva",
+        "fallback": "Fuente {{id}}"
+      },
+      "sources": {
+        "help": "Elige fuentes existentes o añade una y después prueba la conexión."
+      },
+      "sourcesLoading": "Cargando fuentes...",
+      "sourcesError": "No se pudieron cargar las fuentes para el configurador.",
+      "sourceTest": {
+        "action": "Probar fuente",
+        "ready": "La fuente está lista.",
+        "cancelled": "Prueba de fuente cancelada.",
+        "failed": "La prueba de la fuente falló. {{message}}",
+        "summary": "{{ready}} listas, {{filtered}} filtradas",
+        "sample": "Elementos de muestra",
+        "readyItem": "Lista",
+        "filteredItem": "Filtrado",
+        "untitled": "Elemento sin título"
+      },
+      "fields": {
+        "sources": "Fuentes",
+        "sourceName": "Nombre de la fuente",
+        "sourceUrl": "URL de la fuente",
+        "monitorName": "Nombre del monitor",
+        "schedule": "Programación",
+        "timezone": "Zona horaria",
+        "intervalEvery": "Cada",
+        "intervalUnit": "Unidad del intervalo",
+        "weekday": "Día de la semana",
+        "hour": "Hora",
+        "minute": "Minuto",
+        "cronExpression": "Expresión cron",
+        "showName": "Nombre del programa",
+        "premise": "Premisa del programa",
+        "includeAudio": "Audio",
+        "audioHelp": "Añade una versión hablada reproducible.",
+        "audioMinutes": "Duración objetivo en minutos",
+        "speakerCount": "Tamaño del elenco",
+        "template": "Plantilla del informe",
+        "audioProvider": "Proveedor de audio alternativo",
+        "audioModel": "Modelo de audio alternativo",
+        "customInstructions": "Instrucciones editoriales personalizadas",
+        "emailDelivery": "Correo electrónico",
+        "emailRecipients": "Destinatarios del correo",
+        "chatbookDelivery": "Chatbook",
+        "chatbookTitle": "Título del Chatbook"
+      },
+      "schedule": {
+        "manual": "Solo manual",
+        "interval": "Cada N horas o minutos",
+        "daily": "Diariamente",
+        "weekdays": "Días laborables",
+        "weekly": "Semanalmente",
+        "advanced": "Cron avanzado"
+      },
+      "intervalUnits": {
+        "hours": "Horas",
+        "minutes": "Minutos"
+      },
+      "weekdays": {
+        "monday": "Lunes",
+        "tuesday": "Martes",
+        "wednesday": "Miércoles",
+        "thursday": "Jueves",
+        "friday": "Viernes",
+        "saturday": "Sábado",
+        "sunday": "Domingo"
+      },
+      "advancedCron": "Cron avanzado",
+      "nextOccurrence": "Próxima ejecución",
+      "manualOccurrence": "Solo manual",
+      "nextOccurrencePending": "Guarda una programación válida para calcular la hora exacta.",
+      "schedulePreview": {
+        "loading": "Calculando la programación exacta…",
+        "error": "No se pudo calcular la programación exacta. Revisa la expresión cron y la zona horaria."
+      },
+      "briefing": {
+        "question": "¿Qué estás creando?",
+        "help": "Elige la forma editorial. Todas las opciones se basan en las fuentes seleccionadas.",
+        "advanced": "Configuración avanzada del informe"
+      },
+      "formats": {
+        "concise_briefing": "Informe conciso",
+        "solo_update": "Actualización en solitario",
+        "host_discussion": "Conversación entre presentadores",
+        "sportscast": "Retransmisión deportiva",
+        "culture_roundtable": "Mesa redonda cultural",
+        "custom": "Personalizado"
+      },
+      "speaker": {
+        "defaultLabel": "Participante {{index}}",
+        "defaultRole": "Presentador",
+        "labelField": "Etiqueta del participante {{index}}",
+        "roleField": "Rol del participante {{index}}",
+        "voiceField": "Voz del participante {{index}}",
+        "personaField": "Personalidad del participante {{index}}"
+      },
+      "preview": {
+        "generate": "Vista previa del informe",
+        "diagnostics": "Diagnóstico de la vista previa",
+        "context": "Ejecución de vista previa: {{runId}}",
+        "noRunContext": "Ejecuta correctamente un monitor antes de previsualizar este informe.",
+        "templateRequired": "Selecciona una plantilla antes de generar la vista previa.",
+        "templateEmpty": "La plantilla seleccionada está vacía.",
+        "emptyResult": "La vista previa no devolvió contenido procesado.",
+        "error": "No se pudo generar la vista previa."
+      },
+      "delivery": {
+        "help": "Los informes siempre se incluyen. La entrega externa espera hasta que los artefactos seleccionados estén listos.",
+        "reports": "Informes",
+        "required": "Almacenamiento obligatorio",
+        "alwaysOn": "Siempre activo"
+      },
+      "receipt": {
+        "labels": {
+          "schedule": "Programación",
+          "sources": "Fuentes",
+          "artifacts": "Artefactos",
+          "format": "Formato",
+          "showName": "Nombre del programa",
+          "cast": "Elenco",
+          "duration": "Duración objetivo",
+          "destinations": "Destinos"
+        },
+        "schedule": {
+          "manual": "Solo manual",
+          "scheduled": "{{date}} ({{timezone}})"
+        },
+        "sources": "{{count}} fuentes",
+        "sources_one": "{{count}} fuente",
+        "sources_many": "{{count}} fuentes",
+        "sources_other": "{{count}} fuentes",
+        "artifacts": {
+          "textReport": "informe de texto",
+          "showNotes": "notas del programa",
+          "audio": "audio"
+        },
+        "formats": {
+          "concise_briefing": "informe conciso",
+          "solo_update": "actualización en solitario",
+          "host_discussion": "conversación entre presentadores",
+          "sportscast": "retransmisión deportiva",
+          "culture_roundtable": "mesa redonda cultural",
+          "custom": "programa personalizado"
+        },
+        "speakerStyle": {
+          "1": "en solitario",
+          "2": "con dos presentadores",
+          "3": "con tres presentadores",
+          "4": "con cuatro presentadores"
+        },
+        "programWithSpeakers": "{{format}} {{speakers}}",
+        "cast": "{{count}} participantes",
+        "cast_one": "{{count}} participante",
+        "cast_many": "{{count}} participantes",
+        "cast_other": "{{count}} participantes",
+        "duration": "objetivo de {{count}} minutos",
+        "duration_one": "objetivo de {{count}} minuto",
+        "duration_many": "objetivo de {{count}} minutos",
+        "duration_other": "objetivo de {{count}} minutos",
+        "destinations": {
+          "email": "Correo: {{recipients}}",
+          "chatbook": "Chatbook: {{title}}"
+        },
+        "untitledChatbook": "Sin título",
+        "dstChange": "La siguiente ejecución usa {{timezoneName}} después del cambio de horario de verano: {{date}}."
+      },
+      "test": {
+        "providerDisclosure": "Las pruebas usan los proveedores de LLM y texto a voz configurados. La muestra se limita a 60 segundos; la prueba completa usa la duración objetivo.",
+        "textProviderDisclosure": "Las pruebas usan el proveedor de LLM configurado. Las pruebas de solo texto no usan texto a voz.",
+        "receipt": "Resumen de activación",
+        "manualReceipt": "Este informe se ejecuta manualmente, guarda los artefactos seleccionados en Informes y no contacta ningún destino externo salvo que elijas Enviar prueba.",
+        "scheduledReceipt": "{{schedule}}, recopila actualizaciones de {{sources}}, genera {{artifacts}} como {{program}}{{duration}} y después guárdalos y entrégalos en {{destinations}}.",
+        "audioTestRequired": "Genera correctamente una muestra de audio o una prueba completa antes de activar.",
+        "progress": "Progreso de la prueba",
+        "stages": {
+          "collection": "Recopilar fuentes",
+          "selection": "Seleccionar actualizaciones",
+          "text": "Crear informe",
+          "audio": "Crear audio",
+          "persistence": "Guardar en Informes",
+          "audioScript": "Redactar guion de audio",
+          "audioScriptPersistence": "Guardar guion de audio",
+          "audioPersistence": "Guardar audio en Informes",
+          "delivery": "Comprobar la entrega de prueba",
+          "deliveryAdapter": "Entregar a {{adapter}}",
+          "unknown": "Etapa {{stage}}"
+        },
+        "sample": "Generar muestra de 60 segundos",
+        "full": "Generar episodio de prueba completo",
+        "text": "Generar informe de prueba",
+        "send": "Enviar prueba",
+        "activate": "Activar programación",
+        "ready": "Prueba completada. Tu informe está listo. Este borrador permanece inactivo hasta que actives su programación.",
+        "running": "La ejecución {{runId}} sigue activa: {{stage}}. Puedes cerrar la configuración y supervisarla en Resumen.",
+        "failedStage": "{{stage}} falló. Abre la ejecución {{runId}} y reintenta esta etapa.",
+        "failedWithCode": "{{stage}} falló ({{code}}). Abre la ejecución {{runId}} y reintenta esta etapa.",
+        "cancelledStage": "{{stage}} se canceló. Tu borrador está guardado.",
+        "cancelledWithCode": "{{stage}} se canceló ({{code}}). Tu borrador está guardado.",
+        "cancelled": "Prueba cancelada. Tu borrador está guardado.",
+        "failed": "La prueba falló. Tu borrador está guardado. {{message}}",
+        "status": {
+          "not_started": "No iniciada",
+          "queued": "En cola",
+          "running": "En curso",
+          "ready": "Lista",
+          "failed": "Fallida",
+          "skipped": "Omitida",
+          "cancelled": "Cancelada"
+        }
+      },
+      "activate": {
+        "ready": "Programación activada.",
+        "failed": "No se pudo activar la programación. Tu borrador está guardado. {{message}}"
+      },
+      "validation": {
+        "sourcesRequired": "Elige al menos una fuente antes de continuar.",
+        "sourceNameRequired": "Introduce un nombre de fuente.",
+        "sourceUrlInvalid": "Introduce una URL de fuente HTTP o HTTPS válida.",
+        "monitorNameRequired": "Introduce un nombre de monitor.",
+        "timezoneInvalid": "Introduce una zona horaria IANA válida.",
+        "intervalInvalid": "Introduce un intervalo de programación admitido.",
+        "hourInvalid": "Introduce una hora entre 0 y 23.",
+        "minuteInvalid": "Introduce un minuto entre 0 y 59.",
+        "cronInvalid": "Introduce una expresión cron válida de cinco campos.",
+        "cronTooFrequent": "Elige una programación con al menos cinco minutos de separación.",
+        "templateRequired": "Introduce una plantilla de informe.",
+        "castSizeInvalid": "Elige entre uno y cuatro participantes.",
+        "castIdsInvalid": "Cada participante necesita una identidad única.",
+        "castVoicesRequired": "Elige una voz para cada participante.",
+        "audioMinutesInvalid": "Introduce una duración entre 1 y 60 minutos.",
+        "emailInvalid": "Introduce al menos una dirección de correo válida."
+      },
+      "validationError": "Revisa los campos resaltados antes de continuar."
+    },
+    "latest": {
+      "heading": {
+        "briefing": "Último resumen",
+        "episode": "Último episodio"
+      },
+      "empty": {
+        "scheduled": "Tu primer resumen está programado para {{date}}.",
+        "manual": "No iniciado. Probar ahora."
+      },
+      "generatedAt": "Generado {{date}}",
+      "untitled": "resumen {{runId}}",
+      "artifacts": "informe / audio",
+      "audio": "audio",
+      "audioFailed": "audio falló",
+      "ready": "Listo",
+      "saved": "Guardado",
+      "waiting": "En espera",
+      "script": "audio informe",
+      "stageWithStatus": "{{stage}}: {{status}}",
+      "noUpdates": "No se encontraron actualizaciones que cumplieran los criterios. Se guardó un {{noun}} de estado.",
+      "nextRun": "Próxima ejecución: {{date}}",
+      "nextRunRelative": "Próxima ejecución: {{relative}}",
+      "counts": "resumen: Incluidos, Sin leer, Nuevos",
+      "count": {
+        "included": "Incluidos {{count}}",
+        "unread": "Sin leer {{count}}",
+        "new": "Nuevos {{count}}"
+      },
+      "provenance": {
+        "sources": "{{count}} fuentes seguidas",
+        "sources_zero": "{{count}} fuentes seguidas",
+        "sources_one": "{{count}} fuente seguida",
+        "sources_two": "{{count}} fuentes seguidas",
+        "sources_few": "{{count}} fuentes seguidas",
+        "sources_many": "{{count}} fuentes seguidas",
+        "sources_other": "{{count}} fuentes seguidas"
+      },
+      "delivery": {
+        "reports": "Ver todos los informes",
+        "retryAria": "Reintentar {{adapter}}: {{name}}",
+        "retryUnknownAria": "Resultado desconocido. Reintentar {{adapter}}: {{name}}",
+        "reviewRetry": "Revisar y reintentar",
+        "unknownConfirmation": "El proveedor no confirmó la entrega por {{adapter}}. Reintentar puede enviar un duplicado. Revisa el destino y continúa solo si aceptas ese riesgo. ({{destination}})",
+        "chatbookDestination": "Chatbook",
+        "confirmRetry": "Reintentar entrega",
+        "confirmRetryAria": "Reintentar {{adapter}} entrega",
+        "recipientCount": "{{count}} destinatarios",
+        "recipientCount_zero": "{{count}} destinatarios",
+        "recipientCount_one": "{{count}} destinatarios",
+        "recipientCount_two": "{{count}} destinatarios",
+        "recipientCount_few": "{{count}} destinatarios",
+        "recipientCount_many": "{{count}} destinatarios",
+        "recipientCount_other": "{{count}} destinatarios",
+        "reviewAcknowledgement": "He revisado el destino y acepto el riesgo de una entrega duplicada.",
+        "reviewSettings": "Revisar configuración",
+        "reviewTitle": "Revisar {{adapter}} entrega"
+      },
+      "playback": {
+        "region": "audio: {{name}}",
+        "playAria": "Reproducir {{name}}",
+        "pauseAria": "Pausar {{name}}",
+        "resumeAria": "Reanudar {{name}}",
+        "seekAria": "audio: {{name}}",
+        "loading": "Cargando audio",
+        "error": "audio falló. Abrir informe / Regenerar audio.",
+        "play": "Reproducir",
+        "pause": "Pausar",
+        "resume": "Reanudar",
+        "accessError": "audio: Error de acceso. Comprueba tu inicio de sesión y la conexión con el servidor.",
+        "missing": "audio ya no está disponible."
+      },
+      "actions": {
+        "label": "Último resumen",
+        "openReport": "Abrir {{report}}",
+        "openReportAria": "Abrir {{report}}: {{name}}",
+        "regenerateAudio": "Regenerar audio",
+        "regenerateAudioAria": "Regenerar {{style}} {{noun}} audio: {{name}}",
+        "retry": "Reintentar",
+        "retrySaveAria": "Reintentar guardado informe: {{name}}",
+        "retryTextAria": "Reintentar informe: {{name}}",
+        "retryStage": "Reintentar: {{stage}}",
+        "inspect": "Inspeccionar ejecución",
+        "inspectAria": "Inspeccionar ejecución {{runId}}: {{name}}",
+        "viewReports": "Ver todos los informes",
+        "testNow": "Probar ahora",
+        "downloadAudio": "Descargar audio",
+        "downloadAudioAria": "Descargar audio: {{name}}",
+        "retryExactAria": "Reintentar {{stage}}: {{name}}",
+        "reviewScript": "Revisar audio informe",
+        "reviewScriptAria": "Revisar audio informe: {{name}}"
+      },
+      "announcements": {
+        "blockingFailure": "{{name}} falló. Inspeccionar ejecución {{runId}}.",
+        "delivered": "{{name}}: entregado.",
+        "nextRunUpdated": "{{name}}: próxima ejecución.",
+        "partialAudioFailure": "{{name}}: notas del programa listo, audio falló.",
+        "readyText": "{{name}}: informe listo.",
+        "readyWithAudio": "{{name}}: Listo. audio / notas del programa.",
+        "stageProgress": "{{name}}: {{stage}} {{status}}.",
+        "testQueued": "Probar ahora: en cola."
+      },
+      "retryError": "Reintentar falló. Inspeccionar ejecución.",
+      "regenerateError": "Regenerar audio: falló.",
+      "testError": "Probar ahora: falló.",
+      "status": {
+        "ready": "Listo",
+        "failed": "Falló",
+        "saved": "Guardado",
+        "waiting": "En espera",
+        "running": "En ejecución",
+        "queued": "En cola",
+        "notStarted": "No iniciado",
+        "notSelected": "No seleccionado",
+        "cancelled": "Cancelado",
+        "delivered": "Entregado",
+        "unknown": "Resultado desconocido",
+        "sending": "Enviando",
+        "stale": "Obsoleto",
+        "superseded": "Reemplazado",
+        "unavailable": "No disponible",
+        "partial": "Parcial"
+      },
+      "stages": {
+        "renderText": "informe",
+        "persistText": "Guardado informe",
+        "composeScript": "audio informe",
+        "persistScript": "Guardado audio informe",
+        "generateAudio": "audio",
+        "persistAudio": "Guardado audio"
+      },
+      "nouns": {
+        "briefing": "resumen",
+        "episode": "episodio",
+        "report": "informe",
+        "showNotes": "notas del programa"
+      },
+      "scriptAccessError": "audio informe: Error de acceso. Comprueba tu inicio de sesión y la conexión con el servidor.",
+      "scriptLoading": "Cargando audio informe",
+      "scriptMissing": "audio informe ya no está disponible.",
+      "recovery": {
+        "renderText": "Generando informe",
+        "persistText": "Guardando informe",
+        "composeScript": "Redactando audio informe",
+        "persistScript": "Guardando audio informe",
+        "generateAudio": "Generando audio",
+        "persistAudio": "Guardando audio"
+      }
+    }
+  },
+  "outputs": {
+    "openInNewTabAria": "Abrir en una pestaña nueva: {{title}}",
+    "chatAboutAria": "Conversar sobre esto: {{title}}",
+    "downloadAria": "Descargar: {{title}}",
+    "artifactMissing": "ya no está disponible.",
+    "artifactAuthError": "Acceso denegado. Comprueba tu inicio de sesión.",
+    "artifactAccessError": "Error de acceso. Comprueba tu inicio de sesión y la conexión con el servidor."
   }
 }

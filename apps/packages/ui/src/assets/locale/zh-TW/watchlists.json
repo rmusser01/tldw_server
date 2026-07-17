@@ -1,4 +1,12 @@
 {
+  "accessibilityHardening": {
+    "source": { "toggleActive": "切換啟用狀態：{{name}}", "checkNow": "立即檢查：{{name}}", "openWebsite": "開啟來源網站：{{name}}", "openHealth": "開啟來源狀態：{{name}}", "edit": "編輯來源：{{name}}", "delete": "刪除來源：{{name}}" },
+    "item": { "open": "開啟更新：{{title}}", "select": "選取更新：{{title}}", "description": "{{state}}。來源：{{source}}。" },
+    "output": { "openNewTab": "在新分頁中開啟 {{title}}", "chat": "討論 {{title}}", "download": "下載 {{title}}", "close": "關閉預覽：{{title}}" },
+    "health": { "show": "顯示監視清單狀態詳情", "hide": "隱藏監視清單狀態詳情", "refresh": "重新整理監視清單狀態", "settings": "開啟監視清單設定" },
+    "delivery": { "email": "啟用後，將每份報告傳送給已設定的收件者。", "chatbook": "啟用後，將每份報告發佈到 Chatbook。" },
+    "help": { "open": "開啟監視清單說明", "title": "監視清單說明" }
+  },
   "items": {
     "queuedForBriefing": "已加入簡報佇列",
     "includeInNextBriefing": "加入下一次簡報",
@@ -17,5 +25,467 @@
       "generateError": "無法從佇列項目產生報告。",
       "generateReport": "從佇列產生報告"
     }
+  },
+  "setupWizard": {
+    "title": "建立監視清單",
+    "containerTitle": "建立監視清單",
+    "containerHelp": "請先建立專案容器。接著在同一設定流程中設定來源、頻率、簡報、傳送和測試。",
+    "actions": {
+      "continue": "繼續前往來源"
+    },
+    "sections": {
+      "preset": "領域預設"
+    },
+    "fields": {
+      "name": "監視清單名稱",
+      "objective": "目標"
+    },
+    "validation": {
+      "nameRequired": "請輸入監視清單名稱。"
+    },
+    "errors": {
+      "createFailed": "無法建立監視清單。"
+    },
+    "presets": {
+      "cti_osint": {
+        "label": "CTI / OSINT",
+        "description": "追蹤弱點、惡意軟體、威脅行為者、安全公告和來源變更。"
+      },
+      "news": {
+        "label": "新聞",
+        "description": "追蹤持續發展的事件、人物、組織和來源多樣性。"
+      },
+      "general": {
+        "label": "一般",
+        "description": "追蹤主題並收集更新以供檢閱。"
+      },
+      "blank": {
+        "label": "空白",
+        "description": "從空白監視清單開始並自行設定詳細資料。"
+      }
+    },
+    "startModes": {
+      "sources": {
+        "label": "從來源開始",
+        "description": "使用初始資訊提供和選用監視器建立監視清單。"
+      },
+      "topic": {
+        "label": "從主題開始",
+        "description": "先建立監視清單目標，再於收集開始前新增資訊提供。"
+      },
+      "report_goal": {
+        "label": "從報告目標開始",
+        "description": "先定義簡報目標，再連接來源和範本。"
+      }
+    },
+    "boundaries": {
+      "alerts": "內容比對提醒將於之後設定。此設定定義監視清單及其初始收集範圍。"
+    }
+  },
+  "overview": {
+    "pipelineSetup": {
+      "title": "設定簡報",
+      "open": "設定簡報",
+      "progress": "簡報設定步驟",
+      "steps": {
+        "sources": "來源",
+        "cadence": "頻率",
+        "briefing": "簡報",
+        "delivery": "傳送",
+        "test": "測試"
+      },
+      "actions": {
+        "next": "繼續前往{{step}}"
+      },
+      "source": {
+        "existing": "使用現有來源",
+        "new": "新增來源",
+        "fallback": "來源 {{id}}"
+      },
+      "sources": {
+        "help": "選擇現有來源或新增一個來源，然後測試連線。"
+      },
+      "sourcesLoading": "正在載入來源...",
+      "sourcesError": "無法為設定工具載入資訊提供。",
+      "sourceTest": {
+        "action": "測試來源",
+        "ready": "來源已就緒。",
+        "cancelled": "來源測試已取消。",
+        "failed": "來源測試失敗。{{message}}",
+        "summary": "已就緒 {{ready}} 個，已篩選 {{filtered}} 個",
+        "sample": "範例項目",
+        "readyItem": "已就緒",
+        "filteredItem": "已篩選",
+        "untitled": "無標題項目"
+      },
+      "fields": {
+        "sources": "來源",
+        "sourceName": "來源名稱",
+        "sourceUrl": "來源 URL",
+        "monitorName": "監視器名稱",
+        "schedule": "排程",
+        "timezone": "時區",
+        "intervalEvery": "每",
+        "intervalUnit": "間隔單位",
+        "weekday": "星期",
+        "hour": "小時",
+        "minute": "分鐘",
+        "cronExpression": "Cron 運算式",
+        "showName": "節目名稱",
+        "premise": "節目構想",
+        "includeAudio": "音訊",
+        "audioHelp": "新增可播放的語音版本。",
+        "audioMinutes": "目標時間（分鐘）",
+        "speakerCount": "來賓人數",
+        "template": "報告範本",
+        "audioProvider": "替代音訊供應商",
+        "audioModel": "替代音訊模型",
+        "customInstructions": "自訂編輯指示",
+        "emailDelivery": "電子郵件",
+        "emailRecipients": "郵件收件人",
+        "chatbookDelivery": "Chatbook",
+        "chatbookTitle": "Chatbook 標題"
+      },
+      "schedule": {
+        "manual": "僅手動",
+        "interval": "每 N 小時或分鐘",
+        "daily": "每天",
+        "weekdays": "工作日",
+        "weekly": "每週",
+        "advanced": "進階 Cron"
+      },
+      "intervalUnits": {
+        "hours": "小時",
+        "minutes": "分鐘"
+      },
+      "weekdays": {
+        "monday": "星期一",
+        "tuesday": "星期二",
+        "wednesday": "星期三",
+        "thursday": "星期四",
+        "friday": "星期五",
+        "saturday": "星期六",
+        "sunday": "星期日"
+      },
+      "advancedCron": "進階 Cron",
+      "nextOccurrence": "下次執行",
+      "manualOccurrence": "僅手動",
+      "nextOccurrencePending": "儲存有效排程以計算確切時間。",
+      "schedulePreview": {
+        "loading": "正在計算確切排程…",
+        "error": "無法計算確切排程。請檢查 cron 運算式和時區。"
+      },
+      "briefing": {
+        "question": "您要製作什麼？",
+        "help": "請選擇編輯形式。每個選項都以您選擇的來源為依據。",
+        "advanced": "進階簡報設定"
+      },
+      "formats": {
+        "concise_briefing": "精簡簡報",
+        "solo_update": "單人更新",
+        "host_discussion": "主持人討論",
+        "sportscast": "體育播報",
+        "culture_roundtable": "文化圓桌",
+        "custom": "自訂"
+      },
+      "speaker": {
+        "defaultLabel": "參與者 {{index}}",
+        "defaultRole": "主持人",
+        "labelField": "參與者 {{index}} 標籤",
+        "roleField": "參與者 {{index}} 角色",
+        "voiceField": "參與者 {{index}} 聲音",
+        "personaField": "參與者 {{index}} 人設"
+      },
+      "preview": {
+        "generate": "預覽報告",
+        "diagnostics": "預覽診斷",
+        "context": "預覽執行：{{runId}}",
+        "noRunContext": "請先成功執行監視器，再預覽此報告。",
+        "templateRequired": "產生預覽前請選擇範本。",
+        "templateEmpty": "所選範本是空的。",
+        "emptyResult": "預覽未傳回算繪內容。",
+        "error": "無法產生預覽。"
+      },
+      "delivery": {
+        "help": "一律包含報告。外部傳送會等待所選成果準備就緒。",
+        "reports": "報告",
+        "required": "必要儲存空間",
+        "alwaysOn": "一律開啟"
+      },
+      "receipt": {
+        "labels": {
+          "schedule": "排程",
+          "sources": "來源",
+          "artifacts": "成果",
+          "format": "格式",
+          "showName": "節目名稱",
+          "cast": "來賓",
+          "duration": "目標時間",
+          "destinations": "目的地"
+        },
+        "schedule": {
+          "manual": "僅手動",
+          "scheduled": "{{date}}（{{timezone}}）"
+        },
+        "sources": "{{count}} 個來源",
+        "sources_one": "{{count}} 個來源",
+        "sources_other": "{{count}} 個來源",
+        "artifacts": {
+          "textReport": "文字報告",
+          "showNotes": "節目說明",
+          "audio": "音訊"
+        },
+        "formats": {
+          "concise_briefing": "精簡簡報",
+          "solo_update": "單人更新",
+          "host_discussion": "主持人討論",
+          "sportscast": "體育播報",
+          "culture_roundtable": "文化圓桌",
+          "custom": "自訂節目"
+        },
+        "speakerStyle": {
+          "1": "單人",
+          "2": "雙主持人",
+          "3": "三位主持人",
+          "4": "四位主持人"
+        },
+        "programWithSpeakers": "{{speakers}}{{format}}",
+        "cast": "{{count}} 位參與者",
+        "cast_one": "{{count}} 位參與者",
+        "cast_other": "{{count}} 位參與者",
+        "duration": "目標 {{count}} 分鐘",
+        "duration_one": "目標 {{count}} 分鐘",
+        "duration_other": "目標 {{count}} 分鐘",
+        "destinations": {
+          "email": "電子郵件：{{recipients}}",
+          "chatbook": "Chatbook：{{title}}"
+        },
+        "untitledChatbook": "無標題",
+        "dstChange": "日光節約時間偏移變更後，下一次執行使用 {{timezoneName}}：{{date}}。"
+      },
+      "test": {
+        "providerDisclosure": "測試會使用您設定的 LLM 和文字轉語音供應商。樣本限制為 60 秒；完整測試使用目標時間。",
+        "textProviderDisclosure": "測試會使用您設定的 LLM 供應商。純文字測試不使用文字轉語音。",
+        "receipt": "啟用摘要",
+        "manualReceipt": "此簡報會手動執行，將所選成果儲存在「報告」中；除非您選擇「傳送測試」，否則不會聯絡外部目的地。",
+        "scheduledReceipt": "{{schedule}}：從 {{sources}} 收集更新，以 {{program}}{{duration}} 形式產生 {{artifacts}}，然後儲存並傳送到 {{destinations}}。",
+        "audioTestRequired": "啟用前，請成功產生音訊樣本或完整測試。",
+        "progress": "測試進度",
+        "stages": {
+          "collection": "收集來源",
+          "selection": "選擇更新",
+          "text": "建立報告",
+          "audio": "建立音訊",
+          "persistence": "儲存到報告",
+          "audioScript": "撰寫音訊指令碼",
+          "audioScriptPersistence": "儲存音訊指令碼",
+          "audioPersistence": "將音訊儲存到報告",
+          "delivery": "檢查測試傳送",
+          "deliveryAdapter": "傳送到 {{adapter}}",
+          "unknown": "階段 {{stage}}"
+        },
+        "sample": "產生 60 秒樣本",
+        "full": "產生完整測試節目",
+        "text": "產生測試報告",
+        "send": "傳送測試",
+        "activate": "啟用排程",
+        "ready": "測試已完成。簡報已準備就緒。在啟用排程之前，此草稿會維持未啟用狀態。",
+        "running": "執行 {{runId}} 仍在進行：{{stage}}。你可以關閉設定並在概覽中監控。",
+        "failedStage": "{{stage}} 失敗。請開啟執行 {{runId}} 並重試此階段。",
+        "failedWithCode": "{{stage}} 失敗（{{code}}）。請開啟執行 {{runId}} 並重試此階段。",
+        "cancelledStage": "{{stage}} 已取消。草稿已儲存。",
+        "cancelledWithCode": "{{stage}} 已取消（{{code}}）。草稿已儲存。",
+        "cancelled": "測試已取消。草稿已儲存。",
+        "failed": "測試失敗。草稿已儲存。{{message}}",
+        "status": {
+          "not_started": "未開始",
+          "queued": "已排入佇列",
+          "running": "執行中",
+          "ready": "已就緒",
+          "failed": "失敗",
+          "skipped": "已略過",
+          "cancelled": "已取消"
+        }
+      },
+      "activate": {
+        "ready": "排程已啟用。",
+        "failed": "無法啟用排程。草稿已儲存。{{message}}"
+      },
+      "validation": {
+        "sourcesRequired": "請至少選擇一個來源再繼續。",
+        "sourceNameRequired": "請輸入來源名稱。",
+        "sourceUrlInvalid": "請輸入有效的 HTTP 或 HTTPS 來源 URL。",
+        "monitorNameRequired": "請輸入監視器名稱。",
+        "timezoneInvalid": "請輸入有效的 IANA 時區。",
+        "intervalInvalid": "請輸入支援的排程間隔。",
+        "hourInvalid": "請輸入 0 到 23 之間的小時。",
+        "minuteInvalid": "請輸入 0 到 59 之間的分鐘。",
+        "cronInvalid": "請輸入有效的五欄位 Cron 運算式。",
+        "cronTooFrequent": "請選擇間隔至少五分鐘的排程。",
+        "templateRequired": "請輸入報告範本。",
+        "castSizeInvalid": "請選擇一到四位參與者。",
+        "castIdsInvalid": "每位參與者都需要唯一身分。",
+        "castVoicesRequired": "請為每位參與者選擇聲音。",
+        "audioMinutesInvalid": "請輸入 1 到 60 分鐘的時間。",
+        "emailInvalid": "請輸入至少一個有效的電子郵件地址。"
+      },
+      "validationError": "請檢查醒目顯示的欄位再繼續。"
+    },
+    "latest": {
+      "heading": {
+        "briefing": "最新簡報",
+        "episode": "最新節目"
+      },
+      "empty": {
+        "scheduled": "首份簡報預定於{{date}}產生。",
+        "manual": "尚未開始。立即測試。"
+      },
+      "generatedAt": "產生於 {{date}}",
+      "untitled": "簡報 {{runId}}",
+      "artifacts": "報告／音訊",
+      "audio": "音訊",
+      "audioFailed": "音訊產生失敗",
+      "ready": "就緒",
+      "saved": "已儲存",
+      "waiting": "等待中",
+      "script": "音訊腳本",
+      "stageWithStatus": "{{stage}}：{{status}}",
+      "noUpdates": "找不到符合條件的更新。已儲存狀態{{noun}}。",
+      "nextRun": "下次執行：{{date}}",
+      "nextRunRelative": "下次執行：{{relative}}",
+      "counts": "簡報：已包含、未讀、新增",
+      "count": {
+        "included": "已包含 {{count}}",
+        "unread": "未讀 {{count}}",
+        "new": "新增 {{count}}"
+      },
+      "provenance": {
+        "sources": "{{count}} 個追蹤來源",
+        "sources_zero": "{{count}} 個追蹤來源",
+        "sources_one": "{{count}} 個追蹤來源",
+        "sources_two": "{{count}} 個追蹤來源",
+        "sources_few": "{{count}} 個追蹤來源",
+        "sources_many": "{{count}} 個追蹤來源",
+        "sources_other": "{{count}} 個追蹤來源"
+      },
+      "delivery": {
+        "reports": "查看所有報告",
+        "retryAria": "重試 {{adapter}}: {{name}}",
+        "retryUnknownAria": "結果未知. 重試 {{adapter}}: {{name}}",
+        "reviewRetry": "檢查後重試",
+        "unknownConfirmation": "提供者未確認透過 {{adapter}} 送達。重試可能會傳送重複內容。請檢查目的地，僅在可接受此風險時繼續。 ({{destination}})",
+        "chatbookDestination": "Chatbook",
+        "confirmRetry": "重試 送達",
+        "confirmRetryAria": "重試 {{adapter}} 送達",
+        "recipientCount": "{{count}} 收件者",
+        "recipientCount_zero": "{{count}} 收件者",
+        "recipientCount_one": "{{count}} 收件者",
+        "recipientCount_two": "{{count}} 收件者",
+        "recipientCount_few": "{{count}} 收件者",
+        "recipientCount_many": "{{count}} 收件者",
+        "recipientCount_other": "{{count}} 收件者",
+        "reviewAcknowledgement": "我已檢查目的地，並接受重複送達的風險。",
+        "reviewSettings": "檢查 設定",
+        "reviewTitle": "檢查 {{adapter}} 送達"
+      },
+      "playback": {
+        "region": "音訊: {{name}}",
+        "playAria": "播放 {{name}}",
+        "pauseAria": "暫停 {{name}}",
+        "resumeAria": "繼續播放 {{name}}",
+        "seekAria": "音訊: {{name}}",
+        "loading": "正在載入音訊",
+        "error": "音訊產生失敗。請開啟報告或重新產生音訊。",
+        "play": "播放",
+        "pause": "暫停",
+        "resume": "繼續",
+        "accessError": "音訊: 存取失敗. 請檢查登入狀態與伺服器連線。",
+        "missing": "音訊 已無法使用."
+      },
+      "actions": {
+        "label": "最新簡報",
+        "openReport": "開啟 {{report}}",
+        "openReportAria": "開啟{{report}}：{{name}}",
+        "regenerateAudio": "重新產生音訊",
+        "regenerateAudioAria": "重新產生{{style}}{{noun}}音訊：{{name}}",
+        "retry": "重試",
+        "retrySaveAria": "重試 已儲存 報告: {{name}}",
+        "retryTextAria": "重試 報告: {{name}}",
+        "retryStage": "重試: {{stage}}",
+        "inspect": "檢查執行",
+        "inspectAria": "檢查執行 {{runId}}: {{name}}",
+        "viewReports": "查看所有報告",
+        "testNow": "立即測試",
+        "downloadAudio": "下載音訊",
+        "downloadAudioAria": "下載音訊：{{name}}",
+        "retryExactAria": "重試 {{stage}}: {{name}}",
+        "reviewScript": "檢查音訊腳本",
+        "reviewScriptAria": "檢查音訊腳本：{{name}}"
+      },
+      "announcements": {
+        "blockingFailure": "{{name}}失敗。請檢查執行{{runId}}。",
+        "delivered": "{{name}}：已送達。",
+        "nextRunUpdated": "{{name}}：已更新下次執行時間。",
+        "partialAudioFailure": "{{name}}：節目說明已就緒，音訊產生失敗。",
+        "readyText": "{{name}}：報告已就緒。",
+        "readyWithAudio": "{{name}}：音訊與節目說明已就緒。",
+        "stageProgress": "{{name}}：{{stage}}{{status}}。",
+        "testQueued": "測試已排入佇列。"
+      },
+      "retryError": "重試 失敗. 檢查執行.",
+      "regenerateError": "重新產生 音訊: 失敗.",
+      "testError": "立即測試: 失敗.",
+      "status": {
+        "ready": "就緒",
+        "failed": "失敗",
+        "saved": "已儲存",
+        "waiting": "等待中",
+        "running": "執行中",
+        "queued": "已排入佇列",
+        "notStarted": "未開始",
+        "notSelected": "未選取",
+        "cancelled": "已取消",
+        "delivered": "已送達",
+        "unknown": "結果未知",
+        "sending": "傳送中",
+        "stale": "已過期",
+        "superseded": "已被取代",
+        "unavailable": "無法使用",
+        "partial": "部分完成"
+      },
+      "stages": {
+        "renderText": "報告",
+        "persistText": "已儲存 報告",
+        "composeScript": "音訊腳本",
+        "persistScript": "已儲存音訊腳本",
+        "generateAudio": "音訊",
+        "persistAudio": "已儲存 音訊"
+      },
+      "nouns": {
+        "briefing": "簡報",
+        "episode": "節目",
+        "report": "報告",
+        "showNotes": "節目說明"
+      },
+      "scriptAccessError": "音訊 報告: 存取失敗. 請檢查登入狀態與伺服器連線。",
+      "scriptLoading": "正在載入音訊腳本",
+      "scriptMissing": "音訊 報告 已無法使用.",
+      "recovery": {
+        "renderText": "正在產生 報告",
+        "persistText": "正在儲存 報告",
+        "composeScript": "正在編寫音訊腳本",
+        "persistScript": "正在儲存音訊腳本",
+        "generateAudio": "正在產生 音訊",
+        "persistAudio": "正在儲存 音訊"
+      }
+    }
+  },
+  "outputs": {
+    "openInNewTabAria": "在新分頁中開啟: {{title}}",
+    "chatAboutAria": "討論此內容: {{title}}",
+    "downloadAria": "下載: {{title}}",
+    "artifactMissing": "已無法使用.",
+    "artifactAuthError": "存取遭拒。請檢查登入狀態。",
+    "artifactAccessError": "存取失敗. 請檢查登入狀態與伺服器連線。"
   }
 }

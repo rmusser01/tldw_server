@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import os
 import re
-from collections.abc import Callable, Mapping, Set as AbstractSet
+from collections.abc import Mapping
+from collections.abc import Set as AbstractSet
+from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
 
-from tldw_Server_API.app.core.Security.egress import evaluate_url_policy
+from tldw_Server_API.app.core.Security.egress import URLPolicyResult
 
 _TRUE_VALUES = {"1", "true", "yes", "on", "enabled"}
 
@@ -40,6 +42,14 @@ _UNAVAILABLE_PROVIDER_AVAILABILITY_STATES = {
     "not-configured",
     "unavailable",
 }
+
+
+@dataclass(frozen=True)
+class ModelDiscoveryResult:
+    """Sanitized outcome from one configured-provider model discovery attempt."""
+
+    status: str
+    models: tuple[str, ...] = ()
 
 
 def _truthy(value: Any) -> bool:
@@ -97,14 +107,15 @@ def provider_readiness(
     is_configured: bool,
     endpoint_url: str | None,
     api_key_value: str | None,
-    model_discovery: str | None,
     current_availability: Any,
     health_entry: Any,
     supported_chat_providers: AbstractSet[str],
-    discover_models_from_endpoint: Callable[[str, str, str, str | None], list[str]] | None = None,
+    endpoint_policy: URLPolicyResult | None = None,
+    discovery_result: ModelDiscoveryResult | None = None,
+    has_explicit_models: bool = False,
     endpoint_probe_enabled: bool = False,
 ) -> dict[str, Any]:
-    """Compute user-facing readiness metadata for one configured provider."""
+    """Reduce precomputed policy, health, and discovery state into readiness metadata."""
     chat_provider = normalize_catalog_provider_for_chat(provider_name)
     provider_enabled = bool(is_configured)
     availability = (
@@ -141,21 +152,22 @@ def provider_readiness(
             "for this endpoint before chat generation can run."
         )
     elif endpoint_url:
-        try:
-            policy = evaluate_url_policy(endpoint_url)
-        except Exception as exc:  # noqa: BLE001 - readiness metadata should fail closed.
+        if endpoint_policy is None:
             provider_enabled = False
             availability = "unavailable"
             reason_code = "egress_policy_unavailable"
-            message = f"Provider endpoint egress policy could not be evaluated: {exc}"
-        else:
-            if not policy.allowed:
-                provider_enabled = False
-                availability = "unavailable"
+            message = "Provider endpoint egress policy could not be evaluated."
+        elif not endpoint_policy.allowed:
+            provider_enabled = False
+            availability = "unavailable"
+            if endpoint_policy.reason_code == "dns_unresolved":
+                reason_code = "endpoint_unreachable"
+                message = "Provider endpoint could not be resolved."
+            else:
                 reason_code = "egress_blocked"
                 message = (
                     "Provider endpoint is blocked by the server egress policy"
-                    + (f": {policy.reason}" if policy.reason else ".")
+                    + (f": {endpoint_policy.reason}" if endpoint_policy.reason else ".")
                 )
 
     if provider_enabled and isinstance(health_entry, dict):
@@ -169,31 +181,36 @@ def provider_readiness(
                 "before generating."
             )
 
-    if (
+    should_reduce_discovery = (
         provider_enabled
         and provider_info.get("type") == "local"
-        and endpoint_url
-        and model_discovery
-        and endpoint_probe_enabled
-        and discover_models_from_endpoint is not None
-    ):
-        try:
-            discovered_models = discover_models_from_endpoint(
-                provider_name,
-                endpoint_url,
-                model_discovery,
-                api_key_value,
-            )
-        except Exception:  # noqa: BLE001 - best-effort endpoint probes must not break listings.
-            discovered_models = []
-        if not discovered_models:
+        and endpoint_url is not None
+        and (endpoint_probe_enabled or not has_explicit_models)
+    )
+    if should_reduce_discovery:
+        result = discovery_result or ModelDiscoveryResult("unreachable")
+        display_name = provider_info.get("display_name") or provider_name
+        if result.status == "ready" and not result.models and not has_explicit_models:
+            reason_code = "no_models_reported"
+            message = f"{display_name} did not report any models."
+        elif result.status == "auth_failed":
+            provider_enabled = False
+            availability = "unavailable"
+            reason_code = "auth_failed"
+            message = f"{display_name} rejected the configured credentials."
+        elif result.status == "server_error":
+            provider_enabled = False
+            availability = "unavailable"
+            reason_code = "endpoint_error"
+            message = f"{display_name} returned a server error during model discovery."
+        elif result.status == "unsupported":
+            reason_code = "model_discovery_unavailable"
+            message = f"{display_name} does not expose a supported model discovery response."
+        elif result.status == "unreachable":
             provider_enabled = False
             availability = "unavailable"
             reason_code = "endpoint_unreachable"
-            message = (
-                f"{provider_info.get('display_name') or provider_name} endpoint "
-                "could not be reached or did not return models."
-            )
+            message = f"{display_name} endpoint could not be reached."
 
     if provider_enabled and availability in _UNAVAILABLE_PROVIDER_AVAILABILITY_STATES:
         provider_enabled = False

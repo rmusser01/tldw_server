@@ -2,6 +2,8 @@ type TldwClientLike = {
   getConfig: () => Promise<
     | {
         authMode?: unknown
+        authSource?: unknown
+        serverUrl?: unknown
         accessToken?: unknown
         apiKey?: unknown
       }
@@ -12,6 +14,7 @@ type TldwClientLike = {
 
 type TldwAuthLike = {
   getCurrentUser: () => Promise<unknown>
+  logout?: () => Promise<void>
 }
 
 export const loadTldwClient = async (): Promise<TldwClientLike> => {

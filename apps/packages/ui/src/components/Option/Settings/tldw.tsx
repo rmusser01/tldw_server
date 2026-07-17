@@ -18,6 +18,7 @@ import type { PathOrUrl } from "@/services/tldw/openapi-guard"
 import { useAntdMessage } from "@/hooks/useAntdMessage"
 import { useConnectionStore } from "@/store/connection"
 import { mapMultiUserLoginErrorMessage } from "@/services/auth-errors"
+import { commitManualServerTransition } from "@/components/Option/Onboarding/validation"
 import { emitSplashAfterSingleUserAuthSuccess } from "@/services/splash-auth"
 import { ServerOverviewHint } from "@/components/Common/ServerOverviewHint"
 import { requestOptionalHostPermission } from "@/utils/extension-permissions"
@@ -59,6 +60,8 @@ export const TldwSettings = () => {
   const [coreStatus, setCoreStatus] = useState<CoreStatus>("unknown")
   const [ragStatus, setRagStatus] = useState<RagStatus>("unknown")
   const [authMode, setAuthMode] = useState<'single-user' | 'multi-user'>('single-user')
+  const [authSource, setAuthSource] = useState<TldwConfig['authSource']>()
+  const [rememberApiKey, setRememberApiKey] = useState(true)
   const [isLoggedIn, setIsLoggedIn] = useState(false)
   const [loginMethod, setLoginMethod] = useState<LoginMethod>('magic-link')
   const [magicEmail, setMagicEmail] = useState("")
@@ -105,6 +108,8 @@ export const TldwSettings = () => {
       const config = await tldwClient.getConfig()
       if (config) {
         setAuthMode(config.authMode)
+        setAuthSource(config.authSource)
+        setRememberApiKey(config.apiKeyPersistence !== 'session')
         setServerUrl(config.serverUrl)
         const nextTimeouts = { ...TIMEOUT_PRESETS.balanced }
         if (typeof (config as any).requestTimeoutMs === 'number') nextTimeouts.request = Math.round((config as any).requestTimeoutMs / 1000)
@@ -128,14 +133,37 @@ export const TldwSettings = () => {
         form.setFieldsValue({
           serverUrl: config.serverUrl,
           apiKey: config.apiKey,
-          authMode: config.authMode
+          authMode: config.authMode,
+          rememberApiKey: config.apiKeyPersistence !== 'session'
         })
 
         if (config.authMode === 'multi-user' && config.accessToken) {
           setIsLoggedIn(true)
         }
       } else {
+        setAuthMode('single-user')
+        setAuthSource(undefined)
+        setRememberApiKey(true)
+        setIsLoggedIn(false)
+        setServerUrl("")
+        setMagicEmail("")
+        setMagicToken("")
+        setMagicSent(false)
+        setConnectionStatus(null)
+        setConnectionDetail("")
+        setCoreStatus("unknown")
+        setRagStatus("unknown")
         setTimeoutPreset('balanced')
+        form.setFieldsValue({
+          serverUrl: '',
+          apiKey: '',
+          authMode: 'single-user',
+          username: '',
+          password: '',
+          magicEmail: '',
+          magicToken: '',
+          rememberApiKey: true
+        })
       }
       setInitializingError(null)
     } catch (error) {
@@ -155,6 +183,7 @@ export const TldwSettings = () => {
   const handleSave = async (values: any) => {
     setLoading(true)
     try {
+      const requestedRememberApiKey = values.rememberApiKey !== false
       const config: Partial<TldwConfig & {
         requestTimeoutMs?: number
         streamIdleTimeoutMs?: number
@@ -177,7 +206,7 @@ export const TldwSettings = () => {
         uploadRequestTimeoutMs: Math.min(2147483000, Math.max(1, Math.round(Number(uploadRequestTimeoutSec) || mediaRequestTimeoutSec || 60)) * 1000)
       }
 
-      if (values.authMode === 'single-user') {
+      if (values.authMode === 'single-user' && authSource !== 'cookie-session') {
         config.apiKey = values.apiKey
         config.accessToken = undefined
         config.refreshToken = undefined
@@ -195,8 +224,55 @@ export const TldwSettings = () => {
         }
       )
 
-      await tldwClient.updateConfig(config)
-      message.success(t("settings:savedSuccessfully"))
+      let achievedPersistence: "device" | "session" | "memory" | null = null
+      if (values.authMode === 'single-user' && authSource !== 'cookie-session') {
+        const requestedPersistence = requestedRememberApiKey ? "device" : "session"
+        achievedPersistence = await commitManualServerTransition({
+          serverUrl: values.serverUrl,
+          apiKey: values.apiKey,
+          persistence: requestedPersistence
+        })
+        setAuthSource('manual')
+        const {
+          serverUrl: _serverUrl,
+          authMode: _authMode,
+          apiKey: _apiKey,
+          accessToken: _accessToken,
+          refreshToken: _refreshToken,
+          ...settingsConfig
+        } = config
+        await tldwClient.updateConfig(settingsConfig)
+      } else if (values.authMode === 'single-user') {
+        const {
+          serverUrl: _serverUrl,
+          authMode: _authMode,
+          apiKey: _apiKey,
+          accessToken: _accessToken,
+          refreshToken: _refreshToken,
+          ...settingsConfig
+        } = config
+        await tldwClient.updateConfig(settingsConfig)
+      } else {
+        await tldwClient.updateConfig(config)
+      }
+      setServerUrl(values.serverUrl)
+      if (achievedPersistence === 'memory') {
+        message.warning(
+          t(
+            'settings:tldw.rememberApiKey.memoryFallback',
+            'This key is available only on this page and will be lost on reload.'
+          )
+        )
+      } else if (requestedRememberApiKey && achievedPersistence === 'session') {
+        message.warning(
+          t(
+            'settings:tldw.rememberApiKey.deviceFallback',
+            'Couldn’t remember the key on this device; it will be kept until this browser closes.'
+          )
+        )
+      } else {
+        message.success(t("settings:savedSuccessfully"))
+      }
 
       await testConnection({
         triggerSplashOnSuccess: values.authMode === "single-user"
@@ -600,6 +676,11 @@ export const TldwSettings = () => {
       setLoading(true)
       await tldwAuth.logout()
       setIsLoggedIn(false)
+      await loadConfig()
+      setConnectionStatus(null)
+      setConnectionDetail("")
+      setCoreStatus("unknown")
+      setRagStatus("unknown")
       message.success(t('settings:tldw.logout.success', 'Logged out successfully'))
     } catch (error) {
       message.error(t('settings:tldw.logout.failed', 'Logout failed'))
@@ -826,14 +907,23 @@ export const TldwSettings = () => {
           layout="vertical"
           initialValues={{
             authMode: 'single-user',
-            apiKey: ''
+            apiKey: '',
+            rememberApiKey: true
           }}
         >
           <TldwConnectionSettings
             t={t}
             form={form}
+            configuredServerUrl={serverUrl}
+            authSource={authSource}
+            rememberApiKey={rememberApiKey}
+            setRememberApiKey={setRememberApiKey}
+            onManualServerOriginChange={() => setAuthSource(undefined)}
             authMode={authMode}
-            setAuthMode={setAuthMode}
+            setAuthMode={(mode) => {
+              setAuthMode(mode)
+              setAuthSource(undefined)
+            }}
             isLoggedIn={isLoggedIn}
             setIsLoggedIn={setIsLoggedIn}
             loginMethod={loginMethod}
@@ -846,6 +936,7 @@ export const TldwSettings = () => {
             setMagicSent={setMagicSent}
             magicSending={magicSending}
             testingConnection={testingConnection}
+            logoutLoading={loading}
             connectionStatus={connectionStatus}
             connectionDetail={connectionDetail}
             coreStatus={coreStatus}

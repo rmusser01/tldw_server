@@ -19,7 +19,9 @@ import {
   requireSubmittedIngestJobs,
 } from "@/services/tldw/ingest-jobs-orchestrator";
 import {
+  completedIngestJobIndicatesFailure,
   completedIngestJobIndicatesSkipped,
+  extractCompletedIngestJobError,
   extractCompletedIngestJobMediaId,
 } from "@/services/tldw/ingest-job-results";
 import {
@@ -44,6 +46,7 @@ import {
   resolveConferenceDuplicatePolicy,
   type ApiMediaCollection,
   type ApiMediaCollectionItem,
+  type MediaCollectionItemStatus,
 } from "@/services/tldw/conference-collections";
 
 type TypeDefaults = {
@@ -712,6 +715,12 @@ const patchConferenceCollectionItem = async (
   });
 };
 
+const getConferenceTerminalStatus = (
+  duplicate: boolean,
+  failed: boolean,
+): MediaCollectionItemStatus =>
+  duplicate ? "skipped_existing" : failed ? "failed" : "completed";
+
 const applyPlannedConferenceFields = (
   fields: Record<string, any>,
   planned: PlannedConferenceCollectionItem | undefined,
@@ -846,6 +855,7 @@ const runDirectQuickIngestBatch = async (
         let data: unknown;
         let resultOutcome: QuickIngestBatchResult["outcome"];
         let resultMessage: string | undefined;
+        let resultError: string | undefined;
         let resultMediaId: string | number | null = null;
         let resultPersisted = false;
         if (resolvedType === "html") {
@@ -859,13 +869,24 @@ const runDirectQuickIngestBatch = async (
             autoApplyTemplate: input.autoApplyTemplate,
             persist: shouldStoreRemote,
           });
+          const htmlDuplicate = completedIngestJobIndicatesSkipped(data);
+          const htmlFailure = completedIngestJobIndicatesFailure(data);
+          if (htmlDuplicate) {
+            resultOutcome = "skipped";
+            resultMessage = DUPLICATE_SKIP_MESSAGE;
+          } else if (htmlFailure) {
+            resultError =
+              extractCompletedIngestJobError(data) || "Web scraping failed";
+          }
           resultMediaId = shouldStoreRemote ? extractWebScrapeMediaId(data) : null;
           resultPersisted =
             shouldStoreRemote &&
+            !resultError &&
             webScrapeResponseIndicatesPersisted(data, resultMediaId);
           await patchConferenceCollectionItem(plannedConferenceItem, {
-            status: "completed",
+            status: getConferenceTerminalStatus(htmlDuplicate, Boolean(resultError)),
             media_id: resultMediaId,
+            error_summary: resultError,
           });
         } else if (shouldStoreRemote) {
           const fields = buildFields({
@@ -940,11 +961,18 @@ const runDirectQuickIngestBatch = async (
             if (completedDuplicate) {
               resultOutcome = "skipped";
               resultMessage = DUPLICATE_SKIP_MESSAGE;
+            } else if (completedIngestJobIndicatesFailure(pollResult.data)) {
+              resultError =
+                extractCompletedIngestJobError(pollResult.data) || "Ingest failed";
             }
             await patchConferenceCollectionItem(plannedConferenceItem, {
-              status: completedDuplicate ? "skipped_existing" : "completed",
+              status: getConferenceTerminalStatus(
+                completedDuplicate,
+                Boolean(resultError),
+              ),
               latest_job_id: String(latestJobId),
               media_id: resultMediaId,
+              error_summary: resultError,
             });
           } catch (error) {
             if (!shouldFallbackToPersistentAdd(error)) {
@@ -967,12 +995,19 @@ const runDirectQuickIngestBatch = async (
             if (fallbackDuplicate) {
               resultOutcome = "skipped";
               resultMessage = DUPLICATE_SKIP_MESSAGE;
+            } else if (completedIngestJobIndicatesFailure(data)) {
+              resultError =
+                extractCompletedIngestJobError(data) || "Ingest failed";
             }
             await patchConferenceCollectionItem(plannedConferenceItem, {
-              status: fallbackDuplicate ? "skipped_existing" : "completed",
+              status: getConferenceTerminalStatus(
+                fallbackDuplicate,
+                Boolean(resultError),
+              ),
               latest_job_id:
                 typeof latestJobId === "number" ? String(latestJobId) : undefined,
               media_id: resultMediaId,
+              error_summary: resultError,
             });
           }
         } else {
@@ -998,15 +1033,23 @@ const runDirectQuickIngestBatch = async (
             timeoutMs: DIRECT_INGEST_TIMEOUT_MS,
             ...DIRECT_QUICK_INGEST_TRANSPORT,
           });
+          if (completedIngestJobIndicatesFailure(data)) {
+            resultError =
+              extractCompletedIngestJobError(data) || "Ingest failed";
+          } else if (completedIngestJobIndicatesSkipped(data)) {
+            resultOutcome = "skipped";
+            resultMessage = DUPLICATE_SKIP_MESSAGE;
+          }
         }
 
         out.push({
           id: entry.id,
-          status: "ok",
-          outcome: resultOutcome,
+          status: resultError ? "error" : "ok",
+          outcome: resultError ? "failed" : resultOutcome,
           url,
           type: resolvedType,
           data,
+          error: resultError,
           message: resultMessage,
           persisted: resultPersisted,
           mediaId: resultMediaId,

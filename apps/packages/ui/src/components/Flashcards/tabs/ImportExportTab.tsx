@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next"
 
 import type { FlashcardsGenerateIntent } from "@/services/tldw/flashcards-generate-handoff"
 import type { StudyPackIntent } from "@/services/tldw/study-pack-handoff"
+import type { SourceReviewFlashcardsIntent } from "@/services/tldw/source-review-handoff"
 
 import { StudyPackCreateDrawer } from "../components/StudyPackCreateDrawer"
 import { useImportLimitsQuery } from "../hooks"
@@ -65,20 +66,24 @@ const getExportHandoffToken = (
  */
 type ImportExportTabProps = {
   generateIntent?: FlashcardsGenerateIntent | null
+  sourceReviewIntent?: SourceReviewFlashcardsIntent | null
   studyPackIntent?: StudyPackIntent | null
   initialTask?: TransferTaskKey | null
   initialTaskHandoffKey?: string | null
   initialExportDeckId?: number | null
   initialExportDeckHandoffKey?: string | null
+  onSourceReviewIntentExit?: () => void
 }
 
 export const ImportExportTab: React.FC<ImportExportTabProps> = ({
   generateIntent,
+  sourceReviewIntent,
   studyPackIntent,
   initialTask = null,
   initialTaskHandoffKey = null,
   initialExportDeckId = null,
-  initialExportDeckHandoffKey = null
+  initialExportDeckHandoffKey = null,
+  onSourceReviewIntentExit
 }) => {
   const { t } = useTranslation(["option", "common"])
   const limitsQuery = useImportLimitsQuery()
@@ -136,6 +141,25 @@ export const ImportExportTab: React.FC<ImportExportTabProps> = ({
     seenGenerateIntentTokenRef.current = token
     setActiveTask("create")
   }, [generateIntent])
+
+  React.useEffect(() => {
+    if (sourceReviewIntent) setActiveTask("create")
+  }, [sourceReviewIntent])
+
+  const handleTaskChange = React.useCallback(
+    (value: string | number) => {
+      const nextTask = value as TransferTaskKey
+      if (
+        activeTask === "create" &&
+        nextTask !== "create" &&
+        sourceReviewIntent
+      ) {
+        onSourceReviewIntentExit?.()
+      }
+      setActiveTask(nextTask)
+    },
+    [activeTask, onSourceReviewIntentExit, sourceReviewIntent]
+  )
 
   React.useEffect(() => {
     if (!initialTask || !initialTaskHandoffKey) {
@@ -238,7 +262,7 @@ export const ImportExportTab: React.FC<ImportExportTabProps> = ({
           })}
           options={transferTaskOptions}
           value={activeTask}
-          onChange={(value) => setActiveTask(value as TransferTaskKey)}
+          onChange={handleTaskChange}
         />
       </Card>
       <section
@@ -280,6 +304,7 @@ export const ImportExportTab: React.FC<ImportExportTabProps> = ({
           >
             <GeneratePanel
               initialIntent={generateIntent || null}
+              sourceReviewIntent={sourceReviewIntent || null}
               onTransferAction={handleTransferAction}
             />
           </Card>

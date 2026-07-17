@@ -41,7 +41,7 @@ jobs:
     name: frontend-required
     runs-on: ubuntu-latest
     needs: [changes]
-    timeout-minutes: 25
+    timeout-minutes: 45
     env:
       PYTHONPATH: .
       PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
@@ -77,6 +77,17 @@ jobs:
         if: needs.changes.outputs.tldw_frontend_changed == 'true'
         working-directory: apps
         run: bun install
+
+      - name: Setup Python for auth lifecycle
+        if: needs.changes.outputs.tldw_frontend_changed == 'true'
+        uses: ./.github/actions/setup-python-deps
+        with:
+          python-version: '3.11'
+          use-uv: 'true'
+          cache-dependency-path: |
+            pyproject.toml
+            uv.lock
+          extras: dev
 
       - name: Run frontend lint
         if: needs.changes.outputs.tldw_frontend_changed == 'true'
@@ -123,7 +134,7 @@ jobs:
         run: bun run test:family-guardrails
 
       - name: Install Playwright Chromium
-        if: needs.changes.outputs.family_guardrails_changed == 'true'
+        if: needs.changes.outputs.tldw_frontend_changed == 'true'
         working-directory: apps/tldw-frontend
         run: bunx playwright install --with-deps chromium
 
@@ -131,6 +142,28 @@ jobs:
         if: needs.changes.outputs.family_guardrails_changed == 'true'
         working-directory: apps/tldw-frontend
         run: bun run e2e:family-guardrails
+
+      - name: Build production Chrome extension
+        if: needs.changes.outputs.tldw_frontend_changed == 'true'
+        working-directory: apps/extension
+        run: bun run build:chrome:prod
+
+      - name: Run WebUI API-key persistence lifecycle
+        if: needs.changes.outputs.tldw_frontend_changed == 'true'
+        working-directory: apps/tldw-frontend
+        run: bunx playwright test e2e/manual-api-key-persistence.spec.ts --reporter=line
+
+      - name: Run extension API-key persistence lifecycle
+        if: needs.changes.outputs.tldw_frontend_changed == 'true'
+        working-directory: apps/tldw-frontend
+        run: bunx playwright test e2e/extension-api-key-persistence.spec.ts --reporter=line
+
+      - name: Run single-user cookie persistence lifecycle
+        if: needs.changes.outputs.tldw_frontend_changed == 'true'
+        working-directory: apps/tldw-frontend
+        env:
+          TLDW_E2E_PYTHON: python
+        run: bun run e2e:cookie-lifecycle
 
       - name: Install admin-ui dependencies
         if: needs.changes.outputs.admin_ui_changed == 'true'

@@ -97,21 +97,49 @@ vi.mock("antd", () => {
         children,
         label,
         name,
-        rules
+        rules,
+        initialValue
       }: {
         children?: React.ReactNode
         label?: React.ReactNode
         name?: string
         rules?: unknown[]
+        initialValue?: unknown
       }) => {
         formItemSpy({ label, name, rules })
         const testId =
           typeof label === "string"
             ? `form-item-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`
             : "form-item"
-        return <div data-testid={testId}>{children}</div>
+        const controlledChild =
+          name === "rememberApiKey" && React.isValidElement(children)
+            ? React.cloneElement(children as React.ReactElement<{ checked?: boolean }>, {
+                checked: Boolean(initialValue)
+              })
+            : children
+        return <div data-testid={testId}>{controlledChild}</div>
       }
     },
+    Checkbox: ({
+      children,
+      checked,
+      onChange
+    }: {
+      children?: React.ReactNode
+      checked?: boolean
+      onChange?: (event: { target: { checked: boolean } }) => void
+    }) => (
+      <label>
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={(event) =>
+            onChange?.({ target: { checked: event.currentTarget.checked } })
+          }
+        />
+        {children}
+      </label>
+    ),
     Input,
     Modal: {
       confirm: modalConfirmMock
@@ -184,6 +212,11 @@ const createConnectionProps = (
   form: {
     setFieldValue: vi.fn()
   } as any,
+  configuredServerUrl: "https://api.example.test/path",
+  authSource: "manual",
+  rememberApiKey: true,
+  setRememberApiKey: vi.fn(),
+  onManualServerOriginChange: vi.fn(),
   authMode: "single-user",
   setAuthMode: vi.fn(),
   isLoggedIn: false,
@@ -198,6 +231,7 @@ const createConnectionProps = (
   setMagicSent: vi.fn(),
   magicSending: false,
   testingConnection: false,
+  logoutLoading: false,
   connectionStatus: null,
   connectionDetail: "",
   coreStatus: "unknown",
@@ -283,6 +317,83 @@ describe("settings PR review fixes", () => {
     expect(props.setIsLoggedIn).toHaveBeenCalledWith(false)
   })
 
+  it("clears the visible API key when the server changes to a different origin", () => {
+    const props = createConnectionProps()
+    render(<TldwConnectionSettings {...props} />)
+
+    fireEvent.change(
+      screen.getByPlaceholderText("http://127.0.0.1:8000"),
+      { target: { value: "https://other.example.test/path" } }
+    )
+
+    expect(props.form.setFieldValue).toHaveBeenCalledWith("apiKey", "")
+  })
+
+  it("preserves the visible API key for path-only changes on the same origin", () => {
+    const props = createConnectionProps()
+    render(<TldwConnectionSettings {...props} />)
+
+    fireEvent.change(
+      screen.getByPlaceholderText("http://127.0.0.1:8000"),
+      { target: { value: "https://api.example.test/other/" } }
+    )
+
+    expect(props.form.setFieldValue).not.toHaveBeenCalledWith("apiKey", "")
+  })
+
+  it("renders a default-on remember choice with live session-only copy", () => {
+    const Harness = () => {
+      const [rememberApiKey, setRememberApiKey] = React.useState(true)
+      return (
+        <TldwConnectionSettings
+          {...createConnectionProps()}
+          rememberApiKey={rememberApiKey}
+          setRememberApiKey={setRememberApiKey}
+        />
+      )
+    }
+
+    render(<Harness />)
+
+    const remember = screen.getByRole("checkbox", {
+      name: "Remember on this device"
+    })
+    expect(remember).toBeChecked()
+    expect(screen.getByText(/stores this api key in this browser/i)).toBeInTheDocument()
+
+    fireEvent.click(remember)
+
+    expect(screen.getByText("Keep signed in until this browser closes.")).toBeInTheDocument()
+  })
+
+  it("reveals manual key controls when a cookie session changes to a remote origin", () => {
+    const Harness = () => {
+      const [authSource, setAuthSource] = React.useState<
+        "manual" | "cookie-session"
+      >("cookie-session")
+      return (
+        <TldwConnectionSettings
+          {...createConnectionProps()}
+          authSource={authSource}
+          onManualServerOriginChange={() => setAuthSource("manual")}
+        />
+      )
+    }
+
+    render(<Harness />)
+
+    expect(screen.queryByPlaceholderText("Enter your API key")).not.toBeInTheDocument()
+    fireEvent.change(
+      screen.getByPlaceholderText("http://127.0.0.1:8000"),
+      { target: { value: "https://remote.example.test" } }
+    )
+
+    expect(screen.getByPlaceholderText("Enter your API key")).toBeInTheDocument()
+    expect(
+      screen.getByRole("checkbox", { name: "Remember on this device" })
+    ).toBeChecked()
+  })
+
   it("does not register magic-link inputs as named Form fields", () => {
     render(
       <TldwConnectionSettings
@@ -330,7 +441,7 @@ describe("settings PR review fixes", () => {
   it("renders the logged-in notice through the design-system alert primitive and preserves logout", () => {
     const onLogout = vi.fn()
 
-    render(
+    const { rerender } = render(
       <TldwConnectionSettings
         {...createConnectionProps({
           authMode: "multi-user",
@@ -348,6 +459,58 @@ describe("settings PR review fixes", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Logout" }))
     expect(onLogout).toHaveBeenCalledTimes(1)
+
+    rerender(
+      <TldwConnectionSettings
+        {...createConnectionProps({
+          authMode: "multi-user",
+          isLoggedIn: true,
+          logoutLoading: true,
+          onLogout
+        })}
+      />
+    )
+    expect(screen.getByRole("button", { name: "Logout" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Logout" })).toHaveAttribute(
+      "aria-busy",
+      "true"
+    )
+  })
+
+  it("offers cookie-session logout through the production auth handler", () => {
+    const onLogout = vi.fn()
+
+    const { rerender } = render(
+      <TldwConnectionSettings
+        {...createConnectionProps({
+          authMode: "single-user",
+          authSource: "cookie-session",
+          onLogout
+        })}
+      />
+    )
+
+    expect(
+      screen.getByText("Connected securely through this WebUI.")
+    ).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Logout" }))
+    expect(onLogout).toHaveBeenCalledTimes(1)
+
+    rerender(
+      <TldwConnectionSettings
+        {...createConnectionProps({
+          authMode: "single-user",
+          authSource: "cookie-session",
+          logoutLoading: true,
+          onLogout
+        })}
+      />
+    )
+    expect(screen.getByRole("button", { name: "Logout" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Logout" })).toHaveAttribute(
+      "aria-busy",
+      "true"
+    )
   })
 
   it("formats invoice amounts using the invoice currency instead of a hardcoded dollar prefix", () => {

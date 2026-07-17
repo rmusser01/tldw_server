@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { act, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import {
@@ -16,6 +16,21 @@ import {
   QuickIngestButton,
   QuickIngestModalHost,
 } from "../QuickIngestButton"
+import { resolvePresetMap } from "@/components/Common/QuickIngest/presets"
+import { requestQuickIngestOpen } from "@/utils/quick-ingest-open"
+
+const presetStorage = vi.hoisted(() => ({
+  value: undefined as ReturnType<typeof resolvePresetMap> | undefined,
+  isLoading: false,
+}))
+
+vi.mock("@plasmohq/storage/hook", () => ({
+  useStorage: () => [
+    presetStorage.value,
+    vi.fn(),
+    { isLoading: presetStorage.isLoading, setRenderValue: vi.fn() },
+  ],
+}))
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -54,18 +69,31 @@ vi.mock("@/components/Common/QuickIngestWizardModal", () => ({
     open,
     autoProcessQueued,
     onClose,
+    openRevision,
+    createNewDraft,
+    presetMap,
   }: {
     open: boolean
     autoProcessQueued?: boolean
     onClose: () => void
+    openRevision?: number
+    createNewDraft?: () => void
+    presetMap?: ReturnType<typeof resolvePresetMap>
   }) => (
     <div
       data-testid="quick-ingest-modal-mock"
       data-open={open ? "true" : "false"}
       data-auto-process={autoProcessQueued ? "true" : "false"}
+      data-open-revision={String(openRevision ?? "")}
+      data-standard-provider={String(
+        presetMap?.standard.advancedValues?.api_name ?? ""
+      )}
     >
       <button type="button" onClick={onClose}>
         close-modal
+      </button>
+      <button type="button" onClick={() => createNewDraft?.()}>
+        new-draft
       </button>
     </div>
   ),
@@ -74,6 +102,9 @@ vi.mock("@/components/Common/QuickIngestWizardModal", () => ({
 describe("QuickIngestButton resume behavior", () => {
   beforeEach(async () => {
     sessionStorage.clear()
+    ;(window as typeof window & {
+      __tldwPendingQuickIngestOpen?: unknown
+    }).__tldwPendingQuickIngestOpen = undefined
     useQuickIngestStore.setState((prev) => ({
       ...prev,
       queuedCount: 0,
@@ -87,7 +118,394 @@ describe("QuickIngestButton resume behavior", () => {
     if (useQuickIngestSessionStore.persist?.clearStorage) {
       await useQuickIngestSessionStore.persist.clearStorage()
     }
+    presetStorage.value = resolvePresetMap()
+    presetStorage.isLoading = false
   })
+
+  it("waits for preset storage before consuming a pending open", () => {
+    presetStorage.isLoading = true
+    ;(window as typeof window & {
+      __tldwPendingQuickIngestOpen?: { mode: "normal" | "intro"; at: number }
+    }).__tldwPendingQuickIngestOpen = {
+      mode: "normal",
+      at: Date.now(),
+    }
+
+    render(<QuickIngestModalHost />)
+
+    expect(screen.queryByTestId("quick-ingest-modal-mock")).not.toBeInTheDocument()
+    expect(useQuickIngestSessionStore.getState().session).toBeNull()
+  })
+
+  it("rebases a rehydrated visible draft only after preset storage is ready", async () => {
+    presetStorage.isLoading = true
+    presetStorage.value = resolvePresetMap({
+      standard: {
+        ...resolvePresetMap().standard,
+        advancedValues: { api_name: "openai" },
+      },
+    })
+    useQuickIngestSessionStore.getState().upsertSession({
+      ...createEmptyQuickIngestSession(),
+      lifecycle: "draft",
+      visibility: "visible",
+    })
+
+    const { rerender } = render(<QuickIngestModalHost />)
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+
+    expect(screen.queryByTestId("quick-ingest-modal-mock")).not.toBeInTheDocument()
+    expect(
+      useQuickIngestSessionStore.getState().session?.presetConfig.advancedValues
+        ?.api_name
+    ).toBeUndefined()
+
+    presetStorage.isLoading = false
+    rerender(<QuickIngestModalHost />)
+
+    expect(await screen.findByTestId("quick-ingest-modal-mock")).toBeInTheDocument()
+    expect(
+      useQuickIngestSessionStore.getState().session?.presetConfig.advancedValues
+        ?.api_name
+    ).toBe("openai")
+  })
+
+  it("creates a regular draft from the captured saved preset", () => {
+    presetStorage.value = resolvePresetMap({
+      standard: {
+        ...resolvePresetMap().standard,
+        advancedValues: { api_name: "openai" },
+      },
+    })
+    ;(window as typeof window & {
+      __tldwPendingQuickIngestOpen?: { mode: "normal" | "intro"; at: number }
+    }).__tldwPendingQuickIngestOpen = {
+      mode: "normal",
+      at: Date.now(),
+    }
+
+    render(<QuickIngestModalHost />)
+
+    expect(
+      useQuickIngestSessionStore.getState().session?.presetConfig.advancedValues
+        ?.api_name
+    ).toBe("openai")
+  })
+
+  it("consumes a live open request once and preserves its options snapshot", () => {
+    presetStorage.value = resolvePresetMap({
+      standard: {
+        ...resolvePresetMap().standard,
+        advancedValues: { api_name: "openai" },
+      },
+    })
+    const { rerender } = render(<QuickIngestModalHost />)
+
+    act(() => {
+      requestQuickIngestOpen(undefined, { autoProcessQueued: true })
+    })
+
+    const modal = screen.getByTestId("quick-ingest-modal-mock")
+    const openedRevision = modal.getAttribute("data-open-revision")
+    expect(modal).toHaveAttribute("data-auto-process", "true")
+    expect(
+      (window as typeof window & {
+        __tldwPendingQuickIngestOpen?: unknown
+      }).__tldwPendingQuickIngestOpen
+    ).toBeUndefined()
+
+    presetStorage.value = resolvePresetMap({
+      standard: {
+        ...resolvePresetMap().standard,
+        advancedValues: { api_name: "anthropic" },
+      },
+    })
+    rerender(<QuickIngestModalHost />)
+
+    expect(screen.getByTestId("quick-ingest-modal-mock")).toHaveAttribute(
+      "data-open-revision",
+      openedRevision
+    )
+    expect(
+      useQuickIngestSessionStore.getState().session?.presetConfig.advancedValues
+        ?.api_name
+    ).toBe("openai")
+  })
+
+  it("keeps the captured preset map when reopening an excluded session", async () => {
+    const user = userEvent.setup()
+    presetStorage.value = resolvePresetMap({
+      standard: {
+        ...resolvePresetMap().standard,
+        advancedValues: { api_name: "openai" },
+      },
+    })
+    useQuickIngestSessionStore.getState().upsertSession({
+      ...createEmptyQuickIngestSession(),
+      lifecycle: "draft",
+      visibility: "visible",
+    })
+    const { rerender } = render(<QuickIngestButton />)
+
+    const modal = screen.getByTestId("quick-ingest-modal-mock")
+    await waitFor(() => {
+      expect(modal).toHaveAttribute("data-standard-provider", "openai")
+    })
+    const capturedRevision = modal.getAttribute("data-open-revision")
+    await user.click(screen.getByText("close-modal"))
+    act(() => {
+      useQuickIngestSessionStore.getState().upsertSession({
+        lifecycle: "processing",
+      })
+    })
+
+    presetStorage.value = resolvePresetMap({
+      standard: {
+        ...resolvePresetMap().standard,
+        advancedValues: { api_name: "anthropic" },
+      },
+    })
+    rerender(<QuickIngestButton />)
+    await user.click(screen.getByTestId("open-quick-ingest"))
+
+    expect(modal).toHaveAttribute("data-open-revision", capturedRevision)
+    expect(modal).toHaveAttribute("data-standard-provider", "openai")
+  })
+
+  it("rebases and seeds an existing named draft in one playlist open", () => {
+    presetStorage.value = resolvePresetMap({
+      standard: {
+        ...resolvePresetMap().standard,
+        advancedValues: { api_name: "openai" },
+      },
+    })
+    useQuickIngestSessionStore.getState().upsertSession({
+      ...createEmptyQuickIngestSession(),
+      visibility: "hidden",
+      presetConfig: {
+        ...resolvePresetMap().standard,
+        advancedValues: { api_name: "stale-provider" },
+      },
+    })
+    render(<QuickIngestModalHost />)
+    const initialRevision = screen
+      .getByTestId("quick-ingest-modal-mock")
+      .getAttribute("data-open-revision")
+
+    act(() => {
+      requestQuickIngestOpen({
+        source: "extension_active_tab",
+        action: "playlist_preflight",
+        sourceKind: "youtube_playlist",
+        url: "https://www.youtube.com/playlist?list=PL123",
+      })
+    })
+
+    const session = useQuickIngestSessionStore.getState().session
+    expect(session?.presetConfig.advancedValues?.api_name).toBe("openai")
+    expect(session?.openDetail).toMatchObject({
+      action: "playlist_preflight",
+      url: "https://www.youtube.com/playlist?list=PL123",
+    })
+    expect(screen.getByTestId("quick-ingest-modal-mock")).not.toHaveAttribute(
+      "data-open-revision",
+      initialRevision
+    )
+  })
+
+  it("remounts and applies a first-source seed to an existing custom draft", () => {
+    useQuickIngestSessionStore.getState().upsertSession({
+      ...createEmptyQuickIngestSession(),
+      visibility: "hidden",
+      selectedPreset: "custom",
+      customBasePreset: "standard",
+      presetConfig: {
+        ...resolvePresetMap().standard,
+        advancedValues: { api_name: "custom-provider" },
+      },
+    })
+    render(<QuickIngestModalHost />)
+    const initialRevision = screen
+      .getByTestId("quick-ingest-modal-mock")
+      .getAttribute("data-open-revision")
+
+    act(() => {
+      requestQuickIngestOpen({
+        source: "first_source_milestone",
+        preferredPreset: "quick",
+        firstSource: true,
+        firstSourceKind: "paste_text",
+      })
+    })
+
+    const session = useQuickIngestSessionStore.getState().session
+    expect(session).toMatchObject({
+      selectedPreset: "quick",
+      customBasePreset: "quick",
+      firstSourceAddMode: "paste_text",
+      openDetail: { source: "first_source_milestone" },
+    })
+    expect(session?.presetConfig.common.perform_analysis).toBe(false)
+    expect(session?.presetConfig.common.perform_chunking).toBe(true)
+    expect(screen.getByTestId("quick-ingest-modal-mock")).not.toHaveAttribute(
+      "data-open-revision",
+      initialRevision
+    )
+  })
+
+  it("remounts a custom draft when a playlist seed changes its open detail", () => {
+    useQuickIngestSessionStore.getState().upsertSession({
+      ...createEmptyQuickIngestSession(),
+      visibility: "hidden",
+      selectedPreset: "custom",
+      customBasePreset: "standard",
+      presetConfig: {
+        ...resolvePresetMap().standard,
+        advancedValues: { api_name: "custom-provider" },
+      },
+    })
+    render(<QuickIngestModalHost />)
+    const initialRevision = screen
+      .getByTestId("quick-ingest-modal-mock")
+      .getAttribute("data-open-revision")
+
+    act(() => {
+      requestQuickIngestOpen({
+        source: "extension_active_tab",
+        action: "playlist_preflight",
+        sourceKind: "youtube_watch_playlist",
+        url: "https://www.youtube.com/watch?v=abc&list=PL123",
+      })
+    })
+
+    const session = useQuickIngestSessionStore.getState().session
+    expect(session?.selectedPreset).toBe("custom")
+    expect(session?.presetConfig.advancedValues?.api_name).toBe(
+      "custom-provider"
+    )
+    expect(session?.openDetail).toMatchObject({ action: "playlist_preflight" })
+    expect(screen.getByTestId("quick-ingest-modal-mock")).not.toHaveAttribute(
+      "data-open-revision",
+      initialRevision
+    )
+  })
+
+  it.each(["processing", "completed"] as const)(
+    "keeps a %s session snapshot when a seeded open arrives",
+    (lifecycle) => {
+      useQuickIngestSessionStore.getState().upsertSession({
+        ...createEmptyQuickIngestSession(),
+        lifecycle,
+        visibility: "hidden",
+        presetConfig: {
+          ...resolvePresetMap().standard,
+          advancedValues: { api_name: "active-provider" },
+        },
+      })
+      render(<QuickIngestModalHost />)
+      const initialRevision = screen
+        .getByTestId("quick-ingest-modal-mock")
+        .getAttribute("data-open-revision")
+
+      act(() => {
+        requestQuickIngestOpen({
+          source: "extension_active_tab",
+          action: "playlist_preflight",
+          sourceKind: "youtube_playlist",
+          url: "https://www.youtube.com/playlist?list=PL123",
+        })
+      })
+
+      const session = useQuickIngestSessionStore.getState().session
+      expect(session?.openDetail).toBeNull()
+      expect(session?.presetConfig.advancedValues?.api_name).toBe(
+        "active-provider"
+      )
+      expect(screen.getByTestId("quick-ingest-modal-mock")).toHaveAttribute(
+        "data-open-revision",
+        initialRevision
+      )
+    }
+  )
+
+  it("captures current settings when Ingest More creates a new draft", async () => {
+    const user = userEvent.setup()
+    const completed = createEmptyQuickIngestSession()
+    useQuickIngestSessionStore.getState().upsertSession({
+      ...completed,
+      lifecycle: "completed",
+      visibility: "visible",
+      selectedPreset: "standard",
+      customBasePreset: "standard",
+      presetConfig: {
+        ...resolvePresetMap().standard,
+        advancedValues: { api_name: "session-only" },
+      },
+    })
+    const { rerender } = render(<QuickIngestModalHost />)
+
+    presetStorage.value = resolvePresetMap({
+      standard: {
+        ...resolvePresetMap().standard,
+        advancedValues: { api_name: "anthropic" },
+      },
+    })
+    rerender(<QuickIngestModalHost />)
+    await user.click(await screen.findByText("new-draft"))
+
+    const next = useQuickIngestSessionStore.getState().session
+    expect(next?.id).not.toBe(completed.id)
+    expect(next?.presetConfig.advancedValues?.api_name).toBe("anthropic")
+  })
+
+  it.each([
+    ["processing", "standard", null],
+    ["interrupted", "standard", null],
+    ["cancelled", "standard", null],
+    ["partial_failure", "standard", null],
+    ["completed", "standard", null],
+    ["draft", "custom", null],
+    ["draft", "quick", "web_url"],
+  ] as const)(
+    "preserves %s %s session configuration when opening",
+    async (lifecycle, selectedPreset, firstSourceAddMode) => {
+      presetStorage.value = resolvePresetMap({
+        standard: {
+          ...resolvePresetMap().standard,
+          advancedValues: { api_name: "new-default" },
+        },
+        quick: {
+          ...resolvePresetMap().quick,
+          advancedValues: { api_name: "new-quick-default" },
+        },
+      })
+      const existing = createEmptyQuickIngestSession()
+      useQuickIngestSessionStore.getState().upsertSession({
+        ...existing,
+        lifecycle,
+        visibility: "visible",
+        selectedPreset,
+        customBasePreset: selectedPreset === "custom" ? "standard" : selectedPreset,
+        firstSourceAddMode,
+        presetConfig: {
+          ...(selectedPreset === "quick"
+            ? resolvePresetMap().quick
+            : resolvePresetMap().standard),
+          advancedValues: { api_name: "session-provider" },
+        },
+      })
+
+      render(<QuickIngestModalHost />)
+      await screen.findByTestId("quick-ingest-modal-mock")
+
+      expect(
+        useQuickIngestSessionStore.getState().session?.presetConfig.advancedValues
+          ?.api_name
+      ).toBe("session-provider")
+    }
+  )
 
   it("reopens an existing hidden session instead of creating a new one", async () => {
     const user = userEvent.setup()
@@ -191,6 +609,12 @@ describe("QuickIngestButton resume behavior", () => {
   })
 
   it("hydrates first-source pending opens into the quick first-source preset", () => {
+    presetStorage.value = resolvePresetMap({
+      quick: {
+        ...resolvePresetMap().quick,
+        advancedValues: { api_name: "saved-quick-provider" },
+      },
+    })
     ;(window as typeof window & {
       __tldwPendingQuickIngestOpen?: {
         mode: "normal" | "intro"

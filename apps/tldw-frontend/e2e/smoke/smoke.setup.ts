@@ -220,6 +220,22 @@ export async function seedAuth(
         : AUTH_CONFIG.allowOffline
   }
 
+  if (cfg.authMode === "single-user") {
+    await page.route("**/api/_tldw-webui/runtime-config", async (route) => {
+      await fulfillSmokeJson(route, 200, {
+        runtimeAuth: {
+          available: true,
+          authMode: "single-user",
+          apiKey: cfg.apiKey
+        },
+        networking: {
+          deploymentMode: "advanced",
+          serverUrl: cfg.serverUrl
+        }
+      })
+    })
+  }
+
   await page.addInitScript(
     (cfg) => {
       const readStorageValue = (key: string) => {
@@ -227,7 +243,7 @@ export async function seedAuth(
         if (raw == null) return undefined
         try {
           return JSON.parse(raw)
-        } catch (_error) {
+        } catch {
           return raw
         }
       }
@@ -409,7 +425,6 @@ export async function seedAuth(
         authMode: cfg.authMode,
         accessToken: cfg.accessToken
       }
-      ;(window as Window & { __tldwRuntimeApiKey?: string }).__tldwRuntimeApiKey = cfg.apiKey
 
       // lgtm[js/clear-text-storage-of-sensitive-data]: synthetic E2E auth seed only.
       localStorage.setItem("tldwConfig", JSON.stringify(authConfig))

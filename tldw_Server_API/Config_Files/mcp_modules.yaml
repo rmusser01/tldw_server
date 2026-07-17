@@ -98,6 +98,17 @@ modules:
         #     key: search_knowledge
         #     title: Search Knowledge
 
+  - id: skills
+    class: tldw_Server_API.app.core.MCP_unified.modules.implementations.skills_module:SkillsModule
+    enabled: true
+    name: Skills
+    version: "0.1.0"
+    department: knowledge
+    max_concurrent: 10
+    settings:
+      list_page_size: 50
+      max_rendered_skill_chars: 100000
+
   - id: cooking
     class: tldw_Server_API.app.core.MCP_unified.modules.implementations.cooking_module:CookingModule
     enabled: true

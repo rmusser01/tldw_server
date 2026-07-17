@@ -1001,18 +1001,6 @@
   "actor_presetPlaceholder": {
     "message": "Välj en förinställning"
   },
-  "actor_preset.sliceOfLife": {
-    "message": "Vardagsliv"
-  },
-  "actor_preset.dungeonCrawl": {
-    "message": "Dungeoncrawl"
-  },
-  "actor_preset.romance": {
-    "message": "Romantik"
-  },
-  "actor_preset.workSession": {
-    "message": "Arbetspass"
-  },
   "actor_applyPreset": {
     "message": "Använd"
   },
@@ -1033,15 +1021,6 @@
   },
   "actor_templateModeHelp": {
     "message": "Styr hur Actor interagerar med aktiva scenmallar. Sammanfoga behåller båda; Åsidosätt låter Actor ersätta överlappande fält; Ignorera hoppar över Actor när mallar är aktiva."
-  },
-  "actor_templateMode.merge": {
-    "message": "Sammanfoga med mallar"
-  },
-  "actor_templateMode.override": {
-    "message": "Åsidosätt mallar"
-  },
-  "actor_templateMode.ignore": {
-    "message": "Ignorera när mallar är aktiva"
   },
   "actor_bladeAspectsTitle": {
     "message": "Aspekter"
@@ -1465,5 +1444,29 @@
   },
   "acp_workspace_title": {
     "message": "Arbetsytans terminal"
+  },
+  "tts_routeTitle": {
+    "message": "Text till tal"
+  },
+  "actor_preset_sliceOfLife": {
+    "message": "Vardagsliv"
+  },
+  "actor_preset_dungeonCrawl": {
+    "message": "Dungeoncrawl"
+  },
+  "actor_preset_romance": {
+    "message": "Romantik"
+  },
+  "actor_preset_workSession": {
+    "message": "Arbetspass"
+  },
+  "actor_templateMode_merge": {
+    "message": "Sammanfoga med mallar"
+  },
+  "actor_templateMode_override": {
+    "message": "Åsidosätt mallar"
+  },
+  "actor_templateMode_ignore": {
+    "message": "Ignorera när mallar är aktiva"
   }
 }

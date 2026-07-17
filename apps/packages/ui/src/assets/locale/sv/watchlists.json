@@ -1,4 +1,12 @@
 {
+  "accessibilityHardening": {
+    "source": { "toggleActive": "Växla aktiv status: {{name}}", "checkNow": "Kontrollera nu: {{name}}", "openWebsite": "Öppna källans webbplats: {{name}}", "openHealth": "Öppna källstatus: {{name}}", "edit": "Redigera källa: {{name}}", "delete": "Ta bort källa: {{name}}" },
+    "item": { "open": "Öppna uppdatering: {{title}}", "select": "Välj uppdatering: {{title}}", "description": "{{state}}. Källa: {{source}}." },
+    "output": { "openNewTab": "Öppna {{title}} i en ny flik", "chat": "Chatta om {{title}}", "download": "Hämta {{title}}", "close": "Stäng förhandsvisning: {{title}}" },
+    "health": { "show": "Visa statusdetaljer för bevakningslistor", "hide": "Dölj statusdetaljer för bevakningslistor", "refresh": "Uppdatera status för bevakningslistor", "settings": "Öppna inställningar för bevakningslistor" },
+    "delivery": { "email": "Skicka varje rapport till de konfigurerade mottagarna när funktionen är aktiverad.", "chatbook": "Publicera varje rapport i Chatbook när funktionen är aktiverad." },
+    "help": { "open": "Öppna hjälp för bevakningslistor", "title": "Hjälp för bevakningslistor" }
+  },
   "items": {
     "queuedForBriefing": "I kö för briefing",
     "includeInNextBriefing": "Inkludera i nästa briefing",
@@ -17,5 +25,467 @@
       "generateError": "Kunde inte skapa rapport från köade objekt.",
       "generateReport": "Skapa rapport från kö"
     }
+  },
+  "setupWizard": {
+    "title": "Skapa bevakningslista",
+    "containerTitle": "Skapa bevakningslista",
+    "containerHelp": "Skapa projektbehållaren först. Källor, frekvens, briefing, leverans och test följer i ett gemensamt konfigurationsflöde.",
+    "actions": {
+      "continue": "Fortsätt till Källor"
+    },
+    "sections": {
+      "preset": "Domänförval"
+    },
+    "fields": {
+      "name": "Bevakningslistans namn",
+      "objective": "Mål"
+    },
+    "validation": {
+      "nameRequired": "Lägg till ett namn på bevakningslistan."
+    },
+    "errors": {
+      "createFailed": "Det gick inte att skapa bevakningslistan."
+    },
+    "presets": {
+      "cti_osint": {
+        "label": "CTI / OSINT",
+        "description": "Bevaka sårbarheter, skadlig kod, aktörer, meddelanden och ändringar i källor."
+      },
+      "news": {
+        "label": "Nyheter",
+        "description": "Följ pågående händelser, personer, organisationer och källornas mångfald."
+      },
+      "general": {
+        "label": "Allmänt",
+        "description": "Följ ett ämne och samla uppdateringar för granskning."
+      },
+      "blank": {
+        "label": "Tom",
+        "description": "Börja med en tom bevakningslista och konfigurera detaljerna själv."
+      }
+    },
+    "startModes": {
+      "sources": {
+        "label": "Börja med källor",
+        "description": "Skapa en bevakningslista med inledande flöden och en valfri bevakare."
+      },
+      "topic": {
+        "label": "Börja med ämne",
+        "description": "Skapa först bevakningslistans mål och lägg till flöden innan insamlingen börjar."
+      },
+      "report_goal": {
+        "label": "Börja med rapportmål",
+        "description": "Definiera först briefingens mål och anslut sedan källor och mallar."
+      }
+    },
+    "boundaries": {
+      "alerts": "Aviseringar om innehållsträffar kommer senare. Den här konfigurationen definierar bevakningslistan och dess första insamlingsomfång."
+    }
+  },
+  "overview": {
+    "pipelineSetup": {
+      "title": "Konfigurera briefing",
+      "open": "Konfigurera briefing",
+      "progress": "Steg i briefingkonfigurationen",
+      "steps": {
+        "sources": "Källor",
+        "cadence": "Frekvens",
+        "briefing": "Briefing",
+        "delivery": "Leverans",
+        "test": "Test"
+      },
+      "actions": {
+        "next": "Fortsätt till {{step}}"
+      },
+      "source": {
+        "existing": "Använd befintliga källor",
+        "new": "Lägg till en ny källa",
+        "fallback": "Källa {{id}}"
+      },
+      "sources": {
+        "help": "Välj befintliga källor eller lägg till en och testa sedan anslutningen."
+      },
+      "sourcesLoading": "Läser in källor...",
+      "sourcesError": "Det gick inte att läsa in flöden för konfigurationen.",
+      "sourceTest": {
+        "action": "Testa källa",
+        "ready": "Källan är klar.",
+        "cancelled": "Källtestet avbröts.",
+        "failed": "Källtestet misslyckades. {{message}}",
+        "summary": "{{ready}} klara, {{filtered}} filtrerade",
+        "sample": "Exempelobjekt",
+        "readyItem": "Klar",
+        "filteredItem": "Filtrerad",
+        "untitled": "Objekt utan titel"
+      },
+      "fields": {
+        "sources": "Källor",
+        "sourceName": "Källans namn",
+        "sourceUrl": "Källans URL",
+        "monitorName": "Bevakarens namn",
+        "schedule": "Schema",
+        "timezone": "Tidszon",
+        "intervalEvery": "Varje",
+        "intervalUnit": "Intervallenhet",
+        "weekday": "Veckodag",
+        "hour": "Timme",
+        "minute": "Minut",
+        "cronExpression": "Cron-uttryck",
+        "showName": "Programnamn",
+        "premise": "Programidé",
+        "includeAudio": "Ljud",
+        "audioHelp": "Lägg till en spelbar uppläst version.",
+        "audioMinutes": "Mållängd i minuter",
+        "speakerCount": "Antal medverkande",
+        "template": "Rapportmall",
+        "audioProvider": "Åsidosätt ljudleverantör",
+        "audioModel": "Åsidosätt ljudmodell",
+        "customInstructions": "Anpassade redaktionella instruktioner",
+        "emailDelivery": "E-post",
+        "emailRecipients": "E-postmottagare",
+        "chatbookDelivery": "Chatbook",
+        "chatbookTitle": "Chatbook-titel"
+      },
+      "schedule": {
+        "manual": "Endast manuellt",
+        "interval": "Var N:e timme eller minut",
+        "daily": "Dagligen",
+        "weekdays": "Vardagar",
+        "weekly": "Varje vecka",
+        "advanced": "Avancerad cron"
+      },
+      "intervalUnits": {
+        "hours": "Timmar",
+        "minutes": "Minuter"
+      },
+      "weekdays": {
+        "monday": "Måndag",
+        "tuesday": "Tisdag",
+        "wednesday": "Onsdag",
+        "thursday": "Torsdag",
+        "friday": "Fredag",
+        "saturday": "Lördag",
+        "sunday": "Söndag"
+      },
+      "advancedCron": "Avancerad cron",
+      "nextOccurrence": "Nästa körning",
+      "manualOccurrence": "Endast manuellt",
+      "nextOccurrencePending": "Spara ett giltigt schema för att beräkna den exakta tiden.",
+      "schedulePreview": {
+        "loading": "Beräknar det exakta schemat…",
+        "error": "Det exakta schemat kunde inte beräknas. Kontrollera cron-uttrycket och tidszonen."
+      },
+      "briefing": {
+        "question": "Vad skapar du?",
+        "help": "Välj redaktionell form. Alla alternativ bygger fortfarande på dina valda källor.",
+        "advanced": "Avancerade briefinginställningar"
+      },
+      "formats": {
+        "concise_briefing": "Kort briefing",
+        "solo_update": "Solouppdatering",
+        "host_discussion": "Värdsamtal",
+        "sportscast": "Sportsändning",
+        "culture_roundtable": "Kulturellt rundabordssamtal",
+        "custom": "Anpassat"
+      },
+      "speaker": {
+        "defaultLabel": "Medverkande {{index}}",
+        "defaultRole": "Värd",
+        "labelField": "Etikett för medverkande {{index}}",
+        "roleField": "Roll för medverkande {{index}}",
+        "voiceField": "Röst för medverkande {{index}}",
+        "personaField": "Persona för medverkande {{index}}"
+      },
+      "preview": {
+        "generate": "Förhandsgranska rapport",
+        "diagnostics": "Diagnostik för förhandsgranskning",
+        "context": "Förhandsgranskningskörning: {{runId}}",
+        "noRunContext": "Kör en bevakare utan fel innan du förhandsgranskar rapporten.",
+        "templateRequired": "Välj en mall innan du skapar förhandsgranskningen.",
+        "templateEmpty": "Den valda mallen är tom.",
+        "emptyResult": "Förhandsgranskningen gav inget renderat innehåll.",
+        "error": "Det gick inte att skapa förhandsgranskningen."
+      },
+      "delivery": {
+        "help": "Rapporter ingår alltid. Extern leverans väntar tills de valda artefakterna är klara.",
+        "reports": "Rapporter",
+        "required": "Obligatorisk lagring",
+        "alwaysOn": "Alltid aktiv"
+      },
+      "receipt": {
+        "labels": {
+          "schedule": "Schema",
+          "sources": "Källor",
+          "artifacts": "Artefakter",
+          "format": "Format",
+          "showName": "Programnamn",
+          "cast": "Medverkande",
+          "duration": "Mållängd",
+          "destinations": "Mål"
+        },
+        "schedule": {
+          "manual": "Endast manuellt",
+          "scheduled": "{{date}} ({{timezone}})"
+        },
+        "sources": "{{count}} källor",
+        "sources_one": "{{count}} källa",
+        "sources_other": "{{count}} källor",
+        "artifacts": {
+          "textReport": "textrapport",
+          "showNotes": "programanteckningar",
+          "audio": "ljud"
+        },
+        "formats": {
+          "concise_briefing": "kort briefing",
+          "solo_update": "solouppdatering",
+          "host_discussion": "värdsamtal",
+          "sportscast": "sportsändning",
+          "culture_roundtable": "kulturellt rundabordssamtal",
+          "custom": "anpassat program"
+        },
+        "speakerStyle": {
+          "1": "solo",
+          "2": "med två värdar",
+          "3": "med tre värdar",
+          "4": "med fyra värdar"
+        },
+        "programWithSpeakers": "{{speakers}} {{format}}",
+        "cast": "{{count}} medverkande",
+        "cast_one": "{{count}} medverkande",
+        "cast_other": "{{count}} medverkande",
+        "duration": "mål på {{count}} minuter",
+        "duration_one": "mål på {{count}} minut",
+        "duration_other": "mål på {{count}} minuter",
+        "destinations": {
+          "email": "E-post: {{recipients}}",
+          "chatbook": "Chatbook: {{title}}"
+        },
+        "untitledChatbook": "Utan titel",
+        "dstChange": "Följande körning använder {{timezoneName}} efter övergången till eller från sommartid: {{date}}."
+      },
+      "test": {
+        "providerDisclosure": "Tester använder dina konfigurerade leverantörer för LLM och talsyntes. Ett prov begränsas till 60 sekunder; ett fullständigt test använder mållängden.",
+        "textProviderDisclosure": "Tester använder din konfigurerade LLM-leverantör. Tester med endast text använder inte talsyntes.",
+        "receipt": "Aktiveringsöversikt",
+        "manualReceipt": "Den här briefingen körs manuellt, sparar valda artefakter i Rapporter och kontaktar inget externt mål om du inte väljer Skicka test.",
+        "scheduledReceipt": "{{schedule}}: samla uppdateringar från {{sources}}, skapa {{artifacts}} som {{program}}{{duration}} och spara och leverera dem sedan till {{destinations}}.",
+        "audioTestRequired": "Skapa ett lyckat ljudprov eller fullständigt test före aktivering.",
+        "progress": "Testförlopp",
+        "stages": {
+          "collection": "Samla källor",
+          "selection": "Välj uppdateringar",
+          "text": "Skapa rapport",
+          "audio": "Skapa ljud",
+          "persistence": "Spara i Rapporter",
+          "audioScript": "Skriv ljudmanus",
+          "audioScriptPersistence": "Spara ljudmanus",
+          "audioPersistence": "Spara ljud i Rapporter",
+          "delivery": "Kontrollera testleverans",
+          "deliveryAdapter": "Leverera till {{adapter}}",
+          "unknown": "Steg {{stage}}"
+        },
+        "sample": "Skapa 60-sekundersprov",
+        "full": "Skapa fullständigt testavsnitt",
+        "text": "Skapa testrapport",
+        "send": "Skicka test",
+        "activate": "Aktivera schema",
+        "ready": "Testet är klart. Din briefing är redo. Utkastet förblir inaktivt tills du aktiverar schemat.",
+        "running": "Körning {{runId}} pågår fortfarande: {{stage}}. Du kan stänga konfigurationen och följa den i Översikt.",
+        "failedStage": "{{stage}} misslyckades. Öppna körning {{runId}} och försök med steget igen.",
+        "failedWithCode": "{{stage}} misslyckades ({{code}}). Öppna körning {{runId}} och försök med steget igen.",
+        "cancelledStage": "{{stage}} avbröts. Utkastet har sparats.",
+        "cancelledWithCode": "{{stage}} avbröts ({{code}}). Utkastet har sparats.",
+        "cancelled": "Testet avbröts. Utkastet har sparats.",
+        "failed": "Testet misslyckades. Utkastet har sparats. {{message}}",
+        "status": {
+          "not_started": "Inte startat",
+          "queued": "I kö",
+          "running": "Körs",
+          "ready": "Klar",
+          "failed": "Misslyckades",
+          "skipped": "Överhoppat",
+          "cancelled": "Avbrutet"
+        }
+      },
+      "activate": {
+        "ready": "Schemat aktiverades.",
+        "failed": "Schemat kunde inte aktiveras. Utkastet har sparats. {{message}}"
+      },
+      "validation": {
+        "sourcesRequired": "Välj minst en källa innan du fortsätter.",
+        "sourceNameRequired": "Ange ett källnamn.",
+        "sourceUrlInvalid": "Ange en giltig HTTP- eller HTTPS-URL för källan.",
+        "monitorNameRequired": "Ange ett namn på bevakaren.",
+        "timezoneInvalid": "Ange en giltig IANA-tidszon.",
+        "intervalInvalid": "Ange ett intervall som stöds.",
+        "hourInvalid": "Ange en timme från 0 till 23.",
+        "minuteInvalid": "Ange en minut från 0 till 59.",
+        "cronInvalid": "Ange ett giltigt cron-uttryck med fem fält.",
+        "cronTooFrequent": "Välj ett schema med minst fem minuters mellanrum.",
+        "templateRequired": "Ange en rapportmall.",
+        "castSizeInvalid": "Välj en till fyra medverkande.",
+        "castIdsInvalid": "Varje medverkande behöver en unik identitet.",
+        "castVoicesRequired": "Välj en röst för varje medverkande.",
+        "audioMinutesInvalid": "Ange en längd från 1 till 60 minuter.",
+        "emailInvalid": "Ange minst en giltig e-postadress."
+      },
+      "validationError": "Granska de markerade fälten innan du fortsätter."
+    },
+    "latest": {
+      "heading": {
+        "briefing": "Senaste briefing",
+        "episode": "Senaste avsnitt"
+      },
+      "empty": {
+        "scheduled": "briefing: {{date}}.",
+        "manual": "Inte startad. Testa nu."
+      },
+      "generatedAt": "Skapad {{date}}",
+      "untitled": "briefing {{runId}}",
+      "artifacts": "rapport / ljud",
+      "audio": "ljud",
+      "audioFailed": "ljud misslyckades",
+      "ready": "Klar",
+      "saved": "Sparad",
+      "waiting": "Väntar",
+      "script": "ljud rapport",
+      "stageWithStatus": "{{stage}}: {{status}}",
+      "noUpdates": "Inga kvalificerande uppdateringar hittades. En status-{{noun}} sparades.",
+      "nextRun": "Nästa körning: {{date}}",
+      "nextRunRelative": "Nästa körning: {{relative}}",
+      "counts": "briefing: Inkluderat, Oläst, Nytt",
+      "count": {
+        "included": "Inkluderat {{count}}",
+        "unread": "Oläst {{count}}",
+        "new": "Nytt {{count}}"
+      },
+      "provenance": {
+        "sources": "{{count}} spårade källor",
+        "sources_zero": "{{count}} spårade källor",
+        "sources_one": "{{count}} spårad källa",
+        "sources_two": "{{count}} spårade källor",
+        "sources_few": "{{count}} spårade källor",
+        "sources_many": "{{count}} spårade källor",
+        "sources_other": "{{count}} spårade källor"
+      },
+      "delivery": {
+        "reports": "Visa alla rapporter",
+        "retryAria": "Försök igen {{adapter}}: {{name}}",
+        "retryUnknownAria": "Okänt resultat. Försök igen {{adapter}}: {{name}}",
+        "reviewRetry": "Granska och försök igen",
+        "unknownConfirmation": "Leverantören bekräftade inte leverans via {{adapter}}. Ett nytt försök kan skicka en dubblett. Kontrollera målet och fortsätt bara om risken är acceptabel. ({{destination}})",
+        "chatbookDestination": "Chatbook",
+        "confirmRetry": "Försök igen leverans",
+        "confirmRetryAria": "Försök igen {{adapter}} leverans",
+        "recipientCount": "{{count}} mottagare",
+        "recipientCount_zero": "{{count}} mottagare",
+        "recipientCount_one": "{{count}} mottagare",
+        "recipientCount_two": "{{count}} mottagare",
+        "recipientCount_few": "{{count}} mottagare",
+        "recipientCount_many": "{{count}} mottagare",
+        "recipientCount_other": "{{count}} mottagare",
+        "reviewAcknowledgement": "Jag har granskat målet och accepterar risken för dubbelleverans.",
+        "reviewSettings": "Granska inställningar",
+        "reviewTitle": "Granska {{adapter}} leverans"
+      },
+      "playback": {
+        "region": "ljud: {{name}}",
+        "playAria": "Spela upp {{name}}",
+        "pauseAria": "Pausa {{name}}",
+        "resumeAria": "Återuppta {{name}}",
+        "seekAria": "ljud: {{name}}",
+        "loading": "Laddar ljud",
+        "error": "ljud misslyckades. Öppna rapport / Återskapa ljud.",
+        "play": "Spela",
+        "pause": "Pausa",
+        "resume": "Fortsätt",
+        "accessError": "ljud: Åtkomst misslyckades. Kontrollera din inloggning och serveranslutning.",
+        "missing": "ljud är inte längre tillgänglig."
+      },
+      "actions": {
+        "label": "Senaste briefing",
+        "openReport": "Öppna {{report}}",
+        "openReportAria": "Öppna {{report}}: {{name}}",
+        "regenerateAudio": "Återskapa ljud",
+        "regenerateAudioAria": "Återskapa {{style}} {{noun}} ljud: {{name}}",
+        "retry": "Försök igen",
+        "retrySaveAria": "Försök igen sparad rapport: {{name}}",
+        "retryTextAria": "Försök igen rapport: {{name}}",
+        "retryStage": "Försök igen: {{stage}}",
+        "inspect": "Granska körning",
+        "inspectAria": "Granska körning {{runId}}: {{name}}",
+        "viewReports": "Visa alla rapporter",
+        "testNow": "Testa nu",
+        "downloadAudio": "Hämta ljud",
+        "downloadAudioAria": "Hämta ljud: {{name}}",
+        "retryExactAria": "Försök igen {{stage}}: {{name}}",
+        "reviewScript": "Granska ljud rapport",
+        "reviewScriptAria": "Granska ljud rapport: {{name}}"
+      },
+      "announcements": {
+        "blockingFailure": "{{name}} misslyckades. Granska körning {{runId}}.",
+        "delivered": "{{name}}: levererad.",
+        "nextRunUpdated": "{{name}}: nästa körning.",
+        "partialAudioFailure": "{{name}}: programanteckningar klar, ljud misslyckades.",
+        "readyText": "{{name}}: rapport klar.",
+        "readyWithAudio": "{{name}}: Klar. ljud / programanteckningar.",
+        "stageProgress": "{{name}}: {{stage}} {{status}}.",
+        "testQueued": "Testa nu: i kö."
+      },
+      "retryError": "Försök igen misslyckades. Granska körning.",
+      "regenerateError": "Återskapa ljud: misslyckades.",
+      "testError": "Testa nu: misslyckades.",
+      "status": {
+        "ready": "Klar",
+        "failed": "Misslyckades",
+        "saved": "Sparad",
+        "waiting": "Väntar",
+        "running": "Körs",
+        "queued": "I kö",
+        "notStarted": "Inte startad",
+        "notSelected": "Inte vald",
+        "cancelled": "Avbruten",
+        "delivered": "Levererad",
+        "unknown": "Okänt resultat",
+        "sending": "Skickar",
+        "stale": "Inaktuell",
+        "superseded": "Ersatt",
+        "unavailable": "Inte tillgänglig",
+        "partial": "Delvis"
+      },
+      "stages": {
+        "renderText": "rapport",
+        "persistText": "Sparad rapport",
+        "composeScript": "ljud rapport",
+        "persistScript": "Sparad ljud rapport",
+        "generateAudio": "ljud",
+        "persistAudio": "Sparad ljud"
+      },
+      "nouns": {
+        "briefing": "briefing",
+        "episode": "avsnitt",
+        "report": "rapport",
+        "showNotes": "programanteckningar"
+      },
+      "scriptAccessError": "ljud rapport: Åtkomst misslyckades. Kontrollera din inloggning och serveranslutning.",
+      "scriptLoading": "Läser in ljud rapport",
+      "scriptMissing": "ljud rapport är inte längre tillgänglig.",
+      "recovery": {
+        "renderText": "Genererar rapport",
+        "persistText": "Sparar rapport",
+        "composeScript": "Utformar ljud rapport",
+        "persistScript": "Sparar ljud rapport",
+        "generateAudio": "Genererar ljud",
+        "persistAudio": "Sparar ljud"
+      }
+    }
+  },
+  "outputs": {
+    "openInNewTabAria": "Öppna i ny flik: {{title}}",
+    "chatAboutAria": "Chatta om detta: {{title}}",
+    "downloadAria": "Hämta: {{title}}",
+    "artifactMissing": "är inte längre tillgänglig.",
+    "artifactAuthError": "Åtkomst nekades. Kontrollera din inloggning.",
+    "artifactAccessError": "Åtkomst misslyckades. Kontrollera din inloggning och serveranslutning."
   }
 }

@@ -142,6 +142,57 @@ def test_search_by_safe_metadata_uses_json_fallback_and_zero_result_fast_return(
     assert count_params == ("%nature%",)
 
 
+def test_search_by_safe_metadata_eq_matches_default_json_spacing() -> None:
+    safe_metadata_search_ops_module = _load_safe_metadata_search_ops_module()
+    connection = sqlite3.connect(":memory:")
+    connection.row_factory = sqlite3.Row
+    connection.executescript(
+        """
+        CREATE TABLE Media (
+            id INTEGER PRIMARY KEY,
+            title TEXT,
+            type TEXT,
+            deleted INTEGER NOT NULL DEFAULT 0,
+            last_modified TEXT
+        );
+        CREATE TABLE DocumentVersions (
+            id INTEGER PRIMARY KEY,
+            media_id INTEGER NOT NULL,
+            version_number INTEGER NOT NULL,
+            created_at TEXT,
+            safe_metadata TEXT,
+            deleted INTEGER NOT NULL DEFAULT 0
+        );
+        INSERT INTO Media (id, title, type, last_modified)
+        VALUES (7, 'Provider paper', 'pdf', '2026-07-12T00:00:00Z');
+        INSERT INTO DocumentVersions (
+            id, media_id, version_number, created_at, safe_metadata
+        ) VALUES (
+            1,
+            7,
+            1,
+            '2026-07-12T00:00:00Z',
+            '{"provider_ids": {"openalex_id": "W123"}}'
+        );
+        """
+    )
+    db = SimpleNamespace(
+        backend_type=BackendType.SQLITE,
+        execute_query=connection.execute,
+    )
+
+    try:
+        rows, total = safe_metadata_search_ops_module.search_by_safe_metadata(
+            db,
+            filters=[{"field": "openalex_id", "op": "eq", "value": "W123"}],
+        )
+    finally:
+        connection.close()
+
+    assert total == 1
+    assert rows[0]["media_id"] == 7
+
+
 def test_search_by_safe_metadata_ungrouped_query_preserves_standard_constraints_and_postgres_title_sort() -> None:
     safe_metadata_search_ops_module = _load_safe_metadata_search_ops_module()
 

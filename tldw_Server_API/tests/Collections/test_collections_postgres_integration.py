@@ -79,8 +79,51 @@ def test_collections_postgres_round_trip(request: pytest.FixtureRequest, monkeyp
         storage_path="expired.md",
         metadata_json=None,
         retention_until=expired_at,
+        idempotency_key="postgres-output-v1",
     )
     assert output.id > 0
+    replay = db.create_output_artifact(
+        type_="summary",
+        title="Expired Output",
+        format_="markdown",
+        storage_path="expired.md",
+        metadata_json=None,
+        retention_until=expired_at,
+        idempotency_key="postgres-output-v1",
+    )
+    assert replay.id == output.id
+    assert replay.idempotency_key == "postgres-output-v1"
+
+    columns = {row["name"] for row in backend.get_table_info("outputs")}
+    assert "idempotency_key" in columns
+    indexes = {
+        row["indexname"]: row["indexdef"]
+        for row in backend.execute(
+            "SELECT indexname, indexdef FROM pg_indexes WHERE tablename = ?",
+            ("outputs",),
+        ).rows
+    }
+    assert "ux_outputs_user_idempotency_active" in indexes
+    assert " WHERE " in indexes["ux_outputs_user_idempotency_active"].upper()
+    assert "deleted" in indexes["ux_outputs_user_idempotency_active"]
+    assert "ux_outputs_user_idempotency" not in indexes
+
+    assert db.delete_output_artifact(output.id) is True
+    recreated = db.create_output_artifact(
+        type_="summary",
+        title="Expired Output",
+        format_="markdown",
+        storage_path="expired.md",
+        metadata_json=None,
+        retention_until=expired_at,
+        idempotency_key="postgres-output-v1",
+    )
+    assert recreated.id != output.id
+    tombstones = backend.execute(
+        "SELECT id FROM outputs WHERE user_id = ? AND idempotency_key = ? AND deleted = TRUE",
+        ("1", "postgres-output-v1"),
+    ).rows
+    assert [int(row["id"]) for row in tombstones] == [output.id]
 
     purged = db.purge_expired_outputs()
     assert purged >= 1

@@ -39,6 +39,73 @@ export type QuizQuestionPlanItem = {
   option_count?: number
   pair_count?: number
 }
+export type QuizGenerationProfile =
+  | "standard_recall"
+  | "mixed_assessment"
+  | "best_of_five"
+  | "emq"
+  | "assertion_reasoning"
+  | "osce_scenario"
+export type AvailableQuizGenerationProfile = Exclude<
+  QuizGenerationProfile,
+  "osce_scenario"
+>
+export type QuizGenerationProfileDefinition = {
+  id: QuizGenerationProfile
+  label: string
+  description: string
+  status: "available" | "planned"
+  default_num_questions: number
+  default_difficulty: "easy" | "medium" | "hard" | "mixed"
+  default_question_types: QuestionType[]
+}
+export const QUIZ_GENERATION_PROFILES: QuizGenerationProfileDefinition[] = [
+  {
+    id: "standard_recall",
+    label: "Standard Recall",
+    description: "Balanced source-grounded recall and application questions.",
+    status: "available",
+    default_num_questions: 10,
+    default_difficulty: "mixed",
+    default_question_types: ["multiple_choice", "true_false", "fill_blank"]
+  },
+  {
+    id: "mixed_assessment",
+    label: "Mixed Assessment",
+    description: "A broader mix of recall, interpretation, and applied understanding.",
+    status: "available",
+    default_num_questions: 10,
+    default_difficulty: "mixed",
+    default_question_types: ["multiple_choice", "true_false", "fill_blank"]
+  },
+  {
+    id: "best_of_five",
+    label: "Best of Five",
+    description: "Single-best-answer questions with five plausible options.",
+    status: "available",
+    default_num_questions: 5,
+    default_difficulty: "mixed",
+    default_question_types: ["multiple_choice"]
+  },
+  {
+    id: "emq",
+    label: "EMQ",
+    description: "Extended matching questions with shared option banks.",
+    status: "available",
+    default_num_questions: 5,
+    default_difficulty: "mixed",
+    default_question_types: ["multiple_choice"]
+  },
+  {
+    id: "assertion_reasoning",
+    label: "Assertion / Reasoning",
+    description: "Assertion and reason pairs with concise evidence-backed rationales.",
+    status: "available",
+    default_num_questions: 5,
+    default_difficulty: "mixed",
+    default_question_types: ["multiple_choice"]
+  }
+]
 export type AnswerValue = number | string | number[] | Record<string, string>
 export type QuizGenerateSourceType =
   | "media"
@@ -88,6 +155,8 @@ export type QuestionBase = {
   question_type: QuestionType
   question_text: string
   options?: string[] | null
+  group_id?: string | null
+  group_prompt?: string | null
   hint?: string | null
   hint_penalty_points?: number | null
   source_citations?: SourceCitation[] | null
@@ -172,6 +241,8 @@ export type QuestionCreate = {
   question_type: QuestionType
   question_text: string
   options?: string[] | null
+  group_id?: string | null
+  group_prompt?: string | null
   correct_answer: AnswerValue
   explanation?: string | null
   hint?: string | null
@@ -186,6 +257,8 @@ export type QuestionUpdate = {
   question_type?: QuestionType | null
   question_text?: string | null
   options?: string[] | null
+  group_id?: string | null
+  group_prompt?: string | null
   correct_answer?: AnswerValue | null
   explanation?: string | null
   hint?: string | null
@@ -199,6 +272,7 @@ export type QuestionUpdate = {
 
 // AI generation request
 type QuizGenerateRequestBase = {
+  generation_profile?: AvailableQuizGenerationProfile
   num_questions?: number
   question_types?: QuestionType[]
   question_plan?: QuizQuestionPlanItem[]
@@ -206,6 +280,8 @@ type QuizGenerateRequestBase = {
   focus_topics?: string[]
   model?: string
   api_provider?: string
+  claims_verification_provider?: string | null
+  claims_verification_model?: string | null
   workspace_id?: string | null
   workspace_tag?: string | null
 }
@@ -335,12 +411,15 @@ export type AttemptListParams = {
 export type QuizGenerateResponse = {
   quiz: Quiz
   questions: QuestionAdmin[]
+  claim_verification?: Record<string, unknown> | null
 }
 
 export type QuizImportQuestion = {
   question_type: QuestionType
   question_text: string
   options?: string[] | null
+  group_id?: string | null
+  group_prompt?: string | null
   correct_answer: AnswerValue
   explanation?: string | null
   hint?: string | null
@@ -556,6 +635,16 @@ export async function generateQuiz(
     body: request,
     abortSignal: options?.signal,
     timeoutMs
+  })
+}
+
+export async function listQuizGenerationProfiles(
+  options?: { signal?: AbortSignal }
+): Promise<QuizGenerationProfileDefinition[]> {
+  return await bgRequest<QuizGenerationProfileDefinition[], AllowedPath, "GET">({
+    path: "/api/v1/quizzes/generation-profiles" as AllowedPath,
+    method: "GET",
+    abortSignal: options?.signal
   })
 }
 

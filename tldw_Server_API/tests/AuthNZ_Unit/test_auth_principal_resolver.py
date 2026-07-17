@@ -24,6 +24,26 @@ def _make_request(headers: Dict[str, str] | None = None) -> Request:
     return Request(scope)
 
 
+def test_build_principal_ignores_legacy_user_role_without_canonical_claims() -> None:
+    user = User(
+        id=44,
+        username="legacy-admin",
+        role="admin",
+        roles=[],
+        permissions=[],
+        is_admin=False,
+    )
+
+    principal = resolver._build_principal_from_user(
+        user,
+        kind="user",
+        request=_make_request(),
+    )
+
+    assert principal.roles == []
+    assert principal.is_admin is False
+
+
 @pytest.mark.asyncio
 async def test_get_auth_principal_reuses_existing_context():
     req = _make_request()

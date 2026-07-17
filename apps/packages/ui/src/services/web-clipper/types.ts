@@ -15,6 +15,7 @@ export interface WebClipperNotePayload {
 
 export interface WebClipperWorkspacePayload {
   workspace_id: string
+  default_review_state?: "needs_review" | null
 }
 
 export interface WebClipperContentPayload {

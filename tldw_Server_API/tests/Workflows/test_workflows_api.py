@@ -6,6 +6,7 @@ import time
 import types
 import pytest
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 # Stub heavyweight audio deps before app import for local test stability.
 if "torch" not in sys.modules:
@@ -418,6 +419,24 @@ def test_websocket_auth_and_events(client_with_workflows_db: TestClient):
     with pytest.raises(Exception):
         with client.websocket_connect(f"/api/v1/workflows/ws?run_id={run_id}&token={bad_token}"):
             pass
+
+
+def test_websocket_missing_run_closes_with_4404(client_with_workflows_db: TestClient):
+    client = client_with_workflows_db
+    token = get_jwt_manager().create_access_token(
+        subject="1",
+        username="tester",
+        roles=["user"],
+        permissions=[],
+    )
+
+    with pytest.raises(WebSocketDisconnect) as exc_info:
+        with client.websocket_connect(
+            f"/api/v1/workflows/ws?run_id=missing-run&token={token}"
+        ):
+            pass
+
+    assert exc_info.value.code == 4404
 
 
 def test_step_types_and_runs_listing(client_with_workflows_db: TestClient):

@@ -1,12 +1,12 @@
 import json
 from typing import Iterable, Union
-from unittest.mock import MagicMock, patch
 
 import pytest
 
 from tldw_Server_API.app.core.LLM_Calls.providers.local_adapters import (
     _chat_with_openai_compatible_local_server,
 )
+from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
 
 
 class DummyResponse:
@@ -75,21 +75,27 @@ def test_local_streaming_normalizes_sse_and_closes_client():
     def fake_close():
         client_closed["called"] = True
 
-    with patch("tldw_Server_API.app.core.LLM_Calls.providers.local_adapters._hc_create_client") as mock_client_cls:
-        mock_client = MagicMock()
-        mock_client.stream.side_effect = fake_stream
-        mock_client.close.side_effect = fake_close
-        mock_client_cls.return_value = mock_client
-
-        generator = _chat_with_openai_compatible_local_server(
-            api_base_url="http://fake.local",
-            model_name="local-model",
-            input_data=[{"role": "user", "content": "Ping"}],
-            streaming=True,
-            provider_name="TestLocalProvider",
+    def checked_streamer(**kwargs):
+        assert kwargs["configured_endpoint"].matches(kwargs["url"])
+        return fake_stream(
+            kwargs["method"],
+            kwargs["url"],
+            headers=kwargs.get("headers"),
+            json=kwargs.get("json"),
+            timeout=kwargs.get("timeout"),
         )
 
-        chunks = list(generator)
+    generator = _chat_with_openai_compatible_local_server(
+        api_base_url="http://fake.local",
+        model_name="local-model",
+        input_data=[{"role": "user", "content": "Ping"}],
+        streaming=True,
+        provider_name="TestLocalProvider",
+        http_streamer=checked_streamer,
+        configured_endpoint_scope=ConfiguredEndpointScope.from_url("http://fake.local"),
+    )
+
+    chunks = list(generator)
 
     # Expect two payload chunks plus the appended [DONE] sentinel.
     assert len(chunks) == 3
@@ -103,4 +109,4 @@ def test_local_streaming_normalizes_sse_and_closes_client():
 
     assert chunks[-1] == "data: [DONE]\n\n"
     assert dummy_response.close_calls >= 1
-    assert client_closed["called"] is True
+    assert client_closed["called"] is False

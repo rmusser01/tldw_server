@@ -1,25 +1,29 @@
 import contextlib
 import json
 import os
-import socket
-import subprocess
 import shlex
 import shutil
+import socket
+import subprocess
 import time
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
 import pytest
+
+_FRONTEND_RESPONSE_CHUNK_BYTES = 64 * 1024
+_FRONTEND_RESPONSE_MAX_BYTES = 1024 * 1024
+_FRONTEND_READINESS_MARKERS = (b"__NEXT_DATA__", b'id="__next"')
 
 # Robust import of server_lifecycle regardless of PYTHONPATH layout in CI.
 try:
     from tldw_Server_API.tests.scripts import server_lifecycle
 except ModuleNotFoundError:  # pragma: no cover - environment specific
-    import sys
     import importlib
+    import sys
     here = Path(__file__).resolve()
     repo_root = None
     for cand in [here.parent, *here.parents]:
@@ -104,16 +108,28 @@ def _fetch_frontend(base_url: str) -> Dict[str, Optional[str]]:
         raise ValueError(f"Unsupported frontend URL scheme: {parsed.scheme or '<empty>'}")
     try:
         with urllib.request.urlopen(base_url, timeout=1) as response:
-            body = response.read(4096).decode(
-                response.headers.get_content_charset() or "utf-8",
-                errors="ignore",
-            )
+            body = _read_frontend_body(response)
             return {"status": str(response.status), "body": body}
     except urllib.error.HTTPError as error:
-        body = error.read().decode("utf-8", errors="ignore")
+        body = _read_frontend_body(error)
         return {"status": str(error.code), "body": body}
     except Exception:
         return {"status": None, "body": None}
+
+
+def _read_frontend_body(response: Any) -> str:
+    """Read a bounded response body until readiness is found or input ends."""
+    body = bytearray()
+    while len(body) < _FRONTEND_RESPONSE_MAX_BYTES:
+        remaining = _FRONTEND_RESPONSE_MAX_BYTES - len(body)
+        chunk = response.read(min(_FRONTEND_RESPONSE_CHUNK_BYTES, remaining))
+        if not chunk:
+            break
+        body.extend(chunk)
+        if any(marker in body for marker in _FRONTEND_READINESS_MARKERS):
+            break
+    charset = response.headers.get_content_charset() or "utf-8"
+    return body.decode(charset, errors="ignore")
 
 
 def _is_frontend_response(body: Optional[str]) -> bool:

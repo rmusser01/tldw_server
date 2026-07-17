@@ -5,6 +5,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { Modal, message } from "antd"
 import { JobFormModal } from "../JobFormModal"
 import { setViewport } from "../../__tests__/test-utils/viewport"
+import { buildBriefingPipelineContract } from "../../shared/briefing-contract"
 
 const servicesMock = vi.hoisted(() => ({
   applyWatchlistOutputPreset: vi.fn(),
@@ -169,6 +170,8 @@ vi.mock("../FilterBuilder", () => ({
 }))
 
 describe("JobFormModal live summary", () => {
+  type ConfirmConfig = Parameters<typeof Modal.confirm>[0]
+  type ConfirmResult = ReturnType<typeof Modal.confirm>
   const createObjectUrlMock = vi.fn(() => "blob:job-form-audio-preview")
   const revokeObjectUrlMock = vi.fn()
 
@@ -176,12 +179,12 @@ describe("JobFormModal live summary", () => {
     vi.clearAllMocks()
     setViewport(1024)
     telemetryMock.trackWatchlistsPreventionTelemetry.mockResolvedValue(undefined)
-    vi.spyOn(Modal, "confirm").mockImplementation((config: any) => {
+    vi.spyOn(Modal, "confirm").mockImplementation((config: ConfirmConfig) => {
       config?.onOk?.()
       return {
         destroy: vi.fn(),
         update: vi.fn()
-      } as any
+      } as ConfirmResult
     })
     servicesMock.fetchWatchlistSources.mockResolvedValue({
       items: [
@@ -257,6 +260,51 @@ describe("JobFormModal live summary", () => {
     ;(URL as unknown as { revokeObjectURL?: (url: string) => void }).revokeObjectURL =
       revokeObjectUrlMock
   })
+
+  const saveCanonicalContract = async ({
+    id,
+    name,
+    contract
+  }: {
+    id: number
+    name: string
+    contract: ReturnType<typeof buildBriefingPipelineContract>
+  }) => {
+    servicesMock.updateWatchlistJob.mockResolvedValueOnce({ id })
+    render(
+      <JobFormModal
+        open
+        onClose={vi.fn()}
+        onSuccess={vi.fn()}
+        initialValues={{
+          id,
+          name,
+          description: null,
+          scope: { sources: [1] },
+          schedule_expr: "0 9 * * *",
+          timezone: "UTC",
+          active: true,
+          output_prefs: { briefing_pipeline: contract },
+          job_filters: null,
+          created_at: "2026-01-15T00:00:00Z"
+        }}
+      />
+    )
+
+    await waitFor(() => {
+      expect(servicesMock.fetchWatchlistSources).toHaveBeenCalled()
+      expect(servicesMock.fetchWatchlistGroups).toHaveBeenCalled()
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Save" }))
+    await waitFor(() => {
+      expect(servicesMock.updateWatchlistJob).toHaveBeenCalledTimes(1)
+    })
+
+    const [, payload] = servicesMock.updateWatchlistJob.mock.calls[0]
+    return payload.output_prefs.briefing_pipeline as ReturnType<
+      typeof buildBriefingPipelineContract
+    >
+  }
 
   it("uses full-width constrained modal chrome with visible create and cancel actions", async () => {
     setViewport(420)
@@ -427,19 +475,122 @@ describe("JobFormModal live summary", () => {
       expect(servicesMock.createWatchlistJob).toHaveBeenCalledTimes(1)
     })
 
-    expect(servicesMock.createWatchlistJob).toHaveBeenCalledWith(
+    const payload = servicesMock.createWatchlistJob.mock.calls[0][0]
+    expect(payload.output_prefs.briefing_pipeline.audio).toEqual(
       expect.objectContaining({
-        output_prefs: expect.objectContaining({
-          generate_audio: true,
-          audio_voice: "alloy",
-          audio_speed: 1,
-          target_audio_minutes: 8
-        })
+        enabled: true,
+        voice: "alloy",
+        target_minutes: 8
       })
     )
+    expect(payload.output_prefs.briefing_pipeline.audio).not.toHaveProperty("speed")
   }, 15_000)
 
-  it("keeps recurring reports opt-in separately from delivery and audio settings", async () => {
+  it("saves the same canonical contract as the shared builder for equivalent intent", async () => {
+    const expectedContract = buildBriefingPipelineContract({
+      monitorName: "Canonical parity monitor",
+      scope: { sources: [1] },
+      active: true,
+      scheduleExpr: "0 9 * * *",
+      timezone: "UTC",
+      templateName: "briefing_markdown",
+      templateFormat: "md",
+      audioEnabled: true,
+      audioVoice: "alloy",
+      targetAudioMinutes: 8,
+      emailEnabled: true,
+      emailRecipients: ["ops@example.com"]
+    })
+    const savedContract = await saveCanonicalContract({
+      id: 90,
+      name: "Canonical parity monitor",
+      contract: expectedContract
+    })
+
+    expect(savedContract).toEqual(expectedContract)
+  }, 15_000)
+
+  it("preserves explicitly configured canonical extension fields on save", async () => {
+    const baseContract = buildBriefingPipelineContract({
+      monitorName: "Extended canonical monitor",
+      scope: { sources: [1] },
+      active: true,
+      scheduleExpr: "0 9 * * *",
+      timezone: "UTC",
+      templateName: "briefing_markdown",
+      templateFormat: "html",
+      audioEnabled: true,
+      audioVoice: "nova",
+      targetAudioMinutes: 12,
+      emailEnabled: true,
+      emailRecipients: ["ops@example.com"]
+    })
+    const extendedContract = {
+      ...baseContract,
+      audio: { ...baseContract.audio, speed: 1.25 },
+      delivery: {
+        ...baseContract.delivery,
+        email: {
+          ...baseContract.delivery.email,
+          attach_file: false,
+          body_format: "html"
+        }
+      }
+    } as unknown as typeof baseContract
+    const savedContract = await saveCanonicalContract({
+      id: 92,
+      name: "Extended canonical monitor",
+      contract: extendedContract
+    })
+
+    expect(savedContract).toEqual(extendedContract)
+  }, 15_000)
+
+  it.each([
+    {
+      label: "sportscast briefing without show notes",
+      programFormat: "sportscast",
+      outcomeNoun: "briefing",
+      showNotes: false
+    },
+    {
+      label: "concise briefing with show notes",
+      programFormat: "concise_briefing",
+      outcomeNoun: "briefing",
+      showNotes: true
+    }
+  ] as const)("retains hidden canonical intent when saving a $label", async ({
+    programFormat,
+    outcomeNoun,
+    showNotes
+  }) => {
+    const preservedContract = buildBriefingPipelineContract({
+      monitorName: "Hidden intent monitor",
+      scope: { sources: [1] },
+      active: true,
+      scheduleExpr: "0 9 * * *",
+      timezone: "UTC",
+      templateName: "briefing_markdown",
+      templateFormat: "md",
+      programFormat,
+      outcomeNoun,
+      showNotes,
+      audioEnabled: false
+    })
+    const savedContract = await saveCanonicalContract({
+      id: 91,
+      name: "Hidden intent monitor",
+      contract: preservedContract
+    })
+
+    expect(savedContract.editorial).toMatchObject({
+      program_format: programFormat,
+      outcome_noun: outcomeNoun
+    })
+    expect(savedContract.text.show_notes).toBe(showNotes)
+  }, 15_000)
+
+  it("keeps Reports required separately from optional delivery and audio", async () => {
     render(<JobFormModal open onClose={vi.fn()} onSuccess={vi.fn()} />)
 
     await waitFor(() => {
@@ -459,13 +610,13 @@ describe("JobFormModal live summary", () => {
     fireEvent.click(screen.getByTestId("job-form-audio-enabled-switch"))
 
     expect(screen.getByTestId("job-form-summary-output")).toHaveTextContent(
-      "Manual/test reports only"
+      "Save a text report after each scheduled run"
     )
     expect(screen.getByTestId("job-form-summary-delivery")).toHaveTextContent(
-      "Reports tab only"
+      "Reports (required)"
     )
     expect(screen.getByTestId("job-form-summary-audio")).toHaveTextContent(
-      "Audio briefing requested"
+      "Audio briefing targeting 8 minutes"
     )
 
     fireEvent.click(screen.getByRole("button", { name: "Create" }))
@@ -477,13 +628,37 @@ describe("JobFormModal live summary", () => {
     const payload = servicesMock.createWatchlistJob.mock.calls[0][0]
     expect(payload.output_prefs).toEqual(
       expect.objectContaining({
-        generate_audio: true
+        briefing_pipeline: expect.objectContaining({
+          text: expect.objectContaining({ enabled: true }),
+          audio: expect.objectContaining({ enabled: true }),
+          delivery: expect.objectContaining({ reports: { enabled: true } })
+        })
       })
     )
     expect(payload.output_prefs).not.toHaveProperty("auto_output")
   }, 15_000)
 
-  it("enables scheduled report generation only when the recurring report switch is on", async () => {
+  it("names report, delivery, and audio switches with their consequences", async () => {
+    render(<JobFormModal open onClose={vi.fn()} onSuccess={vi.fn()} />)
+
+    await waitFor(() => {
+      expect(servicesMock.fetchWatchlistSources).toHaveBeenCalled()
+    })
+    fireEvent.click(screen.getByTestId("job-form-mode-advanced"))
+    fireEvent.click(screen.getByText("Output & Delivery"))
+
+    expect(screen.getByRole("switch", { name: "Reports storage" }))
+      .toHaveAttribute("aria-describedby", "job-form-report-output-description")
+    expect(screen.getByRole("switch", { name: "Email delivery" }))
+      .toHaveAttribute("aria-describedby", "job-form-email-delivery-description")
+    expect(screen.getByRole("switch", { name: "Attach output file" })).toBeInTheDocument()
+    expect(screen.getByRole("switch", { name: "Chatbook delivery" }))
+      .toHaveAttribute("aria-describedby", "job-form-chatbook-delivery-description")
+    expect(screen.getByRole("switch", { name: "Audio briefing" }))
+      .toHaveAttribute("aria-describedby", "job-form-audio-description")
+  }, 15_000)
+
+  it("keeps required scheduled reports enabled in the canonical contract", async () => {
     render(<JobFormModal open onClose={vi.fn()} onSuccess={vi.fn()} />)
 
     await waitFor(() => {
@@ -500,11 +675,11 @@ describe("JobFormModal live summary", () => {
     fireEvent.click(collapseHeaders[1] as Element)
     fireEvent.click(screen.getByTestId("schedule-setter"))
     fireEvent.click(screen.getByText("Output & Delivery"))
-    fireEvent.click(screen.getByTestId("job-form-create-scheduled-output-switch"))
+    expect(screen.getByTestId("job-form-create-scheduled-output-switch")).toBeDisabled()
     fireEvent.click(screen.getByTestId("job-form-audio-enabled-switch"))
 
     expect(screen.getByTestId("job-form-summary-output")).toHaveTextContent(
-      "Create a report after each scheduled run"
+      "Save a text report after each scheduled run"
     )
 
     fireEvent.click(screen.getByRole("button", { name: "Create" }))
@@ -516,11 +691,14 @@ describe("JobFormModal live summary", () => {
     expect(servicesMock.createWatchlistJob).toHaveBeenCalledWith(
       expect.objectContaining({
         output_prefs: expect.objectContaining({
-          auto_output: expect.objectContaining({
-            enabled: true,
-            type: "briefing_markdown"
-          }),
-          generate_audio: true
+          briefing_pipeline: expect.objectContaining({
+            text: expect.objectContaining({
+              enabled: true,
+              type: "briefing_markdown"
+            }),
+            audio: expect.objectContaining({ enabled: true }),
+            delivery: expect.objectContaining({ reports: { enabled: true } })
+          })
         })
       })
     )
@@ -545,17 +723,22 @@ describe("JobFormModal live summary", () => {
       expect(servicesMock.createWatchlistOutputPreset).toHaveBeenCalledTimes(1)
     })
 
-    expect(servicesMock.createWatchlistOutputPreset).toHaveBeenCalledWith(
+    const presetPayload = servicesMock.createWatchlistOutputPreset.mock.calls[0][0]
+    expect(presetPayload).toEqual(
       expect.objectContaining({
         name: "Narrated newsletter",
         output_prefs: expect.objectContaining({
-          generate_audio: true,
-          audio_voice: "alloy",
-          audio_speed: 1,
-          target_audio_minutes: 8
+          briefing_pipeline: expect.objectContaining({
+            audio: expect.objectContaining({
+              enabled: true,
+              voice: "alloy",
+              target_minutes: 8
+            })
+          })
         })
       })
     )
+    expect(presetPayload.output_prefs.briefing_pipeline.audio).not.toHaveProperty("speed")
   }, 15_000)
 
   it("applies server-backed presets without losing unknown output prefs on save", async () => {
@@ -647,23 +830,86 @@ describe("JobFormModal live summary", () => {
     const [, payload] = servicesMock.updateWatchlistJob.mock.calls[0]
     expect(payload.output_prefs).toEqual(
       expect.objectContaining({
-        template: expect.objectContaining({
-          default_name: "podcast_script",
-          default_format: "md",
-          experimental_renderer: "keep"
-        }),
-        deliveries: expect.objectContaining({
-          email: expect.objectContaining({
-            enabled: true,
-            recipients: ["ops@example.com"]
+        briefing_pipeline: expect.objectContaining({
+          text: expect.objectContaining({
+            template_name: "podcast_script",
+            format: "md",
+            experimental_renderer: "keep"
           }),
-          webhook: { url: "https://hooks.example.com/watchlists" }
+          delivery: expect.objectContaining({
+            reports: { enabled: true },
+            email: expect.objectContaining({
+              enabled: true,
+              recipients: ["ops@example.com"]
+            }),
+            webhook: { url: "https://hooks.example.com/watchlists" }
+          }),
+          audio: expect.objectContaining({ enabled: true, voice: "nova" })
         }),
-        generate_audio: true,
-        audio_voice: "nova",
         raw_advanced: { preserve: true }
       })
     )
+  }, 15_000)
+
+  it("loads legacy briefing preferences and saves one canonical contract", async () => {
+    servicesMock.updateWatchlistJob.mockResolvedValueOnce({ id: 79 })
+
+    render(
+      <JobFormModal
+        open
+        onClose={vi.fn()}
+        onSuccess={vi.fn()}
+        initialValues={{
+          id: 79,
+          name: "Legacy audio monitor",
+          description: "existing",
+          scope: { sources: [1] },
+          schedule_expr: "0 9 * * *",
+          timezone: "America/Los_Angeles",
+          active: true,
+          output_prefs: {
+            auto_output: {
+              enabled: true,
+              type: "briefing_markdown",
+              template_name: "briefing_markdown"
+            },
+            generate_audio: true,
+            audio_voice: "nova",
+            target_audio_minutes: 12,
+            custom_future_key: { keep: true }
+          },
+          job_filters: null,
+          created_at: "2026-01-15T00:00:00Z"
+        }}
+      />
+    )
+
+    await waitFor(() => {
+      expect(servicesMock.fetchWatchlistSources).toHaveBeenCalled()
+      expect(servicesMock.fetchWatchlistGroups).toHaveBeenCalled()
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }))
+
+    await waitFor(() => {
+      expect(servicesMock.updateWatchlistJob).toHaveBeenCalledTimes(1)
+    })
+
+    const [, payload] = servicesMock.updateWatchlistJob.mock.calls[0]
+    expect(payload.output_prefs).toMatchObject({
+      custom_future_key: { keep: true },
+      briefing_pipeline: {
+        version: 1,
+        text: { enabled: true, template_name: "briefing_markdown" },
+        audio: { enabled: true, voice: "nova", target_minutes: 12 },
+        delivery: { reports: { enabled: true } },
+        test: { external_delivery: false, audio_sample_seconds: 60 }
+      }
+    })
+    expect(payload.output_prefs).not.toHaveProperty("auto_output")
+    expect(payload.output_prefs).not.toHaveProperty("generate_audio")
+    expect(payload.output_prefs).not.toHaveProperty("audio_voice")
+    expect(payload.output_prefs).not.toHaveProperty("target_audio_minutes")
   }, 15_000)
 
   it("updates and deletes selected server-backed output presets", async () => {
@@ -702,7 +948,11 @@ describe("JobFormModal live summary", () => {
       34,
       expect.objectContaining({
         name: "Reusable newsletter",
-        output_prefs: expect.objectContaining({ generate_audio: true })
+        output_prefs: expect.objectContaining({
+          briefing_pipeline: expect.objectContaining({
+            audio: expect.objectContaining({ enabled: true })
+          })
+        })
       })
     )
 
@@ -718,7 +968,7 @@ describe("JobFormModal live summary", () => {
     })
   }, 15_000)
 
-  it("sends an explicit disabled auto_output record when scheduled reports are turned off during edit", async () => {
+  it("normalizes legacy scheduled reports to required canonical text", async () => {
     servicesMock.updateWatchlistJob.mockResolvedValueOnce({ id: 78 })
 
     render(
@@ -756,7 +1006,7 @@ describe("JobFormModal live summary", () => {
     fireEvent.click(screen.getByText("Output & Delivery"))
     const scheduledReportsSwitch = screen.getByTestId("job-form-create-scheduled-output-switch")
     expect(scheduledReportsSwitch).toHaveAttribute("aria-checked", "true")
-    fireEvent.click(scheduledReportsSwitch)
+    expect(scheduledReportsSwitch).toBeDisabled()
 
     fireEvent.click(screen.getByRole("button", { name: "Save" }))
 
@@ -767,13 +1017,17 @@ describe("JobFormModal live summary", () => {
     const [, payload] = servicesMock.updateWatchlistJob.mock.calls[0]
     expect(payload.output_prefs).toEqual(
       expect.objectContaining({
-        auto_output: expect.objectContaining({
-          enabled: false,
-          type: "briefing_markdown",
-          template_name: "briefing_markdown"
+        briefing_pipeline: expect.objectContaining({
+          text: expect.objectContaining({
+            enabled: true,
+            type: "briefing_markdown",
+            template_name: "briefing_markdown"
+          }),
+          delivery: expect.objectContaining({ reports: { enabled: true } })
         })
       })
     )
+    expect(payload.output_prefs).not.toHaveProperty("auto_output")
   }, 15_000)
 
   it("shows practical audio setup guidance in monitor form", async () => {
@@ -1099,13 +1353,15 @@ describe("JobFormModal live summary", () => {
     const [, payload] = servicesMock.updateWatchlistJob.mock.calls[0]
     expect(payload.output_prefs).toEqual(
       expect.objectContaining({
-        generate_audio: false,
-        template: { default_name: "briefing_markdown" }
+        briefing_pipeline: expect.objectContaining({
+          text: expect.objectContaining({ template_name: "briefing_markdown" }),
+          audio: expect.objectContaining({ enabled: false })
+        })
       })
     )
-    expect(payload.output_prefs).not.toHaveProperty("audio_voice")
-    expect(payload.output_prefs).not.toHaveProperty("audio_speed")
-    expect(payload.output_prefs).not.toHaveProperty("target_audio_minutes")
+    expect(payload.output_prefs.briefing_pipeline.audio).not.toHaveProperty("voice")
+    expect(payload.output_prefs.briefing_pipeline.audio).not.toHaveProperty("speed")
+    expect(payload.output_prefs.briefing_pipeline.audio).not.toHaveProperty("target_minutes")
   })
 
   it("persists advanced audio settings when provided", async () => {
@@ -1141,12 +1397,16 @@ describe("JobFormModal live summary", () => {
     expect(servicesMock.createWatchlistJob).toHaveBeenCalledWith(
       expect.objectContaining({
         output_prefs: expect.objectContaining({
-          generate_audio: true,
-          background_audio_uri: "file:///tmp/news-bed.mp3",
-          voice_map: {
-            HOST: "af_heart",
-            REPORTER: "am_adam"
-          }
+          briefing_pipeline: expect.objectContaining({
+            audio: expect.objectContaining({
+              enabled: true,
+              background_audio_uri: "file:///tmp/news-bed.mp3",
+              voice_map: {
+                HOST: "af_heart",
+                REPORTER: "am_adam"
+              }
+            })
+          })
         })
       })
     )
@@ -1258,9 +1518,11 @@ describe("JobFormModal live summary", () => {
     expect(servicesMock.createWatchlistJob).toHaveBeenCalledWith(
       expect.objectContaining({
         output_prefs: expect.objectContaining({
-          deliveries: expect.objectContaining({
-            email: expect.objectContaining({
-              subject: "Ops Digest"
+          briefing_pipeline: expect.objectContaining({
+            delivery: expect.objectContaining({
+              email: expect.objectContaining({
+                subject: "Ops Digest"
+              })
             })
           })
         })
@@ -1327,7 +1589,7 @@ describe("JobFormModal live summary", () => {
       expect(servicesMock.fetchWatchlistGroups).toHaveBeenCalled()
     })
 
-    expect(screen.getByTestId("job-form-summary-delivery")).toHaveTextContent("Reports tab only")
+    expect(screen.getByTestId("job-form-summary-delivery")).toHaveTextContent("Reports (required)")
     expect(screen.getByTestId("job-form-summary-audio")).toHaveTextContent("Text report only")
 
     fireEvent.click(screen.getByTestId("job-form-mode-advanced"))
@@ -1338,7 +1600,7 @@ describe("JobFormModal live summary", () => {
     })
 
     expect(screen.getByTestId("job-form-summary-audio")).toHaveTextContent(
-      "Audio briefing requested (alloy, 8 min target)"
+      "Audio briefing targeting 8 minutes (alloy)"
     )
     fireEvent.click(screen.getByTestId("job-form-mode-basic"))
 
@@ -1348,12 +1610,12 @@ describe("JobFormModal live summary", () => {
   })
 
   it("requires explicit confirmation for recurring delivery settings", async () => {
-    const confirmSpy = vi.spyOn(Modal, "confirm").mockImplementationOnce((config: any) => {
+    const confirmSpy = vi.spyOn(Modal, "confirm").mockImplementationOnce((config: ConfirmConfig) => {
       config?.onCancel?.()
       return {
         destroy: vi.fn(),
         update: vi.fn()
-      } as any
+      } as ConfirmResult
     })
 
     render(<JobFormModal open onClose={vi.fn()} onSuccess={vi.fn()} />)

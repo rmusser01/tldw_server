@@ -1,0 +1,21 @@
+{
+  "data": [
+    {
+      "type": "preprints",
+      "id": "osf001",
+      "attributes": {
+        "title": "Shared Discovery Record",
+        "description": "A sanitized description for discovery adapter testing.",
+        "doi": "10.5555/shared.discovery.2026",
+        "date_published": "2026-01-15T00:00:00Z"
+      },
+      "links": {
+        "html": "https://osf.io/preprints/osf/osf001/",
+        "self": "https://api.osf.io/v2/preprints/osf001/"
+      }
+    }
+  ],
+  "links": {
+    "next": null
+  }
+}

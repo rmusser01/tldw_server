@@ -1,3 +1,5 @@
+import DOMPurify from "dompurify"
+
 import type {
   ScrapedItem,
   ScrapedItemSortMode,
@@ -5,6 +7,7 @@ import type {
   WatchlistItemSavedViewFilters,
   WatchlistSource
 } from "@/types/watchlists"
+import { safeImageUrl } from "@/utils/image-utils"
 
 export const SOURCE_LOAD_PAGE_SIZE = 200
 export const SOURCE_LOAD_MAX_ITEMS = 1000
@@ -458,16 +461,12 @@ const stripHtmlTagsWithoutRegex = (value: string): string => {
 
 export const stripHtmlToText = (value: string): string => {
   if (!value) return ""
-  if (typeof DOMParser !== "undefined") {
-    try {
-      const doc = new DOMParser().parseFromString(value, "text/html")
-      doc.querySelectorAll("script, style").forEach((node) => node.remove())
-      return (doc.body?.textContent || "").replace(/\s+/g, " ").trim()
-    } catch {
-      // Fall through to non-DOM fallback.
-    }
-  }
-  return decodeCommonEntities(stripHtmlTagsWithoutRegex(value))
+  if (typeof DOMPurify.sanitize !== "function") return ""
+  const sanitized = DOMPurify.sanitize(value, {
+    USE_PROFILES: { html: true },
+    FORBID_TAGS: ["script", "style"]
+  })
+  return decodeCommonEntities(stripHtmlTagsWithoutRegex(sanitized))
     .replace(/\s+/g, " ")
     .trim()
 }
@@ -485,11 +484,15 @@ export const shouldReloadItemsAfterReviewMutation = (
 export const extractImageUrl = (value: string | null | undefined): string | null => {
   if (!value) return null
 
-  const htmlMatch = value.match(/<img[^>]+src=["']([^"']+)["']/i)
-  if (htmlMatch?.[1]) return htmlMatch[1]
+  for (const match of value.matchAll(/<img\b[^>]*?\s+src\s*=\s*["']([^"']+)["']/gi)) {
+    const safeUrl = safeImageUrl(match[1])
+    if (safeUrl) return safeUrl
+  }
 
-  const markdownMatch = value.match(/!\[[^\]]*]\((https?:\/\/[^)\s]+)\)/i)
-  if (markdownMatch?.[1]) return markdownMatch[1]
+  for (const match of value.matchAll(/!\[[^\]]*]\(([^)\s]+)\)/gi)) {
+    const safeUrl = safeImageUrl(match[1])
+    if (safeUrl) return safeUrl
+  }
 
   return null
 }

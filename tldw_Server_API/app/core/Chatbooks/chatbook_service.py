@@ -156,6 +156,11 @@ _CHATBOOK_TEMPLATE_MODES = {"pass_through", "render_on_export", "render_on_impor
 MAX_OPENWEBUI_HYDRATION_RESPONSE_ITEMS = 1000
 ManifestImportPathIndex = dict[tuple[str, str], tuple[str | None, str]]
 
+_ACCOUNT_STATE_SCHEMA_VERSION = "1.0"
+_ACCOUNT_PROFILE_ARCHIVE_PATH = "json/account_profile.json"
+_ACCOUNT_SETTINGS_ARCHIVE_PATH = "json/account_settings.json"
+_ACCOUNT_RESTORE_PAYLOAD_KEY = "_account_restore_payload"
+
 try:  # Prompts database is optional in some deployments
     from ..DB_Management.Prompts_DB import PromptsDatabase  # type: ignore
 except _CHATBOOK_NONCRITICAL_EXCEPTIONS:  # pragma: no cover - defensive guard for stripped builds
@@ -958,6 +963,30 @@ class ChatbookService:
         return None
 
     @staticmethod
+    def _serialize_job_timestamp(value: datetime | None) -> str | None:
+        """Serialize a job timestamp with explicit UTC semantics."""
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc).isoformat(sep=" ")
+
+    @staticmethod
+    def _job_timestamp_for_api(value: datetime | None) -> datetime | None:
+        """Return an aware UTC timestamp for API serialization."""
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+
+    @classmethod
+    def _normalize_job_timestamps_for_api(cls, job: ExportJob | ImportJob) -> None:
+        for field_name in ("created_at", "started_at", "completed_at", "expires_at"):
+            if hasattr(job, field_name):
+                setattr(job, field_name, cls._job_timestamp_for_api(getattr(job, field_name)))
+
+    @staticmethod
     def _normalize_timestamp_to_naive(value: datetime | None) -> datetime | None:
         """Convert aware timestamps to naive UTC for consistent downstream handling."""
         if value is None:
@@ -1173,6 +1202,7 @@ class ChatbookService:
             counts = {}
 
         known_categories = {entry.category for entry in ACCOUNT_DATA_INVENTORY}
+        inventory_definitions = {entry.category: entry for entry in ACCOUNT_DATA_INVENTORY}
         canonical_warnings = {
             entry.category: entry.warning
             for entry in ACCOUNT_DATA_INVENTORY
@@ -1197,11 +1227,8 @@ class ChatbookService:
             "media_stored_artifacts",
             "embeddings",
         }
-        account_metadata_without_payload = {
-            "account_profile",
-            "account_settings",
-            "tags_categories_relationships",
-        }
+        account_metadata_without_payload = {"tags_categories_relationships"}
+        serialized_account_categories = {"account_profile", "account_settings"}
 
         for entry in manifest.account_inventory or []:
             if not isinstance(entry, dict):
@@ -1210,7 +1237,11 @@ class ChatbookService:
             if not category:
                 continue
             restore_status = str(entry.get("restore_status") or "").strip()
-            count = self._coerce_inventory_count(counts.get(category))
+            definition = inventory_definitions.get(category)
+            manifest_count_key = definition.manifest_count_key if definition else category
+            count = self._coerce_inventory_count(
+                counts.get(manifest_count_key, counts.get(category))
+            )
             if restore_status == "restorable" and category not in known_categories:
                 errors.append(
                     f"Archive inventory category '{category}' is marked restorable but this importer has no handler."
@@ -1241,12 +1272,108 @@ class ChatbookService:
                 restore_status == "restorable"
                 and count
                 and category not in serialized_content_categories
+                and category not in serialized_account_categories
             ):
                 warnings.append(
                     f"Archive inventory category '{category}' is known but has no direct content item payload."
                 )
 
         return redacted_summary, skipped_non_restorable, warnings, errors
+
+    def _load_account_restore_payloads(
+        self,
+        extract_dir: Path,
+        manifest: ChatbookManifest,
+    ) -> tuple[dict[str, dict[str, Any]], list[str]]:
+        """Load and validate versioned account payloads declared by inventory counts."""
+        summary = manifest.account_inventory_summary or {}
+        counts = summary.get("counts", {}) if isinstance(summary, dict) else {}
+        counts = counts if isinstance(counts, dict) else {}
+        manifest_inventory = {
+            str(row.get("category") or ""): row
+            for row in manifest.account_inventory or []
+            if isinstance(row, dict)
+        }
+        definitions = {entry.category: entry for entry in ACCOUNT_DATA_INVENTORY}
+        inventory_paths = {
+            normalized_path
+            for entry in manifest.file_inventory or []
+            if isinstance(entry, dict)
+            and (
+                normalized_path := self._normalize_manifest_archive_path(
+                    str(entry.get("path") or "")
+                )
+            )
+        }
+        payloads: dict[str, dict[str, Any]] = {}
+        errors: list[str] = []
+
+        for category, canonical_path in (
+            ("account_profile", _ACCOUNT_PROFILE_ARCHIVE_PATH),
+            ("account_settings", _ACCOUNT_SETTINGS_ARCHIVE_PATH),
+        ):
+            definition = definitions[category]
+            count = self._coerce_inventory_count(
+                counts.get(definition.manifest_count_key, counts.get(category))
+            )
+            inventory_row = manifest_inventory.get(category, {})
+            declared_path = str(inventory_row.get("export_representation") or canonical_path)
+            normalized_path = self._normalize_manifest_archive_path(declared_path)
+            if normalized_path != canonical_path:
+                errors.append(
+                    f"Archive inventory category '{category}' has an invalid account payload path."
+                )
+                continue
+            payload_path = extract_dir / canonical_path
+            if count == 0:
+                if payload_path.exists():
+                    errors.append(
+                        f"Archive account payload '{canonical_path}' is present but its inventory count is zero."
+                    )
+                continue
+            if count != 1:
+                errors.append(
+                    f"Archive inventory category '{category}' must declare exactly one account payload."
+                )
+                continue
+            if not payload_path.is_file():
+                errors.append(
+                    f"Archive inventory category '{category}' is missing its serialized restore payload."
+                )
+                continue
+            if (
+                manifest.version == ChatbookVersion.V1_1
+                and canonical_path not in inventory_paths
+            ):
+                errors.append(
+                    f"Archive inventory category '{category}' is missing verified file inventory entry."
+                )
+                continue
+            try:
+                payload = json.loads(payload_path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+                errors.append(f"Archive inventory category '{category}' has an unreadable payload.")
+                continue
+            if not isinstance(payload, dict):
+                errors.append(f"Archive inventory category '{category}' payload must be an object.")
+                continue
+            if payload.get("schema_version") != _ACCOUNT_STATE_SCHEMA_VERSION:
+                errors.append(
+                    f"Archive inventory category '{category}' uses an unsupported account payload version."
+                )
+                continue
+            if payload.get("category") != category:
+                errors.append(f"Archive inventory category '{category}' payload type does not match.")
+                continue
+            if category == "account_profile" and not isinstance(payload.get("profile"), dict):
+                errors.append("Archive account profile payload is missing its profile object.")
+                continue
+            if category == "account_settings" and not isinstance(payload.get("overrides"), dict):
+                errors.append("Archive account settings payload is missing its overrides object.")
+                continue
+            payloads[category] = payload
+
+        return payloads, errors
 
     def _safe_import_artifact_destination(
         self,
@@ -1400,10 +1527,49 @@ class ChatbookService:
             return
         vector_bytes = base64.b64decode(str(vector_payload["vector"]))
         with media_db.transaction() as conn:
-            media_db._execute_with_connection(
+            if not hasattr(media_db, "_fetchone_with_connection"):
+                media_db._execute_with_connection(
+                    conn,
+                    "UPDATE Media SET vector_embedding = ? WHERE id = ?",
+                    (vector_bytes, int(media_id)),
+                )
+                return
+            media_row = media_db._fetchone_with_connection(
                 conn,
-                "UPDATE Media SET vector_embedding = ? WHERE id = ?",
-                (vector_bytes, int(media_id)),
+                "SELECT uuid, version FROM Media WHERE id = ? AND deleted = 0",
+                (int(media_id),),
+            )
+            if not media_row:
+                raise ValueError("Restored media row was not found for vector attachment")
+            current_version = int(media_row.get("version") or 1)
+            next_version = current_version + 1
+            now = media_db._get_current_utc_timestamp_str()
+            client_id = media_db.client_id
+            cursor = media_db._execute_with_connection(
+                conn,
+                """
+                UPDATE Media
+                   SET vector_embedding = ?, last_modified = ?, version = ?, client_id = ?
+                 WHERE id = ? AND version = ? AND deleted = 0
+                """,
+                (vector_bytes, now, next_version, client_id, int(media_id), current_version),
+            )
+            if getattr(cursor, "rowcount", 0) != 1:
+                raise ValueError("Restored media row changed during vector attachment")
+            media_db._log_sync_event(
+                conn,
+                "Media",
+                str(media_row["uuid"]),
+                "update",
+                next_version,
+                {
+                    "id": int(media_id),
+                    "uuid": str(media_row["uuid"]),
+                    "version": next_version,
+                    "last_modified": now,
+                    "client_id": client_id,
+                    "vector_embedding_restored": True,
+                },
             )
 
     def _filter_chroma_ids_for_conflict_resolution(
@@ -2154,6 +2320,111 @@ class ChatbookService:
                 except _CHATBOOK_NONCRITICAL_EXCEPTIONS:
                     pass
 
+    async def _write_full_account_state_payloads(
+        self,
+        work_dir: Path,
+        manifest: ChatbookManifest,
+    ) -> None:
+        """Serialize portable AuthNZ profile state and user-owned settings overrides."""
+        if self.user_id_int is None:
+            raise ExportError("Full-account profile export requires a numeric user id")
+
+        from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+        from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
+        from tldw_Server_API.app.core.UserProfiles.overrides_repo import UserProfileOverridesRepo
+        from tldw_Server_API.app.core.UserProfiles.user_profile_catalog import (
+            load_user_profile_catalog,
+        )
+
+        db_pool = await get_db_pool()
+        user = await AuthnzUsersRepo(db_pool=db_pool).get_user_by_id(self.user_id_int)
+        if user is None:
+            raise ExportError("Full-account profile export could not resolve the account record")
+
+        catalog = load_user_profile_catalog()
+        catalog_entries = {str(entry.key): entry for entry in catalog.entries}
+        profile: dict[str, Any] = {}
+        email = str(user.get("email") or "").strip()
+        if email:
+            profile["identity.email"] = email
+
+        overrides_repo = UserProfileOverridesRepo(db_pool)
+        await overrides_repo.ensure_tables()
+        override_rows = await overrides_repo.list_overrides_for_user(self.user_id_int)
+        overrides: dict[str, Any] = {}
+        unrecognized_overrides: list[dict[str, Any]] = []
+        for row in override_rows:
+            key = str(row.get("key") or "").strip()
+            if not key:
+                continue
+            entry = catalog_entries.get(key)
+            if entry is None or "user" not in set(entry.editable_by or []):
+                unrecognized_overrides.append({"key": key, "value": row.get("value")})
+                continue
+            overrides[key] = row.get("value")
+
+        policy = {
+            "destination_owned_fields": [
+                "identity.id",
+                "identity.uuid",
+                "identity.username",
+                "identity.role",
+                "identity.is_active",
+                "identity.is_verified",
+            ],
+            "excluded_secret_categories": [
+                "password_hashes",
+                "sessions",
+                "api_keys",
+                "provider_credentials",
+                "deployment_secrets",
+            ],
+            "exclusion_reason": "Authentication, authorization, and deployment-bound secrets require destination reconfiguration.",
+        }
+        profile_payload = {
+            "schema_version": _ACCOUNT_STATE_SCHEMA_VERSION,
+            "category": "account_profile",
+            "profile": profile,
+            "policy": policy,
+        }
+        settings_payload = {
+            "schema_version": _ACCOUNT_STATE_SCHEMA_VERSION,
+            "category": "account_settings",
+            "catalog_version": catalog.version,
+            "overrides": overrides,
+            "unrecognized_overrides": unrecognized_overrides,
+            "policy": {
+                "restore_contract": "catalog_controlled_user_overrides",
+                "unrecognized_override_behavior": "preserved_in_archive_not_restored",
+            },
+        }
+
+        json_dir = work_dir / "json"
+        json_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        for path, payload in (
+            (json_dir / "account_profile.json", profile_payload),
+            (json_dir / "account_settings.json", settings_payload),
+        ):
+            async with aiofiles.open(path, "w", encoding="utf-8") as handle:
+                await handle.write(json.dumps(payload, indent=2, ensure_ascii=False))
+            with contextlib.suppress(OSError):
+                path.chmod(0o600)
+
+        manifest.metadata["account_state_counts"] = {
+            "account_profiles": 1,
+            "account_settings": 1,
+        }
+        manifest.metadata["account_state_policy"] = {
+            "schema_version": _ACCOUNT_STATE_SCHEMA_VERSION,
+            "destination_owned_identity": True,
+            "authentication_secrets_restored": False,
+            "unrecognized_setting_count": len(unrecognized_overrides),
+        }
+        if unrecognized_overrides:
+            manifest.metadata.setdefault("pointer_only_warnings", []).append(
+                f"{len(unrecognized_overrides)} unrecognized account setting override(s) were preserved but cannot be restored by this version."
+            )
+
     def _build_account_inventory_summary(
         self,
         content: ChatbookContent,
@@ -2170,9 +2441,18 @@ class ChatbookService:
             for artifact in item.get("stored_artifacts") or []
             if artifact.get("pointer_only")
         )
+        account_state_counts = (
+            metadata.get("account_state_counts", {})
+            if isinstance(metadata, dict)
+            else {}
+        )
         counts = {
-            "account_profiles": 1,
-            "account_settings": 1,
+            "account_profiles": self._coerce_inventory_count(
+                account_state_counts.get("account_profiles")
+            ),
+            "account_settings": self._coerce_inventory_count(
+                account_state_counts.get("account_settings")
+            ),
             "conversations": len(content.conversations),
             "notes": len(content.notes),
             "characters": len(content.characters),
@@ -2253,6 +2533,12 @@ class ChatbookService:
         except _CHATBOOK_NONCRITICAL_EXCEPTIONS:
             return {}
         summary = manifest.get("account_inventory_summary") or {}
+        counts = summary.get("counts") if isinstance(summary.get("counts"), dict) else {}
+        total_items = sum(
+            max(0, int(count or 0))
+            for count in counts.values()
+            if isinstance(count, (int, float)) and not isinstance(count, bool)
+        )
         return {
             "account_inventory_summary": summary,
             "archive_size_bytes": summary.get("archive_size_bytes")
@@ -2261,6 +2547,7 @@ class ChatbookService:
             "pointer_only_count": int(summary.get("pointer_only_count") or 0),
             "warning_count": int(summary.get("warning_count") or 0),
             "sensitive_category_count": int(summary.get("sensitive_category_count") or 0),
+            "total_items": total_items,
         }
 
     async def _stabilize_archive_size(
@@ -2341,6 +2628,7 @@ class ChatbookService:
                 manifest.include_media = True
                 manifest.include_embeddings = True
                 manifest.include_generated_content = True
+                await self._write_full_account_state_payloads(work_dir, manifest)
             if manifest.version == ChatbookVersion.V1_1:
                 manifest.features_used = [
                     "content_envelopes",
@@ -2560,7 +2848,14 @@ class ChatbookService:
                 job.completed_at = now_utc
                 job.output_path = file_path
                 job.file_size_bytes = Path(file_path).stat().st_size if file_path else None
-                job.metadata = self.build_export_job_metadata(file_path)
+                terminal_metadata = self.build_export_job_metadata(file_path)
+                job.total_items = int(terminal_metadata.get("total_items") or 0)
+                job.processed_items = job.total_items
+                job.progress_percentage = 100
+                job.metadata = {
+                    **(job.metadata if isinstance(job.metadata, dict) else {}),
+                    **terminal_metadata,
+                }
                 # Build (optionally signed) download URL and expiry
                 job.expires_at = self._get_export_expiry(now_utc)
                 download_expires_at = self._get_download_expiry(now_utc, job.expires_at)
@@ -2592,12 +2887,14 @@ class ChatbookService:
         request_id: str | None = None,
         source_format: str = "chatbook",
         selected_openwebui_user_id: str | None = None,
+        source_filename: str | None = None,
     ) -> tuple[bool, str, str | dict[str, Any] | None]:
         """
         Import a chatbook.
 
         Args:
             file_path: Path to chatbook file
+            source_filename: User-facing upload filename; server paths are removed
             content_selections: Specific content to import
             conflict_resolution: How to handle conflicts
             prefix_imported: Add prefix to imported items
@@ -2675,6 +2972,9 @@ class ChatbookService:
             )
             return False, detail, None
         file_token = self._build_import_file_token(resolved_path)
+        safe_source_filename = Path(str(source_filename or "").replace("\\", "/")).name
+        if safe_source_filename in {"", ".", ".."}:
+            safe_source_filename = ""
 
         if not async_mode:
             self._check_chatbook_job_admission_with_lock("import")
@@ -2687,7 +2987,14 @@ class ChatbookService:
                 user_id=self.user_id,
                 status=ImportStatus.PENDING,
                 chatbook_path=file_token,
-                metadata={"source_format": source_format_value},
+                metadata={
+                    "source_format": source_format_value,
+                    **(
+                        {"source_filename": safe_source_filename}
+                        if safe_source_filename
+                        else {}
+                    ),
+                },
             )
 
             # Store job in database after atomically reserving Chatbooks quota.
@@ -2762,12 +3069,13 @@ class ChatbookService:
                 )
             # Run synchronously (wrapped in executor for async compatibility)
             # Return (success, message, structured sync import result)
-            return await asyncio.to_thread(
+            sync_result = await asyncio.to_thread(
                 self._import_chatbook_sync,
                 str(resolved_path), content_selections,
                 conflict_resolution, prefix_imported,
                 effective_import_media, effective_import_embeddings
             )
+            return await self.finalize_account_restore(*sync_result)
 
     def _import_chatbook_sync(
         self,
@@ -2902,6 +3210,19 @@ class ChatbookService:
                     "imported_items": {},
                     "warnings": list(import_status.warnings or []),
                     "errors": inventory_errors,
+                    "inventory_summary": inventory_summary,
+                    "skipped_non_restorable": skipped_non_restorable,
+                }
+
+            account_restore_payload, account_payload_errors = self._load_account_restore_payloads(
+                extract_dir,
+                manifest,
+            )
+            if account_payload_errors:
+                return False, f"Chatbook account restore payload invalid: {account_payload_errors[0]}", {
+                    "imported_items": {},
+                    "warnings": list(import_status.warnings or []),
+                    "errors": account_payload_errors,
                     "inventory_summary": inventory_summary,
                     "skipped_non_restorable": skipped_non_restorable,
                 }
@@ -3136,6 +3457,8 @@ class ChatbookService:
                 sync_result["inventory_summary"] = inventory_summary
             if skipped_non_restorable:
                 sync_result["skipped_non_restorable"] = skipped_non_restorable
+            if account_restore_payload:
+                sync_result[_ACCOUNT_RESTORE_PAYLOAD_KEY] = account_restore_payload
 
             if import_status.successful_items > 0:
                 message = f"Successfully imported {import_status.successful_items}/{import_status.total_items} items"
@@ -3158,6 +3481,99 @@ class ChatbookService:
         finally:
             if extract_dir and extract_dir.exists():
                 shutil.rmtree(extract_dir, ignore_errors=True)
+
+    async def finalize_account_restore(
+        self,
+        success: bool,
+        message: str,
+        result: dict[str, Any] | None,
+    ) -> tuple[bool, str, dict[str, Any] | None]:
+        """Apply private account payloads and remove them before results can be persisted."""
+        if not isinstance(result, dict):
+            return success, message, result
+        account_payloads = result.pop(_ACCOUNT_RESTORE_PAYLOAD_KEY, None)
+        if not success or not account_payloads:
+            return success, message, result
+        if not isinstance(account_payloads, dict):
+            result.setdefault("errors", []).append("Account restore payload was invalid.")
+            return False, "Account profile and settings restore failed", result
+
+        try:
+            restored = await self._restore_account_state_payloads(account_payloads)
+        except _CHATBOOK_NONCRITICAL_EXCEPTIONS:
+            logger.error("Chatbooks account profile/settings restore failed; details redacted")
+            result.setdefault("errors", []).append(
+                "Account profile and settings could not be restored to the destination account."
+            )
+            return False, "Account profile and settings restore failed", result
+
+        imported_items = result.setdefault("imported_items", {})
+        for category, count in restored.items():
+            imported_items[category] = int(count)
+        restored_count = sum(restored.values())
+        if restored_count:
+            message = f"{message}; restored {restored_count} account profile/settings payload(s)"
+        return True, message, result
+
+    async def _restore_account_state_payloads(
+        self,
+        payloads: dict[str, dict[str, Any]],
+    ) -> dict[str, int]:
+        """Restore portable account state through AuthNZ and UserProfiles services."""
+        if self.user_id_int is None:
+            raise ValidationError("Account restore requires a numeric destination user id")
+
+        from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+        from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
+        from tldw_Server_API.app.core.UserProfiles.command_service import ProfileCommandService
+        from tldw_Server_API.app.core.UserProfiles.contracts import (
+            ProfileContractMode,
+            ProfileUpdateCommand,
+        )
+
+        db_pool = await get_db_pool()
+        destination_user = await AuthnzUsersRepo(db_pool=db_pool).get_user_by_id(self.user_id_int)
+        if destination_user is None:
+            raise ValidationError("Destination account record does not exist")
+
+        updates: list[tuple[str, Any]] = []
+        profile_payload = payloads.get("account_profile")
+        settings_payload = payloads.get("account_settings")
+        if profile_payload:
+            profile = profile_payload.get("profile") or {}
+            if not isinstance(profile, dict):
+                raise ValidationError("Account profile payload is invalid")
+            email = profile.get("identity.email")
+            if email is not None:
+                updates.append(("identity.email", email))
+        if settings_payload:
+            overrides = settings_payload.get("overrides") or {}
+            if not isinstance(overrides, dict):
+                raise ValidationError("Account settings payload is invalid")
+            updates.extend((str(key), value) for key, value in sorted(overrides.items()))
+
+        if updates:
+            command = ProfileUpdateCommand(
+                actor_user_id=self.user_id_int,
+                target_user_id=self.user_id_int,
+                updates=tuple(updates),
+                roles=frozenset({"user"}),
+                dry_run=False,
+                contract_mode=ProfileContractMode.LEGACY_V1,
+            )
+            async with db_pool.transaction() as db_conn:
+                command_result = await ProfileCommandService(db_pool=db_pool).apply(
+                    command,
+                    db_conn=db_conn,
+                    scope=None,
+                )
+            if command_result.status_code >= 400 or command_result.skipped:
+                raise ValidationError("Destination rejected one or more account profile/settings values")
+
+        return {
+            "account_profile": 1 if profile_payload else 0,
+            "account_settings": 1 if settings_payload else 0,
+        }
 
     async def _import_chatbook_async(
         self,
@@ -3190,6 +3606,11 @@ class ChatbookService:
                 conflict_resolution, prefix_imported,
                 import_media, import_embeddings
             )
+            success, message, result = await self.finalize_account_restore(
+                success,
+                message,
+                result,
+            )
 
             if success:
                 latest = self._get_import_job(job.job_id)
@@ -3207,15 +3628,23 @@ class ChatbookService:
                     skipped_count = sum(int(count or 0) for count in skipped_non_restorable.values())
                     job.progress_percentage = 100
                     job.successful_items = successful_count
-                    job.skipped_items = max(job.skipped_items, skipped_count)
-                    job.processed_items = max(job.processed_items, successful_count + skipped_count)
-                    job.total_items = max(job.total_items, successful_count + skipped_count)
-                    job.warnings = result.get("warnings") if isinstance(result.get("warnings"), list) else []
+                    job.skipped_items = skipped_count
+                    job.processed_items = successful_count + skipped_count
+                    job.total_items = job.processed_items
+                    result_warnings = result.get("warnings") if isinstance(result.get("warnings"), list) else []
+                    job.warnings = list(job.warnings or []) + [
+                        warning for warning in result_warnings if warning not in (job.warnings or [])
+                    ]
                     job.metadata = {
+                        **(job.metadata if isinstance(job.metadata, dict) else {}),
                         "imported_items": imported_items,
                         "inventory_summary": result.get("inventory_summary"),
                         "skipped_non_restorable": skipped_non_restorable,
                     }
+                else:
+                    job.progress_percentage = 100
+                    job.total_items = 0
+                    job.processed_items = 0
             else:
                 job.status = ImportStatus.FAILED
                 job.error_message = message
@@ -4521,6 +4950,8 @@ class ChatbookService:
         if job and getattr(self, "_jobs_adapter", None) is not None:
             with contextlib.suppress(_CHATBOOK_NONCRITICAL_EXCEPTIONS):
                 self._jobs_adapter.apply_export_status(job)
+        if job:
+            self._normalize_job_timestamps_for_api(job)
         return job
 
     def get_import_job(self, job_id: str) -> ImportJob | None:
@@ -4529,15 +4960,25 @@ class ChatbookService:
         if job and getattr(self, "_jobs_adapter", None) is not None:
             with contextlib.suppress(_CHATBOOK_NONCRITICAL_EXCEPTIONS):
                 self._jobs_adapter.apply_import_status(job)
+        if job:
+            self._normalize_job_timestamps_for_api(job)
         return job
 
-    def list_export_jobs(self, status: str | None = None, limit: int = 100, offset: int = 0) -> list[ExportJob]:
+    def list_export_jobs(
+        self,
+        status: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+        *,
+        raise_on_error: bool = False,
+    ) -> list[ExportJob]:
         """List all export jobs for this user.
 
         Args:
             status: Optional status filter (pending, in_progress, completed, failed, cancelled, expired)
             limit: Maximum number of jobs to return
             offset: Offset for pagination
+            raise_on_error: Propagate database errors for destructive workflows
         """
         # Sanity check: ensure user_id is set to prevent listing all jobs
         if not self.user_id:
@@ -4652,18 +5093,31 @@ class ChatbookService:
                 except _CHATBOOK_NONCRITICAL_EXCEPTIONS:
                     pass
 
+            for job in jobs:
+                self._normalize_job_timestamps_for_api(job)
+
             return jobs
         except _CHATBOOK_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Error listing export jobs: {e}")
+            if raise_on_error:
+                raise
             return []
 
-    def list_import_jobs(self, status: str | None = None, limit: int = 100, offset: int = 0) -> list[ImportJob]:
+    def list_import_jobs(
+        self,
+        status: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+        *,
+        raise_on_error: bool = False,
+    ) -> list[ImportJob]:
         """List all import jobs for this user.
 
         Args:
             status: Optional status filter (pending, validating, in_progress, completed, failed, cancelled)
             limit: Maximum number of jobs to return
             offset: Offset for pagination
+            raise_on_error: Propagate database errors for destructive workflows
         """
         # Sanity check: ensure user_id is set to prevent listing all jobs
         if not self.user_id:
@@ -4781,9 +5235,14 @@ class ChatbookService:
                 except _CHATBOOK_NONCRITICAL_EXCEPTIONS:
                     pass
 
+            for job in jobs:
+                self._normalize_job_timestamps_for_api(job)
+
             return jobs
         except _CHATBOOK_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Error listing import jobs: {e}")
+            if raise_on_error:
+                raise
             return []
 
     def count_export_jobs(self, status: str | None = None) -> int:
@@ -5368,7 +5827,11 @@ class ChatbookService:
                         break
                     documents = result.get("documents", [])
                     metadatas = result.get("metadatas", [])
-                    embeddings_data = result.get("embeddings", [])
+                    embeddings_data = result.get("embeddings")
+                    if hasattr(embeddings_data, "tolist"):
+                        embeddings_data = embeddings_data.tolist()
+                    if embeddings_data is None:
+                        embeddings_data = []
 
                     for i, chunk_id in enumerate(ids):
                         if max_chunks_per_collection > 0 and len(chunks) >= max_chunks_per_collection:
@@ -5379,7 +5842,7 @@ class ChatbookService:
                             chunk["document"] = documents[i]
                         if metadatas and i < len(metadatas):
                             chunk["metadata"] = metadatas[i]
-                        if embeddings_data and i < len(embeddings_data):
+                        if i < len(embeddings_data):
                             chunk["embedding"] = embeddings_data[i]
                         chunks.append(chunk)
 
@@ -7443,6 +7906,9 @@ class ChatbookService:
         connection that didn't share the transaction with execute_query's connection.
         """
         try:
+            if job.status == ExportStatus.COMPLETED:
+                job.progress_percentage = 100
+                job.processed_items = job.total_items
             self.db.execute_query("""
                 INSERT OR REPLACE INTO export_jobs (
                     job_id, user_id, status, chatbook_name, output_path,
@@ -7453,12 +7919,12 @@ class ChatbookService:
             """, (
                 job.job_id, job.user_id, job.status.value, job.chatbook_name,
                 job.output_path,
-                job.created_at.strftime('%Y-%m-%d %H:%M:%S.%f') if job.created_at else None,
-                job.started_at.strftime('%Y-%m-%d %H:%M:%S.%f') if job.started_at else None,
-                job.completed_at.strftime('%Y-%m-%d %H:%M:%S.%f') if job.completed_at else None,
+                self._serialize_job_timestamp(job.created_at),
+                self._serialize_job_timestamp(job.started_at),
+                self._serialize_job_timestamp(job.completed_at),
                 job.error_message, job.progress_percentage, job.total_items,
                 job.processed_items, job.file_size_bytes, job.download_url,
-                job.expires_at.strftime('%Y-%m-%d %H:%M:%S.%f') if job.expires_at else None,
+                self._serialize_job_timestamp(job.expires_at),
                 json.dumps(job.metadata or {}, ensure_ascii=False)
             ), commit=commit)
         except _CHATBOOK_NONCRITICAL_EXCEPTIONS as e:
@@ -7478,7 +7944,7 @@ class ChatbookService:
             True if the job was successfully claimed, False if already claimed or not found
         """
         try:
-            started_at = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')
+            started_at = self._serialize_job_timestamp(datetime.now(timezone.utc))
             cursor = self.db.execute_query(
                 """UPDATE export_jobs
                    SET status = ?, started_at = ?
@@ -7511,7 +7977,7 @@ class ChatbookService:
             True if the job was successfully claimed, False if already claimed or not found
         """
         try:
-            started_at = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')
+            started_at = self._serialize_job_timestamp(datetime.now(timezone.utc))
             cursor = self.db.execute_query(
                 """UPDATE import_jobs
                    SET status = ?, started_at = ?
@@ -7616,6 +8082,9 @@ class ChatbookService:
         connection that didn't share the transaction with execute_query's connection.
         """
         try:
+            if job.status == ImportStatus.COMPLETED:
+                job.progress_percentage = 100
+                job.processed_items = job.total_items
             self.db.execute_query("""
                 INSERT OR REPLACE INTO import_jobs (
                     job_id, user_id, status, chatbook_path,
@@ -7626,9 +8095,9 @@ class ChatbookService:
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 job.job_id, job.user_id, job.status.value, job.chatbook_path,
-                job.created_at.strftime('%Y-%m-%d %H:%M:%S.%f') if job.created_at else None,
-                job.started_at.strftime('%Y-%m-%d %H:%M:%S.%f') if job.started_at else None,
-                job.completed_at.strftime('%Y-%m-%d %H:%M:%S.%f') if job.completed_at else None,
+                self._serialize_job_timestamp(job.created_at),
+                self._serialize_job_timestamp(job.started_at),
+                self._serialize_job_timestamp(job.completed_at),
                 job.error_message, job.progress_percentage, job.total_items,
                 job.processed_items, job.successful_items, job.failed_items,
                 job.skipped_items, json.dumps(job.conflicts), json.dumps(job.warnings),
@@ -7915,11 +8384,28 @@ class ChatbookService:
                 file_path = Path(job.output_path).resolve()
                 expected_base = Path(self.export_dir).resolve()
                 if os.path.commonpath([str(file_path), str(expected_base)]) != str(expected_base):
-                    logger.warning(f"Refusing to delete export outside export dir: {file_path}")
-                elif file_path.exists() and file_path.is_file():
+                    raise JobError(
+                        "Saved export archive is outside managed storage; job history was preserved",
+                        job_id=job_id,
+                        job_type="export",
+                    )
+                if file_path.exists() and not file_path.is_file():
+                    raise JobError(
+                        "Saved export archive is not a regular file; job history was preserved",
+                        job_id=job_id,
+                        job_type="export",
+                    )
+                if file_path.is_file():
                     file_path.unlink()
+            except JobError:
+                raise
             except _CHATBOOK_NONCRITICAL_EXCEPTIONS as exc:
-                logger.warning(f"Failed to delete export file for job {job_id}: {exc}")
+                logger.error(f"Failed to delete export file for job {job_id}: {exc}")
+                raise JobError(
+                    "Unable to delete saved export archive; job history was preserved",
+                    job_id=job_id,
+                    job_type="export",
+                ) from exc
 
         try:
             self.db.execute_query(
@@ -7954,6 +8440,66 @@ class ChatbookService:
             raise
 
         return True
+
+    def delete_finished_jobs(self, batch_size: int = 100) -> dict[str, int]:
+        """Remove all terminal job records, including saved export archives."""
+        batch_size = max(1, min(int(batch_size), 1000))
+        export_jobs_removed = 0
+        import_jobs_removed = 0
+
+        for status in (
+            ExportStatus.COMPLETED,
+            ExportStatus.CANCELLED,
+            ExportStatus.EXPIRED,
+            ExportStatus.FAILED,
+        ):
+            while True:
+                jobs = self.list_export_jobs(
+                    status=status.value,
+                    limit=batch_size,
+                    offset=0,
+                    raise_on_error=True,
+                )
+                if not jobs:
+                    break
+                removed_in_batch = sum(
+                    1 for job in jobs if self.delete_export_job(job.job_id)
+                )
+                export_jobs_removed += removed_in_batch
+                if removed_in_batch == 0:
+                    raise JobError(
+                        "Finished export job removal made no progress",
+                        job_type="export",
+                    )
+
+        for status in (
+            ImportStatus.COMPLETED,
+            ImportStatus.CANCELLED,
+            ImportStatus.FAILED,
+        ):
+            while True:
+                jobs = self.list_import_jobs(
+                    status=status.value,
+                    limit=batch_size,
+                    offset=0,
+                    raise_on_error=True,
+                )
+                if not jobs:
+                    break
+                removed_in_batch = sum(
+                    1 for job in jobs if self.delete_import_job(job.job_id)
+                )
+                import_jobs_removed += removed_in_batch
+                if removed_in_batch == 0:
+                    raise JobError(
+                        "Finished import job removal made no progress",
+                        job_type="import",
+                    )
+
+        return {
+            "export_jobs_removed": export_jobs_removed,
+            "import_jobs_removed": import_jobs_removed,
+        }
 
     def create_import_job(self, file_path: str, conflict_strategy: str = "skip") -> dict[str, Any]:
         """

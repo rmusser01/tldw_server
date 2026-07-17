@@ -225,6 +225,46 @@ def test_generate_handles_invalid_json(monkeypatch):
         )
 
 
+def test_generate_rejects_placeholder_slide_content(monkeypatch):
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Slides.slides_generator.is_test_mode",
+        lambda: False,
+    )
+
+    payload = {
+        "title": "Deck",
+        "slides": [
+            {
+                "layout": "content",
+                "title": "Invalid",
+                "content": "slides go here",
+                "order": 0,
+                "speaker_notes": "invalid",
+            }
+        ],
+    }
+
+    def placeholder_llm_call(**_kwargs):
+        return {"choices": [{"message": {"content": json.dumps(payload)}}]}
+
+    generator = SlidesGenerator(llm_call=placeholder_llm_call)
+    with pytest.raises(SlidesGenerationOutputError, match="slide_content_missing"):
+        generator.generate_from_text(
+            source_text="Content",
+            title_hint=None,
+            provider="openai",
+            model=None,
+            api_key=None,
+            temperature=None,
+            max_tokens=None,
+            max_source_tokens=None,
+            max_source_chars=None,
+            enable_chunking=False,
+            chunk_size_tokens=None,
+            summary_tokens=None,
+        )
+
+
 def test_timeline_style_generates_visual_block_and_text_fallback(monkeypatch):
     monkeypatch.setattr(
         "tldw_Server_API.app.core.Slides.slides_generator.is_test_mode",
@@ -355,6 +395,47 @@ def test_builtin_blueprint_prompt_uses_profile_guidance_and_artifact_preferences
     assert "prefer exact sequencing and component naming" in system_prompt
     assert "Preferred visual block types: process_flow, timeline" in system_prompt
     assert "Fallback instructions:" in system_prompt
+
+
+def test_generation_prompt_forbids_unsupported_slide_claims(monkeypatch):
+    captured: dict[str, str] = {}
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Slides.slides_generator.is_test_mode",
+        lambda: False,
+    )
+    generator = SlidesGenerator(
+        llm_call=_make_prompt_capture_llm(
+            {
+                "title": "Grounded Deck",
+                "slides": [
+                    {"layout": "title", "title": "Grounded Deck", "content": "", "order": 0},
+                ],
+            },
+            captured,
+        )
+    )
+
+    generator.generate_from_text(
+        source_text="Trial started March 3. Treatment basil gained 18%. Control gained 7%.",
+        title_hint="Grounded Deck",
+        provider="openai",
+        model=None,
+        api_key=None,
+        temperature=None,
+        max_tokens=None,
+        max_source_tokens=None,
+        max_source_chars=None,
+        enable_chunking=False,
+        chunk_size_tokens=None,
+        summary_tokens=None,
+    )
+
+    system_prompt = captured["system_prompt"]
+    assert "Use only facts explicitly supported by the source material." in system_prompt
+    assert "Do not invent recommendations, next steps, objectives, methods, trial status" in system_prompt
+    assert "Speaker notes must stay source-grounded" in system_prompt
+    assert "Short sources may produce 2-5 slides" in system_prompt
+    assert "Omit conclusion or summary slides for short sources unless the source states conclusions" in system_prompt
 
 
 def test_timeline_style_prompts_chronology_first_behavior(monkeypatch):

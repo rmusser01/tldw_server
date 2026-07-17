@@ -208,11 +208,15 @@ describe("watchlists overview quick setup helpers", () => {
       schedule_expr: "0 8 * * *",
       timezone: "UTC",
       output_prefs: {
-        template_name: "briefing_markdown",
-        template: {
-          default_name: "briefing_markdown"
-        },
-        generate_audio: true
+        briefing_pipeline: expect.objectContaining({
+          version: 1,
+          text: expect.objectContaining({
+            enabled: true,
+            template_name: "briefing_markdown"
+          }),
+          audio: expect.objectContaining({ enabled: true }),
+          delivery: expect.objectContaining({ reports: { enabled: true } })
+        })
       }
     })
 
@@ -327,11 +331,15 @@ describe("watchlists overview quick setup helpers", () => {
       timezone: "UTC",
       watchlist_id: 42,
       output_prefs: {
-        template_name: "briefing_markdown",
-        template: {
-          default_name: "briefing_markdown"
-        },
-        generate_audio: false
+        briefing_pipeline: expect.objectContaining({
+          version: 1,
+          text: expect.objectContaining({
+            enabled: true,
+            template_name: "briefing_markdown"
+          }),
+          audio: expect.objectContaining({ enabled: false }),
+          delivery: expect.objectContaining({ reports: { enabled: true } })
+        })
       }
     })
 

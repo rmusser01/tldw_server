@@ -12,11 +12,29 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   }
 }))
 
-import { resolveAssistantOverlaySnapshot } from "../assistant-overlay"
+import {
+  buildAssistantOverlaySnapshotFromSelection,
+  resolveAssistantOverlaySnapshot
+} from "../assistant-overlay"
 
 describe("resolveAssistantOverlaySnapshot", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+  })
+
+  it("rejects unsafe selection avatars in summary snapshots", () => {
+    expect(
+      buildAssistantOverlaySnapshotFromSelection({
+        kind: "persona",
+        id: "persona-1",
+        name: "Research Guide",
+        avatar_url: "javascript:alert(1)"
+      })
+    ).toEqual(
+      expect.objectContaining({
+        avatar_url: null
+      })
+    )
   })
 
   it("uses full persona profile detail instead of catalog summary data", async () => {
@@ -42,6 +60,27 @@ describe("resolveAssistantOverlaySnapshot", () => {
         name: "Research Guide",
         avatar_url: "https://example.com/persona-full.png",
         system_prompt_snapshot: "Persona full prompt"
+      })
+    )
+  })
+
+  it("falls back to a safe selection avatar when persona detail is unsafe", async () => {
+    mocks.getPersonaProfile.mockResolvedValue({
+      id: "persona-1",
+      name: "Research Guide",
+      avatar_url: "javascript:alert(1)"
+    })
+
+    await expect(
+      resolveAssistantOverlaySnapshot({
+        kind: "persona",
+        id: "persona-1",
+        name: "Research Guide",
+        avatar_url: "https://example.com/persona-summary.png"
+      })
+    ).resolves.toEqual(
+      expect.objectContaining({
+        avatar_url: "https://example.com/persona-summary.png"
       })
     )
   })
@@ -104,6 +143,27 @@ describe("resolveAssistantOverlaySnapshot", () => {
     expect(mocks.getCharacter).toHaveBeenCalledWith("char-1", {
       forceRefresh: true
     })
+  })
+
+  it("stores no character avatar when fetched and selection candidates are unsafe", async () => {
+    mocks.getCharacter.mockResolvedValue({
+      id: "char-1",
+      name: "Alpha",
+      avatar_url: "mailto:avatar@example.com"
+    })
+
+    await expect(
+      resolveAssistantOverlaySnapshot({
+        kind: "character",
+        id: "char-1",
+        name: "Alpha",
+        avatar_url: "data:image/svg+xml;base64,PHN2Zy8+"
+      })
+    ).resolves.toEqual(
+      expect.objectContaining({
+        avatar_url: null
+      })
+    )
   })
 
   it("stores the normalized snapshot payload shape", async () => {

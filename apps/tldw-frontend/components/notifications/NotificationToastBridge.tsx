@@ -1,12 +1,8 @@
-import React, { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 
+import { useOptionalNotificationLifecycle } from '@web/components/notifications/NotificationLifecycleProvider';
 import { useToast } from '@web/components/ui/ToastProvider';
-import {
-  listNotifications,
-  subscribeNotificationsStream,
-  type NotificationItem,
-  type NotificationStreamEvent,
-} from '@web/lib/api/notifications';
+import type { NotificationItem } from '@web/lib/api/notifications';
 
 const TOAST_COALESCE_MS = 800;
 
@@ -35,10 +31,11 @@ function toNotificationFromStream(payload: unknown): NotificationItem | null {
 
 export function NotificationToastBridge() {
   const { show } = useToast();
-  const cursorRef = useRef(0);
+  const lifecycle = useOptionalNotificationLifecycle();
   const pendingToastCountRef = useRef(0);
   const latestToastItemRef = useRef<NotificationItem | null>(null);
   const toastTimerRef = useRef<number | null>(null);
+  const handledEventSequenceRef = useRef(0);
 
   const flushQueuedToast = useCallback(() => {
     const burstCount = pendingToastCountRef.current;
@@ -76,61 +73,44 @@ export function NotificationToastBridge() {
     [flushQueuedToast]
   );
 
+  const clearQueuedToast = useCallback(() => {
+    if (toastTimerRef.current !== null) {
+      window.clearTimeout(toastTimerRef.current);
+    }
+    toastTimerRef.current = null;
+    pendingToastCountRef.current = 0;
+    latestToastItemRef.current = null;
+  }, []);
+
   useEffect(() => {
-    let cancelled = false;
-    let unsubscribe = () => {};
+    clearQueuedToast();
+    handledEventSequenceRef.current = 0;
+  }, [clearQueuedToast, lifecycle?.lifecycleEpoch]);
 
-    void (async () => {
-      try {
-        const latest = await listNotifications({ limit: 1, offset: 0, include_archived: false });
-        if (cancelled) {
-          return;
-        }
-        cursorRef.current = latest.items.reduce(
-          (maxId, item) => Math.max(maxId, Number(item.id) || 0),
-          cursorRef.current
-        );
-      } catch {
-        if (cancelled) {
-          return;
-        }
+  useEffect(() => {
+    const pendingEvents = (lifecycle?.events ?? []).filter(
+      ({ sequence }) => sequence > handledEventSequenceRef.current
+    );
+    for (const { sequence, event } of pendingEvents) {
+      handledEventSequenceRef.current = sequence;
+      if (event.event === 'notification') {
+        const nextItem = toNotificationFromStream(event.payload);
+        if (nextItem) queueToast(nextItem, 1);
+        continue;
       }
+      if (event.event === 'notifications_coalesced') {
+        const payload = event.payload as Record<string, unknown> | undefined;
+        const count = Number(payload?.count ?? 0);
+        if (Number.isFinite(count) && count > 0) queueToast(null, count);
+      }
+    }
+  }, [lifecycle?.events, queueToast]);
 
-      unsubscribe = subscribeNotificationsStream({
-        after: cursorRef.current,
-        onEvent: (event: NotificationStreamEvent) => {
-          if (typeof event.id === 'number' && Number.isFinite(event.id)) {
-            cursorRef.current = Math.max(cursorRef.current, event.id);
-          }
-          if (event.event === 'notification') {
-            const nextItem = toNotificationFromStream(event.payload);
-            if (nextItem) {
-              queueToast(nextItem, 1);
-            }
-            return;
-          }
-          if (event.event === 'notifications_coalesced') {
-            const payload = event.payload as Record<string, unknown> | undefined;
-            const count = Number(payload?.count ?? 0);
-            if (Number.isFinite(count) && count > 0) {
-              queueToast(null, count);
-            }
-          }
-        },
-        onError: () => {
-          // The notifications stream reconnects internally; no UI action needed here.
-        },
-      });
-    })();
-
+  useEffect(() => {
     return () => {
-      cancelled = true;
-      unsubscribe();
-      if (toastTimerRef.current !== null) {
-        window.clearTimeout(toastTimerRef.current);
-      }
+      clearQueuedToast();
     };
-  }, [queueToast]);
+  }, [clearQueuedToast]);
 
   return null;
 }

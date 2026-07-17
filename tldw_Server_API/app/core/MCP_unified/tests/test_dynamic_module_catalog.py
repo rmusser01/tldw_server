@@ -154,6 +154,112 @@ def test_default_mcp_modules_config_declares_prompts_module_with_empty_config_al
     assert prompts_module["settings"]["config_prompts"] == {"enabled": True, "entries": []}  # nosec B101
 
 
+def test_default_mcp_modules_config_declares_skills_module_after_prompts() -> None:
+    config_path = Path("tldw_Server_API/Config_Files/mcp_modules.yaml")
+    data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    module_ids = [module["id"] for module in data["modules"]]
+    modules = {module["id"]: module for module in data["modules"]}
+
+    skills_module = modules["skills"]
+
+    assert module_ids[module_ids.index("prompts") + 1] == "skills"  # nosec B101
+    assert skills_module == {  # nosec B101
+        "id": "skills",
+        "class": "tldw_Server_API.app.core.MCP_unified.modules.implementations.skills_module:SkillsModule",
+        "enabled": True,
+        "name": "Skills",
+        "version": "0.1.0",
+        "department": "knowledge",
+        "max_concurrent": 10,
+        "settings": {
+            "list_page_size": 50,
+            "max_rendered_skill_chars": 100000,
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_server_registers_skills_module_tools_from_temporary_config(monkeypatch, tmp_path: Path) -> None:
+    from unittest.mock import AsyncMock
+
+    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+    from tldw_Server_API.app.core.MCP_unified.modules.registry import reset_module_registry
+    from tldw_Server_API.app.core.MCP_unified.protocol_types import RequestContext
+    from tldw_Server_API.app.core.MCP_unified.server import MCPServer
+    from tldw_Server_API.app.core.Skills.skills_service import SkillsService
+
+    await reset_module_registry()
+    config_path = tmp_path / "mcp_modules.yaml"
+    config_path.write_text(
+        """
+modules:
+  - id: skills
+    class: tldw_Server_API.app.core.MCP_unified.modules.implementations.skills_module:SkillsModule
+    enabled: true
+    name: Skills
+    version: "0.1.0"
+    department: knowledge
+    max_concurrent: 10
+    settings:
+      list_page_size: 50
+      max_rendered_skill_chars: 100000
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MCP_MODULES_CONFIG", str(config_path))
+    monkeypatch.setenv("MCP_MODULES", "")
+    server = MCPServer()
+    catalog_handler = AsyncMock(
+        return_value={"tools": [{"name": "rag.search", "canExecute": True}]}
+    )
+    server.protocol._handle_tools_list = catalog_handler
+    db = None
+
+    try:
+        await server._register_default_modules()
+        registered_modules = [
+            await server.module_registry.find_module_for_tool(tool_name)
+            for tool_name in ("skills.list", "skills.get", "skills.render")
+        ]
+
+        assert all(registered_modules)  # nosec B101
+        assert len({id(module) for module in registered_modules}) == 1  # nosec B101
+        skills_module = registered_modules[0]
+        assert (  # nosec B101
+            skills_module.config.tool_catalog_handler is catalog_handler
+        )
+
+        user_path = tmp_path / "user-1"
+        user_path.mkdir()
+        db_path = user_path / "ChaChaNotes.db"
+        db = CharactersRAGDB(db_path=db_path, client_id="server-wired-skills")
+        service = SkillsService(user_id=1, base_path=user_path, db=db)
+        await service.create_skill(
+            "review-paper",
+            "---\nallowed-tools:\n  - rag.search\n---\nReview $ARGUMENTS",
+        )
+        context = RequestContext(
+            request_id="server-wired-skills-render",
+            user_id="1",
+            db_paths={"chacha": str(db_path)},
+        )
+
+        result = await skills_module.execute_tool(
+            "skills.render",
+            {"skill_name": "review-paper", "arguments": "issue 42"},
+            context=context,
+        )
+
+        assert result["rendered_prompt"] == "Review issue 42"  # nosec B101
+        assert result["catalog_matches"] == ["rag.search"]  # nosec B101
+        catalog_handler.assert_awaited_once_with({}, context)
+    finally:
+        if db is not None:
+            db.close_all_connections()
+        await server.module_registry.shutdown_all()
+        await reset_module_registry()
+
+
 def test_default_mcp_modules_config_declares_docs_module_without_web_acquisition() -> None:
     config_path = Path("tldw_Server_API/Config_Files/mcp_modules.yaml")
     data = yaml.safe_load(config_path.read_text(encoding="utf-8"))

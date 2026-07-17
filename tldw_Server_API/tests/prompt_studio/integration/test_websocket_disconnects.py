@@ -1,3 +1,6 @@
+import os
+from urllib.parse import urlencode
+
 import pytest
 
 from tldw_Server_API.app.api.v1.endpoints.prompt_studio import prompt_studio_websocket as ws_mod
@@ -5,7 +8,9 @@ from tldw_Server_API.app.api.v1.endpoints.prompt_studio import prompt_studio_web
 pytestmark = pytest.mark.integration
 
 
-def test_websocket_disconnects_decrement_connection_count(prompt_studio_dual_backend_client):
+def test_websocket_disconnects_decrement_connection_count(
+    prompt_studio_dual_backend_client,
+):
     backend_label, client, _db = prompt_studio_dual_backend_client
 
     # Access the shared connection manager used by the WebSocket endpoints
@@ -14,7 +19,8 @@ def test_websocket_disconnects_decrement_connection_count(prompt_studio_dual_bac
     before = mgr.get_connection_count()
 
     # Open a base WebSocket connection and ensure the count increases
-    with client.websocket_connect("/api/v1/prompt-studio/ws") as websocket:
+    query = urlencode({"api_key": os.environ["SINGLE_USER_TEST_API_KEY"]})
+    with client.websocket_connect(f"/api/v1/prompt-studio/ws?{query}") as websocket:
         during = mgr.get_connection_count()
         assert during >= before + 1
 

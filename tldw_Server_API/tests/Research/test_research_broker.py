@@ -1,7 +1,8 @@
+from datetime import datetime, timezone
+
 import pytest
 
 from tldw_Server_API.app.core.Research.models import ResearchPlan
-
 
 pytestmark = pytest.mark.unit
 
@@ -195,6 +196,7 @@ async def test_broker_passes_resolved_provider_config_and_preserves_provider_ide
         web_provider=web_provider,
     )
 
+    collection_started_at = datetime.now(timezone.utc)
     result = await broker.collect_focus_area(
         session_id="rs_1",
         owner_user_id="1",
@@ -207,11 +209,22 @@ async def test_broker_passes_resolved_provider_config_and_preserves_provider_ide
         },
         context={},
     )
+    collection_finished_at = datetime.now(timezone.utc)
+    retrieved_at = [datetime.fromisoformat(source.retrieved_at) for source in result.sources]
 
     assert local_provider.calls[0]["config"] == {"top_k": 4, "sources": ["media_db"]}
     assert academic_provider.calls[0]["config"] == {"providers": ["arxiv"], "max_results": 2}
     assert web_provider.calls[0]["config"] == {"engine": "kagi", "result_count": 3}
     assert {source.provider for source in result.sources} == {"local_corpus", "arxiv", "kagi"}
+    assert all(value.tzinfo is not None and value.utcoffset() is not None for value in retrieved_at)
+    assert all(collection_started_at <= value <= collection_finished_at for value in retrieved_at)
+    assert [
+        (source.source_id, note.note_id) for source, note in zip(result.sources, result.evidence_notes, strict=True)
+    ] == [
+        ("src_7aef3f6cf7e9", "note_9c1e03fe5b64"),
+        ("src_72b0a1007cc7", "note_3fd24e3f8693"),
+        ("src_47fc41c2bc20", "note_817ae2d4c1e1"),
+    ]
 
 
 @pytest.mark.asyncio

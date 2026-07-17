@@ -21,6 +21,7 @@ services:
     environment:
       - AUTH_MODE=${AUTH_MODE:-single_user}
       - SINGLE_USER_API_KEY=${SINGLE_USER_API_KEY:-change-me}
+      - SINGLE_USER_SESSION_COOKIE_NAME=${SINGLE_USER_SESSION_COOKIE_NAME:-tldw_single_user_session}
       - tldw_production=${tldw_production:-false}
       - DATABASE_URL=${DATABASE_URL:-sqlite:///./Databases/users.db}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379}

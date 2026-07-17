@@ -95,6 +95,7 @@ import { useTldwAudioStatus } from "@/hooks/useTldwAudioStatus"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import {
   normalizeVoiceConversationRuntimeError,
+  isVoiceConversationAuthReady,
   resolveVoiceConversationAvailability,
   resolveVoiceConversationTtsConfig,
   shouldProbeVoiceConversationAudioHealth
@@ -158,6 +159,7 @@ import type { SidepanelChatWebUiHandoffOverrides } from "@/services/tldw/sidepan
 import { buildVisibleDocumentHandoffSnippetText } from "./sidepanel-chat-handoff-context"
 import {
   DEFAULT_DOCUMENT_PROCESSING_MODE,
+  documentProcessingSelectionKey,
   normalizeDocumentPreflightResponse,
   prepareChatDocumentAttachmentsForSend,
   withDefaultDocumentDecision
@@ -430,6 +432,26 @@ export const SidepanelForm = ({
     imageValueRef.current = form.values.image
   }, [form.values.image])
   const [contextFiles, setContextFiles] = React.useState<UploadedFile[]>([])
+  const currentDocumentSelectionKey =
+    documentProcessingSelectionKey(contextFiles)
+  const currentDocumentSelectionKeyRef = React.useRef(
+    currentDocumentSelectionKey
+  )
+  const sidepanelDocumentPreparationRef = React.useRef<{
+    controller: AbortController
+    selectionKey: string
+  } | null>(null)
+  currentDocumentSelectionKeyRef.current = currentDocumentSelectionKey
+  React.useEffect(() => {
+    const active = sidepanelDocumentPreparationRef.current
+    if (active && active.selectionKey !== currentDocumentSelectionKey) {
+      active.controller.abort()
+    }
+  }, [currentDocumentSelectionKey])
+  React.useEffect(
+    () => () => sidepanelDocumentPreparationRef.current?.controller.abort(),
+    []
+  )
   const openChatInWebUiWithDocumentHandoff = React.useCallback(async () => {
     if (!onOpenChatInWebUi) return
     if (contextFiles.length === 0) {
@@ -641,12 +663,13 @@ export const SidepanelForm = ({
       resolveVoiceConversationAvailability({
         isConnectionReady: isConnectionReady && !canonicalConnectionLoading,
         hasVoiceConversationTransport,
-        authReady: Boolean(
-          canonicalConnectionConfig?.serverUrl &&
-            (canonicalConnectionConfig?.authMode === "multi-user"
-              ? canonicalConnectionConfig.accessToken
-              : canonicalConnectionConfig.apiKey)
-        ),
+        authReady: isVoiceConversationAuthReady({
+          serverUrl: canonicalConnectionConfig?.serverUrl,
+          authMode: canonicalConnectionConfig?.authMode,
+          authSource: canonicalConnectionConfig?.authSource,
+          apiKey: canonicalConnectionConfig?.apiKey,
+          accessToken: canonicalConnectionConfig?.accessToken
+        }),
         sttHealthState,
         ttsHealthState: audioHealthState,
         selectedModel: String(voiceChatModel || "").trim(),
@@ -657,6 +680,7 @@ export const SidepanelForm = ({
       audioHealthState,
       canonicalConnectionConfig?.apiKey,
       canonicalConnectionConfig?.authMode,
+      canonicalConnectionConfig?.authSource,
       canonicalConnectionConfig?.accessToken,
       canonicalConnectionConfig?.serverUrl,
       canonicalConnectionLoading,
@@ -1726,6 +1750,7 @@ export const SidepanelForm = ({
     image: string,
     options?: { ignorePinnedResults?: boolean }
   ): Promise<void> {
+    if (sidepanelDocumentPreparationRef.current) return
     const intent = resolveSubmissionIntent(rawMessage, options)
     if (intent.invalidImageCommand) {
       notification.error({
@@ -1762,51 +1787,83 @@ export const SidepanelForm = ({
       })
       return
     }
-    await stopListening()
-    if (!intent.isImageCommand) {
-      const normalizedSelectedModel = normalizeChatModelId(selectedModel)
-      if (!normalizedSelectedModel) {
-        form.setFieldError("message", t("formError.noModel"))
-        return
-      }
-      const unavailableModel = findUnavailableChatModel(
-        [normalizedSelectedModel],
-        availableChatModelIds
-      )
-      if (unavailableModel) {
-        form.setFieldError(
-          "message",
-          t(
-            "playground:composer.validationModelUnavailableInline",
-            "Selected model is not available on this server. Refresh models or choose a different model."
-          )
-        )
-        return
-      }
-    }
-    if (!intent.isImageCommand) {
-      const hasEmbedding = await ensureEmbeddingModelAvailable()
-      if (!hasEmbedding) {
-        return
-      }
-    }
-    const contextSend = intent.isImageCommand
-      ? null
-      : await conversationContextComposition.composeForSend({
-          message: trimmed,
-          history
-        })
-    let documentUploadedFiles = contextFiles
-    let documentRequestOverrides: SidepanelRequestOverrides =
-      contextSend?.requestOverrides
-
+    let documentPreparation: {
+      controller: AbortController
+      selectionKey: string
+    } | null = null
     if (!intent.isImageCommand && contextFiles.length > 0) {
-      const preparedDocumentAttachments =
-        await prepareChatDocumentAttachmentsForSend({
-          files: contextFiles,
-          historyId: historyId ?? undefined,
-          sessionId: serverChatId ?? undefined
-        })
+      documentPreparation = {
+        controller: new AbortController(),
+        selectionKey: currentDocumentSelectionKeyRef.current
+      }
+      sidepanelDocumentPreparationRef.current = documentPreparation
+    }
+    try {
+      await stopListening()
+      if (!intent.isImageCommand) {
+        const normalizedSelectedModel = normalizeChatModelId(selectedModel)
+        if (!normalizedSelectedModel) {
+          form.setFieldError("message", t("formError.noModel"))
+          return
+        }
+        const unavailableModel = findUnavailableChatModel(
+          [normalizedSelectedModel],
+          availableChatModelIds
+        )
+        if (unavailableModel) {
+          form.setFieldError(
+            "message",
+            t(
+              "playground:composer.validationModelUnavailableInline",
+              "Selected model is not available on this server. Refresh models or choose a different model."
+            )
+          )
+          return
+        }
+      }
+      if (!intent.isImageCommand) {
+        const hasEmbedding = await ensureEmbeddingModelAvailable()
+        if (!hasEmbedding) {
+          return
+        }
+      }
+      const contextSend = intent.isImageCommand
+        ? null
+        : await conversationContextComposition.composeForSend({
+            message: trimmed,
+            history
+          })
+      let documentUploadedFiles = contextFiles
+      let documentRequestOverrides: SidepanelRequestOverrides =
+        contextSend?.requestOverrides
+
+      if (!intent.isImageCommand && contextFiles.length > 0) {
+        if (!documentPreparation) return
+        let preparedDocumentAttachments
+        try {
+          preparedDocumentAttachments =
+            await prepareChatDocumentAttachmentsForSend({
+              files: contextFiles,
+              historyId: historyId ?? undefined,
+              sessionId: serverChatId ?? undefined,
+              signal: documentPreparation.controller.signal
+            })
+        } catch (error) {
+          if (
+            documentPreparation.controller.signal.aborted ||
+            (error instanceof Error && error.name === "AbortError")
+          ) {
+            return
+          }
+          throw error
+        }
+        if (
+          documentPreparation.controller.signal.aborted ||
+          currentDocumentSelectionKeyRef.current !==
+            documentPreparation.selectionKey
+        ) {
+          return
+        }
       const firstBlockedOrFailed =
         preparedDocumentAttachments.blockedFiles[0] ||
         preparedDocumentAttachments.failedFiles[0]
@@ -1873,9 +1930,9 @@ export const SidepanelForm = ({
       )
         ? (preparedRequestOverrides.uploadedFiles as UploadedFile[])
         : preparedDocumentAttachments.contextFiles
-    }
+      }
 
-    await submitDispatch(
+      await submitDispatch(
       {
         image: intent.isImageCommand ? "" : image,
         message: trimmed,
@@ -1906,7 +1963,15 @@ export const SidepanelForm = ({
           setKnowledgeMentionActive(false)
         }
       }
-    )
+      )
+    } finally {
+      if (
+        documentPreparation &&
+        sidepanelDocumentPreparationRef.current === documentPreparation
+      ) {
+        sidepanelDocumentPreparationRef.current = null
+      }
+    }
   }
   const sendCurrentFormMessageRef = React.useRef(sendCurrentFormMessage)
   React.useEffect(() => {

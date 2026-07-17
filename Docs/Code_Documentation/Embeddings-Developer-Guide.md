@@ -880,4 +880,4 @@ async def handle_errors():
 
 ---
 
-For API usage documentation, see [Embeddings API Guide](./Embeddings-API-Guide.md)
+For API usage documentation, see [Embeddings API Guide](../API-related/Embeddings-API-Guide.md)

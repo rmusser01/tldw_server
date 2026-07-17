@@ -1005,10 +1005,10 @@ def _jsonld_score_candidate(node: dict[str, Any]) -> tuple[int, int]:
     return score, content_len
 
 
-def _jsonld_has_content(result: dict[str, Any]) -> bool:
+def _jsonld_has_body(result: dict[str, Any]) -> bool:
+    """Return whether an extraction result contains nonblank body text."""
     content = result.get("content")
-    summary = result.get("summary")
-    return any(isinstance(value, str) and value.strip() for value in (content, summary))
+    return isinstance(content, str) and bool(content.strip())
 
 
 def _collect_jsonld_nodes(data: Any) -> list[dict[str, Any]]:
@@ -1211,7 +1211,7 @@ def extract_jsonld_entities(html_text: str, url: str) -> dict[str, Any]:
     if content:
         result["content"] = content
 
-    result["extraction_successful"] = _jsonld_has_content(result)
+    result["extraction_successful"] = _jsonld_has_body(result)
     return result
 
 
@@ -2464,9 +2464,13 @@ def extract_article_with_pipeline(
     llm_settings: Optional[dict[str, Any]] = None,
     regex_settings: Optional[dict[str, Any]] = None,
     cluster_settings: Optional[dict[str, Any]] = None,
+    allow_llm_extraction: bool = True,
 ) -> dict[str, Any]:
     trace: list[dict[str, Any]] = []
+    jsonld_summary: Optional[str] = None
     order, unknown = _normalize_strategy_order(strategy_order)
+    if not allow_llm_extraction:
+        order = [strategy for strategy in order if strategy != "llm"]
     if _should_clear_caches("start"):
         clear_extraction_caches()
 
@@ -2475,10 +2479,18 @@ def extract_article_with_pipeline(
         *,
         strategy: Optional[str],
     ) -> dict[str, Any]:
+        summary = result.get("summary")
+        if (
+            result.get("extraction_successful")
+            and jsonld_summary
+            and (not isinstance(summary, str) or not summary.strip())
+        ):
+            result["summary"] = jsonld_summary
         final = _attach_trace(result, trace, strategy, order)
         if _should_clear_caches("end"):
             clear_extraction_caches()
         return final
+
     for strategy in unknown:
         trace.append(_trace_entry(strategy, "skipped", "unknown_strategy"))
 
@@ -2488,6 +2500,9 @@ def extract_article_with_pipeline(
         if strategy == "jsonld":
             with _strategy_throttle(strategy):
                 result = extract_jsonld_entities(html, url)
+            summary = result.get("summary")
+            if isinstance(summary, str) and summary.strip():
+                jsonld_summary = summary
             last_result = result
             if result.get("extraction_successful"):
                 trace.append(_trace_entry(strategy, "success", "jsonld_extracted"))
@@ -2662,6 +2677,7 @@ def extract_article_data_from_html(
     llm_settings: Optional[dict[str, Any]] = None,
     regex_settings: Optional[dict[str, Any]] = None,
     cluster_settings: Optional[dict[str, Any]] = None,
+    allow_llm_extraction: bool = True,
 ) -> dict[str, Any]:
     """Extract article metadata and body from raw HTML."""
     return extract_article_with_pipeline(
@@ -2673,6 +2689,7 @@ def extract_article_data_from_html(
         llm_settings=llm_settings,
         regex_settings=regex_settings,
         cluster_settings=cluster_settings,
+        allow_llm_extraction=allow_llm_extraction,
     )
 
 
@@ -2791,7 +2808,12 @@ def _fetch_article_lightweight(
     return response, response.backend or "httpx"
 
 
-async def scrape_article(url: str, custom_cookies: Optional[list[dict[str, Any]]] = None) -> dict[str, Any]:
+async def scrape_article(
+    url: str,
+    custom_cookies: Optional[list[dict[str, Any]]] = None,
+    *,
+    allow_llm_extraction: bool = True,
+) -> dict[str, Any]:
     logging.info(f"Scraping article from URL: {url}")
     # Resolve scraper plan via router (configurable via YAML)
     ws_cfg: dict[str, Any] = {}
@@ -2978,6 +3000,7 @@ async def scrape_article(url: str, custom_cookies: Optional[list[dict[str, Any]]
                     llm_settings=llm_settings,
                     regex_settings=regex_settings,
                     cluster_settings=cluster_settings,
+                    allow_llm_extraction=allow_llm_extraction,
                 )
                 if article_data.get("extraction_successful"):
                     if not use_handler and article_data.get("content"):
@@ -3109,6 +3132,7 @@ async def scrape_article(url: str, custom_cookies: Optional[list[dict[str, Any]]
         llm_settings=llm_settings,
         regex_settings=regex_settings,
         cluster_settings=cluster_settings,
+        allow_llm_extraction=allow_llm_extraction,
     )
     if article_data.get("extraction_successful") and not use_handler and article_data.get("content"):
         article_data["content"] = convert_html_to_markdown(article_data["content"])
@@ -3123,7 +3147,12 @@ async def scrape_article(url: str, custom_cookies: Optional[list[dict[str, Any]]
     return _attach_preflight(article_data)
 
 
-def scrape_article_blocking(url: str, custom_cookies: Optional[list[dict[str, Any]]] = None) -> dict[str, Any]:
+def scrape_article_blocking(
+    url: str,
+    custom_cookies: Optional[list[dict[str, Any]]] = None,
+    *,
+    allow_llm_extraction: bool = True,
+) -> dict[str, Any]:
     """Blocking scraper for synchronous code paths.
 
     Fetches HTML with http_client using a desktop-like user agent and optional cookies,
@@ -3178,7 +3207,11 @@ def scrape_article_blocking(url: str, custom_cookies: Optional[list[dict[str, An
             logging.error(f"Failed to fetch {url}, status: {status}")
             return {"url": url, "title": "N/A", "author": "N/A", "date": "N/A", "content": "", "extraction_successful": False}
 
-        article_data = extract_article_data_from_html(text, url)
+        article_data = extract_article_data_from_html(
+            text,
+            url,
+            allow_llm_extraction=allow_llm_extraction,
+        )
         if article_data.get("extraction_successful"):
             article_data["content"] = convert_html_to_markdown(article_data["content"])
         return article_data
@@ -3198,7 +3231,8 @@ async def scrape_and_summarize_multiple(
     system_message: Optional[str] = None,
     summarize_checkbox: bool = False,
     custom_cookies: Optional[list[dict[str, Any]]] = None,
-    temperature: float = 0.7
+    temperature: float = 0.7,
+    allow_llm_extraction: bool = True,
 ) -> list[dict[str, Any]]:
     urls_list = [url.strip() for url in urls.split('\n') if url.strip()]
     custom_titles = custom_article_titles.split('\n') if custom_article_titles else []
@@ -3225,7 +3259,11 @@ async def scrape_and_summarize_multiple(
                 with suppress(_ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS):
                     await rate_limiter.acquire()
             # Scrape the article
-            article = await scrape_article(url, custom_cookies=custom_cookies)
+            article = await scrape_article(
+                url,
+                custom_cookies=custom_cookies,
+                allow_llm_extraction=allow_llm_extraction,
+            )
             if article and article['extraction_successful']:
                 log_counter("article_scraped", labels={"success": "true", "url": url})
                 if custom_title:
@@ -3257,7 +3295,7 @@ async def scrape_and_summarize_multiple(
                         article['summary'] = "No content available to summarize."
                         logging.warning(f"No content to summarize for URL {url}")
                 else:
-                    article['summary'] = None
+                    article.setdefault('summary', None)
 
                 results.append(article)
             else:
@@ -3467,7 +3505,12 @@ async def scrape_entire_site(base_url: str) -> list[dict]:
     return scraped_articles
 
 
-def scrape_by_url_level(base_url: str, level: int) -> list:
+def scrape_by_url_level(
+    base_url: str,
+    level: int,
+    *,
+    allow_llm_extraction: bool = True,
+) -> list:
     """Scrape articles from URLs up to a certain level under the base URL."""
 
     def get_url_level(url: str) -> int:
@@ -3478,13 +3521,20 @@ def scrape_by_url_level(base_url: str, level: int) -> list:
 
     results = []
     for link in filtered_links:
-        article = scrape_article_blocking(link)
+        article = scrape_article_blocking(
+            link,
+            allow_llm_extraction=allow_llm_extraction,
+        )
         if article:
             results.append(article)
     return results
 
 
-def scrape_from_sitemap(sitemap_url: str) -> list:
+def scrape_from_sitemap(
+    sitemap_url: str,
+    *,
+    allow_llm_extraction: bool = True,
+) -> list:
     """Scrape articles from a sitemap URL."""
     try:
         try:
@@ -3533,7 +3583,10 @@ def scrape_from_sitemap(sitemap_url: str) -> list:
 
         results = []
         for url in root.findall('.//{http://www.sitemaps.org/schemas/sitemap/0.9}loc'):
-            article = scrape_article_blocking(url.text)
+            article = scrape_article_blocking(
+                url.text,
+                allow_llm_extraction=allow_llm_extraction,
+            )
             if article:
                 results.append(article)
         return results
@@ -4030,6 +4083,29 @@ class ContentMetadataHandler:
         return formatted_content
 
     @staticmethod
+    def _parse_metadata_envelope(content: str) -> Optional[tuple[dict[str, Any], str]]:
+        """Parse a canonical leading metadata envelope and return its body."""
+        if not isinstance(content, str):
+            return None
+        envelope = content.lstrip()
+        if not envelope.startswith(ContentMetadataHandler.METADATA_START):
+            return None
+
+        metadata_text = envelope[len(ContentMetadataHandler.METADATA_START) :].lstrip()
+        try:
+            metadata, metadata_end = json.JSONDecoder().raw_decode(metadata_text)
+        except (json.JSONDecodeError, RecursionError):
+            return None
+        if not isinstance(metadata, dict):
+            return None
+
+        remainder = metadata_text[metadata_end:].lstrip()
+        if not remainder.startswith(ContentMetadataHandler.METADATA_END):
+            return None
+        clean_content = remainder[len(ContentMetadataHandler.METADATA_END) :].strip()
+        return metadata, clean_content
+
+    @staticmethod
     def extract_metadata(content: str) -> tuple[dict[str, Any], str]:
         """
         Extract metadata and content separately.
@@ -4040,16 +4116,8 @@ class ContentMetadataHandler:
         Returns:
             Tuple of (metadata dict, clean content)
         """
-        try:
-            metadata_start = content.index(ContentMetadataHandler.METADATA_START) + len(
-                ContentMetadataHandler.METADATA_START)
-            metadata_end = content.index(ContentMetadataHandler.METADATA_END)
-            metadata_json = content[metadata_start:metadata_end].strip()
-            metadata = json.loads(metadata_json)
-            clean_content = content[metadata_end + len(ContentMetadataHandler.METADATA_END):].strip()
-            return metadata, clean_content
-        except (ValueError, json.JSONDecodeError):
-            return {}, content
+        parsed = ContentMetadataHandler._parse_metadata_envelope(content)
+        return parsed if parsed is not None else ({}, content)
 
     @staticmethod
     def has_metadata(content: str) -> bool:
@@ -4062,8 +4130,7 @@ class ContentMetadataHandler:
         Returns:
             bool: True if metadata is present
         """
-        return (ContentMetadataHandler.METADATA_START in content and
-                ContentMetadataHandler.METADATA_END in content)
+        return ContentMetadataHandler._parse_metadata_envelope(content) is not None
 
     @staticmethod
     def strip_metadata(content: str) -> str:
@@ -4076,11 +4143,8 @@ class ContentMetadataHandler:
         Returns:
             Content without metadata
         """
-        try:
-            metadata_end = content.index(ContentMetadataHandler.METADATA_END)
-            return content[metadata_end + len(ContentMetadataHandler.METADATA_END):].strip()
-        except ValueError:
-            return content
+        parsed = ContentMetadataHandler._parse_metadata_envelope(content)
+        return parsed[1] if parsed is not None else content
 
     @staticmethod
     def get_content_hash(content: str) -> str:
@@ -4120,12 +4184,26 @@ class ContentMetadataHandler:
 def get_url_depth(url: str) -> int:
     return len(urlparse(url).path.strip('/').split('/'))
 
-def sync_recursive_scrape(url_input, max_pages, max_depth, delay=1.0, custom_cookies=None):
+def sync_recursive_scrape(
+    url_input,
+    max_pages,
+    max_depth,
+    delay=1.0,
+    custom_cookies=None,
+    allow_llm_extraction: bool = True,
+):
     def run_async_scrape():
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         return loop.run_until_complete(
-            recursive_scrape(url_input, max_pages, max_depth, delay=delay, custom_cookies=custom_cookies)
+            recursive_scrape(
+                url_input,
+                max_pages,
+                max_depth,
+                delay=delay,
+                custom_cookies=custom_cookies,
+                allow_llm_extraction=allow_llm_extraction,
+            )
         )
 
     with ThreadPoolExecutor(max_workers=_extractor_max_workers()) as executor:
@@ -4140,7 +4218,8 @@ async def recursive_scrape(
         resume_file: str = 'scrape_progress.json',
         user_agent: str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3",
         custom_cookies: Optional[list[dict[str, Any]]] = None,
-        progress_callback: Optional[callable] = None
+        progress_callback: Optional[callable] = None,
+        allow_llm_extraction: bool = True,
 ) -> list[dict]:
     async def save_progress():
         temp_file = resume_file + ".tmp"
@@ -4195,7 +4274,11 @@ async def recursive_scrape(
                     try:
                         await asyncio.sleep(random.uniform(delay * 0.8, delay * 1.2))  # nosec B311
 
-                        article_data = await scrape_article_async(context, current_url)
+                        article_data = await scrape_article_async(
+                            context,
+                            current_url,
+                            allow_llm_extraction=allow_llm_extraction,
+                        )
 
                         if article_data and article_data['extraction_successful']:
                             scraped_articles.append(article_data)
@@ -4241,7 +4324,12 @@ async def recursive_scrape(
 
     return scraped_articles
 
-async def scrape_article_async(context, url: str) -> dict[str, Any]:
+async def scrape_article_async(
+    context,
+    url: str,
+    *,
+    allow_llm_extraction: bool = True,
+) -> dict[str, Any]:
     page = await context.new_page()
     try:
         await page.goto(url)
@@ -4250,12 +4338,17 @@ async def scrape_article_async(context, url: str) -> dict[str, Any]:
         title = await page.title()
         content = await page.content()
 
-        return {
-            'url': url,
-            'title': title,
-            'content': content,
-            'extraction_successful': True
-        }
+        article_data = extract_article_with_pipeline(
+            content,
+            url,
+            allow_llm_extraction=allow_llm_extraction,
+        )
+        if article_data.get("extraction_successful"):
+            if article_data.get("title") in {None, "", "N/A"}:
+                article_data["title"] = title
+            if article_data.get("content"):
+                article_data["content"] = convert_html_to_markdown(article_data["content"])
+        return article_data
     except _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS as e:
         logging.error(f"Error scraping article {url}: {str(e)}")
         return {

@@ -11,6 +11,7 @@ const chatPanelRuntimeState = vi.hoisted(() => ({
 const workspaceState = vi.hoisted((): { value: any } => ({
   value: {
     workspaceId: "workspace-1",
+    storeHydrated: true,
     workspaceName: "Default workspace",
     sources: [
       {
@@ -60,6 +61,7 @@ vi.mock("@/store/workspace", () => ({
     selector({
       sourcesLoading: false,
       sourcesError: null,
+      storeHydrated: true,
       ...workspaceActions,
       ...workspaceState.value
     })
@@ -101,6 +103,7 @@ vi.mock("../WorkspaceChatPanel", () => ({
         backendAvailable: chatPanelRuntimeState.backendAvailable,
         streaming: true,
         selectedModelLabel: "gpt-test",
+        hasModelSelected: true,
         selectedPersonaLabel: "Analyst",
         assistantSource: "explicit"
       })
@@ -127,6 +130,7 @@ describe("ChatWorkspacePage", () => {
     workspaceActions.focusSourceById.mockReturnValue(true)
     workspaceState.value = {
       workspaceId: "workspace-1",
+      storeHydrated: true,
       workspaceName: "Default workspace",
       sources: [
         {
@@ -259,6 +263,48 @@ describe("ChatWorkspacePage", () => {
     const panel = screen.getByTestId("workspace-chat-panel")
     expect(panel).toHaveAttribute("data-workspace-id", "null")
     expect(panel).toHaveAttribute("data-backend-available", "false")
+  })
+
+  it("keeps chat and rails loading until the workspace store hydrates", () => {
+    workspaceState.value = {
+      workspaceId: "workspace-1",
+      storeHydrated: false,
+      workspaceName: "Default workspace",
+      sources: []
+    }
+
+    const { rerender } = render(<ChatWorkspacePage />)
+
+    expect(screen.getByTestId("workspace-chat-panel")).toHaveAttribute(
+      "data-backend-available",
+      "false"
+    )
+    expect(
+      within(screen.getByLabelText("Chat workspace status")).getByText(
+        "Loading workspace context"
+      )
+    ).toBeInTheDocument()
+    expect(
+      within(
+        screen.getByRole("complementary", { name: /workspace inspector/i })
+      ).getByText("Loading workspace context")
+    ).toBeInTheDocument()
+
+    workspaceState.value = {
+      ...workspaceState.value,
+      storeHydrated: true
+    }
+    rerender(<ChatWorkspacePage />)
+
+    expect(screen.getByTestId("workspace-chat-panel")).toHaveAttribute(
+      "data-backend-available",
+      "true"
+    )
+    expect(
+      within(screen.getByLabelText("Chat workspace status")).getByText(
+        "Streaming"
+      )
+    ).toBeInTheDocument()
   })
 
   it("clears browsed and staged sources when the workspace changes", () => {

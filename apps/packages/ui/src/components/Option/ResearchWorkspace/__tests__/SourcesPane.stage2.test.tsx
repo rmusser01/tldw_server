@@ -10,9 +10,14 @@ const { mockScheduleWorkspaceUndoAction, mockUndoWorkspaceAction } = vi.hoisted(
   })
 )
 
-const { mockAddMedia, mockGetWorkspaceSourcePreview } = vi.hoisted(() => ({
+const {
+  mockAddMedia,
+  mockGetWorkspaceSourcePreview,
+  mockUpdateWorkspaceSourceReviewState
+} = vi.hoisted(() => ({
   mockAddMedia: vi.fn(),
-  mockGetWorkspaceSourcePreview: vi.fn()
+  mockGetWorkspaceSourcePreview: vi.fn(),
+  mockUpdateWorkspaceSourceReviewState: vi.fn()
 }))
 
 const mockToggleSourceSelection = vi.fn()
@@ -24,6 +29,7 @@ const mockRemoveSource = vi.fn()
 const mockRestoreSource = vi.fn()
 const mockReorderSource = vi.fn()
 const mockClearSourceFocusTarget = vi.fn()
+const mockMergeSourceReviewUpdates = vi.fn()
 
 const defaultSources: WorkspaceSource[] = [
   {
@@ -59,6 +65,7 @@ const workspaceStoreState = {
   removeSource: mockRemoveSource,
   restoreSource: mockRestoreSource,
   reorderSource: mockReorderSource,
+  mergeSourceReviewUpdates: mockMergeSourceReviewUpdates,
 }
 
 vi.mock("react-i18next", () => ({
@@ -103,7 +110,8 @@ vi.mock("@/store/workspace", () => ({
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     addMedia: mockAddMedia,
-    getWorkspaceSourcePreview: mockGetWorkspaceSourcePreview
+    getWorkspaceSourcePreview: mockGetWorkspaceSourcePreview,
+    updateWorkspaceSourceReviewState: mockUpdateWorkspaceSourceReviewState
   }
 }))
 
@@ -161,6 +169,7 @@ describe("SourcesPane Stage 2 source highlighting", () => {
       }
     )
     workspaceStoreState.sources = [...defaultSources]
+    workspaceStoreState.selectedSourceIds = []
     workspaceStoreState.sourceSearchQuery = ""
     workspaceStoreState.sourceFocusTarget = null
 
@@ -170,6 +179,15 @@ describe("SourcesPane Stage 2 source highlighting", () => {
     mockClearSourceFocusTarget.mockImplementation(() => {
       workspaceStoreState.sourceFocusTarget = null
     })
+    mockMergeSourceReviewUpdates.mockImplementation(
+      (updates: Array<Partial<WorkspaceSource> & Pick<WorkspaceSource, "id">>) => {
+        const updatesById = new Map(updates.map((update) => [update.id, update]))
+        workspaceStoreState.sources = workspaceStoreState.sources.map((source) => ({
+          ...source,
+          ...(updatesById.get(source.id) || {})
+        }))
+      }
+    )
     mockReorderSource.mockImplementation((sourceId: string, targetIndex: number) => {
       const currentIndex = workspaceStoreState.sources.findIndex((source) => source.id === sourceId)
       if (currentIndex < 0) return
@@ -205,6 +223,7 @@ describe("SourcesPane Stage 2 source highlighting", () => {
           dateFrom: null,
           dateTo: null,
           statusFilters: [],
+          reviewStateFilters: [],
           typeFilters: [],
           requireUrl: false,
           requireFileSize: false,
@@ -501,6 +520,9 @@ describe("SourcesPane Stage 2 source highlighting", () => {
         ...defaultSources[1],
         status: "processing" as const,
         statusMessage: "Indexing chunks 45/120",
+        reviewState: "reviewed" as const,
+        reviewedAt: new Date("2026-05-23T12:02:00.000Z"),
+        reviewedByUserId: "reviewer-17",
         readiness: {
           metadata_ready: true,
           text_extracted: true,
@@ -551,6 +573,12 @@ describe("SourcesPane Stage 2 source highlighting", () => {
     expect(dialog).toHaveTextContent("Source of truth")
     expect(dialog).toHaveTextContent("Server workspace status projection")
     expect(dialog).toHaveTextContent("Last refresh")
+    expect(dialog).toHaveTextContent("Review")
+    expect(dialog).toHaveTextContent("Reviewed")
+    expect(dialog).toHaveTextContent("Reviewer: reviewer-17")
+    expect(dialog).toHaveTextContent(
+      new Date("2026-05-23T12:02:00.000Z").toLocaleDateString()
+    )
     expect(dialog).toHaveTextContent("Progress")
     expect(dialog).toHaveTextContent("38%")
     expect(dialog).toHaveTextContent("Retry eligibility")
@@ -838,6 +866,99 @@ describe("SourcesPane Stage 2 source highlighting", () => {
     expect(
       screen.getByPlaceholderText("Highlighted excerpt (optional)")
     ).toBeInTheDocument()
+  })
+
+  it("renders review-state badges independently from processing status", () => {
+    workspaceStoreState.sources = [
+      { ...defaultSources[0], reviewState: "needs_review" },
+      { ...defaultSources[1], reviewState: "unset" },
+      {
+        ...defaultSources[0],
+        id: "s3",
+        mediaId: 3,
+        title: "Source Three",
+        reviewState: "reviewed"
+      }
+    ]
+
+    render(<SourcesPane />)
+
+    expect(screen.getByText("Needs review")).toBeInTheDocument()
+    expect(screen.getByText("Unreviewed")).toBeInTheDocument()
+    expect(screen.getByText("Reviewed")).toBeInTheDocument()
+  })
+
+  it("marks one source as needing review from its row action", async () => {
+    mockUpdateWorkspaceSourceReviewState.mockResolvedValue([
+      {
+        id: "s1",
+        workspace_id: "workspace-1",
+        media_id: 1,
+        title: "Source One",
+        source_type: "pdf",
+        url: null,
+        position: 0,
+        selected: false,
+        added_at: "2026-02-18T00:00:00.000Z",
+        review_state: "needs_review",
+        review_state_updated_at: "2026-02-19T00:00:00.000Z",
+        reviewed_at: null,
+        reviewed_by_user_id: null,
+        version: 2
+      }
+    ])
+
+    render(<SourcesPane />)
+    fireEvent.click(screen.getByTestId("source-review-actions-s1"))
+    fireEvent.click(await screen.findByText("Needs review"))
+
+    await waitFor(() => {
+      expect(mockUpdateWorkspaceSourceReviewState).toHaveBeenCalledWith(
+        "workspace-1",
+        ["s1"],
+        "needs_review"
+      )
+    })
+    expect(mockMergeSourceReviewUpdates).toHaveBeenCalledWith([
+      expect.objectContaining({ id: "s1", reviewState: "needs_review" })
+    ])
+  })
+
+  it("marks selected sources reviewed and merges the returned rows", async () => {
+    workspaceStoreState.selectedSourceIds = ["s1"]
+    mockUpdateWorkspaceSourceReviewState.mockResolvedValue([
+      {
+        id: "s1",
+        workspace_id: "workspace-1",
+        media_id: 1,
+        title: "Source One",
+        source_type: "pdf",
+        url: null,
+        position: 0,
+        selected: true,
+        added_at: "2026-02-18T00:00:00.000Z",
+        review_state: "reviewed",
+        review_state_updated_at: "2026-02-19T00:00:00.000Z",
+        reviewed_at: "2026-02-19T00:00:00.000Z",
+        reviewed_by_user_id: "reviewer-7",
+        version: 2
+      }
+    ])
+
+    render(<SourcesPane />)
+    fireEvent.click(screen.getByRole("button", { name: "Mark reviewed" }))
+
+    await waitFor(() => {
+      expect(mockUpdateWorkspaceSourceReviewState).toHaveBeenCalledWith(
+        "workspace-1",
+        ["s1"],
+        "reviewed"
+      )
+    })
+    expect(mockMergeSourceReviewUpdates).toHaveBeenCalledWith([
+      expect.objectContaining({ id: "s1", reviewState: "reviewed" })
+    ])
+    expect(workspaceStoreState.selectedSourceIds).toEqual(["s1"])
   })
 
   it("enables virtualized rendering when source volume crosses threshold", () => {

@@ -1,9 +1,15 @@
 import { getDesignSystemState } from "@/design-system"
+import type { ChatWorkspaceAssistantSource } from "./types"
 
 export type WorkspaceStatusStripProps = {
   backendAvailable: boolean
+  workspaceReady: boolean
   streaming: boolean
+  sendError?: string | null
   stagedSourceCount: number
+  hasModelSelected: boolean
+  selectedPersonaLabel?: string | null
+  assistantSource?: ChatWorkspaceAssistantSource
 }
 
 const statusPillClass =
@@ -11,16 +17,42 @@ const statusPillClass =
 
 const READY_STATE_LABEL = getDesignSystemState("ready").label
 
+const getRuntimeLabel = ({
+  backendAvailable,
+  workspaceReady,
+  streaming,
+  sendError
+}: Pick<
+  WorkspaceStatusStripProps,
+  "backendAvailable" | "workspaceReady" | "streaming" | "sendError"
+>) => {
+  if (!backendAvailable) return "Server unavailable"
+  if (workspaceReady === false) return "Loading workspace context"
+  if (sendError) return "Send failed"
+  if (streaming) return "Streaming"
+  return READY_STATE_LABEL
+}
+
 export const WorkspaceStatusStrip = ({
   backendAvailable,
+  workspaceReady,
   streaming,
-  stagedSourceCount
+  sendError,
+  stagedSourceCount,
+  hasModelSelected,
+  selectedPersonaLabel,
+  assistantSource
 }: WorkspaceStatusStripProps) => {
-  const runtimeLabel = !backendAvailable
-    ? "Server unavailable"
-    : streaming
-      ? "Streaming"
-      : READY_STATE_LABEL
+  const runtimeLabel = getRuntimeLabel({
+    backendAvailable,
+    workspaceReady,
+    streaming,
+    sendError
+  })
+  const hasPersona =
+    Boolean(selectedPersonaLabel) ||
+    assistantSource === "workspace" ||
+    assistantSource === "unavailable"
 
   return (
     <footer
@@ -31,6 +63,18 @@ export const WorkspaceStatusStrip = ({
         <span className={statusPillClass}>{runtimeLabel}</span>
         {stagedSourceCount > 0 ? (
           <span className={statusPillClass}>Context staged</span>
+        ) : null}
+        {!backendAvailable ? (
+          <span className={statusPillClass}>Reconnect server</span>
+        ) : null}
+        {backendAvailable && workspaceReady === false ? (
+          <span className={statusPillClass}>Wait for workspace identity</span>
+        ) : null}
+        {backendAvailable && workspaceReady && !hasModelSelected ? (
+          <span className={statusPillClass}>Select a model</span>
+        ) : null}
+        {backendAvailable && workspaceReady && !hasPersona ? (
+          <span className={statusPillClass}>No persona</span>
         ) : null}
       </div>
       <div className="flex min-w-0 flex-wrap items-center gap-2">

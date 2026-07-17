@@ -16,6 +16,19 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock("@web/lib/api", () => ({
+  ApiError: class ApiError extends Error {
+    status?: number
+    statusCode?: number
+    retryAfter?: number
+
+    constructor(message: string, options?: { status?: number; retryAfter?: number }) {
+      super(message)
+      this.name = "ApiError"
+      this.status = options?.status
+      this.statusCode = options?.status
+      this.retryAfter = options?.retryAfter
+    }
+  },
   apiClient: {
     get: (...args: unknown[]) => mocks.apiGet(...args),
     post: (...args: unknown[]) => mocks.apiPost(...args),
@@ -205,8 +218,34 @@ describe("web notifications adapter", () => {
           "X-CSRF-Token": "csrf-token"
         })
       }),
+      expect.any(Function),
+      undefined,
       expect.any(Function)
     )
+
+    unsubscribe()
+  })
+
+  it("reports stream open only after the SSE transport confirms acquisition", async () => {
+    let confirmOpen: (() => void) | undefined
+    mocks.streamStructuredSSE.mockImplementationOnce(async (_url, _options, _onEvent, _onDone, onOpen) => {
+      confirmOpen = onOpen
+      await new Promise<void>(() => {})
+    })
+    const onOpen = vi.fn()
+
+    const unsubscribe = subscribeNotificationsStream({
+      after: 0,
+      onEvent: vi.fn(),
+      onOpen
+    })
+
+    expect(onOpen).not.toHaveBeenCalled()
+    await Promise.resolve()
+    expect(onOpen).not.toHaveBeenCalled()
+
+    confirmOpen?.()
+    expect(onOpen).toHaveBeenCalledTimes(1)
 
     unsubscribe()
   })
@@ -250,5 +289,79 @@ describe("web notifications adapter", () => {
     expect(mocks.streamStructuredSSE).toHaveBeenCalledTimes(1)
 
     unsubscribe()
+  })
+
+  it("issues exactly one WebUI request for each explicit mutation call", async () => {
+    const failure = Object.assign(new Error("temporary outage"), { status: 503 })
+    mocks.apiPost.mockRejectedValue(failure)
+    mocks.apiDelete.mockRejectedValue(failure)
+    mocks.apiPatch.mockRejectedValue(failure)
+
+    await expect(markNotificationsRead([1])).rejects.toBe(failure)
+    expect(mocks.apiPost).toHaveBeenCalledTimes(1)
+
+    await expect(dismissNotification(1)).rejects.toBe(failure)
+    expect(mocks.apiPost).toHaveBeenCalledTimes(2)
+
+    await expect(snoozeNotification(1, 15)).rejects.toBe(failure)
+    expect(mocks.apiPost).toHaveBeenCalledTimes(3)
+
+    await expect(cancelNotificationSnooze(1)).rejects.toBe(failure)
+    expect(mocks.apiDelete).toHaveBeenCalledTimes(1)
+
+    await expect(updateNotificationPreferences({ reminder_enabled: false })).rejects.toBe(failure)
+    expect(mocks.apiPatch).toHaveBeenCalledTimes(1)
+  })
+
+  it("preserves HTTP status and Retry-After when direct WebUI SSE acquisition fails", async () => {
+    const { streamStructuredSSE } = await vi.importActual<typeof import("../sse")>("@web/lib/sse")
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(null, {
+        status: 503,
+        statusText: "Service Unavailable",
+        headers: { "Retry-After": "40" }
+      })
+    )
+    vi.stubGlobal("fetch", fetchMock)
+
+    try {
+      await expect(
+        streamStructuredSSE("http://example.test/api/v1/notifications/stream", {}, vi.fn())
+      ).rejects.toMatchObject({
+        name: "ApiError",
+        status: 503,
+        statusCode: 503,
+        retryAfter: 40
+      })
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it("preserves an HTTP-date Retry-After as seconds", async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date("2026-07-11T20:00:00.000Z"))
+    const { streamStructuredSSE } = await vi.importActual<typeof import("../sse")>("@web/lib/sse")
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(null, {
+        status: 503,
+        statusText: "Service Unavailable",
+        headers: { "Retry-After": "Sat, 11 Jul 2026 20:00:40 GMT" }
+      })
+    )
+    vi.stubGlobal("fetch", fetchMock)
+
+    try {
+      await expect(
+        streamStructuredSSE("http://example.test/api/v1/notifications/stream", {}, vi.fn())
+      ).rejects.toMatchObject({
+        name: "ApiError",
+        status: 503,
+        retryAfter: 40
+      })
+    } finally {
+      vi.unstubAllGlobals()
+      vi.useRealTimers()
+    }
   })
 })

@@ -1001,18 +1001,6 @@
   "actor_presetPlaceholder": {
     "message": "Scegli un preset"
   },
-  "actor_preset.sliceOfLife": {
-    "message": "Spaccato di vita"
-  },
-  "actor_preset.dungeonCrawl": {
-    "message": "Esplorazione del dungeon"
-  },
-  "actor_preset.romance": {
-    "message": "Romanticismo"
-  },
-  "actor_preset.workSession": {
-    "message": "Sessione di lavoro"
-  },
   "actor_applyPreset": {
     "message": "Applica"
   },
@@ -1033,15 +1021,6 @@
   },
   "actor_templateModeHelp": {
     "message": "Controlla come Actor interagisce con i template di scena attivi. Unisci mantiene entrambi; Sovrascrivi consente ad Actor di sostituire i campi sovrapposti; Ignora salta Actor quando i template sono attivi."
-  },
-  "actor_templateMode.merge": {
-    "message": "Unisci con i template"
-  },
-  "actor_templateMode.override": {
-    "message": "Sovrascrivi i template"
-  },
-  "actor_templateMode.ignore": {
-    "message": "Ignora quando i template sono attivi"
   },
   "actor_bladeAspectsTitle": {
     "message": "Aspetti"
@@ -1465,5 +1444,29 @@
   },
   "acp_workspace_title": {
     "message": "Terminale dell'area di lavoro"
+  },
+  "tts_routeTitle": {
+    "message": "Sintesi vocale"
+  },
+  "actor_preset_sliceOfLife": {
+    "message": "Spaccato di vita"
+  },
+  "actor_preset_dungeonCrawl": {
+    "message": "Esplorazione del dungeon"
+  },
+  "actor_preset_romance": {
+    "message": "Romanticismo"
+  },
+  "actor_preset_workSession": {
+    "message": "Sessione di lavoro"
+  },
+  "actor_templateMode_merge": {
+    "message": "Unisci con i template"
+  },
+  "actor_templateMode_override": {
+    "message": "Sovrascrivi i template"
+  },
+  "actor_templateMode_ignore": {
+    "message": "Ignora quando i template sono attivi"
   }
 }

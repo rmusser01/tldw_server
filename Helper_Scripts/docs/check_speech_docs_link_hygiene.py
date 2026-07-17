@@ -4,26 +4,18 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterator
 from pathlib import Path
+from urllib.parse import SplitResult, unquote, urlsplit
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
-MONITORED_FILES = [
-    Path("README.md"),
-    Path("Docs/API-related/Audio_Transcription_API.md"),
-    Path("Docs/Published/API-related/Audio_Transcription_API.md"),
-    Path("Docs/API-related/TTS_API.md"),
-    Path("Docs/Published/API-related/TTS_API.md"),
-    Path("Docs/User_Guides/WebUI_Extension/Getting-Started-STT_and_TTS.md"),
-    Path("Docs/Published/User_Guides/WebUI_Extension/Getting-Started-STT_and_TTS.md"),
-    Path("Docs/User_Guides/WebUI_Extension/TTS_Getting_Started.md"),
-    Path("Docs/Published/User_Guides/WebUI_Extension/TTS_Getting_Started.md"),
-    Path("Docs/User_Guides/WebUI_Extension/TTS-SETUP-GUIDE.md"),
-    Path("Docs/Published/User_Guides/WebUI_Extension/TTS-SETUP-GUIDE.md"),
-]
-
 MONITORED_ENTRYPOINTS = [
     Path("README.md"),
+    Path("Docs/Getting_Started/First_Time_Audio_Setup_CPU.md"),
+    Path("Docs/Getting_Started/First_Time_Audio_Setup_GPU_Accelerated.md"),
+    Path("Docs/Published/Getting_Started/First_Time_Audio_Setup_CPU.md"),
+    Path("Docs/Published/Getting_Started/First_Time_Audio_Setup_GPU_Accelerated.md"),
 ]
 
 MONITORED_DIRS = [
@@ -37,12 +29,68 @@ BLOCKED_PATTERNS: dict[str, re.Pattern[str]] = {
     "legacy_stt_tts_blob_link": re.compile(
         r"https://github\.com/rmusser01/tldw_server/blob/main/Docs/Getting-Started-STT_and_TTS\.md"
     ),
-    "legacy_stt_tts_runbook_blob_prefix": re.compile(
-        r"https://github\.com/rmusser01/tldw_server/blob/main/Docs/STT-TTS/"
-    ),
     "bad_tts_user_guide_path": re.compile(r"Docs/User_Guides/TTS_Getting_Started\.md"),
     "removed_installation_setup_guide": re.compile(r"Installation-Setup-Guide\.md"),
 }
+URL_TOKEN = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://[^\s<>()\[\]{}\"'`]+")
+STT_TTS_REPO_PATH_PREFIX = "/rmusser01/tldw_server/blob/main/Docs/STT-TTS/"
+AUDITED_STT_TTS_BLOB_TARGETS = frozenset(
+    {
+        (
+            "https",
+            "github.com",
+            "/rmusser01/tldw_server/blob/main/Docs/STT-TTS/QWEN3_ASR_SETUP.md",
+        ),
+        (
+            "https",
+            "github.com",
+            "/rmusser01/tldw_server/blob/main/Docs/STT-TTS/QWEN3_TTS_SETUP.md",
+        ),
+        (
+            "https",
+            "github.com",
+            "/rmusser01/tldw_server/blob/main/Docs/STT-TTS/TTS-SETUP-GUIDE.md",
+        ),
+        (
+            "https",
+            "github.com",
+            "/rmusser01/tldw_server/blob/main/Docs/STT-TTS/NEUTTS_TTS_SETUP.md",
+        ),
+        (
+            "https",
+            "github.com",
+            "/rmusser01/tldw_server/blob/main/Docs/STT-TTS/CHATTERBOX_SETUP.md",
+        ),
+        (
+            "https",
+            "github.com",
+            "/rmusser01/tldw_server/blob/main/Docs/STT-TTS/VIBEVOICE_GETTING_STARTED.md",
+        ),
+        (
+            "https",
+            "github.com",
+            "/rmusser01/tldw_server/blob/main/Docs/STT-TTS/LUXTTS_TTS_SETUP.md",
+        ),
+    }
+)
+
+
+def iter_stt_tts_blob_candidates(line: str) -> Iterator[tuple[str, SplitResult, str]]:
+    """Yield same-repo STT-TTS URL tokens, including encoded or case-varied forms."""
+    for match in URL_TOKEN.finditer(line):
+        url = match.group(0)
+        try:
+            parsed = urlsplit(url)
+            hostname = parsed.hostname
+        except ValueError:
+            continue
+        decoded_path = unquote(parsed.path)
+        if (
+            hostname is not None
+            and hostname.lower() == "github.com"
+            and decoded_path.startswith(STT_TTS_REPO_PATH_PREFIX)
+        ):
+            yield url, parsed, decoded_path
 
 
 def iter_monitored_files() -> tuple[list[Path], list[Path]]:
@@ -79,6 +127,14 @@ def main() -> int:
             for name, pattern in BLOCKED_PATTERNS.items():
                 if pattern.search(line):
                     failures.append(f"{rel}:{line_no}: [{name}] {line.strip()}")
+            for url, parsed, decoded_path in iter_stt_tts_blob_candidates(line):
+                target = (parsed.scheme, parsed.netloc, parsed.path)
+                if (
+                    not url.startswith("https://")
+                    or parsed.path != decoded_path
+                    or target not in AUDITED_STT_TTS_BLOB_TARGETS
+                ):
+                    failures.append(f"{rel}:{line_no}: [unaudited_stt_tts_blob_target] {url}")
 
     if failures:
         print("Speech docs link hygiene violations found:")

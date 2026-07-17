@@ -3,13 +3,17 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 const mocks = vi.hoisted(() => ({
   sendMessage: vi.fn(),
   tldwRequest: vi.fn(),
-  storageGet: vi.fn(async () => ({ serverUrl: "http://127.0.0.1:8000" }))
+  runtimeId: "test-extension" as string | null,
+  storageGet: vi.fn(async () => ({ serverUrl: "http://127.0.0.1:8000" })),
+  sessionStorageGet: vi.fn(async () => null)
 }))
 
 vi.mock("wxt/browser", () => ({
   browser: {
     runtime: {
-      id: "test-extension",
+      get id() {
+        return mocks.runtimeId
+      },
       sendMessage: (...args: unknown[]) =>
         (mocks.sendMessage as (...args: unknown[]) => unknown)(...args)
     }
@@ -22,9 +26,11 @@ vi.mock("@/services/tldw/request-core", () => ({
 }))
 
 vi.mock("@/utils/safe-storage", () => ({
-  createSafeStorage: () => ({
+  createSafeStorage: (options?: { area?: string }) => ({
     get: (...args: unknown[]) =>
-      (mocks.storageGet as (...args: unknown[]) => unknown)(...args)
+      options?.area === "session"
+        ? (mocks.sessionStorageGet as (...args: unknown[]) => unknown)(...args)
+        : (mocks.storageGet as (...args: unknown[]) => unknown)(...args)
   })
 }))
 
@@ -36,8 +42,12 @@ describe("apiSend timeout fallback policy", () => {
     vi.useRealTimers()
     mocks.sendMessage.mockReset()
     mocks.tldwRequest.mockReset()
+    mocks.runtimeId = "test-extension"
     mocks.storageGet.mockReset()
+    mocks.sessionStorageGet.mockReset()
     mocks.storageGet.mockResolvedValue({ serverUrl: "http://127.0.0.1:8000" })
+    mocks.sessionStorageGet.mockResolvedValue(null)
+    delete process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
   })
 
   it("falls back to direct request for GET timeout", async () => {
@@ -113,5 +123,90 @@ describe("apiSend timeout fallback policy", () => {
 
     await assertion
     expect(mocks.tldwRequest).not.toHaveBeenCalled()
+  })
+
+  it("uses an eligible WebUI cookie marker in the direct fallback without stored auth", async () => {
+    mocks.runtimeId = null
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+    mocks.storageGet.mockImplementation(async (key: string) => {
+      if (key === "tldwCookieSessionConfig") {
+        return {
+          serverUrl: window.location.origin,
+          authMode: "single-user",
+          authSource: "cookie-session",
+          apiKey: "must-not-leak",
+          accessToken: "must-not-leak"
+        }
+      }
+      if (key === "tldwConfig") {
+        return {
+          serverUrl: "https://remote.example.test",
+          authMode: "single-user",
+          authSource: "manual",
+          apiKey: "preserved-device-key",
+          credentialSource: "manual",
+          apiKeyPersistence: "device",
+          apiKeyServerOrigin: "https://remote.example.test"
+        }
+      }
+      return null
+    })
+    mocks.tldwRequest.mockResolvedValue({ ok: true, status: 200, data: { ok: true } })
+
+    const { apiSend } = await importApiSend()
+    await apiSend({
+      path: "/api/v1/notes/search/",
+      method: "POST",
+      body: { q: "cookie" }
+    })
+
+    const runtime = mocks.tldwRequest.mock.calls[0]?.[1] as {
+      getConfig: () => Promise<Record<string, unknown>>
+    }
+    const config = await runtime.getConfig()
+    expect(config).toMatchObject({
+      serverUrl: window.location.origin,
+      authMode: "single-user",
+      authSource: "cookie-session"
+    })
+    expect(config).not.toHaveProperty("apiKey")
+    expect(config).not.toHaveProperty("accessToken")
+  })
+
+  it("hydrates an exact-origin session credential in the direct fallback", async () => {
+    mocks.runtimeId = null
+    const persistentConfig = {
+      serverUrl: "https://api.example.test",
+      authMode: "single-user",
+      authSource: "manual",
+      credentialSource: "manual",
+      apiKeyPersistence: "session",
+      apiKeyServerOrigin: "https://api.example.test"
+    }
+    mocks.storageGet.mockImplementation(async (key: string) =>
+      key === "tldwConfig" ? persistentConfig : null
+    )
+    mocks.sessionStorageGet.mockImplementation(async (key: string) =>
+      key === "tldwManualSessionApiKey"
+        ? {
+            apiKey: "api-send-session-key",
+            credentialSource: "manual",
+            apiKeyPersistence: "session",
+            apiKeyServerOrigin: "https://api.example.test"
+          }
+        : null
+    )
+    mocks.tldwRequest.mockResolvedValue({ ok: true, status: 200, data: { ok: true } })
+
+    const { apiSend } = await importApiSend()
+    await apiSend({ path: "/api/v1/health", method: "GET" })
+
+    const runtime = mocks.tldwRequest.mock.calls[0]?.[1] as {
+      getConfig: () => Promise<Record<string, unknown>>
+    }
+    await expect(runtime.getConfig()).resolves.toMatchObject({
+      apiKey: "api-send-session-key"
+    })
+    expect(persistentConfig).not.toHaveProperty("apiKey")
   })
 })

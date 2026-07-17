@@ -3,7 +3,9 @@
 # Integration tests for Skills REST API endpoints
 #
 
+import gc
 import os
+import weakref
 import zipfile
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -26,15 +28,15 @@ _routes_disable = {
 _routes_disable.update({"media", "audio", "audio-websocket"})
 os.environ["ROUTES_DISABLE"] = ",".join(sorted(_routes_disable))
 
-from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps import auth_deps
+from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.endpoints.skills import (
     MAX_SKILL_IMPORT_PREVIEW_UPLOAD_BYTES,
-    _skill_data_to_response,
     _metadata_to_summary,
+    _skill_data_to_response,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.Context_Integrity.resolver import clear_global_context_integrity_resolver
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
@@ -199,6 +201,58 @@ class TestListSkills:
         data = r.json()
         assert data["skills"] == []
         assert data["total"] == 0
+
+    def test_list_skills_reuses_service_for_cached_database(self, client, monkeypatch):
+        """Repeated requests reuse debounce and maintenance state for one user DB."""
+        constructor_calls = 0
+        original_init = SkillsService.__init__
+
+        def _counting_init(self, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003, ANN202
+            nonlocal constructor_calls
+            constructor_calls += 1
+            original_init(self, *args, **kwargs)
+
+        monkeypatch.setattr(SkillsService, "__init__", _counting_init)
+
+        first = client.get(f"{SKILLS_PREFIX}/")
+        second = client.get(f"{SKILLS_PREFIX}/")
+
+        assert first.status_code == 200, first.text
+        assert second.status_code == 200, second.text
+        assert constructor_calls == 1
+
+    def test_cached_service_does_not_outlive_database_owner(self, tmp_path, monkeypatch):
+        """Service reuse must not keep an evicted ChaCha database alive globally."""
+        from tldw_Server_API.app.api.v1.endpoints import skills as skills_endpoint
+
+        class StubDatabase:
+            pass
+
+        class StubService:
+            def __init__(self, user_id, base_path, db):
+                self.user_id = user_id
+                self.base_path = base_path
+                self.db = db
+
+        clear_cache = getattr(skills_endpoint._get_cached_skills_service, "cache_clear", None)
+        if clear_cache is not None:
+            clear_cache()
+        monkeypatch.setattr(skills_endpoint, "SkillsService", StubService)
+        db = StubDatabase()
+        service = skills_endpoint._get_cached_skills_service(42, tmp_path, db)
+        assert skills_endpoint._get_cached_skills_service(42, tmp_path, db) is service
+        db_ref = weakref.ref(db)
+        service_ref = weakref.ref(service)
+
+        del service
+        del db
+        gc.collect()
+        try:
+            assert db_ref() is None
+            assert service_ref() is None
+        finally:
+            if clear_cache is not None:
+                clear_cache()
 
     def test_list_skills_uses_current_principal_alias(self, principal_client):
         r = principal_client.get(f"{SKILLS_PREFIX}/")
@@ -598,15 +652,23 @@ class TestListSkills:
 
 class TestCreateAndGetSkill:
     def test_create_skill_and_get(self, client):
+        source = (
+            SAMPLE_SKILL.replace("name: test-skill", "name: new-skill")
+            .replace(
+                "context: inline",
+                "custom-review-key: preserve-me\ncontext: inline",
+            )
+        )
         r = client.post(
             f"{SKILLS_PREFIX}/",
-            json={"name": "new-skill", "content": SAMPLE_SKILL},
+            json={"name": "new-skill", "content": source},
         )
         assert r.status_code == 201, r.text
         created = r.json()
         assert created["name"] == "new-skill"
         assert created["description"] == "A test skill for API integration"
         assert created["version"] == 1
+        assert created["raw_content"] == source
 
         # Get it back
         r = client.get(f"{SKILLS_PREFIX}/new-skill")
@@ -614,6 +676,8 @@ class TestCreateAndGetSkill:
         got = r.json()
         assert got["name"] == "new-skill"
         assert "Process $ARGUMENTS" in got["content"]
+        assert got["raw_content"] == source
+        assert "custom-review-key: preserve-me" in got["raw_content"]
 
     def test_create_skill_invalid_name_400(self, client):
         r = client.post(
@@ -668,6 +732,23 @@ class TestUpdateSkill:
         updated = r.json()
         assert updated["description"] == "Updated"
         assert updated["version"] == 2
+
+    def test_update_skill_accepts_quoted_if_match(self, client: TestClient) -> None:
+        """Standard quoted entity tags are accepted for optimistic updates."""
+        created = client.post(
+            f"{SKILLS_PREFIX}/",
+            json={"name": "quoted-update", "content": "v1"},
+        )
+        assert created.status_code == 201, created.text
+
+        updated = client.put(
+            f"{SKILLS_PREFIX}/quoted-update",
+            json={"content": "v2"},
+            headers={"If-Match": f'"{created.json()["version"]}"'},
+        )
+
+        assert updated.status_code == 200, updated.text
+        assert updated.json()["version"] == created.json()["version"] + 1
 
     def test_update_skill_version_conflict_409(self, client):
         client.post(
@@ -753,7 +834,7 @@ class TestDeleteSkill:
 
         r = client.delete(
             f"{SKILLS_PREFIX}/del-versioned",
-            headers={"If-Match": str(version)},
+            headers={"If-Match": f'"{version}"'},
         )
         assert r.status_code == 204, r.text
 
@@ -787,6 +868,32 @@ class TestDeleteSkill:
         still_there = client.get(f"{SKILLS_PREFIX}/del-stale")
         assert still_there.status_code == 200, still_there.text
         assert still_there.json()["version"] == update_resp.json()["version"]
+
+    def test_delete_skill_rejects_malformed_if_match_with_400(self, client: TestClient) -> None:
+        """Malformed or weak entity tags fail as client input, not schema errors."""
+        created = client.post(
+            f"{SKILLS_PREFIX}/",
+            json={"name": "invalid-etag", "content": "content"},
+        )
+        assert created.status_code == 201, created.text
+
+        response = client.delete(
+            f"{SKILLS_PREFIX}/invalid-etag",
+            headers={"If-Match": 'W/"1"'},
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == "If-Match must be a numeric skill version"
+
+    def test_delete_skill_rejects_oversized_if_match_with_400(self, client: TestClient) -> None:
+        """Unbounded numeric entity tags fail as input instead of integer conversion."""
+        response = client.delete(
+            f"{SKILLS_PREFIX}/missing-skill",
+            headers={"If-Match": "9" * 5000},
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == "If-Match must be a numeric skill version"
 
     def test_delete_skill_not_found_404(self, client):
         r = client.delete(f"{SKILLS_PREFIX}/nonexistent")
@@ -925,6 +1032,169 @@ class TestBulkDeleteSkills:
         assert "/private/" not in joined
 
 
+class TestSkillTrash:
+    def test_delete_list_restore_and_purge_roundtrip(self, client: TestClient) -> None:
+        """Trash endpoints expose durable state and preserve optimistic versions."""
+        created = client.post(
+            f"{SKILLS_PREFIX}/",
+            json={
+                "name": "trash-api",
+                "content": "---\ndescription: Trash API\n---\nBody",
+                "supporting_files": {"notes.md": "keep"},
+            },
+        )
+        assert created.status_code == 201, created.text
+
+        deleted = client.delete(
+            f"{SKILLS_PREFIX}/trash-api",
+            headers={"If-Match": str(created.json()["version"])},
+        )
+        assert deleted.status_code == 204, deleted.text
+
+        trash = client.get(f"{SKILLS_PREFIX}/trash")
+        assert trash.status_code == 200, trash.text
+        assert trash.json()["total"] == 1
+        item = trash.json()["skills"][0]
+        assert item["name"] == "trash-api"
+        assert item["restorable"] is True
+        assert item["version"] == created.json()["version"] + 1
+
+        restored = client.post(
+            f"{SKILLS_PREFIX}/trash-api/restore",
+            headers={"If-Match": f'"{item["version"]}"'},
+        )
+        assert restored.status_code == 200, restored.text
+        assert restored.json()["supporting_files"] == {"notes.md": "keep"}
+        assert client.get(f"{SKILLS_PREFIX}/trash").json()["total"] == 0
+
+        deleted_again = client.delete(
+            f"{SKILLS_PREFIX}/trash-api",
+            headers={"If-Match": str(restored.json()["version"])},
+        )
+        assert deleted_again.status_code == 204, deleted_again.text
+        trashed_again = client.get(f"{SKILLS_PREFIX}/trash").json()["skills"][0]
+
+        purged = client.delete(
+            f"{SKILLS_PREFIX}/trash-api/purge",
+            headers={"If-Match": f'"{trashed_again["version"]}"'},
+        )
+        assert purged.status_code == 204, purged.text
+        assert client.get(f"{SKILLS_PREFIX}/trash").json()["total"] == 0
+
+    def test_restore_and_purge_reject_stale_versions(self, client: TestClient) -> None:
+        created = client.post(
+            f"{SKILLS_PREFIX}/",
+            json={"name": "trash-stale", "content": "Body"},
+        )
+        client.delete(
+            f"{SKILLS_PREFIX}/trash-stale",
+            headers={"If-Match": str(created.json()["version"])},
+        )
+
+        restore = client.post(
+            f"{SKILLS_PREFIX}/trash-stale/restore",
+            headers={"If-Match": str(created.json()["version"])},
+        )
+        purge = client.delete(
+            f"{SKILLS_PREFIX}/trash-stale/purge",
+            headers={"If-Match": str(created.json()["version"])},
+        )
+
+        assert restore.status_code == 409
+        assert purge.status_code == 409
+
+    def test_trash_list_error_log_has_sanitized_request_context(
+        self,
+        client: TestClient,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        async def _boom(self, *, limit=100, offset=0):  # noqa: ANN001, ANN202
+            raise SkillsError("trash backend exploded at /private/trash.db")
+
+        monkeypatch.setattr(SkillsService, "list_trash", _boom)
+
+        with _capture_skills_endpoint_errors() as messages:
+            response = client.get(f"{SKILLS_PREFIX}/trash?limit=7&offset=3")
+
+        joined = "\n".join(messages)
+        assert response.status_code == 500
+        assert response.json()["detail"] == "Failed to list Skills Trash"
+        assert "Error listing Skills Trash" in joined
+        assert f"user_id={TEST_USER_ID}" in joined
+        assert "limit=7" in joined
+        assert "offset=3" in joined
+        assert "error_type=SkillsError" in joined
+        assert "trash backend exploded" not in joined
+        assert "/private/" not in joined
+
+    @pytest.mark.parametrize(
+        ("method", "action", "service_method", "log_message", "detail"),
+        [
+            (
+                "POST",
+                "restore",
+                "restore_skill",
+                "Error restoring skill from Trash",
+                "Failed to restore skill",
+            ),
+            (
+                "DELETE",
+                "purge",
+                "purge_skill",
+                "Error permanently deleting skill from Trash",
+                "Failed to permanently delete skill",
+            ),
+        ],
+    )
+    def test_trash_mutation_error_logs_have_sanitized_request_context(
+        self,
+        client: TestClient,
+        monkeypatch: pytest.MonkeyPatch,
+        method: str,
+        action: str,
+        service_method: str,
+        log_message: str,
+        detail: str,
+    ) -> None:
+        async def _boom(self, name, expected_version=None):  # noqa: ANN001, ANN202
+            raise SkillsError("trash backend exploded at /private/trash.db")
+
+        monkeypatch.setattr(SkillsService, service_method, _boom)
+
+        with _capture_skills_endpoint_errors() as messages:
+            response = client.request(
+                method,
+                f"{SKILLS_PREFIX}/trash-log/{action}",
+                headers={"If-Match": '"3"'},
+            )
+
+        joined = "\n".join(messages)
+        assert response.status_code == 500
+        assert response.json()["detail"] == detail
+        assert log_message in joined
+        assert f"user_id={TEST_USER_ID}" in joined
+        assert "skill_name=trash-log" in joined
+        assert "expected_version=3" in joined
+        assert "error_type=SkillsError" in joined
+        assert "trash backend exploded" not in joined
+        assert "/private/" not in joined
+
+    @pytest.mark.parametrize(
+        ("method", "action"),
+        [("POST", "restore"), ("DELETE", "purge")],
+    )
+    def test_restore_and_purge_reject_invalid_skill_names(
+        self,
+        client: TestClient,
+        method: str,
+        action: str,
+    ) -> None:
+        response = client.request(method, f"{SKILLS_PREFIX}/INVALID!/{action}")
+
+        assert response.status_code == 400
+        assert "Invalid skill name" in response.json()["detail"]
+
+
 class TestImportExport:
     def test_import_skill_preview_json_returns_metadata_and_conflict(self, client):
         client.post(
@@ -965,6 +1235,70 @@ class TestImportExport:
         persisted = client.get(f"{SKILLS_PREFIX}/preview-conflict")
         assert persisted.status_code == 200
         assert persisted.json()["content"] == "Original"
+
+    def test_text_import_rejects_stale_preview_version(self, client):
+        created = client.post(
+            f"{SKILLS_PREFIX}/",
+            json={"name": "stale-text", "content": "Original"},
+        )
+        assert created.status_code == 201, created.text
+        preview = client.post(
+            f"{SKILLS_PREFIX}/import/preview",
+            json={"name": "stale-text", "content": "Replacement"},
+        )
+        assert preview.status_code == 200, preview.text
+        preview_version = preview.json()["existing_version"]
+        updated = client.put(
+            f"{SKILLS_PREFIX}/stale-text",
+            json={"content": "Concurrent edit"},
+            headers={"If-Match": str(preview_version)},
+        )
+        assert updated.status_code == 200, updated.text
+
+        response = client.post(
+            f"{SKILLS_PREFIX}/import",
+            json={
+                "name": "stale-text",
+                "content": "Replacement",
+                "overwrite": True,
+                "expected_version": preview_version,
+            },
+        )
+
+        assert response.status_code == 409
+        persisted = client.get(f"{SKILLS_PREFIX}/stale-text")
+        assert persisted.status_code == 200
+        assert persisted.json()["content"] == "Concurrent edit"
+
+    def test_file_import_rejects_stale_preview_version(self, client):
+        created = client.post(
+            f"{SKILLS_PREFIX}/",
+            json={"name": "stale-file", "content": "Original"},
+        )
+        assert created.status_code == 201, created.text
+        preview = client.post(
+            f"{SKILLS_PREFIX}/import/file/preview",
+            files={"file": ("stale-file.md", b"Replacement", "text/markdown")},
+        )
+        assert preview.status_code == 200, preview.text
+        preview_version = preview.json()["existing_version"]
+        updated = client.put(
+            f"{SKILLS_PREFIX}/stale-file",
+            json={"content": "Concurrent edit"},
+            headers={"If-Match": str(preview_version)},
+        )
+        assert updated.status_code == 200, updated.text
+
+        response = client.post(
+            f"{SKILLS_PREFIX}/import/file",
+            params={"overwrite": "true", "expected_version": preview_version},
+            files={"file": ("stale-file.md", b"Replacement", "text/markdown")},
+        )
+
+        assert response.status_code == 409
+        persisted = client.get(f"{SKILLS_PREFIX}/stale-file")
+        assert persisted.status_code == 200
+        assert persisted.json()["content"] == "Concurrent edit"
 
     def test_import_skill_preview_invalid_content_returns_review_error(self, client):
         r = client.post(
@@ -1045,6 +1379,31 @@ class TestImportExport:
         assert imported.status_code == 201, imported.text
         assert imported.json()["version"] == 1
 
+    def test_import_skill_file_zip_sniffs_content_without_zip_filename(self, client):
+        buffer = BytesIO()
+        with zipfile.ZipFile(buffer, "w") as zf:
+            zf.writestr(
+                "sniffed-import/SKILL.md",
+                "---\nname: sniffed-import\ndescription: Sniffed import\n---\nZip import content",
+            )
+
+        response = client.post(
+            f"{SKILLS_PREFIX}/import/file",
+            files={
+                "file": (
+                    "skill.bundle",
+                    buffer.getvalue(),
+                    "application/octet-stream",
+                )
+            },
+        )
+
+        assert response.status_code == 201, response.text
+        assert response.json()["name"] == "sniffed-import"
+        persisted = client.get(f"{SKILLS_PREFIX}/sniffed-import")
+        assert persisted.status_code == 200
+        assert persisted.json()["description"] == "Sniffed import"
+
     def test_import_skill_file_zip_non_utf8_skill_md_returns_400(self, client):
         buffer = BytesIO()
         with zipfile.ZipFile(buffer, "w") as zf:
@@ -1065,6 +1424,18 @@ class TestImportExport:
 
         r = client.post(
             f"{SKILLS_PREFIX}/import/file/preview",
+            files={"file": ("too-large.md", too_large, "text/markdown")},
+        )
+
+        assert r.status_code == 413, r.text
+        assert "exceeds" in r.json()["detail"]
+
+    def test_import_skill_file_rejects_oversized_upload(self, client):
+        """The mutating import path must enforce the same upload limit as preview."""
+        too_large = b"a" * (MAX_SKILL_IMPORT_PREVIEW_UPLOAD_BYTES + 1)
+
+        r = client.post(
+            f"{SKILLS_PREFIX}/import/file",
             files={"file": ("too-large.md", too_large, "text/markdown")},
         )
 
@@ -1131,7 +1502,15 @@ class TestImportExport:
         assert r.json()["description"] == "Overwritten"
 
     def test_import_skill_sanitizes_skills_error(self, client, monkeypatch):
-        async def _boom(self, *, content, name=None, supporting_files=None, overwrite=False):  # noqa: ANN001, ANN202
+        async def _boom(  # noqa: ANN001, ANN202
+            self,
+            *,
+            content,
+            name=None,
+            supporting_files=None,
+            overwrite=False,
+            expected_version=None,
+        ):
             raise SkillsError("skills backend exploded at /private/import")
 
         monkeypatch.setattr(SkillsService, "import_skill", _boom)
@@ -1190,7 +1569,15 @@ class TestImportExport:
         assert r.status_code == 201, r.text
 
     def test_import_skill_file_sanitizes_skills_error(self, client, monkeypatch):
-        async def _boom(self, *, content, name=None, supporting_files=None, overwrite=False):  # noqa: ANN001, ANN202
+        async def _boom(  # noqa: ANN001, ANN202
+            self,
+            *,
+            content,
+            name=None,
+            supporting_files=None,
+            overwrite=False,
+            expected_version=None,
+        ):
             raise SkillsError("skills backend exploded at /private/import-file")
 
         monkeypatch.setattr(SkillsService, "import_skill", _boom)
@@ -1288,10 +1675,14 @@ class TestImportExport:
         assert r.status_code == 400
 
     def test_export_skill_zip(self, client):
-        client.post(
+        create_response = client.post(
             f"{SKILLS_PREFIX}/",
-            json={"name": "export-skill", "content": SAMPLE_SKILL},
+            json={
+                "name": "export-skill",
+                "content": SAMPLE_SKILL.replace("name: test-skill", "name: export-skill"),
+            },
         )
+        assert create_response.status_code == 201, create_response.text
         r = client.get(f"{SKILLS_PREFIX}/export-skill/export")
         assert r.status_code == 200
         assert r.headers["content-type"] == "application/zip"

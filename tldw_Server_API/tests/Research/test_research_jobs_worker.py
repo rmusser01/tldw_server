@@ -1,7 +1,26 @@
+from pathlib import Path
+
 import pytest
 
-
 pytestmark = pytest.mark.unit
+
+
+def _assert_artifacts_exist(
+    db,
+    base_dir: Path,
+    session_id: str,
+    artifact_names: set[str],
+) -> None:
+    artifacts = {
+        artifact.artifact_name: artifact
+        for artifact in db.list_artifacts(session_id)
+    }
+    assert artifact_names <= artifacts.keys()
+    research_root = (base_dir / "research").resolve()
+    for name in artifact_names:
+        path = Path(artifacts[name].storage_path).resolve()
+        path.relative_to(research_root)
+        assert path.is_file()
 
 
 class _ProviderStub:
@@ -293,7 +312,7 @@ async def test_planning_job_writes_plan_and_opens_checkpoint(tmp_path):
     assert updated.latest_checkpoint_id is not None
     assert result["phase"] == "awaiting_plan_review"
     assert result["artifacts_written"] >= 1
-    assert (tmp_path / "outputs" / "research" / session.id / "plan.json").exists()
+    _assert_artifacts_exist(db, tmp_path / "outputs", session.id, {"plan.json"})
 
 
 @pytest.mark.asyncio
@@ -435,9 +454,12 @@ async def test_collecting_job_writes_artifacts_and_opens_source_review(tmp_path)
     assert updated.latest_checkpoint_id is not None
     assert result["phase"] == "awaiting_source_review"
     assert result["artifacts_written"] >= 3
-    assert (tmp_path / "outputs" / "research" / session.id / "source_registry.json").exists()
-    assert (tmp_path / "outputs" / "research" / session.id / "evidence_notes.jsonl").exists()
-    assert (tmp_path / "outputs" / "research" / session.id / "collection_summary.json").exists()
+    _assert_artifacts_exist(
+        db,
+        tmp_path / "outputs",
+        session.id,
+        {"source_registry.json", "evidence_notes.jsonl", "collection_summary.json"},
+    )
 
 
 @pytest.mark.asyncio
@@ -1158,14 +1180,21 @@ async def test_synthesizing_job_writes_artifacts_and_opens_outline_review(tmp_pa
     assert updated.latest_checkpoint_id is not None
     assert result["phase"] == "awaiting_outline_review"
     assert result["artifacts_written"] >= 4
-    assert (tmp_path / "outputs" / "research" / session.id / "outline_v1.json").exists()
-    assert (tmp_path / "outputs" / "research" / session.id / "claims.json").exists()
-    assert (tmp_path / "outputs" / "research" / session.id / "report_v1.md").exists()
-    assert (tmp_path / "outputs" / "research" / session.id / "synthesis_summary.json").exists()
-    assert (tmp_path / "outputs" / "research" / session.id / "verification_summary.json").exists()
-    assert (tmp_path / "outputs" / "research" / session.id / "unsupported_claims.json").exists()
-    assert (tmp_path / "outputs" / "research" / session.id / "contradictions.json").exists()
-    assert (tmp_path / "outputs" / "research" / session.id / "source_trust.json").exists()
+    _assert_artifacts_exist(
+        db,
+        tmp_path / "outputs",
+        session.id,
+        {
+            "outline_v1.json",
+            "claims.json",
+            "report_v1.md",
+            "synthesis_summary.json",
+            "verification_summary.json",
+            "unsupported_claims.json",
+            "contradictions.json",
+            "source_trust.json",
+        },
+    )
 
 
 @pytest.mark.asyncio
@@ -1957,8 +1986,8 @@ async def test_packaging_job_writes_bundle_and_completes_session(tmp_path):
 @pytest.mark.asyncio
 async def test_packaging_job_inserts_completion_message_into_linked_chat(tmp_path, monkeypatch):
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
-    from tldw_Server_API.app.core.DB_Management.ResearchSessionsDB import ResearchSessionsDB
     from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+    from tldw_Server_API.app.core.DB_Management.ResearchSessionsDB import ResearchSessionsDB
     from tldw_Server_API.app.core.Research.artifact_store import ResearchArtifactStore
     from tldw_Server_API.app.core.Research.jobs import handle_research_phase_job
 

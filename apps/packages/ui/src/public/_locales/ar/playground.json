@@ -1085,18 +1085,6 @@
   "actor_presetPlaceholder": {
     "message": "اختر إعدادا مسبقا"
   },
-  "actor_preset.sliceOfLife": {
-    "message": "لقطة من الحياة"
-  },
-  "actor_preset.dungeonCrawl": {
-    "message": "استكشاف زنزانة"
-  },
-  "actor_preset.romance": {
-    "message": "رومانسية"
-  },
-  "actor_preset.workSession": {
-    "message": "جلسة عمل"
-  },
   "actor_applyPreset": {
     "message": "تطبيق"
   },
@@ -1117,15 +1105,6 @@
   },
   "actor_templateModeHelp": {
     "message": "يتحكم بكيفية تفاعل Actor مع قوالب المشهد النشطة. الدمج يبقي الاثنين؛ الاستبدال يسمح لـ Actor باستبدال الحقول المتداخلة؛ التجاهل يتجاوز Actor عندما تكون القوالب نشطة."
-  },
-  "actor_templateMode.merge": {
-    "message": "دمج مع القوالب"
-  },
-  "actor_templateMode.override": {
-    "message": "استبدال القوالب"
-  },
-  "actor_templateMode.ignore": {
-    "message": "تجاهل عند نشاط القوالب"
   },
   "actor_bladeAspectsTitle": {
     "message": "الجوانب"
@@ -1570,5 +1549,29 @@
   },
   "acp_workspace_title": {
     "message": "طرفية مساحة العمل"
+  },
+  "tts_routeTitle": {
+    "message": "تحويل النص إلى كلام"
+  },
+  "actor_preset_sliceOfLife": {
+    "message": "لقطة من الحياة"
+  },
+  "actor_preset_dungeonCrawl": {
+    "message": "استكشاف زنزانة"
+  },
+  "actor_preset_romance": {
+    "message": "رومانسية"
+  },
+  "actor_preset_workSession": {
+    "message": "جلسة عمل"
+  },
+  "actor_templateMode_merge": {
+    "message": "دمج مع القوالب"
+  },
+  "actor_templateMode_override": {
+    "message": "استبدال القوالب"
+  },
+  "actor_templateMode_ignore": {
+    "message": "تجاهل عند نشاط القوالب"
   }
 }

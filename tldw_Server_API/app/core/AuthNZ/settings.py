@@ -6,6 +6,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import re
 from pathlib import Path
 from typing import Annotated, Literal, Optional
 
@@ -101,6 +102,12 @@ SINGLE_USER_API_KEY_PLACEHOLDERS = {
     "change-me-in-production",
     "CHANGE-ME-to-a-secure-key-at-least-16-chars",
 }
+SINGLE_USER_SESSION_COOKIE_NAME_PATTERN = re.compile(
+    r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$"
+)
+SINGLE_USER_SESSION_COOKIE_RESERVED_PREFIXES = ("__host-", "__http-", "__secure-")
+
+
 def _authnz_default_env_file() -> Path:
     if get_tldw_env_file_path:
         explicit_env_file = get_tldw_env_file_path()
@@ -779,6 +786,19 @@ class Settings(BaseSettings):
         default=1,
         description="Fixed user ID for single-user mode"
     )
+
+    SINGLE_USER_SESSION_COOKIE_NAME: str = Field(
+        default="tldw_single_user_session",
+        description="Host-only cookie name for opaque single-user sessions",
+    )
+
+    SINGLE_USER_SESSION_EXPIRE_DAYS: int = Field(
+        default=30,
+        ge=1,
+        le=365,
+        description="Opaque single-user session lifetime in days",
+    )
+
     # Optional IP allowlist for single-user mode (comma-separated env or list)
     SINGLE_USER_ALLOWED_IPS: Annotated[list[str], NoDecode] = Field(
         default_factory=list,
@@ -1019,6 +1039,18 @@ class Settings(BaseSettings):
 
         if v and len(v) < 32:
             raise ValueError("JWT_SECRET_KEY must be at least 32 characters")
+        return v
+
+    @field_validator("SINGLE_USER_SESSION_COOKIE_NAME")
+    @classmethod
+    def validate_single_user_session_cookie_name(cls, v: str) -> str:
+        """Reject names incompatible with the single-user session cookie contract."""
+        if not SINGLE_USER_SESSION_COOKIE_NAME_PATTERN.fullmatch(v):
+            raise ValueError("must be a non-empty RFC cookie token")
+        if v == "csrf_token":
+            raise ValueError("must not collide with the CSRF cookie name")
+        if v.lower().startswith(SINGLE_USER_SESSION_COOKIE_RESERVED_PREFIXES):
+            raise ValueError("must not use a reserved secure cookie prefix")
         return v
 
     @field_validator("SINGLE_USER_ALLOWED_IPS", mode="before")

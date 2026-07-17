@@ -24,6 +24,7 @@ from datetime import datetime, timedelta, timezone
 from html import escape
 from pathlib import Path
 from typing import Any, Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import (
     APIRouter,
@@ -63,6 +64,10 @@ from tldw_Server_API.app.core.AuthNZ.ip_allowlist import (
     resolve_client_ip,
 )
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+from tldw_Server_API.app.core.AuthNZ.websocket_session_auth import (
+    cookie_websocket_rejection_code,
+    resolve_single_user_cookie_websocket,
+)
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 from tldw_Server_API.app.core.DB_Management.scope_context import get_scope as _get_scope
@@ -83,6 +88,18 @@ from tldw_Server_API.app.core.testing import is_explicit_pytest_runtime as _is_e
 from tldw_Server_API.app.core.testing import is_test_mode as _is_test_mode
 from tldw_Server_API.app.core.testing import is_truthy as _is_truthy
 from tldw_Server_API.app.core.Watchlists import template_store
+from tldw_Server_API.app.core.Watchlists.briefing_contract import (
+    BRIEFING_PIPELINE_KEY,
+    get_briefing_contract,
+    normalize_briefing_output_prefs,
+)
+from tldw_Server_API.app.core.Watchlists.briefing_delivery import (
+    external_delivery_adapters,
+    reconcile_successful_delivery_attempt,
+    schedule_briefing_delivery,
+)
+from tldw_Server_API.app.core.Watchlists.briefing_fulfillment import retry_briefing_stage
+from tldw_Server_API.app.core.Watchlists.briefing_projection import build_briefing_projection
 from tldw_Server_API.app.core.Watchlists.fetchers import (
     fetch_rss_feed,
     fetch_site_items_with_rules,
@@ -243,7 +260,11 @@ from tldw_Server_API.app.api.v1.schemas.watchlists_schemas import (  # noqa: E40
     WatchlistOutputEvidenceResponse,
     WatchlistOutputsListResponse,
     WatchlistRunAudioResponse,
+    WatchlistBriefingProjection,
+    WatchlistBriefingRetryRequest,
     WatchlistReportReadiness,
+    WatchlistSchedulePreviewRequest,
+    WatchlistSchedulePreviewResponse,
     WatchlistsListResponse,
     WatchlistUpdateRequest,
     WatchlistTemplateCreateRequest,
@@ -320,6 +341,48 @@ _WATCHLISTS_UX_BASELINE = {
 def _utcnow_iso() -> str:
     """Return the current UTC timestamp as an ISO-8601 string."""
     return datetime.now(timezone.utc).isoformat()
+
+
+@router.post(
+    "/schedules/preview",
+    response_model=WatchlistSchedulePreviewResponse,
+    summary="Preview the next two schedule occurrences",
+    dependencies=[Depends(rbac_rate_limit("watchlists.read"))],
+)
+async def preview_watchlist_schedule(
+    payload: WatchlistSchedulePreviewRequest = Body(...),
+    current_user: User = Depends(get_request_user),
+    _db: WatchlistsDatabase = Depends(get_watchlists_db_for_user),
+) -> WatchlistSchedulePreviewResponse:
+    """Return APScheduler's exact next two occurrences for one authenticated user."""
+    _ = current_user
+    timezone_name = payload.timezone.strip() or "UTC"
+    try:
+        schedule_timezone = ZoneInfo(timezone_name)
+    except (ValueError, ZoneInfoNotFoundError):
+        raise HTTPException(status_code=422, detail="invalid_timezone") from None
+
+    try:
+        from apscheduler.triggers.cron import CronTrigger
+
+        trigger = CronTrigger.from_crontab(
+            payload.schedule_expr.strip(),
+            timezone=schedule_timezone,
+        )
+    except ValueError:
+        raise HTTPException(status_code=422, detail="invalid_schedule_expr") from None
+
+    now = datetime.now(schedule_timezone)
+    next_run_at = trigger.get_next_fire_time(None, now)
+    following_run_at = (
+        trigger.get_next_fire_time(next_run_at, next_run_at)
+        if next_run_at is not None
+        else None
+    )
+    return WatchlistSchedulePreviewResponse(
+        next_run_at=next_run_at,
+        following_run_at=following_run_at,
+    )
 
 
 def _safe_ratio(numerator: int | float, denominator: int | float) -> float:
@@ -1036,25 +1099,12 @@ def _extract_job_email_recipients(output_prefs: dict[str, Any] | None) -> list[s
         return []
 
     recipients: list[str] = []
-
-    deliveries = output_prefs.get("deliveries")
-    if isinstance(deliveries, dict):
-        email_cfg = deliveries.get("email")
-        if isinstance(email_cfg, dict):
-            raw = email_cfg.get("recipients")
-            if isinstance(raw, list):
-                for value in raw:
-                    if isinstance(value, str) and value.strip():
-                        recipients.append(value.strip())
-
-    if not recipients:
-        delivery_cfg = output_prefs.get("delivery_config")
-        if isinstance(delivery_cfg, dict):
-            raw = delivery_cfg.get("email_recipients")
-            if isinstance(raw, list):
-                for value in raw:
-                    if isinstance(value, str) and value.strip():
-                        recipients.append(value.strip())
+    email_cfg = get_briefing_contract(output_prefs, scheduled=False)["delivery"]["email"]
+    raw = email_cfg.get("recipients")
+    if isinstance(raw, list):
+        for value in raw:
+            if isinstance(value, str) and value.strip():
+                recipients.append(value.strip())
 
     deduped: list[str] = []
     seen: set[str] = set()
@@ -1079,6 +1129,148 @@ def _find_invalid_email_recipients(recipients: list[str]) -> list[str]:
         if not _EMAIL_RECIPIENT_PATTERN.match(normalized):
             invalid.append(value.strip())
     return invalid
+
+
+def _raw_delivery_configs(output_prefs: dict[str, Any] | None) -> list[dict[str, Any]]:
+    if not isinstance(output_prefs, dict):
+        return []
+    candidates: list[Any] = [output_prefs.get("deliveries")]
+    pipeline = output_prefs.get(BRIEFING_PIPELINE_KEY)
+    if isinstance(pipeline, dict):
+        candidates.append(pipeline.get("delivery"))
+    legacy = output_prefs.get("delivery_config")
+    if isinstance(legacy, dict):
+        candidates.append(legacy)
+        legacy_adapter: dict[str, Any] = {}
+        if "email_enabled" in legacy or "email_recipients" in legacy:
+            legacy_adapter["email"] = {
+                "enabled": legacy.get("email_enabled", False),
+                "recipients": legacy.get("email_recipients", []),
+            }
+        if "create_chatbook" in legacy:
+            legacy_adapter["chatbook"] = {"enabled": legacy.get("create_chatbook")}
+        if legacy_adapter:
+            candidates.append(legacy_adapter)
+    return [dict(candidate) for candidate in candidates if isinstance(candidate, dict)]
+
+
+def _validate_raw_delivery_config(output_prefs: dict[str, Any] | None) -> None:
+    """Reject malformed adapter intent before canonical normalization can erase it."""
+    from tldw_Server_API.app.core.Notifications.service import (
+        MAX_EMAIL_RECIPIENTS,
+        normalize_email_recipients,
+    )
+
+    if isinstance(output_prefs, dict):
+        legacy = output_prefs.get("delivery_config")
+        if legacy is not None and not isinstance(legacy, dict):
+            _raise_watchlists_validation_error(
+                rule="invalid_delivery_configuration",
+                message_key="watchlists:jobs.form.deliveryInvalid",
+                message="Delivery configuration must be an object.",
+                remediation_key="watchlists:jobs.form.deliveryRemediation",
+                remediation="Provide a valid delivery configuration.",
+            )
+
+    for delivery in _raw_delivery_configs(output_prefs):
+        email = delivery.get("email")
+        if email is not None and not isinstance(email, dict):
+            _raise_watchlists_validation_error(
+                rule="invalid_email_delivery",
+                message_key="watchlists:jobs.form.emailRecipientsInvalidSubmit",
+                message="Email delivery configuration must be an object.",
+                remediation_key="watchlists:jobs.form.emailRecipientsRemediation",
+                remediation="Provide a valid email delivery configuration.",
+            )
+        if isinstance(email, dict):
+            raw_recipients = email.get("recipients", [])
+            if not isinstance(raw_recipients, list):
+                _raise_watchlists_validation_error(
+                    rule="invalid_email_recipients",
+                    message_key="watchlists:jobs.form.emailRecipientsInvalidSubmit",
+                    message="Email recipients must be a list.",
+                    remediation_key="watchlists:jobs.form.emailRecipientsRemediation",
+                    remediation="Provide a list of valid recipient addresses.",
+                )
+            if len(raw_recipients) > MAX_EMAIL_RECIPIENTS:
+                _raise_watchlists_validation_error(
+                    rule="too_many_email_recipients",
+                    message_key="watchlists:jobs.form.emailRecipientsInvalidSubmit",
+                    message="Too many email recipients.",
+                    remediation_key="watchlists:jobs.form.emailRecipientsRemediation",
+                    remediation=f"Use at most {MAX_EMAIL_RECIPIENTS} recipient addresses.",
+                    meta={"count": len(raw_recipients), "maximum": MAX_EMAIL_RECIPIENTS},
+                )
+            normalized, invalid_count = normalize_email_recipients(raw_recipients)
+            if invalid_count:
+                invalid_values = [
+                    value
+                    for value in raw_recipients
+                    if isinstance(value, str) and value.strip() and value.strip() not in normalized
+                ]
+                _raise_watchlists_validation_error(
+                    rule="invalid_email_recipients",
+                    message_key="watchlists:jobs.form.emailRecipientsInvalidSubmit",
+                    message="Fix invalid email recipients before saving.",
+                    remediation_key="watchlists:jobs.form.emailRecipientsRemediation",
+                    remediation="Remove or correct invalid recipient addresses.",
+                    meta={"count": invalid_count, "invalid_recipients": invalid_values[:10]},
+                )
+            if bool(email.get("enabled")) and not normalized:
+                _raise_watchlists_validation_error(
+                    rule="email_recipients_required",
+                    message_key="watchlists:jobs.form.emailRecipientsInvalidSubmit",
+                    message="Enabled email delivery requires at least one recipient.",
+                    remediation_key="watchlists:jobs.form.emailRecipientsRemediation",
+                    remediation="Add a valid recipient or disable email delivery.",
+                )
+
+        chatbook = delivery.get("chatbook")
+        if chatbook is not None and not isinstance(chatbook, dict):
+            _raise_watchlists_validation_error(
+                rule="invalid_chatbook_delivery",
+                message_key="watchlists:jobs.form.deliveryInvalid",
+                message="Chatbook delivery configuration must be an object.",
+                remediation_key="watchlists:jobs.form.deliveryRemediation",
+                remediation="Provide a valid Chatbook delivery configuration.",
+            )
+        if isinstance(chatbook, dict):
+            metadata = chatbook.get("metadata")
+            conversation_id = chatbook.get("conversation_id")
+            scalar_limits = {
+                "title": 255,
+                "description": 4000,
+                "provider": 128,
+                "model": 128,
+            }
+            scalar_fields_valid = all(
+                value is None
+                or (
+                    isinstance(value, str)
+                    and bool(value.strip())
+                    and len(value) <= scalar_limits[field]
+                )
+                for field, value in ((field, chatbook.get(field)) for field in scalar_limits)
+            )
+            if (
+                (metadata is not None and not isinstance(metadata, dict))
+                or (
+                    conversation_id is not None
+                    and (
+                        isinstance(conversation_id, bool)
+                        or not isinstance(conversation_id, int)
+                        or conversation_id < 1
+                    )
+                )
+                or not scalar_fields_valid
+            ):
+                _raise_watchlists_validation_error(
+                    rule="invalid_chatbook_delivery",
+                    message_key="watchlists:jobs.form.deliveryInvalid",
+                    message="Chatbook delivery configuration is invalid.",
+                    remediation_key="watchlists:jobs.form.deliveryRemediation",
+                    remediation="Correct the Chatbook title, metadata, or conversation association.",
+                )
 
 
 def _detect_schedule_interval_minutes(schedule_expr: str | None, timezone: str | None) -> float | None:
@@ -1788,6 +1980,9 @@ async def _resolve_watchlists_ws_user_id(
             raise HTTPException(status_code=401, detail="invalid_api_key")
         return int(user_id)
 
+    cookie_identity = await resolve_single_user_cookie_websocket(websocket)
+    if cookie_identity is not None:
+        return cookie_identity.user_id
     raise HTTPException(status_code=401, detail="auth_required")
 
 
@@ -3377,6 +3572,11 @@ async def create_job(
 ):
     ingest_prefs = payload.ingest_prefs.model_dump(exclude_none=True) if payload.ingest_prefs else None
     output_prefs = _merge_output_prefs(payload.output_prefs or {}, ingest_prefs)
+    _validate_raw_delivery_config(output_prefs)
+    output_prefs = normalize_briefing_output_prefs(
+        output_prefs,
+        scheduled=bool(payload.schedule_expr),
+    ).output_prefs
     _validate_job_request(
         scope=payload.scope or {},
         schedule_expr=payload.schedule_expr,
@@ -3833,13 +4033,18 @@ async def update_job(
         patch["job_filters_json"] = json.dumps(patch.pop("job_filters") or {})
     _ensure_watchlist_exists(db, patch.get("watchlist_id"))
     current_output_prefs = _normalize_output_prefs(getattr(current, "output_prefs_json", None))
+    scheduled = bool(patch.get("schedule_expr", current.schedule_expr))
     if ingest_prefs is not None:
         if output_prefs is None:
             output_prefs = current_output_prefs
         output_prefs = _merge_output_prefs(output_prefs, ingest_prefs)
+        _validate_raw_delivery_config(output_prefs)
+        output_prefs = normalize_briefing_output_prefs(output_prefs, scheduled=scheduled).output_prefs
         patch["output_prefs_json"] = json.dumps(output_prefs)
     elif output_prefs is not None:
-        patch["output_prefs_json"] = json.dumps(output_prefs or {})
+        _validate_raw_delivery_config(output_prefs)
+        output_prefs = normalize_briefing_output_prefs(output_prefs or {}, scheduled=scheduled).output_prefs
+        patch["output_prefs_json"] = json.dumps(output_prefs)
     current_scope = {}
     try:
         current_scope = json.loads(current.scope_json or "{}") if current.scope_json else {}
@@ -4785,7 +4990,7 @@ async def stream_run(
         user_id = await _resolve_watchlists_ws_user_id(websocket, token=token, api_key=api_key)
     except HTTPException:
         try:
-            await websocket.close(code=4401)
+            await websocket.close(code=cookie_websocket_rejection_code(websocket) or 4401)
         finally:
             return  # noqa: B012
     db = WatchlistsDatabase.for_user(user_id)
@@ -4982,9 +5187,21 @@ def _is_audio_output_row(row: Any, metadata: dict[str, Any]) -> bool:
     )
 
 
+def _external_delivery_plan(raw: Any) -> dict[str, dict[str, Any]]:
+    """Return only enabled email and Chatbook adapters from a delivery plan."""
+    if not isinstance(raw, dict):
+        return {}
+    external: dict[str, dict[str, Any]] = {}
+    for channel in ("email", "chatbook"):
+        config = raw.get(channel)
+        if isinstance(config, dict) and config and config.get("enabled", True) is True:
+            external[channel] = dict(config)
+    return external
+
+
 def _has_delivery_plan(metadata: dict[str, Any]) -> bool:
-    """Return whether metadata includes a persisted delivery plan."""
-    return isinstance(metadata.get("delivery_plan"), dict)
+    """Return whether metadata includes an enabled external delivery plan."""
+    return bool(_external_delivery_plan(metadata.get("delivery_plan")))
 
 
 def _is_canonical_delivery_output(row: Any, metadata: dict[str, Any]) -> bool:
@@ -5009,7 +5226,7 @@ def _output_row_summary(row: Any) -> dict[str, Any]:
         "type": getattr(row, "type", None),
         "created_at": getattr(row, "created_at", None),
         "deliveries": _sanitize_delivery_results(metadata.get("deliveries")),
-        "delivery_plan_present": isinstance(metadata.get("delivery_plan"), dict),
+        "delivery_plan_present": _has_delivery_plan(metadata),
         "audio_briefing_status": metadata.get("audio_briefing_status"),
         "audio_briefing_task_id": metadata.get("audio_briefing_task_id"),
         "audio_briefing_reason": metadata.get("audio_briefing_reason"),
@@ -5098,6 +5315,239 @@ def _mirror_audio_retry_state_to_output(
         return False
 
 
+async def _build_briefing_projection(
+    *,
+    occurrence: Any,
+    current_user: User,
+    resolved_user_id: int,
+    watchlists_db: Any,
+    collections_db: Any,
+) -> WatchlistBriefingProjection:
+    """Load current audio state and validate the core occurrence projection."""
+    contract = _parse_json_object(getattr(occurrence, "contract_json", None))
+    audio: dict[str, Any] | None = None
+    if bool(contract.get("audio", {}).get("enabled")):
+        try:
+            audio = await get_run_audio(
+                run_id=int(occurrence.run_id),
+                target_user_id=resolved_user_id
+                if resolved_user_id != _safe_int(getattr(current_user, "id", None), -1)
+                else None,
+                current_user=current_user,
+                db=watchlists_db,
+                collections_db=collections_db,
+            )
+        except HTTPException as exc:
+            if exc.status_code != 404:
+                raise
+    return WatchlistBriefingProjection.model_validate(
+        build_briefing_projection(
+            occurrence=occurrence,
+            watchlists_db=watchlists_db,
+            collections_db=collections_db,
+            audio=audio,
+        )
+    )
+
+
+async def _owned_briefing_context(
+    *,
+    run_id: int,
+    target_user_id: int | None,
+    current_user: User,
+    db: Any,
+    collections_db: Any,
+) -> tuple[int, Any, Any, Any]:
+    _enforce_runs_admin_if_configured(current_user)
+    resolved_user_id, target_db = await _resolve_target_watchlists_context(
+        current_user=current_user,
+        current_db=db,
+        target_user_id=target_user_id,
+    )
+    target_collections_db = _resolve_collections_db_for_target_user(
+        current_user=current_user,
+        current_db=collections_db,
+        target_user_id=resolved_user_id,
+    )
+    try:
+        target_db.get_run(run_id)
+        occurrence = target_db.get_briefing_occurrence_for_run(run_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="briefing_not_found") from None
+    return resolved_user_id, target_db, target_collections_db, occurrence
+
+
+def _run_briefing_occurrence_or_none(db: Any, run_id: int) -> Any | None:
+    """Return a real exact-run occurrence while preserving legacy/mock DB compatibility."""
+    lookup = getattr(db, "get_briefing_occurrence_for_run", None)
+    if not callable(lookup):
+        return None
+    try:
+        occurrence = lookup(run_id)
+    except (AttributeError, KeyError):
+        return None
+    return occurrence if _safe_int(getattr(occurrence, "run_id", None), -1) == run_id else None
+
+
+@router.get(
+    "/briefings/latest",
+    response_model=WatchlistBriefingProjection,
+    summary="Get the latest briefing fulfillment projection",
+    dependencies=[Depends(rbac_rate_limit("watchlists.read"))],
+)
+async def get_latest_watchlist_briefing(
+    watchlist_id: int | None = Query(None, ge=1),
+    target_user_id: int | None = Query(None, ge=1),
+    current_user: User = Depends(get_request_user),
+    db: Any = Depends(get_watchlists_db_for_user),
+    collections_db: Any = Depends(get_collections_db_for_user),
+) -> WatchlistBriefingProjection:
+    """Return the latest owned occurrence, optionally scoped to one Watchlist."""
+    _enforce_runs_admin_if_configured(current_user)
+    resolved_user_id, target_db = await _resolve_target_watchlists_context(
+        current_user=current_user,
+        current_db=db,
+        target_user_id=target_user_id,
+    )
+    target_collections_db = _resolve_collections_db_for_target_user(
+        current_user=current_user,
+        current_db=collections_db,
+        target_user_id=resolved_user_id,
+    )
+    _ensure_watchlist_exists(target_db, watchlist_id)
+    try:
+        occurrence = target_db.get_latest_briefing_occurrence_for_watchlist(watchlist_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="briefing_not_found") from None
+    return await _build_briefing_projection(
+        occurrence=occurrence,
+        current_user=current_user,
+        resolved_user_id=resolved_user_id,
+        watchlists_db=target_db,
+        collections_db=target_collections_db,
+    )
+
+
+@router.get(
+    "/runs/{run_id}/briefing",
+    response_model=WatchlistBriefingProjection,
+    summary="Get briefing fulfillment for an exact run",
+    dependencies=[Depends(rbac_rate_limit("watchlists.read"))],
+)
+async def get_watchlist_run_briefing(
+    run_id: int = Path(..., ge=1),
+    target_user_id: int | None = Query(None, ge=1),
+    current_user: User = Depends(get_request_user),
+    db: Any = Depends(get_watchlists_db_for_user),
+    collections_db: Any = Depends(get_collections_db_for_user),
+) -> WatchlistBriefingProjection:
+    """Return one exact owned occurrence even when a newer job run exists."""
+    resolved_user_id, target_db, target_collections_db, occurrence = await _owned_briefing_context(
+        run_id=run_id,
+        target_user_id=target_user_id,
+        current_user=current_user,
+        db=db,
+        collections_db=collections_db,
+    )
+    return await _build_briefing_projection(
+        occurrence=occurrence,
+        current_user=current_user,
+        resolved_user_id=resolved_user_id,
+        watchlists_db=target_db,
+        collections_db=target_collections_db,
+    )
+
+
+@router.post(
+    "/runs/{run_id}/briefing/retry",
+    response_model=WatchlistBriefingProjection,
+    summary="Retry one briefing fulfillment stage",
+    dependencies=[Depends(rbac_rate_limit("watchlists.run"))],
+)
+async def retry_watchlist_briefing_stage(
+    payload: WatchlistBriefingRetryRequest,
+    run_id: int = Path(..., ge=1),
+    target_user_id: int | None = Query(None, ge=1),
+    current_user: User = Depends(get_request_user),
+    db: Any = Depends(get_watchlists_db_for_user),
+    collections_db: Any = Depends(get_collections_db_for_user),
+) -> WatchlistBriefingProjection:
+    """Retry only the selected owned stage, preserving already-ready artifacts."""
+    resolved_user_id, target_db, target_collections_db, occurrence = await _owned_briefing_context(
+        run_id=run_id,
+        target_user_id=target_user_id,
+        current_user=current_user,
+        db=db,
+        collections_db=collections_db,
+    )
+    tenant_id = await _resolve_watchlist_workflow_tenant_id(
+        current_user=current_user,
+        resolved_user_id=resolved_user_id,
+    )
+    raw_stages = _parse_json_object(occurrence.stages_json)
+    current_stage = raw_stages.get(payload.stage)
+    if not isinstance(current_stage, dict):
+        current_stage = {"status": "not_started"}
+    if current_stage.get("status") == "ready" and not payload.regenerate:
+        raise HTTPException(status_code=409, detail="stage_already_ready")
+
+    if payload.stage.startswith("deliver:"):
+        adapter = payload.stage.partition(":")[2]
+        contract = _parse_json_object(occurrence.contract_json)
+        if adapter not in external_delivery_adapters(contract):
+            raise HTTPException(status_code=422, detail="delivery_adapter_not_configured")
+        if reconcile_successful_delivery_attempt(
+            watchlists_db=target_db,
+            occurrence=occurrence,
+            adapter=adapter,
+        ) is not None:
+            raise HTTPException(status_code=409, detail="stage_already_ready")
+        outcome = current_stage.get("outcome")
+        if outcome == "successful":
+            raise HTTPException(status_code=409, detail="stage_already_ready")
+        if outcome in {"unknown", "sending"} and not payload.confirm_unknown_delivery_retry:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "unknown_delivery_confirmation_required",
+                    "message": "Delivery outcome is unknown. Review the destination and confirm retry; it may create a duplicate.",
+                },
+            )
+        try:
+            await schedule_briefing_delivery(
+                occurrence=occurrence,
+                audio_task_id=str(occurrence.audio_task_id) if occurrence.audio_task_id else None,
+                watchlists_db=target_db,
+                requested_adapters={adapter},
+                confirmed_unknown_adapters={adapter}
+                if payload.confirm_unknown_delivery_retry
+                else set(),
+            )
+        except (SchedulerError, RuntimeError) as exc:
+            raise HTTPException(status_code=503, detail="briefing_delivery_queue_unavailable") from exc
+    else:
+        try:
+            await retry_briefing_stage(
+                user_id=resolved_user_id,
+                occurrence_id=int(occurrence.id),
+                stage=payload.stage,
+                watchlists_db=target_db,
+                collections_db=target_collections_db,
+                regenerate=payload.regenerate,
+                tenant_id=tenant_id,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    refreshed = target_db.get_briefing_occurrence(int(occurrence.id))
+    return await _build_briefing_projection(
+        occurrence=refreshed,
+        current_user=current_user,
+        resolved_user_id=resolved_user_id,
+        watchlists_db=target_db,
+        collections_db=target_collections_db,
+    )
+
+
 @router.post(
     "/runs/{run_id}/retry-audio",
     response_model=RunStageRetryResponse,
@@ -5121,6 +5571,10 @@ async def retry_run_audio(
         current_db=db,
         target_user_id=target_user_id,
     )
+    tenant_id = await _resolve_watchlist_workflow_tenant_id(
+        current_user=current_user,
+        resolved_user_id=resolved_user_id,
+    )
     target_collections_db = None
     if _looks_like_collections_db(collections_db):
         target_collections_db = _resolve_collections_db_for_target_user(
@@ -5137,12 +5591,56 @@ async def retry_run_audio(
     except KeyError:
         raise HTTPException(status_code=404, detail="job_not_found") from None
 
+    if target_collections_db is not None:
+        occurrence = _run_briefing_occurrence_or_none(target_db, run_id)
+        if occurrence is not None:
+            stages = _parse_json_object(occurrence.stages_json)
+            audio_stages = (
+                "compose_audio_script",
+                "persist_audio_script",
+                "generate_audio",
+                "persist_audio",
+            )
+            retry_stage = next(
+                (
+                    name
+                    for name in audio_stages
+                    if _parse_json_object(stages.get(name)).get("status") in {"failed", "not_started"}
+                ),
+                None,
+            )
+            if retry_stage is None:
+                raise HTTPException(status_code=409, detail="stage_already_ready")
+            result = await retry_briefing_stage(
+                user_id=resolved_user_id,
+                occurrence_id=int(occurrence.id),
+                stage=retry_stage,
+                watchlists_db=target_db,
+                collections_db=target_collections_db,
+                tenant_id=tenant_id,
+            )
+            return RunStageRetryResponse(
+                run_id=run_id,
+                stage="audio",
+                retried=True,
+                task_id=result.audio_task_id,
+                output_id=result.output_id,
+            )
+
     output_prefs = _parse_json_object(getattr(job, "output_prefs_json", None))
-    if not output_prefs.get("generate_audio"):
+    contract = get_briefing_contract(
+        output_prefs,
+        scheduled=bool(getattr(job, "schedule_expr", None)),
+    )
+    if not contract["audio"]["enabled"]:
         run_stats = _parse_json_object(getattr(run, "stats_json", None))
         if not run_stats.get("audio_briefing_task_id"):
             raise HTTPException(status_code=400, detail="audio_not_configured")
-    output_prefs["generate_audio"] = True
+    output_prefs = normalize_briefing_output_prefs(
+        output_prefs,
+        scheduled=bool(getattr(job, "schedule_expr", None)),
+    ).output_prefs
+    output_prefs[BRIEFING_PIPELINE_KEY]["audio"]["enabled"] = True
 
     from tldw_Server_API.app.core.Watchlists.audio_briefing_workflow import (
         apply_audio_briefing_result_metadata,
@@ -5162,6 +5660,7 @@ async def retry_run_audio(
         run_id=run_id,
         output_prefs=output_prefs,
         db=target_db,
+        tenant_id=tenant_id,
     )
     if not audio_result.submitted:
         raise HTTPException(status_code=409, detail="audio_retry_not_queued")
@@ -5230,6 +5729,48 @@ async def retry_run_delivery(
     except KeyError:
         raise HTTPException(status_code=404, detail="run_not_found") from None
 
+    occurrence = _run_briefing_occurrence_or_none(target_db, run_id)
+    if occurrence is not None:
+        contract = _parse_json_object(occurrence.contract_json)
+        adapters = external_delivery_adapters(contract)
+        stages = _parse_json_object(occurrence.stages_json)
+        unknown = [
+            adapter
+            for adapter in adapters
+            if _parse_json_object(stages.get(f"deliver:{adapter}")).get("outcome") == "unknown"
+        ]
+        if unknown:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "unknown_delivery_confirmation_required",
+                    "message": "Delivery outcome is unknown. Use the briefing retry endpoint to review duplicate risk and confirm.",
+                },
+            )
+        requested = {
+            adapter
+            for adapter in adapters
+            if _parse_json_object(stages.get(f"deliver:{adapter}")).get("outcome") != "successful"
+        }
+        if not requested:
+            raise HTTPException(status_code=409, detail="stage_already_ready")
+        try:
+            task_id = await schedule_briefing_delivery(
+                occurrence=occurrence,
+                audio_task_id=str(occurrence.audio_task_id) if occurrence.audio_task_id else None,
+                watchlists_db=target_db,
+                requested_adapters=requested,
+            )
+        except (SchedulerError, RuntimeError) as exc:
+            raise HTTPException(status_code=503, detail="briefing_delivery_queue_unavailable") from exc
+        return RunStageRetryResponse(
+            run_id=run_id,
+            stage="delivery",
+            retried=True,
+            task_id=task_id,
+            output_id=int(occurrence.output_id) if occurrence.output_id is not None else None,
+        )
+
     output_rows = await _list_run_watchlist_outputs(target_collections_db, run_id, limit=20)
     if not output_rows:
         raise HTTPException(status_code=404, detail="output_not_found")
@@ -5258,7 +5799,7 @@ async def retry_run_delivery(
     output = await _row_to_output(selected_row, user_id=int(resolved_user_id))
     title = output.title or f"watchlist-output-{output.id}"
     output_format = output.format or getattr(selected_row, "format", None) or "md"
-    delivery_plan = selected_metadata.get("delivery_plan") or {}
+    delivery_plan = _external_delivery_plan(selected_metadata.get("delivery_plan"))
     is_delegated_retry = resolved_user_id != _safe_int(getattr(current_user, "id", None), -1)
     notifications = NotificationsService(
         user_id=int(resolved_user_id),
@@ -5390,21 +5931,26 @@ async def get_run_diagnostics(
 
     job_payload: dict[str, Any] | None = None
     output_prefs: dict[str, Any] = {}
+    contract = get_briefing_contract({}, scheduled=False)
     try:
         job = target_db.get_job(run.job_id)
         output_prefs = _parse_json_object(getattr(job, "output_prefs_json", None))
+        contract = get_briefing_contract(
+            output_prefs,
+            scheduled=bool(getattr(job, "schedule_expr", None)),
+        )
         job_payload = {
             "id": int(getattr(job, "id", run.job_id)),
             "name": getattr(job, "name", None),
             "schedule_expr": getattr(job, "schedule_expr", None),
             "active": getattr(job, "active", None),
             "watchlist_id": getattr(job, "watchlist_id", None),
-            "output_auto_enabled": bool(
-                isinstance(output_prefs.get("auto_output"), dict)
-                and output_prefs.get("auto_output", {}).get("enabled")
+            "output_auto_enabled": bool(contract["text"]["enabled"]),
+            "audio_enabled": bool(contract["audio"]["enabled"]),
+            "delivery_configured": any(
+                bool(contract["delivery"][channel]["enabled"])
+                for channel in ("email", "chatbook")
             ),
-            "audio_enabled": bool(output_prefs.get("generate_audio")),
-            "delivery_configured": isinstance(output_prefs.get("deliveries"), dict),
         }
     except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
         logger.warning("watchlists.diagnostics failed to load job metadata for run={}: {}", run_id, exc)
@@ -5433,7 +5979,7 @@ async def get_run_diagnostics(
         recovery={
             "can_retry_full_run": bool(run_payload.get("job_id")),
             "can_retry_delivery": any(output.get("delivery_plan_present") for output in outputs),
-            "can_retry_audio": bool(audio_task_id or output_prefs.get("generate_audio")),
+            "can_retry_audio": bool(audio_task_id or contract["audio"]["enabled"]),
         },
     )
 
@@ -5723,6 +6269,7 @@ async def get_run_audio(
 
     try:
         from tldw_Server_API.app.core.Watchlists.audio_artifact_projection import (
+            apply_scheduler_status_to_audio_projection,
             build_audio_projection,
             find_matching_workflow_run,
             get_mirrored_audio_projection,
@@ -5774,14 +6321,12 @@ async def get_run_audio(
 
         response_status = projection.get("status") or "unknown"
         queue_name = None
-        fallback_reason = projection.get("fallback_reason")
         if not projection.get("final_artifact"):
             scheduler_status = await _get_audio_scheduler_task_status(str(task_id))
             if scheduler_status:
-                response_status = scheduler_status.get("status") or response_status
                 queue_name = scheduler_status.get("queue_name")
-                fallback_reason = scheduler_status.get("fallback_reason") or fallback_reason
-                projection = {**projection, "status": response_status, "fallback_reason": fallback_reason}
+                projection = apply_scheduler_status_to_audio_projection(projection, scheduler_status)
+                response_status = projection.get("status") or response_status
 
         if target_collections_db is not None:
             mirror_ok = await run_in_threadpool(
@@ -6381,11 +6926,16 @@ async def create_output(
         job_prefs = json.loads(job.output_prefs_json or "{}") if getattr(job, "output_prefs_json", None) else {}
     except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
         job_prefs = {}
+    contract = get_briefing_contract(
+        job_prefs,
+        scheduled=bool(getattr(job, "schedule_expr", None)),
+    )
     retention_spec = job_prefs.get("retention") or {}
     job_default_retention = _safe_int(retention_spec.get("default_seconds"), DEFAULT_OUTPUT_TTL_SECONDS)
     job_temp_retention = _safe_int(retention_spec.get("temporary_seconds"), TEMP_OUTPUT_TTL_SECONDS)
-    template_defaults = job_prefs.get("template") or {}
-    delivery_defaults = job_prefs.get("deliveries") or {}
+    template_defaults = contract["text"]
+    delivery_defaults = contract["delivery"]
+    audio_defaults = contract["audio"]
     tts_brief_defaults = {}
     if isinstance(job_prefs.get("tts_brief"), dict):
         tts_brief_defaults = job_prefs.get("tts_brief") or {}
@@ -6481,33 +7031,35 @@ async def create_output(
         effective_tts_speed = _safe_float(configured_tts_speed, None, minimum=0.25, maximum=4.0)
 
     effective_generate_audio = bool(payload.generate_audio)
+    if "generate_audio" not in payload.model_fields_set:
+        effective_generate_audio = bool(audio_defaults.get("enabled"))
     effective_target_audio_minutes = payload.target_audio_minutes
     if "target_audio_minutes" not in payload.model_fields_set:
         effective_target_audio_minutes = _safe_int(
-            job_prefs.get("target_audio_minutes"),
+            audio_defaults.get("target_minutes"),
             payload.target_audio_minutes,
         )
 
     effective_audio_model = payload.audio_model
-    if not effective_audio_model and isinstance(job_prefs.get("audio_model"), str):
-        effective_audio_model = job_prefs.get("audio_model").strip() or None
+    if not effective_audio_model and isinstance(audio_defaults.get("model"), str):
+        effective_audio_model = audio_defaults.get("model").strip() or None
 
     effective_audio_voice = payload.audio_voice
-    if not effective_audio_voice and isinstance(job_prefs.get("audio_voice"), str):
-        effective_audio_voice = job_prefs.get("audio_voice").strip() or None
+    if not effective_audio_voice and isinstance(audio_defaults.get("voice"), str):
+        effective_audio_voice = audio_defaults.get("voice").strip() or None
 
     effective_audio_speed = payload.audio_speed
     if effective_audio_speed is None:
         effective_audio_speed = _safe_float(
-            job_prefs.get("audio_speed"),
+            audio_defaults.get("speed"),
             None,
             minimum=0.25,
             maximum=4.0,
         )
 
     effective_background_audio_uri = payload.background_audio_uri
-    if not effective_background_audio_uri and isinstance(job_prefs.get("background_audio_uri"), str):
-        effective_background_audio_uri = job_prefs.get("background_audio_uri").strip() or None
+    if not effective_background_audio_uri and isinstance(audio_defaults.get("background_audio_uri"), str):
+        effective_background_audio_uri = audio_defaults.get("background_audio_uri").strip() or None
     if isinstance(effective_background_audio_uri, str):
         normalized_background_uri = effective_background_audio_uri.strip()
         if normalized_background_uri.lower() in {"none", "null"}:
@@ -6518,7 +7070,7 @@ async def create_output(
     effective_background_volume = payload.background_volume
     if effective_background_volume is None:
         effective_background_volume = _safe_float(
-            job_prefs.get("background_volume"),
+            audio_defaults.get("background_volume"),
             0.15,
             minimum=0.0,
             maximum=2.0,
@@ -6528,7 +7080,7 @@ async def create_output(
 
     effective_background_delay_ms = payload.background_delay_ms
     if effective_background_delay_ms is None:
-        effective_background_delay_ms = _safe_int(job_prefs.get("background_delay_ms"), 0)
+        effective_background_delay_ms = _safe_int(audio_defaults.get("background_delay_ms"), 0)
     if effective_background_delay_ms < 0:
         effective_background_delay_ms = 0
     if effective_background_delay_ms > 120000:
@@ -6537,7 +7089,7 @@ async def create_output(
     effective_background_fade_seconds = payload.background_fade_seconds
     if effective_background_fade_seconds is None:
         effective_background_fade_seconds = _safe_float(
-            job_prefs.get("background_fade_seconds"),
+            audio_defaults.get("background_fade_seconds"),
             2.0,
             minimum=0.0,
             maximum=30.0,
@@ -6546,14 +7098,14 @@ async def create_output(
         effective_background_fade_seconds = 2.0
 
     effective_audio_language = payload.audio_language
-    if not effective_audio_language and isinstance(job_prefs.get("audio_language"), str):
-        effective_audio_language = job_prefs.get("audio_language").strip() or None
+    if not effective_audio_language and isinstance(audio_defaults.get("language"), str):
+        effective_audio_language = audio_defaults.get("language").strip() or None
     if not effective_audio_language:
         effective_audio_language = "en"
 
     effective_audio_llm_provider = payload.llm_provider
-    if not effective_audio_llm_provider and isinstance(job_prefs.get("llm_provider"), str):
-        effective_audio_llm_provider = job_prefs.get("llm_provider").strip() or None
+    if not effective_audio_llm_provider and isinstance(audio_defaults.get("llm_provider"), str):
+        effective_audio_llm_provider = audio_defaults.get("llm_provider").strip() or None
     if not effective_audio_llm_provider:
         llm_cfg = job_prefs.get("llm") if isinstance(job_prefs.get("llm"), dict) else {}
         configured_provider = llm_cfg.get("provider") or llm_cfg.get("api_name")
@@ -6561,8 +7113,8 @@ async def create_output(
             effective_audio_llm_provider = configured_provider.strip() or None
 
     effective_audio_llm_model = payload.llm_model
-    if not effective_audio_llm_model and isinstance(job_prefs.get("llm_model"), str):
-        effective_audio_llm_model = job_prefs.get("llm_model").strip() or None
+    if not effective_audio_llm_model and isinstance(audio_defaults.get("llm_model"), str):
+        effective_audio_llm_model = audio_defaults.get("llm_model").strip() or None
     if not effective_audio_llm_model:
         llm_cfg = job_prefs.get("llm") if isinstance(job_prefs.get("llm"), dict) else {}
         configured_model = llm_cfg.get("model")
@@ -6571,43 +7123,43 @@ async def create_output(
 
     effective_persona_summarize = bool(payload.persona_summarize)
     if "persona_summarize" not in payload.model_fields_set:
-        effective_persona_summarize = bool(job_prefs.get("persona_summarize", payload.persona_summarize))
+        effective_persona_summarize = bool(audio_defaults.get("persona_summarize", payload.persona_summarize))
 
     effective_persona_id = payload.persona_id
-    if not effective_persona_id and isinstance(job_prefs.get("persona_id"), str):
-        effective_persona_id = job_prefs.get("persona_id").strip() or None
+    if not effective_persona_id and isinstance(audio_defaults.get("persona_id"), str):
+        effective_persona_id = audio_defaults.get("persona_id").strip() or None
     if isinstance(effective_persona_id, str):
         effective_persona_id = effective_persona_id.strip() or None
 
     effective_persona_provider = payload.persona_provider
-    if not effective_persona_provider and isinstance(job_prefs.get("persona_provider"), str):
-        effective_persona_provider = job_prefs.get("persona_provider").strip() or None
+    if not effective_persona_provider and isinstance(audio_defaults.get("persona_provider"), str):
+        effective_persona_provider = audio_defaults.get("persona_provider").strip() or None
     if not effective_persona_provider:
         effective_persona_provider = effective_audio_llm_provider
 
     effective_persona_model = payload.persona_model
-    if not effective_persona_model and isinstance(job_prefs.get("persona_model"), str):
-        effective_persona_model = job_prefs.get("persona_model").strip() or None
+    if not effective_persona_model and isinstance(audio_defaults.get("persona_model"), str):
+        effective_persona_model = audio_defaults.get("persona_model").strip() or None
     if not effective_persona_model:
         effective_persona_model = effective_audio_llm_model
 
     effective_voice_map = payload.voice_map
-    if effective_voice_map is None and isinstance(job_prefs.get("voice_map"), dict):
-        effective_voice_map = job_prefs.get("voice_map")
+    if effective_voice_map is None and isinstance(audio_defaults.get("voice_map"), dict):
+        effective_voice_map = audio_defaults.get("voice_map")
 
     effective_audio_cast = payload.audio_cast.model_dump(exclude_none=True) if payload.audio_cast else None
-    if effective_audio_cast is None and isinstance(job_prefs.get("audio_cast"), dict):
-        effective_audio_cast = job_prefs.get("audio_cast")
+    if effective_audio_cast is None and isinstance(audio_defaults.get("cast"), dict):
+        effective_audio_cast = audio_defaults.get("cast")
 
     version = _next_output_version_for_run(collections_db, payload.run_id)
     job_name = getattr(job, "name", None) or f"Job-{job.id}"
     default_title = f"{job_name}-Output-{version}"
     title = payload.title or default_title
 
-    template_name = payload.template_name or template_defaults.get("default_name")
+    template_name = payload.template_name or template_defaults.get("template_name")
     template_version = payload.template_version
     if template_version is None:
-        configured_default_version = template_defaults.get("default_version")
+        configured_default_version = template_defaults.get("template_version")
         if configured_default_version is not None:
             try:
                 parsed_default_version = int(configured_default_version)
@@ -6652,7 +7204,7 @@ async def create_output(
     elif template_record:
         template_format = template_record.format
 
-    output_format = payload.format or template_defaults.get("default_format") or (template_format or "md")
+    output_format = payload.format or template_defaults.get("format") or (template_format or "md")
     if output_format not in {"md", "html"}:
         raise HTTPException(status_code=400, detail="invalid_format")
 
@@ -6819,9 +7371,11 @@ async def create_output(
             metadata["_enrichment_summary_config"] = payload.briefing_summary.model_dump()
 
     delivery_override = payload.deliveries.model_dump(exclude_none=True) if payload.deliveries else {}
-    delivery_plan = (
+    merged_delivery_plan = (
         _deep_merge_dict(delivery_defaults, delivery_override) if (delivery_defaults or delivery_override) else {}
     )
+    delivery_plan = _external_delivery_plan(merged_delivery_plan)
+    metadata.pop("delivery_plan", None)
     if delivery_plan:
         metadata["delivery_plan"] = delivery_plan
 

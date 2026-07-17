@@ -251,9 +251,6 @@
   "header_omniSearchStartChat": {
     "message": "بدء محادثة جديدة \"{{query}}\""
   },
-  "header_connectionCard.connectedCaption": {
-    "message": "أصبحت الدردشة والأدوات متاحة الآن في صفحة الخيارات وفي اللوحة الجانبية."
-  },
   "header_quickIngestQueuedAria": {
     "message": "{{label}} — {{count}} عناصر في الطابور — انقر للمراجعة والمعالجة"
   },
@@ -2728,5 +2725,8 @@
   },
   "repo2txt_status_generated": {
     "message": "Generated output for {{count}} files ({{tokenCount}} tokens)."
+  },
+  "header_connectionCard_connectedCaption": {
+    "message": "أصبحت الدردشة والأدوات متاحة الآن في صفحة الخيارات وفي اللوحة الجانبية."
   }
 }

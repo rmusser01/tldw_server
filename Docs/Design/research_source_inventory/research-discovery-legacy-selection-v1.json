@@ -1,0 +1,255 @@
+{
+  "schema_version": "research-discovery-legacy-selection.v1",
+  "characterized_on": "2026-07-13",
+  "catalog_version": "research-discovery-v1",
+  "raw_list_limit": 20,
+  "resolved_source_limit": 8,
+  "default_category": "open_research_graph",
+  "default_source_ids": [
+    "openalex",
+    "semantic_scholar",
+    "crossref"
+  ],
+  "cases": [
+    {
+      "id": "omitted_both",
+      "request_fields": {},
+      "schema_status": "accepted",
+      "normalized_source_ids": [],
+      "normalized_categories": [
+        "open_research_graph"
+      ],
+      "defaulted_categories": [
+        "open_research_graph"
+      ],
+      "resolved_source_ids": [
+        "openalex",
+        "semantic_scholar",
+        "crossref"
+      ]
+    },
+    {
+      "id": "explicit_empty_lists",
+      "request_fields": {
+        "source_ids": [],
+        "categories": []
+      },
+      "schema_status": "accepted",
+      "normalized_source_ids": [],
+      "normalized_categories": [
+        "open_research_graph"
+      ],
+      "defaulted_categories": [
+        "open_research_graph"
+      ],
+      "resolved_source_ids": [
+        "openalex",
+        "semantic_scholar",
+        "crossref"
+      ]
+    },
+    {
+      "id": "whitespace_only_lists",
+      "request_fields": {
+        "source_ids": [
+          " ",
+          "\t"
+        ],
+        "categories": [
+          ""
+        ]
+      },
+      "schema_status": "accepted",
+      "normalized_source_ids": [],
+      "normalized_categories": [
+        "open_research_graph"
+      ],
+      "defaulted_categories": [
+        "open_research_graph"
+      ],
+      "resolved_source_ids": [
+        "openalex",
+        "semantic_scholar",
+        "crossref"
+      ]
+    },
+    {
+      "id": "explicit_source_duplicates",
+      "request_fields": {
+        "source_ids": [
+          "pubmed",
+          "pubmed",
+          "arxiv"
+        ]
+      },
+      "schema_status": "accepted",
+      "normalized_source_ids": [
+        "pubmed",
+        "pubmed",
+        "arxiv"
+      ],
+      "normalized_categories": [],
+      "defaulted_categories": [],
+      "resolved_source_ids": [
+        "arxiv",
+        "pubmed"
+      ]
+    },
+    {
+      "id": "category_only",
+      "request_fields": {
+        "categories": [
+          "open_research_graph"
+        ]
+      },
+      "schema_status": "accepted",
+      "normalized_source_ids": [],
+      "normalized_categories": [
+        "open_research_graph"
+      ],
+      "defaulted_categories": [],
+      "resolved_source_ids": [
+        "openalex",
+        "semantic_scholar",
+        "crossref"
+      ]
+    },
+    {
+      "id": "explicit_and_category_union",
+      "request_fields": {
+        "source_ids": [
+          "arxiv",
+          "openalex"
+        ],
+        "categories": [
+          "open_research_graph"
+        ]
+      },
+      "schema_status": "accepted",
+      "normalized_source_ids": [
+        "arxiv",
+        "openalex"
+      ],
+      "normalized_categories": [
+        "open_research_graph"
+      ],
+      "defaulted_categories": [],
+      "resolved_source_ids": [
+        "openalex",
+        "semantic_scholar",
+        "crossref",
+        "arxiv"
+      ]
+    },
+    {
+      "id": "duplicate_categories",
+      "request_fields": {
+        "categories": [
+          "open_research_graph",
+          "open_research_graph"
+        ]
+      },
+      "schema_status": "accepted",
+      "normalized_source_ids": [],
+      "normalized_categories": [
+        "open_research_graph",
+        "open_research_graph"
+      ],
+      "defaulted_categories": [],
+      "resolved_source_ids": [
+        "openalex",
+        "semantic_scholar",
+        "crossref"
+      ]
+    },
+    {
+      "id": "unknown_source",
+      "request_fields": {
+        "source_ids": [
+          "missing"
+        ]
+      },
+      "schema_status": "accepted",
+      "selection_error": {
+        "exception": "ResearchDiscoveryBadRequestError",
+        "detail": "unknown_source:1:8",
+        "http_status": 400
+      }
+    },
+    {
+      "id": "unknown_category",
+      "request_fields": {
+        "categories": [
+          "missing_category"
+        ]
+      },
+      "schema_status": "accepted",
+      "selection_error": {
+        "exception": "ResearchDiscoveryBadRequestError",
+        "detail": "unknown_category:1:8",
+        "http_status": 400
+      }
+    },
+    {
+      "id": "explicit_null_source_ids",
+      "request_fields": {
+        "source_ids": null
+      },
+      "schema_status": "rejected",
+      "http_status": 422
+    },
+    {
+      "id": "explicit_null_categories",
+      "request_fields": {
+        "categories": null
+      },
+      "schema_status": "rejected",
+      "http_status": 422
+    },
+    {
+      "id": "raw_source_list_over_20",
+      "request_fields": {
+        "source_ids": [
+          "openalex",
+          "openalex",
+          "openalex",
+          "openalex",
+          "openalex",
+          "openalex",
+          "openalex",
+          "openalex",
+          "openalex",
+          "openalex",
+          "openalex",
+          "openalex",
+          "openalex",
+          "openalex",
+          "openalex",
+          "openalex",
+          "openalex",
+          "openalex",
+          "openalex",
+          "openalex",
+          "openalex"
+        ]
+      },
+      "schema_status": "rejected",
+      "http_status": 422
+    },
+    {
+      "id": "effective_max_sources_below_category_expansion",
+      "request_fields": {
+        "categories": [
+          "open_research_graph"
+        ]
+      },
+      "schema_status": "accepted",
+      "service_max_sources": 2,
+      "selection_error": {
+        "exception": "ResearchDiscoveryValidationError",
+        "detail": "source_selection_over_cap:3:2",
+        "http_status": 422
+      }
+    }
+  ]
+}

@@ -14,7 +14,7 @@ import os
 import re
 import shutil
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Optional
 from uuid import uuid4
 
@@ -69,6 +69,7 @@ from ..schemas.chatbook_schemas import (
     OpenWebUIHydrationPreviewRequest,
     OpenWebUIHydrationPreviewResponse,
     PreviewChatbookResponse,
+    RemoveFinishedJobsResponse,
     RemoveJobResponse,
 )
 from ..schemas.chatbook_schemas import (
@@ -99,7 +100,75 @@ router = APIRouter(prefix="/chatbooks", tags=["chatbooks"])
 # Use central limiter instance
 
 _ADMIN_CLAIM_PERMISSIONS = {"*", "system.configure"}
-_ABSOLUTE_PATH_RE = re.compile(r"(?<![A-Za-z0-9_])/(?:[^\s,;:)\"']+/?)+")
+_IMPORT_UPLOAD_PREFIX_RE = re.compile(r"^import_[0-9a-fA-F]{32}_(.+)$")
+_QUOTED_ABSOLUTE_PATH_RE = re.compile(
+    r"([\"'])((?:[A-Za-z]:\\|\\\\|/)[^\"'\r\n]+)\1"
+)
+_CONTEXTUAL_ABSOLUTE_PATH_RE = re.compile(
+    r"(?P<prefix>\b(?:at|from|path|file)\s+)"
+    r"(?P<path>(?:[A-Za-z]:\\|\\\\|/).+?)"
+    r"(?=\s+(?:and|because|but|failed|was|is|for|with|from)\b|[,;:)\"']|$)",
+    re.IGNORECASE,
+)
+_UNC_ABSOLUTE_PATH_RE = re.compile(r"\\\\[^\r\n,;:)\"']+")
+_WINDOWS_ABSOLUTE_PATH_RE = re.compile(r"\b[A-Za-z]:\\[^\r\n,;:)\"']+")
+_ABSOLUTE_PATH_RE = re.compile(r"(?<![A-Za-z0-9_])/[^\r\n,;:)\"']+")
+
+
+def _redact_server_paths(value: object) -> str:
+    """Replace absolute server paths before returning text to API clients."""
+    text = str(value)
+    if Path(text).is_absolute() or PureWindowsPath(text).is_absolute():
+        return "[redacted-path]"
+    redacted = _QUOTED_ABSOLUTE_PATH_RE.sub("[redacted-path]", text)
+    redacted = _CONTEXTUAL_ABSOLUTE_PATH_RE.sub(
+        lambda match: f"{match.group('prefix')}[redacted-path]",
+        redacted,
+    )
+    redacted = _UNC_ABSOLUTE_PATH_RE.sub("[redacted-path]", redacted)
+    redacted = _ABSOLUTE_PATH_RE.sub("[redacted-path]", redacted)
+    return _WINDOWS_ABSOLUTE_PATH_RE.sub("[redacted-path]", redacted)
+
+
+def _redact_server_path_values(value: object) -> object:
+    """Recursively redact absolute paths from an API response value."""
+    if isinstance(value, str):
+        return _redact_server_paths(value)
+    if isinstance(value, list):
+        return [_redact_server_path_values(item) for item in value]
+    if isinstance(value, tuple):
+        return [_redact_server_path_values(item) for item in value]
+    if isinstance(value, dict):
+        return {
+            (
+                _redact_server_paths(key)
+                if isinstance(key, str)
+                else str(key)
+            ): _redact_server_path_values(item)
+            for key, item in value.items()
+        }
+    return value
+
+
+def _safe_import_source_filename(job: ImportJob, metadata: dict) -> str | None:
+    """Return a display-safe archive filename without exposing server paths."""
+    raw_value = metadata.get("source_filename") or getattr(job, "chatbook_path", "")
+    filename = Path(str(raw_value).replace("\\", "/")).name
+    prefix_match = _IMPORT_UPLOAD_PREFIX_RE.match(filename)
+    if prefix_match:
+        filename = prefix_match.group(1)
+    filename = re.sub(r"[\x00-\x1f\x7f]", "", filename).strip()
+    return filename if filename and filename not in {".", ".."} else None
+
+
+def _safe_import_chatbook_name(metadata: dict) -> str | None:
+    """Return a bounded, control-character-free manifest name for display."""
+    value = metadata.get("chatbook_name")
+    if not isinstance(value, str):
+        return None
+    value = re.sub(r"[\x00-\x1f\x7f]", "", value).strip()
+    value = _redact_server_paths(value)
+    return value[:200] or None
 
 
 def _safe_increment_metric(metric_name: str, labels: dict, error_context: str = "") -> None:
@@ -113,26 +182,41 @@ def _safe_increment_metric(metric_name: str, labels: dict, error_context: str = 
 def _import_job_response(job: ImportJob) -> ImportJobResponse:
     """Build an API import job response including structured async result metadata."""
     metadata = job.metadata if isinstance(getattr(job, "metadata", None), dict) else {}
+    source_filename = _safe_import_source_filename(job, metadata)
+    chatbook_name = _safe_import_chatbook_name(metadata)
+    safe_metadata = _redact_server_path_values(metadata)
+    if not isinstance(safe_metadata, dict):
+        safe_metadata = {}
+    if source_filename:
+        safe_metadata["source_filename"] = source_filename
+    if chatbook_name:
+        safe_metadata["chatbook_name"] = chatbook_name
     return ImportJobResponse(
         job_id=job.job_id,
         status=job.status,
-        chatbook_path=job.chatbook_path,
+        chatbook_path=source_filename or "",
+        source_filename=source_filename,
+        chatbook_name=chatbook_name,
         created_at=job.created_at,
         started_at=job.started_at,
         completed_at=job.completed_at,
-        error_message=job.error_message,
+        error_message=(
+            _redact_server_paths(job.error_message)
+            if job.error_message is not None
+            else None
+        ),
         progress_percentage=job.progress_percentage,
         total_items=job.total_items,
         processed_items=job.processed_items,
         successful_items=job.successful_items,
         failed_items=job.failed_items,
         skipped_items=job.skipped_items,
-        conflicts=job.conflicts,
-        warnings=job.warnings,
-        imported_items=metadata.get("imported_items"),
-        inventory_summary=metadata.get("inventory_summary"),
-        skipped_non_restorable=metadata.get("skipped_non_restorable"),
-        metadata=metadata,
+        conflicts=_redact_server_path_values(job.conflicts),
+        warnings=_redact_server_path_values(job.warnings),
+        imported_items=safe_metadata.get("imported_items"),
+        inventory_summary=safe_metadata.get("inventory_summary"),
+        skipped_non_restorable=safe_metadata.get("skipped_non_restorable"),
+        metadata=safe_metadata,
     )
 
 
@@ -166,20 +250,12 @@ def _require_openwebui_hydration_access(principal: AuthPrincipal) -> None:
 
 def _redact_hydration_warning(value: object) -> str:
     """Redact absolute filesystem paths from hydration warning strings."""
-    return _ABSOLUTE_PATH_RE.sub("[redacted-path]", str(value))
+    return _redact_server_paths(value)
 
 
 def _redact_hydration_value(value: object) -> object:
     """Redact absolute filesystem paths in nested hydration response values."""
-    if isinstance(value, str):
-        return _redact_hydration_warning(value)
-    if isinstance(value, list):
-        return [_redact_hydration_value(item) for item in value]
-    if isinstance(value, tuple):
-        return [_redact_hydration_value(item) for item in value]
-    if isinstance(value, dict):
-        return {str(key): _redact_hydration_value(item) for key, item in value.items()}
-    return value
+    return _redact_server_path_values(value)
 
 
 def _hydration_preview_response(
@@ -877,6 +953,7 @@ async def import_chatbook(
         ensure_traceparent(request)
         success, message, result = await service.import_chatbook(
             file_path=str(temp_file),
+            source_filename=safe_filename,
             content_selections=content_selections,
             conflict_resolution=import_request.conflict_resolution,
             prefix_imported=import_request.prefix_imported,
@@ -1190,6 +1267,16 @@ async def preview_chatbook(
             updated_at=manifest.updated_at,
             export_id=manifest.export_id,
             content_items=[],  # Simplified for preview
+            account_inventory=[
+                dict(row)
+                for row in (manifest.account_inventory or [])
+                if isinstance(row, dict)
+            ],
+            account_inventory_summary=(
+                dict(manifest.account_inventory_summary)
+                if isinstance(manifest.account_inventory_summary, dict)
+                else {}
+            ),
             include_media=manifest.include_media,
             include_embeddings=manifest.include_embeddings,
             include_generated_content=manifest.include_generated_content,
@@ -1956,6 +2043,54 @@ async def cancel_import_job(
         raise HTTPException(
             status_code=500,
             detail="An error occurred while cancelling the import job",
+        ) from None
+
+
+@router.delete("/jobs/finished", response_model=RemoveFinishedJobsResponse)
+async def remove_finished_jobs(
+    request: Request,
+    service: ChatbookService = Depends(get_chatbook_service),
+    user: User = Depends(get_request_user),
+    audit_service=Depends(get_audit_service_for_user),
+):
+    """Remove all terminal Chatbook job history and saved export archives."""
+    try:
+        result = await asyncio.to_thread(service.delete_finished_jobs)
+        export_jobs_removed = int(result.get("export_jobs_removed") or 0)
+        import_jobs_removed = int(result.get("import_jobs_removed") or 0)
+        total_removed = export_jobs_removed + import_jobs_removed
+        try:
+            context = AuditContext(
+                user_id=str(user.id),
+                endpoint="/chatbooks/jobs/finished",
+                method="DELETE",
+                ip_address=request.client.host if request and hasattr(request, "client") else None,
+            )
+            await audit_service.log_event(
+                event_type=AuditEventType.DATA_DELETE,
+                context=context,
+                resource_type="chatbook_job_history",
+                action="chatbook_finished_jobs_removed",
+                metadata={
+                    "export_jobs_removed": export_jobs_removed,
+                    "import_jobs_removed": import_jobs_removed,
+                },
+            )
+        except _CHATBOOKS_NONCRITICAL_EXCEPTIONS as audit_err:
+            logger.warning(f"Failed to log finished Chatbook job removal: {audit_err}")
+        return RemoveFinishedJobsResponse(
+            success=True,
+            message=f"Removed {total_removed} finished Chatbook job records",
+            export_jobs_removed=export_jobs_removed,
+            import_jobs_removed=import_jobs_removed,
+        )
+    except JobError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    except _CHATBOOKS_NONCRITICAL_EXCEPTIONS:
+        logger.error("Failed to remove finished Chatbook jobs")
+        raise HTTPException(
+            status_code=500,
+            detail="An error occurred while removing finished Chatbook jobs",
         ) from None
 
 

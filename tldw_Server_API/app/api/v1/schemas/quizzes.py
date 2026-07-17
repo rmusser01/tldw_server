@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -27,6 +27,40 @@ class QuestionType(str, Enum):
     MATCHING = "matching"
     TRUE_FALSE = "true_false"
     FILL_BLANK = "fill_blank"
+
+
+class QuizGenerationProfile(str, Enum):
+    STANDARD_RECALL = "standard_recall"
+    MIXED_ASSESSMENT = "mixed_assessment"
+    BEST_OF_FIVE = "best_of_five"
+    EMQ = "emq"
+    ASSERTION_REASONING = "assertion_reasoning"
+    OSCE_SCENARIO = "osce_scenario"
+
+
+class AvailableQuizGenerationProfile(str, Enum):
+    STANDARD_RECALL = "standard_recall"
+    MIXED_ASSESSMENT = "mixed_assessment"
+    BEST_OF_FIVE = "best_of_five"
+    EMQ = "emq"
+    ASSERTION_REASONING = "assertion_reasoning"
+
+
+def _validate_available_generation_profiles() -> None:
+    """Fail fast if request profiles drift from the available catalog subset."""
+    expected = {
+        profile.value
+        for profile in QuizGenerationProfile
+        if profile is not QuizGenerationProfile.OSCE_SCENARIO
+    }
+    actual = {profile.value for profile in AvailableQuizGenerationProfile}
+    if actual != expected:
+        raise RuntimeError(
+            "AvailableQuizGenerationProfile must match all non-planned quiz profiles"
+        )
+
+
+_validate_available_generation_profiles()
 
 
 class QuizSourceType(str, Enum):
@@ -125,9 +159,21 @@ class QuizListResponse(BaseModel):
         return _default_offset_pagination_aliases(self)
 
 
+class QuizGenerationProfileDefinition(BaseModel):
+    id: QuizGenerationProfile
+    label: str
+    description: str
+    status: Literal["available", "planned"]
+    default_num_questions: int = Field(..., ge=1, le=100)
+    default_difficulty: Literal["easy", "medium", "hard", "mixed"]
+    default_question_types: list[QuestionType]
+
+
 class QuestionCreate(BaseModel):
     question_type: QuestionType
     question_text: str
+    group_id: Optional[str] = Field(None, max_length=128)
+    group_prompt: Optional[str] = Field(None, max_length=2000)
     options: Optional[list[str]] = Field(None, description="Multiple choice options")
     correct_answer: AnswerValue
     explanation: Optional[str] = None
@@ -144,6 +190,8 @@ class QuestionUpdate(BaseModel):
 
     question_type: Optional[QuestionType] = None
     question_text: Optional[str] = None
+    group_id: Optional[str] = Field(None, max_length=128)
+    group_prompt: Optional[str] = Field(None, max_length=2000)
     options: Optional[list[str]] = None
     correct_answer: Optional[AnswerValue] = None
     explanation: Optional[str] = None
@@ -161,6 +209,8 @@ class QuestionPublicResponse(BaseModel):
     quiz_id: int
     question_type: QuestionType
     question_text: str
+    group_id: Optional[str] = Field(None, max_length=128)
+    group_prompt: Optional[str] = Field(None, max_length=2000)
     options: Optional[list[str]] = None
     hint: Optional[str] = None
     hint_penalty_points: int = Field(0, ge=0)
@@ -332,6 +382,7 @@ class QuizRemediationConvertResponse(BaseModel):
 class QuizGenerateRequest(BaseModel):
     media_id: Optional[int] = Field(None, ge=1)
     sources: Optional[list[QuizGenerateSource]] = Field(None, min_length=1)
+    generation_profile: AvailableQuizGenerationProfile = AvailableQuizGenerationProfile.STANDARD_RECALL
     num_questions: int = Field(10, ge=1, le=100)
     question_types: Optional[list[QuestionType]] = None
     question_plan: Optional[list[QuizQuestionPlanItem]] = Field(None, min_length=1)
@@ -339,6 +390,8 @@ class QuizGenerateRequest(BaseModel):
     focus_topics: Optional[list[str]] = None
     model: Optional[str] = None
     api_provider: Optional[str] = None
+    claims_verification_provider: Optional[str] = Field(None, description="Optional Claims verification LLM provider override")
+    claims_verification_model: Optional[str] = Field(None, description="Optional Claims verification LLM model override")
     workspace_id: Optional[str] = Field(None, description="Canonical owning workspace ID; null means general scope")
     workspace_tag: Optional[str] = Field(None, description="Optional workspace tag (e.g., 'workspace:<slug-or-id>')")
 
@@ -374,11 +427,14 @@ class QuizGenerateRequest(BaseModel):
 class QuizGenerateResponse(BaseModel):
     quiz: QuizResponse
     questions: list[QuestionAdminResponse]
+    claim_verification: Optional[dict[str, Any]] = None
 
 
 class QuizImportQuestion(BaseModel):
     question_type: QuestionType
     question_text: str
+    group_id: Optional[str] = Field(None, max_length=128)
+    group_prompt: Optional[str] = Field(None, max_length=2000)
     options: Optional[list[str]] = None
     correct_answer: AnswerValue
     explanation: Optional[str] = None

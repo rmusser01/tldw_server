@@ -1,4 +1,12 @@
 {
+  "accessibilityHardening": {
+    "source": { "toggleActive": "切换启用状态：{{name}}", "checkNow": "立即检查：{{name}}", "openWebsite": "打开来源网站：{{name}}", "openHealth": "打开来源状态：{{name}}", "edit": "编辑来源：{{name}}", "delete": "删除来源：{{name}}" },
+    "item": { "open": "打开更新：{{title}}", "select": "选择更新：{{title}}", "description": "{{state}}。来源：{{source}}。" },
+    "output": { "openNewTab": "在新标签页中打开 {{title}}", "chat": "讨论 {{title}}", "download": "下载 {{title}}", "close": "关闭预览：{{title}}" },
+    "health": { "show": "显示监视列表状态详情", "hide": "隐藏监视列表状态详情", "refresh": "刷新监视列表状态", "settings": "打开监视列表设置" },
+    "delivery": { "email": "启用后，将每份报告发送给已配置的收件人。", "chatbook": "启用后，将每份报告发布到 Chatbook。" },
+    "help": { "open": "打开监视列表帮助", "title": "监视列表帮助" }
+  },
   "items": {
     "queuedForBriefing": "已加入简报队列",
     "includeInNextBriefing": "加入下一次简报",
@@ -17,5 +25,467 @@
       "generateError": "无法从排队条目生成报告。",
       "generateReport": "从队列生成报告"
     }
+  },
+  "setupWizard": {
+    "title": "创建监视列表",
+    "containerTitle": "创建监视列表",
+    "containerHelp": "请先创建项目容器。随后在同一设置流程中配置来源、频率、简报、投递和测试。",
+    "actions": {
+      "continue": "继续前往来源"
+    },
+    "sections": {
+      "preset": "领域预设"
+    },
+    "fields": {
+      "name": "监视列表名称",
+      "objective": "目标"
+    },
+    "validation": {
+      "nameRequired": "请输入监视列表名称。"
+    },
+    "errors": {
+      "createFailed": "无法创建监视列表。"
+    },
+    "presets": {
+      "cti_osint": {
+        "label": "CTI / OSINT",
+        "description": "跟踪漏洞、恶意软件、威胁主体、安全公告和来源变化。"
+      },
+      "news": {
+        "label": "新闻",
+        "description": "跟踪持续发展的事件、人物、组织和来源多样性。"
+      },
+      "general": {
+        "label": "常规",
+        "description": "跟踪一个主题并收集更新以供审阅。"
+      },
+      "blank": {
+        "label": "空白",
+        "description": "从空白监视列表开始并自行配置详细信息。"
+      }
+    },
+    "startModes": {
+      "sources": {
+        "label": "从来源开始",
+        "description": "使用初始订阅源和可选监视器创建监视列表。"
+      },
+      "topic": {
+        "label": "从主题开始",
+        "description": "先创建监视列表目标，再在收集开始前添加订阅源。"
+      },
+      "report_goal": {
+        "label": "从报告目标开始",
+        "description": "先定义简报目标，再连接来源和模板。"
+      }
+    },
+    "boundaries": {
+      "alerts": "内容匹配提醒将在之后配置。此设置定义监视列表及其初始收集范围。"
+    }
+  },
+  "overview": {
+    "pipelineSetup": {
+      "title": "设置简报",
+      "open": "设置简报",
+      "progress": "简报设置步骤",
+      "steps": {
+        "sources": "来源",
+        "cadence": "频率",
+        "briefing": "简报",
+        "delivery": "投递",
+        "test": "测试"
+      },
+      "actions": {
+        "next": "继续前往{{step}}"
+      },
+      "source": {
+        "existing": "使用现有来源",
+        "new": "添加新来源",
+        "fallback": "来源 {{id}}"
+      },
+      "sources": {
+        "help": "选择现有来源或添加一个新来源，然后测试连接。"
+      },
+      "sourcesLoading": "正在加载来源...",
+      "sourcesError": "无法为设置工具加载订阅源。",
+      "sourceTest": {
+        "action": "测试来源",
+        "ready": "来源已就绪。",
+        "cancelled": "来源测试已取消。",
+        "failed": "来源测试失败。{{message}}",
+        "summary": "已就绪 {{ready}} 个，已筛选 {{filtered}} 个",
+        "sample": "示例项目",
+        "readyItem": "已就绪",
+        "filteredItem": "已筛选",
+        "untitled": "无标题项目"
+      },
+      "fields": {
+        "sources": "来源",
+        "sourceName": "来源名称",
+        "sourceUrl": "来源 URL",
+        "monitorName": "监视器名称",
+        "schedule": "计划",
+        "timezone": "时区",
+        "intervalEvery": "每",
+        "intervalUnit": "间隔单位",
+        "weekday": "星期",
+        "hour": "小时",
+        "minute": "分钟",
+        "cronExpression": "Cron 表达式",
+        "showName": "节目名称",
+        "premise": "节目构想",
+        "includeAudio": "音频",
+        "audioHelp": "添加可播放的语音版本。",
+        "audioMinutes": "目标时长（分钟）",
+        "speakerCount": "嘉宾人数",
+        "template": "报告模板",
+        "audioProvider": "替代音频提供商",
+        "audioModel": "替代音频模型",
+        "customInstructions": "自定义编辑说明",
+        "emailDelivery": "电子邮件",
+        "emailRecipients": "邮件收件人",
+        "chatbookDelivery": "Chatbook",
+        "chatbookTitle": "Chatbook 标题"
+      },
+      "schedule": {
+        "manual": "仅手动",
+        "interval": "每 N 小时或分钟",
+        "daily": "每天",
+        "weekdays": "工作日",
+        "weekly": "每周",
+        "advanced": "高级 Cron"
+      },
+      "intervalUnits": {
+        "hours": "小时",
+        "minutes": "分钟"
+      },
+      "weekdays": {
+        "monday": "星期一",
+        "tuesday": "星期二",
+        "wednesday": "星期三",
+        "thursday": "星期四",
+        "friday": "星期五",
+        "saturday": "星期六",
+        "sunday": "星期日"
+      },
+      "advancedCron": "高级 Cron",
+      "nextOccurrence": "下次运行",
+      "manualOccurrence": "仅手动",
+      "nextOccurrencePending": "保存有效计划以计算准确时间。",
+      "schedulePreview": {
+        "loading": "正在计算准确计划…",
+        "error": "无法计算准确计划。请检查 cron 表达式和时区。"
+      },
+      "briefing": {
+        "question": "您要制作什么？",
+        "help": "请选择编辑形式。每个选项都以您选择的来源为依据。",
+        "advanced": "高级简报设置"
+      },
+      "formats": {
+        "concise_briefing": "精简简报",
+        "solo_update": "单人更新",
+        "host_discussion": "主持人讨论",
+        "sportscast": "体育播报",
+        "culture_roundtable": "文化圆桌",
+        "custom": "自定义"
+      },
+      "speaker": {
+        "defaultLabel": "参与者 {{index}}",
+        "defaultRole": "主持人",
+        "labelField": "参与者 {{index}} 标签",
+        "roleField": "参与者 {{index}} 角色",
+        "voiceField": "参与者 {{index}} 声音",
+        "personaField": "参与者 {{index}} 人设"
+      },
+      "preview": {
+        "generate": "预览报告",
+        "diagnostics": "预览诊断",
+        "context": "预览运行：{{runId}}",
+        "noRunContext": "请先成功运行监视器，再预览此报告。",
+        "templateRequired": "生成预览前请选择模板。",
+        "templateEmpty": "所选模板为空。",
+        "emptyResult": "预览未返回渲染内容。",
+        "error": "无法生成预览。"
+      },
+      "delivery": {
+        "help": "始终包含报告。外部投递会等待所选成果准备就绪。",
+        "reports": "报告",
+        "required": "必需存储",
+        "alwaysOn": "始终开启"
+      },
+      "receipt": {
+        "labels": {
+          "schedule": "计划",
+          "sources": "来源",
+          "artifacts": "成果",
+          "format": "格式",
+          "showName": "节目名称",
+          "cast": "嘉宾",
+          "duration": "目标时长",
+          "destinations": "目的地"
+        },
+        "schedule": {
+          "manual": "仅手动",
+          "scheduled": "{{date}}（{{timezone}}）"
+        },
+        "sources": "{{count}} 个来源",
+        "sources_one": "{{count}} 个来源",
+        "sources_other": "{{count}} 个来源",
+        "artifacts": {
+          "textReport": "文本报告",
+          "showNotes": "节目说明",
+          "audio": "音频"
+        },
+        "formats": {
+          "concise_briefing": "精简简报",
+          "solo_update": "单人更新",
+          "host_discussion": "主持人讨论",
+          "sportscast": "体育播报",
+          "culture_roundtable": "文化圆桌",
+          "custom": "自定义节目"
+        },
+        "speakerStyle": {
+          "1": "单人",
+          "2": "双主持人",
+          "3": "三位主持人",
+          "4": "四位主持人"
+        },
+        "programWithSpeakers": "{{speakers}}{{format}}",
+        "cast": "{{count}} 位参与者",
+        "cast_one": "{{count}} 位参与者",
+        "cast_other": "{{count}} 位参与者",
+        "duration": "目标 {{count}} 分钟",
+        "duration_one": "目标 {{count}} 分钟",
+        "duration_other": "目标 {{count}} 分钟",
+        "destinations": {
+          "email": "电子邮件：{{recipients}}",
+          "chatbook": "Chatbook：{{title}}"
+        },
+        "untitledChatbook": "无标题",
+        "dstChange": "夏令时偏移变化后，下一次运行使用 {{timezoneName}}：{{date}}。"
+      },
+      "test": {
+        "providerDisclosure": "测试使用您配置的 LLM 和文本转语音提供商。样本限制为 60 秒；完整测试使用目标时长。",
+        "textProviderDisclosure": "测试使用您配置的 LLM 提供商。纯文本测试不使用文本转语音。",
+        "receipt": "启用摘要",
+        "manualReceipt": "此简报手动运行，将所选成果保存在“报告”中；除非您选择“发送测试”，否则不会联系外部目的地。",
+        "scheduledReceipt": "{{schedule}}：从 {{sources}} 收集更新，以 {{program}}{{duration}} 形式生成 {{artifacts}}，然后保存并发送到 {{destinations}}。",
+        "audioTestRequired": "激活前，请成功生成音频样本或完整测试。",
+        "progress": "测试进度",
+        "stages": {
+          "collection": "收集来源",
+          "selection": "选择更新",
+          "text": "创建报告",
+          "audio": "创建音频",
+          "persistence": "保存到报告",
+          "audioScript": "编写音频脚本",
+          "audioScriptPersistence": "保存音频脚本",
+          "audioPersistence": "将音频保存到报告",
+          "delivery": "检查测试投递",
+          "deliveryAdapter": "投递到 {{adapter}}",
+          "unknown": "阶段 {{stage}}"
+        },
+        "sample": "生成 60 秒样本",
+        "full": "生成完整测试节目",
+        "text": "生成测试报告",
+        "send": "发送测试",
+        "activate": "启用计划",
+        "ready": "测试已完成。简报已准备就绪。在启用计划之前，此草稿保持未启用状态。",
+        "running": "运行 {{runId}} 仍在进行：{{stage}}。你可以关闭设置并在概览中监控。",
+        "failedStage": "{{stage}} 失败。请打开运行 {{runId}} 并重试此阶段。",
+        "failedWithCode": "{{stage}} 失败（{{code}}）。请打开运行 {{runId}} 并重试此阶段。",
+        "cancelledStage": "{{stage}} 已取消。草稿已保存。",
+        "cancelledWithCode": "{{stage}} 已取消（{{code}}）。草稿已保存。",
+        "cancelled": "测试已取消。草稿已保存。",
+        "failed": "测试失败。草稿已保存。{{message}}",
+        "status": {
+          "not_started": "未开始",
+          "queued": "已排队",
+          "running": "运行中",
+          "ready": "已就绪",
+          "failed": "失败",
+          "skipped": "已跳过",
+          "cancelled": "已取消"
+        }
+      },
+      "activate": {
+        "ready": "计划已启用。",
+        "failed": "无法启用计划。草稿已保存。{{message}}"
+      },
+      "validation": {
+        "sourcesRequired": "请至少选择一个来源再继续。",
+        "sourceNameRequired": "请输入来源名称。",
+        "sourceUrlInvalid": "请输入有效的 HTTP 或 HTTPS 来源 URL。",
+        "monitorNameRequired": "请输入监视器名称。",
+        "timezoneInvalid": "请输入有效的 IANA 时区。",
+        "intervalInvalid": "请输入支持的计划间隔。",
+        "hourInvalid": "请输入 0 到 23 之间的小时。",
+        "minuteInvalid": "请输入 0 到 59 之间的分钟。",
+        "cronInvalid": "请输入有效的五字段 Cron 表达式。",
+        "cronTooFrequent": "请选择间隔至少五分钟的计划。",
+        "templateRequired": "请输入报告模板。",
+        "castSizeInvalid": "请选择一到四位参与者。",
+        "castIdsInvalid": "每位参与者都需要唯一身份。",
+        "castVoicesRequired": "请为每位参与者选择声音。",
+        "audioMinutesInvalid": "请输入 1 到 60 分钟的时长。",
+        "emailInvalid": "请输入至少一个有效的电子邮件地址。"
+      },
+      "validationError": "请检查突出显示的字段再继续。"
+    },
+    "latest": {
+      "heading": {
+        "briefing": "最新简报",
+        "episode": "最新节目"
+      },
+      "empty": {
+        "scheduled": "首份简报计划于{{date}}生成。",
+        "manual": "尚未开始。立即测试。"
+      },
+      "generatedAt": "生成于 {{date}}",
+      "untitled": "简报 {{runId}}",
+      "artifacts": "报告／音频",
+      "audio": "音频",
+      "audioFailed": "音频生成失败",
+      "ready": "就绪",
+      "saved": "已保存",
+      "waiting": "等待中",
+      "script": "音频脚本",
+      "stageWithStatus": "{{stage}}：{{status}}",
+      "noUpdates": "未找到符合条件的更新。已保存状态{{noun}}。",
+      "nextRun": "下次运行：{{date}}",
+      "nextRunRelative": "下次运行：{{relative}}",
+      "counts": "简报：已包含、未读、新增",
+      "count": {
+        "included": "已包含 {{count}}",
+        "unread": "未读 {{count}}",
+        "new": "新增 {{count}}"
+      },
+      "provenance": {
+        "sources": "{{count}} 个跟踪来源",
+        "sources_zero": "{{count}} 个跟踪来源",
+        "sources_one": "{{count}} 个跟踪来源",
+        "sources_two": "{{count}} 个跟踪来源",
+        "sources_few": "{{count}} 个跟踪来源",
+        "sources_many": "{{count}} 个跟踪来源",
+        "sources_other": "{{count}} 个跟踪来源"
+      },
+      "delivery": {
+        "reports": "查看所有报告",
+        "retryAria": "重试 {{adapter}}: {{name}}",
+        "retryUnknownAria": "结果未知. 重试 {{adapter}}: {{name}}",
+        "reviewRetry": "检查后重试",
+        "unknownConfirmation": "提供商未确认通过 {{adapter}} 送达。重试可能会发送重复内容。请检查目标，仅在可以接受该风险时继续。 ({{destination}})",
+        "chatbookDestination": "Chatbook",
+        "confirmRetry": "重试 送达",
+        "confirmRetryAria": "重试 {{adapter}} 送达",
+        "recipientCount": "{{count}} 收件人",
+        "recipientCount_zero": "{{count}} 收件人",
+        "recipientCount_one": "{{count}} 收件人",
+        "recipientCount_two": "{{count}} 收件人",
+        "recipientCount_few": "{{count}} 收件人",
+        "recipientCount_many": "{{count}} 收件人",
+        "recipientCount_other": "{{count}} 收件人",
+        "reviewAcknowledgement": "我已检查目标，并接受重复送达的风险。",
+        "reviewSettings": "检查 设置",
+        "reviewTitle": "检查 {{adapter}} 送达"
+      },
+      "playback": {
+        "region": "音频: {{name}}",
+        "playAria": "播放 {{name}}",
+        "pauseAria": "暂停 {{name}}",
+        "resumeAria": "继续播放 {{name}}",
+        "seekAria": "音频: {{name}}",
+        "loading": "正在加载音频",
+        "error": "音频生成失败。请打开报告或重新生成音频。",
+        "play": "播放",
+        "pause": "暂停",
+        "resume": "继续",
+        "accessError": "音频: 访问失败. 请检查登录状态和服务器连接。",
+        "missing": "音频已不可用。"
+      },
+      "actions": {
+        "label": "最新简报",
+        "openReport": "打开 {{report}}",
+        "openReportAria": "打开{{report}}：{{name}}",
+        "regenerateAudio": "重新生成音频",
+        "regenerateAudioAria": "重新生成{{style}}{{noun}}音频：{{name}}",
+        "retry": "重试",
+        "retrySaveAria": "重试 已保存 报告: {{name}}",
+        "retryTextAria": "重试 报告: {{name}}",
+        "retryStage": "重试: {{stage}}",
+        "inspect": "检查运行",
+        "inspectAria": "检查运行 {{runId}}: {{name}}",
+        "viewReports": "查看所有报告",
+        "testNow": "立即测试",
+        "downloadAudio": "下载音频",
+        "downloadAudioAria": "下载音频：{{name}}",
+        "retryExactAria": "重试 {{stage}}: {{name}}",
+        "reviewScript": "检查音频脚本",
+        "reviewScriptAria": "检查音频脚本：{{name}}"
+      },
+      "announcements": {
+        "blockingFailure": "{{name}}失败。请检查运行{{runId}}。",
+        "delivered": "{{name}}：已送达。",
+        "nextRunUpdated": "{{name}}：已更新下次运行时间。",
+        "partialAudioFailure": "{{name}}：节目说明已就绪，音频生成失败。",
+        "readyText": "{{name}}：报告已就绪。",
+        "readyWithAudio": "{{name}}：音频和节目说明已就绪。",
+        "stageProgress": "{{name}}：{{stage}}{{status}}。",
+        "testQueued": "测试已排队。"
+      },
+      "retryError": "重试 失败. 检查运行.",
+      "regenerateError": "重新生成 音频: 失败.",
+      "testError": "立即测试: 失败.",
+      "status": {
+        "ready": "就绪",
+        "failed": "失败",
+        "saved": "已保存",
+        "waiting": "等待中",
+        "running": "运行中",
+        "queued": "已排队",
+        "notStarted": "未开始",
+        "notSelected": "未选择",
+        "cancelled": "已取消",
+        "delivered": "已送达",
+        "unknown": "结果未知",
+        "sending": "发送中",
+        "stale": "已过期",
+        "superseded": "已被取代",
+        "unavailable": "不可用",
+        "partial": "部分完成"
+      },
+      "stages": {
+        "renderText": "报告",
+        "persistText": "已保存 报告",
+        "composeScript": "音频脚本",
+        "persistScript": "已保存音频脚本",
+        "generateAudio": "音频",
+        "persistAudio": "已保存 音频"
+      },
+      "nouns": {
+        "briefing": "简报",
+        "episode": "节目",
+        "report": "报告",
+        "showNotes": "节目说明"
+      },
+      "scriptAccessError": "音频脚本访问失败。请检查登录状态和服务器连接。",
+      "scriptLoading": "正在加载音频脚本",
+      "scriptMissing": "音频脚本已不可用。",
+      "recovery": {
+        "renderText": "正在生成 报告",
+        "persistText": "正在保存 报告",
+        "composeScript": "正在编写音频脚本",
+        "persistScript": "正在保存音频脚本",
+        "generateAudio": "正在生成 音频",
+        "persistAudio": "正在保存 音频"
+      }
+    }
+  },
+  "outputs": {
+    "openInNewTabAria": "在新标签页中打开: {{title}}",
+    "chatAboutAria": "讨论此内容: {{title}}",
+    "downloadAria": "下载: {{title}}",
+    "artifactMissing": "已不可用.",
+    "artifactAuthError": "访问被拒绝。请检查登录状态。",
+    "artifactAccessError": "访问失败. 请检查登录状态和服务器连接。"
   }
 }

@@ -63,6 +63,7 @@ class _SQLiteRegisterConn:
     def __init__(self) -> None:
         self.execute_calls: list[tuple[str, Any]] = []
         self.committed = False
+        self.membership_inserted = False
 
     async def execute(self, query: str, params: Any) -> _CursorStub:
         lowered = str(query).lower()
@@ -71,6 +72,11 @@ class _SQLiteRegisterConn:
             return _CursorStub(row=None)
         if "insert into users" in lowered:
             return _CursorStub(lastrowid=29)
+        if "select id from roles where name" in lowered:
+            return _CursorStub(row=(11,))
+        if "insert into user_roles" in lowered:
+            self.membership_inserted = params == (29, 11)
+            return _CursorStub(lastrowid=1)
         if "insert into password_history" in lowered:
             return _CursorStub(lastrowid=1)
         if "insert into audit_log" in lowered:
@@ -114,6 +120,36 @@ class _PostgresConnWithExecuteTrap:
 
     async def execute(self, query: str, *params: Any):  # noqa: ARG002
         raise AssertionError(f"Postgres backend path should not call conn.execute: {query!r}")
+
+
+class _PostgresRegisterConn:
+    def __init__(self) -> None:
+        self.fetchval_calls: list[tuple[str, tuple[Any, ...]]] = []
+        self.execute_calls: list[tuple[str, tuple[Any, ...]]] = []
+        self.membership_inserted = False
+
+    async def fetchrow(self, query: str, *params: Any) -> None:  # noqa: ARG002
+        assert "select username, email" in query.lower()
+        return None
+
+    async def fetchval(self, query: str, *params: Any) -> int | None:
+        lowered = query.lower()
+        self.fetchval_calls.append((lowered, tuple(params)))
+        if "insert into users" in lowered:
+            return 31
+        if "select id from roles where name" in lowered:
+            return 13
+        raise AssertionError(f"Unexpected PostgreSQL fetchval query: {query!r}")
+
+    async def execute(self, query: str, *params: Any) -> None:
+        lowered = query.lower()
+        self.execute_calls.append((lowered, tuple(params)))
+        if "insert into user_roles" in lowered:
+            self.membership_inserted = params == (31, 13)
+            return
+        if "insert into password_history" in lowered or "insert into audit_log" in lowered:
+            return
+        raise AssertionError(f"Unexpected PostgreSQL execute query: {query!r}")
 
 
 class _SQLiteConnWithFetchrowTrap:
@@ -228,7 +264,26 @@ async def test_register_user_system_provisioning_bypasses_disabled_registration_
     assert payload["is_verified"] is True
     assert payload["registration_code_id"] is None
     assert conn.committed is False
+    assert conn.membership_inserted is True
     assert not any("from registration_codes" in query for query, _ in conn.execute_calls)
+
+
+@pytest.mark.asyncio
+async def test_register_user_postgres_persists_role_membership_before_returning() -> None:
+    conn = _PostgresRegisterConn()
+    service = _make_service(_PoolStub(conn, postgres=True))
+    service._create_user_directories = lambda user_id: True  # noqa: ARG005
+
+    payload = await service.register_user(
+        username="postgres-user",
+        email="postgres-user@example.com",
+        password="Strong!Pass9",
+    )
+
+    assert payload["user_id"] == 31
+    assert payload["role"] == "user"
+    assert conn.membership_inserted is True
+    assert any("select id from roles where name = $1" in query for query, _ in conn.fetchval_calls)
 
 
 @pytest.mark.asyncio

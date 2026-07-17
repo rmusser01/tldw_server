@@ -115,16 +115,19 @@ def test_chatbook_import_docs_match_multipart_contract() -> None:
         assert "source_format` (form field)" in api_text  # nosec B101
         assert "selected_openwebui_user_id` (form field)" in api_text  # nosec B101
         assert "chatbooks/import?conflict_resolution" not in api_text  # nosec B101
-        assert '"import_media": false' in api_text  # nosec B101
+        assert "For `source_format=chatbook`, omit them to restore media data and embeddings" in api_text  # nosec B101
+        assert '"import_media": null' in api_text  # nosec B101
+        assert '"import_embeddings": null' in api_text  # nosec B101
         assert '"selected_openwebui_user_id": "user_abc123"' in api_text  # nosec B101
 
     for guide_text in (source_guide, published_guide):
-        assert "**Import Media**: Not supported yet" in guide_text  # nosec B101
-        assert "**Import Embeddings**: Not supported yet" in guide_text  # nosec B101
-        assert "Keep this set to false" in guide_text  # nosec B101
+        assert "Chatbook archives: omit this option to restore all restorable media data" in guide_text  # nosec B101
+        assert "Chatbook archives: omit this option to restore embeddings" in guide_text  # nosec B101
+        assert "OpenWebUI JSON and database imports: embeddings are not imported" in guide_text  # nosec B101
+        assert "OpenWebUI JSON and database imports: attachment references are preserved first" in guide_text  # nosec B101
+        assert "use OpenWebUI attachment hydration after import" in guide_text  # nosec B101
+        assert "run OpenWebUI attachment hydration after import" in guide_text  # nosec B101
         assert "Default: true" not in guide_text  # nosec B101
-        assert "OpenWebUI JSON and database imports preserve attachment references first" in guide_text  # nosec B101
-        assert "Run OpenWebUI attachment hydration after import" in guide_text  # nosec B101
 
 
 def test_chatbook_openapi_documents_openwebui_multipart_fields() -> None:

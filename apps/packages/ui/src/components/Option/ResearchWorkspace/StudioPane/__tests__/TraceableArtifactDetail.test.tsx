@@ -174,6 +174,28 @@ describe("TraceableArtifactDetail", () => {
     expect(screen.queryByText("{")).not.toBeInTheDocument()
   })
 
+  it("labels non-default claims verification metadata as an override", () => {
+    renderDetail(
+      baseArtifact({
+        producerMetadata: {
+          producerType: "research_workspace_claim_verification",
+          provider: "openai",
+          model: "gpt-4o-mini",
+          claimsVerificationProvider: "llamacpp",
+          claimsVerificationModel: "qwen-claims",
+          claimsVerificationUsesDefault: false,
+          claimsVerificationDiffersFromGeneration: true,
+          claimsVerificationVerdict: "grounded"
+        }
+      })
+    )
+
+    expect(screen.getByText("Claims verifier")).toBeInTheDocument()
+    expect(screen.getByText("llamacpp / qwen-claims")).toBeInTheDocument()
+    expect(screen.getByText("Claims verifier mode")).toBeInTheDocument()
+    expect(screen.getByText("Override verifier")).toBeInTheDocument()
+  })
+
   it("suppresses provenance and lineage details when redaction posture is restricted", () => {
     renderDetail(
       baseArtifact({

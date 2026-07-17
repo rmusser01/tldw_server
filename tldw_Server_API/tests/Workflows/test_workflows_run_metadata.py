@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -136,6 +138,23 @@ def test_sqlite_metadata_migration_reraises_non_duplicate_errors():
     assert connection.rollback_called is True
 
 
+def test_update_run_metadata_retries_locked_sqlite_write() -> None:
+    db = WorkflowsDatabase.__new__(WorkflowsDatabase)
+    db.get_run = MagicMock(
+        return_value=SimpleNamespace(definition_snapshot_json='{"name":"audio_briefing"}')
+    )
+    db._using_backend = MagicMock(return_value=False)
+    db._conn = MagicMock()
+    db._conn.execute.side_effect = sqlite3.OperationalError("database is locked")
+    db._sqlite_retry_execute = MagicMock()
+    db._sqlite_retry_commit = MagicMock()
+
+    db.update_run_metadata("wf_audio_locked", {"audio_request_id": "wla_locked"})
+
+    db._sqlite_retry_execute.assert_called_once()
+    db._sqlite_retry_commit.assert_called_once_with()
+
+
 @pytest.mark.asyncio
 async def test_workflow_run_handler_persists_payload_metadata_without_mutating_definition(monkeypatch):
     created_runs: list[dict[str, Any]] = []
@@ -174,7 +193,7 @@ async def test_workflow_run_handler_persists_payload_metadata_without_mutating_d
         "steps": [],
     }
     metadata = {
-        "source": "watchlist_audio_briefing",
+        "source": "scheduled_test_workflow",
         "watchlist_job_id": 3,
         "watchlist_run_id": 7,
         "audio_request_id": "wla_test_1",
@@ -220,3 +239,85 @@ async def test_workflow_run_handler_rejects_non_dict_metadata(monkeypatch):
                 "mode": "async",
             }
         )
+
+
+@pytest.mark.asyncio
+async def test_watchlist_workflow_failure_is_recorded_and_fails_scheduler_task(monkeypatch):
+    recorded: list[dict[str, Any]] = []
+
+    class FakeWorkflowsDB:
+        def create_run(self, **_kwargs: Any) -> None:
+            return None
+
+        def get_run(self, run_id: str) -> Any:
+            return SimpleNamespace(run_id=run_id, status="failed")
+
+    class FakeWorkflowEngine:
+        def __init__(self, *, db: Any) -> None:
+            self.db = db
+
+        def submit(self, _run_id: str, mode: Any) -> None:
+            assert mode == workflow_handler_mod.RunMode.SYNC
+
+    def record_terminal(**kwargs: Any) -> None:
+        recorded.append(kwargs)
+
+    monkeypatch.setattr(workflow_handler_mod, "_get_wf_db", lambda: FakeWorkflowsDB())
+    monkeypatch.setattr(workflow_handler_mod, "WorkflowEngine", FakeWorkflowEngine)
+    monkeypatch.setattr(workflow_handler_mod, "record_workflow_run", AsyncMock())
+    monkeypatch.setattr(workflow_handler_mod, "record_audio_workflow_terminal", record_terminal)
+
+    with pytest.raises(RuntimeError, match="workflow_run_failed"):
+        await workflow_handler_mod.workflow_run(
+            {
+                "user_id": "42",
+                "definition_snapshot": {"name": "audio_briefing", "steps": []},
+                "inputs": {"items": []},
+                "metadata": {
+                    "source": "watchlist_audio_briefing",
+                    "watchlist_job_id": 3,
+                    "watchlist_run_id": 7,
+                    "briefing_occurrence_id": 9,
+                    "briefing_attempt_id": 11,
+                    "audio_request_id": "wla_test_1",
+                },
+                "mode": "async",
+            }
+        )
+
+    assert recorded[0]["status"] == "failed"
+    assert recorded[0]["workflow_db"].get_run(recorded[0]["workflow_run_id"]).status == "failed"
+
+
+@pytest.mark.asyncio
+async def test_generic_sync_workflow_failure_returns_structured_result(monkeypatch):
+    class FakeWorkflowsDB:
+        def create_run(self, **_kwargs: Any) -> None:
+            return None
+
+        def get_run(self, run_id: str) -> Any:
+            return SimpleNamespace(run_id=run_id, status="failed")
+
+    class FakeWorkflowEngine:
+        def __init__(self, *, db: Any) -> None:
+            self.db = db
+
+        def submit(self, _run_id: str, mode: Any) -> None:
+            assert mode == workflow_handler_mod.RunMode.SYNC
+
+    monkeypatch.setattr(workflow_handler_mod, "_get_wf_db", lambda: FakeWorkflowsDB())
+    monkeypatch.setattr(workflow_handler_mod, "WorkflowEngine", FakeWorkflowEngine)
+    monkeypatch.setattr(workflow_handler_mod, "record_workflow_run", AsyncMock())
+
+    result = await workflow_handler_mod.workflow_run(
+        {
+            "user_id": "42",
+            "definition_snapshot": {"name": "generic_sync", "steps": []},
+            "inputs": {},
+            "metadata": {"source": "generic_scheduler_test"},
+            "mode": "sync",
+        }
+    )
+
+    assert result["status"] == "failed"
+    assert result["succeeded"] is False

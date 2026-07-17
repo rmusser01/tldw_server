@@ -15,6 +15,7 @@ from tldw_Server_API.app.core.Chatbooks.chatbook_models import (
     FULL_ACCOUNT_EXPORT_MODE,
     ChatbookManifest,
     ChatbookVersion,
+    ContentType,
     ExportJob,
     ExportStatus,
 )
@@ -43,6 +44,11 @@ def chatbook_v1_1_service(tmp_path, monkeypatch):
 def _load_v1_1_schema() -> dict:
     schema_path = Path(__file__).resolve().parents[3] / "Docs" / "Schemas" / "chatbooks_manifest_v1_1.json"
     return json.loads(schema_path.read_text(encoding="utf-8"))
+
+
+def _character_selection(service: ChatbookService, name: str) -> dict[ContentType, list[str]]:
+    character_id = service.db.add_character_card({"name": name})
+    return {ContentType.CHARACTER: [str(character_id)]}
 
 
 def _minimal_v1_1_manifest() -> dict:
@@ -132,7 +138,10 @@ async def test_create_chatbook_export_writes_requested_v1_1_manifest_version(cha
     success, _message, archive_path = await chatbook_v1_1_service.create_chatbook(
         name="v1.1",
         description="v1.1",
-        content_selections={},
+        content_selections=_character_selection(
+            chatbook_v1_1_service,
+            "v1.1 manifest character",
+        ),
         format_version=ChatbookVersion.V1_1,
     )
 
@@ -159,7 +168,10 @@ async def test_create_chatbook_export_canonicalizes_legacy_v1_manifest_version(c
     success, _message, archive_path = await chatbook_v1_1_service.create_chatbook(
         name="legacy v1",
         description="legacy v1",
-        content_selections={},
+        content_selections=_character_selection(
+            chatbook_v1_1_service,
+            "legacy manifest character",
+        ),
         format_version=ChatbookVersion.V1_LEGACY,
     )
 

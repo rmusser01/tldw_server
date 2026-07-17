@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import pytest
 
+from tldw_Server_API.app.core.LLM_Calls.providers.cohere_adapter import CohereAdapter
 from tldw_Server_API.app.core.LLM_Calls.providers.google_adapter import GoogleAdapter
 from tldw_Server_API.app.core.LLM_Calls.providers.local_adapters import (
     _chat_with_openai_compatible_local_server,
 )
 from tldw_Server_API.app.core.LLM_Calls.providers.mlx_provider import MLXChatAdapter
-from tldw_Server_API.app.core.LLM_Calls.providers.cohere_adapter import CohereAdapter
 from tldw_Server_API.app.core.LLM_Calls.providers.moonshot_adapter import MoonshotAdapter
 from tldw_Server_API.app.core.LLM_Calls.providers.zai_adapter import ZaiAdapter
 
@@ -51,8 +51,8 @@ def test_local_non_streaming_prod_fetch_receives_timeout(monkeypatch):
         def close(self):
             return None
 
-    def fake_fetch(method, url, headers=None, json=None, timeout=None, retry=None):
-        captured["timeout"] = timeout
+    def fake_fetch(**kwargs):
+        captured["timeout"] = kwargs.get("timeout")
         return FakeResponse()
 
     result = _chat_with_openai_compatible_local_server(

@@ -97,6 +97,7 @@ from tldw_Server_API.app.core.custom_openai_providers import (
     custom_openai_provider_name,
     iter_custom_openai_provider_numbers,
 )
+from tldw_Server_API.app.core.exceptions import EgressPolicyError
 from tldw_Server_API.app.core.LLM_Calls import adapter_registry as _adapter_registry
 from tldw_Server_API.app.core.LLM_Calls.openrouter_model_inventory import (
     clear_openrouter_model_cache as _clear_openrouter_model_cache_shared,
@@ -1788,7 +1789,11 @@ def _find_local_request_url_override_keys(chat_args: dict[str, Any]) -> list[str
     return sorted(
         key
         for key, value in chat_args.items()
-        if value is not None and (key == "api_url" or key.endswith("_api_url"))
+        if value is not None
+        and (
+            key in {"api_url", "base_url", "api_base_url"}
+            or key.endswith("_api_url")
+        )
     )
 
 
@@ -1880,6 +1885,12 @@ def _build_adapter_request_from_chat_args(chat_args: dict[str, Any]) -> tuple[st
         "principal",
         "auth_user",
         "trusted_base_url_override",
+        "configured_endpoint_base_url",
+        "configured_endpoint_scope",
+        "endpoint_provenance",
+        "http_client_factory",
+        "http_fetcher",
+        "http_streamer",
         "_structured_requested_response_format",
         "stream",
         "streaming",
@@ -1888,25 +1899,21 @@ def _build_adapter_request_from_chat_args(chat_args: dict[str, Any]) -> tuple[st
         "slash_command_injection_mode",
     }
     for key, value in chat_args.items():
-        if key in skip_keys or key.startswith("_chat_") or value is None:
+        if key in skip_keys or key.startswith("_chat_") or key == "_endpoint_provenance" or value is None:
             continue
         if key not in request:
             request[key] = value
 
-    internal: dict[str, Any] = {}
-    for key in ("http_client_factory", "http_fetcher"):
-        if chat_args.get(key) is not None:
-            internal[key] = chat_args[key]
+    provenance = chat_args.get("_endpoint_provenance")
+    if provenance in {"server_config", "byok", "request_override"}:
+        request["_endpoint_provenance"] = provenance
 
-    return provider, request, internal
+    return provider, request, {}
 
 
 def _attach_internal_http_hooks(adapter: Any, request: dict[str, Any], internal: dict[str, Any]) -> None:
-    """Attach http_client_factory/http_fetcher only for adapters that opt in."""
-    if not internal:
-        return
-    if getattr(adapter, "accepts_internal_http_hooks", False):
-        request.update(internal)
+    """Compatibility no-op: transport hooks are adapter-owned, never request-owned."""
+    return None
 
 
 def _is_client_like_error(exc: Exception) -> bool:
@@ -1927,6 +1934,43 @@ def _get_llm_registry():
     return _adapter_registry.get_registry()
 
 
+def _map_provider_egress_error(
+    provider: str,
+    exc: EgressPolicyError,
+) -> ChatAPIError:
+    """Map typed policy failures without exposing target or resolver details."""
+    if exc.reason_code == "dns_unresolved":
+        return ChatProviderError(
+            provider=provider,
+            message="Provider endpoint is unreachable.",
+            status_code=503,
+        )
+    return ChatConfigurationError(
+        provider=provider,
+        message="Provider endpoint is blocked by the outbound security policy.",
+    )
+
+
+def _map_sync_stream_egress_errors(provider: str, stream: Any) -> Iterator[Any]:
+    """Map policy failures raised lazily while consuming a sync stream."""
+    try:
+        yield from stream
+    except EgressPolicyError as exc:
+        raise _map_provider_egress_error(provider, exc) from exc
+
+
+async def _map_async_stream_egress_errors(
+    provider: str,
+    stream: AsyncIterator[Any],
+) -> AsyncIterator[Any]:
+    """Map policy failures raised lazily while consuming an async stream."""
+    try:
+        async for item in stream:
+            yield item
+    except EgressPolicyError as exc:
+        raise _map_provider_egress_error(provider, exc) from exc
+
+
 def perform_chat_api_call(**kwargs: Any) -> Any:
     """Adapter-backed replacement for chat_orchestrator.chat_api_call."""
     provider, request, internal = _build_adapter_request_from_chat_args(kwargs)
@@ -1934,9 +1978,12 @@ def perform_chat_api_call(**kwargs: Any) -> Any:
     if adapter is None:
         raise ChatConfigurationError(provider=provider, message="LLM adapter unavailable.")
     _attach_internal_http_hooks(adapter, request, internal)
-    if request.get("stream"):
-        return adapter.stream(request)
-    return adapter.chat(request)
+    try:
+        if request.get("stream"):
+            return _map_sync_stream_egress_errors(provider, adapter.stream(request))
+        return adapter.chat(request)
+    except EgressPolicyError as exc:
+        raise _map_provider_egress_error(provider, exc) from exc
 
 
 async def perform_chat_api_call_async(**kwargs: Any) -> Any:
@@ -1947,20 +1994,26 @@ async def perform_chat_api_call_async(**kwargs: Any) -> Any:
         raise ChatConfigurationError(provider=provider, message="LLM adapter unavailable.")
     _attach_internal_http_hooks(adapter, request, internal)
 
-    if request.get("stream"):
-        try:
-            stream_iter = adapter.astream(request)
-            if inspect.isawaitable(stream_iter):
-                stream_iter = await stream_iter
-            return stream_iter
-        except NotImplementedError:
-            stream_iter = adapter.stream(request)
-            return wrap_sync_stream(stream_iter)
-
     try:
-        return await adapter.achat(request)
-    except NotImplementedError:
-        return await asyncio.to_thread(adapter.chat, request)
+        if request.get("stream"):
+            try:
+                stream_iter = adapter.astream(request)
+                if inspect.isawaitable(stream_iter):
+                    stream_iter = await stream_iter
+                return _map_async_stream_egress_errors(provider, stream_iter)
+            except NotImplementedError:
+                stream_iter = adapter.stream(request)
+                return _map_async_stream_egress_errors(
+                    provider,
+                    wrap_sync_stream(stream_iter),
+                )
+
+        try:
+            return await adapter.achat(request)
+        except NotImplementedError:
+            return await asyncio.to_thread(adapter.chat, request)
+    except EgressPolicyError as exc:
+        raise _map_provider_egress_error(provider, exc) from exc
 
 
 def merge_api_keys_for_provider(

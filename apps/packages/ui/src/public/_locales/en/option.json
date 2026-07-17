@@ -299,9 +299,6 @@
   "header_omniSearchStartChat": {
     "message": "Start new chat \"{{query}}\""
   },
-  "header_connectionCard.connectedCaption": {
-    "message": "Chat and tools are now available in Options and the sidepanel."
-  },
   "header_quickIngestQueuedAria": {
     "message": "{{label}} — {{count}} items queued — click to review and process"
   },
@@ -623,12 +620,6 @@
   "quickIngest_reviewRunLabel": {
     "message": "Review"
   },
-  "quickIngest_review.warnLongTime": {
-    "message": "Processing may take a while ({{time}})"
-  },
-  "quickIngest_review.summary": {
-    "message": "{{count}} items | {{preset}} preset | {{time}} estimated"
-  },
   "quickIngest_reviewDraftsCreated": {
     "message": "Drafts ready for review."
   },
@@ -858,7 +849,7 @@
     "message": "Use the Inspector to see status, type, and quick checks before ingesting."
   },
   "quickIngest_supportedFormats": {
-    "message": "Supported: docs, PDFs, audio, video, and web URLs."
+    "message": "Supported: docs, PDFs, HTML/XML/JSON, audio, video, and web URLs."
   },
   "quickIngest_itemsReady": {
     "message": "{{count}} item(s) ready"
@@ -870,7 +861,7 @@
     "message": "Drag and drop files"
   },
   "quickIngest_dragAndDropHint": {
-    "message": "Docs, PDFs, audio, and video are all welcome."
+    "message": "Docs, PDFs, HTML/XML/JSON, audio, and video are all welcome."
   },
   "quickIngest_pasteFromClipboard": {
     "message": "Paste URLs from clipboard"
@@ -3000,7 +2991,7 @@
     "message": "Some files not supported"
   },
   "quickIngest_dropzoneRejectHint": {
-    "message": "Check file type and size (max 500 MB)"
+    "message": "Check file type and size (max {{maxSize}})"
   },
   "quickIngest_dropzoneRelease": {
     "message": "Release to add files"
@@ -3019,42 +3010,6 @@
   },
   "quickIngest_filesRejected": {
     "message": "{{count}} files rejected"
-  },
-  "quickIngest_preset.label": {
-    "message": "Preset"
-  },
-  "quickIngest_preset.quick": {
-    "message": "Quick"
-  },
-  "quickIngest_preset.quick.description": {
-    "message": "Process fast, skip analysis"
-  },
-  "quickIngest_preset.standard": {
-    "message": "Standard"
-  },
-  "quickIngest_preset.standard.description": {
-    "message": "Analyze + chunk for RAG search"
-  },
-  "quickIngest_preset.deep": {
-    "message": "Deep"
-  },
-  "quickIngest_preset.deep.description": {
-    "message": "All options, review before save"
-  },
-  "quickIngest_preset.custom": {
-    "message": "Custom"
-  },
-  "quickIngest_preset.custom.description": {
-    "message": "Your manual configuration"
-  },
-  "quickIngest_preset.reset": {
-    "message": "Reset to defaults"
-  },
-  "quickIngest_preset.recommended": {
-    "message": "(Recommended)"
-  },
-  "quickIngest_preset.ariaLabel": {
-    "message": "Select processing preset"
   },
   "quickIngest_transcriptionModelLabel": {
     "message": "Transcription model"
@@ -4173,7 +4128,7 @@
     "message": "This media type isn’t supported in the document workspace."
   },
   "documentWorkspace_missingFile": {
-    "message": "The original file is not available (it may have failed to store). Open in Media or re-upload with \"Keep original file\" enabled."
+    "message": "This document's original file was not preserved during ingest. To view it in the workspace, re-upload it using the Upload tab above, or re-ingest it — newer ingests automatically preserve document files."
   },
   "documentWorkspace_fileUnauthorized": {
     "message": "You don't have permission to access this document."
@@ -4202,11 +4157,548 @@
   "header_skills": {
     "message": "Skills"
   },
-  "skills_testRun": {
-    "message": "Test run"
+  "skills_activeModeFilter": {
+    "message": "Mode: {{value}}"
   },
-  "skills_testRunTitle": {
-    "message": "Test run"
+  "skills_activeModelFilter": {
+    "message": "Model: {{value}}"
+  },
+  "skills_activeToolsFilter": {
+    "message": "Tools: {{value}}"
+  },
+  "skills_activeVisibilityFilter": {
+    "message": "Visibility: {{value}}"
+  },
+  "skills_addSupportingFile": {
+    "message": "Add Supporting File"
+  },
+  "skills_allowedToolsHelp": {
+    "message": "Separate tool names with commas or new lines."
+  },
+  "skills_allowedToolsLabel": {
+    "message": "Declared tools"
+  },
+  "skills_argumentHint": {
+    "message": "Argument hint"
+  },
+  "skills_argumentHintHelp": {
+    "message": "Shown to users as a short example of the expected input."
+  },
+  "skills_argumentHintLabel": {
+    "message": "Argument hint"
+  },
+  "skills_bulkDeleteAction": {
+    "message": "Delete selected"
+  },
+  "skills_bulkDeleteConfirmContent": {
+    "message": "{count, plural, one {Move # selected skill to Trash? You can restore it later.} other {Move # selected skills to Trash? You can restore them later.}}"
+  },
+  "skills_bulkDeleteConfirmContent_one": {
+    "message": "Move {{count}} selected skill to Trash? You can restore it later."
+  },
+  "skills_bulkDeleteConfirmContent_other": {
+    "message": "Move {{count}} selected skills to Trash? You can restore them later."
+  },
+  "skills_bulkDeleteConfirmOk": {
+    "message": "Move selected to Trash"
+  },
+  "skills_bulkDeleteConfirmTitle": {
+    "message": "Delete selected skills?"
+  },
+  "skills_bulkDeleteConflict": {
+    "message": "Selected skills changed elsewhere"
+  },
+  "skills_bulkDeleteConflictDesc": {
+    "message": "The stale selection was cleared. Select current versions and try again."
+  },
+  "skills_bulkDeleteError": {
+    "message": "Failed to delete selected skills"
+  },
+  "skills_bulkDeleteSuccess": {
+    "message": "Skills moved to Trash"
+  },
+  "skills_bulkDeleteSuccessDesc": {
+    "message": "{count, plural, one {# skill can be restored from Trash.} other {# skills can be restored from Trash.}}"
+  },
+  "skills_bulkDeleteSuccessDesc_one": {
+    "message": "{{count}} skill can be restored from Trash."
+  },
+  "skills_bulkDeleteSuccessDesc_other": {
+    "message": "{{count}} skills can be restored from Trash."
+  },
+  "skills_bulkExportAction": {
+    "message": "Export selected"
+  },
+  "skills_bulkExportError": {
+    "message": "Failed to export selected skills"
+  },
+  "skills_bulkExportPartial": {
+    "message": "Some skills could not be exported"
+  },
+  "skills_bulkExportSuccess": {
+    "message": "Skills exported"
+  },
+  "skills_bulkExportSuccessDescription": {
+    "message": "{count, plural, one {# skill was added to {filename}.} other {# skills were added to {filename}.}}"
+  },
+  "skills_bulkExportSuccessDescription_one": {
+    "message": "{{count}} skill was added to {{filename}}."
+  },
+  "skills_bulkExportSuccessDescription_other": {
+    "message": "{{count}} skills were added to {{filename}}."
+  },
+  "skills_clearFilters": {
+    "message": "Clear filters"
+  },
+  "skills_clearSelection": {
+    "message": "Clear selection"
+  },
+  "skills_colActions": {
+    "message": "Actions"
+  },
+  "skills_colArgumentHint": {
+    "message": "Argument hint"
+  },
+  "skills_colContext": {
+    "message": "Mode"
+  },
+  "skills_colDescription": {
+    "message": "Description"
+  },
+  "skills_colModelUse": {
+    "message": "Model use"
+  },
+  "skills_colName": {
+    "message": "Name"
+  },
+  "skills_colRuntime": {
+    "message": "Runtime"
+  },
+  "skills_columnVisibility": {
+    "message": "Column visibility"
+  },
+  "skills_colVisibility": {
+    "message": "Visibility"
+  },
+  "skills_contentHelp": {
+    "message": "Edit YAML frontmatter and instructions directly. Use $ARGUMENTS for input substitution."
+  },
+  "skills_contentLabel": {
+    "message": "SKILL.md Content"
+  },
+  "skills_contentRequired": {
+    "message": "Content is required"
+  },
+  "skills_contextFilter": {
+    "message": "Skill mode filter"
+  },
+  "skills_copyInvocation": {
+    "message": "Copy {{invocation}}"
+  },
+  "skills_copyInvocationAction": {
+    "message": "Copy invocation"
+  },
+  "skills_copyInvocationError": {
+    "message": "Failed to copy skill invocation"
+  },
+  "skills_copyInvocationSuccess": {
+    "message": "Skill invocation copied"
+  },
+  "skills_copyInvocationUnavailable": {
+    "message": "Clipboard is not available in this browser context."
+  },
+  "skills_copyNamedInvocation": {
+    "message": "Copy invocation for {{name}}"
+  },
+  "skills_countSummary": {
+    "message": "{count, plural, one {# skill} other {# skills}}"
+  },
+  "skills_countSummary_one": {
+    "message": "{{count}} skill"
+  },
+  "skills_countSummary_other": {
+    "message": "{{count}} skills"
+  },
+  "skills_countUnavailable": {
+    "message": "Count unavailable"
+  },
+  "skills_createError": {
+    "message": "Failed to create skill"
+  },
+  "skills_createSuccess": {
+    "message": "Skill created"
+  },
+  "skills_createSuccessActionDesc": {
+    "message": "Next, test it here or copy the chat invocation for a conversation."
+  },
+  "skills_declaredTools": {
+    "message": "Declared tools"
+  },
+  "skills_declaredToolsDisclosure": {
+    "message": "Declared tools are declarations, not availability guarantees."
+  },
+  "skills_defaultModel": {
+    "message": "Default"
+  },
+  "skills_deleteConfirmContent": {
+    "message": "Move \"{{name}}\" to Trash? You can restore it later."
+  },
+  "skills_deleteConfirmTitle": {
+    "message": "Delete {{name}}?"
+  },
+  "skills_deleteConflict": {
+    "message": "Skill changed elsewhere"
+  },
+  "skills_deleteConflictDesc": {
+    "message": "Reload skills before deleting this version."
+  },
+  "skills_deletedAt": {
+    "message": "Deleted"
+  },
+  "skills_deletedAtValue": {
+    "message": "Deleted {{deletedAt}}"
+  },
+  "skills_deleteError": {
+    "message": "Failed to delete skill"
+  },
+  "skills_deleteSuccess": {
+    "message": "Skill moved to Trash"
+  },
+  "skills_deleteSuccessDescription": {
+    "message": "You can restore it now or later from Trash."
+  },
+  "skills_densityComfortable": {
+    "message": "Comfortable"
+  },
+  "skills_densityCompact": {
+    "message": "Compact"
+  },
+  "skills_description": {
+    "message": "Discover, test, create, import, and manage reusable instructions."
+  },
+  "skills_descriptionLabel": {
+    "message": "Description"
+  },
+  "skills_detailsLoadError": {
+    "message": "Failed to load skill details"
+  },
+  "skills_detailsTitle": {
+    "message": "Skill details: {{name}}"
+  },
+  "skills_discardDraftCancel": {
+    "message": "Keep editing"
+  },
+  "skills_discardDraftConfirm": {
+    "message": "Discard draft"
+  },
+  "skills_discardDraftDescription": {
+    "message": "Your unsaved changes will be removed from this browser session."
+  },
+  "skills_discardDraftTitle": {
+    "message": "Discard unsaved skill draft?"
+  },
+  "skills_discardFileImportDescription": {
+    "message": "You will need to select and review the file again."
+  },
+  "skills_discardFileImportTitle": {
+    "message": "Discard reviewed file import?"
+  },
+  "skills_discardImportCancel": {
+    "message": "Keep editing"
+  },
+  "skills_discardImportConfirm": {
+    "message": "Discard import"
+  },
+  "skills_discardImportDescription": {
+    "message": "The imported text and review state will be removed."
+  },
+  "skills_discardImportTitle": {
+    "message": "Discard unfinished import?"
+  },
+  "skills_discardRecovered": {
+    "message": "Discard recovered draft"
+  },
+  "skills_discardRecoveredImport": {
+    "message": "Discard recovered import"
+  },
+  "skills_draftRecovered": {
+    "message": "Recovered your unsaved draft from this session."
+  },
+  "skills_dryRenderResult": {
+    "message": "Dry render"
+  },
+  "skills_duplicate": {
+    "message": "Duplicate"
+  },
+  "skills_duplicateError": {
+    "message": "A skill with this name already exists."
+  },
+  "skills_editTitleNamed": {
+    "message": "Edit Skill: {{name}}"
+  },
+  "skills_emptyCreateFromTemplate": {
+    "message": "Create from template"
+  },
+  "skills_emptyCurrentPage": {
+    "message": "No skills on this page."
+  },
+  "skills_emptyDescription": {
+    "message": "Skills are reusable instructions that can be tested here and used from chat."
+  },
+  "skills_emptyImportText": {
+    "message": "Import from text"
+  },
+  "skills_emptySeedBuiltins": {
+    "message": "Seed built-ins"
+  },
+  "skills_emptyTable": {
+    "message": "No skills yet."
+  },
+  "skills_emptyTableError": {
+    "message": "Unable to load skills."
+  },
+  "skills_emptyTitle": {
+    "message": "Start with a reusable skill"
+  },
+  "skills_executedResult": {
+    "message": "Executed test"
+  },
+  "skills_executionFork": {
+    "message": "Forked model run"
+  },
+  "skills_executionInline": {
+    "message": "Inline"
+  },
+  "skills_executionModeLabel": {
+    "message": "Execution mode"
+  },
+  "skills_export": {
+    "message": "Export"
+  },
+  "skills_exportError": {
+    "message": "Failed to export skill"
+  },
+  "skills_exportStarted": {
+    "message": "Export started"
+  },
+  "skills_exportStartedDescription": {
+    "message": "{{filename}} download has started."
+  },
+  "skills_filterAllModes": {
+    "message": "All modes"
+  },
+  "skills_filterAllVisibility": {
+    "message": "All visibility"
+  },
+  "skills_filterAnyTools": {
+    "message": "Any tools"
+  },
+  "skills_filterFork": {
+    "message": "Fork"
+  },
+  "skills_filterHasTools": {
+    "message": "Has tools"
+  },
+  "skills_filterHidden": {
+    "message": "Hidden"
+  },
+  "skills_filterInline": {
+    "message": "Inline"
+  },
+  "skills_filterNoTools": {
+    "message": "No tools"
+  },
+  "skills_filters": {
+    "message": "Filters"
+  },
+  "skills_filtersCount": {
+    "message": "Filters ({{count}})"
+  },
+  "skills_filterVisible": {
+    "message": "Visible"
+  },
+  "skills_guidedMode": {
+    "message": "Guided"
+  },
+  "skills_guidedRewriteNotice": {
+    "message": "Guided changes rewrite supported metadata. Use Advanced source to preserve custom frontmatter."
+  },
+  "skills_hiddenFromChatState": {
+    "message": "Hidden from chat"
+  },
+  "skills_hiddenState": {
+    "message": "Hidden"
+  },
+  "skills_import": {
+    "message": "Import"
+  },
+  "skills_importConflictDescription": {
+    "message": "Importing will replace the existing skill or Trash item only if overwrite is enabled."
+  },
+  "skills_importConflictTitle": {
+    "message": "Existing skill detected"
+  },
+  "skills_importConflictVersion": {
+    "message": "Version {{version}}"
+  },
+  "skills_importDraftRecovered": {
+    "message": "Recovered your unfinished import from this session."
+  },
+  "skills_importError": {
+    "message": "Failed to import skill"
+  },
+  "skills_importFile": {
+    "message": "Import File (.md/.zip)"
+  },
+  "skills_importFileInputLabel": {
+    "message": "Import skill file"
+  },
+  "skills_importFileReviewSource": {
+    "message": "Selected file:"
+  },
+  "skills_importFileReviewTitle": {
+    "message": "Review Skill Import"
+  },
+  "skills_importNameOptional": {
+    "message": "Optional. If omitted, name from frontmatter will be used."
+  },
+  "skills_importOverwrite": {
+    "message": "Overwrite existing skill"
+  },
+  "skills_importOverwriteRequired": {
+    "message": "Required because this import matches an existing skill name."
+  },
+  "skills_importPreviewError": {
+    "message": "Failed to review skill import"
+  },
+  "skills_importReviewConflict": {
+    "message": "Conflict"
+  },
+  "skills_importReviewErrors": {
+    "message": "Fix these issues before importing."
+  },
+  "skills_importReviewMissingName": {
+    "message": "Not resolved"
+  },
+  "skills_importReviewNeedsFixes": {
+    "message": "Needs fixes"
+  },
+  "skills_importReviewReady": {
+    "message": "Ready"
+  },
+  "skills_importReviewTitle": {
+    "message": "Import review"
+  },
+  "skills_importReviewUnknownError": {
+    "message": "The skill could not be validated."
+  },
+  "skills_importSkill": {
+    "message": "Import skill"
+  },
+  "skills_importSuccess": {
+    "message": "Skill imported"
+  },
+  "skills_importSuccessActionDesc": {
+    "message": "Next, test it here or open the skill to confirm the imported details."
+  },
+  "skills_importText": {
+    "message": "Import Text"
+  },
+  "skills_importTextTitle": {
+    "message": "Import Skill from Text"
+  },
+  "skills_instructionsHelp": {
+    "message": "Use $ARGUMENTS where supplied input should be inserted."
+  },
+  "skills_instructionsLabel": {
+    "message": "Instructions"
+  },
+  "skills_libraryView": {
+    "message": "Library"
+  },
+  "skills_libraryViewSelector": {
+    "message": "Skills view"
+  },
+  "skills_loadDuplicateError": {
+    "message": "Failed to prepare skill duplicate"
+  },
+  "skills_loadError": {
+    "message": "Failed to load skill"
+  },
+  "skills_loadingDetails": {
+    "message": "Loading skill details"
+  },
+  "skills_loadingStatus": {
+    "message": "Loading skills"
+  },
+  "skills_loadListError": {
+    "message": "Failed to load skills"
+  },
+  "skills_loadListErrorRecoveryDescription": {
+    "message": "The Skills list could not be loaded. Try again or open diagnostics."
+  },
+  "skills_mode": {
+    "message": "Mode"
+  },
+  "skills_model": {
+    "message": "Model"
+  },
+  "skills_modelAllowed": {
+    "message": "Model allowed"
+  },
+  "skills_modelDisabled": {
+    "message": "Model disabled"
+  },
+  "skills_modelFilter": {
+    "message": "Filter by model"
+  },
+  "skills_modelFilterPlaceholder": {
+    "message": "Model"
+  },
+  "skills_modelInvocationLabel": {
+    "message": "Allow model invocation"
+  },
+  "skills_modelOverrideLabel": {
+    "message": "Model override"
+  },
+  "skills_moreActionsForSkill": {
+    "message": "More actions for {{name}}"
+  },
+  "skills_moveToTrash": {
+    "message": "Move to Trash"
+  },
+  "skills_nameInvalid": {
+    "message": "Must start with a letter, use only lowercase letters, numbers, and hyphens (max 64 chars)"
+  },
+  "skills_nameLabel": {
+    "message": "Name"
+  },
+  "skills_nameRequired": {
+    "message": "Name is required"
+  },
+  "skills_newSkill": {
+    "message": "New Skill"
+  },
+  "skills_newTitleNamed": {
+    "message": "New Skill: {{name}}"
+  },
+  "skills_noDescription": {
+    "message": "No description"
+  },
+  "skills_noDescriptionProvided": {
+    "message": "No description provided."
+  },
+  "skills_noFilterMatches": {
+    "message": "No skills match these filters."
+  },
+  "skills_noMatches": {
+    "message": "No skills match this search."
+  },
+  "skills_noSupportingFiles": {
+    "message": "No supporting files."
+  },
+  "skills_optionalField": {
+    "message": "Optional"
   },
   "skills_previewArgs": {
     "message": "Test Arguments"
@@ -4214,35 +4706,455 @@
   "skills_previewArgsPlaceholder": {
     "message": "Enter test arguments..."
   },
-  "skills_renderOnlyAction": {
-    "message": "Render prompt only"
-  },
-  "skills_testRunAction": {
-    "message": "Run test"
+  "skills_previewForkOutput": {
+    "message": "Fork Output"
   },
   "skills_previewRendered": {
     "message": "Rendered Prompt"
   },
-  "skills_previewForkOutput": {
-    "message": "Fork Output"
+  "skills_purge": {
+    "message": "Delete permanently"
   },
-  "skills_testRunError": {
-    "message": "Execution failed"
+  "skills_purgeConfirmContent": {
+    "message": "Permanently delete \"{{name}}\" and its archived files? This cannot be undone."
   },
-  "skills_loadingStatus": {
-    "message": "Loading skills"
+  "skills_purgeConfirmOk": {
+    "message": "Delete permanently"
   },
-  "skills_renderingPromptStatus": {
-    "message": "Rendering prompt for {{name}}"
+  "skills_purgeConfirmTitle": {
+    "message": "Permanently delete {{name}}?"
   },
-  "skills_runningTestStatus": {
-    "message": "Running test for {{name}}"
+  "skills_purgeConflictDescription": {
+    "message": "Reload Trash before permanently deleting this version."
+  },
+  "skills_purgeError": {
+    "message": "Failed to permanently delete skill"
+  },
+  "skills_purgeNamedSkill": {
+    "message": "Permanently delete {{name}}"
+  },
+  "skills_purgeSuccess": {
+    "message": "Skill permanently deleted"
+  },
+  "skills_readyToRestore": {
+    "message": "Ready to restore"
+  },
+  "skills_reloadLatest": {
+    "message": "Reload latest"
+  },
+  "skills_reviewLatest": {
+    "message": "Review latest"
+  },
+  "skills_reloadSkills": {
+    "message": "Reload skills"
+  },
+  "skills_reloadTrash": {
+    "message": "Reload Trash"
+  },
+  "skills_removeSupportingFile": {
+    "message": "Remove supporting file"
   },
   "skills_renderedPromptReadyStatus": {
     "message": "Rendered prompt ready for {{name}}"
   },
+  "skills_renderingPromptStatus": {
+    "message": "Rendering prompt for {{name}}"
+  },
+  "skills_renderOnlyAction": {
+    "message": "Render prompt only"
+  },
+  "skills_renderOnlyDisclosure": {
+    "message": "Render prompt only does not invoke fork, model, or tool execution."
+  },
+  "skills_replaceAdvancedCancel": {
+    "message": "Keep advanced source"
+  },
+  "skills_replaceAdvancedConfirm": {
+    "message": "Use guided fields"
+  },
+  "skills_replaceAdvancedDescription": {
+    "message": "Guided fields cannot preserve custom frontmatter. Continue only if you want to replace the advanced source."
+  },
+  "skills_replaceAdvancedTitle": {
+    "message": "Replace advanced source?"
+  },
+  "skills_replaceTemplateCancel": {
+    "message": "Keep current draft"
+  },
+  "skills_replaceTemplateConfirm": {
+    "message": "Replace draft"
+  },
+  "skills_replaceTemplateDescription": {
+    "message": "This replaces the current guided fields with the selected template."
+  },
+  "skills_replaceTemplateTitle": {
+    "message": "Replace guided draft with template?"
+  },
+  "skills_restore": {
+    "message": "Restore"
+  },
+  "skills_restoreConflictDescription": {
+    "message": "Reload Trash before restoring this version."
+  },
+  "skills_restoreError": {
+    "message": "Failed to restore skill"
+  },
+  "skills_restoreNamedSkill": {
+    "message": "Restore {{name}}"
+  },
+  "skills_restoreStatus": {
+    "message": "Restore status"
+  },
+  "skills_restoreSuccess": {
+    "message": "Skill restored"
+  },
+  "skills_restoreUnavailable": {
+    "message": "Restore unavailable"
+  },
+  "skills_removeActiveFilter": {
+    "message": "Remove {{label}} filter"
+  },
+  "skills_restoreUnavailableReason": {
+    "message": "Archived skill files are unavailable."
+  },
+  "skills_reviewImport": {
+    "message": "Review import"
+  },
+  "skills_runningTestStatus": {
+    "message": "Running test for {{name}}"
+  },
+  "skills_runtimeAutoOff": {
+    "message": "Auto invocation off"
+  },
+  "skills_runtimeDeclaredTools": {
+    "message": "{count, plural, one {# tool declared} other {# tools declared}}"
+  },
+  "skills_runtimeDeclaredTools_one": {
+    "message": "{{count}} tool declared"
+  },
+  "skills_runtimeDeclaredTools_other": {
+    "message": "{{count}} tools declared"
+  },
+  "skills_runtimeFork": {
+    "message": "Fork"
+  },
+  "skills_runtimeImpactTitle": {
+    "message": "Runtime impact"
+  },
+  "skills_runtimeInline": {
+    "message": "Inline"
+  },
+  "skills_runtimeMayCallModel": {
+    "message": "Test may call model"
+  },
+  "skills_runtimeModelOverride": {
+    "message": "Model override"
+  },
+  "skills_runtimePromptOnly": {
+    "message": "Prompt only by default"
+  },
+  "skills_searchLabel": {
+    "message": "Search skills"
+  },
+  "skills_searchPlaceholder": {
+    "message": "Search skills..."
+  },
+  "skills_seedBuiltins": {
+    "message": "Seed Built-ins"
+  },
+  "skills_seedBuiltinsMissingOnly": {
+    "message": "Seed Missing Only"
+  },
+  "skills_seedBuiltinsOverwrite": {
+    "message": "Seed and Overwrite Existing"
+  },
+  "skills_seedError": {
+    "message": "Failed to seed built-in skills"
+  },
+  "skills_seedOverwriteConfirmContent": {
+    "message": "This replaces existing skill copies that match built-in skill names. Custom skills with other names are not changed."
+  },
+  "skills_seedOverwriteConfirmOk": {
+    "message": "Overwrite built-ins"
+  },
+  "skills_seedOverwriteConfirmTitle": {
+    "message": "Overwrite existing built-in skills?"
+  },
+  "skills_seedSuccess": {
+    "message": "Built-in skills seeded"
+  },
+  "skills_seedSuccessActionDesc": {
+    "message": "Try a built-in skill now, or copy the chat invocation for later."
+  },
+  "skills_seedSuccessDesc": {
+    "message": "{count, plural, one {# built-in skill seeded.} other {# built-in skills seeded.}}"
+  },
+  "skills_seedSuccessDesc_one": {
+    "message": "{{count}} built-in skill seeded."
+  },
+  "skills_seedSuccessDesc_other": {
+    "message": "{{count}} built-in skills seeded."
+  },
+  "skills_selectedCount": {
+    "message": "{{count}} selected"
+  },
+  "skills_selectionLimitDescription": {
+    "message": "Bulk actions accept at most {{limit}} skills at a time."
+  },
+  "skills_selectionLimitReached": {
+    "message": "Selection limit reached ({{limit}} maximum)."
+  },
+  "skills_selectionLimitTitle": {
+    "message": "Selection limited to 100 skills"
+  },
+  "skills_selectSkillRow": {
+    "message": "Select {{name}}"
+  },
+  "skills_sourceMode": {
+    "message": "Advanced source"
+  },
+  "skills_supportingFileContent": {
+    "message": "Content"
+  },
+  "skills_supportingFileName": {
+    "message": "Filename"
+  },
+  "skills_supportingFileNameInvalid": {
+    "message": "Use letters, numbers, dot, underscore, or hyphen (max 100 chars)"
+  },
+  "skills_supportingFileNameRequired": {
+    "message": "Filename is required"
+  },
+  "skills_supportingFileNameReserved": {
+    "message": "SKILL.md is reserved"
+  },
+  "skills_supportingFiles": {
+    "message": "Supporting files"
+  },
+  "skills_supportingFilesInvalid": {
+    "message": "Invalid supporting files"
+  },
+  "skills_supportingFilesLabel": {
+    "message": "Supporting Files"
+  },
+  "skills_tableDensity": {
+    "message": "Table density"
+  },
+  "skills_templateHelpGuided": {
+    "message": "Choose a starting point, then edit the fields below."
+  },
+  "skills_templateLabel": {
+    "message": "Start from template"
+  },
+  "skills_templates_summarizer_label": {
+    "message": "Summarizer"
+  },
+  "skills_templates_explainer_label": {
+    "message": "Explainer"
+  },
+  "skills_templates_extractor_label": {
+    "message": "Extractor"
+  },
+  "skills_templates_blank_label": {
+    "message": "Blank"
+  },
   "skills_testResultReadyStatus": {
     "message": "Test result ready for {{name}}"
+  },
+  "skills_testRun": {
+    "message": "Test run"
+  },
+  "skills_testRunAction": {
+    "message": "Run test"
+  },
+  "skills_testRunDisclosure": {
+    "message": "This renders the skill with your arguments. Fork-mode skills may call the configured model and allowed tools."
+  },
+  "skills_testRunError": {
+    "message": "Execution failed"
+  },
+  "skills_testRunForkMayCallModelDisclosure": {
+    "message": "Run test uses fork execution and may call the configured model for this skill."
+  },
+  "skills_testRunForkPromptOnlyDisclosure": {
+    "message": "Run test uses fork execution for this skill; model calls are disabled."
+  },
+  "skills_testRunInlineDisclosure": {
+    "message": "Run test uses inline prompt execution for this skill."
+  },
+  "skills_testRunInlineMayCallModelDisclosure": {
+    "message": "Run test uses inline prompt execution and may call the configured model for this skill."
+  },
+  "skills_testRunSkill": {
+    "message": "Test run {{name}}"
+  },
+  "skills_testRunTitle": {
+    "message": "Test run: {{name}}"
+  },
+  "skills_testSpecificSkill": {
+    "message": "Test {{skillName}}"
+  },
+  "skills_title": {
+    "message": "Skills"
+  },
+  "skills_toolsFilter": {
+    "message": "Skill tools filter"
+  },
+  "skills_trashConflict": {
+    "message": "Trash item changed elsewhere"
+  },
+  "skills_trashCountSummary": {
+    "message": "{{count}} in Trash"
+  },
+  "skills_trashEmptyDescription": {
+    "message": "Skills you move to Trash will appear here until permanently deleted."
+  },
+  "skills_trashEmptyError": {
+    "message": "Unable to load Trash."
+  },
+  "skills_trashEmptyTitle": {
+    "message": "Trash is empty"
+  },
+  "skills_trashLoadError": {
+    "message": "Failed to load Trash"
+  },
+  "skills_trashLoadErrorDescription": {
+    "message": "Deleted skills could not be loaded. Try again or open diagnostics."
+  },
+  "skills_trashLoadingStatus": {
+    "message": "Loading deleted skills"
+  },
+  "skills_trashView": {
+    "message": "Trash"
+  },
+  "skills_undoDeleteNamedSkill": {
+    "message": "Undo delete {{name}}"
+  },
+  "skills_unsavedChanges": {
+    "message": "Unsaved changes"
+  },
+  "skills_untitled": {
+    "message": "untitled"
+  },
+  "skills_updateError": {
+    "message": "Failed to update skill"
+  },
+  "skills_updateSuccess": {
+    "message": "Skill updated"
+  },
+  "skills_useInChat": {
+    "message": "Use in chat"
+  },
+  "skills_useNamedSkillInChat": {
+    "message": "Use {{name}} in chat"
+  },
+  "skills_userInvocableLabel": {
+    "message": "Visible in chat"
+  },
+  "skills_versionConflict": {
+    "message": "This skill changed elsewhere. Review the latest version before choosing whether to overwrite it."
+  },
+  "skills_conflictOverwriteReady": {
+    "message": "Draft ready to overwrite latest"
+  },
+  "skills_conflictOverwriteReadyDescription": {
+    "message": "Your local draft is unchanged. Save when you are ready to overwrite version {{version}}."
+  },
+  "skills_conflictReviewDescription": {
+    "message": "Review the latest source below. Continuing keeps your local draft and uses the latest version token when you save."
+  },
+  "skills_conflictReviewTitle": {
+    "message": "Overwrite the latest server version?"
+  },
+  "skills_keepDraftAndOverwrite": {
+    "message": "Keep draft and overwrite"
+  },
+  "skills_keepReviewing": {
+    "message": "Keep reviewing"
+  },
+  "skills_latestServerSource": {
+    "message": "Latest server source"
+  },
+  "skills_versionReloaded": {
+    "message": "Latest version loaded"
+  },
+  "skills_versionReloadedDescription": {
+    "message": "Your local draft was preserved. Save again to apply it."
+  },
+  "skills_versionReloadError": {
+    "message": "Failed to reload latest version"
+  },
+  "skills_viewNamedSkill": {
+    "message": "View {{name}}"
+  },
+  "skills_viewOptions": {
+    "message": "View options"
+  },
+  "skills_viewSkill": {
+    "message": "View skill"
+  },
+  "skills_visibility": {
+    "message": "Visibility"
+  },
+  "skills_visibilityFilter": {
+    "message": "Skill visibility filter"
+  },
+  "skills_visibleInChatState": {
+    "message": "Visible in chat"
+  },
+  "skills_visibleState": {
+    "message": "Visible"
+  },
+  "skills_templates_summarizer_description": {
+    "message": "Condense source material into a short, useful answer."
+  },
+  "skills_templates_explainer_description": {
+    "message": "Teach a concept step by step for a specific audience."
+  },
+  "skills_templates_extractor_description": {
+    "message": "Pull structured facts or fields from messy input."
+  },
+  "skills_templates_blank_description": {
+    "message": "Start from valid frontmatter and write custom instructions."
+  },
+  "skills_sortBy": {
+    "message": "Sort by"
+  },
+  "skills_sortDefault": {
+    "message": "Default order"
+  },
+  "skills_sortCreatedAsc": {
+    "message": "Created (oldest)"
+  },
+  "skills_sortCreatedDesc": {
+    "message": "Created (newest)"
+  },
+  "skills_sortModifiedAsc": {
+    "message": "Modified (oldest)"
+  },
+  "skills_sortModifiedDesc": {
+    "message": "Modified (newest)"
+  },
+  "skills_sortModeAsc": {
+    "message": "Mode (A-Z)"
+  },
+  "skills_sortModeDesc": {
+    "message": "Mode (Z-A)"
+  },
+  "skills_sortNameAsc": {
+    "message": "Name (A-Z)"
+  },
+  "skills_sortNameDesc": {
+    "message": "Name (Z-A)"
+  },
+  "skills_createdAt": {
+    "message": "Created"
+  },
+  "skills_lastUpdated": {
+    "message": "Last updated"
+  },
+  "skills_versionLabel": {
+    "message": "Version"
   },
   "header_modeRepo2txt": {
     "message": "Repo2Txt"
@@ -4327,5 +5239,752 @@
   },
   "repo2txt_status_generated": {
     "message": "Generated output for {{count}} files ({{tokenCount}} tokens)."
+  },
+  "setupReadiness_title": {
+    "message": "Setup readiness"
+  },
+  "setupReadiness_description": {
+    "message": "Choose the defaults that make chat, search, ingestion, and speech ready before the first large import."
+  },
+  "setupReadiness_valueNotSet": {
+    "message": "Not set"
+  },
+  "setupReadiness_actions_openBackendSetup": {
+    "message": "Open backend setup"
+  },
+  "setupReadiness_actions_refresh": {
+    "message": "Refresh"
+  },
+  "setupReadiness_actions_preview": {
+    "message": "Preview selection"
+  },
+  "setupReadiness_actions_provision": {
+    "message": "Provision now"
+  },
+  "setupReadiness_actions_verify": {
+    "message": "Verify readiness"
+  },
+  "setupReadiness_actions_continue": {
+    "message": "Continue"
+  },
+  "setupReadiness_errors_adminRequiredTitle": {
+    "message": "Admin access required"
+  },
+  "setupReadiness_errors_requestFailedTitle": {
+    "message": "Readiness request failed"
+  },
+  "setupReadiness_errors_localSetupRequiredTitle": {
+    "message": "Local setup required"
+  },
+  "setupReadiness_errors_localSetupRequiredDescription": {
+    "message": "First-run setup is restricted to local requests."
+  },
+  "setupReadiness_errors_load": {
+    "message": "Unable to load setup readiness."
+  },
+  "setupReadiness_errors_preview": {
+    "message": "Unable to preview setup readiness."
+  },
+  "setupReadiness_errors_provision": {
+    "message": "Unable to provision setup readiness."
+  },
+  "setupReadiness_errors_verify": {
+    "message": "Unable to verify setup readiness."
+  },
+  "setupReadiness_profile_title": {
+    "message": "Readiness profile"
+  },
+  "setupReadiness_profile_description": {
+    "message": "Profiles set defaults only. Provisioning is a separate action."
+  },
+  "setupReadiness_profile_empty": {
+    "message": "No setup readiness profiles are available."
+  },
+  "setupReadiness_profile_advancedControls": {
+    "message": "Advanced controls"
+  },
+  "setupReadiness_machine_appleSilicon": {
+    "message": "Apple Silicon"
+  },
+  "setupReadiness_machine_freeDiskGb": {
+    "message": "{{value}} GB free"
+  },
+  "setupReadiness_lanes_noSelection": {
+    "message": "No selection yet."
+  },
+  "setupReadiness_lanes_ttsSelection": {
+    "message": "TTS: {{value}}"
+  },
+  "setupReadiness_preview_title": {
+    "message": "Preview and provision"
+  },
+  "setupReadiness_preview_configUpdates": {
+    "message": "Config updates"
+  },
+  "setupReadiness_preview_configUpdateCount": {
+    "message": "{{count}} section(s)"
+  },
+  "setupReadiness_preview_installPlan": {
+    "message": "Install plan"
+  },
+  "setupReadiness_preview_installPlanWork": {
+    "message": "Provisioning work planned"
+  },
+  "setupReadiness_preview_noDownloads": {
+    "message": "No downloads needed"
+  },
+  "setupReadiness_preview_overlays": {
+    "message": "Overlays"
+  },
+  "setupReadiness_preview_none": {
+    "message": "None"
+  },
+  "setupReadiness_preview_reviewTitle": {
+    "message": "Review before provisioning"
+  },
+  "setupReadiness_preview_reviewDescription": {
+    "message": "Select a profile or preview the current selection before running Provision now."
+  },
+  "setupReadiness_consequences_title": {
+    "message": "Skipped-lane consequences"
+  },
+  "setupReadiness_provision_statusTitle": {
+    "message": "Provision status: {{status}}"
+  },
+  "setupReadiness_provision_description": {
+    "message": "Readiness provisioning has started. Refresh or watch the status cards for progress."
+  },
+  "setupReadiness_verification_statusTitle": {
+    "message": "Verification: {{status}}"
+  },
+  "setupReadiness_verification_description": {
+    "message": "Verification completed."
+  },
+  "setupReadiness_statuses_not_configured": {
+    "message": "not configured"
+  },
+  "setupReadiness_statuses_ready": {
+    "message": "ready"
+  },
+  "setupReadiness_statuses_ready_with_warnings": {
+    "message": "ready with warnings"
+  },
+  "setupReadiness_statuses_previewed": {
+    "message": "previewed"
+  },
+  "setupReadiness_statuses_failed": {
+    "message": "failed"
+  },
+  "setupReadiness_statuses_blocked": {
+    "message": "blocked"
+  },
+  "setupReadiness_statuses_provisioning": {
+    "message": "provisioning"
+  },
+  "setupReadiness_statuses_queued": {
+    "message": "queued"
+  },
+  "setupReadiness_statuses_running": {
+    "message": "running"
+  },
+  "setupReadiness_statuses_in_progress": {
+    "message": "in progress"
+  },
+  "setupReadiness_statuses_completed": {
+    "message": "completed"
+  },
+  "setupReadiness_statuses_skipped": {
+    "message": "skipped"
+  },
+  "setupReadiness_statuses_restart_required": {
+    "message": "restart required"
+  },
+  "header_modeSttHostedDesc": {
+    "message": "Requires a self-hosted tldw server for speech transcription."
+  },
+  "header_modeTtsHostedDesc": {
+    "message": "Requires a self-hosted tldw server for speech generation."
+  },
+  "header_sources": {
+    "message": "Sources"
+  },
+  "header_connectionCard_connectedCaption": {
+    "message": "Chat and tools are now available in Options and the sidepanel."
+  },
+  "agentRegistry_health_title": {
+    "message": "ACP System Health"
+  },
+  "agentRegistry_health_runnerBinary": {
+    "message": "Runner Binary"
+  },
+  "agentRegistry_health_agentStatus": {
+    "message": "Agent Status"
+  },
+  "agentRegistry_health_apiKeys": {
+    "message": "API Keys"
+  },
+  "agentRegistry_health_unavailableTitle": {
+    "message": "Health check unavailable"
+  },
+  "agentRegistry_health_unavailableBody": {
+    "message": "Could not reach the ACP health endpoint. Ensure the server is running."
+  },
+  "agentRegistry_executionHealth_title": {
+    "message": "ACP Execution Health"
+  },
+  "agentRegistry_executionHealth_unavailableTitle": {
+    "message": "Execution health summary unavailable"
+  },
+  "agentRegistry_executionHealth_unavailableBody": {
+    "message": "The admin summary endpoint may require newer backend support or elevated permissions."
+  },
+  "agentRegistry_executionHealth_sessions": {
+    "message": "Sessions"
+  },
+  "agentRegistry_executionHealth_sessionWindowSingular": {
+    "message": "{{total}} session in {{days}}d"
+  },
+  "agentRegistry_executionHealth_sessionWindowPlural": {
+    "message": "{{total}} sessions in {{days}}d"
+  },
+  "agentRegistry_executionHealth_statusCount": {
+    "message": "{{count}} {{status}}"
+  },
+  "agentRegistry_executionHealth_noSessions": {
+    "message": "No sessions recorded"
+  },
+  "agentRegistry_executionHealth_compatibility": {
+    "message": "Compatibility"
+  },
+  "agentRegistry_executionHealth_liveCertificationRequired": {
+    "message": "Live certification required"
+  },
+  "agentRegistry_executionHealth_noLiveCertificationBlocker": {
+    "message": "No live-certification blocker"
+  },
+  "agentRegistry_executionHealth_supportStateCount": {
+    "message": "{{count}} {{state}}"
+  },
+  "agentRegistry_executionHealth_unverifiedAgents": {
+    "message": "Unverified agents: {{agents}}"
+  },
+  "agentRegistry_executionHealth_noDocumentedUnverifiedAgents": {
+    "message": "No documented-unverified agents"
+  },
+  "agentRegistry_executionHealth_executionEvidenceDocs": {
+    "message": "Execution evidence docs"
+  },
+  "agentRegistry_executionHealth_retentionAndRedaction": {
+    "message": "Retention and redaction"
+  },
+  "agentRegistry_executionHealth_retentionSummary": {
+    "message": "Retention {{sessionDays}}d sessions / {{auditDays}}d audit"
+  },
+  "agentRegistry_executionHealth_redactedDrillThroughEnabled": {
+    "message": "Redacted drill-through enabled"
+  },
+  "agentRegistry_executionHealth_reviewRedactionSettings": {
+    "message": "Review redaction settings"
+  },
+  "agentRegistry_executionHealth_failureBucketsTitle": {
+    "message": "Failure buckets"
+  },
+  "agentRegistry_executionHealth_noRecentFailureBuckets": {
+    "message": "No recent failure buckets"
+  },
+  "agentRegistry_executionHealth_setupHealthTitle": {
+    "message": "Setup health"
+  },
+  "agentRegistry_executionHealth_setupStatus": {
+    "message": "{{label}} {{status}}"
+  },
+  "agentRegistry_executionHealth_evidenceCount": {
+    "message": "{{count}} evidence"
+  },
+  "agentRegistry_executionHealth_setupBlockers": {
+    "message": "{{label}} {{status}}: {{blockers}}"
+  },
+  "agentRegistry_executionHealth_noSetupBlockers": {
+    "message": "No setup blockers in this window"
+  },
+  "agentRegistry_executionHealth_failureBuckets_setupBlockers": {
+    "message": "Setup blockers"
+  },
+  "agentRegistry_executionHealth_failureBuckets_runnerSessionFailures": {
+    "message": "Runner/session failures"
+  },
+  "agentRegistry_executionHealth_failureBuckets_reviewerRejections": {
+    "message": "Reviewer rejections"
+  },
+  "agentRegistry_executionHealth_failureBuckets_reviewerFailures": {
+    "message": "Reviewer failures"
+  },
+  "agentRegistry_executionHealth_failureBuckets_governanceDenials": {
+    "message": "Governance denials"
+  },
+  "agentRegistry_executionHealth_failureBuckets_structuredCompletionFailures": {
+    "message": "Structured completion failures"
+  },
+  "agentRegistry_executionHealth_failureBuckets_sandboxRuntimeErrors": {
+    "message": "Sandbox runtime errors"
+  },
+  "agentRegistry_executionHealth_failureBuckets_retentionRedactionActions": {
+    "message": "Retention/redaction actions"
+  },
+  "agentRegistry_executionHealth_setupDimensions_agent": {
+    "message": "Agent"
+  },
+  "agentRegistry_executionHealth_setupDimensions_workspace": {
+    "message": "Workspace"
+  },
+  "agentRegistry_executionHealth_setupDimensions_sandboxRuntime": {
+    "message": "Sandbox runtime"
+  },
+  "agentRegistry_executionHealth_setupDimensions_mcpInjection": {
+    "message": "MCP injection"
+  },
+  "agentRegistry_executionHealth_setupDimensions_schedulerTriggerPath": {
+    "message": "Scheduler trigger path"
+  },
+  "agentRegistry_loadFailedTitle": {
+    "message": "Agent registry could not load"
+  },
+  "agentRegistry_registeredAgents": {
+    "message": "Registered Agents"
+  },
+  "agentRegistry_empty": {
+    "message": "No agents registered"
+  },
+  "quickIngest_preset_label": {
+    "message": "Preset"
+  },
+  "quickIngest_preset_quick": {
+    "message": "Quick"
+  },
+  "quickIngest_preset_quick_description": {
+    "message": "Process fast, skip analysis"
+  },
+  "quickIngest_preset_standard": {
+    "message": "Standard"
+  },
+  "quickIngest_preset_standard_description": {
+    "message": "Analyze + chunk for RAG search"
+  },
+  "quickIngest_preset_deep": {
+    "message": "Deep"
+  },
+  "quickIngest_preset_deep_description": {
+    "message": "All options, review before save"
+  },
+  "quickIngest_preset_custom": {
+    "message": "Custom"
+  },
+  "quickIngest_preset_custom_description": {
+    "message": "Your manual configuration"
+  },
+  "quickIngest_preset_reset": {
+    "message": "Reset to defaults"
+  },
+  "quickIngest_preset_recommended": {
+    "message": "(Recommended)"
+  },
+  "quickIngest_preset_ariaLabel": {
+    "message": "Select processing preset"
+  },
+  "quickIngest_review_warnLongTime": {
+    "message": "Processing may take a while ({{time}})"
+  },
+  "quickIngest_review_summary": {
+    "message": "{{count}} items | {{preset}} preset | {{time}} estimated"
+  },
+  "hostedAudio_badge": {
+    "message": "Hosted mode"
+  },
+  "hostedAudio_title": {
+    "message": "Audio features require a self-hosted tldw server"
+  },
+  "hostedAudio_description": {
+    "message": "{{featureName}} depends on server-side audio runtimes, local model dependencies, host audio tooling, or provider keys that are only exposed in self-hosted deployments. The hosted product keeps these routes visible so you can find the feature boundary without exposing controls that cannot run here."
+  },
+  "hostedAudio_quickstart": {
+    "message": "Open self-hosting quickstart"
+  },
+  "hostedAudio_opensInNewTab": {
+    "message": "(opens in new tab)"
+  },
+  "hostedAudio_loadingTts": {
+    "message": "Loading TTS playground."
+  },
+  "hostedAudio_loadingStt": {
+    "message": "Loading STT playground."
+  },
+  "flashcards_largeImportUndoHint": {
+    "message": "Large imports may take a moment to process. You'll have {{seconds}} seconds to undo after import completes."
+  },
+  "flashcards_demoCard1Front": {
+    "message": "What is spaced repetition?"
+  },
+  "flashcards_demoCard1Back": {
+    "message": "A learning technique that reviews material at increasing intervals based on how well you remember it. Cards you know well are shown less often; cards you struggle with are shown more frequently."
+  },
+  "flashcards_demoCard1Deck": {
+    "message": "Study Techniques"
+  },
+  "flashcards_demoCard2Front": {
+    "message": "What does RAG stand for in AI?"
+  },
+  "flashcards_demoCard2Back": {
+    "message": "Retrieval-Augmented Generation — a technique that enhances LLM responses by retrieving relevant documents from a knowledge base before generating an answer."
+  },
+  "flashcards_demoCard2Deck": {
+    "message": "AI Concepts"
+  },
+  "flashcards_demoCard3Front": {
+    "message": "What is the difference between a podcast and an audiobook?"
+  },
+  "flashcards_demoCard3Back": {
+    "message": "Podcasts are episodic audio series, often conversational, released on a schedule. Audiobooks are narrated versions of written books, typically consumed as a complete work."
+  },
+  "flashcards_demoCard3Deck": {
+    "message": "Media Literacy"
+  },
+  "flashcards_demoCard4Front": {
+    "message": "What is an API key?"
+  },
+  "flashcards_demoCard4Back": {
+    "message": "A unique identifier used to authenticate requests to an API. Like a password for software — it proves your application is authorized to access the service."
+  },
+  "flashcards_demoCard4Deck": {
+    "message": "Developer Basics"
+  },
+  "flashcards_demoCard5Front": {
+    "message": "What is the Feynman Technique?"
+  },
+  "flashcards_demoCard5Back": {
+    "message": "A learning method: (1) Choose a concept, (2) Explain it simply as if teaching a child, (3) Identify gaps in your explanation, (4) Review and simplify further."
+  },
+  "flashcards_demoCard5Deck": {
+    "message": "Study Techniques"
+  },
+  "flashcards_demoQuestionLabel": {
+    "message": "Question"
+  },
+  "flashcards_demoAnswerLabel": {
+    "message": "Answer"
+  },
+  "flashcards_demoShowQuestion": {
+    "message": "Show question"
+  },
+  "flashcards_demoShowAnswer": {
+    "message": "Show answer"
+  },
+  "flashcards_demoClickToSeeQuestion": {
+    "message": "Click to see question"
+  },
+  "flashcards_demoClickToRevealAnswer": {
+    "message": "Click to reveal answer"
+  },
+  "flashcards_demoPreviousCard": {
+    "message": "Previous card"
+  },
+  "flashcards_demoNextCard": {
+    "message": "Next card"
+  },
+  "flashcards_demoFlip": {
+    "message": "Flip"
+  },
+  "flashcards_demoPreviewDescription": {
+    "message": "This is a preview. Connect a server to create your own decks with spaced repetition."
+  },
+  "flashcards_createNewDeck": {
+    "message": "Create new deck"
+  },
+  "flashcards_orCreateNewDeck": {
+    "message": "or create a new deck"
+  },
+  "flashcards_writingTipsHeader": {
+    "message": "Tips for effective flashcards"
+  },
+  "flashcards_writingTip1": {
+    "message": "Keep each card focused on one concept"
+  },
+  "flashcards_writingTip2": {
+    "message": "Use simple, clear language on the front"
+  },
+  "flashcards_writingTip3": {
+    "message": "Include context clues but avoid giving away the answer"
+  },
+  "flashcards_writingTip4": {
+    "message": "Use images or diagrams when they help understanding"
+  },
+  "flashcards_writingTip5": {
+    "message": "For cloze deletions, use {{syntax}} syntax"
+  },
+  "moderationPlayground_desc": {
+    "message": "Configure moderation policies, blocklists, and testing"
+  },
+  "moderationPlayground_onboarding_title": {
+    "message": "Welcome to Content Rules"
+  },
+  "moderationPlayground_onboarding_description": {
+    "message": "Set up content safety rules, blocklists, overrides, and test cases."
+  },
+  "moderationPlayground_onboarding_guardrailsCta": {
+    "message": "Set up Family Guardrails"
+  },
+  "moderationPlayground_onboarding_dismiss": {
+    "message": "Skip — I’ll explore on my own"
+  },
+  "moderationPlayground_onboarding_tabHint": {
+    "message": "Start here: Policy & Settings tab sets your base rules. Then test them in the Test Sandbox."
+  },
+  "moderationPlayground_onboarding_startHereBadge": {
+    "message": "Start here"
+  },
+  "mcpHub_toolCatalogs_serverInventoryErrorTitle": {
+    "message": "Could not load server inventory"
+  },
+  "mcpHub_toolCatalogs_serverInventoryGuidance": {
+    "message": "Tool Catalog guidance may be incomplete until the server list loads."
+  },
+  "flashcards_sourceReviewHeading": {
+    "message": "Source reviews"
+  },
+  "flashcards_sourceReviewUnavailable": {
+    "message": "Source reviews unavailable"
+  },
+  "flashcards_sourceReviewDueNow": {
+    "message": "{{count}} due now"
+  },
+  "flashcards_sourceReviewNoneDue": {
+    "message": "No source reviews due"
+  },
+  "flashcards_sourceReviewSchedule": {
+    "message": "Schedule"
+  },
+  "flashcards_sourceReviewLoadFailed": {
+    "message": "Could not load due source reviews."
+  },
+  "flashcards_sourceReviewRetry": {
+    "message": "Retry"
+  },
+  "flashcards_sourceReviewPlanFallback": {
+    "message": "Review plan {{id}}"
+  },
+  "flashcards_sourceReviewDueAt": {
+    "message": "Due {{dueAt}}"
+  },
+  "flashcards_sourceReviewSourceCountOne": {
+    "message": "{{count}} source"
+  },
+  "flashcards_sourceReviewSourceCountOther": {
+    "message": "{{count}} sources"
+  },
+  "flashcards_sourceReviewSourceSummary": {
+    "message": "{{countLabel}} · {{labels}}{{remainder}}"
+  },
+  "flashcards_sourceReviewStart": {
+    "message": "Start"
+  },
+  "flashcards_sourceReviewResume": {
+    "message": "Resume"
+  },
+  "flashcards_sourceReviewComplete": {
+    "message": "Complete"
+  },
+  "flashcards_sourceReviewSkip": {
+    "message": "Skip"
+  },
+  "flashcards_sourceReviewSnapshotLabel": {
+    "message": "Source snapshot"
+  },
+  "flashcards_sourceReviewSourceIdentity": {
+    "message": "{{sourceType}} · {{sourceId}}"
+  },
+  "flashcards_sourceReviewLocator": {
+    "message": "Locator: {{locator}}"
+  },
+  "flashcards_sourceReviewOpenSource": {
+    "message": "Open source"
+  },
+  "flashcards_sourceReviewShowFewer": {
+    "message": "Show fewer"
+  },
+  "flashcards_sourceReviewShowAll": {
+    "message": "Show all {{count}}"
+  },
+  "flashcards_sourceReviewActivityReread": {
+    "message": "Reread"
+  },
+  "flashcards_sourceReviewActivityQuiz": {
+    "message": "Quiz"
+  },
+  "flashcards_sourceReviewActivityFlashcards": {
+    "message": "Flashcards"
+  },
+  "flashcards_sourceReviewActivityCloze": {
+    "message": "Fill in the blank"
+  },
+  "flashcards_sourceReviewLaunchMissing": {
+    "message": "This review could not load its saved source snapshot."
+  },
+  "flashcards_sourceReviewStartFailed": {
+    "message": "Could not start this source review."
+  },
+  "flashcards_sourceReviewCompleteFailed": {
+    "message": "Could not complete this source review."
+  },
+  "flashcards_sourceReviewSkipFailed": {
+    "message": "Could not skip this source review."
+  },
+  "flashcards_sourceReviewSourceTypeNote": {
+    "message": "Note"
+  },
+  "flashcards_sourceReviewSourceTypeMedia": {
+    "message": "Media"
+  },
+  "flashcards_sourceReviewSourceTypeMessage": {
+    "message": "Message"
+  },
+  "flashcards_sourceReviewPlanCreated": {
+    "message": "Review plan created."
+  },
+  "flashcards_sourceReviewPlanCreateFailed": {
+    "message": "Could not create the review plan."
+  },
+  "flashcards_sourceReviewPlanTitle": {
+    "message": "Schedule source review"
+  },
+  "flashcards_sourceReviewCreatePlan": {
+    "message": "Create plan"
+  },
+  "flashcards_sourceReviewPlanDetailsHeading": {
+    "message": "Plan details"
+  },
+  "flashcards_sourceReviewPlanTitleLabel": {
+    "message": "Plan title"
+  },
+  "flashcards_sourceReviewPlanTitlePlaceholder": {
+    "message": "Cardiac physiology review"
+  },
+  "flashcards_sourceReviewStartDateLabel": {
+    "message": "Start date"
+  },
+  "flashcards_sourceReviewTimezoneLabel": {
+    "message": "Timezone"
+  },
+  "flashcards_sourceReviewSourcesHeading": {
+    "message": "Sources"
+  },
+  "flashcards_sourceReviewSourcesHelp": {
+    "message": "The saved snapshot grounds every future review."
+  },
+  "flashcards_sourceReviewSourceTypeLabel": {
+    "message": "Source type"
+  },
+  "flashcards_sourceReviewSourceIdLabel": {
+    "message": "Source ID"
+  },
+  "flashcards_sourceReviewSourceLabelLabel": {
+    "message": "Source label"
+  },
+  "flashcards_sourceReviewSourceLabelPlaceholder": {
+    "message": "Optional label"
+  },
+  "flashcards_sourceReviewSourceExcerptLabel": {
+    "message": "Source excerpt"
+  },
+  "flashcards_sourceReviewSourceExcerptPlaceholder": {
+    "message": "Optional excerpt to preserve with the plan"
+  },
+  "flashcards_sourceReviewSourceLocatorLabel": {
+    "message": "Source locator JSON"
+  },
+  "flashcards_sourceReviewSourceLocatorPlaceholder": {
+    "message": "Optional, for example {\"page\": 12}"
+  },
+  "flashcards_sourceReviewAddSource": {
+    "message": "Add source"
+  },
+  "flashcards_sourceReviewRemoveSource": {
+    "message": "Remove source {{number}}"
+  },
+  "flashcards_sourceReviewScheduleHeading": {
+    "message": "Review schedule"
+  },
+  "flashcards_sourceReviewScheduleHelp": {
+    "message": "Choose what happens at each interval."
+  },
+  "flashcards_sourceReviewAddInterval": {
+    "message": "Add interval"
+  },
+  "flashcards_sourceReviewOffsetLabel": {
+    "message": "Offset"
+  },
+  "flashcards_sourceReviewOffsetNumber": {
+    "message": "Offset {{number}}"
+  },
+  "flashcards_sourceReviewUnitLabel": {
+    "message": "Unit"
+  },
+  "flashcards_sourceReviewUnitNumber": {
+    "message": "Unit {{number}}"
+  },
+  "flashcards_sourceReviewUnitDays": {
+    "message": "Days"
+  },
+  "flashcards_sourceReviewUnitMonths": {
+    "message": "Months"
+  },
+  "flashcards_sourceReviewActivityLabel": {
+    "message": "Activity"
+  },
+  "flashcards_sourceReviewActivityNumber": {
+    "message": "Activity {{number}}"
+  },
+  "flashcards_sourceReviewRemoveInterval": {
+    "message": "Remove interval {{number}}"
+  },
+  "flashcards_sourceReviewScheduleDay": {
+    "message": "Day {{value}}"
+  },
+  "flashcards_sourceReviewScheduleMonthOne": {
+    "message": "{{value}} month"
+  },
+  "flashcards_sourceReviewScheduleMonthOther": {
+    "message": "{{value}} months"
+  },
+  "flashcards_sourceReviewOffsetError": {
+    "message": "Enter a whole number between 1 and {{maximum}}."
+  },
+  "flashcards_sourceReviewActivityError": {
+    "message": "Choose a review activity."
+  },
+  "flashcards_sourceReviewDuplicateError": {
+    "message": "Duplicate interval and activity."
+  },
+  "flashcards_sourceReviewLocatorObjectError": {
+    "message": "Locator must be a JSON object."
+  },
+  "flashcards_sourceReviewLocatorSizeError": {
+    "message": "Use 8 KiB or less for locator JSON."
+  },
+  "flashcards_sourceReviewLocatorJsonError": {
+    "message": "Enter valid locator JSON."
+  },
+  "flashcards_sourceReviewTitleError": {
+    "message": "Use 200 characters or fewer."
+  },
+  "flashcards_sourceReviewTimezoneError": {
+    "message": "Enter a valid IANA timezone."
+  },
+  "flashcards_sourceReviewSourceIdError": {
+    "message": "Use 256 characters or fewer."
+  },
+  "flashcards_sourceReviewSourceLabelError": {
+    "message": "Use 200 characters or fewer."
+  },
+  "flashcards_sourceReviewExcerptError": {
+    "message": "Use 20,000 characters or fewer."
   }
 }
