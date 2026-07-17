@@ -22,7 +22,8 @@ import {
   fetchTtsProviders,
   type TldwTtsProvidersInfo,
   type TldwTtsVoiceInfo,
-  type TldwTtsProviderCapabilities
+  type TldwTtsProviderCapabilities,
+  type TldwTtsModelCapabilities
 } from "@/services/tldw/audio-providers"
 import {
   fetchTldwTtsModels,
@@ -52,6 +53,43 @@ const isCanonicalBackendId = (value: unknown): value is string =>
   value === "openrouter" ||
   (typeof value === "string" &&
     /^gateway:[a-z0-9][a-z0-9-]{0,62}$/.test(value))
+
+const normalizedFormats = (formats: readonly string[] | undefined): string[] =>
+  Array.from(
+    new Set(
+      (formats || [])
+        .map((format) => format.toLowerCase())
+        .filter(Boolean)
+    )
+  )
+
+const resolveResponseFormat = (
+  current: string,
+  providerCaps?: TldwTtsProviderCapabilities | null,
+  modelCaps?: TldwTtsModelCapabilities
+): string => {
+  const formats = normalizedFormats(
+    modelCaps?.formats?.length
+      ? modelCaps.formats
+      : providerCaps?.formats?.length
+        ? providerCaps.formats
+        : SUPPORTED_TLDW_TTS_FORMATS
+  )
+  const normalizedCurrent = current.toLowerCase()
+  if (formats.includes(normalizedCurrent)) return normalizedCurrent
+
+  const preferred = [
+    modelCaps?.default_format,
+    providerCaps?.default_format,
+    ...(modelCaps?.native_formats || []),
+    formats[0]
+  ]
+    .filter((format): format is string => typeof format === "string")
+    .map((format) => format.toLowerCase())
+    .find((format) => formats.includes(format))
+
+  return preferred || formats[0] || "mp3"
+}
 
 const formatValidationTimestamp = (value?: string | null) => {
   if (!value) return ""
@@ -583,7 +621,10 @@ export const TTSModeSettings = ({ hideBorder }: { hideBorder?: boolean }) => {
         return {
           tldwTtsBackend: "",
           tldwTtsModel: DEFAULT_TLDW_TTS_MODEL,
-          tldwTtsVoice: ""
+          tldwTtsVoice: "",
+          tldwTtsResponseFormat: resolveResponseFormat(
+            form.values.tldwTtsResponseFormat
+          )
         }
       }
       const caps = tldwProvidersInfo?.providers?.[backend]
@@ -611,10 +652,15 @@ export const TTSModeSettings = ({ hideBorder }: { hideBorder?: boolean }) => {
       return {
         tldwTtsBackend: backend,
         tldwTtsModel: model,
-        tldwTtsVoice: voice
+        tldwTtsVoice: voice,
+        tldwTtsResponseFormat: resolveResponseFormat(
+          form.values.tldwTtsResponseFormat,
+          caps,
+          modelCaps
+        )
       }
     },
-    [tldwProvidersInfo]
+    [form.values.tldwTtsResponseFormat, tldwProvidersInfo]
   )
 
   const handleTldwBackendChange = React.useCallback(
@@ -638,10 +684,19 @@ export const TTSModeSettings = ({ hideBorder }: { hideBorder?: boolean }) => {
         ""
       setFormValues({
         tldwTtsModel: model,
-        tldwTtsVoice: voice
+        tldwTtsVoice: voice,
+        tldwTtsResponseFormat: resolveResponseFormat(
+          form.values.tldwTtsResponseFormat,
+          selectedBackendCaps,
+          modelCaps
+        )
       })
     },
-    [selectedBackendCaps, setFormValues]
+    [
+      form.values.tldwTtsResponseFormat,
+      selectedBackendCaps,
+      setFormValues
+    ]
   )
 
   React.useEffect(() => {
