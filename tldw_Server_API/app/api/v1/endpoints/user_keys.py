@@ -420,25 +420,33 @@ def _row_metadata(row: dict[str, Any] | None) -> dict[str, Any] | None:
     return _parse_metadata_value(row.get("metadata"))
 
 
+def _metadata_key_contains_gateway_authority(key: Any) -> bool:
+    """Match separated concepts and conservatively match their joined aliases."""
+    key_text = str(key)
+    canonical_key = "".join(
+        character
+        for character in key_text.casefold()
+        if character.isalnum()
+    )
+    separated_key = _CAMEL_CASE_BOUNDARY.sub(" ", key_text)
+    tokens = tuple(
+        token.casefold()
+        for token in re.findall(r"[A-Za-z0-9]+", separated_key)
+    )
+    if canonical_key in _TTS_GATEWAY_EXACT_AUTHORITY_KEYS:
+        return True
+    if set(zip(tokens, tokens[1:])) & _TTS_GATEWAY_AUTHORITY_TOKEN_PAIRS:
+        return True
+    return len(tokens) == 1 and any(
+        "".join(pair) in canonical_key
+        for pair in _TTS_GATEWAY_AUTHORITY_TOKEN_PAIRS
+    )
+
+
 def _metadata_contains_gateway_authority(value: Any) -> bool:
     if isinstance(value, Mapping):
         for key, child in value.items():
-            key_text = str(key)
-            canonical_key = "".join(
-                character
-                for character in key_text.casefold()
-                if character.isalnum()
-            )
-            separated_key = _CAMEL_CASE_BOUNDARY.sub(" ", key_text)
-            tokens = tuple(
-                token.casefold()
-                for token in re.findall(r"[A-Za-z0-9]+", separated_key)
-            )
-            token_pairs = set(zip(tokens, tokens[1:]))
-            if (
-                canonical_key in _TTS_GATEWAY_EXACT_AUTHORITY_KEYS
-                or bool(token_pairs & _TTS_GATEWAY_AUTHORITY_TOKEN_PAIRS)
-            ):
+            if _metadata_key_contains_gateway_authority(key):
                 return True
             if _metadata_contains_gateway_authority(child):
                 return True

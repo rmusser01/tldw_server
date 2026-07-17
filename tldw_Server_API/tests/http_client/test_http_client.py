@@ -707,6 +707,53 @@ async def test_async_json_max_bytes_rejects_declared_oversize_before_body():
 
 @requires_httpx
 @pytest.mark.asyncio
+@pytest.mark.parametrize("status", [301, 302, 303, 307, 308])
+async def test_bounded_json_redirect_without_location_rejects_before_body(status):
+    import httpx
+
+    from tldw_Server_API.app.core.exceptions import NetworkError
+    from tldw_Server_API.app.core.http_client import afetch_json, create_async_client
+
+    sensitive_body = b'{"secret":"must-not-be-read"}'
+    stream = _counting_async_stream(httpx, [sensitive_body])
+    callback_statuses: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            status,
+            request=request,
+            headers={"Content-Type": "application/json"},
+            stream=stream,
+        )
+
+    def on_response(response_status: int, _headers: Mapping[str, str]) -> None:
+        callback_statuses.append(response_status)
+
+    client = create_async_client(transport=httpx.MockTransport(handler))
+    try:
+        with pytest.raises(
+            NetworkError,
+            match="^Redirect without Location header$",
+        ) as exc_info:
+            await afetch_json(
+                method="GET",
+                url="http://93.184.216.34/missing-location",
+                client=client,
+                max_bytes=1024,
+                allow_redirects=True,
+                on_response=on_response,
+            )
+    finally:
+        await client.aclose()
+
+    assert stream.yielded == 0
+    assert stream.close_count == 1
+    assert callback_statuses == []
+    assert sensitive_body.decode() not in str(exc_info.value)
+
+
+@requires_httpx
+@pytest.mark.asyncio
 async def test_bounded_json_cross_origin_redirect_strips_sensitive_headers():
     import httpx
 
