@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -53,32 +54,106 @@ class _FailingStream(_ClosingStream):
         return chunk
 
 
-def _gateway_spec(*, api_key: str | None = "admin-key"):
-    return normalize_gateway_specs(
-        {},
-        {
-            "company": {
-                "enabled": True,
-                "display_name": "Company Speech",
-                "base_url": "https://speech.example/v1/",
-                "speech_path": "audio/speech",
-                "models_path": "models",
-                "api_key": api_key,
-                "allow_user_api_key": True,
-                "default_model": "Vendor/Exact",
+def _gateway_definition(*, api_key: str | None = "admin-key") -> dict[str, object]:
+    return {
+        "enabled": True,
+        "display_name": "Company Speech",
+        "base_url": "https://speech.example/v1/",
+        "speech_path": "audio/speech",
+        "models_path": "models",
+        "api_key": api_key,
+        "allow_user_api_key": True,
+        "default_model": "Vendor/Exact",
+        "default_voice": "Narrator",
+        "allowed_models": ["Vendor/Exact"],
+        "model_overrides": {
+            "Vendor/Exact": {
                 "default_voice": "Narrator",
-                "allowed_models": ["Vendor/Exact"],
-                "model_overrides": {
-                    "Vendor/Exact": {
-                        "default_voice": "Narrator",
-                        "voices": ["Narrator", "Guide"],
-                    }
-                },
-                "capability_defaults": {"formats": ["mp3"]},
-                "discovery": {"enabled": True, "models_path": "models"},
+                "voices": ["Narrator", "Guide"],
             }
         },
+        "capability_defaults": {"formats": ["mp3"]},
+        "discovery": {"enabled": True, "models_path": "models"},
+    }
+
+
+def _gateway_spec(
+    *,
+    api_key: str | None = "admin-key",
+    conversion: dict[str, object] | None = None,
+    ffmpeg_path: str | None = None,
+):
+    definition = _gateway_definition(api_key=api_key)
+    if conversion is not None:
+        definition["conversion"] = conversion
+    return normalize_gateway_specs(
+        {},
+        {"company": definition},
+        ffmpeg_path=ffmpeg_path,
     )["gateway:company"]
+
+
+async def test_production_service_uses_one_manager_for_gateway_registry_and_executor(
+    monkeypatch,
+) -> None:
+    from tldw_Server_API.app.core import config as core_config
+    from tldw_Server_API.app.core.TTS import adapter_registry, tts_config, tts_service_v2
+    from tldw_Server_API.app.core.TTS.adapters.openai_compatible_speech_adapter import (
+        OpenAICompatibleSpeechAdapter,
+    )
+    from tldw_Server_API.app.core.TTS.tts_config import TTSConfig, TTSConfigManager
+
+    definition = _gateway_definition()
+    manager = TTSConfigManager.__new__(TTSConfigManager)
+    manager._config = TTSConfig(gateways={"company": definition})
+    manager._gateway_specs = normalize_gateway_specs({}, {"company": definition})
+    manager._sources = {}
+    legacy_config = {"adapter_failure_retry_seconds": 9.0}
+    circuit_manager = MagicMock()
+    circuit_factory = AsyncMock(return_value=circuit_manager)
+
+    monkeypatch.setattr(adapter_registry, "_factory_instance", None)
+    monkeypatch.setattr(tts_service_v2, "_service_instance", None)
+    monkeypatch.setattr(adapter_registry, "get_tts_config_manager", lambda: manager)
+    monkeypatch.setattr(tts_config, "get_tts_config_manager", lambda: manager)
+    monkeypatch.setattr(
+        core_config,
+        "load_comprehensive_config_with_tts",
+        lambda: SimpleNamespace(get_tts_config=lambda: legacy_config),
+    )
+    monkeypatch.setattr(tts_service_v2, "get_circuit_manager", circuit_factory)
+
+    service = await tts_service_v2.get_tts_service_v2()
+    registry = service.factory.registry
+
+    assert registry.config_manager is manager
+    assert registry._gateway_specs == manager.get_gateway_specs()
+    assert registry.resolve_provider_key("gateway:company") == "gateway:company"
+    assert registry._adapter_specs["gateway:company"] is OpenAICompatibleSpeechAdapter
+    assert service.gateway_config_manager is manager
+    assert service.gateway_executor._spec_provider is manager
+    circuit_factory.assert_awaited_once_with(legacy_config)
+
+
+async def test_production_service_preserves_explicit_gateway_config_as_single_source(
+    monkeypatch,
+) -> None:
+    from tldw_Server_API.app.core.TTS import adapter_registry, tts_service_v2
+
+    explicit_config = {"gateways": {"company": _gateway_definition()}}
+    circuit_factory = AsyncMock(return_value=MagicMock())
+    monkeypatch.setattr(adapter_registry, "_factory_instance", None)
+    monkeypatch.setattr(tts_service_v2, "_service_instance", None)
+    monkeypatch.setattr(tts_service_v2, "get_circuit_manager", circuit_factory)
+
+    service = await tts_service_v2.get_tts_service_v2(explicit_config)
+    registry = service.factory.registry
+
+    assert registry.config_manager is None
+    assert registry.resolve_provider_key("gateway:company") == "gateway:company"
+    assert service.gateway_config_manager is registry
+    assert service.gateway_executor._spec_provider is registry
+    circuit_factory.assert_awaited_once_with(explicit_config)
 
 
 async def test_service_explicit_backend_bypasses_legacy_preparation() -> None:
@@ -495,6 +570,47 @@ async def test_missing_gateway_credential_returns_static_overlay_without_discove
         "sample_width_bits": 16,
     }
     catalog.get.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("conversion_enabled", "source_format", "executable_state", "expected_converted"),
+    [
+        (False, "mp3", "valid", []),
+        (True, "ogg", "valid", []),
+        (True, "mp3", "missing", []),
+        (True, "mp3", "non_executable", []),
+        (True, "mp3", "valid", ["wav"]),
+    ],
+)
+async def test_gateway_catalog_advertises_only_executable_conversion_routes(
+    tmp_path,
+    conversion_enabled: bool,
+    source_format: str,
+    executable_state: str,
+    expected_converted: list[str],
+) -> None:
+    executable = tmp_path / "ffmpeg"
+    executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    executable.chmod(0o700)
+    spec = _gateway_spec(
+        conversion={
+            "enabled": conversion_enabled,
+            "source_format": source_format,
+            "target_formats": ["wav"],
+        },
+        ffmpeg_path=str(executable),
+    )
+    if executable_state == "missing":
+        spec = replace(spec, ffmpeg_path=None)
+    elif executable_state == "non_executable":
+        executable.chmod(0o600)
+
+    provider = TTSServiceV2._serialize_gateway_provider(spec, None)
+    capabilities = provider["model_capabilities"]["Vendor/Exact"]
+
+    assert capabilities["native_formats"] == ["mp3"]
+    assert capabilities["converted_formats"] == expected_converted
+    assert capabilities["formats"] == ["mp3", *expected_converted]
 
 
 async def test_endpoint_closes_iterator_on_empty_and_prefetch_error(
