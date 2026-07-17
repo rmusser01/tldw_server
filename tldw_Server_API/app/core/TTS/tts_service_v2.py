@@ -1463,9 +1463,20 @@ class TTSServiceV2:
             if default_voice and default_voice not in voices:
                 voices.insert(0, default_voice)
             native_formats = list(capabilities.formats)
-            converted_formats = [
-                fmt for fmt in spec.conversion.target_formats if fmt not in native_formats
-            ]
+            conversion = spec.conversion
+            executable = spec.ffmpeg_path
+            conversion_available = (
+                conversion.enabled
+                and conversion.source_format in native_formats
+                and bool(executable)
+                and Path(executable).is_file()
+                and os.access(executable, os.X_OK)
+            )
+            converted_formats = (
+                [fmt for fmt in conversion.target_formats if fmt not in native_formats]
+                if conversion_available
+                else []
+            )
             model_capabilities[model] = {
                 "formats": [*native_formats, *converted_formats],
                 "native_formats": native_formats,
@@ -3896,29 +3907,38 @@ async def get_tts_service_v2(config: Optional[dict[str, Any]] = None) -> TTSServ
         async with _service_lock:
             if _service_instance is None:
                 # Load configuration if not provided
+                circuit_config = config
                 if config is None:
                     from tldw_Server_API.app.core.config import load_comprehensive_config_with_tts
                     config_obj = load_comprehensive_config_with_tts()
-                    config = config_obj.get_tts_config()
+                    circuit_config = config_obj.get_tts_config()
 
                 # Get factory
                 factory = await get_tts_factory(config)
 
                 # Get circuit breaker manager
-                circuit_manager = await get_circuit_manager(config)
+                circuit_manager = await get_circuit_manager(circuit_config)
 
                 from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
                     resolve_gateway_byok_credentials,
                 )
 
+                from .adapters.openai_compatible_speech_adapter import (
+                    OpenAICompatibleSpeechAdapter,
+                )
                 from .audio_utils import AudioProcessor
                 from .gateway_catalog import GatewayCatalog
                 from .gateway_execution import GatewaySpeechExecutor
-                from .tts_config import get_tts_config_manager
 
                 config_manager = getattr(factory.registry, "config_manager", None)
                 if config_manager is None:
-                    config_manager = get_tts_config_manager()
+                    config_manager = factory.registry
+                for backend_id, spec in config_manager.get_gateway_specs().items():
+                    if spec.enabled and factory.registry.resolve_provider_key(backend_id) is None:
+                        factory.registry.register_adapter(
+                            backend_id,
+                            OpenAICompatibleSpeechAdapter,
+                        )
                 gateway_catalog = GatewayCatalog()
                 gateway_executor = GatewaySpeechExecutor(
                     registry=factory.registry,

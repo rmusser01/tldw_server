@@ -353,6 +353,10 @@ class TTSAdapterRegistry:
             return candidate
         return None
 
+    def get_gateway_specs(self) -> Mapping[str, GatewaySpec]:
+        """Return the normalized gateway specs owned by this registry."""
+        return self._gateway_specs
+
     def __init__(
         self,
         config: Optional[dict[str, Any]] = None,
