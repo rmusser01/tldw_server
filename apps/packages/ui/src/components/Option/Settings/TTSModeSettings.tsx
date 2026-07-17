@@ -43,6 +43,10 @@ import { useSimpleForm } from "@/hooks/useSimpleForm"
 import { isTimeoutLikeError } from "@/utils/request-timeout"
 
 const ELEVENLABS_KEY_DEBOUNCE_MS = 350
+const isCanonicalBackendId = (value: unknown): value is string =>
+  value === "openrouter" ||
+  (typeof value === "string" &&
+    /^gateway:[a-z0-9][a-z0-9-]{0,62}$/.test(value))
 
 const formatValidationTimestamp = (value?: string | null) => {
   if (!value) return ""
@@ -627,23 +631,6 @@ export const TTSModeSettings = ({ hideBorder }: { hideBorder?: boolean }) => {
 
   React.useEffect(() => {
     if (
-      form.values.ttsProvider === "tldw" &&
-      tldwProvidersInfo &&
-      !explicitBackendSupported &&
-      configuredBackend
-    ) {
-      setFormFieldValue("tldwTtsBackend", "")
-    }
-  }, [
-    configuredBackend,
-    explicitBackendSupported,
-    form.values.ttsProvider,
-    setFormFieldValue,
-    tldwProvidersInfo
-  ])
-
-  React.useEffect(() => {
-    if (
       form.values.ttsProvider !== "tldw" ||
       !explicitBackendSupported ||
       !selectedBackend
@@ -690,7 +677,7 @@ export const TTSModeSettings = ({ hideBorder }: { hideBorder?: boolean }) => {
   ])
 
   const fallbackTargets = (selectedBackendCaps?.fallback?.targets || []).filter(
-    (target): target is string => typeof target === "string" && Boolean(target)
+    isCanonicalBackendId
   )
 
   const tldwCatalogError = React.useMemo(() => {
