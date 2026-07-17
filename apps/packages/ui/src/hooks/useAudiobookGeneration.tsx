@@ -22,6 +22,13 @@ type GenerateAllOptions = {
   onChapterError?: (chapterId: string, error: Error) => void
 }
 
+type GeneratedChapterAudio = {
+  blob: Blob
+  requestedBackend?: string
+  actualBackend?: string
+  fallbackUsed?: boolean
+}
+
 export const useAudiobookGeneration = () => {
   const { t } = useTranslation(["playground", "audiobook"])
   const notification = useAntdNotification()
@@ -51,7 +58,7 @@ export const useAudiobookGeneration = () => {
     async ({
       chapter,
       overrides
-    }: GenerateChapterOptions): Promise<Blob | null> => {
+    }: GenerateChapterOptions): Promise<GeneratedChapterAudio | null> => {
       try {
         const effectiveOverrides = applyVoiceSpeedOverrides({
           ...chapter.voiceConfig,
@@ -89,7 +96,12 @@ export const useAudiobookGeneration = () => {
 
         const result = await context.synthesize(context.utterance)
         const blob = new Blob([result.buffer], { type: result.mimeType })
-        return blob
+        return {
+          blob,
+          requestedBackend: context.cacheSettings?.backend || undefined,
+          actualBackend: result.actualBackend,
+          fallbackUsed: result.fallbackUsed
+        }
       } catch (error) {
         console.error("Failed to generate chapter audio:", error)
         throw error
@@ -107,13 +119,14 @@ export const useAudiobookGeneration = () => {
       updateChapter(chapter.id, { status: "generating", errorMessage: undefined })
 
       try {
-        const blob = await generateChapterAudio({ chapter, overrides })
+        const generated = await generateChapterAudio({ chapter, overrides })
 
-        if (!blob) {
+        if (!generated) {
           updateChapter(chapter.id, { status: "pending", errorMessage: undefined })
           return false
         }
 
+        const { blob, requestedBackend, actualBackend, fallbackUsed } = generated
         const url = URL.createObjectURL(blob)
         if (chapter.audioUrl) {
           try {
@@ -136,7 +149,13 @@ export const useAudiobookGeneration = () => {
           status: "completed",
           audioBlob: blob,
           audioUrl: url,
-          audioDuration: duration
+          audioDuration: duration,
+          requestedBackend,
+          actualBackend,
+          fallbackUsed:
+            requestedBackend || actualBackend || fallbackUsed
+              ? Boolean(fallbackUsed)
+              : undefined
         })
 
         return true
@@ -188,18 +207,19 @@ export const useAudiobookGeneration = () => {
         updateChapter(chapter.id, { status: "generating", errorMessage: undefined })
 
         try {
-          const blob = await generateChapterAudio({ chapter, overrides })
+          const generated = await generateChapterAudio({ chapter, overrides })
 
           if (abortControllerRef.current?.signal.aborted) {
             updateChapter(chapter.id, { status: "pending" })
             break
           }
 
-          if (!blob) {
+          if (!generated) {
             updateChapter(chapter.id, { status: "pending", errorMessage: undefined })
             continue
           }
 
+          const { blob, requestedBackend, actualBackend, fallbackUsed } = generated
           const url = URL.createObjectURL(blob)
           if (chapter.audioUrl) {
             try {
@@ -221,7 +241,13 @@ export const useAudiobookGeneration = () => {
             status: "completed",
             audioBlob: blob,
             audioUrl: url,
-            audioDuration: duration
+            audioDuration: duration,
+            requestedBackend,
+            actualBackend,
+            fallbackUsed:
+              requestedBackend || actualBackend || fallbackUsed
+                ? Boolean(fallbackUsed)
+                : undefined
           })
 
           success++

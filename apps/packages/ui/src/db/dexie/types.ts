@@ -391,6 +391,9 @@ export type SerializedAudioChapter = {
   status: "pending" | "generating" | "completed" | "error"
   audioDuration?: number
   errorMessage?: string
+  requestedBackend?: string
+  actualBackend?: string
+  fallbackUsed?: boolean
 }
 
 export type AudiobookProject = {
@@ -464,6 +467,8 @@ export type TtsClipSegment = {
   mimeType: string
   blob: Blob
   sizeBytes: number
+  actualBackend?: string
+  fallbackUsed?: boolean
 }
 
 export type TtsClip = {
@@ -475,6 +480,9 @@ export type TtsClip = {
   format?: string
   mimeType?: string
   playbackSpeed?: number
+  requestedBackend?: string
+  actualBackends?: string[]
+  fallbackUsed?: boolean
   utterance: string
   textPreview: string
   totalBytes: number
