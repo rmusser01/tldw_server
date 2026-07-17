@@ -3445,11 +3445,9 @@ async def _afetch_json_bounded(
             response_headers: Mapping[str, str],
         ) -> None:
             location = response_headers.get("location")
-            if (
-                allow_redirects
-                and response_status in {301, 302, 303, 307, 308}
-                and location
-            ):
+            if allow_redirects and response_status in {301, 302, 303, 307, 308}:
+                if not location:
+                    raise NetworkError("Redirect without Location header")  # noqa: TRY003
                 raise _BoundedJSONRedirect(str(location))
             await _invoke_response_callback(
                 on_response,

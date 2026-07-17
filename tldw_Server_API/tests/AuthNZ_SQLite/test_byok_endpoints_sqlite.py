@@ -388,13 +388,52 @@ def test_gateway_metadata_authority_variants_are_rejected(metadata):
     _validate_gateway_metadata("openrouter", metadata)
 
 
+@pytest.mark.parametrize("uppercase", [False, True], ids=["lower", "upper"])
+@pytest.mark.parametrize(
+    "collapsed_key",
+    [
+        "authorizationheader",
+        "authschemename",
+        "authtype",
+        "apikeyalias",
+        "bearerauthority",
+        "credentialsource",
+        "serviceendpointoptions",
+        "discoveryurivalue",
+        "customurlvalue",
+    ],
+)
+def test_gateway_metadata_collapsed_authority_aliases_are_rejected(
+    collapsed_key,
+    uppercase,
+):
+    from fastapi import HTTPException
+
+    from tldw_Server_API.app.api.v1.endpoints.user_keys import (
+        _validate_gateway_metadata,
+    )
+
+    key = collapsed_key.upper() if uppercase else collapsed_key
+    with pytest.raises(HTTPException) as exc_info:
+        _validate_gateway_metadata(
+            "gateway:voice-lab",
+            {"nested": [{"deeper": {key: "attacker"}}]},
+        )
+
+    assert exc_info.value.status_code == 400
+
+
 @pytest.mark.parametrize(
     "key",
     [
         "token_count",
+        "token-count",
         "header_color",
+        "HEADER-COLOR",
         "secret_santa",
+        "secret.santa",
         "password_policy",
+        "password policy",
         "author",
         "description",
         "model_family",
