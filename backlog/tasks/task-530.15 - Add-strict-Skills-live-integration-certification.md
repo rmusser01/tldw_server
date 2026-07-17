@@ -54,6 +54,8 @@ modified_files:
 - tldw_Server_API/tests/Config/test_env_file_selection.py
 - tldw_Server_API/tests/Services/test_router_groups_contract.py
 - tldw_Server_API/tests/Services/test_startup_context_integrity.py
+references:
+- https://github.com/rmusser01/tldw_server/pull/2746
 ---
 
 ## Description
@@ -106,6 +108,7 @@ Added one strict, explicit Skills release-gate command that owns a disposable si
 The implementation also closes isolation defects reproduced during certification: exclusive runtime env selection now applies to central config and AuthNZ loading, the chat request schema no longer performs an independent dotenv load, and all certification database and system-log paths stay under the disposable runtime. Product Skills behavior was not changed.
 
 All acceptance criteria and verification gates pass.
+PR: https://github.com/rmusser01/tldw_server/pull/2746
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
