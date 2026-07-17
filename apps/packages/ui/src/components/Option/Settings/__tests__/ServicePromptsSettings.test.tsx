@@ -88,21 +88,23 @@ vi.mock("@/services/service-prompts", async () => {
   }
 })
 
+const translate = vi.hoisted(() => (
+  _key: string,
+  fallbackOrOptions?: string | { defaultValue?: string; [key: string]: unknown }
+) => {
+  const options = typeof fallbackOrOptions === "string"
+    ? { defaultValue: fallbackOrOptions }
+    : fallbackOrOptions
+  let value = options?.defaultValue ?? _key
+  for (const [key, replacement] of Object.entries(options ?? {})) {
+    value = value.replaceAll(`{{${key}}}`, String(replacement))
+  }
+  return value
+})
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (
-      _key: string,
-      fallbackOrOptions?: string | { defaultValue?: string; [key: string]: unknown }
-    ) => {
-      const options = typeof fallbackOrOptions === "string"
-        ? { defaultValue: fallbackOrOptions }
-        : fallbackOrOptions
-      let value = options?.defaultValue ?? _key
-      for (const [key, replacement] of Object.entries(options ?? {})) {
-        value = value.replaceAll(`{{${key}}}`, String(replacement))
-      }
-      return value
-    }
+    t: translate
   })
 }))
 
@@ -1576,13 +1578,20 @@ describe("ServicePromptsSettings", () => {
 
   it("reverses declined popstate once, registers beforeunload, and cleans up listeners", async () => {
     const go = vi.spyOn(window.history, "go").mockImplementation(() => undefined)
+    const addWindow = vi.spyOn(window, "addEventListener")
     const removeWindow = vi.spyOn(window, "removeEventListener")
     const removeDocument = vi.spyOn(document, "removeEventListener")
     const view = renderSettings()
     await openPrompt("RAG answer")
+    const popstateRegistrations = addWindow.mock.calls.filter(
+      ([eventName]) => eventName === "popstate"
+    ).length
     fireEvent.change(screen.getByRole("textbox", { name: "Template" }), {
       target: { value: "Dirty {context} {question}" }
     })
+    expect(addWindow.mock.calls.filter(
+      ([eventName]) => eventName === "popstate"
+    )).toHaveLength(popstateRegistrations)
     vi.mocked(window.confirm).mockReturnValue(false)
 
     const unload = new Event("beforeunload", { cancelable: true })

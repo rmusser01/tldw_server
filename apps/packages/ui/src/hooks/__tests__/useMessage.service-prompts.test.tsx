@@ -394,9 +394,8 @@ vi.mock("@/utils/mcp-disclosure", () => ({
 import { useMessage } from "../useMessage"
 
 describe("useMessage legacy Sidepanel Service Prompts", () => {
-  const expectNoPreflightMutation = () => {
+  const expectNoMessageMutation = () => {
     expect(mocks.resetChatLoopState).not.toHaveBeenCalled()
-    expect(mocks.setAbortController).not.toHaveBeenCalled()
     expect(mocks.setEmbeddingController).not.toHaveBeenCalled()
     expect(mocks.setMessages).not.toHaveBeenCalled()
     expect(mocks.setHistory).not.toHaveBeenCalled()
@@ -482,7 +481,7 @@ describe("useMessage legacy Sidepanel Service Prompts", () => {
       })
     })
 
-    expectNoPreflightMutation()
+    expectNoMessageMutation()
     expect(mocks.notification.warning).toHaveBeenCalledTimes(1)
     const notice = mocks.notification.warning.mock.calls[0][0]
     render(<>{notice.description}</>)
@@ -548,7 +547,7 @@ describe("useMessage legacy Sidepanel Service Prompts", () => {
       })
     })
 
-    expectNoPreflightMutation()
+    expectNoMessageMutation()
     expect(mocks.notification.error).toHaveBeenCalledTimes(1)
     const notice = mocks.notification.error.mock.calls[0][0]
     const copy = `${String(notice.message)} ${String(notice.description)}`
@@ -562,7 +561,7 @@ describe("useMessage legacy Sidepanel Service Prompts", () => {
     expect(mocks.ragSearch).not.toHaveBeenCalled()
   })
 
-  it("keeps snapshot preflight mutation-free while resolution is pending", async () => {
+  it("registers the snapshot controller while resolution is pending", async () => {
     let resolveSnapshot!: (snapshot: ReturnType<typeof mocks.makeSnapshot>) => void
     const pendingSnapshot = new Promise<ReturnType<typeof mocks.makeSnapshot>>(
       (resolve) => {
@@ -582,35 +581,75 @@ describe("useMessage legacy Sidepanel Service Prompts", () => {
       expect(mocks.loadServicePromptSnapshot).toHaveBeenCalledTimes(1)
     })
 
-    expectNoPreflightMutation()
+    expectNoMessageMutation()
+    expect(mocks.setAbortController.mock.calls).toEqual([[controller]])
 
     resolveSnapshot(mocks.makeSnapshot())
     await act(async () => {
       await submission
     })
-    expect(mocks.setAbortController.mock.calls).toEqual([
-      [controller],
-      [null]
-    ])
+    expect(mocks.setAbortController.mock.calls[0]).toEqual([controller])
+    expect(mocks.setAbortController).not.toHaveBeenCalledWith(null)
+    const releaseController = mocks.setAbortController.mock.calls[1]?.[0]
+    expect(releaseController).toEqual(expect.any(Function))
+    const newerController = new AbortController()
+    expect(releaseController(newerController)).toBe(newerController)
   })
 
-  it("silently stops an aborted snapshot preflight without taking controller ownership", async () => {
-    const abortError = new Error("Service Prompt request was aborted")
-    abortError.name = "AbortError"
-    mocks.loadServicePromptSnapshot.mockRejectedValue(abortError)
+  it("silently stops an aborted snapshot preflight and releases controller ownership", async () => {
+    mocks.loadServicePromptSnapshot.mockImplementation(
+      (_ids: unknown, options: { signal: AbortSignal }) =>
+        new Promise((_resolve, reject) => {
+          options.signal.addEventListener("abort", () => {
+            const abortError = new Error("Service Prompt request was aborted")
+            abortError.name = "AbortError"
+            reject(abortError)
+          }, { once: true })
+        })
+    )
+    const controller = new AbortController()
+    const { result } = renderHook(() => useMessage())
+
+    const submission = result.current.onSubmit({
+      message: "Current follow-up",
+      image: "",
+      controller
+    })
+    await vi.waitFor(() => {
+      expect(mocks.setAbortController).toHaveBeenCalledWith(controller)
+    })
+    controller.abort()
+    await act(async () => {
+      await submission
+    })
+
+    expectNoMessageMutation()
+    const releaseController = mocks.setAbortController.mock.calls[1]?.[0]
+    expect(releaseController).toEqual(expect.any(Function))
+    expect(releaseController(controller)).toBeNull()
+    const newerController = new AbortController()
+    expect(releaseController(newerController)).toBe(newerController)
+    expect(mocks.notification.error).not.toHaveBeenCalled()
+    expect(mocks.notification.warning).not.toHaveBeenCalled()
+  })
+
+  it("releases controller ownership when the Sidepanel preamble fails", async () => {
+    const controller = new AbortController()
+    mocks.pageAssistModel.mockRejectedValueOnce(new Error("preamble failed"))
     const { result } = renderHook(() => useMessage())
 
     await act(async () => {
-      await result.current.onSubmit({
+      await expect(result.current.onSubmit({
         message: "Current follow-up",
         image: "",
-        controller: new AbortController()
-      })
+        controller
+      })).rejects.toThrow("preamble failed")
     })
 
-    expectNoPreflightMutation()
-    expect(mocks.notification.error).not.toHaveBeenCalled()
-    expect(mocks.notification.warning).not.toHaveBeenCalled()
+    expect(mocks.setAbortController).toHaveBeenCalledWith(controller)
+    const releaseController = mocks.setAbortController.mock.calls.at(-1)?.[0]
+    expect(releaseController).toEqual(expect.any(Function))
+    expect(releaseController(controller)).toBeNull()
   })
 
   it("reuses the snapshot for a tool-disabled rewrite and the final Sidepanel answer", async () => {

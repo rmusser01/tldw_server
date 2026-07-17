@@ -866,7 +866,6 @@ export const useMessage = () => {
       setIsEmbedding(false);
     } finally {
       discardCurrentTurnOnAbortRef.current = false;
-      setAbortController(null);
       setEmbeddingController(null);
     }
   };
@@ -2428,14 +2427,20 @@ export const useMessage = () => {
       resolvedChatMode === "rag";
     const activeController = controller ?? new AbortController();
     const signal = activeController.signal;
+    const releaseActiveController = () =>
+      setAbortController((current: AbortController | null) =>
+        current === activeController ? null : current,
+      );
     let servicePromptSnapshot: ServicePromptSnapshot | undefined;
     if (usesLegacySidepanelRag) {
+      setAbortController(activeController);
       try {
         servicePromptSnapshot = await loadServicePromptSnapshot(
           ["chat.rag.answer", "chat.rag.question_rewrite"],
           { signal },
         );
       } catch (error) {
+        releaseActiveController();
         const errorName =
           typeof error === "object" && error !== null && "name" in error
             ? error.name
@@ -2517,17 +2522,25 @@ export const useMessage = () => {
     };
     if (!hasExplicitImageBackend) {
       if (!validateBeforeSubmit(resolvedSelectedModel, t, notification)) {
+        if (usesLegacySidepanelRag) releaseActiveController();
         return;
       }
-      const modelAvailable = await ensureSelectedChatModelIsAvailable(
-        resolvedSelectedModel,
-      );
+      let modelAvailable: boolean;
+      try {
+        modelAvailable = await ensureSelectedChatModelIsAvailable(
+          resolvedSelectedModel,
+        );
+      } catch (error) {
+        if (usesLegacySidepanelRag) releaseActiveController();
+        throw error;
+      }
       if (!modelAvailable) {
+        if (usesLegacySidepanelRag) releaseActiveController();
         return;
       }
     }
 
-    setAbortController(activeController);
+    if (!usesLegacySidepanelRag) setAbortController(activeController);
     const replyActive =
       Boolean(replyTarget) &&
       !isRegenerate &&
@@ -2878,6 +2891,7 @@ export const useMessage = () => {
         }
       }
     } finally {
+      if (usesLegacySidepanelRag) releaseActiveController();
       if (replyActive) {
         clearReplyTarget();
       }

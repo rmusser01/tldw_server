@@ -283,6 +283,13 @@ export const ServicePromptsSettings = () => {
     id: string | null
   } | null>(null)
   const suppressPopstateRef = React.useRef(false)
+  const historyRestoreStateRef = React.useRef({
+    conflict,
+    draft,
+    fieldErrors,
+    operationError,
+    preview
+  })
   const activeOperationRef = React.useRef<ActiveOperation | null>(null)
   const operationIdentityRef = React.useRef(0)
   const migrationProbedScopeRef = React.useRef<string | null>(null)
@@ -390,6 +397,16 @@ export const ServicePromptsSettings = () => {
   React.useEffect(() => {
     dirtyRef.current = dirty
   }, [dirty])
+
+  React.useEffect(() => {
+    historyRestoreStateRef.current = {
+      conflict,
+      draft,
+      fieldErrors,
+      operationError,
+      preview
+    }
+  }, [conflict, draft, fieldErrors, operationError, preview])
 
   React.useEffect(() => {
     if (historyRestoreCheckedRef.current || !selectedId) return
@@ -711,23 +728,25 @@ export const ServicePromptsSettings = () => {
       const targetIndex = getHistoryIndex(event.state)
       const forwardEntryToken = historyForwardEntryTokenRef.current
       const delta = targetIndex === null
-        ? forwardEntryToken &&
-          getHistoryEntryToken(event.state) === forwardEntryToken ? -1 : 1
+        ? (forwardEntryToken &&
+          getHistoryEntryToken(event.state) === forwardEntryToken ? -1 : 1)
         : historyIndexRef.current - targetIndex
       const activeElement = document.activeElement instanceof HTMLElement
         ? document.activeElement
         : null
-      if (draft && scopeRef.current?.scopeKey === draft.scopeKey &&
-        selectedIdRef.current === draft.definitionId) {
+      const restoreState = historyRestoreStateRef.current
+      const restoreDraft = restoreState.draft
+      if (restoreDraft && scopeRef.current?.scopeKey === restoreDraft.scopeKey &&
+        selectedIdRef.current === restoreDraft.definitionId) {
         stagePendingHistoryRestore({
-          conflict,
-          definitionId: draft.definitionId,
-          draft: { ...draft, parts: { ...draft.parts } },
-          fieldErrors: { ...fieldErrors },
+          conflict: restoreState.conflict,
+          definitionId: restoreDraft.definitionId,
+          draft: { ...restoreDraft, parts: { ...restoreDraft.parts } },
+          fieldErrors: { ...restoreState.fieldErrors },
           focusId: activeElement?.id || null,
-          operationError,
-          preview: preview ? { ...preview } : null,
-          scopeKey: draft.scopeKey,
+          operationError: restoreState.operationError,
+          preview: restoreState.preview ? { ...restoreState.preview } : null,
+          scopeKey: restoreDraft.scopeKey,
           url: historyUrlRef.current
         })
       }
@@ -757,11 +776,6 @@ export const ServicePromptsSettings = () => {
       document.removeEventListener("click", anchorClick, true)
     }
   }, [
-    conflict,
-    draft,
-    fieldErrors,
-    operationError,
-    preview,
     prepareHistoryNavigation,
     stampPendingHistoryDestination,
     t
