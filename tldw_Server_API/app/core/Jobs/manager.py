@@ -3025,9 +3025,18 @@ class JobManager:
         # Queue name policy
         allowed_queues = self._get_allowed_queues(domain)
         if queue not in allowed_queues:
-            raise ValueError(
+            error = ValueError(
                 f"Queue '{queue}' not allowed for domain '{domain}'. Allowed: {allowed_queues}"
-            )  # noqa: TRY003
+            )
+            if slides_generation:
+                existing = self._serialized_slides_generation_replay(
+                    owner_user_id=owner_user_id,
+                    idempotency_key=idempotency_key,
+                    rejection=error,
+                )
+                if existing is not None:
+                    return existing
+            raise error  # noqa: TRY003
 
         # Fair-share scheduling: enforce per-user concurrency limits and adjust priority
         if owner_user_id and _fair_share_enabled():

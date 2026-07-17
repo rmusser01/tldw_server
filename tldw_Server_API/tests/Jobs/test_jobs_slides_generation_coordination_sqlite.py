@@ -1164,6 +1164,58 @@ def test_sqlite_generation_replay_precedes_queue_policy_rejection(
     assert replayed["archived"] is archived
 
 
+@pytest.mark.parametrize("archived", (False, True))
+def test_sqlite_queue_policy_rejection_rechecks_concurrent_generation_winner(
+    tmp_path,
+    monkeypatch,
+    archived,
+):
+    db_path = ensure_jobs_tables(tmp_path / f"slides-queue-policy-race-{archived}.db")
+    manager = JobManager(db_path)
+    winner_uuid = f"queue-policy-winner-{archived}"
+    inserted = False
+
+    def reject_after_winner(_domain):
+        nonlocal inserted
+        if not inserted:
+            with sqlite3.connect(db_path) as conn:
+                if archived:
+                    _insert_archive(
+                        conn,
+                        job_id=42,
+                        job_uuid=winner_uuid,
+                        owner="owner-1",
+                        idempotency_key="queue-policy-race",
+                    )
+                else:
+                    conn.execute(
+                        """
+                        INSERT INTO jobs (
+                            uuid, domain, queue, job_type, owner_user_id,
+                            idempotency_key, payload, status
+                        ) VALUES (?, 'slides', 'default', 'presentation.generate',
+                                  'owner-1', 'queue-policy-race', '{}', 'queued')
+                        """,
+                        (winner_uuid,),
+                    )
+            inserted = True
+        return ["high"]
+
+    monkeypatch.setattr(manager, "_get_allowed_queues", reject_after_winner)
+
+    replayed = manager.create_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        payload={"receipt_id": "loser"},
+        owner_user_id="owner-1",
+        idempotency_key="queue-policy-race",
+    )
+
+    assert replayed["uuid"] == winner_uuid
+    assert replayed["archived"] is archived
+
+
 def test_sqlite_not_ready_fails_closed_only_for_exact_generation_scope(tmp_path):
     db_path = ensure_jobs_tables(tmp_path / "slides-readiness-enforcement.db")
     jm = JobManager(db_path)
