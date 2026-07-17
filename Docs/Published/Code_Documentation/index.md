@@ -10,7 +10,7 @@ Use the links below to jump to common areas, or the sidebar to browse all topics
 
 ## Architecture & Databases
 - Database Overview: Database.md
-- Media DB v2: Databases/Media_DB_v2.md
+- MediaDatabase: Databases/Media_DB_v2.md
 - ChaChaNotes DB (Chats/Notes/Characters): Databases/ChaChaNotes_DB.md
 - Generated Files Storage Guide: Guides/Generated_Files_Storage_Code_Guide.md
 
@@ -39,6 +39,7 @@ Use the links below to jump to common areas, or the sidebar to browse all topics
 
 ## Voice Assistant
 - Voice Assistant Module: VoiceAssistant_Module.md
+- Persona Visual Packs: Persona_Visual_Packs.md
 
 ## Evaluations
 - Evaluations Developer Guide: Evaluations_Developer_Guide.md

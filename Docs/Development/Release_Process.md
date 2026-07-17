@@ -27,7 +27,7 @@ Treat main snapshots republish as a first-class side effect of the release comma
 - Formal release artifacts are the `app`, `worker`, and `audio-worker` images published by the GitHub Release workflow with versioned release tags.
 - `main` snapshots are the rolling GHCR `app`, `webui`, and `admin-ui` images republished by pushes to `main`.
 - Pushing the release commit republishes `main` snapshots before GitHub Release publication triggers the formal Docker release artifacts.
-- `Docs/site/` is generated documentation-site output, not release source material. It remains ignored and is not staged by the release helper.
+- `Docs/_site/` is generated documentation-site output, not release source material. It remains ignored and is not staged by the release helper.
 
 ## Retry And Recovery
 

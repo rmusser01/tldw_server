@@ -1,0 +1,93 @@
+{
+  "default_workers": [
+    "chatbooks",
+    "files",
+    "data_tables",
+    "prompt_studio",
+    "privilege_snapshots",
+    "audio",
+    "media_ingest",
+    "reading_import",
+    "reading_digest",
+    "evals_abtest"
+  ],
+  "workers": [
+    {
+      "key": "chatbooks",
+      "slug": "chatbooks",
+      "label": "Chatbooks core jobs",
+      "module": "tldw_Server_API.app.services.core_jobs_worker",
+      "optional": false
+    },
+    {
+      "key": "files",
+      "slug": "files",
+      "label": "File artifacts jobs",
+      "module": "tldw_Server_API.app.core.File_Artifacts.jobs_worker",
+      "optional": false
+    },
+    {
+      "key": "data_tables",
+      "slug": "data-tables",
+      "label": "Data tables jobs",
+      "module": "tldw_Server_API.app.core.Data_Tables.jobs_worker",
+      "optional": false
+    },
+    {
+      "key": "prompt_studio",
+      "slug": "prompt-studio",
+      "label": "Prompt Studio jobs",
+      "module": "tldw_Server_API.app.core.Prompt_Management.prompt_studio.services.jobs_worker",
+      "optional": false
+    },
+    {
+      "key": "privilege_snapshots",
+      "slug": "privilege-snapshots",
+      "label": "Privilege snapshots worker",
+      "module": "tldw_Server_API.app.services.privilege_snapshot_worker",
+      "optional": false
+    },
+    {
+      "key": "audio",
+      "slug": "audio",
+      "label": "Audio jobs worker",
+      "module": "tldw_Server_API.app.services.audio_jobs_worker",
+      "optional": false
+    },
+    {
+      "key": "media_ingest",
+      "slug": "media-ingest",
+      "label": "Media ingest jobs worker",
+      "module": "tldw_Server_API.app.services.media_ingest_jobs_worker",
+      "optional": false
+    },
+    {
+      "key": "reading_import",
+      "slug": "reading-import",
+      "label": "Reading list import jobs worker",
+      "module": "tldw_Server_API.app.core.Collections.reading_import_jobs_worker",
+      "optional": false
+    },
+    {
+      "key": "reading_digest",
+      "slug": "reading-digest",
+      "label": "Reading digest jobs worker",
+      "module": "tldw_Server_API.app.core.Collections.reading_digest_jobs_worker",
+      "optional": false
+    },
+    {
+      "key": "evals_abtest",
+      "slug": "evals-abtest",
+      "label": "Evaluations embeddings ABTest worker",
+      "module": "tldw_Server_API.app.core.Evaluations.embeddings_abtest_jobs_worker",
+      "optional": false
+    },
+    {
+      "key": "connectors",
+      "slug": "connectors",
+      "label": "Connectors worker",
+      "module": "tldw_Server_API.app.services.connectors_worker",
+      "optional": true
+    }
+  ]
+}

@@ -31,7 +31,7 @@ See also: Guides/Chunking_Code_Guide.md for the core Chunker APIs and streaming/
               │
 ┌─────────────▼───────────────────────────┐
 │        Database Layer                    │
-│   /core/DB_Management/Media_DB_v2.py     │
+│   /core/DB_Management/media_db/native_class.py │
 │   ChunkingTemplates table                │
 └─────────────────────────────────────────┘
 ```

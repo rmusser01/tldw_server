@@ -174,7 +174,7 @@ For accelerated audio, local/manual or `make` is the recommended first path.
 
 ## NVIDIA: faster-whisper first
 
-Edit [config.txt](../../tldw_Server_API/Config_Files/config.txt):
+Edit [config.txt](https://github.com/rmusser01/tldw_server/blob/main/tldw_Server_API/Config_Files/config.txt):
 
 ```ini
 [STT-Settings]
@@ -197,7 +197,7 @@ Install the MLX STT extras in your active environment:
 pip install -e '.[STT_Parakeet_MLX]'
 ```
 
-Then edit [config.txt](../../tldw_Server_API/Config_Files/config.txt):
+Then edit [config.txt](https://github.com/rmusser01/tldw_server/blob/main/tldw_Server_API/Config_Files/config.txt):
 
 ```ini
 [STT-Settings]
@@ -233,7 +233,7 @@ python Helper_Scripts/TTS_Installers/install_tts_supertonic.py
 
 ### 3B. Enable the provider
 
-Edit [tts_providers_config.yaml](../../tldw_Server_API/Config_Files/tts_providers_config.yaml):
+Edit [tts_providers_config.yaml](https://github.com/rmusser01/tldw_server/blob/main/tldw_Server_API/Config_Files/tts_providers_config.yaml):
 
 ```yaml
 providers:
@@ -255,7 +255,7 @@ providers:
 
 ### 3C. Make it the default TTS provider
 
-Edit [config.txt](../../tldw_Server_API/Config_Files/config.txt):
+Edit [config.txt](https://github.com/rmusser01/tldw_server/blob/main/tldw_Server_API/Config_Files/config.txt):
 
 ```ini
 [TTS-Settings]
@@ -398,7 +398,7 @@ Tradeoffs:
 
 After the basic accelerated stack works, move to:
 
-- [QWEN3_TTS_SETUP.md](../STT-TTS/QWEN3_TTS_SETUP.md)
+- [QWEN3_TTS_SETUP.md](https://github.com/rmusser01/tldw_server/blob/main/Docs/STT-TTS/QWEN3_TTS_SETUP.md)
 
 Treat it as the advanced upgrade path, not the baseline.
 
@@ -423,7 +423,7 @@ pip install -e '.[STT_Parakeet_MLX]'
 
 ### The server is using the wrong STT model
 
-- make the defaults explicit in [config.txt](../../tldw_Server_API/Config_Files/config.txt)
+- make the defaults explicit in [config.txt](https://github.com/rmusser01/tldw_server/blob/main/tldw_Server_API/Config_Files/config.txt)
 - do not rely on implicit provider selection if you care which backend is used
 - verify with `/api/v1/audio/transcriptions/health?model=...`
 
@@ -441,6 +441,6 @@ That can happen today.
 
 Use `/setup` when you want guided provisioning, then manually set:
 
-- your STT defaults in [config.txt](../../tldw_Server_API/Config_Files/config.txt)
-- your TTS provider in [config.txt](../../tldw_Server_API/Config_Files/config.txt)
-- your enabled provider block in [tts_providers_config.yaml](../../tldw_Server_API/Config_Files/tts_providers_config.yaml)
+- your STT defaults in [config.txt](https://github.com/rmusser01/tldw_server/blob/main/tldw_Server_API/Config_Files/config.txt)
+- your TTS provider in [config.txt](https://github.com/rmusser01/tldw_server/blob/main/tldw_Server_API/Config_Files/config.txt)
+- your enabled provider block in [tts_providers_config.yaml](https://github.com/rmusser01/tldw_server/blob/main/tldw_Server_API/Config_Files/tts_providers_config.yaml)

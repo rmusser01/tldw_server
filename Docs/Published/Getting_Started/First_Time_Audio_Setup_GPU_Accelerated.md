@@ -27,8 +27,8 @@ Alternatives:
 
 Important current-repo realities:
 
-- current config defaults use `auto`: `parakeet-mlx` on macOS and `parakeet-tdt-0.6b-v3-onnx` on Linux/Windows; the shorter `parakeet-onnx` alias remains supported for older configs
-- current `/setup` bundle docs may recommend a different first-run STT path for some hardware classes
+- The shipped `config.txt` STT defaults use `auto`: `parakeet-mlx` on macOS and `parakeet-tdt-0.6b-v3-onnx` on Linux/Windows. The shorter `parakeet-onnx` alias remains supported for older configs. This guide shows you how to pin GPU-optimized engines explicitly.
+- The `/setup` bundle docs may recommend a different first-run STT path for some hardware classes.
 - Stock Docker CPU/default audio works with bundled dependencies, but the stock Docker profile is not a ready-made GPU-accelerated audio path. Host-side config or model edits require a rebuild, `Dockerfiles/docker-compose.host-storage.yml`, or a custom image path.
 
 ## Choose Your Hardware Lane First
@@ -174,7 +174,7 @@ For accelerated audio, local/manual or `make` is the recommended first path.
 
 ## NVIDIA: faster-whisper first
 
-Edit [config.txt](../../../tldw_Server_API/Config_Files/config.txt):
+Edit [config.txt](https://github.com/rmusser01/tldw_server/blob/main/tldw_Server_API/Config_Files/config.txt):
 
 ```ini
 [STT-Settings]
@@ -197,7 +197,7 @@ Install the MLX STT extras in your active environment:
 pip install -e '.[STT_Parakeet_MLX]'
 ```
 
-Then edit [config.txt](../../../tldw_Server_API/Config_Files/config.txt):
+Then edit [config.txt](https://github.com/rmusser01/tldw_server/blob/main/tldw_Server_API/Config_Files/config.txt):
 
 ```ini
 [STT-Settings]
@@ -233,7 +233,7 @@ python Helper_Scripts/TTS_Installers/install_tts_supertonic.py
 
 ### 3B. Enable the provider
 
-Edit [tts_providers_config.yaml](../../../tldw_Server_API/Config_Files/tts_providers_config.yaml):
+Edit [tts_providers_config.yaml](https://github.com/rmusser01/tldw_server/blob/main/tldw_Server_API/Config_Files/tts_providers_config.yaml):
 
 ```yaml
 providers:
@@ -255,7 +255,7 @@ providers:
 
 ### 3C. Make it the default TTS provider
 
-Edit [config.txt](../../../tldw_Server_API/Config_Files/config.txt):
+Edit [config.txt](https://github.com/rmusser01/tldw_server/blob/main/tldw_Server_API/Config_Files/config.txt):
 
 ```ini
 [TTS-Settings]
@@ -377,24 +377,28 @@ Success means:
 - the `text` field is close to `This is the accelerated audio setup smoke test`
 - the backend matches the path you intended
 
-## Optional Alternative: `pocket_tts`
+## Optional Alternatives: PocketTTS Runtimes
 
-Use `pocket_tts` instead of `supertonic` if local voice cloning matters more than the simplest first-run TTS path.
+Use a PocketTTS runtime instead of `supertonic` if local voice cloning matters more than the simplest first-run TTS path.
 
 Use:
 
-- [PocketTTS Voice Cloning Guide](../User_Guides/WebUI_Extension/PocketTTS_Voice_Cloning_Guide.md)
+- [PocketTTS Voice Cloning Guide](../User_Guides/WebUI_Extension/PocketTTS_Voice_Cloning_Guide.md) for `pocket_tts` (Python/ONNX)
+- `python Helper_Scripts/TTS_Installers/install_tts_pocket_tts_cpp.py` for `pocket_tts_cpp` (compiled native runtime)
 
-Tradeoff:
+Tradeoffs:
 
-- excellent if voice cloning is the point
-- worse as the default first sound path because reference audio is mandatory
+- `pocket_tts` is the ONNX/Python runtime and is the simplest PocketTTS path to read and debug.
+- `pocket_tts_cpp` is a separate compiled runtime and uses a different installer and runtime layout.
+- Both are excellent if voice cloning is the point.
+- Both are worse than the default first-sound path because you still need either a direct `voice_reference` clip or a stored `custom:<voice_id>` voice.
+- `pocket_tts_cpp` streaming is only available when the local CLI probe proves incremental on this install; otherwise streaming requests fail closed.
 
 ## Better But More Demanding: `qwen3_tts`
 
 After the basic accelerated stack works, move to:
 
-- [QWEN3_TTS_SETUP.md](../../../Docs/STT-TTS/QWEN3_TTS_SETUP.md)
+- [QWEN3_TTS_SETUP.md](https://github.com/rmusser01/tldw_server/blob/main/Docs/STT-TTS/QWEN3_TTS_SETUP.md)
 
 Treat it as the advanced upgrade path, not the baseline.
 
@@ -419,7 +423,7 @@ pip install -e '.[STT_Parakeet_MLX]'
 
 ### The server is using the wrong STT model
 
-- make the defaults explicit in [config.txt](../../../tldw_Server_API/Config_Files/config.txt)
+- make the defaults explicit in [config.txt](https://github.com/rmusser01/tldw_server/blob/main/tldw_Server_API/Config_Files/config.txt)
 - do not rely on implicit provider selection if you care which backend is used
 - verify with `/api/v1/audio/transcriptions/health?model=...`
 
@@ -437,6 +441,6 @@ That can happen today.
 
 Use `/setup` when you want guided provisioning, then manually set:
 
-- your STT defaults in [config.txt](../../../tldw_Server_API/Config_Files/config.txt)
-- your TTS provider in [config.txt](../../../tldw_Server_API/Config_Files/config.txt)
-- your enabled provider block in [tts_providers_config.yaml](../../../tldw_Server_API/Config_Files/tts_providers_config.yaml)
+- your STT defaults in [config.txt](https://github.com/rmusser01/tldw_server/blob/main/tldw_Server_API/Config_Files/config.txt)
+- your TTS provider in [config.txt](https://github.com/rmusser01/tldw_server/blob/main/tldw_Server_API/Config_Files/config.txt)
+- your enabled provider block in [tts_providers_config.yaml](https://github.com/rmusser01/tldw_server/blob/main/tldw_Server_API/Config_Files/tts_providers_config.yaml)

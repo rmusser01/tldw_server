@@ -14,6 +14,12 @@ vi.mock("@/services/chat-document-processing", () => ({
   prepareChatDocumentAttachmentsForSend
 }))
 
+vi.mock("@/services/tldw", () => ({
+  tldwModels: {
+    subscribeInvalidation: vi.fn(() => () => undefined)
+  }
+}))
+
 vi.mock("@/components/Chat/composer/hooks/useComposerQueue", () => ({
   useComposerQueue: (args: any) => {
     queueMock.args = args

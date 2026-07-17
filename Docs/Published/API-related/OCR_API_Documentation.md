@@ -15,7 +15,8 @@ The OCR module integrates with media ingestion to extract text from scanned PDFs
 
 1) GET `/api/v1/ocr/backends`
    - Lists available OCR backends with basic health info.
-   - Returns a map keyed by backend name (e.g., `mineru`, `points`, `dots`) including minimal configuration details and reachability checks.
+   - Returns a map keyed by backend name (e.g., `mineru`, `points`, `dots`, `llamacpp`, `chatllm`) including lightweight backend-specific configuration details.
+   - Field shape varies by backend. Today `llamacpp` exposes `mode`, `configured_mode`, `configured`, `supports_structured_output`, `supports_json`, `model`, `configured_flags`, auto-eligibility flags, `backend_concurrency_cap`, and mode-specific flags such as `url_configured`, `managed_configured`, `managed_running`, `allow_managed_start`, and `cli_configured`; `chatllm` exposes a similar capability set with its own mode-specific details, but not every field is identical.
    - Code: `tldw_Server_API/app/api/v1/endpoints/ocr.py:router.get("/backends")`
 
 2) POST `/api/v1/ocr/points/preload`
@@ -35,6 +36,8 @@ OCR is typically enabled via the media ingestion request options. Key fields (se
 - `ocr_min_page_text_chars` (int) - threshold to treat a page as “no text” for fallback OCR
 - `ocr_output_format` (str | null) - `text|markdown|json` (controls structured OCR output)
 - `ocr_prompt_preset` (str | null) - `general|doc|table|spotting|json` (backend-specific presets)
+- The PDF pipeline stores structured OCR data under `analysis_details.ocr.structured` when the backend returns it.
+- Per-page OCR concurrency is capped by the smaller of `OCR_PAGE_CONCURRENCY` and the backend profile's `max_page_concurrency`.
 
 Reference (code): `tldw_Server_API/app/api/v1/schemas/media_request_models.py`.
 
@@ -45,6 +48,13 @@ Reference (code): `tldw_Server_API/app/api/v1/schemas/media_request_models.py`.
 - MinerU appears in `GET /api/v1/ocr/backends` with capability flags such as `pdf_only`, `document_level`, and `opt_in_only`.
 - MinerU is excluded from `auto`, `auto_high_quality`, and `OCR.backend_priority` in v1.
 - `ocr_lang` and `ocr_dpi` are advisory for MinerU and are currently recorded in metadata but not used to drive the CLI invocation.
+
+### Llama.cpp and ChatLLM behavior
+
+- `ocr_backend=llamacpp` and `ocr_backend=chatllm` are server-owned OCR profiles that can run in `remote`, `managed`, `cli`, or `auto` mode.
+- Both backends use explicit auto-eligibility flags. They only participate in `auto` / `auto_high_quality` when the flag is enabled and the backend is locally available.
+- Managed mode is single-process only in v1. For multi-worker deployments, use `remote` or `cli`.
+- The PDF pipeline records the effective page concurrency it actually used, not just the global cap.
 
 ## Quick Examples
 
@@ -141,7 +151,9 @@ Example MinerU discovery response excerpt (truncated)
 
 - MinerU: document-level PDF OCR with bounded structured artifacts (`pages`, `tables`, artifact excerpts)
 - POINTS Reader: documentation coming soon
-- OCR Providers overview: documentation coming soon
+- Llama.cpp OCR: see `Docs/OCR/LlamaCpp-OCR.md`
+- ChatLLM OCR: see `Docs/OCR/ChatLLM-OCR.md`
+- OCR Providers overview: see `Docs/OCR/OCR_Providers.md`
 
 ## Roadmap (Placeholder)
 

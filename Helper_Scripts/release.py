@@ -833,7 +833,8 @@ class ShellReleaseRunner:
         changelog_path = self.repo_root / "CHANGELOG.md"
         readme_path = self.repo_root / "README.md"
         mkdocs_path = self.repo_root / "Docs" / "mkdocs.yml"
-        release_notes_path = self.repo_root / "Docs" / "Published" / "RELEASE_NOTES.md"
+        release_notes_path = self.repo_root / "Docs" / "Site" / "RELEASE_NOTES.md"
+        published_docs_path = self.repo_root / "Docs" / "Published"
         release_process_doc = "Docs/Development/Release_Process.md"
 
         pyproject_text = pyproject_path.read_text(encoding="utf-8")
@@ -864,6 +865,7 @@ class ShellReleaseRunner:
             readme_path,
             mkdocs_path,
             release_notes_path,
+            published_docs_path,
         ]
 
         if self.dry_run:
@@ -892,6 +894,23 @@ class ShellReleaseRunner:
         if self.dry_run:
             return f"dry-run-release-{next_version}"
 
+        self._run_command(
+            [
+                "/usr/bin/env",
+                "-u",
+                "TLDW_DOCS_SOURCE_DIR",
+                "-u",
+                "TLDW_DOCS_PUBLISHED_DIR",
+                "-u",
+                "TLDW_DOCS_TEST_FAIL_AFTER_BACKUP",
+                "-u",
+                "TLDW_DOCS_TEST_FAIL_DURING_BACKUP_CLEANUP",
+                "-u",
+                "TLDW_DOCS_TEST_MODE",
+                "/bin/bash",
+                str(self.repo_root / "Helper_Scripts" / "refresh_docs_published.sh"),
+            ]
+        )
         self._run_command(["git", "add", *rel_paths])
         self._run_command(["git", "commit", "-m", release_commit_message(next_version)])
         return self.get_head_sha()

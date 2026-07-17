@@ -7,7 +7,7 @@ This guide covers the Quick Chat Helper assistant modes that were added to impro
 - `Browse Guides`: per-page Tutorials + browsable pre-written Q/A workflow cards
 
 Design rationale and architecture details are documented in
-[`Docs/Design/Quick_Chat_Docs_Assistant.md`](../../Design/Quick_Chat_Docs_Assistant.md).
+[`Docs/Design/Quick_Chat_Docs_Assistant.md`](https://github.com/rmusser01/tldw_server/blob/main/Docs/Design/Quick_Chat_Docs_Assistant.md).
 
 Primary implementation files:
 

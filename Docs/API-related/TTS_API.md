@@ -14,7 +14,7 @@ PocketTTS note:
 - For either provider, voice cloning requests must supply either a direct base64 `voice_reference` or `voice: "custom:<voice_id>"` for a stored reference.
 - `pocket_tts_cpp` only exposes streaming when the local CLI probe proves the install is truly incremental; otherwise the adapter fails closed.
 - This page documents public request inputs only. Provider-internal `extra_params` keys are intentionally omitted.
-- Audio Studio Narration, Podcast, and Briefing speech generation use server-managed Audio Studio jobs over the configured TTS providers. See [Audio Studio](../Audio_Studio.md) for project, revision, artifact, render, and migration behavior.
+- Audio Studio Narration, Podcast, and Briefing speech generation use server-managed Audio Studio jobs over the configured TTS providers. See [Audio Studio](https://github.com/rmusser01/tldw_server/blob/main/Docs/Audio_Studio.md) for project, revision, artifact, render, and migration behavior.
 
 OmniVoice note:
 

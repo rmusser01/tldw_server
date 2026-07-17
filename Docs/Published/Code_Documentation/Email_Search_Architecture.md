@@ -15,7 +15,7 @@ This document describes the normalized email search architecture in `tldw_Server
 
 ### Storage and Search Engine
 
-- Core DB module: `tldw_Server_API/app/core/DB_Management/Media_DB_v2.py`
+- Core DB package seam: `tldw_Server_API/app/core/DB_Management/media_db/native_class.py`
 - Primary normalized tables:
   - `email_sources`
   - `email_messages`
@@ -151,4 +151,3 @@ When adding an operator:
 2. Keep deterministic ordering for stable pagination.
 3. Benchmark with `Helper_Scripts/benchmarks/email_search_bench.py`.
 4. Validate legacy parity with `Helper_Scripts/checks/email_search_dual_read_parity.py`.
-

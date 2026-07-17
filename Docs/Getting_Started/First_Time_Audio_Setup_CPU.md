@@ -166,7 +166,7 @@ Important Docker note:
 
 ## Step 2: Set the CPU STT Defaults
 
-The shipped `auto` default already resolves to ONNX on Linux/Windows. To pin CPU STT explicitly, edit [config.txt](../../tldw_Server_API/Config_Files/config.txt):
+The shipped `auto` default already resolves to ONNX on Linux/Windows. To pin CPU STT explicitly, edit [config.txt](https://github.com/rmusser01/tldw_server/blob/main/tldw_Server_API/Config_Files/config.txt):
 
 ```ini
 [STT-Settings]
@@ -221,7 +221,7 @@ This path currently assumes:
 
 ### 3B. Enable the provider
 
-Edit [tts_providers_config.yaml](../../tldw_Server_API/Config_Files/tts_providers_config.yaml):
+Edit [tts_providers_config.yaml](https://github.com/rmusser01/tldw_server/blob/main/tldw_Server_API/Config_Files/tts_providers_config.yaml):
 
 ```yaml
 providers:
@@ -243,7 +243,7 @@ providers:
 
 ### 3C. Make `supertonic` the default TTS provider
 
-Edit [config.txt](../../tldw_Server_API/Config_Files/config.txt):
+Edit [config.txt](https://github.com/rmusser01/tldw_server/blob/main/tldw_Server_API/Config_Files/config.txt):
 
 ```ini
 [TTS-Settings]
@@ -389,7 +389,7 @@ Use `qwen3_tts` after the basic CPU stack already works.
 
 Use:
 
-- [QWEN3_TTS_SETUP.md](../STT-TTS/QWEN3_TTS_SETUP.md)
+- [QWEN3_TTS_SETUP.md](https://github.com/rmusser01/tldw_server/blob/main/Docs/STT-TTS/QWEN3_TTS_SETUP.md)
 
 Treat it as a second-step upgrade, not the first-run baseline.
 
@@ -403,7 +403,7 @@ Treat it as a second-step upgrade, not the first-run baseline.
 
 ### Supertonic does not appear in `/audio/health`
 
-- confirm `providers.supertonic.enabled: true` in [tts_providers_config.yaml](../../tldw_Server_API/Config_Files/tts_providers_config.yaml)
+- confirm `providers.supertonic.enabled: true` in [tts_providers_config.yaml](https://github.com/rmusser01/tldw_server/blob/main/tldw_Server_API/Config_Files/tts_providers_config.yaml)
 - confirm the asset directories exist:
   - `models/supertonic/onnx`
   - `models/supertonic/voice_styles`
@@ -417,7 +417,7 @@ Treat it as a second-step upgrade, not the first-run baseline.
 
 ### STT health shows the wrong model/provider
 
-- re-open [config.txt](../../tldw_Server_API/Config_Files/config.txt)
+- re-open [config.txt](https://github.com/rmusser01/tldw_server/blob/main/tldw_Server_API/Config_Files/config.txt)
 - make sure both `default_batch_transcription_model` and `default_streaming_transcription_model` are set to `auto` or explicitly to `parakeet-tdt-0.6b-v3-onnx`
 - make sure `default_transcriber = parakeet`
 - restart the server

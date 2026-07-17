@@ -181,7 +181,7 @@ venv.bak/
 
 # mkdocs documentation
 /site
-/Docs/site/
+/Docs/_site/
 
 
 
@@ -279,6 +279,11 @@ errors.log
 # Data files
 *.csv
 *.json
+!Docs/Published/Deployment/sidecar_workers_manifest.json
+!Docs/Published/Evaluations/samples/dataset_quick.json
+!Docs/Published/Evaluations/samples/rag_pipeline_eval_inline.json
+!Docs/Published/Evaluations/samples/run_request.json
+!Docs/Published/Monitoring/Grafana_Streaming_Basics.json
 !.impeccable/design.json
 !tldw_Server_API/app/core/Evaluations/data/bullshit_benchmark/questions_v2.json
 !tldw_Server_API/tests/fixtures/privilege_route_registry_snapshot.json

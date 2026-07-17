@@ -1,0 +1,8 @@
+{
+  "mode": "async",
+  "max_examples": 2,
+  "tags": [
+    "quick-sample",
+    "docs"
+  ]
+}

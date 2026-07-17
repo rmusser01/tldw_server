@@ -1,0 +1,23 @@
+{
+  "name": "rag-pipeline-inline-smoke",
+  "evaluation_type": "rag_pipeline",
+  "dataset_inline": {
+    "name": "quick-inline-rag",
+    "records": [
+      {
+        "id": "q1",
+        "query": "What is the project vision for tldw_server?",
+        "expected_answer": "A practical step toward a personal knowledge assistant similar in spirit to the Primer idea."
+      },
+      {
+        "id": "q2",
+        "query": "Which endpoint provides OpenAI-compatible chat?",
+        "expected_answer": "POST /api/v1/chat/completions."
+      }
+    ]
+  },
+  "config": {
+    "retrieval_top_k": 5,
+    "max_context_tokens": 4000
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "name": "quick-rag-dataset",
+  "description": "Small starter dataset for docs and smoke checks.",
+  "records": [
+    {
+      "id": "d1",
+      "query": "Where is the OpenAI-compatible embeddings endpoint?",
+      "expected_answer": "POST /api/v1/embeddings."
+    },
+    {
+      "id": "d2",
+      "query": "Which endpoint is used for unified RAG search?",
+      "expected_answer": "POST /api/v1/rag/search."
+    }
+  ]
+}

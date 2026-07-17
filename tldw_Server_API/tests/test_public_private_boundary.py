@@ -24,9 +24,7 @@ def _require(condition: bool, message: str) -> None:
 
 def test_boundary_policy_and_inventory_exist() -> None:
     policy = Path("Docs/Policies/OSS_Private_Boundary.md").read_text(encoding="utf-8")
-    inventory = Path("Docs/Plans/2026-03-19-oss-saas-private-inventory.md").read_text(
-        encoding="utf-8"
-    )
+    inventory = Path("Docs/Plans/2026-03-19-oss-saas-private-inventory.md").read_text(encoding="utf-8")
 
     _require("Public" in policy, "expected public boundary rules")
     _require("Private" in policy, "expected private boundary rules")
@@ -38,9 +36,7 @@ def test_boundary_policy_and_inventory_exist() -> None:
 
 def test_public_docs_pipeline_declares_hosted_material_private() -> None:
     guide = Path("Docs/Code_Documentation/Docs_Site_Guide.md").read_text(encoding="utf-8")
-    refresh_script = Path("Helper_Scripts/refresh_docs_published.sh").read_text(
-        encoding="utf-8"
-    )
+    checker = _load_boundary_checker()
     mkdocs_config = Path("Docs/mkdocs.yml").read_text(encoding="utf-8")
 
     _require(
@@ -52,8 +48,16 @@ def test_public_docs_pipeline_declares_hosted_material_private() -> None:
         "expected docs site guide to point contributors to the private repo for hosted docs",
     )
     _require(
-        "hosted/commercial docs stay out of docs/published" in refresh_script.lower(),
-        "expected refresh script comments to document that hosted/commercial docs stay out of Docs/Published",
+        "Docs/Published" in checker.SCAN_TARGETS,
+        "expected the boundary checker to scan every generated public doc",
+    )
+    _require(
+        {
+            "Hosted_SaaS_Profile.md",
+            "Hosted_Staging_Runbook.md",
+            "Hosted_Production_Runbook.md",
+        }.issubset(checker.DENYLIST),
+        "expected hosted deployment docs to be denied from public output",
     )
     _require(
         "Hosted_Production_Runbook.md" not in mkdocs_config,
@@ -62,17 +66,9 @@ def test_public_docs_pipeline_declares_hosted_material_private() -> None:
 
 
 def test_public_docs_do_not_point_self_host_users_to_hosted_runbooks() -> None:
-    first_time_setup = Path("Docs/Published/Deployment/First_Time_Production_Setup.md").read_text(
-        encoding="utf-8"
-    )
-    production_hardening = Path(
-        "Docs/User_Guides/Server/Production_Hardening_Checklist.md"
-    ).read_text(
-        encoding="utf-8"
-    )
-    billing_readme = Path("tldw_Server_API/app/core/Billing/README.md").read_text(
-        encoding="utf-8"
-    )
+    first_time_setup = Path("Docs/Published/Deployment/First_Time_Production_Setup.md").read_text(encoding="utf-8")
+    production_hardening = Path("Docs/User_Guides/Server/Production_Hardening_Checklist.md").read_text(encoding="utf-8")
+    billing_readme = Path("tldw_Server_API/app/core/Billing/README.md").read_text(encoding="utf-8")
 
     _require(
         "Hosted_SaaS_Profile.md" not in first_time_setup,
@@ -121,9 +117,7 @@ def test_public_frontend_does_not_import_hosted_customer_surface() -> None:
 
 
 def test_boundary_checker_exists() -> None:
-    checker = Path("Helper_Scripts/docs/check_public_private_boundary.py").read_text(
-        encoding="utf-8"
-    )
+    checker = Path("Helper_Scripts/docs/check_public_private_boundary.py").read_text(encoding="utf-8")
 
     _require(
         "Hosted_Production_Runbook.md" in checker,
@@ -220,9 +214,7 @@ def test_mkdocs_workflow_runs_boundary_checker() -> None:
     )
 
 
-def test_boundary_checker_scans_example_and_special_text_files(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_boundary_checker_scans_example_and_special_text_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     module = _load_boundary_checker()
     scan_targets = (
         "Docs/Published",
@@ -248,9 +240,7 @@ def test_boundary_checker_scans_example_and_special_text_files(
     monkeypatch.setattr(module, "REPO_ROOT", tmp_path)
     monkeypatch.setattr(module, "SCAN_TARGETS", scan_targets)
 
-    candidate_files = {
-        path.relative_to(tmp_path).as_posix() for path in module._iter_candidate_files()
-    }
+    candidate_files = {path.relative_to(tmp_path).as_posix() for path in module._iter_candidate_files()}
 
     _require(
         {path.as_posix() for path in expected_files}.issubset(candidate_files),
@@ -288,16 +278,10 @@ def test_boundary_checker_matches_real_references_without_larger_token_false_pos
         "expected larger-token suffixes to avoid triggering denylist matches",
     )
     _require(
-        any(
-            ":2:" in violation and "Hosted_SaaS_Profile.md" in violation
-            for violation in violations
-        ),
+        any(":2:" in violation and "Hosted_SaaS_Profile.md" in violation for violation in violations),
         "expected anchored doc references to trigger denylist matches",
     )
     _require(
-        any(
-            ":3:" in violation and "@web/components/hosted" in violation
-            for violation in violations
-        ),
+        any(":3:" in violation and "@web/components/hosted" in violation for violation in violations),
         "expected hosted import path prefixes to trigger denylist matches",
     )

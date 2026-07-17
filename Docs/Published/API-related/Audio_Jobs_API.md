@@ -56,3 +56,4 @@ Base path: `/api/v1/audio`
 ## Notes
 
 - This API complements synchronous `/audio/transcriptions` and real-time WS; it does not replace them.
+- Audio Studio uses the Jobs module under the `audio_studio` domain for generation, render, and export work. Audiobook migration commit is currently a synchronous server-side transaction. See [Audio Studio](https://github.com/rmusser01/tldw_server/blob/main/Docs/Audio_Studio.md) for the project/revision API and artifact lifecycle.

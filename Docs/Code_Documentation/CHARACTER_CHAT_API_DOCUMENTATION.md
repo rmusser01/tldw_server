@@ -779,4 +779,4 @@ print(response["response"])
 
 ---
 
-*For more information about the tldw_server project, visit the [main documentation](README.md).*
+*For more information about the tldw_server project, visit the [main documentation](index.md).*

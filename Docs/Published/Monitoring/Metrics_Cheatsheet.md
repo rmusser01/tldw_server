@@ -58,6 +58,48 @@ Example PromQL:
 - `embeddings_generated_total{provider,model}`: Counter of embeddings created.
 - `embedding_generation_duration_seconds{provider,model}`: Histogram of generation time.
 
+## STT vNext
+- Counters:
+  - `audio_stt_requests_total{endpoint,provider,model,status}`
+  - `audio_stt_streaming_sessions_started_total{provider}`
+  - `audio_stt_streaming_sessions_ended_total{provider,session_close_reason}`
+  - `audio_stt_errors_total{endpoint,provider,reason}`
+  - `audio_stt_run_writes_total{provider,write_result}`
+  - `audio_stt_redaction_total{endpoint,redaction_outcome}`
+  - `audio_stt_transcript_read_path_total{path}`
+- Histograms:
+  - `audio_stt_latency_seconds{endpoint,provider,model}`
+  - `audio_stt_queue_wait_seconds{endpoint}`
+  - `audio_stt_streaming_token_latency_seconds{provider,model}`
+- Existing companion latency metrics remain in place:
+  - `stt_final_latency_seconds{model,variant,endpoint}`
+  - `tts_ttfb_seconds{provider,voice,format}`
+  - `voice_to_voice_seconds{provider,route}`
+
+Bounded label policy:
+- `endpoint`: `audio.transcriptions`, `audio.stream.transcribe`, `audio.chat.stream`, `ingestion`, `other`
+- `provider`: `whisper`, `nemo`, `qwen2audio`, `external`, `other`
+- `model`: normalized buckets such as `whisper`, `parakeet`, `canary`, `qwen2audio`, `other`
+- `status`: `ok`, `quota_exceeded`, `bad_request`, `provider_error`, `model_unavailable`, `internal_error`
+- `reason`: `auth`, `quota`, `provider_error`, `model_unavailable`, `invalid_control`, `validation_error`, `timeout`, `internal`
+- `session_close_reason`: `client_stop`, `client_disconnect`, `server_shutdown`, `error`
+- `write_result`: `created`, `deduped`, `superseded`, `failed`
+- `redaction_outcome`: `applied`, `not_requested`, `skipped`, `failed`
+- `path`: `latest_run`, `legacy_fallback`
+
+Cardinality notes:
+- Unknown provider/model values are bucketed to `other`; raw request model IDs are intentionally not exposed on `audio_stt_*`.
+- `audio_stt_queue_wait_seconds` and `audio_stt_streaming_token_latency_seconds` are registered in the current rollout but may remain idle on deployments or code paths that do not yet compute those timings.
+- The in-memory cumulative registry also enforces `METRICS_CUMULATIVE_SERIES_MAX_PER_METRIC` as a hard cap for new label sets.
+- Production target from the STT PRD: total active series across `audio_stt_*` should stay below `1000` per environment.
+
+Example PromQL:
+- STT request rate by endpoint/provider: `sum by (endpoint,provider) (rate(audio_stt_requests_total[5m]))`
+- STT error rate by reason: `sum by (reason) (rate(audio_stt_errors_total[5m]))`
+- P95 REST transcription latency: `histogram_quantile(0.95, sum by (le,provider,model) (rate(audio_stt_latency_seconds_bucket{endpoint="audio.transcriptions"}[5m])))`
+- Legacy fallback read-path watch: `sum(rate(audio_stt_transcript_read_path_total{path="legacy_fallback"}[5m]))`
+- Redaction outcomes by endpoint: `sum by (endpoint,redaction_outcome) (increase(audio_stt_redaction_total[1h]))`
+
 ## Audio (Audiobooks/TTS conversions)
 Cardinality note: `chapter_id` creates a unique series per chapter per metric. At scale (many books/chapters), this can explode series count and memory usage. For production, consider:
 - Dropping `chapter_id` on high-volume metrics (keep it only on error metrics if needed).

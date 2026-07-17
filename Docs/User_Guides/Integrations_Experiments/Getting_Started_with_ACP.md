@@ -90,9 +90,9 @@ pip install -e ".[acp]"
 Current release evidence verifies the Docker sandbox runtime lifecycle on one
 macOS/Docker Desktop host. Lima and Apple Virtualization Framework are not
 certified by that evidence, and named downstream agents still need their own
-sandbox run before their compatibility row can claim sandbox support. See
-[ACP Sandbox Host Runtime Verification - 2026-06-19](../../Development/ACP_Sandbox_Host_Runtime_Verification_2026_06_19.md)
-for the exact host, runtime, commands, and caveats.
+sandbox run before their compatibility row can claim sandbox support. Treat
+that evidence as host-specific and repeat the lifecycle checks on your target
+runtime before claiming compatibility.
 
 To run the ACP agent inside a sandbox container and access it via web SSH:
 
@@ -383,8 +383,8 @@ secret-looking values, and local filesystem paths, but they are not a general
 DLP guarantee. Agent Tasks task detail supports `?run_summary_mode=redacted`
 when support/export workflows need run-status, count, and session-link summaries
 without prompt/result previews. Use the session redacted endpoints for detailed
-transcript, event, or artifact drill-through. For the release policy, see
-[ACP Production Readiness](../../Development/ACP_Production_Readiness.md).
+transcript, event, or artifact drill-through. The ACP production-readiness
+policy still requires deployment-specific validation before release.
 
 ## Alternative Agents
 
@@ -601,7 +601,7 @@ This keeps secrets out of config files.
 
 ## Next Steps
 
-- **Technical Reference**: See [Agent Client Protocol](../../Development/Agent_Client_Protocol.md) for detailed API documentation
+- **Technical Reference**: See [Agent Client Protocol](https://github.com/rmusser01/tldw_server/blob/main/Docs/Development/Agent_Client_Protocol.md) for detailed API documentation
 - **WebSocket Integration**: Learn about real-time streaming and the WebSocket message protocol
 - **Frontend Development**: Explore the React hooks and Zustand store for building custom UIs
 

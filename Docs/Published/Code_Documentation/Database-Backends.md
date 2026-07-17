@@ -19,7 +19,7 @@ Migrations
 - Media Database (SQLite):
   - Uses internal schema versioning with optional JSON-based migrations via `DatabaseMigrator`.
   - If no JSON migration files are present, the system proceeds (no-op) and ensures FTS structures are initialized.
-  - Entry points: `Media_DB_v2.MediaDatabase` (initializes/migrates on first use).
+  - Entry points: `media_db.native_class.MediaDatabase` (initializes/migrates on first use).
 
 - ChaChaNotes (SQLite):
   - Managed version upgrades inside `ChaChaNotes_DB.py` with FTS triggers and sync logs.
