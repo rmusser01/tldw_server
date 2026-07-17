@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
+from threading import Barrier
 
 import pytest
 
@@ -17,7 +19,7 @@ NOW = datetime(2026, 7, 16, 12, 0, tzinfo=UTC)
 def _insert_archive(
     conn: sqlite3.Connection,
     *,
-    job_id: int,
+    job_id: int | None,
     job_uuid: str | None,
     owner: str | None = "owner-1",
     idempotency_key: str | None = "idem-1",
@@ -100,6 +102,91 @@ def test_sqlite_migration_adds_exact_archive_indexes_shared_tables_and_narrow_uu
         )
 
 
+def test_sqlite_generation_uuid_is_immutable_in_active_and_archive_rows(tmp_path):
+    db_path = ensure_jobs_tables(tmp_path / "slides-uuid-immutable.db")
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO jobs (uuid, domain, queue, job_type, status)
+            VALUES ('active-uuid', 'slides', 'default', 'presentation.generate', 'queued')
+            """
+        )
+        _insert_archive(conn, job_id=1, job_uuid="archive-uuid")
+
+        for replacement in ("replacement", None, ""):
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute("UPDATE jobs SET uuid=? WHERE uuid='active-uuid'", (replacement,))
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute("UPDATE jobs_archive SET uuid=? WHERE uuid='archive-uuid'", (replacement,))
+
+        conn.execute("UPDATE jobs SET priority=6 WHERE uuid='active-uuid'")
+        conn.execute("UPDATE jobs_archive SET priority=6 WHERE uuid='archive-uuid'")
+        conn.execute(
+            """
+            INSERT INTO jobs (uuid, domain, queue, job_type, status)
+            VALUES (NULL, 'unrelated', 'default', 'legacy', 'queued')
+            """
+        )
+        conn.execute("UPDATE jobs SET uuid='' WHERE domain='unrelated'")
+
+
+def test_sqlite_wrong_definition_archive_indexes_fail_readiness_and_are_repaired(tmp_path):
+    db_path = ensure_jobs_tables(tmp_path / "slides-index-repair.db")
+    jm = JobManager(db_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("DROP INDEX idx_jobs_archive_slides_scope")
+        conn.execute("DROP INDEX idx_jobs_archive_uuid_unique")
+        conn.execute(
+            """
+            CREATE INDEX idx_jobs_archive_slides_scope
+            ON jobs_archive(uuid) WHERE uuid IS NOT NULL
+            """
+        )
+        conn.execute(
+            """
+            CREATE UNIQUE INDEX idx_jobs_archive_uuid_unique
+            ON jobs_archive(id) WHERE id IS NOT NULL
+            """
+        )
+        conn.commit()
+
+    assert jm.get_slides_generation_readiness()["archive_indexes_ready"] is False
+    ensure_jobs_tables(db_path)
+
+    with sqlite3.connect(db_path) as conn:
+        scope_columns = [row[2] for row in conn.execute("PRAGMA index_info(idx_jobs_archive_slides_scope)")]
+        uuid_columns = [row[2] for row in conn.execute("PRAGMA index_info(idx_jobs_archive_uuid_unique)")]
+        scope_sql = conn.execute("SELECT sql FROM sqlite_master WHERE name='idx_jobs_archive_slides_scope'").fetchone()[
+            0
+        ]
+        uuid_sql = conn.execute("SELECT sql FROM sqlite_master WHERE name='idx_jobs_archive_uuid_unique'").fetchone()[0]
+    assert scope_columns == [
+        "domain",
+        "queue",
+        "job_type",
+        "idempotency_key",
+        "owner_user_id",
+        "archived_at",
+    ]
+    assert uuid_columns == ["uuid"]
+    assert "where idempotency_key is not null" in " ".join(scope_sql.lower().split())
+    assert "where uuid is not null" in " ".join(uuid_sql.lower().split())
+    assert jm.get_slides_generation_readiness()["archive_indexes_ready"] is True
+
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("DROP INDEX idx_jobs_archive_uuid_unique")
+        conn.execute(
+            """
+            CREATE UNIQUE INDEX idx_jobs_archive_uuid_unique
+            ON jobs_archive(uuid COLLATE NOCASE) WHERE uuid IS NOT NULL
+            """
+        )
+        conn.commit()
+    assert jm.get_slides_generation_readiness()["archive_indexes_ready"] is False
+    ensure_jobs_tables(db_path)
+    assert jm.get_slides_generation_readiness()["archive_indexes_ready"] is True
+
+
 def test_sqlite_duplicate_archive_uuid_is_diagnosed_without_deduping_or_breaking_jobs(
     tmp_path,
     monkeypatch,
@@ -160,7 +247,8 @@ def test_sqlite_duplicate_archive_uuid_is_diagnosed_without_deduping_or_breaking
     monkeypatch.setenv("JOBS_ARCHIVE_BEFORE_DELETE", "true")
     monkeypatch.setenv("JOBS_ARCHIVE_COMPRESS", "true")
     monkeypatch.setenv("JOBS_ARCHIVE_COMPRESS_DROP_JSON", "true")
-    assert jm.prune_jobs(older_than_days=1, domain="slides") == 1
+    with pytest.raises(ValueError, match="unsafe presentation.generate archive collision"):
+        jm.prune_jobs(older_than_days=1, domain="slides")
     with sqlite3.connect(db_path) as conn:
         archived_payloads = conn.execute(
             """
@@ -168,11 +256,165 @@ def test_sqlite_duplicate_archive_uuid_is_diagnosed_without_deduping_or_breaking
             WHERE uuid='duplicate-uuid' ORDER BY id
             """
         ).fetchall()
+        active_count = conn.execute("SELECT COUNT(*) FROM jobs WHERE uuid='duplicate-uuid'").fetchone()[0]
     assert archived_payloads == [
         ("{}", None),
         ("{}", None),
-        ('{"new":true}', None),
     ]
+    assert active_count == 1
+
+
+def test_sqlite_exact_archive_collision_is_idempotent_and_deletes_active_row(
+    tmp_path,
+    monkeypatch,
+):
+    db_path = ensure_jobs_tables(tmp_path / "slides-idempotent-archive.db")
+    manager = JobManager(db_path)
+    payload = {"receipt_id": "receipt-1"}
+    job = manager.create_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        payload=payload,
+        owner_user_id="owner-1",
+        idempotency_key="idempotent-archive",
+    )
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "UPDATE jobs SET status='completed', completed_at='2000-01-01 00:00:00' WHERE id=?",
+            (int(job["id"]),),
+        )
+        _insert_archive(
+            conn,
+            job_id=int(job["id"]),
+            job_uuid=str(job["uuid"]),
+            owner="owner-1",
+            idempotency_key="idempotent-archive",
+            payload=json.dumps(payload),
+        )
+        conn.commit()
+
+    monkeypatch.setenv("JOBS_ARCHIVE_BEFORE_DELETE", "true")
+    statements: list[str] = []
+    original_connect = manager._connect
+
+    def traced_connect():
+        conn = original_connect()
+        conn.set_trace_callback(statements.append)
+        return conn
+
+    monkeypatch.setattr(manager, "_connect", traced_connect)
+    assert (
+        manager.prune_jobs(
+            older_than_days=1,
+            domain="slides",
+            queue="default",
+            job_type="presentation.generate",
+        )
+        == 1
+    )
+    assert any(statement.strip().upper() == "BEGIN IMMEDIATE" for statement in statements)
+    with sqlite3.connect(db_path) as conn:
+        assert (
+            conn.execute(
+                "SELECT COUNT(*) FROM jobs_archive WHERE uuid=?",
+                (job["uuid"],),
+            ).fetchone()[0]
+            == 1
+        )
+        assert (
+            conn.execute(
+                "SELECT COUNT(*) FROM jobs WHERE uuid=?",
+                (job["uuid"],),
+            ).fetchone()[0]
+            == 0
+        )
+
+
+def test_sqlite_unsafe_archive_collision_poisons_readiness_and_preserves_active(
+    tmp_path,
+    monkeypatch,
+):
+    db_path = ensure_jobs_tables(tmp_path / "slides-unsafe-archive.db")
+    manager = JobManager(db_path)
+    job = manager.create_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        payload={"receipt_id": "active"},
+        owner_user_id="owner-1",
+        idempotency_key="unsafe-archive",
+    )
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "UPDATE jobs SET status='completed', completed_at='2000-01-01 00:00:00' WHERE id=?",
+            (int(job["id"]),),
+        )
+        _insert_archive(
+            conn,
+            job_id=int(job["id"]),
+            job_uuid=str(job["uuid"]),
+            owner="owner-2",
+            idempotency_key="different-correlation",
+            payload='{"receipt_id":"archive"}',
+        )
+        conn.commit()
+    assert manager.get_slides_generation_readiness()["ready"] is True
+
+    monkeypatch.setenv("JOBS_ARCHIVE_BEFORE_DELETE", "true")
+    with pytest.raises(ValueError, match="unsafe presentation.generate archive collision"):
+        manager.prune_jobs(
+            older_than_days=1,
+            domain="slides",
+            queue="default",
+            job_type="presentation.generate",
+        )
+
+    readiness = manager.get_slides_generation_readiness()
+    assert readiness["ready"] is False
+    assert readiness["diagnostic_code"] == "ambiguous_generation_legacy_row"
+    with sqlite3.connect(db_path) as conn:
+        assert (
+            conn.execute(
+                "SELECT COUNT(*) FROM jobs WHERE uuid=?",
+                (job["uuid"],),
+            ).fetchone()[0]
+            == 1
+        )
+
+
+def test_sqlite_two_managers_create_one_generation_correlation(tmp_path):
+    db_path = ensure_jobs_tables(tmp_path / "slides-create-race.db")
+    managers = (JobManager(db_path), JobManager(db_path))
+    start = Barrier(2)
+
+    def create(manager: JobManager) -> dict:
+        start.wait()
+        return manager.create_job(
+            domain="slides",
+            queue="default",
+            job_type="presentation.generate",
+            payload={"receipt_id": "receipt-1"},
+            owner_user_id="owner-1",
+            idempotency_key="same-correlation",
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(create, managers))
+
+    assert {result["uuid"] for result in results} == {results[0]["uuid"]}
+    with sqlite3.connect(db_path) as conn:
+        assert (
+            conn.execute(
+                """
+            SELECT COUNT(*) FROM jobs
+            WHERE domain='slides' AND queue='default'
+              AND job_type='presentation.generate'
+              AND owner_user_id='owner-1' AND idempotency_key='same-correlation'
+            """
+            ).fetchone()[0]
+            == 1
+        )
 
 
 @pytest.mark.parametrize(
@@ -323,6 +565,173 @@ def test_sqlite_generation_lookup_requires_uuid_owner_scope_key_and_rejects_nume
     )
     assert replayed["uuid"] == job["uuid"]
     assert replayed["archived"] is True
+
+
+def test_sqlite_nullable_legacy_archive_id_never_matches_expected_numeric_id(tmp_path):
+    db_path = ensure_jobs_tables(tmp_path / "slides-null-archive-id.db")
+    with sqlite3.connect(db_path) as conn:
+        _insert_archive(
+            conn,
+            job_id=None,
+            job_uuid="archive-without-numeric-id",
+            owner="owner-1",
+            idempotency_key="nullable-id",
+        )
+        conn.commit()
+    manager = JobManager(db_path)
+
+    assert (
+        manager.resolve_slides_generation_job(
+            job_uuid="archive-without-numeric-id",
+            owner_user_id="owner-1",
+            idempotency_key="nullable-id",
+            job_id=42,
+        )
+        is None
+    )
+
+
+def test_sqlite_public_generation_lookup_is_active_first_and_needs_no_expected_uuid(tmp_path):
+    db_path = ensure_jobs_tables(tmp_path / "slides-public-lookup.db")
+    jm = JobManager(db_path)
+    active = jm.create_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        payload={"receipt_id": "receipt-1"},
+        owner_user_id="owner-1",
+        idempotency_key="idem-public-lookup",
+    )
+    with sqlite3.connect(db_path) as conn:
+        _insert_archive(
+            conn,
+            job_id=int(active["id"]) + 100,
+            job_uuid="stale-archive-uuid",
+            owner="owner-1",
+            idempotency_key="idem-public-lookup",
+        )
+        conn.commit()
+
+    found = jm.lookup_slides_generation_job(
+        owner_user_id="owner-1",
+        idempotency_key="idem-public-lookup",
+    )
+    assert found is not None
+    assert found["uuid"] == active["uuid"]
+    assert found["archived"] is False
+    assert (
+        jm.resolve_slides_generation_job(
+            job_uuid="wrong-expected-uuid",
+            owner_user_id="owner-1",
+            idempotency_key="idem-public-lookup",
+        )
+        is None
+    )
+
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("DELETE FROM jobs WHERE uuid=?", (active["uuid"],))
+        conn.commit()
+    archived = jm.lookup_slides_generation_job(
+        owner_user_id="owner-1",
+        idempotency_key="idem-public-lookup",
+    )
+    assert archived is not None
+    assert archived["uuid"] == "stale-archive-uuid"
+    assert archived["archived"] is True
+
+
+def test_sqlite_archived_generation_replay_precedes_quota_admission(tmp_path, monkeypatch):
+    db_path = ensure_jobs_tables(tmp_path / "slides-pre-admission-replay.db")
+    with sqlite3.connect(db_path) as conn:
+        _insert_archive(
+            conn,
+            job_id=1,
+            job_uuid="archived-authority",
+            owner="owner-1",
+            idempotency_key="idem-replay",
+            payload='{"receipt_id":"receipt-1"}',
+        )
+        conn.execute(
+            """
+            INSERT INTO jobs (
+              uuid, domain, queue, job_type, owner_user_id,
+              idempotency_key, payload, status
+            ) VALUES (
+              'quota-filler', 'slides', 'default', 'presentation.generate',
+              'owner-1', 'different-key', '{}', 'queued'
+            )
+            """
+        )
+        conn.commit()
+    monkeypatch.setenv("JOBS_QUOTA_MAX_QUEUED_SLIDES", "1")
+
+    replayed = JobManager(db_path).create_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        payload={"receipt_id": "receipt-1"},
+        owner_user_id="owner-1",
+        idempotency_key="idem-replay",
+    )
+
+    assert replayed["uuid"] == "archived-authority"
+    assert replayed["archived"] is True
+
+
+def test_sqlite_not_ready_fails_closed_only_for_exact_generation_scope(tmp_path):
+    db_path = ensure_jobs_tables(tmp_path / "slides-readiness-enforcement.db")
+    jm = JobManager(db_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("DROP INDEX idx_jobs_archive_uuid_unique")
+        conn.commit()
+
+    with pytest.raises(ValueError) as lookup_error:
+        jm.lookup_slides_generation_job(
+            owner_user_id="owner-1",
+            idempotency_key="idem-not-ready",
+        )
+    assert type(lookup_error.value).__name__ == "SlidesGenerationJobsUnavailableError"
+    with pytest.raises(ValueError) as create_error:
+        jm.create_job(
+            domain="slides",
+            queue="default",
+            job_type="presentation.generate",
+            payload={},
+            owner_user_id="owner-1",
+            idempotency_key="idem-not-ready",
+        )
+    assert type(create_error.value).__name__ == "SlidesGenerationJobsUnavailableError"
+    assert jm.create_job(
+        domain="chatbooks",
+        queue="default",
+        job_type="export",
+        payload={},
+        owner_user_id="owner-1",
+    )["uuid"]
+
+
+def test_sqlite_exact_generation_create_uses_immediate_correlation_fence(tmp_path, monkeypatch):
+    db_path = ensure_jobs_tables(tmp_path / "slides-create-fence.db")
+    jm = JobManager(db_path)
+    statements: list[str] = []
+    original_connect = jm._connect
+
+    def traced_connect():
+        conn = original_connect()
+        conn.set_trace_callback(statements.append)
+        return conn
+
+    monkeypatch.setattr(jm, "_connect", traced_connect)
+    jm.create_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        payload={},
+        owner_user_id="owner-1",
+        idempotency_key="idem-fenced-create",
+    )
+
+    assert any(statement.strip().upper() == "BEGIN IMMEDIATE" for statement in statements)
 
 
 def test_sqlite_generation_idempotency_never_returns_wrong_owner_or_legacy_null_uuid(tmp_path):
@@ -649,6 +1058,142 @@ def test_sqlite_key_rotation_fences_reconciliation_and_stale_holder(tmp_path):
     )
 
 
+def test_sqlite_completed_sweep_requires_and_stores_reconciler_reference_count(tmp_path):
+    db_path = ensure_jobs_tables(tmp_path / "slides-sweep-count.db")
+    jm = JobManager(db_path)
+    lease = jm.acquire_slides_reconciliation_lease(
+        holder_uuid="sweep-holder",
+        lease_seconds=30,
+        config_revision="revision-a",
+        now=NOW,
+    )
+    assert lease is not None
+
+    with pytest.raises(ValueError, match="unexpired_reference_count"):
+        jm.checkpoint_slides_reconciliation(
+            holder_uuid="sweep-holder",
+            fencing_token=lease["fencing_token"],
+            config_revision="revision-a",
+            cursor=None,
+            startup_complete_epoch="revision-a",
+            last_complete_epoch=NOW.timestamp(),
+            lag=0,
+            now=NOW + timedelta(seconds=1),
+            completed=True,
+            sweep_key_id="old-key",
+            sweep_started_at=NOW,
+        )
+
+    assert jm.checkpoint_slides_reconciliation(
+        holder_uuid="sweep-holder",
+        fencing_token=lease["fencing_token"],
+        config_revision="revision-a",
+        cursor=None,
+        startup_complete_epoch="revision-a",
+        last_complete_epoch=NOW.timestamp(),
+        lag=0,
+        now=NOW + timedelta(seconds=2),
+        completed=True,
+        sweep_key_id="old-key",
+        sweep_started_at=NOW,
+        unexpired_reference_count=3,
+    )
+    proof = jm.load_slides_dormant_sweep_proof(key_id="old-key")
+    assert proof is not None
+    assert proof["unexpired_reference_count"] == 3
+
+
+def test_sqlite_key_removal_atomically_requires_current_zero_reference_proof(tmp_path):
+    now = datetime.now(UTC) - timedelta(minutes=1)
+    db_path = ensure_jobs_tables(tmp_path / "slides-key-removal-proof.db")
+    jm = JobManager(db_path)
+    activated_at = now - timedelta(days=90)
+    retired_at = now - timedelta(days=40)
+    assert jm.compare_and_swap_slides_current_key(
+        expected_current_key_id=None,
+        expected_config_revision=None,
+        new_current_key_id="old-key",
+        new_config_revision="revision-a",
+        changed_at=activated_at,
+    )
+    assert jm.compare_and_swap_slides_current_key(
+        expected_current_key_id="old-key",
+        expected_config_revision="revision-a",
+        new_current_key_id="new-key",
+        new_config_revision="revision-b",
+        changed_at=retired_at,
+    )
+    lease = jm.acquire_slides_reconciliation_lease(
+        holder_uuid="sweep-holder",
+        lease_seconds=60,
+        config_revision="revision-b",
+        now=now,
+    )
+    assert lease is not None
+    checkpoint = {
+        "holder_uuid": "sweep-holder",
+        "fencing_token": lease["fencing_token"],
+        "config_revision": "revision-b",
+        "cursor": None,
+        "startup_complete_epoch": "revision-b",
+        "last_complete_epoch": now.timestamp(),
+        "lag": 0,
+        "completed": True,
+        "sweep_key_id": "old-key",
+        "sweep_started_at": retired_at + timedelta(days=32),
+    }
+    assert jm.checkpoint_slides_reconciliation(
+        **checkpoint,
+        now=now + timedelta(seconds=1),
+        unexpired_reference_count=1,
+    )
+    assert (
+        jm.compare_and_swap_remove_slides_key(
+            key_id="old-key",
+            expected_retired_at=retired_at,
+            expected_config_revision="revision-b",
+        )
+        is None
+    )
+    assert jm.checkpoint_slides_reconciliation(
+        **checkpoint,
+        now=now + timedelta(seconds=2),
+        unexpired_reference_count=0,
+    )
+    removed = jm.compare_and_swap_remove_slides_key(
+        key_id="old-key",
+        expected_retired_at=retired_at,
+        expected_config_revision="revision-b",
+    )
+    assert removed is not None
+    assert [record["key_id"] for record in removed["records"]] == ["new-key"]
+
+
+def test_sqlite_same_current_key_revision_advance_preserves_activated_at(tmp_path):
+    db_path = ensure_jobs_tables(tmp_path / "slides-same-key-revision.db")
+    jm = JobManager(db_path)
+    activated_at = NOW - timedelta(days=90)
+    assert jm.compare_and_swap_slides_current_key(
+        expected_current_key_id=None,
+        expected_config_revision=None,
+        new_current_key_id="same-key",
+        new_config_revision="revision-a",
+        changed_at=activated_at,
+    )
+
+    advanced = jm.compare_and_swap_slides_current_key(
+        expected_current_key_id="same-key",
+        expected_config_revision="revision-a",
+        new_current_key_id="same-key",
+        new_config_revision="revision-b",
+        changed_at=NOW,
+    )
+
+    assert advanced is not None and advanced["applied_here"]
+    current = next(record for record in advanced["state"]["records"] if record["state"] == "current")
+    assert current["activated_at"] == activated_at
+
+
 @pytest.mark.asyncio
 async def test_job_manager_registry_adapter_uses_only_source_free_shared_state(tmp_path):
     db_path = ensure_jobs_tables(tmp_path / "slides-registry-adapter.db")
@@ -696,6 +1241,7 @@ async def test_job_manager_registry_adapter_uses_only_source_free_shared_state(t
         completed=True,
         sweep_key_id="old-key",
         sweep_started_at=NOW,
+        unexpired_reference_count=0,
     )
     proof = await store.load_dormant_sweep_proof(key_id="old-key")
     assert proof is not None

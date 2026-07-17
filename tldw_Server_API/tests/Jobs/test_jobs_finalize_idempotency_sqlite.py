@@ -1,4 +1,10 @@
 import os
+import sqlite3
+
+import pytest
+
+from tldw_Server_API.app.core.Jobs import manager as manager_module
+from tldw_Server_API.app.core.Jobs import metrics as metrics_module
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 
 
@@ -131,6 +137,168 @@ def test_worker_terminalizer_is_exact_idempotent_cas(monkeypatch, tmp_path):
         )
         == "CONFLICT"
     )
+
+
+@pytest.mark.parametrize(
+    ("status", "event_type"),
+    [("failed", "job.failed"), ("cancelled", "job.cancelled")],
+)
+def test_worker_terminalizer_applied_bookkeeping_happens_exactly_once(
+    monkeypatch,
+    tmp_path,
+    status,
+    event_type,
+):
+    _set_env(monkeypatch, tmp_path)
+    monkeypatch.setenv("JOBS_COUNTERS_ENABLED", "true")
+    monkeypatch.setenv("JOBS_EVENTS_OUTBOX", "true")
+    jm = JobManager()
+    job = jm.create_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        payload={},
+        owner_user_id="owner-1",
+        idempotency_key=f"terminal-bookkeeping-{status}",
+    )
+    acquired = jm.acquire_next_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        lease_seconds=30,
+        worker_id="slides-worker",
+    )
+    assert acquired is not None
+    lease_id = str(acquired["lease_id"])
+    with sqlite3.connect(os.environ["JOBS_DB_PATH"]) as conn:
+        conn.execute(
+            """
+            UPDATE job_counters SET processing_count=1
+            WHERE domain='slides' AND queue='default' AND job_type='presentation.generate'
+            """
+        )
+        conn.commit()
+    arguments = {
+        "job_id": int(job["id"]),
+        "job_uuid": str(job["uuid"]),
+        "owner_user_id": "owner-1",
+        "domain": "slides",
+        "queue": "default",
+        "job_type": "presentation.generate",
+        "worker_id": "slides-worker",
+        "lease_id": lease_id,
+        "completion_token": lease_id,
+        "status": status,
+        "error_code": f"slides_render_{status}",
+        "error_message": f"{status} safely",
+    }
+
+    assert jm.terminalize_job_from_worker(**arguments) == "APPLIED"
+    assert jm.terminalize_job_from_worker(**arguments) == "IDEMPOTENT"
+
+    with sqlite3.connect(os.environ["JOBS_DB_PATH"]) as conn:
+        processing_count = conn.execute(
+            """
+            SELECT processing_count FROM job_counters
+            WHERE domain='slides' AND queue='default' AND job_type='presentation.generate'
+            """
+        ).fetchone()[0]
+        event_count = conn.execute(
+            "SELECT COUNT(*) FROM job_events WHERE job_id=? AND event_type=?",
+            (int(job["id"]), event_type),
+        ).fetchone()[0]
+    assert processing_count == 0
+    assert event_count == 1
+
+
+@pytest.mark.parametrize("status", ["failed", "cancelled"])
+def test_worker_terminalizer_applied_side_effects_are_not_repeated(
+    monkeypatch,
+    tmp_path,
+    status,
+):
+    _set_env(monkeypatch, tmp_path)
+    monkeypatch.setenv("JOBS_EVENTS_OUTBOX", "false")
+    jm = JobManager()
+    job = jm.create_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        payload={},
+        owner_user_id="owner-1",
+        idempotency_key=f"terminal-side-effects-{status}",
+    )
+    acquired = jm.acquire_next_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        lease_seconds=30,
+        worker_id="slides-worker",
+    )
+    assert acquired is not None
+    calls = {
+        "gauges": 0,
+        "failures": 0,
+        "failure_codes": 0,
+        "cancelled": 0,
+        "events": 0,
+        "audits": 0,
+    }
+
+    def record(name):
+        calls[name] += 1
+
+    monkeypatch.setattr(jm, "_update_gauges", lambda **_kwargs: record("gauges"))
+    monkeypatch.setattr(
+        manager_module,
+        "increment_failures",
+        lambda *_args, **_kwargs: record("failures"),
+    )
+    monkeypatch.setattr(
+        metrics_module,
+        "increment_failures_by_code",
+        lambda *_args, **_kwargs: record("failure_codes"),
+    )
+    monkeypatch.setattr(
+        manager_module,
+        "increment_cancelled",
+        lambda *_args, **_kwargs: record("cancelled"),
+    )
+    monkeypatch.setattr(
+        manager_module,
+        "emit_job_event",
+        lambda *_args, **_kwargs: record("events"),
+    )
+    monkeypatch.setattr(
+        manager_module,
+        "submit_job_audit_event",
+        lambda *_args, **_kwargs: record("audits"),
+    )
+    lease_id = str(acquired["lease_id"])
+    arguments = {
+        "job_id": int(job["id"]),
+        "job_uuid": str(job["uuid"]),
+        "owner_user_id": "owner-1",
+        "domain": "slides",
+        "queue": "default",
+        "job_type": "presentation.generate",
+        "worker_id": "slides-worker",
+        "lease_id": lease_id,
+        "completion_token": lease_id,
+        "status": status,
+        "error_code": f"slides_render_{status}",
+        "error_message": f"{status} safely",
+    }
+
+    assert jm.terminalize_job_from_worker(**arguments) == "APPLIED"
+    assert jm.terminalize_job_from_worker(**arguments) == "IDEMPOTENT"
+
+    assert calls["gauges"] == 1
+    assert calls["events"] == 1
+    assert calls["audits"] == 1
+    assert calls["failures"] == (1 if status == "failed" else 0)
+    assert calls["failure_codes"] == (1 if status == "failed" else 0)
+    assert calls["cancelled"] == (1 if status == "cancelled" else 0)
 
 
 def test_worker_terminalizer_rejects_wrong_uuid_owner_scope_and_lease(monkeypatch, tmp_path):
