@@ -1338,7 +1338,7 @@ git add "$TASK_FILE"
 git commit -m "chore: finalize service prompts v1 task ($TASK_ID)"
 ```
 
-- [ ] **Step 10: Prepare the PR and commit its task link**
+- [x] **Step 10: Prepare the PR and commit its task link**
 
 - Use the branch-finishing workflow to push and create the PR only after every gate above passes.
 - Add the resulting PR URL to the implementation task through the official Backlog workflow.
