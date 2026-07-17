@@ -12,6 +12,23 @@ export type TldwTtsVoiceInfo = {
 
 export type TldwTtsProviderCapabilities = {
   provider_name?: string
+  display_name?: string
+  models?: unknown[]
+  default_model?: string | null
+  model_capabilities?: Record<
+    string,
+    {
+      formats?: string[]
+      default_voice?: string | null
+      voices?: string[]
+      requires_freeform_voice?: boolean
+      [key: string]: unknown
+    }
+  >
+  fallback?: {
+    available?: boolean
+    targets?: string[]
+  }
   formats?: string[]
   default_format?: string
   languages?: string[]
@@ -26,6 +43,7 @@ export type TldwTtsProviderCapabilities = {
 export type TldwTtsProvidersInfo = {
   providers: Record<string, TldwTtsProviderCapabilities>
   voices: Record<string, TldwTtsVoiceInfo[]>
+  supports_explicit_backend?: boolean
 }
 
 type FetchTtsProvidersOptions = {
@@ -79,7 +97,11 @@ export const fetchTtsProviders = async (
       return null
     }
 
-    return { providers, voices }
+    return {
+      providers,
+      voices,
+      supports_explicit_backend: res.supports_explicit_backend === true
+    }
   } catch (error) {
     if (options?.throwOnError) {
       throw error

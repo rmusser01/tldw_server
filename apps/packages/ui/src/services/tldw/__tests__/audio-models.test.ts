@@ -76,4 +76,42 @@ describe("fetchTldwTtsModels", () => {
     expect(ids).toContain("KittenML/kitten-tts-nano-0.8")
     expect(ids).toContain("vibevoice")
   })
+
+  it("returns only the exact selected backend model catalog", async () => {
+    mocks.fetchTtsProviders.mockResolvedValue({
+      supports_explicit_backend: true,
+      providers: {
+        "gateway:Company": {
+          models: ["Vendor/Exact-Case", "Vendor/Other"]
+        },
+        openrouter: {
+          models: ["OpenAI/Unrelated"]
+        }
+      },
+      voices: {}
+    })
+
+    const { fetchTldwTtsModels } = await import("../audio-models")
+
+    await expect(fetchTldwTtsModels("gateway:Company")).resolves.toEqual([
+      { id: "Vendor/Exact-Case", label: "Vendor/Exact-Case" },
+      { id: "Vendor/Other", label: "Vendor/Other" }
+    ])
+    expect(mocks.getOpenAPISpec).not.toHaveBeenCalled()
+  })
+
+  it("does not fall back or case-fold when an explicit backend is selected", async () => {
+    mocks.fetchTtsProviders.mockResolvedValue({
+      supports_explicit_backend: true,
+      providers: {
+        "gateway:Company": { models: ["Vendor/Exact-Case"] }
+      },
+      voices: {}
+    })
+
+    const { fetchTldwTtsModels } = await import("../audio-models")
+
+    await expect(fetchTldwTtsModels("gateway:company")).resolves.toEqual([])
+    expect(mocks.getOpenAPISpec).not.toHaveBeenCalled()
+  })
 })
