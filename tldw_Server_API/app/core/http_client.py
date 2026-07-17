@@ -624,7 +624,10 @@ _BOUNDED_RESPONSE_EXTENSION = "tldw_bounded_response"
 def _is_bounded_httpx_response(response: httpx.Response) -> bool:
     request = getattr(response, "request", None)
     extensions = getattr(request, "extensions", {})
-    return bool(extensions.get(_BOUNDED_RESPONSE_EXTENSION))
+    return bool(
+        extensions.get(_BOUNDED_RESPONSE_EXTENSION)
+        or extensions.get("tldw_stream_response")
+    )
 
 
 def _capture_error_body_hook(response: httpx.Response) -> None:
@@ -872,6 +875,7 @@ class TransportAdapter(Protocol):
         url: str,
         client: Any | None = None,
         headers: dict[str, str] | None = None,
+        cookies: dict[str, str] | None = None,
         params: dict[str, Any] | None = None,
         json: Any | None = None,
         data: Any | None = None,
@@ -883,6 +887,8 @@ class TransportAdapter(Protocol):
         cert_pinning: dict[str, set[str]] | None = None,
         sensitive_observability: bool = False,
         on_response: ResponseHeadersCallback | None = None,
+        raise_for_status: bool = True,
+        verify: bool | str | ssl.SSLContext | None = None,
     ) -> AsyncIterator[bytes]: ...
 
     async def stream_sse(
@@ -997,6 +1003,7 @@ class HttpxAdapter:
         url: str,
         client: httpx.AsyncClient | None = None,
         headers: dict[str, str] | None = None,
+        cookies: dict[str, str] | None = None,
         params: dict[str, Any] | None = None,
         json: Any | None = None,
         data: Any | None = None,
@@ -1008,12 +1015,15 @@ class HttpxAdapter:
         cert_pinning: dict[str, set[str]] | None = None,
         sensitive_observability: bool = False,
         on_response: ResponseHeadersCallback | None = None,
+        raise_for_status: bool = True,
+        verify: bool | str | ssl.SSLContext | None = None,
     ) -> AsyncIterator[bytes]:
         stream = _astream_bytes_httpx(
             method=method,
             url=url,
             client=client,
             headers=headers,
+            cookies=cookies,
             params=params,
             json=json,
             data=data,
@@ -1025,6 +1035,8 @@ class HttpxAdapter:
             cert_pinning=cert_pinning,
             sensitive_observability=sensitive_observability,
             on_response=on_response,
+            raise_for_status=raise_for_status,
+            verify=verify,
         )
         scoped_stream = _iterate_sensitive_http_items(
             stream,
@@ -1134,6 +1146,7 @@ class AiohttpAdapter:
         url: str,
         client: Any | None = None,
         headers: dict[str, str] | None = None,
+        cookies: dict[str, str] | None = None,
         params: dict[str, Any] | None = None,
         json: Any | None = None,
         data: Any | None = None,
@@ -1145,12 +1158,15 @@ class AiohttpAdapter:
         cert_pinning: dict[str, set[str]] | None = None,
         sensitive_observability: bool = False,
         on_response: ResponseHeadersCallback | None = None,
+        raise_for_status: bool = True,
+        verify: bool | str | ssl.SSLContext | None = None,
     ) -> AsyncIterator[bytes]:
         stream = _astream_bytes_aiohttp(
             method=method,
             url=url,
             client=client,
             headers=headers,
+            cookies=cookies,
             params=params,
             json=json,
             data=data,
@@ -1162,6 +1178,8 @@ class AiohttpAdapter:
             cert_pinning=cert_pinning,
             sensitive_observability=sensitive_observability,
             on_response=on_response,
+            raise_for_status=raise_for_status,
+            verify=verify,
         )
         scoped_stream = _iterate_sensitive_http_items(
             stream,
@@ -3014,6 +3032,7 @@ async def _httpx_stream_io(
     method: str,
     url: str,
     headers: dict[str, str] | None = None,
+    cookies: dict[str, str] | None = None,
     params: dict[str, Any] | None = None,
     json: Any | None = None,
     data: Any | None = None,
@@ -3028,15 +3047,14 @@ async def _httpx_stream_io(
         headers,
         accepted_resolved_ips,
     )
-    extensions = (
-        {"sni_hostname": sni_hostname}
-        if sni_hostname
-        else None
-    )
+    extensions: dict[str, Any] = {"tldw_stream_response": True}
+    if sni_hostname:
+        extensions["sni_hostname"] = sni_hostname
     async with client.stream(
         str(method).upper(),
         url,
         headers=headers,
+        cookies=cookies,
         params=params,
         json=json,
         data=data,
@@ -3060,6 +3078,7 @@ async def _aiohttp_stream_io(
     method: str,
     url: str,
     headers: dict[str, str] | None = None,
+    cookies: dict[str, str] | None = None,
     params: dict[str, Any] | None = None,
     json: Any | None = None,
     data: Any | None = None,
@@ -3080,6 +3099,7 @@ async def _aiohttp_stream_io(
     proxy = _resolve_proxy_for_url(url, proxies)
     req_kwargs: dict[str, Any] = {
         "headers": headers,
+        "cookies": cookies,
         "params": params,
         "timeout": req_timeout,
         "allow_redirects": False,
@@ -5005,6 +5025,119 @@ def fetch(*args, **kwargs):
 # JSON helpers
 # --------------------------------------------------------------------------------------
 
+class _BoundedJSONRedirect(Exception):
+    def __init__(self, location: str) -> None:
+        self.location = location
+
+
+def _redirect_crosses_authority(previous_url: str, next_url: str) -> bool:
+    previous = urlparse(previous_url)
+    following = urlparse(next_url)
+
+    def _origin(parsed: Any) -> tuple[str, str, int | None]:
+        scheme = (parsed.scheme or "").lower()
+        port = parsed.port
+        if port is None:
+            port = 443 if scheme == "https" else 80 if scheme == "http" else None
+        return scheme, (parsed.hostname or "").lower(), port
+
+    previous_origin = _origin(previous)
+    following_origin = _origin(following)
+    return previous_origin != following_origin
+
+
+def _redirect_boundary_headers(headers: dict[str, str] | None) -> dict[str, str]:
+    """Retain only non-authority transport headers across redirect origins."""
+    safe_headers: dict[str, str] = {}
+    for key, value in (headers or {}).items():
+        normalized = str(key).casefold()
+        if normalized == "user-agent":
+            safe_headers["User-Agent"] = str(value)
+        elif normalized == "accept-encoding":
+            safe_headers["Accept-Encoding"] = str(value)
+    return safe_headers
+
+
+async def _afetch_json_bounded(
+    *,
+    method: str,
+    url: str,
+    client: Any | None,
+    require_json_ct: bool,
+    max_bytes: int,
+    on_response: ResponseHeadersCallback | None,
+    **kwargs: Any,
+) -> Any:
+    allow_redirects = bool(kwargs.pop("allow_redirects", True))
+    hop_headers = dict(kwargs.pop("headers", None) or {})
+    hop_cookies = kwargs.pop("cookies", None)
+    current_url = url
+    redirects = 0
+
+    while True:
+        async def _validate_response_headers(
+            response_status: int,
+            response_headers: Mapping[str, str],
+        ) -> None:
+            location = response_headers.get("location")
+            if (
+                allow_redirects
+                and response_status in {301, 302, 303, 307, 308}
+                and location
+            ):
+                raise _BoundedJSONRedirect(str(location))
+            await _invoke_response_callback(
+                on_response,
+                response_status,
+                response_headers,
+            )
+            content_type = response_headers.get("content-type", "").lower()
+            if require_json_ct and "application/json" not in content_type:
+                raise JSONDecodeError("Response is not application/json")  # noqa: TRY003
+            _raise_if_json_response_exceeds_limit(
+                headers=response_headers,
+                content=b"",
+                max_bytes=max_bytes,
+            )
+
+        body = bytearray()
+        stream = astream_bytes(
+            method=method,
+            url=current_url,
+            client=client,
+            headers=hop_headers,
+            cookies=hop_cookies,
+            chunk_size=max(1, min(65536, max_bytes + 1)),
+            on_response=_validate_response_headers,
+            raise_for_status=False,
+            **kwargs,
+        )
+        try:
+            async for chunk in stream:
+                if len(body) + len(chunk) > max_bytes:
+                    raise JSONDecodeError("Response exceeds max_bytes limit")  # noqa: TRY003
+                body.extend(chunk)
+        except _BoundedJSONRedirect as redirect:
+            next_url = _resolve_redirect_url(current_url, redirect.location)
+            if not next_url:
+                raise NetworkError("Invalid redirect Location header") from None  # noqa: TRY003
+            redirects += 1
+            if redirects > DEFAULT_MAX_REDIRECTS:
+                raise NetworkError("Too many redirects") from None  # noqa: TRY003
+            if _redirect_crosses_authority(current_url, next_url):
+                hop_headers = _redirect_boundary_headers(hop_headers)
+                hop_cookies = None
+            current_url = next_url
+            continue
+        finally:
+            await stream.aclose()
+
+        try:
+            return json.loads(body)
+        except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS as exc:
+            raise JSONDecodeError(str(exc)) from exc
+
+
 async def afetch_json(
     *,
     method: str,
@@ -5015,6 +5148,17 @@ async def afetch_json(
     on_response: ResponseHeadersCallback | None = None,
     **kwargs: Any,
 ) -> Any:
+    if max_bytes is not None:
+        return await _afetch_json_bounded(
+            method=method,
+            url=url,
+            client=client,
+            require_json_ct=require_json_ct,
+            max_bytes=max_bytes,
+            on_response=on_response,
+            **kwargs,
+        )
+
     r = await afetch(method=method, url=url, client=client, **kwargs)
     if on_response is not None:
         try:
@@ -5033,16 +5177,6 @@ async def afetch_json(
     if require_json_ct and "application/json" not in ctype:
         await r.aclose()
         raise JSONDecodeError("Response is not application/json")  # noqa: TRY003
-    if max_bytes is not None:
-        try:
-            _raise_if_json_response_exceeds_limit(
-                headers=r.headers,
-                content=r.content,
-                max_bytes=max_bytes,
-            )
-        except JSONDecodeError:
-            await r.aclose()
-            raise
     try:
         data = r.json()
     except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS as e:
@@ -5152,6 +5286,7 @@ async def _astream_bytes_httpx(
     url: str,
     client: httpx.AsyncClient | None = None,
     headers: dict[str, str] | None = None,
+    cookies: dict[str, str] | None = None,
     params: dict[str, Any] | None = None,
     json: Any | None = None,
     data: Any | None = None,
@@ -5163,6 +5298,8 @@ async def _astream_bytes_httpx(
     cert_pinning: dict[str, set[str]] | None = None,
     sensitive_observability: bool = False,
     on_response: ResponseHeadersCallback | None = None,
+    raise_for_status: bool = True,
+    verify: bool | str | ssl.SSLContext | None = None,
 ) -> AsyncIterator[bytes]:
     if httpx is None:  # pragma: no cover
         raise RuntimeError("httpx is not available")  # noqa: TRY003
@@ -5186,7 +5323,7 @@ async def _astream_bytes_httpx(
     need_close = False
     ac = client
     if ac is None:
-        ac = _get_httpx_async_client(proxies=proxies)
+        ac = _get_httpx_async_client(proxies=proxies, verify=verify)
         need_close = False
 
     attempts = max(1, retry.attempts)
@@ -5232,6 +5369,7 @@ async def _astream_bytes_httpx(
                         method=method.upper(),
                         url=url,
                         headers=req_headers,
+                        cookies=cookies,
                         params=params,
                         json=json,
                         data=data,
@@ -5244,9 +5382,7 @@ async def _astream_bytes_httpx(
                         ),
                     )
                 ) as (resp, byte_iter):
-                    try:
-                        resp.raise_for_status()
-                    except httpx.HTTPStatusError:
+                    if resp.status_code >= 400:
                         should, rsn = _should_retry(method, resp.status_code, None, retry)
                         if should and attempt < attempts:
                             with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
@@ -5278,17 +5414,18 @@ async def _astream_bytes_httpx(
                             except Exception as exc:
                                 callback_error = exc
                                 raise
-                        _log_outbound_request(
-                            method=method,
-                            url=_observed_url(resp.request.url),
-                            status_code=int(resp.status_code),
-                            start_time=t0,
-                            attempt=attempt,
-                            last_retry_delay_s=sleep_s,
-                        )
-                        raise _TerminalHTTPStatusError(resp.status_code) from None
+                        if raise_for_status:
+                            _log_outbound_request(
+                                method=method,
+                                url=_observed_url(resp.request.url),
+                                status_code=int(resp.status_code),
+                                start_time=t0,
+                                attempt=attempt,
+                                last_retry_delay_s=sleep_s,
+                            )
+                            raise _TerminalHTTPStatusError(resp.status_code) from None
 
-                    if on_response is not None:
+                    if on_response is not None and not response_committed:
                         try:
                             await _invoke_response_callback(on_response, resp.status_code, resp.headers)
                             response_committed = True
@@ -5432,6 +5569,7 @@ async def _astream_bytes_aiohttp(
     url: str,
     client: Any | None = None,
     headers: dict[str, str] | None = None,
+    cookies: dict[str, str] | None = None,
     params: dict[str, Any] | None = None,
     json: Any | None = None,
     data: Any | None = None,
@@ -5443,6 +5581,8 @@ async def _astream_bytes_aiohttp(
     cert_pinning: dict[str, set[str]] | None = None,
     sensitive_observability: bool = False,
     on_response: ResponseHeadersCallback | None = None,
+    raise_for_status: bool = True,
+    verify: bool | str | ssl.SSLContext | None = None,
 ) -> AsyncIterator[bytes]:
     if aiohttp is None:  # pragma: no cover
         raise RuntimeError("aiohttp is not available")  # noqa: TRY003
@@ -5507,13 +5647,14 @@ async def _astream_bytes_aiohttp(
                 except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS as e:
                     raise NetworkError(e.__class__.__name__) from e
 
-                ssl_ctx = _build_ssl_context(ENFORCE_TLS_MIN, TLS_MIN_VERSION)
+                ssl_ctx = _aiohttp_ssl_from_verify(verify)
                 async with _preserve_terminal_status_during_stream_cleanup(
                     _aiohttp_stream_io(
                         session=session,
                         method=method.upper(),
                         url=url,
                         headers=req_headers,
+                        cookies=cookies,
                         params=params,
                         json=json,
                         data=data,
@@ -5553,7 +5694,6 @@ async def _astream_bytes_aiohttp(
                             await asyncio.sleep(delay)
                             sleep_s = delay
                             continue
-                        terminal_status_error = True
                         if on_response is not None:
                             try:
                                 await _invoke_response_callback(on_response, resp.status, resp.headers)
@@ -5561,17 +5701,19 @@ async def _astream_bytes_aiohttp(
                             except Exception as exc:
                                 callback_error = exc
                                 raise
-                        _log_outbound_request(
-                            method=method,
-                            url=_observed_url(str(getattr(resp, "url", url))),
-                            status_code=int(resp.status),
-                            start_time=t0,
-                            attempt=attempt,
-                            last_retry_delay_s=sleep_s,
-                        )
-                        raise _TerminalHTTPStatusError(resp.status)
+                        if raise_for_status:
+                            terminal_status_error = True
+                            _log_outbound_request(
+                                method=method,
+                                url=_observed_url(str(getattr(resp, "url", url))),
+                                status_code=int(resp.status),
+                                start_time=t0,
+                                attempt=attempt,
+                                last_retry_delay_s=sleep_s,
+                            )
+                            raise _TerminalHTTPStatusError(resp.status)
 
-                    if on_response is not None:
+                    if on_response is not None and not response_committed:
                         try:
                             await _invoke_response_callback(on_response, resp.status, resp.headers)
                             response_committed = True
@@ -5705,6 +5847,7 @@ async def astream_bytes(
     url: str,
     client: Any | None = None,
     headers: dict[str, str] | None = None,
+    cookies: dict[str, str] | None = None,
     params: dict[str, Any] | None = None,
     json: Any | None = None,
     data: Any | None = None,
@@ -5716,6 +5859,8 @@ async def astream_bytes(
     cert_pinning: dict[str, set[str]] | None = None,
     sensitive_observability: bool = False,
     on_response: ResponseHeadersCallback | None = None,
+    raise_for_status: bool = True,
+    verify: bool | str | ssl.SSLContext | None = None,
 ) -> AsyncIterator[bytes]:
     sensitive_observability = _effective_sensitive_observability(
         sensitive_observability
@@ -5730,6 +5875,7 @@ async def astream_bytes(
         url=url,
         client=client,
         headers=headers,
+        cookies=cookies,
         params=params,
         json=json,
         data=data,
@@ -5741,8 +5887,9 @@ async def astream_bytes(
         cert_pinning=cert_pinning,
         sensitive_observability=sensitive_observability,
         on_response=on_response,
+        raise_for_status=raise_for_status,
+        verify=verify,
     )
-
     try:
         async for chunk in stream:
             yield chunk

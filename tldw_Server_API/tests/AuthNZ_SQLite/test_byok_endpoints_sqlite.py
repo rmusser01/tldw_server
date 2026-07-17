@@ -500,7 +500,18 @@ def test_gateway_metadata_authority_variants_are_rejected(metadata):
     _validate_gateway_metadata("openrouter", metadata)
 
 
-@pytest.mark.parametrize("key", ["author", "description", "model_family"])
+@pytest.mark.parametrize(
+    "key",
+    [
+        "token_count",
+        "header_color",
+        "secret_santa",
+        "password_policy",
+        "author",
+        "description",
+        "model_family",
+    ],
+)
 def test_gateway_metadata_benign_keys_are_allowed(key):
     from tldw_Server_API.app.api.v1.endpoints.user_keys import (
         _validate_gateway_metadata,
@@ -532,6 +543,10 @@ async def test_gateway_byok_endpoints_sqlite(tmp_path, monkeypatch):
 
     specs = {
         "gateway:voice-lab": _gateway_endpoint_spec("gateway:voice-lab"),
+        "gateway:admin-fallback": _gateway_endpoint_spec(
+            "gateway:admin-fallback",
+            api_key="configured-admin-key",
+        ),
         "gateway:unverified": _gateway_endpoint_spec("gateway:unverified"),
         "gateway:rejected": _gateway_endpoint_spec("gateway:rejected"),
         "openrouter": _gateway_endpoint_spec("openrouter"),
@@ -661,6 +676,20 @@ async def test_gateway_byok_endpoints_sqlite(tmp_path, monkeypatch):
             headers=user_headers,
         )
         assert benign.status_code == 200, benign.text
+
+        admin_fallback_listing = client.get(
+            "/api/v1/users/keys",
+            headers=user_headers,
+        )
+        assert admin_fallback_listing.status_code == 200
+        admin_fallback_items = {
+            item["provider"]: item
+            for item in admin_fallback_listing.json()["items"]
+        }
+        assert admin_fallback_items["gateway:admin-fallback"]["source"] == (
+            "server_default"
+        )
+        assert admin_fallback_items["gateway:admin-fallback"]["has_key"] is False
 
         rejected = client.post(
             "/api/v1/users/keys",

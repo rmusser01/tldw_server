@@ -887,6 +887,14 @@ def _gateway_user_credential_revision(row: dict[str, Any]) -> str | None:
     ).hexdigest()
 
 
+def _gateway_admin_credential_revision(api_key: str) -> str:
+    """Return a one-way revision for an admin-configured gateway key."""
+    return hashlib.sha256(
+        api_key.encode("utf-8"),
+        usedforsecurity=True,
+    ).hexdigest()
+
+
 def _unavailable_gateway_result(provider: str, *, allowlisted: bool) -> ResolvedByokCredentials:
     return ResolvedByokCredentials(
         provider=provider,
@@ -2345,7 +2353,12 @@ async def resolve_gateway_byok_credentials(
         try:
             user_repo = await _get_user_repo()
             user_row = await user_repo.fetch_secret_for_user(int(user_id), provider_norm)
-        except _BYOK_RUNTIME_NONCRITICAL_EXCEPTIONS as exc:
+            payload = None
+            if user_row is not None:
+                encrypted_blob = user_row.get("encrypted_blob")
+                if encrypted_blob:
+                    payload = decrypt_byok_payload(loads_envelope(encrypted_blob))
+        except Exception as exc:  # noqa: BLE001 - fail closed on repository/crypto drivers
             logger.debug(
                 "Gateway BYOK user lookup failed for provider={}: {}",
                 provider_norm,
@@ -2354,7 +2367,6 @@ async def resolve_gateway_byok_credentials(
             return _unavailable_gateway_result(provider_norm, allowlisted=True)
 
         if user_row is not None:
-            payload = _extract_payload(user_row, provider_norm)
             api_key = None
             if payload is not None:
                 api_key = _legacy_payload_api_key(payload) or _v2_payload_api_key(payload)
@@ -2404,6 +2416,7 @@ async def resolve_gateway_byok_credentials(
         credential_scope_token=_gateway_scope_token(
             provider_norm,
             getattr(spec, "config_generation", None),
+            _gateway_admin_credential_revision(admin_key),
         ),
         _touch_cb=None,
     )

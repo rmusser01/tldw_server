@@ -4,6 +4,8 @@ import os
 from collections.abc import Mapping
 from typing import Any
 
+from loguru import logger
+
 from tldw_Server_API.app.core.AuthNZ.byok_config import (
     PROVIDER_APP_CONFIG_KEYS,
     PROVIDER_RUNTIME_ENV_CONFIG_KEYS,
@@ -158,9 +160,17 @@ def resolve_byok_allowlist() -> set[str]:
         for provider in (allowed or set(DEFAULT_BYOK_ALLOWED_PROVIDERS))
         if not provider.startswith("gateway:")
     }
+    try:
+        gateway_specs = get_byok_gateway_specs()
+    except Exception as exc:
+        logger.warning(
+            "BYOK gateway allowlist augmentation failed: {}",
+            type(exc).__name__,
+        )
+        gateway_specs = {}
     resolved.update(
         backend_id
-        for backend_id, spec in get_byok_gateway_specs().items()
+        for backend_id, spec in gateway_specs.items()
         if bool(spec.enabled) and bool(spec.allow_user_api_key)
     )
     return resolved
