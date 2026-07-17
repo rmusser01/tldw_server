@@ -953,8 +953,9 @@ async def test_declared_and_streamed_response_size_limits(
             headers={"Content-Type": "audio/mpeg", "Content-Length": str(len(MP3) + 1)},
         ),
     )
-    with pytest.raises(TTSAudioQualityError, match="size"):
+    with pytest.raises(TTSAudioQualityError, match="size") as declared:
         await _collect(await adapter.generate(_request()))
+    assert declared.value.error_code == "RESPONSE_SIZE_EXCEEDED"
 
     calls.clear()
     monkeypatch.setattr(
@@ -962,8 +963,9 @@ async def test_declared_and_streamed_response_size_limits(
         "astream_bytes",
         _stream_stub(calls, chunks=(MP3, b"x")),
     )
-    with pytest.raises(TTSAudioQualityError, match="size"):
+    with pytest.raises(TTSAudioQualityError, match="size") as streamed:
         await _collect(await adapter.generate(_request()))
+    assert streamed.value.error_code == "RESPONSE_SIZE_EXCEEDED"
 
 
 @pytest.mark.unit
