@@ -1,7 +1,7 @@
 ---
 id: TASK-12973
 title: Prepare and cut the 0.1.41 release from frozen dev
-status: In Progress
+status: Done
 labels:
 - release
 - documentation
@@ -43,9 +43,9 @@ Prepare release 0.1.41 from frozen origin/dev commit 4c2ad2070ed63992dac8a97a6c4
 - [x] #3 CHANGELOG.md contains a curated 0.1.41 rollup for merged PRs included after 0.1.40 through PR #2744
 - [x] #4 README.md current status and What's New accurately summarize 0.1.41
 - [x] #5 Focused release metadata/docs tests, diff checks, and Bandit policy are satisfied
-- [ ] #6 Release PR into main is merged only after required checks are green
-- [ ] #7 Annotated v0.1.41 tag and GitHub Release point at the final main merge commit
-- [ ] #8 Release artifact workflows are verified and main is synchronized back into dev
+- [x] #6 Release PR into main is merged only after required checks are green
+- [x] #7 No annotated v0.1.41 tag or GitHub Release is created, per the requester's 2026-07-16 instruction
+- [x] #8 Released main history is synchronized back into dev; tag-triggered artifact workflows are intentionally not applicable
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -98,20 +98,21 @@ Worktree clean. The corrected merge ancestry has not yet been pushed at note tim
 - Requester instruction on 2026-07-16: "Do not create a new tagged release." Tag and GitHub Release publication are therefore intentionally skipped. Confirmed no local v0.1.41 tag, no remote matching tag ref, and no GitHub Release for v0.1.41. Do not create or publish either later under this task.
 - Sync branch codex/sync-main-0.1.41-to-dev was created from released main merge 7a23be3202. TASK-12973 remains In Progress until the sync PR merges and closeout evidence is committed.
 Main-to-dev sync PR opened: https://github.com/rmusser01/tldw_server/pull/2748. Base=dev, head=codex/sync-main-0.1.41-to-dev. Its human-authored Change summary reuses the requester's exact two sentences from release PR #2745. No tag or GitHub Release will be created.
+Closeout (2026-07-16): main-to-dev sync PR https://github.com/rmusser01/tldw_server/pull/2748 merged normally at 7d72382d9c671e3c8d11cc2f4ae1de8d30c78977. After fetching origin/dev and origin/main, git merge-base --is-ancestor origin/main origin/dev exited zero (origin/main=7a23be3202e360f2d8e7cfe208e13ba406cf0507, origin/dev=7d72382d9c671e3c8d11cc2f4ae1de8d30c78977). Tag-triggered publication checks are intentionally not applicable because the requester explicitly prohibited creating a tagged release. No local or remote v0.1.41 tag and no GitHub Release exist.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+0.1.41 was prepared from frozen dev commit 4c2ad2070ed63992dac8a97a6c4cf3c7d75f6de8 through PR #2744, with all relevant version surfaces, CHANGELOG.md, README.md, and release notes updated. The release also replaced the inherited 101-warning documentation baseline with deterministic canonical publication and strict zero-warning MkDocs validation. Release PR #2745 merged into main only after all six exact-head gates passed, and sync PR #2748 carried the released main history back into dev. The frozen release branch was used because development velocity required pausing a stable reviewed snapshot without stopping ongoing development. Per the requester's final instruction, no v0.1.41 tag or GitHub Release was created.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
+- [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
+- [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
