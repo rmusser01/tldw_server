@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import FrozenInstanceError
+from pathlib import Path
 from types import MappingProxyType
 from urllib.parse import quote
 
@@ -731,6 +732,49 @@ def test_missing_ffmpeg_only_removes_conversion_formats():
     )["gateway:company"]
     assert spec.enabled is True
     assert spec.capabilities_for_model(spec.default_model).formats == ("mp3", "pcm")
+    assert spec.conversion.target_formats == ()
+    assert spec.ffmpeg_path is None
+
+
+@pytest.mark.unit
+def test_gateway_normalization_pins_ffmpeg_identity_and_generation(monkeypatch, tmp_path):
+    first = tmp_path / "first" / "ffmpeg"
+    second = tmp_path / "second" / "ffmpeg"
+    for executable in (first, second):
+        executable.parent.mkdir()
+        executable.write_text("#!/bin/sh\nexit 0\n")
+        executable.chmod(0o755)
+
+    config = _gateway(
+        conversion={"enabled": True, "target_formats": ["wav"]},
+    )
+    monkeypatch.setenv("PATH", str(first.parent))
+    first_spec = normalize_gateway_specs({}, {"company": config})["gateway:company"]
+
+    monkeypatch.setenv("PATH", str(second.parent))
+    second_spec = normalize_gateway_specs({}, {"company": config})["gateway:company"]
+
+    assert first_spec.ffmpeg_path == str(first.resolve())
+    assert first_spec.ffmpeg_path != str(second.resolve())
+    assert first_spec.conversion.target_formats == ("wav",)
+    assert second_spec.ffmpeg_path == str(second.resolve())
+    assert first_spec.config_generation != second_spec.config_generation
+
+
+@pytest.mark.unit
+def test_gateway_normalization_clears_unusable_injected_ffmpeg(tmp_path):
+    missing = Path(tmp_path, "missing-ffmpeg")
+    spec = normalize_gateway_specs(
+        {},
+        {
+            "company": _gateway(
+                conversion={"enabled": True, "target_formats": ["wav"]},
+            )
+        },
+        ffmpeg_path=str(missing),
+    )["gateway:company"]
+
+    assert spec.ffmpeg_path is None
     assert spec.conversion.target_formats == ()
 
 
