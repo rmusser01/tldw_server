@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import gzip
 import json
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
@@ -8,6 +10,8 @@ from threading import Barrier, Event
 
 import pytest
 
+from tldw_Server_API.app.core.Jobs import manager as jobs_manager
+from tldw_Server_API.app.core.Jobs import migrations as jobs_migrations
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.migrations import ensure_jobs_tables
 from tldw_Server_API.app.core.Slides import standalone_html_registry as registry_module
@@ -181,6 +185,192 @@ def test_sqlite_forward_migration_adds_archive_terminal_projection_before_audit(
             "SELECT diagnostic_code FROM slides_standalone_reconciliation WHERE singleton_id=1"
         ).fetchone()[0]
         assert diagnostic is None
+
+
+def test_sqlite_incomplete_archive_projection_fails_generation_readiness(tmp_path):
+    db_path = ensure_jobs_tables(tmp_path / "slides-archive-incomplete.db")
+    manager = JobManager(db_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("ALTER TABLE jobs_archive DROP COLUMN error_code")
+
+    readiness = manager.get_slides_generation_readiness()
+
+    assert readiness["ready"] is False
+    assert readiness["archive_projection_ready"] is False
+    with pytest.raises(ValueError, match="Jobs coordination is unavailable"):
+        manager.create_job(
+            domain="slides",
+            queue="default",
+            job_type="presentation.generate",
+            payload={},
+            owner_user_id="owner-1",
+            idempotency_key="schema-incomplete",
+        )
+    assert manager.create_job(
+        domain="chatbooks",
+        queue="default",
+        job_type="export",
+        payload={},
+        owner_user_id="owner-1",
+    )["uuid"]
+
+
+def test_sqlite_failed_archive_forward_alter_persists_fail_closed_diagnostic(
+    tmp_path,
+    monkeypatch,
+):
+    db_path = ensure_jobs_tables(tmp_path / "slides-archive-alter-failure.db")
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("ALTER TABLE jobs_archive DROP COLUMN error_code")
+
+    real_connect = sqlite3.connect
+    injected_failures: list[tuple[str, str]] = []
+
+    class FailingArchiveAlterConnection:
+        def __init__(self, inner):
+            self._inner = inner
+
+        def execute(self, sql, *args, **kwargs):
+            normalized = " ".join(str(sql).lower().split())
+            if normalized == "alter table jobs_archive add column error_code text":
+                injected_failures.append((normalized, "OperationalError"))
+                raise sqlite3.OperationalError("injected archive ALTER failure")
+            try:
+                return self._inner.execute(sql, *args, **kwargs)
+            except sqlite3.Error as exc:
+                injected_failures.append((normalized, type(exc).__name__))
+                raise
+
+        def __enter__(self):
+            self._inner.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            return self._inner.__exit__(*args)
+
+        def __getattr__(self, name):
+            return getattr(self._inner, name)
+
+    monkeypatch.setattr(
+        jobs_migrations.sqlite3,
+        "connect",
+        lambda *args, **kwargs: FailingArchiveAlterConnection(real_connect(*args, **kwargs)),
+    )
+
+    ensure_jobs_tables(db_path)
+
+    with real_connect(db_path) as conn:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(jobs_archive)")}
+        diagnostic = conn.execute(
+            "SELECT diagnostic_code FROM slides_standalone_reconciliation WHERE singleton_id=1"
+        ).fetchone()[0]
+    assert "error_code" not in columns
+    assert diagnostic == "ambiguous_generation_legacy_row", injected_failures[-4:]
+
+
+def test_sqlite_schema_audit_holds_immediate_writer_lock_before_scans(tmp_path, monkeypatch):
+    db_path = ensure_jobs_tables(tmp_path / "slides-audit-lock.db")
+    statements: list[str] = []
+    real_connect = sqlite3.connect
+
+    def traced_connect(*args, **kwargs):
+        conn = real_connect(*args, **kwargs)
+        conn.set_trace_callback(statements.append)
+        return conn
+
+    monkeypatch.setattr(jobs_migrations.sqlite3, "connect", traced_connect)
+    ensure_jobs_tables(db_path)
+
+    normalized = [" ".join(statement.upper().split()) for statement in statements]
+    begin_index = normalized.index("BEGIN IMMEDIATE")
+    first_audit_index = next(
+        index for index, statement in enumerate(normalized) if "SELECT COALESCE(SUM(CANDIDATE_COUNT), 0)" in statement
+    )
+    assert begin_index < first_audit_index
+
+
+def test_sqlite_audit_exception_persists_fail_closed_diagnostic(
+    tmp_path,
+    monkeypatch,
+):
+    db_path = ensure_jobs_tables(tmp_path / "slides-audit-exception.db")
+    manager = JobManager(db_path)
+    assert manager.get_slides_generation_readiness()["ready"] is True
+    diagnostic_seen_during_audit: list[str | None] = []
+
+    def fail_audit(conn):
+        diagnostic_seen_during_audit.append(
+            conn.execute(
+                "SELECT diagnostic_code FROM slides_standalone_reconciliation " "WHERE singleton_id=1"
+            ).fetchone()[0]
+        )
+        raise RecursionError("malformed legacy JSON nesting")
+
+    monkeypatch.setattr(
+        jobs_migrations,
+        "_audit_and_index_slides_generation",
+        fail_audit,
+    )
+    ensure_jobs_tables(db_path)
+
+    readiness = manager.get_slides_generation_readiness()
+    assert diagnostic_seen_during_audit == ["ambiguous_generation_legacy_row"]
+    assert readiness["ready"] is False
+    assert readiness["diagnostic_code"] == "ambiguous_generation_legacy_row"
+    assert manager.create_job(
+        domain="chatbooks",
+        queue="default",
+        job_type="export",
+        payload={},
+        owner_user_id="owner-1",
+    )["uuid"]
+
+
+@pytest.mark.parametrize("divergent", (False, True))
+def test_sqlite_audit_compares_logical_compressed_archive_projection(
+    tmp_path,
+    divergent,
+):
+    db_path = ensure_jobs_tables(tmp_path / f"slides-compressed-audit-{divergent}.db")
+    manager = JobManager(db_path)
+    job = manager.create_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        payload={"receipt_id": "receipt-1"},
+        owner_user_id="owner-1",
+        idempotency_key=f"compressed-audit-{divergent}",
+    )
+    with sqlite3.connect(db_path) as conn:
+        _copy_job_to_archive(conn, job_id=int(job["id"]))
+        payload = (
+            '{"receipt_id":"different"}'
+            if divergent
+            else conn.execute(
+                "SELECT payload FROM jobs WHERE id=?",
+                (int(job["id"]),),
+            ).fetchone()[0]
+        )
+        payload_compressed = "gzip64:" + base64.b64encode(gzip.compress(payload.encode("utf-8"))).decode("ascii")
+        if divergent:
+            conn.execute(
+                "UPDATE jobs SET payload=NULL WHERE id=?",
+                (int(job["id"]),),
+            )
+        conn.execute(
+            """
+            UPDATE jobs_archive
+            SET payload=NULL, payload_compressed=?
+            WHERE uuid=?
+            """,
+            (payload_compressed, str(job["uuid"])),
+        )
+
+    ensure_jobs_tables(db_path)
+    readiness = manager.get_slides_generation_readiness()
+
+    assert readiness["ready"] is (not divergent)
+    assert readiness["diagnostic_code"] == ("ambiguous_generation_legacy_row" if divergent else None)
 
 
 def test_sqlite_wrong_definition_archive_indexes_fail_readiness_and_are_repaired(tmp_path):
@@ -487,9 +677,19 @@ def test_sqlite_unsafe_archive_collision_poisons_readiness_and_preserves_active(
     assert reopened_readiness["diagnostic_code"] == "ambiguous_generation_legacy_row"
 
 
+@pytest.mark.parametrize(
+    ("create_owner", "create_key", "receipt_id"),
+    (
+        ("owner-2", "must-not-slip-through", "new"),
+        ("owner-1", "unsafe-archive", "replay"),
+    ),
+)
 def test_sqlite_unsafe_archive_poison_commits_before_waiting_create_rechecks(
     tmp_path,
     monkeypatch,
+    create_owner,
+    create_key,
+    receipt_id,
 ):
     db_path = ensure_jobs_tables(tmp_path / "slides-poison-create-race.db")
     prune_manager = JobManager(db_path)
@@ -572,9 +772,9 @@ def test_sqlite_unsafe_archive_poison_commits_before_waiting_create_rechecks(
             domain="slides",
             queue="default",
             job_type="presentation.generate",
-            payload={"receipt_id": "new"},
-            owner_user_id="owner-2",
-            idempotency_key="must-not-slip-through",
+            payload={"receipt_id": receipt_id},
+            owner_user_id=create_owner,
+            idempotency_key=create_key,
         )
         assert create_waiting.wait(timeout=5)
         allow_poison.set()
@@ -584,8 +784,13 @@ def test_sqlite_unsafe_archive_poison_commits_before_waiting_create_rechecks(
             create_future.result(timeout=5)
 
     with sqlite3.connect(db_path) as conn:
+        expected_count = int(create_key == "unsafe-archive")
         assert (
-            conn.execute("SELECT COUNT(*) FROM jobs WHERE idempotency_key='must-not-slip-through'").fetchone()[0] == 0
+            conn.execute(
+                "SELECT COUNT(*) FROM jobs WHERE idempotency_key=?",
+                (create_key,),
+            ).fetchone()[0]
+            == expected_count
         )
 
 
@@ -974,6 +1179,53 @@ def test_sqlite_exact_generation_create_uses_immediate_correlation_fence(tmp_pat
     )
 
     assert any(statement.strip().upper() == "BEGIN IMMEDIATE" for statement in statements)
+
+
+def test_sqlite_fair_share_rejection_replays_concurrent_generation_winner(
+    tmp_path,
+    monkeypatch,
+):
+    db_path = ensure_jobs_tables(tmp_path / "slides-fair-share-race.db")
+    manager = JobManager(db_path)
+
+    class RacingScheduler:
+        max_per_user = 1
+
+        def can_submit(self, owner_user_id, active_count):
+            assert owner_user_id == "owner-1"
+            assert active_count == 0
+            with sqlite3.connect(db_path) as conn:
+                conn.execute(
+                    """
+                    INSERT INTO jobs (
+                        uuid, domain, queue, job_type, owner_user_id,
+                        idempotency_key, payload, status
+                    ) VALUES (
+                        'racing-winner', 'slides', 'default',
+                        'presentation.generate', 'owner-1',
+                        'fair-share-race', '{}', 'queued'
+                    )
+                    """
+                )
+            return False
+
+    monkeypatch.setattr(jobs_manager, "_fair_share_enabled", lambda: True)
+    monkeypatch.setattr(jobs_manager, "_get_fair_share", RacingScheduler)
+    monkeypatch.setattr(manager, "_count_active_jobs_for_user", lambda _owner: 0)
+
+    replayed = manager.create_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        payload={"receipt_id": "loser"},
+        owner_user_id="owner-1",
+        idempotency_key="fair-share-race",
+    )
+
+    assert replayed["uuid"] == "racing-winner"
+    assert replayed["archived"] is False
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM jobs WHERE idempotency_key='fair-share-race'").fetchone()[0] == 1
 
 
 def test_sqlite_generation_idempotency_never_returns_wrong_owner_or_legacy_null_uuid(tmp_path):
