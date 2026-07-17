@@ -11,6 +11,7 @@ labels:
 dependencies: []
 references:
 - TASK-12973
+- https://github.com/rmusser01/tldw_server/pull/2747
 documentation:
 - Docs/superpowers/specs/2026-07-12-user-customizable-service-prompts-design.md
 - Docs/superpowers/plans/2026-07-15-user-customizable-service-prompts-v1.md
