@@ -351,8 +351,7 @@ export const useTTS = () => {
             nextAudioPromise
               ?.then((data) => {
                 nextAudioData = data
-              })
-              .catch(console.error) || Promise.resolve()
+              }) || Promise.resolve()
           ])
         } finally {
           settlePlaybackRef.current = null
