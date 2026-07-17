@@ -1,4 +1,7 @@
-import { bgRequest } from "@/services/background-proxy"
+import {
+  bgRequest,
+  sanitizeResponseData
+} from "@/services/background-proxy"
 import { sanitizeServerErrorMessage } from "@/utils/server-error-message"
 import { buildQuery } from "../client-utils"
 import { getNormalizedTldwModels } from "../model-normalization"
@@ -40,6 +43,7 @@ import type {
   MlxLoadRequest,
   MlxUnloadRequest,
   TtsProviderUnloadResponse,
+  TldwConfig,
 } from "../TldwApiClient"
 import type {
   AudioPresetCreatePayload,
@@ -59,7 +63,10 @@ export interface TldwApiClientCore {
   createImageArtifact(request: any): Promise<any>
   ensureConfigForRequest(requireAuth: boolean): Promise<any>
   request<T>(init: any, requireAuth?: boolean): Promise<T>
-  requestWithCurrentConfig<T>(init: any, requireAuth?: boolean): Promise<T>
+  requestWithCurrentConfig<T>(
+    init: any | ((config: TldwConfig) => any),
+    requireAuth?: boolean
+  ): Promise<T>
   upload<T>(init: any, requireAuth?: boolean): Promise<T>
 }
 
@@ -194,15 +201,19 @@ const supportsExplicitTtsBackend = async (
         method: "GET",
         returnResponse: true
       })
+      const responseRecord =
+        response && typeof response === "object"
+          ? (response as Record<string, unknown>)
+          : null
+      const failedEnvelope =
+        responseRecord &&
+        Object.prototype.hasOwnProperty.call(responseRecord, "ok") &&
+        responseRecord.ok !== true
       const payload =
-        response &&
-        typeof response === "object" &&
-        "data" in response &&
-        (response as Record<string, unknown>).data &&
-        typeof (response as Record<string, unknown>).data === "object"
-          ? ((response as Record<string, unknown>).data as Record<string, unknown>)
-          : (response as Record<string, unknown> | null)
-      supported = payload?.supports_explicit_backend === true
+        responseRecord?.data && typeof responseRecord.data === "object"
+          ? (responseRecord.data as Record<string, unknown>)
+          : responseRecord
+      supported = !failedEnvelope && payload?.supports_explicit_backend === true
     } catch {
       supported = false
     }
@@ -320,40 +331,6 @@ type TldwSpeechTransportError = Error & {
   details?: unknown
 }
 
-const SENSITIVE_ERROR_KEY =
-  /(?:authorization|cookie|credential|password|secret|token|api[_-]?key)/i
-
-const sanitizeSpeechErrorDetails = (
-  value: unknown,
-  depth = 0
-): unknown => {
-  if (value == null || typeof value === "number" || typeof value === "boolean") {
-    return value
-  }
-  if (typeof value === "string") {
-    return sanitizeServerErrorMessage(value, "")
-  }
-  if (depth >= 3) return "[truncated]"
-  if (Array.isArray(value)) {
-    return value
-      .slice(0, 20)
-      .map((entry) => sanitizeSpeechErrorDetails(entry, depth + 1))
-  }
-  if (typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>)
-        .slice(0, 20)
-        .map(([key, entry]) => [
-          key,
-          SENSITIVE_ERROR_KEY.test(key)
-            ? "[redacted-secret]"
-            : sanitizeSpeechErrorDetails(entry, depth + 1)
-        ])
-    )
-  }
-  return String(value)
-}
-
 const readErrorMetadata = (
   response: Record<string, any>,
   key: "code" | "name"
@@ -398,7 +375,7 @@ const createSpeechTransportError = (
     ? response.details
     : response.data
   if (rawDetails !== undefined) {
-    error.details = sanitizeSpeechErrorDetails(rawDetails)
+    error.details = sanitizeResponseData(rawDetails)
   }
   return error
 }
@@ -1139,13 +1116,10 @@ export const modelsAudioMethods = {
     }
     if (options?.extraParams) body.extra_params = options.extraParams
     if (options?.stream != null) body.stream = options.stream
-    if (
-      options?.backend &&
-      await supportsExplicitTtsBackend(this, config)
-    ) {
-      body.backend = options.backend
-      body.allow_fallback = options.allowFallback ?? true
-    }
+    const negotiatedScope =
+      options?.backend && await supportsExplicitTtsBackend(this, config)
+        ? getTtsCapabilityScope(config)
+        : undefined
     const accept = (() => {
       switch ((options?.responseFormat || "").trim().toLowerCase()) {
         case "wav":
@@ -1169,24 +1143,37 @@ export const modelsAudioMethods = {
           return "audio/mpeg"
       }
     })()
-    // TTS synthesis of more than a short paragraph routinely exceeds the 10s default
-    // request timeout; give it a generous, overridable timeout. See FRONTEND_AUDIT.md / TASK-12101.
-    const cfgTtsTimeout = Number((config as any)?.ttsRequestTimeoutMs)
-    const ttsTimeoutMs =
-      options?.timeoutMs ??
-      (Number.isFinite(cfgTtsTimeout) && cfgTtsTimeout > 0
-        ? cfgTtsTimeout
-        : 120000)
-    const response = await this.request<any>({
-      path: "/api/v1/audio/speech",
-      method: "POST",
-      headers: { Accept: accept },
-      body,
-      responseType: "arrayBuffer",
-      abortSignal: options?.signal,
-      timeoutMs: ttsTimeoutMs,
-      returnResponse: true
-    })
+    const response = await this.requestWithCurrentConfig<any>(
+      (dispatchConfig) => {
+        const dispatchBody = { ...body }
+        if (
+          negotiatedScope &&
+          getTtsCapabilityScope(dispatchConfig) === negotiatedScope
+        ) {
+          dispatchBody.backend = options?.backend
+          dispatchBody.allow_fallback = options?.allowFallback ?? true
+        }
+        const cfgTtsTimeout = Number(
+          (dispatchConfig as any)?.ttsRequestTimeoutMs
+        )
+        const timeoutMs =
+          options?.timeoutMs ??
+          (Number.isFinite(cfgTtsTimeout) && cfgTtsTimeout > 0
+            ? cfgTtsTimeout
+            : 120000)
+        return {
+          path: "/api/v1/audio/speech",
+          method: "POST",
+          headers: { Accept: accept },
+          body: dispatchBody,
+          responseType: "arrayBuffer",
+          abortSignal: options?.signal,
+          timeoutMs,
+          returnResponse: true
+        }
+      },
+      true
+    )
     const responseRecord =
       response &&
       typeof response === "object" &&
