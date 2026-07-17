@@ -40,6 +40,38 @@ DOCUMENT = (
     '<!doctype html><html><head><meta charset="utf-8"><title>Deck</title></head>'
     '<body><section class="slide">Deck</section><script></script></body></html>'
 )
+EXPECTED_CLOSED_ADAPTER_MANIFEST = (
+    (
+        "openai_official_chat_v1",
+        "openai",
+        "https://api.openai.com:443/v1/chat/completions",
+    ),
+    (
+        "anthropic_official_messages_v1",
+        "anthropic",
+        "https://api.anthropic.com:443/v1/messages",
+    ),
+    (
+        "llamacpp_loopback_chat_v1_ipv4",
+        "llama.cpp",
+        "http://127.0.0.1:8080/v1/chat/completions",
+    ),
+    (
+        "llamacpp_loopback_chat_v1_ipv6",
+        "llama.cpp",
+        "http://[::1]:8080/v1/chat/completions",
+    ),
+    (
+        "ollama_loopback_chat_v1_ipv4",
+        "ollama",
+        "http://127.0.0.1:11434/v1/chat/completions",
+    ),
+    (
+        "ollama_loopback_chat_v1_ipv6",
+        "ollama",
+        "http://[::1]:11434/v1/chat/completions",
+    ),
+)
 
 
 @pytest.fixture
@@ -231,6 +263,14 @@ def _request_identity(request: httpx.Request) -> str:
         host = f"[{host}]"
     port = request.url.port or {"http": 80, "https": 443}[request.url.scheme]
     return f"{request.url.scheme}://{host}:{port}{request.url.path}"
+
+
+def test_closed_adapter_catalog_matches_the_literal_v1_manifest() -> None:
+    actual = tuple(
+        (adapter.adapter_id, adapter.provider, adapter.endpoint_identity) for adapter in CLOSED_ADAPTER_CATALOG
+    )
+
+    assert actual == EXPECTED_CLOSED_ADAPTER_MANIFEST
 
 
 @pytest.mark.asyncio
@@ -719,7 +759,207 @@ async def test_current_configuration_is_rechecked_immediately_before_request(
         current_config_loader=load_config,
     )
 
-    assert order == ["config", "network"]
+    assert order == ["config", "config", "network"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("fresh_update", "expected_code"),
+    [
+        ({"feature_enabled": False}, "standalone_html_egress_disabled"),
+        ({"egress_enabled": False}, "standalone_html_egress_disabled"),
+        ({"allowed_targets": ()}, "standalone_html_endpoint_not_allowed"),
+    ],
+    ids=["feature-disabled", "egress-disabled", "target-removed"],
+)
+async def test_dispatch_rechecks_config_after_client_entry_before_network(
+    provider_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    fresh_update: dict[str, Any],
+    expected_code: str,
+) -> None:
+    target = _target("openai_official_chat_v1")
+    initial = _config(target)
+    current = [initial]
+    loader_calls = 0
+    network_calls = 0
+    client_entered = asyncio.Event()
+    config_flipped = asyncio.Event()
+
+    def load_config() -> SlidesStandaloneHtmlConfig:
+        nonlocal loader_calls
+        loader_calls += 1
+        return current[0]
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal network_calls
+        network_calls += 1
+        response, _ = _response(_response_body(target.provider))
+        return response
+
+    async def flip_config() -> None:
+        await client_entered.wait()
+        current[0] = replace(initial, **fresh_update)
+        config_flipped.set()
+
+    class SchedulingGapClient(httpx.AsyncClient):
+        async def __aenter__(self):
+            client_entered.set()
+            await config_flipped.wait()
+            return await super().__aenter__()
+
+    def client_factory(*args: Any, **kwargs: Any) -> SchedulingGapClient:
+        assert "transport" not in kwargs
+        return SchedulingGapClient(
+            *args,
+            transport=httpx.MockTransport(handler),
+            **kwargs,
+        )
+
+    monkeypatch.setattr(provider_module, "_AsyncClient", client_factory)
+    flipper = asyncio.create_task(flip_config())
+    try:
+        with pytest.raises(provider_module.StandaloneHtmlProviderError) as exc_info:
+            await provider_module.generate_standalone_html(
+                stored_target=target,
+                system_prompt=SYSTEM_PROMPT,
+                user_content=USER_CONTENT,
+                provider_api_key=PROVIDER_SECRET,
+                current_config_loader=load_config,
+            )
+    finally:
+        await flipper
+
+    assert exc_info.value.code == expected_code
+    assert exc_info.value.__context__ is None
+    assert loader_calls == 2
+    assert network_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_post_client_entry_loader_failure_is_redacted_before_network(
+    provider_module: ModuleType,
+    captured_logs: Callable[[], str],
+) -> None:
+    target = _target("openai_official_chat_v1")
+    config = _config(target)
+    loader_calls = 0
+    network_calls = 0
+
+    def load_config() -> SlidesStandaloneHtmlConfig:
+        nonlocal loader_calls
+        loader_calls += 1
+        if loader_calls == 1:
+            return config
+        raise RuntimeError("source-secret provider-body-secret")
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal network_calls
+        network_calls += 1
+        response, _ = _response(_response_body(target.provider))
+        return response
+
+    with pytest.raises(provider_module.StandaloneHtmlProviderError) as exc_info:
+        await _call(
+            provider_module,
+            config,
+            httpx.MockTransport(handler),
+            current_config_loader=load_config,
+        )
+
+    assert exc_info.value.code == "standalone_html_endpoint_not_allowed"
+    assert loader_calls == 2
+    assert network_calls == 0
+    _assert_redacted(exc_info.value, captured_logs())
+
+
+@pytest.mark.asyncio
+async def test_dispatch_does_not_yield_after_fresh_recheck_before_transport(
+    provider_module: ModuleType,
+) -> None:
+    target = _target("openai_official_chat_v1")
+    config = _config(target)
+    loader_calls = 0
+    order: list[str] = []
+    config_flipped = asyncio.Event()
+
+    def flip_config() -> None:
+        order.append("config-flipped")
+        config_flipped.set()
+
+    def load_config() -> SlidesStandaloneHtmlConfig:
+        nonlocal loader_calls
+        loader_calls += 1
+        if loader_calls == 2:
+            asyncio.get_running_loop().call_soon(flip_config)
+        return config
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        order.append("network")
+        response, _ = _response(_response_body(target.provider))
+        return response
+
+    result = await _call(
+        provider_module,
+        config,
+        httpx.MockTransport(handler),
+        current_config_loader=load_config,
+    )
+    await config_flipped.wait()
+
+    assert result == DOCUMENT.encode()
+    assert loader_calls == 2
+    assert order == ["network", "config-flipped"]
+
+
+@pytest.mark.asyncio
+async def test_fresh_attempt_snapshot_solely_controls_overall_timeout(
+    provider_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = _target("openai_official_chat_v1")
+    initial = _config(target, overall_timeout=0.01)
+    fresh = _config(target, overall_timeout=1.0)
+    snapshots = iter((initial, fresh))
+    loader_calls = 0
+    network_calls = 0
+
+    def load_config() -> SlidesStandaloneHtmlConfig:
+        nonlocal loader_calls
+        loader_calls += 1
+        return next(snapshots)
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal network_calls
+        network_calls += 1
+        response, _ = _response(_response_body(target.provider))
+        return response
+
+    class DelayedEntryClient(httpx.AsyncClient):
+        async def __aenter__(self):
+            await asyncio.sleep(0.02)
+            return await super().__aenter__()
+
+    def client_factory(*args: Any, **kwargs: Any) -> DelayedEntryClient:
+        assert "transport" not in kwargs
+        return DelayedEntryClient(
+            *args,
+            transport=httpx.MockTransport(handler),
+            **kwargs,
+        )
+
+    monkeypatch.setattr(provider_module, "_AsyncClient", client_factory)
+    result = await provider_module.generate_standalone_html(
+        stored_target=target,
+        system_prompt=SYSTEM_PROMPT,
+        user_content=USER_CONTENT,
+        provider_api_key=PROVIDER_SECRET,
+        current_config_loader=load_config,
+    )
+
+    assert result == DOCUMENT.encode()
+    assert loader_calls == 2
+    assert network_calls == 1
 
 
 @pytest.mark.asyncio
