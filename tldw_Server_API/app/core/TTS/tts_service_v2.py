@@ -1571,6 +1571,7 @@ class TTSServiceV2:
         """Serialize configured gateway capabilities without authority or secrets."""
         models = list(result.models) if result is not None else cls._static_gateway_models(spec)
         model_capabilities: dict[str, dict[str, Any]] = {}
+        public_formats = {audio_format.value for audio_format in AudioFormat}
         for model in models:
             capabilities = spec.capabilities_for_model(model)
             overlay = spec.model_overrides.get(model)
@@ -1578,7 +1579,9 @@ class TTSServiceV2:
             default_voice = spec.default_voice_for_model(model)
             if default_voice and default_voice not in voices:
                 voices.insert(0, default_voice)
-            native_formats = list(capabilities.formats)
+            native_formats = [
+                fmt for fmt in capabilities.formats if fmt in public_formats
+            ]
             conversion = spec.conversion
             executable = spec.ffmpeg_path
             conversion_available = (
@@ -1589,7 +1592,11 @@ class TTSServiceV2:
                 and os.access(executable, os.X_OK)
             )
             converted_formats = (
-                [fmt for fmt in conversion.target_formats if fmt not in native_formats]
+                [
+                    fmt
+                    for fmt in conversion.target_formats
+                    if fmt in public_formats and fmt not in native_formats
+                ]
                 if conversion_available
                 else []
             )

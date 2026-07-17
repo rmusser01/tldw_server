@@ -82,10 +82,13 @@ def _gateway_spec(
     api_key: str | None = "admin-key",
     conversion: dict[str, object] | None = None,
     ffmpeg_path: str | None = None,
+    native_formats: list[str] | None = None,
 ):
     definition = _gateway_definition(api_key=api_key)
     if conversion is not None:
         definition["conversion"] = conversion
+    if native_formats is not None:
+        definition["capability_defaults"] = {"formats": native_formats}
     return normalize_gateway_specs(
         {},
         {"company": definition},
@@ -611,6 +614,53 @@ async def test_gateway_catalog_advertises_only_executable_conversion_routes(
     assert capabilities["native_formats"] == ["mp3"]
     assert capabilities["converted_formats"] == expected_converted
     assert capabilities["formats"] == ["mp3", *expected_converted]
+
+
+async def test_gateway_catalog_omits_vendor_native_conversion_source(
+    tmp_path,
+) -> None:
+    executable = tmp_path / "ffmpeg"
+    executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    executable.chmod(0o700)
+    spec = _gateway_spec(
+        conversion={
+            "enabled": True,
+            "source_format": "vendor-native",
+            "target_formats": ["wav"],
+        },
+        ffmpeg_path=str(executable),
+        native_formats=["vendor-native"],
+    )
+
+    provider = TTSServiceV2._serialize_gateway_provider(spec, None)
+    capabilities = provider["model_capabilities"]["Vendor/Exact"]
+
+    assert capabilities["native_formats"] == []
+    assert capabilities["converted_formats"] == []
+    assert capabilities["formats"] == []
+
+
+async def test_gateway_catalog_omits_unknown_conversion_target(
+    tmp_path,
+) -> None:
+    executable = tmp_path / "ffmpeg"
+    executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    executable.chmod(0o700)
+    spec = _gateway_spec(
+        conversion={
+            "enabled": True,
+            "source_format": "mp3",
+            "target_formats": ["vendor-output"],
+        },
+        ffmpeg_path=str(executable),
+    )
+
+    provider = TTSServiceV2._serialize_gateway_provider(spec, None)
+    capabilities = provider["model_capabilities"]["Vendor/Exact"]
+
+    assert capabilities["native_formats"] == ["mp3"]
+    assert capabilities["converted_formats"] == []
+    assert capabilities["formats"] == ["mp3"]
 
 
 async def test_endpoint_closes_iterator_on_empty_and_prefetch_error(
