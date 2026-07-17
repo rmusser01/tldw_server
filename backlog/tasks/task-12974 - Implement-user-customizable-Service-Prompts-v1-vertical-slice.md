@@ -1,10 +1,14 @@
 ---
 id: TASK-12974
 title: Implement user-customizable Service Prompts v1 vertical slice
-status: In Progress
+status: Done
+assignee: []
+created_date: ''
+updated_date: 2026-07-17 04:57
 labels:
 - service-prompts
 - implementation
+dependencies: []
 references:
 - TASK-12973
 documentation:
@@ -73,6 +77,17 @@ modified_files:
 - apps/packages/ui/src/hooks/__tests__/useMessage.service-prompts.test.tsx
 - apps/packages/ui/src/hooks/chat-modes/__tests__/ragMode.sanitization.test.ts
 - apps/packages/ui/src/hooks/chat-modes/__tests__/normalChatMode.overlay.test.ts
+- apps/extension/tests/e2e/service-prompts.spec.ts
+- apps/tldw-frontend/e2e/workflows/service-prompts-runtime.spec.ts
+- apps/extension/entrypoints/options/index.html
+- apps/bun.lock
+- apps/extension/package.json
+- apps/packages/ui/src/entries/background.ts
+- apps/packages/ui/src/entries/__tests__/background.effective-auth.test.ts
+- apps/packages/ui/src/services/tldw/deployment-mode.ts
+- apps/packages/ui/src/services/tldw/__tests__/deployment-mode.test.ts
+- apps/packages/ui/src/routes/sidepanel-chat.tsx
+- backlog/tasks/task-12974 - Implement-user-customizable-Service-Prompts-v1-vertical-slice.md
 ---
 
 ## Description
@@ -83,11 +98,11 @@ Execute the approved four-definition Service Prompts v1 plan across the backend,
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A static four-definition registry, strict renderer, one-table owner-scoped override store, and four Service Prompt API operations implement the approved contract.
-- [ ] #2 Workflow prompts Settings is shared by WebUI and extension, supports scoped migration/save/reset/conflict/corrupt states, and keeps Prompt Library navigation and backup disclosure accurate.
-- [ ] #3 All named RAG, rewrite, web-search, Compare, legacy Sidepanel, and synchronous Translation consumers use immutable server-backed request snapshots with preserved no-override semantics.
-- [ ] #4 Focused backend/frontend/E2E verification, OpenAPI checks, lint/type/build checks, Bandit, and git hygiene pass; CI shards remain deliberately unchanged.
-- [ ] #5 Each implementation task passes independent specification and code-quality review, followed by a final whole-feature review.
+- [x] #1 A static four-definition registry, strict renderer, one-table owner-scoped override store, and four Service Prompt API operations implement the approved contract.
+- [x] #2 Workflow prompts Settings is shared by WebUI and extension, supports scoped migration/save/reset/conflict/corrupt states, and keeps Prompt Library navigation and backup disclosure accurate.
+- [x] #3 All named RAG, rewrite, web-search, Compare, legacy Sidepanel, and synchronous Translation consumers use immutable server-backed request snapshots with preserved no-override semantics.
+- [x] #4 Focused backend/frontend/E2E verification, OpenAPI checks, lint/type/build checks, Bandit, and git hygiene pass; CI shards remain deliberately unchanged.
+- [x] #5 Each implementation task passes independent specification and code-quality review, followed by a final whole-feature review.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -98,6 +113,7 @@ Execute Tasks 1-7 from Docs/superpowers/plans/2026-07-15-user-customizable-servi
 
 ## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Execution started in isolated worktree /Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/service-prompts-v1-plan on branch codex/service-prompts-v1-plan. .worktrees is gitignored; linked the existing project .venv and installed the existing Bun workspace dependencies without tracked lockfile changes. Focused pre-change baseline passed: 196 backend tests across Prompts DB, Translation error mapping, and router-group contracts; 10 frontend tests across Settings routing/index and chat-pipeline error recovery. CI shard edits remain explicitly out of scope per requester.
 Task 1 registry/validator/renderer/resolver TDD evidence (2026-07-16): RED command `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Prompt_Management/test_service_prompts.py -v` failed during collection with the expected missing `Prompt_Management.service_prompts` ModuleNotFoundError. The same command is GREEN after implementation: 47 passed, 2 existing warnings, 0 failures. Independent review identified ignored-fixture staging and two JSON decoder corruption edges; the fixture is force-staged, and regression tests first reproduced plain ValueError (over-limit integer) and RecursionError (excessive nesting) before both were normalized to revision-only ServicePromptCorruptOverride errors. Canonical default byte lengths/SHA-256 values match the five source strings. Ruff check/format checks pass, and Bandit reports zero findings for service_prompts.py. Task 1 deliberately calls the narrow get_service_prompt_override interface that Task 2 will add; no direct SQL or Prompts_DB.py changes were made.
@@ -150,20 +166,37 @@ Compare RED proved two expected ordering failures plus a server-chat history reg
 Legacy RED proved prompt loading followed loop/controller mutation, generic failures leaked/rethrew raw details, AbortError was not silent, and provider-message assertions were incomplete. Final legacy RAG loads once before loop/controller/message/history/pending mutation, blocks unresolved migration with an actionable Workflow prompts link, keeps catalog-404 compatibility, never falls back locally on supported failures, emits one fixed retryable connection notice without raw prompt/error text, treats AbortError silently, reuses one snapshot for rewrite/final answer, and locks rewrite tools/persistence plus exact rewrite/final provider messages and retrieval/model/source invariants.
 
 Final independent consolidated review APPROVED correctness, specification compliance, and YAGNI after requiring fail-closed validation for every wrapper, Tab image compatibility, Compare history preservation, and legacy lifecycle/error/provider-message fixes. Fresh verification: exact planned three-file slice 37/37; five-file impacted matrix 46/46; extension compile exit 0; WebUI no-emit TypeScript with incremental disabled exit 0; focused project-config ESLint exit 0 (standard pages-directory notice only); git diff --check clean. Shared UI touched-path type diagnostics are zero; unrelated whole-file formatting/type baselines were not churned. Bandit is not applicable to this frontend-only TypeScript/test delta. CI shards remain deliberately unchanged per requester.
+Task 7 closeout progress (2026-07-16): backend exact six-file gate passes 293/293 after mechanically fixing all 16 pre-existing Ruff findings in the already-touched router contract test; the exact touched-scope Ruff command now passes, compileall is silent, and Bandit reports 0 findings across 4,932 production LOC.
+
+Frontend gates pass: exact 12-file shared UI matrix 284/284, OpenAPI guard 330 paths/49 fields/10 reviewed exceptions, Next route 1/1, Next typecheck, Next lint (0 errors), locale sync/no rewrite, duplicate-locale check, extension compile, and Chrome production build. Existing repo-wide build/lint warnings are unchanged.
+
+Real extension corrupt-state E2E RED exposed two genuine axe blockers: options HTML lacked lang and the default-dark primary CTA had 3.13:1 contrast. Minimal cross-theme-safe fixes add html lang=en and render this lone corrupt reset through the existing outline secondaryActions path; focused ServicePromptsSettings 53/53, extension compile, ESLint, and diff check pass. No axe rule was suppressed. Real E2E runtime/cross-host execution and final review remain in progress.
+
+Focused pytest generated the repository-known untracked watchlist template byproducts; provenance is confirmed and they will be removed during final hygiene. CI shard configuration remains deliberately unchanged per requester.
+Task 7 Sidepanel E2E debugging (2026-07-16): stopped after three attempts per repo rule. Attempt 1 used raw Zustand setState(chatMode='rag'); async Sidepanel state did not render RAG. Attempt 2 used the visible RAG controls for nextgen/legacy, but the default casual composer exposed neither control. Attempt 3 switched to Pro through the real sidebar UI, opened the real delivery-options checkbox, and clicked 'Chat with current page'; the control was present and clickable but immediately reverted (Playwright: clicking checkbox did not change its state). Current hypothesis: asynchronous active-tab/session restoration overwrites chatMode after test configuration. Next action is read-only trace of restore readiness and comparison with existing Sidepanel E2E patterns before any further run.
+Task 7 rewrite E2E stop/reassessment (2026-07-16): stopped after three golden-expectation iterations. With the non-stream mock corrected, all workflows issued both rewrite and final-answer calls. Iteration 1 assumed only Sidepanel included the submitted question in chat_history; packaged Main disproved this by including it. Iteration 2 assumed all workflows included it; packaged Document disproved this by passing prior history only. Iteration 3 assumed Main+Sidepanel included it; packaged Sidepanel disproved this by passing prior history only. Therefore the observed real-UI contract is explicit: Main includes the submitted turn, Document and legacy Sidepanel use prior history only. Reassessment rejects dynamic variable extraction as too weak/tautological and a shared heuristic as incorrect; next change will encode the exact three-workflow mapping.
+Task 7 packaged web E2E stop/reassessment (2026-07-16): stopped after three assertion approaches. Attempt 1 required the packaged template to occupy the entire message; attempt 2 searched for the exact template as an embedded substring; attempt 3 removed the duplicated formatter expectation by extracting the real search_results value from the custom Normal request, proving the same value reached both Compare branches, then using that exact value for the packaged template. Attempt 3 still found no packaged-template candidate, while the removed custom marker remained absent. Live backend detail exactly matches the golden packaged template. Next action is read-only trace of request message construction/default selection and targeted capture diagnostics; do not weaken to a marker-only assertion.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+Task 7 final contract correction (2026-07-16): strict custom and packaged runtime captures supersede the earlier rewrite-mapping note. Main RAG passes prior turns only; Document and legacy Sidepanel include the submitted question. The earlier note that records the opposite mapping is historical and incorrect.
+
+Task 7 final closeout (2026-07-16): committed release gates in 4f2498c43c. Final strict E2E is green: runtime propagation 4/4 and freshly rebuilt production extension cross-host/corrupt/reset/Preview/axe gate 2/2. Focused shared UI passes 80/80; planned UI matrix 284/284; backend 293/293; OpenAPI, route, typecheck, lint, locale, compile, production build, Ruff, compileall, Bandit zero findings, and git diff checks pass. Final independent correctness/YAGNI review is clean. CI shard configuration remains deliberately unchanged per requester; existing repo-wide lint/build warnings are baseline and non-blocking.
+<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Implemented the approved Service Prompts v1 vertical slice for exactly four definitions. The backend now provides a static validated registry, one owner-scoped override table with optimistic concurrency and corruption-safe reset, authenticated catalog/detail/save/reset APIs, and synchronous Translation integration. The shared WebUI/browser-extension Settings surface supports scoped migration, editing, local Preview, save/reset/conflict/corrupt recovery, unsaved-navigation protection, and accessible responsive states. Every approved Main, Tab, Document, Compare, legacy Sidepanel, web-search, rewrite, and Translation consumer resolves one immutable server-backed prompt snapshot per invocation while preserving packaged no-override behavior.
 
+Release proof includes real disposable-server cross-host save/reset/scope isolation, built-extension corrupt-revision recovery, local-only Preview and axe checks, and exact custom-plus-packaged provider payloads for every named runtime path. Final verification passed: backend 293/293; focused UI 80/80 and planned matrix 284/284; runtime E2E 4/4; built extension E2E 2/2; OpenAPI, typecheck, lint (0 errors; existing warnings only), locale, compile, production build, Ruff, compileall, Bandit (0 findings), and git diff checks. CI shards were intentionally not changed per the requester. No known blocker remains; PR creation is a separate requested action, and the required human-owned Change summary must be supplied before merge.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

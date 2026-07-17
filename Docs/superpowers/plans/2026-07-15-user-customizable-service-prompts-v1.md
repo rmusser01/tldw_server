@@ -203,7 +203,7 @@ Malformed Pydantic bodies/queries, authentication failures, scope failures, and 
 - Create: `tldw_Server_API/tests/Prompt_Management/test_service_prompts.py`
 - Create: `tldw_Server_API/app/core/Prompt_Management/service_prompts.py`
 
-- [ ] **Step 1: Write the shared fixture**
+- [x] **Step 1: Write the shared fixture**
 
 Add:
 
@@ -213,7 +213,7 @@ Add:
 
 The fixture is test data only. Runtime registry initialization must not read a frontend file.
 
-- [ ] **Step 2: Write failing Python tests**
+- [x] **Step 2: Write failing Python tests**
 
 Cover:
 
@@ -236,7 +236,7 @@ python -m pytest tldw_Server_API/tests/Prompt_Management/test_service_prompts.py
 
 Expected red result: import fails because `Prompt_Management.service_prompts` does not exist.
 
-- [ ] **Step 3: Implement the minimal registry module**
+- [x] **Step 3: Implement the minimal registry module**
 
 Use frozen dataclasses and `MappingProxyType`; do not add a registry class or plugin mechanism.
 
@@ -316,7 +316,7 @@ Use `Counter(fields) == Counter(part.required_variables)` after enforcing simple
 
 Resolver order is exactly saved valid override, then packaged default. Parse `parts_json`, validate it, and raise a corruption exception carrying only `revision` if parsing or semantic validation fails. Never fall back silently.
 
-- [ ] **Step 4: Run the focused tests**
+- [x] **Step 4: Run the focused tests**
 
 ```bash
 source .venv/bin/activate
@@ -325,7 +325,7 @@ python -m pytest tldw_Server_API/tests/Prompt_Management/test_service_prompts.py
 
 Expected green result: all registry, validation, fixture, renderer, and resolver tests pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add "$TASK_FILE" apps/packages/ui/src/utils/__fixtures__/service-prompt-rendering.json tldw_Server_API/app/core/Prompt_Management/service_prompts.py tldw_Server_API/tests/Prompt_Management/test_service_prompts.py
@@ -341,7 +341,7 @@ git commit -m "feat: add service prompt registry and renderer ($TASK_ID)"
 - Modify: `tldw_Server_API/tests/Prompt_Management/test_prompts_db_v2.py`
 - Modify: `tldw_Server_API/app/core/DB_Management/Prompts_DB.py`
 
-- [ ] **Step 1: Write failing schema tests**
+- [x] **Step 1: Write failing schema tests**
 
 Add tests that:
 
@@ -359,7 +359,7 @@ python -m pytest tldw_Server_API/tests/Prompt_Management/test_prompts_db_v2.py -
 
 Expected red result: current schema is 5 and the table is absent.
 
-- [ ] **Step 2: Write failing store tests**
+- [x] **Step 2: Write failing store tests**
 
 Cover:
 
@@ -378,7 +378,7 @@ Cover:
 
 Expected red result: store methods do not exist.
 
-- [ ] **Step 3: Implement v6 and the store**
+- [x] **Step 3: Implement v6 and the store**
 
 Set `_CURRENT_SCHEMA_VERSION = 6`, add:
 
@@ -440,7 +440,7 @@ Inside one `BEGIN IMMEDIATE` save transaction:
 DELETE selects only `definition_id, revision`; it must not parse `parts_json`.
 Raise `ServicePromptRevisionConflict` for every CAS mismatch so the endpoint can return `current_revision` without rereading outside the transaction. Wrap other SQLite failures in the existing `DatabaseError` family using content-free messages, and never interpolate `parts`, `parts_json`, or authored text into logs or exceptions.
 
-- [ ] **Step 4: Run the DB tests**
+- [x] **Step 4: Run the DB tests**
 
 ```bash
 source .venv/bin/activate
@@ -449,7 +449,7 @@ python -m pytest tldw_Server_API/tests/Prompt_Management/test_prompts_db_v2.py -
 
 Expected green result: v5→v6, fresh v6, CAS, retries, races, reset, and rollback pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/DB_Management/Prompts_DB.py tldw_Server_API/tests/Prompt_Management/test_prompts_db_v2.py
@@ -473,7 +473,7 @@ git commit -m "feat: persist service prompt overrides ($TASK_ID)"
 - Modify: `tldw_Server_API/tests/Services/test_router_groups_contract.py`
 - Modify: `apps/tldw-frontend/lib/api/openapi.fingerprint.json`
 
-- [ ] **Step 1: Write failing API tests**
+- [x] **Step 1: Write failing API tests**
 
 Use the existing Prompt Management app/client fixtures and `get_prompts_db_for_user` dependency override. Cover:
 
@@ -500,7 +500,7 @@ python -m pytest tldw_Server_API/tests/Prompt_Management/test_service_prompts_ap
 
 Expected red result: endpoint module/path is missing.
 
-- [ ] **Step 2: Implement schemas and endpoint mapping**
+- [x] **Step 2: Implement schemas and endpoint mapping**
 
 Use normal current-user ownership:
 
@@ -531,7 +531,7 @@ On PUT:
 
 On DELETE, call the raw conditional reset path so malformed JSON cannot block reset, then return packaged detail.
 
-- [ ] **Step 3: Write failing router contract tests**
+- [x] **Step 3: Write failing router contract tests**
 
 Add a fake `service_prompts` module to `test_router_groups_contract.py` and assert:
 
@@ -556,11 +556,11 @@ python -m pytest tldw_Server_API/tests/Services/test_router_groups_contract.py -
 
 Expected red result: the canonical and minimal selections omit `service_prompts`.
 
-- [ ] **Step 4: Register the always-on router**
+- [x] **Step 4: Register the always-on router**
 
 Add the imported router spec to `iter_content_router_specs()` and add `service_prompts` to `MINIMAL_REQUIRED_ROUTER_NAMES`. A blank `route_key` is intentional: catalog 404 must mean an older server, not a disabled feature.
 
-- [ ] **Step 5: Write failing Translation tests**
+- [x] **Step 5: Write failing Translation tests**
 
 Capture `analyze()` kwargs and prove:
 
@@ -584,7 +584,7 @@ python -m pytest tldw_Server_API/tests/Translation/test_translate_service_prompt
 
 Expected red result: `translate_text` still uses module constants and `str.format`.
 
-- [ ] **Step 6: Switch Translation to the resolver**
+- [x] **Step 6: Switch Translation to the resolver**
 
 Resolve `media.text.translation` before the existing provider `try` block:
 
@@ -601,7 +601,7 @@ prompt = render_service_prompt_part(
 
 Pass `resolved.parts["system"]` as `system_message`. Remove the duplicate canonical constants from `translate.py`; the registry now owns them.
 
-- [ ] **Step 7: Regenerate and verify the OpenAPI fingerprint**
+- [x] **Step 7: Regenerate and verify the OpenAPI fingerprint**
 
 ```bash
 cd apps/tldw-frontend
@@ -613,7 +613,7 @@ python Helper_Scripts/export_openapi_schema.py --check apps/tldw-frontend/lib/ap
 
 Expected result: generated client contract and committed fingerprint match the new routes.
 
-- [ ] **Step 8: Run the focused backend slice**
+- [x] **Step 8: Run the focused backend slice**
 
 ```bash
 source .venv/bin/activate
@@ -628,7 +628,7 @@ python -m pytest \
 
 Expected green result: registry, DB, API, router, and Translation tests pass.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add tldw_Server_API/app/api/v1/schemas/service_prompt_schemas.py tldw_Server_API/app/api/v1/endpoints/service_prompts.py tldw_Server_API/tests/Prompt_Management/test_service_prompts_api.py tldw_Server_API/app/api/v1/endpoints/translate.py tldw_Server_API/tests/Translation/test_translate_service_prompt.py tldw_Server_API/tests/Translation/test_translate_endpoint_error_mapping.py tldw_Server_API/app/api/v1/router_groups/content.py tldw_Server_API/app/api/v1/router_groups/minimal.py tldw_Server_API/tests/Services/test_router_groups_contract.py apps/tldw-frontend/lib/api/openapi.fingerprint.json
@@ -651,7 +651,7 @@ git commit -m "feat: expose service prompts and translation ($TASK_ID)"
 - Modify: `apps/packages/ui/src/services/__tests__/background-proxy.test.ts`
 - Modify: `apps/packages/ui/src/services/tldw-server.ts`
 
-- [ ] **Step 1: Write failing typed-client and transport tests**
+- [x] **Step 1: Write failing typed-client and transport tests**
 
 Keep wire IDs forward-compatible while locking the three Chat runtime IDs and Translation ID locally:
 
@@ -689,7 +689,7 @@ bunx vitest run src/services/tldw/domains/__tests__/service-prompts.test.ts src/
 
 Expected red result: paths and methods do not exist.
 
-- [ ] **Step 2: Implement the domain mixin**
+- [x] **Step 2: Implement the domain mixin**
 
 Add four methods to `servicePromptMethods`:
 
@@ -703,7 +703,7 @@ resetServicePrompt(id, expectedRevision, options?)
 Use `bgRequest`, exact locked types, and the existing domain-mixin pattern. Add the mixin import, declaration merge, and `Object.assign` in `TldwApiClient.ts`; export it from `domains/index.ts`.
 Encode `definition_id` as one path segment with `encodeURIComponent`; never concatenate an unescaped catalog ID into a URL.
 
-- [ ] **Step 3: Write failing renderer/default tests**
+- [x] **Step 3: Write failing renderer/default tests**
 
 Consume the shared JSON fixture and cover:
 
@@ -717,7 +717,7 @@ Consume the shared JSON fixture and cover:
 
 Expected red result: shared validator/renderer does not exist.
 
-- [ ] **Step 4: Implement one small shared service module**
+- [x] **Step 4: Implement one small shared service module**
 
 Keep types/API transport in the domain file and put the remaining v1 behavior in one `services/service-prompts.ts`; do not create separate `types`, `template`, `runtime`, or `legacy-storage` modules.
 
@@ -750,7 +750,7 @@ return tokens
 
 Export the legacy defaults from `tldw-server.ts` as clearly named `LEGACY_SERVICE_PROMPT_DEFAULTS`; existing getter functions remain for older-server fallback only.
 
-- [ ] **Step 5: Write failing raw-migration and runtime-loader tests**
+- [x] **Step 5: Write failing raw-migration and runtime-loader tests**
 
 Cover:
 
@@ -818,7 +818,7 @@ bunx vitest run src/services/__tests__/service-prompts.test.ts --maxWorkers=1 --
 
 Expected red result: raw migration and snapshot functions are missing.
 
-- [ ] **Step 6: Implement capability, scope, migration, and snapshot loading**
+- [x] **Step 6: Implement capability, scope, migration, and snapshot loading**
 
 Export:
 
@@ -841,7 +841,7 @@ Runtime order:
 
 Do not use the Settings React Query cache for runtime reads.
 
-- [ ] **Step 7: Run the shared-client tests and OpenAPI guard**
+- [x] **Step 7: Run the shared-client tests and OpenAPI guard**
 
 ```bash
 cd apps/packages/ui
@@ -851,7 +851,7 @@ bun run verify:openapi
 
 Expected green result: API, proxy, renderer, scope, migration, and snapshot tests pass.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add apps/packages/ui/src/services/tldw/domains/service-prompts.ts apps/packages/ui/src/services/tldw/domains/__tests__/service-prompts.test.ts apps/packages/ui/src/services/service-prompts.ts apps/packages/ui/src/services/__tests__/service-prompts.test.ts apps/packages/ui/src/services/tldw/openapi-guard.ts apps/packages/ui/src/services/tldw/TldwApiClient.ts apps/packages/ui/src/services/tldw/domains/index.ts apps/packages/ui/src/services/__tests__/background-proxy.test.ts apps/packages/ui/src/services/tldw-server.ts
@@ -885,7 +885,7 @@ git commit -m "feat: add shared service prompt client ($TASK_ID)"
 - Modify: `apps/packages/ui/src/assets/locale/en/settings.json`
 - Regenerate: `apps/packages/ui/src/public/_locales/en/settings.json`
 
-- [ ] **Step 1: Write failing component tests**
+- [x] **Step 1: Write failing component tests**
 
 Test the shared component with mocked domain/runtime functions:
 
@@ -917,7 +917,7 @@ bunx vitest run src/components/Option/Settings/__tests__/ServicePromptsSettings.
 
 Expected red result: component does not exist.
 
-- [ ] **Step 2: Implement the smallest shared Settings component**
+- [x] **Step 2: Implement the smallest shared Settings component**
 
 Use React Query only for Settings state:
 
@@ -950,7 +950,7 @@ Implement unsaved protection locally in this component rather than changing the 
 
 Tests must exercise query selection, Settings nav links, browser history, and `beforeunload`. Do not rely on the current no-op Next `useBlocker`.
 
-- [ ] **Step 3: Write failing route and navigation tests**
+- [x] **Step 3: Write failing route and navigation tests**
 
 Assert:
 
@@ -972,14 +972,14 @@ bunx vitest run __tests__/pages/settings-prompt-route.test.tsx --maxWorkers=1 --
 
 Expected red result: route still renders the reusable-workspace empty state and links still point to `/settings/prompt`.
 
-- [ ] **Step 4: Rewire routes and remove the dead editor**
+- [x] **Step 4: Rewire routes and remove the dead editor**
 
 Point all route registries and the Next wrapper to `ServicePromptsSettings`. Delete the unreachable old local editor. Keep the legacy getter/setter functions in `tldw-server.ts` because catalog-404 runtime compatibility still needs them.
 
 Retarget only links that mean reusable Prompt Library to `/prompts`; keep Settings navigation at `/settings/prompt` and rename it Workflow prompts.
 Use a new `settings:servicePrompts.title` route/nav token and keep the existing `managePrompts.*` copy owned by the reusable Prompt Library; do not globally relabel that older namespace. Keep `/settings/prompt` in the existing Preferences & Workflow settings group in both hosts.
 
-- [ ] **Step 5: Correct backup disclosure and English fallback keys**
+- [x] **Step 5: Correct backup disclosure and English fallback keys**
 
 Change the UI claim from “Backup all account data” to “Backup supported account data” and explicitly list Service Prompt overrides among portable-backup exclusions. The migration panel repeats the same exclusion.
 
@@ -1000,7 +1000,7 @@ bun run locales:sync settings.json
 bun run check:i18n:dupes
 ```
 
-- [ ] **Step 6: Run Settings and route tests**
+- [x] **Step 6: Run Settings and route tests**
 
 ```bash
 cd apps/packages/ui
@@ -1011,7 +1011,7 @@ bunx vitest run __tests__/pages/settings-prompt-route.test.tsx --maxWorkers=1 --
 
 Expected green result: shared editor, migration, guards, navigation, and backup disclosure pass.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add apps/packages/ui/src/components/Option/Settings apps/packages/ui/src/routes/option-settings-route-registry.tsx apps/packages/ui/src/routes/route-registry.tsx apps/tldw-frontend/extension/routes/route-registry.tsx apps/tldw-frontend/pages/settings/prompt.tsx apps/tldw-frontend/__tests__/pages/settings-prompt-route.test.tsx apps/packages/ui/src/components/Layouts/settings-nav-config.ts apps/packages/ui/src/data/settings-index.ts apps/packages/ui/src/hooks/useOmniSearchDeps.tsx apps/packages/ui/src/components/Common/PromptSearch.tsx apps/packages/ui/src/components/Layouts/__tests__ apps/packages/ui/src/routes/__tests__/option-settings-route-split.test.tsx apps/packages/ui/src/data/__tests__/settings-index.test.ts apps/packages/ui/src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx apps/packages/ui/src/components/Option/Chatbooks/__tests__/ChatbooksPlaygroundPage.backup-all.test.tsx apps/packages/ui/src/assets/locale/en/settings.json apps/packages/ui/src/public/_locales/en/settings.json
@@ -1035,7 +1035,7 @@ git commit -m "feat: replace workflow prompt settings ($TASK_ID)"
 - Modify: `apps/packages/ui/src/hooks/chat/useChatActions.ts`
 - Modify: `apps/packages/ui/src/hooks/useMessage.tsx`
 
-- [ ] **Step 1: Write failing mode-wrapper and golden tests**
+- [x] **Step 1: Write failing mode-wrapper and golden tests**
 
 For each top-level wrapper, assert prompt loading occurs before `runChatPipeline` creates message stubs:
 
@@ -1057,7 +1057,7 @@ Add provider-message goldens:
 
 Expected red result: modes still read local settings inside preflight/preparePrompt and use `.replace`.
 
-- [ ] **Step 2: Thread the optional snapshot through existing params**
+- [x] **Step 2: Thread the optional snapshot through existing params**
 
 Add the same optional field to `ChatModeParamsBase` **and** to each independently declared mode parameter type: `RagModeParams`, `TabChatModeParams`, `DocumentChatModeParams`, and `NormalChatModeParams`:
 
@@ -1069,7 +1069,7 @@ Do not assume the four mode types extend `ChatModeParamsBase`; they currently do
 
 This placement matters: `runChatPipeline` creates optimistic user/assistant messages before its current `preflight`, so resolution inside `preflight` is too late.
 
-- [ ] **Step 3: Replace mode-local getters and replacement loops**
+- [x] **Step 3: Replace mode-local getters and replacement loops**
 
 - Remove `promptForRag()` and `getWebSearchPrompt()` calls from mode definitions.
 - Use `renderServicePromptPart()` from the snapshot.
@@ -1077,7 +1077,7 @@ This placement matters: `runChatPipeline` creates optimistic user/assistant mess
 - Move web-search prompt availability outside the best-effort provider/search catch. A provider search failure may still fall back; a supported-server prompt failure aborts preflight.
 - Keep selected-source retrieval fallback behavior, but do not let its catch convert a prompt-resolution failure into a grounding fallback.
 
-- [ ] **Step 4: Harden all question-rewrite calls**
+- [x] **Step 4: Harden all question-rewrite calls**
 
 In Main RAG, Document Chat, and legacy `useMessage`, construct the rewrite model with:
 
@@ -1091,7 +1091,7 @@ In Main RAG, Document Chat, and legacy `useMessage`, construct the rewrite model
 
 The customized rewrite output is used only as the retrieval query. Tests also prove authenticated sources, media IDs, retrieval options, provider/model selection, and tool configuration are unchanged.
 
-- [ ] **Step 5: Write failing Compare tests**
+- [x] **Step 5: Write failing Compare tests**
 
 In `useChatActions.service-prompts.test.tsx`, assert:
 
@@ -1103,11 +1103,11 @@ In `useChatActions.service-prompts.test.tsx`, assert:
 
 `useCompareSubmit` handles a later per-model reply as its own top-level invocation, so its ordinary `normalChatMode` wrapper may load a new snapshot once. Verify that path through the wrapper test; no `useCompareSubmit.ts` code change is expected.
 
-- [ ] **Step 6: Implement Compare snapshot ownership**
+- [x] **Step 6: Implement Compare snapshot ownership**
 
 In `useChatActions.ts`, resolve the web-search definition before creating/persisting the Compare user message and pass the same snapshot in `compareEnhancedParams` to every branch. Do not resolve inside `models.map`.
 
-- [ ] **Step 7: Write failing legacy Sidepanel tests**
+- [x] **Step 7: Write failing legacy Sidepanel tests**
 
 In `useMessage.service-prompts.test.tsx`, assert:
 
@@ -1118,11 +1118,11 @@ In `useMessage.service-prompts.test.tsx`, assert:
 - rewrite is tool-disabled/non-persistent;
 - final answer uses rewritten query while Main/Tab/Document keep original-question semantics.
 
-- [ ] **Step 8: Implement the legacy snapshot path**
+- [x] **Step 8: Implement the legacy snapshot path**
 
 Load the applicable snapshot once into a local constant at the beginning of the top-level legacy send path, before UI mutation. Reuse it for rewrite and final answer. Do not retrofit the whole legacy hook onto `ChatModeContext`.
 
-- [ ] **Step 9: Run focused Chat tests**
+- [x] **Step 9: Run focused Chat tests**
 
 ```bash
 cd apps/packages/ui
@@ -1131,7 +1131,7 @@ bunx vitest run src/hooks/chat-modes/__tests__/service-prompts.test.ts src/hooks
 
 Expected green result: all consumers resolve once at the correct boundary and preserve the locked semantics.
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git add apps/packages/ui/src/hooks/chat-modes/chatModePipeline.ts apps/packages/ui/src/hooks/chat-modes/ragMode.ts apps/packages/ui/src/hooks/chat-modes/tabChatMode.ts apps/packages/ui/src/hooks/chat-modes/documentChatMode.ts apps/packages/ui/src/hooks/chat-modes/normalChatMode.ts apps/packages/ui/src/hooks/chat/useChatActions.ts apps/packages/ui/src/hooks/useMessage.tsx apps/packages/ui/src/hooks/chat-modes/__tests__/service-prompts.test.ts apps/packages/ui/src/hooks/chat/__tests__/useChatActions.service-prompts.test.tsx apps/packages/ui/src/hooks/__tests__/useMessage.service-prompts.test.tsx
@@ -1150,7 +1150,7 @@ git commit -m "feat: resolve service prompts in chat workflows ($TASK_ID)"
 - Modify: `apps/extension/tests/e2e/page-inventory.ts`
 - Modify implementation task metadata and final summary
 
-- [ ] **Step 1: Add the cross-host and corrupt-transport E2E cases**
+- [x] **Step 1: Add the cross-host and corrupt-transport E2E cases**
 
 Launch the production build with the existing `launchWithExtension` helper—not an `OrSkip` wrapper—so this completion gate fails on missing browser/build/server prerequisites. Seed the extension's `tldwConfig` through the helper, then create a second page in the same persistent context and seed the same config in WebUI `localStorage` with `page.addInitScript` before navigation. Keep two cases in this one file:
 
@@ -1178,7 +1178,7 @@ Also assert Preview makes no API/LLM call and the page has no serious axe violat
 
 Update only the two page inventories needed to name `/settings/prompt` “Workflow prompts”. Do not add CI shard configuration.
 
-- [ ] **Step 2: Add the four-definition runtime propagation matrix**
+- [x] **Step 2: Add the four-definition runtime propagation matrix**
 
 In `apps/tldw-frontend/e2e/workflows/service-prompts-runtime.spec.ts`, use the real disposable Service Prompt API and real WebUI workflow components. Stub only nondeterministic retrieval, web-search, and model responses, and capture the actual provider payload emitted by each workflow. Do not satisfy this matrix by calling `renderServicePromptPart()` directly.
 
@@ -1197,7 +1197,7 @@ After each definition's custom-marker assertions, reset it through a real client
 
 Expected red result: editors can persist overrides, but current workflows continue reading local/default prompt text and reset is not reflected in a new invocation.
 
-- [ ] **Step 3: Run the backend gate**
+- [x] **Step 3: Run the backend gate**
 
 ```bash
 source .venv/bin/activate
@@ -1227,7 +1227,7 @@ python -m ruff check \
 
 Expected result: all focused backend tests pass, compileall is silent, and Ruff reports no errors.
 
-- [ ] **Step 4: Run Bandit on every touched Python path**
+- [x] **Step 4: Run Bandit on every touched Python path**
 
 ```bash
 source .venv/bin/activate
@@ -1244,7 +1244,7 @@ python -m bandit -r \
 
 Expected result: exit 0 and no new finding in changed code.
 
-- [ ] **Step 5: Run frontend unit/integration gates**
+- [x] **Step 5: Run frontend unit/integration gates**
 
 ```bash
 cd apps/packages/ui
@@ -1278,7 +1278,7 @@ bun run build:chrome:prod
 
 Expected result: focused tests, OpenAPI guard, typecheck, lint, locale check, compile, and Chrome production build pass.
 
-- [ ] **Step 6: Run the real runtime and cross-host E2E gates**
+- [x] **Step 6: Run the real runtime and cross-host E2E gates**
 
 Run these only against a disposable local single-user test server using the fake keys below, with the WebUI already running at `TLDW_WEB_URL`. Start that server with `CUSTOM_OPENAI_API_URL=http://127.0.0.1:18112/v1` and `CUSTOM_OPENAI_API_KEY=sk-e2e-fake`; the runtime spec owns the loopback capture listener at that URL. Never point the mutating save/reset cases at a personal or shared account. Both specs must health-check their required URLs before mutation and fail rather than skip when a prerequisite is unavailable.
 
@@ -1299,7 +1299,7 @@ bunx playwright test tests/e2e/service-prompts.spec.ts --reporter=line --workers
 
 Expected result: all named consumers use the saved marker, reset restores their packaged messages, and cross-host save visibility, scope isolation, corrupt reset, preview, and responsive accessibility pass without skips.
 
-- [ ] **Step 7: Run repository hygiene**
+- [x] **Step 7: Run repository hygiene**
 
 ```bash
 git diff --check
@@ -1317,14 +1317,14 @@ Review every changed file against this plan. Confirm there is no:
 - `webSearchFollowUpPrompt` migration;
 - CI shard edit.
 
-- [ ] **Step 8: Commit E2E/inventory closeout**
+- [x] **Step 8: Commit E2E/inventory closeout**
 
 ```bash
 git add apps/extension/tests/e2e/service-prompts.spec.ts apps/tldw-frontend/e2e/workflows/service-prompts-runtime.spec.ts apps/tldw-frontend/e2e/smoke/page-inventory.ts apps/extension/tests/e2e/page-inventory.ts
 git commit -m "test: verify service prompts v1 ($TASK_ID)"
 ```
 
-- [ ] **Step 9: Finalize and commit the Backlog task**
+- [x] **Step 9: Finalize and commit the Backlog task**
 
 - Record focused test, typecheck, lint, build, E2E, OpenAPI, Bandit, and `git diff --check` evidence.
 - Mark every acceptance criterion complete only after the evidence exists.
