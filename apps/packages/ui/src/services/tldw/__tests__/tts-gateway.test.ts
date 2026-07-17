@@ -38,7 +38,8 @@ const makeClient = (options?: {
   })
   const client = {
     ensureConfigForRequest: vi.fn(async () => config),
-    request
+    request,
+    requestWithCurrentConfig: request
   }
   return {
     client,
@@ -278,6 +279,83 @@ describe("tldw gateway speech client", () => {
     expect(capabilityCalls(request)).toHaveLength(0)
   })
 
+  it("preserves AbortError transport metadata without exposing response secrets", async () => {
+    const rawSecret = "abort-token-secret"
+    const { client } = makeClient({
+      config: {
+        serverUrl: "https://abort-error.example.test",
+        authMode: "single-user",
+        apiKey: "abort-key"
+      },
+      speechResponse: {
+        ok: false,
+        status: 0,
+        error: `Request aborted token=${rawSecret}`,
+        name: "AbortError",
+        code: "REQUEST_ABORTED",
+        details: {
+          detail: "The speech request was cancelled",
+          access_token: rawSecret
+        }
+      }
+    })
+
+    const error = await detailed(client, "Cancelled").catch((reason) => reason)
+
+    expect(error).toBeInstanceOf(Error)
+    expect(error).toMatchObject({
+      name: "AbortError",
+      code: "REQUEST_ABORTED",
+      status: 0,
+      details: {
+        detail: "The speech request was cancelled",
+        access_token: "[redacted-secret]"
+      }
+    })
+    expect(JSON.stringify(error)).not.toContain(rawSecret)
+    expect(error.message).not.toContain(rawSecret)
+  })
+
+  it("preserves sanitized HTTP transport status, details, code, and name", async () => {
+    const rawSecret = "http-api-secret"
+    const { client } = makeClient({
+      config: {
+        serverUrl: "https://http-error.example.test",
+        authMode: "multi-user",
+        accessToken: "client-token",
+        orgId: 22
+      },
+      speechResponse: {
+        ok: false,
+        status: 429,
+        error: `Rate limited api_key=${rawSecret}`,
+        name: "TldwRequestError",
+        code: "UPSTREAM_RATE_LIMITED",
+        details: {
+          detail: "Try again later",
+          api_key: rawSecret,
+          retry_after: 3
+        }
+      }
+    })
+
+    const error = await detailed(client, "Rate limit").catch((reason) => reason)
+
+    expect(error).toMatchObject({
+      name: "TldwRequestError",
+      code: "UPSTREAM_RATE_LIMITED",
+      status: 429,
+      details: {
+        detail: "Try again later",
+        api_key: "[redacted-secret]",
+        retry_after: 3
+      }
+    })
+    expect(error.message).toContain("Rate limited")
+    expect(error.message).not.toContain(rawSecret)
+    expect(JSON.stringify(error)).not.toContain(rawSecret)
+  })
+
   it("does not negotiate or add extension fields without a backend option", async () => {
     const { client, request } = makeClient({
       config: {
@@ -356,6 +434,217 @@ describe("tldw gateway speech client", () => {
     await detailed(client, "Fourth", options)
 
     expect(capabilityCalls(request)).toHaveLength(2)
+  })
+
+  it("uses monotonic expiry when the wall clock moves backward", async () => {
+    const now = vi.spyOn(performance, "now").mockReturnValue(1_000)
+    const { client, request } = makeClient({
+      config: {
+        serverUrl: "https://monotonic-cache.example.test",
+        authMode: "single-user",
+        apiKey: "monotonic-secret"
+      }
+    })
+
+    await detailed(client, "First", { backend: "openrouter" })
+    vi.setSystemTime(new Date("2020-01-01T00:00:00Z"))
+    now.mockReturnValue(31_001)
+    await detailed(client, "Expired", { backend: "openrouter" })
+
+    expect(capabilityCalls(request)).toHaveLength(2)
+  })
+
+  it("bounds cached capability scopes", async () => {
+    const { client, request, setConfig } = makeClient()
+    const firstUrl = "https://bounded-0.example.test"
+
+    for (let index = 0; index < 65; index += 1) {
+      setConfig({
+        serverUrl: `https://bounded-${index}.example.test`,
+        authMode: "single-user",
+        apiKey: `bounded-secret-${index}`
+      })
+      await detailed(client, `Scope ${index}`, { backend: "openrouter" })
+    }
+    setConfig({
+      serverUrl: firstUrl,
+      authMode: "single-user",
+      apiKey: "rotated-bounded-secret"
+    })
+    await detailed(client, "Evicted scope", { backend: "openrouter" })
+
+    expect(capabilityCalls(request)).toHaveLength(66)
+  })
+
+  it("coalesces same-scope capability requests through the scope-local in-flight map", async () => {
+    let releaseCapability: ((value: unknown) => void) | undefined
+    const capability = new Promise((resolve) => {
+      releaseCapability = resolve
+    })
+    const speechRequests: Array<Record<string, any>> = []
+    const request = vi.fn(async (init: Record<string, any>) => {
+      if (init.path === "/api/v1/audio/speech") {
+        speechRequests.push(init)
+        return { ok: true, status: 200, data: audioBytes(), headers: {} }
+      }
+      throw new Error("generic GET transport must not be used")
+    })
+    const requestWithCurrentConfig = vi.fn(async () => capability)
+    const client = {
+      ensureConfigForRequest: vi.fn(async () => ({
+        serverUrl: "https://same-scope.example.test",
+        authMode: "multi-user",
+        accessToken: "same-scope-secret",
+        orgId: 3
+      })),
+      request,
+      requestWithCurrentConfig
+    }
+
+    const first = detailed(client, "First", { backend: "openrouter" })
+    const second = detailed(client, "Second", { backend: "openrouter" })
+    await vi.waitFor(() => expect(requestWithCurrentConfig).toHaveBeenCalledTimes(1))
+    releaseCapability?.({
+      ok: true,
+      status: 200,
+      data: { supports_explicit_backend: true }
+    })
+    await Promise.all([first, second])
+
+    expect(requestWithCurrentConfig).toHaveBeenCalledWith({
+      path: "/api/v1/audio/providers",
+      method: "GET",
+      returnResponse: true
+    })
+    expect(speechRequests.map((entry) => entry.body.backend)).toEqual([
+      "openrouter",
+      "openrouter"
+    ])
+  })
+
+  it("never shares concurrent capability results across server or organization scopes", async () => {
+    let releaseA: ((value: unknown) => void) | undefined
+    let releaseB: ((value: unknown) => void) | undefined
+    const capabilityA = new Promise((resolve) => {
+      releaseA = resolve
+    })
+    const capabilityB = new Promise((resolve) => {
+      releaseB = resolve
+    })
+    const globallyCoalesced = Promise.resolve({
+      supports_explicit_backend: true
+    })
+    const makeScopedClient = (
+      serverUrl: string,
+      orgId: number,
+      capability: Promise<unknown>
+    ) => {
+      const speechRequests: Array<Record<string, any>> = []
+      return {
+        speechRequests,
+        client: {
+          ensureConfigForRequest: vi.fn(async () => ({
+            serverUrl,
+            authMode: "multi-user",
+            accessToken: `scope-${orgId}-secret`,
+            orgId
+          })),
+          request: vi.fn(async (init: Record<string, any>) => {
+            if (init.path === "/api/v1/audio/providers") return globallyCoalesced
+            speechRequests.push(init)
+            return { ok: true, status: 200, data: audioBytes(), headers: {} }
+          }),
+          requestWithCurrentConfig: vi.fn(async () => capability)
+        }
+      }
+    }
+    const scopeA = makeScopedClient(
+      "https://concurrent-a.example.test",
+      10,
+      capabilityA
+    )
+    const scopeB = makeScopedClient(
+      "https://concurrent-b.example.test",
+      11,
+      capabilityB
+    )
+
+    const first = detailed(scopeA.client, "A", { backend: "openrouter" })
+    const second = detailed(scopeB.client, "B", { backend: "openrouter" })
+    await vi.waitFor(() => {
+      expect(scopeA.client.requestWithCurrentConfig).toHaveBeenCalledTimes(1)
+      expect(scopeB.client.requestWithCurrentConfig).toHaveBeenCalledTimes(1)
+    })
+    releaseA?.({
+      ok: true,
+      status: 200,
+      data: { supports_explicit_backend: false }
+    })
+    releaseB?.({
+      ok: true,
+      status: 200,
+      data: { supports_explicit_backend: true }
+    })
+    await Promise.all([first, second])
+
+    expect(scopeA.speechRequests[0].body).not.toHaveProperty("backend")
+    expect(scopeB.speechRequests[0].body.backend).toBe("openrouter")
+    expect(scopeA.client.request).not.toHaveBeenCalledWith(
+      expect.objectContaining({ path: "/api/v1/audio/providers" })
+    )
+    expect(scopeB.client.request).not.toHaveBeenCalledWith(
+      expect.objectContaining({ path: "/api/v1/audio/providers" })
+    )
+  })
+
+  it("discards a capability result when the active config scope changes mid-request", async () => {
+    let config: TestConfig = {
+      serverUrl: "https://race-a.example.test",
+      authMode: "multi-user",
+      accessToken: "race-a-secret",
+      orgId: 41
+    }
+    let releaseCapability: ((value: unknown) => void) | undefined
+    const firstCapability = new Promise((resolve) => {
+      releaseCapability = resolve
+    })
+    const speechRequests: Array<Record<string, any>> = []
+    const requestWithCurrentConfig = vi
+      .fn()
+      .mockImplementationOnce(async () => firstCapability)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        data: { supports_explicit_backend: false }
+      })
+    const client = {
+      ensureConfigForRequest: vi.fn(async () => config),
+      request: vi.fn(async (init: Record<string, any>) => {
+        speechRequests.push(init)
+        return { ok: true, status: 200, data: audioBytes(), headers: {} }
+      }),
+      requestWithCurrentConfig
+    }
+
+    const first = detailed(client, "Changing scope", { backend: "openrouter" })
+    await vi.waitFor(() => expect(requestWithCurrentConfig).toHaveBeenCalledTimes(1))
+    config = {
+      serverUrl: "https://race-b.example.test",
+      authMode: "multi-user",
+      accessToken: "race-b-secret",
+      orgId: 42
+    }
+    releaseCapability?.({
+      ok: true,
+      status: 200,
+      data: { supports_explicit_backend: true }
+    })
+    await first
+    await detailed(client, "Stable new scope", { backend: "openrouter" })
+
+    expect(requestWithCurrentConfig).toHaveBeenCalledTimes(2)
+    expect(speechRequests[0].body).not.toHaveProperty("backend")
+    expect(speechRequests[1].body).not.toHaveProperty("backend")
   })
 
   it("partitions capability support by sanitized server, auth mode, and organization", async () => {
