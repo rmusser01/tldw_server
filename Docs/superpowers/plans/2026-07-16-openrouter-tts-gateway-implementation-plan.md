@@ -347,7 +347,7 @@ git commit -m "feat(tts): add OpenAI-compatible speech gateway adapter"
 
 **Tests:** Request resolution, gateway executor, endpoint integration, BYOK SQLite/unit, CORS, fallback/cancellation/resource cleanup, and circuit classification.
 
-**Status:** In Progress
+**Status:** Complete
 
 ### Files
 
@@ -533,7 +533,7 @@ git commit -m "feat(tts): route explicit gateways with safe fallback"
 
 **Tests:** Jobs/history unit tests, WebUI client/service/settings/playground/audiobook/read-along tests.
 
-**Status:** Not Started
+**Status:** In Progress
 
 ### Files
 
