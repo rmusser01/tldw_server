@@ -2,8 +2,11 @@ import importlib
 from pathlib import Path
 
 import dotenv
+import pytest
 
 from tldw_Server_API.app.core import config
+
+pytestmark = pytest.mark.unit
 
 
 def test_explicit_tldw_env_file_is_first_dotenv_candidate(
@@ -43,6 +46,20 @@ def test_exclusive_tldw_env_file_does_not_load_canonical_env(
 
     assert config._candidate_env_paths(project_root, tmp_path) == [explicit_env.resolve()]  # nosec B101
     assert sentinel not in config.os.environ  # nosec B101
+
+
+def test_exclusive_tldw_env_file_must_reference_an_existing_file(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    missing_env = tmp_path / "missing.env"
+    monkeypatch.setenv("TLDW_ENV_FILE", str(missing_env))
+    monkeypatch.setenv("TLDW_ENV_FILE_EXCLUSIVE", "1")
+
+    with pytest.raises(FileNotFoundError, match="TLDW_ENV_FILE_EXCLUSIVE"):
+        config._candidate_env_paths(tmp_path / "tldw_Server_API", tmp_path)
+
+    assert not missing_env.exists()  # nosec B101
 
 
 def test_chat_request_schema_does_not_bypass_exclusive_env_file(

@@ -45,6 +45,7 @@ modified_files:
 - apps/tldw-frontend/scripts/skills-certification/profile.mjs
 - apps/tldw-frontend/scripts/skills-certification/run.mjs
 - backlog/tasks/task-530.15 - Add-strict-Skills-live-integration-certification.md
+- tldw_Server_API/app/api/v1/endpoints/skills.py
 - tldw_Server_API/app/api/v1/router_groups/content.py
 - tldw_Server_API/app/api/v1/schemas/chat_request_schemas.py
 - tldw_Server_API/app/core/AuthNZ/initialize.py
@@ -81,21 +82,26 @@ Add an explicit release-gate command that certifies the /skills lifecycle agains
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented the explicit Skills live certification runner and dedicated WebUI/MV3 surfaces in an isolated worktree.
 
+PR review remediation:
+- Added the standard ingress rate-limit dependency to every Skills API route, with a route contract test.
+- Made exclusive TLDW_ENV_FILE selection fail fast when the configured path is missing or not a file; AuthNZ no longer creates a typo path.
+- Removed silent JSON parse catches from the certification runner; malformed response/result data now reaches the existing categorized failure handling.
+- Added accepted unit markers to the changed config/AuthNZ test modules.
+- Kept final result categories mandatory and verified that missing/unknown categories fail closed.
+- Confirmed the reported extension readiness TDZ does not exist: timeout is initialized before attempt(), and the synchronous-callback regression test passes.
+- Independent final review found no correctness/security issues; its one low-complexity finding was addressed by removing the behavior-free responseJson wrapper.
+
 Verification:
-- Frontend certification/helper Vitest: 134 passed.
-- Extension launcher/relay/fixture Vitest: 39 passed.
-- Shared UI background/deployment Vitest: 5 passed.
-- Backend isolation/router/AuthNZ pytest: 203 passed.
-- Extension TypeScript compile: passed.
-- Frontend scoped ESLint: passed.
-- Existing mocked WebUI Skills gate: 13 expected, 0 skipped/unexpected/flaky.
-- Existing extension parity gate: 6 expected, 0 skipped/unexpected/flaky.
-- Strict live gate: passed at apps/tldw-frontend/test-results/skills-certification/2026-07-17T03-56-33-275Z-uw38dl.
-- Strict evidence: both surface postconditions passed; 23/23 extension Skills requests worker-owned; all observed DB paths were inside the disposable runtime; children closed; runtime deleted; artifact scan passed.
-- Worktree Databases/system_logs.jsonl was not modified by the final live run.
+- Frontend certification/helper Vitest: 136 passed; final runner rerun: 47 passed.
+- Extension launcher/relay Vitest rerun: 29 passed; extension TypeScript compile passed.
+- Backend isolation/router/AuthNZ pytest: 206 passed.
+- Full Skills API integration pytest: 90 passed.
+- Frontend scoped ESLint and Prettier: passed.
+- Final strict live gate passed at apps/tldw-frontend/test-results/skills-certification/2026-07-17T05-19-42-369Z-blrzs4.
+- Strict evidence: WebUI and extension each had 1 expected test, 0 skipped/flaky/unexpected; both postconditions passed; 23/23 extension Skills requests were worker-owned, successful, and 2xx; children closed; runtime deleted; artifact scan passed.
+- Worktree Databases/system_logs.jsonl timestamp predates and was unchanged by the final live run.
 - Bandit touched source and test scopes: 0 findings, 0 errors.
 - git diff --check: passed.
-- Final correctness review: approved with no Critical, Important, or Minor findings.
 
 Known skips or blockers: none. The explicit live gate remains intentionally outside default PR CI.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
@@ -105,9 +111,9 @@ Known skips or blockers: none. The explicit live gate remains intentionally outs
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Added one strict, explicit Skills release-gate command that owns a disposable single-user backend, certifies the complete lifecycle in both the WebUI and packaged Chrome MV3 extension, proves exact background-worker request ownership, checks direct API postconditions, and always performs bounded teardown plus sanitized evidence handling.
 
-The implementation also closes isolation defects reproduced during certification: exclusive runtime env selection now applies to central config and AuthNZ loading, the chat request schema no longer performs an independent dotenv load, and all certification database and system-log paths stay under the disposable runtime. Product Skills behavior was not changed.
+The final PR review remediation also rate-limits the newly exposed Skills API, fails fast on invalid exclusive runtime env paths, prevents AuthNZ from creating typo env files, and makes malformed certification JSON fail through explicit workflow/postcondition classification. Strict result categories remain mandatory by design.
 
-All acceptance criteria and verification gates pass.
+All acceptance criteria and local verification gates pass.
 PR: https://github.com/rmusser01/tldw_server/pull/2746
 <!-- SECTION:FINAL_SUMMARY:END -->
 

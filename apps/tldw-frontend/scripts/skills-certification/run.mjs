@@ -40,11 +40,7 @@ export function formatSkillsCertificationDiagnostic(summary) {
 
 function defaultReadJson(filePath) {
   if (!existsSync(filePath)) return undefined;
-  try {
-    return JSON.parse(readFileSync(filePath, 'utf8'));
-  } catch {
-    return undefined;
-  }
+  return JSON.parse(readFileSync(filePath, 'utf8'));
 }
 
 function defaultReadText(filePath) {
@@ -91,14 +87,6 @@ function resultCategories(result, allowed) {
 
 function apiUrl(backendUrl, pathname) {
   return new URL(pathname, backendUrl).toString();
-}
-
-async function responseJson(response) {
-  try {
-    return await response.json();
-  } catch {
-    return undefined;
-  }
 }
 
 /** Execute the fixed local Skills certification gate. */
@@ -179,7 +167,7 @@ export async function runSkillsCertification({ operations: suppliedOperations = 
         const response = await fetchDirect(apiUrl(backendUrl, route), {
           headers: { 'X-API-KEY': SKILLS_CERT_API_KEY },
         });
-        if (response.status !== 200 || !invariant(await responseJson(response))) {
+        if (response.status !== 200 || !invariant(await response.json())) {
           fail('postcondition', `${route} status/invariant`);
         }
       } catch {
@@ -208,7 +196,7 @@ export async function runSkillsCertification({ operations: suppliedOperations = 
       const trash = await fetchDirect(apiUrl(backendUrl, trashRoute), {
         headers: { 'X-API-KEY': SKILLS_CERT_API_KEY },
       });
-      const body = await responseJson(trash);
+      const body = await trash.json();
       if (
         trash.status !== 200 ||
         !Array.isArray(body?.skills) ||

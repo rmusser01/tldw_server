@@ -4,13 +4,18 @@ Unit tests for MCP secret generation during AuthNZ initialization.
 
 from pathlib import Path
 
+import pytest
+
 from tldw_Server_API.app.core.AuthNZ import initialize as initialize_module
 from tldw_Server_API.app.core.AuthNZ.initialize import (
     check_environment,
     _detect_env_issues,
+    _ensure_env_file,
     _resolve_env_locations,
     generate_secure_keys,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def test_detect_env_issues_requires_mcp_secrets(monkeypatch):
@@ -84,3 +89,17 @@ def test_authnz_initializer_excludes_canonical_env_in_exclusive_mode(
 
     assert result["env_path"] == explicit_env.resolve()  # nosec B101
     assert sentinel not in initialize_module.os.environ  # nosec B101
+
+
+def test_authnz_initializer_does_not_create_missing_exclusive_env_file(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    missing_env = tmp_path / "missing.env"
+    monkeypatch.setenv("TLDW_ENV_FILE", str(missing_env))
+    monkeypatch.setenv("TLDW_ENV_FILE_EXCLUSIVE", "true")
+
+    with pytest.raises(FileNotFoundError, match="TLDW_ENV_FILE_EXCLUSIVE"):
+        _ensure_env_file()
+
+    assert not missing_env.exists()  # nosec B101

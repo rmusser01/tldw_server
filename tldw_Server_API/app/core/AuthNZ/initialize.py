@@ -204,7 +204,13 @@ def _resolve_env_locations() -> tuple[list[Path], list[Path], Path]:
     cfg_dir = project_root / "Config_Files"
     explicit_env = get_tldw_env_file_path()
     env_candidates = [explicit_env] if explicit_env else []
-    if not (explicit_env and is_tldw_env_file_exclusive()):
+    if explicit_env and is_tldw_env_file_exclusive():
+        if not explicit_env.is_file():
+            raise FileNotFoundError(
+                "TLDW_ENV_FILE_EXCLUSIVE requires TLDW_ENV_FILE to reference "
+                f"an existing file: {explicit_env}"
+            )
+    else:
         env_candidates.extend([cfg_dir / ".env", cfg_dir / ".ENV"])
     template_candidates = [cfg_dir / ".env.example"]
     return env_candidates, template_candidates, cfg_dir

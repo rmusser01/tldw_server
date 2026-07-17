@@ -418,6 +418,52 @@ describe('Skills certification runner', () => {
     }
   });
 
+  it('requires an explicit allowed categories array in every final surface result', async () => {
+    for (const value of [
+      { status: 'passed' },
+      { categories: ['unknown_category'], status: 'passed' },
+    ]) {
+      for (const surface of ['webui', 'extension']) {
+        const test = harness();
+        test.files.set(`/evidence/${surface}/result.json`, value);
+
+        const summary = await runSkillsCertification({ operations: test.operations });
+
+        expect(summary.failures.map((failure: { category: string }) => failure.category)).toContain(
+          `${surface}_workflow`
+        );
+      }
+    }
+  });
+
+  it('classifies malformed direct API JSON as a postcondition failure', async () => {
+    const route = '/api/v1/skills/?limit=1&offset=0';
+    const test = harness({
+      fetch: vi.fn(async (url: string) => {
+        if (url.endsWith(route)) {
+          return {
+            json: async () => {
+              throw new SyntaxError('malformed JSON');
+            },
+            status: 200,
+          };
+        }
+        if (url.includes('/trash'))
+          return { json: async () => ({ skills: [], total: 0 }), status: 200 };
+        if (url.includes(`/skills/${webName}`) || url.includes(`/skills/${extensionName}`))
+          return { json: async () => ({}), status: 404 };
+        return { json: async () => ({ total: 0 }), status: 200 };
+      }),
+    });
+
+    const summary = await runSkillsCertification({ operations: test.operations });
+
+    expect(summary.failures).toContainEqual({
+      category: 'postcondition',
+      detail: `${route} status/invariant`,
+    });
+  });
+
   it('retains workflow, postcondition, cleanup, and artifact safety in the final summary', async () => {
     const test = harness({
       fetch: vi.fn(async (url) => {

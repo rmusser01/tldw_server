@@ -260,6 +260,11 @@ def _candidate_env_paths(project_root: Path, repo_root: Path | None = None) -> l
     if explicit_env_file:
         candidates.append(explicit_env_file)
         if is_tldw_env_file_exclusive():
+            if not explicit_env_file.is_file():
+                raise FileNotFoundError(
+                    "TLDW_ENV_FILE_EXCLUSIVE requires TLDW_ENV_FILE to reference "
+                    f"an existing file: {explicit_env_file}"
+                )
             return candidates
 
     candidates.extend(
