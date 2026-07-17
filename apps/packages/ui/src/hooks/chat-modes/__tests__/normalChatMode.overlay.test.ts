@@ -62,10 +62,39 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
 }))
 
 vi.mock("./../chatModePipeline", () => ({
-  runChatPipeline: mocks.runChatPipeline
+  runChatPipeline: mocks.runChatPipeline,
+  getRequiredServicePrompt: (snapshot: any, id: string) => {
+    const resolved = snapshot?.definitions?.[id]
+    if (!resolved) throw new Error(`Service Prompt snapshot is missing ${id}.`)
+    return resolved
+  }
 }))
 
 import { normalChatMode } from "../normalChatMode"
+
+const webSearchSnapshot = {
+  scopeKey: "test-scope",
+  capability: "supported" as const,
+  definitions: {
+    "chat.web_search.answer": {
+      definition: {
+        id: "chat.web_search.answer",
+        parts: [
+          {
+            key: "template",
+            mode: "template" as const,
+            required_variables: ["current_date_time", "search_results"]
+          }
+        ]
+      },
+      parts: {
+        template: "Search wrapper at {current_date_time}\n{search_results}"
+      },
+      source: "packaged" as const,
+      revision: null
+    }
+  }
+}
 
 describe("normalChatMode overlay prompt ordering", () => {
   beforeEach(() => {
@@ -107,6 +136,7 @@ describe("normalChatMode overlay prompt ordering", () => {
         overlaySystemPrompt: "Overlay snapshot prompt",
         actorSettings: { isEnabled: true } as never,
         webSearch: true,
+        servicePromptSnapshot: webSearchSnapshot,
         setMessages: vi.fn(),
         saveMessageOnSuccess: vi.fn(async () => null),
         saveMessageOnError: vi.fn(async () => null),

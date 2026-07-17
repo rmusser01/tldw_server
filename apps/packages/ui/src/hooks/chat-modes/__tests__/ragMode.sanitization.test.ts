@@ -99,7 +99,12 @@ vi.mock("@/utils/resolve-api-provider", () => ({
 }))
 
 vi.mock("../chatModePipeline", () => ({
-  runChatPipeline: (...args: unknown[]) => mocks.runChatPipeline(...args)
+  runChatPipeline: (...args: unknown[]) => mocks.runChatPipeline(...args),
+  getRequiredServicePrompt: (snapshot: any, id: string) => {
+    const resolved = snapshot?.definitions?.[id]
+    if (!resolved) throw new Error(`Service Prompt snapshot is missing ${id}.`)
+    return resolved
+  }
 }))
 
 vi.mock("@/utils/output-formatting-guide", () => ({
@@ -108,6 +113,47 @@ vi.mock("@/utils/output-formatting-guide", () => ({
 }))
 
 import { __testing__ } from "../ragMode"
+
+const servicePromptSnapshot = {
+  scopeKey: "test-scope",
+  capability: "supported" as const,
+  definitions: {
+    "chat.rag.answer": {
+      definition: {
+        id: "chat.rag.answer",
+        parts: [
+          {
+            key: "template",
+            mode: "template" as const,
+            required_variables: ["context", "question"]
+          }
+        ]
+      },
+      parts: {
+        template: "Use context:\n{context}\nQuestion: {question}"
+      },
+      source: "packaged" as const,
+      revision: null
+    },
+    "chat.rag.question_rewrite": {
+      definition: {
+        id: "chat.rag.question_rewrite",
+        parts: [
+          {
+            key: "template",
+            mode: "template" as const,
+            required_variables: ["chat_history", "question"]
+          }
+        ]
+      },
+      parts: {
+        template: "History: {chat_history}\nQuestion: {question}"
+      },
+      source: "packaged" as const,
+      revision: null
+    }
+  }
+}
 
 const createRagContext = (overrides: Record<string, unknown> = {}) =>
   ({
@@ -147,6 +193,7 @@ const createRagContext = (overrides: Record<string, unknown> = {}) =>
     ragEnableCitations: true,
     ragSources: [],
     ragAdvancedOptions: { enable_intent_routing: true },
+    servicePromptSnapshot,
     ...overrides
   }) as any
 

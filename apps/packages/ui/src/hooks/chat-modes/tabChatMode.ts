@@ -1,4 +1,3 @@
-import { promptForRag } from "~/services/tldw-server"
 import { type ChatHistory, type Message, type ToolChoice } from "~/store/option"
 import { generateHistory } from "@/utils/generate-history"
 import { humanMessageFormatter } from "@/utils/human-message"
@@ -9,11 +8,17 @@ import type { ActorSettings } from "@/types/actor"
 import { maybeInjectActorMessage } from "@/utils/actor"
 import type { SaveMessageData, SaveMessageErrorData } from "@/types/chat-modes"
 import {
+  getRequiredServicePrompt,
   runChatPipeline,
   type ChatModeDefinition
 } from "./chatModePipeline"
 import { appendSystemPromptSuffix } from "@/utils/output-formatting-guide"
 import type { ChatSubmitResult } from "@/hooks/chat/chat-action-utils"
+import {
+  loadServicePromptSnapshot,
+  renderServicePromptPart,
+  type ServicePromptSnapshot
+} from "@/services/service-prompts"
 
 type TabChatModeParams = {
   selectedModel: string
@@ -42,6 +47,7 @@ type TabChatModeParams = {
   historyForModel?: ChatHistory
   regenerateFromMessage?: Message
   documents: ChatDocuments
+  servicePromptSnapshot?: ServicePromptSnapshot
 }
 
 const tabChatModeDefinition: ChatModeDefinition<TabChatModeParams> = {
@@ -75,42 +81,32 @@ const tabChatModeDefinition: ChatModeDefinition<TabChatModeParams> = {
     parentMessageId: ctx.resolvedAssistantParentMessageId ?? null
   }),
   preparePrompt: async (ctx) => {
-    const { ragPrompt: systemPrompt } = await promptForRag()
-    const resolvedSystemPrompt = appendSystemPromptSuffix(
-      systemPrompt,
-      ctx.systemPromptAppendix
+    const answerPrompt = getRequiredServicePrompt(
+      ctx.servicePromptSnapshot,
+      "chat.rag.answer"
     )
     const context = await getTabContents(ctx.documents)
-
-    let humanMessage = await humanMessageFormatter({
-      content: [
-        {
-          text: resolvedSystemPrompt
-            .replace("{context}", context)
-            .replace("{question}", ctx.message),
-          type: "text"
-        }
-      ],
+    const renderedSystemPrompt = renderServicePromptPart(
+      answerPrompt.definition,
+      "template",
+      answerPrompt.parts.template,
+      { context, question: ctx.message }
+    )
+    const resolvedSystemPrompt = appendSystemPromptSuffix(
+      renderedSystemPrompt,
+      ctx.systemPromptAppendix
+    )
+    const content = ctx.image.length > 0
+      ? [
+          { text: ctx.message, type: "text" as const },
+          { image_url: ctx.image, type: "image_url" as const }
+        ]
+      : [{ text: resolvedSystemPrompt, type: "text" as const }]
+    const humanMessage = await humanMessageFormatter({
+      content,
       model: ctx.selectedModel,
       useOCR: ctx.useOCR
     })
-
-    if (ctx.image.length > 0) {
-      humanMessage = await humanMessageFormatter({
-        content: [
-          {
-            text: ctx.message,
-            type: "text"
-          },
-          {
-            image_url: ctx.image,
-            type: "image_url"
-          }
-        ],
-        model: ctx.selectedModel,
-        useOCR: ctx.useOCR
-      })
-    }
 
     let applicationChatHistory = generateHistory(
       ctx.historyForModel ?? ctx.history,
@@ -144,6 +140,10 @@ export const tabChatMode = async (
   params: Omit<TabChatModeParams, "documents">
 ): Promise<ChatSubmitResult> => {
   console.log("Using tabChatMode")
+  const servicePromptSnapshot =
+    params.servicePromptSnapshot ??
+    (await loadServicePromptSnapshot(["chat.rag.answer"], { signal }))
+  getRequiredServicePrompt(servicePromptSnapshot, "chat.rag.answer")
   return runChatPipeline(
     tabChatModeDefinition,
     message,
@@ -154,7 +154,8 @@ export const tabChatMode = async (
     signal,
     {
       ...params,
-      documents
+      documents,
+      servicePromptSnapshot
     }
   )
 }

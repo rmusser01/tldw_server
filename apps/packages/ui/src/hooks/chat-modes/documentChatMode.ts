@@ -1,4 +1,3 @@
-import { promptForRag } from "~/services/tldw-server"
 import { type ChatHistory, type Message, type ToolChoice } from "~/store/option"
 import { addFileToSession, getSessionFiles } from "@/db/dexie/helpers"
 import { generateHistory } from "@/utils/generate-history"
@@ -17,11 +16,17 @@ import type { ChatModelSettings } from "@/store/model"
 import { extractGenerationInfo } from "@/utils/llm-helpers"
 import type { SaveMessageData, SaveMessageErrorData } from "@/types/chat-modes"
 import {
+  getRequiredServicePrompt,
   runChatPipeline,
   type ChatModeDefinition
 } from "./chatModePipeline"
 import { appendSystemPromptSuffix } from "@/utils/output-formatting-guide"
 import type { ChatSubmitResult } from "@/hooks/chat/chat-action-utils"
+import {
+  loadServicePromptSnapshot,
+  renderServicePromptPart,
+  type ServicePromptSnapshot
+} from "@/services/service-prompts"
 
 interface RagDocumentMetadata {
   filename?: string
@@ -78,6 +83,7 @@ type DocumentChatModeParams = {
   newFiles: UploadedFile[]
   allFiles: UploadedFile[]
   documents?: any[]
+  servicePromptSnapshot?: ServicePromptSnapshot
 }
 
 const documentChatModeDefinition: ChatModeDefinition<DocumentChatModeParams> = {
@@ -116,11 +122,13 @@ const documentChatModeDefinition: ChatModeDefinition<DocumentChatModeParams> = {
   }),
   preparePrompt: async (ctx) => {
     let query = ctx.message
-    const { ragPrompt: systemPrompt, ragQuestionPrompt: questionPrompt } =
-      await promptForRag()
-    const resolvedSystemPrompt = appendSystemPromptSuffix(
-      systemPrompt,
-      ctx.systemPromptAppendix
+    const answerPrompt = getRequiredServicePrompt(
+      ctx.servicePromptSnapshot,
+      "chat.rag.answer"
+    )
+    const rewritePrompt = getRequiredServicePrompt(
+      ctx.servicePromptSnapshot,
+      "chat.rag.question_rewrite"
     )
     const contextMessages = ctx.isRegenerate
       ? ctx.messages
@@ -147,9 +155,12 @@ const documentChatModeDefinition: ChatModeDefinition<DocumentChatModeParams> = {
           return `${message.isBot ? "Assistant: " : "Human: "}${message.message}`
         })
         .join("\n")
-      const promptForQuestion = questionPrompt
-        .replaceAll("{chat_history}", chat_history)
-        .replaceAll("{question}", ctx.message)
+      const promptForQuestion = renderServicePromptPart(
+        rewritePrompt.definition,
+        "template",
+        rewritePrompt.parts.template,
+        { chat_history, question: ctx.message }
+      )
       const questionMessage = await humanMessageFormatter({
         content: [
           {
@@ -162,7 +173,9 @@ const documentChatModeDefinition: ChatModeDefinition<DocumentChatModeParams> = {
       })
       const questionOllama = await pageAssistModel({
         model: ctx.selectedModel,
-        toolChoice: ctx.toolChoice
+        toolChoice: "none",
+        tools: [],
+        saveToDb: false
       })
       const response = await questionOllama.invoke([questionMessage])
       query = response.content.toString()
@@ -246,12 +259,21 @@ const documentChatModeDefinition: ChatModeDefinition<DocumentChatModeParams> = {
       context += "No documents uploaded for this conversation."
     }
 
+    const renderedSystemPrompt = renderServicePromptPart(
+      answerPrompt.definition,
+      "template",
+      answerPrompt.parts.template,
+      { context, question: ctx.message }
+    )
+    const resolvedSystemPrompt = appendSystemPromptSuffix(
+      renderedSystemPrompt,
+      ctx.systemPromptAppendix
+    )
+
     const humanMessage = await humanMessageFormatter({
       content: [
         {
-          text: resolvedSystemPrompt
-            .replace("{context}", context)
-            .replace("{question}", ctx.message),
+          text: resolvedSystemPrompt,
           type: "text"
         }
       ],
@@ -290,6 +312,14 @@ export const documentChatMode = async (
   uploadedFiles: UploadedFile[],
   params: Omit<DocumentChatModeParams, "uploadedFiles" | "newFiles" | "allFiles">
 ): Promise<ChatSubmitResult> => {
+  const servicePromptSnapshot =
+    params.servicePromptSnapshot ??
+    (await loadServicePromptSnapshot(
+      ["chat.rag.answer", "chat.rag.question_rewrite"],
+      { signal }
+    ))
+  getRequiredServicePrompt(servicePromptSnapshot, "chat.rag.answer")
+  getRequiredServicePrompt(servicePromptSnapshot, "chat.rag.question_rewrite")
   await getAllDefaultModelSettings()
 
   let sessionFiles: UploadedFile[] = []
@@ -327,7 +357,8 @@ export const documentChatMode = async (
     documents: documentsForSave,
     uploadedFiles,
     newFiles,
-    allFiles
+    allFiles,
+    servicePromptSnapshot
   }
 
   return runChatPipeline(

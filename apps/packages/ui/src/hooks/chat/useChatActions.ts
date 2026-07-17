@@ -18,6 +18,7 @@ import { getModelNicknameByID } from "@/db/dexie/nickname"
 import { isReasoningEnded, isReasoningStarted } from "@/libs/reasoning"
 import type { ChatDocuments } from "@/models/ChatTypes"
 import { normalChatMode } from "@/hooks/chat-modes/normalChatMode"
+import { getRequiredServicePrompt } from "@/hooks/chat-modes/chatModePipeline"
 import { continueChatMode } from "@/hooks/chat-modes/continueChatMode"
 import { ragMode } from "@/hooks/chat-modes/ragMode"
 import { tabChatMode } from "@/hooks/chat-modes/tabChatMode"
@@ -156,6 +157,10 @@ import {
   resolveOutputFormattingGuideSuffix
 } from "@/utils/output-formatting-guide"
 import { parseVisualIdentityEmoteCommand } from "@/utils/visual-identity-emote"
+import {
+  loadServicePromptSnapshot,
+  type ServicePromptSnapshot
+} from "@/services/service-prompts"
 
 type ChatModelSettingsStore = ChatModelSettings & {
   setSystemPrompt?: (prompt: string) => void
@@ -3098,6 +3103,22 @@ export const useChatActions = ({
     try {
       // Pre-stream awaits run inside the try so a failure resets streaming state
       // (and lets the caller drain its queue) instead of stranding the UI.
+      const compareWebSearchEnabled =
+        compareModeActive &&
+        (typeof requestOverrides?.webSearch === "boolean"
+          ? requestOverrides.webSearch
+          : webSearch)
+      let compareServicePromptSnapshot: ServicePromptSnapshot | undefined
+      if (compareWebSearchEnabled) {
+        compareServicePromptSnapshot = await loadServicePromptSnapshot(
+          ["chat.web_search.answer"],
+          { signal }
+        )
+        getRequiredServicePrompt(
+          compareServicePromptSnapshot,
+          "chat.web_search.answer"
+        )
+      }
       const chatModeParams = await buildChatModeParams({
         ...(requestOverrides ?? {}),
         ragMediaIds: turnRagMediaIds,
@@ -3586,7 +3607,7 @@ export const useChatActions = ({
             }
           ])
 
-          let activeHistoryId = historyId
+          let activeHistoryId = enhancedChatModeParams.historyId
           if (temporaryChat) {
             if (historyId !== "temp") {
               setHistoryId("temp")
@@ -3644,7 +3665,8 @@ export const useChatActions = ({
           })
           const compareEnhancedParams = {
             ...compareChatModeParams,
-            uploadedFiles: turnUploadedFiles
+            uploadedFiles: turnUploadedFiles,
+            servicePromptSnapshot: compareServicePromptSnapshot
           }
 
           const comparePromises = models.map(async (modelId) => {

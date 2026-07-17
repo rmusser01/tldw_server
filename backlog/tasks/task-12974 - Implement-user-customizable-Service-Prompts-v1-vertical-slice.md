@@ -61,6 +61,18 @@ modified_files:
 - apps/tldw-frontend/e2e/workflows/tier-1-critical/settings-core.spec.ts
 - apps/tldw-frontend/extension/routes/route-registry.tsx
 - apps/tldw-frontend/pages/settings/prompt.tsx
+- apps/packages/ui/src/hooks/chat-modes/chatModePipeline.ts
+- apps/packages/ui/src/hooks/chat-modes/ragMode.ts
+- apps/packages/ui/src/hooks/chat-modes/tabChatMode.ts
+- apps/packages/ui/src/hooks/chat-modes/documentChatMode.ts
+- apps/packages/ui/src/hooks/chat-modes/normalChatMode.ts
+- apps/packages/ui/src/hooks/chat/useChatActions.ts
+- apps/packages/ui/src/hooks/useMessage.tsx
+- apps/packages/ui/src/hooks/chat-modes/__tests__/service-prompts.test.ts
+- apps/packages/ui/src/hooks/chat/__tests__/useChatActions.service-prompts.test.tsx
+- apps/packages/ui/src/hooks/__tests__/useMessage.service-prompts.test.tsx
+- apps/packages/ui/src/hooks/chat-modes/__tests__/ragMode.sanitization.test.ts
+- apps/packages/ui/src/hooks/chat-modes/__tests__/normalChatMode.overlay.test.ts
 ---
 
 ## Description
@@ -131,6 +143,13 @@ A single cancelable Settings-navigation event now covers mobile Settings selecti
 TDD evidence included: scope rejection/Retry RED 2/2 then matching/mismatching/accepted-leave GREEN 3/3; programmatic Browser/Hash navigation RED 2/2 then GREEN 2/2; token-only stale-URL regressions RED 3/3 then GREEN; CommandPalette injected prompt route RED 1/1 then mouse-decline/Enter-allow GREEN with exactly one allowed transition; useClearChat RED 1 failed/1 passed then GREEN 2/2; and final extension-anchor RED (utility 1 failed/7 passed plus focused component failure because a different extension host confirmed) then GREEN utility 8/8 and component 1/1. The approved unsaved-navigation contract remains the design's explicit Settings navigation, prompt query selection, Back/Forward, and beforeunload in Browser/Hash hosts, plus the reviewed anchor, mobile/Close, CommandPalette targetPath, and New Chat shell paths. After three caller-audit corrections, NotesDock/QuickIngest and a universal app-wide blocker were deliberately left for separate design/task work rather than expanding this local-guard plan or creating an untracked TODO.
 
 Final verification on the settled diff: shared UI compatibility matrix 11 files/127 tests passed; Next settings route 1/1 passed; Next TypeScript no-emit passed; shared UI full typecheck still reaches unrelated repository-baseline diagnostics, while the exact touched-path filter returned no matches; focused ESLint passed with only the standard Next pages-directory environment notice; duplicate locale-key check passed; git diff --check passed. Bandit is not applicable to this frontend-only TypeScript/test/Backlog delta. CI shards remain deliberately unchanged per requester. Independent specification, UX/overengineering, and final correctness reviewers all APPROVED; the correctness review's cross-extension anchor blocker was reproduced and fixed TDD-first before final approval.
+Task 6 immutable Chat snapshot integration (2026-07-16): three parallel TDD slices added wrapper/pipeline ownership, Compare fan-out ownership, and legacy Sidepanel ownership, followed by independent review/fix cycles. Wrapper RED first reproduced four missing pre-pipeline loads; definition RED reproduced seven old-getter/replacement/failure-boundary/tool-hardening gaps. Final wrappers load only the exact eligible IDs, reuse caller snapshots, and validate required entries before runChatPipeline or wrapper side effects (Main RAG answer+rewrite, Tab answer, Document answer+rewrite, web-Normal answer; no-web Normal does no prompt work). Definitions never fetch, render single-pass through the production renderer, append literal systemPromptAppendix after render, preserve Main/Tab/Document original-question semantics and Tab image byte-equivalence, harden Main/Document rewrites with toolChoice none/tools []/saveToDb false, keep provider/search and selected-source fallback behavior without swallowing prompt failures, and remove production promptForRag/getWebSearchPrompt/replacement loops.
+
+Compare RED proved two expected ordering failures plus a server-chat history regression: prompt resolution originally occurred after mutating parameter/history work, partial snapshots reached setMessages, and a temporary historyId bypass permanently suppressed ensureServerChatHistoryId. Final Compare computes effective web-search ownership, loads and validates one chat.web_search.answer snapshot with the exact turn signal before parameter/history/message work, then preserves ordinary server-history ensure behavior and reuses its returned ID. The same snapshot object/revision is passed outside models.map to every branch; deferred rejection/partial snapshots have zero shared effects; no-web performs no Service Prompt read.
+
+Legacy RED proved prompt loading followed loop/controller mutation, generic failures leaked/rethrew raw details, AbortError was not silent, and provider-message assertions were incomplete. Final legacy RAG loads once before loop/controller/message/history/pending mutation, blocks unresolved migration with an actionable Workflow prompts link, keeps catalog-404 compatibility, never falls back locally on supported failures, emits one fixed retryable connection notice without raw prompt/error text, treats AbortError silently, reuses one snapshot for rewrite/final answer, and locks rewrite tools/persistence plus exact rewrite/final provider messages and retrieval/model/source invariants.
+
+Final independent consolidated review APPROVED correctness, specification compliance, and YAGNI after requiring fail-closed validation for every wrapper, Tab image compatibility, Compare history preservation, and legacy lifecycle/error/provider-message fixes. Fresh verification: exact planned three-file slice 37/37; five-file impacted matrix 46/46; extension compile exit 0; WebUI no-emit TypeScript with incremental disabled exit 0; focused project-config ESLint exit 0 (standard pages-directory notice only); git diff --check clean. Shared UI touched-path type diagnostics are zero; unrelated whole-file formatting/type baselines were not churned. Bandit is not applicable to this frontend-only TypeScript/test delta. CI shards remain deliberately unchanged per requester.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

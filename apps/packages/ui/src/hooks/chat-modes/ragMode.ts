@@ -1,4 +1,3 @@
-import { promptForRag } from "~/services/tldw-server" // Reuse prompts storage for now
 import {
   type ChatHistory,
   type Message,
@@ -23,12 +22,18 @@ import {
 import type { ChatModelSettings } from "@/store/model"
 import type { SaveMessageData, SaveMessageErrorData } from "@/types/chat-modes"
 import {
+  getRequiredServicePrompt,
   runChatPipeline,
   type ChatModeContext,
   type ChatModeDefinition
 } from "./chatModePipeline"
 import { appendSystemPromptSuffix } from "@/utils/output-formatting-guide"
 import type { ChatSubmitResult } from "@/hooks/chat/chat-action-utils"
+import {
+  loadServicePromptSnapshot,
+  renderServicePromptPart,
+  type ServicePromptSnapshot
+} from "@/services/service-prompts"
 
 const RAG_STRING_ARRAY_KEYS = new Set([
   "sources",
@@ -230,6 +235,7 @@ type RagModeParams = {
   assistantParentMessageId?: string | null
   historyForModel?: ChatHistory
   regenerateFromMessage?: Message
+  servicePromptSnapshot?: ServicePromptSnapshot
 }
 
 type PreparedRagRetrieval = {
@@ -306,13 +312,9 @@ const buildSelectedSourceGroundingResponse = (
   saveToDb: false
 })
 
-const resolveRagQuery = async (
-  ctx: ChatModeContext<RagModeParams>,
-  questionPrompt: string
-) => {
-  let query = ctx.message
+const buildRagRewritePrompt = (ctx: ChatModeContext<RagModeParams>) => {
   if (hasSelectedMediaSources(ctx)) {
-    return query
+    return null
   }
 
   const contextMessages = ctx.isRegenerate
@@ -329,7 +331,7 @@ const resolveRagQuery = async (
       ]
 
   if (contextMessages.length <= 2) {
-    return query
+    return null
   }
 
   const lastTenMessages = contextMessages.slice(-10)
@@ -339,12 +341,27 @@ const resolveRagQuery = async (
       return `${message.isBot ? "Assistant: " : "Human: "}${message.message}`
     })
     .join("\n")
-  const promptForQuestion = questionPrompt
-    .replaceAll("{chat_history}", chat_history)
-    .replaceAll("{question}", ctx.message)
+  const rewritePrompt = getRequiredServicePrompt(
+    ctx.servicePromptSnapshot,
+    "chat.rag.question_rewrite"
+  )
+  return renderServicePromptPart(
+    rewritePrompt.definition,
+    "template",
+    rewritePrompt.parts.template,
+    { chat_history, question: ctx.message }
+  )
+}
+
+const resolveRagQuery = async (
+  ctx: ChatModeContext<RagModeParams>,
+  promptForQuestion: string | null
+) => {
+  if (!promptForQuestion) return ctx.message
   const questionOllama = await pageAssistModel({
     model: ctx.selectedModel,
     toolChoice: "none",
+    tools: [],
     saveToDb: false
   })
   const questionMessage = await humanMessageFormatter({
@@ -358,8 +375,7 @@ const resolveRagQuery = async (
     useOCR: ctx.useOCR
   })
   const response = await questionOllama.invoke([questionMessage])
-  query = response.content.toString()
-  return removeReasoning(query)
+  return removeReasoning(response.content.toString())
 }
 
 const buildRagOptions = async (
@@ -429,9 +445,9 @@ const buildRagOptions = async (
 
 const prepareRagRetrieval = async (
   ctx: ChatModeContext<RagModeParams>,
-  questionPrompt: string
+  rewritePrompt: string | null
 ): Promise<PreparedRagRetrieval> => {
-  const query = await resolveRagQuery(ctx, questionPrompt)
+  const query = await resolveRagQuery(ctx, rewritePrompt)
   await tldwClient.initialize()
   const defaultTopK = await getNoOfRetrievedDocs()
   const ragOptions = await buildRagOptions(ctx, defaultTopK)
@@ -499,9 +515,8 @@ const ragModeDefinition: ChatModeDefinition<RagModeParams> = {
       return null
     }
 
-    const { ragQuestionPrompt: questionPrompt } = await promptForRag()
     try {
-      const retrieval = await prepareRagRetrieval(ctx, questionPrompt)
+      const retrieval = await prepareRagRetrieval(ctx, null)
       if (retrieval.source.length > 0) {
         selectedSourceRetrievalCache.set(ctx, retrieval)
         return null
@@ -522,12 +537,11 @@ const ragModeDefinition: ChatModeDefinition<RagModeParams> = {
     }
   },
   preparePrompt: async (ctx) => {
-    const { ragPrompt: systemPrompt, ragQuestionPrompt: questionPrompt } =
-      await promptForRag()
-    const resolvedSystemPrompt = appendSystemPromptSuffix(
-      systemPrompt,
-      ctx.systemPromptAppendix
+    const answerPrompt = getRequiredServicePrompt(
+      ctx.servicePromptSnapshot,
+      "chat.rag.answer"
     )
+    const rewritePrompt = buildRagRewritePrompt(ctx)
 
     let context = ""
     let source: RagSourceEntry[] = []
@@ -537,7 +551,7 @@ const ragModeDefinition: ChatModeDefinition<RagModeParams> = {
         selectedSourceRetrievalCache.delete(ctx)
       }
       const retrieval =
-        cachedRetrieval || (await prepareRagRetrieval(ctx, questionPrompt))
+        cachedRetrieval || (await prepareRagRetrieval(ctx, rewritePrompt))
       context = retrieval.context
       source = retrieval.source
       if (hasSelectedMediaSources(ctx) && source.length === 0) {
@@ -552,12 +566,21 @@ const ragModeDefinition: ChatModeDefinition<RagModeParams> = {
       source = []
     }
 
+    const renderedSystemPrompt = renderServicePromptPart(
+      answerPrompt.definition,
+      "template",
+      answerPrompt.parts.template,
+      { context, question: ctx.message }
+    )
+    const resolvedSystemPrompt = appendSystemPromptSuffix(
+      renderedSystemPrompt,
+      ctx.systemPromptAppendix
+    )
+
     const humanMessage = await humanMessageFormatter({
       content: [
         {
-          text: resolvedSystemPrompt
-            .replace("{context}", context)
-            .replace("{question}", ctx.message),
+          text: resolvedSystemPrompt,
           type: "text"
         }
       ],
@@ -595,6 +618,14 @@ export const ragMode = async (
   params: RagModeParams
 ): Promise<ChatSubmitResult> => {
   console.log("Using ragMode")
+  const servicePromptSnapshot =
+    params.servicePromptSnapshot ??
+    (await loadServicePromptSnapshot(
+      ["chat.rag.answer", "chat.rag.question_rewrite"],
+      { signal }
+    ))
+  getRequiredServicePrompt(servicePromptSnapshot, "chat.rag.answer")
+  getRequiredServicePrompt(servicePromptSnapshot, "chat.rag.question_rewrite")
   return runChatPipeline(
     ragModeDefinition,
     message,
@@ -603,7 +634,7 @@ export const ragMode = async (
     messages,
     history,
     signal,
-    params
+    { ...params, servicePromptSnapshot }
   )
 }
 

@@ -47,6 +47,8 @@ import {
 import { isAbortLikeError } from "@/hooks/chat/abort-turn-cleanup"
 import type { DynamicUIRequest } from "@/types/dynamic-ui"
 import type { MessageMetadataExtra } from "@/store/option"
+import type { ServicePromptSnapshot } from "@/services/service-prompts"
+import type { KnownServicePromptId } from "@/services/tldw/domains/service-prompts"
 
 const STREAMING_UPDATE_INTERVAL_MS = 80
 const EMPTY_RESPONSE_ERROR_MESSAGE = "No response text was returned."
@@ -90,6 +92,7 @@ export type ChatModeParamsBase = {
   researchContext?: ChatResearchContext
   dynamicUIRequest?: DynamicUIRequest
   userMetadataExtra?: MessageMetadataExtra
+  servicePromptSnapshot?: ServicePromptSnapshot
 }
 
 export type ChatModeContext<TParams extends ChatModeParamsBase> = TParams & {
@@ -129,6 +132,17 @@ export type ChatModePreflightResult = {
   saveToDb?: boolean
   conversationId?: string
   skipHistoryAppend?: boolean
+}
+
+export const getRequiredServicePrompt = (
+  snapshot: ServicePromptSnapshot | undefined,
+  id: KnownServicePromptId
+) => {
+  const resolved = snapshot?.definitions[id]
+  if (!resolved) {
+    throw new Error(`Service Prompt snapshot is missing ${id}.`)
+  }
+  return resolved
 }
 
 export type ChatModeMessageSetup = {

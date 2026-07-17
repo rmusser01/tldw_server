@@ -1,6 +1,6 @@
 import React from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { promptForRag, systemPromptForNonRag } from "~/services/tldw-server";
+import { systemPromptForNonRag } from "~/services/tldw-server";
 import { useStoreMessageOption, type Message } from "~/store/option";
 import { useStoreMessage } from "~/store";
 import { getContentFromCurrentTab } from "~/libs/get-html";
@@ -105,6 +105,11 @@ import { subscribeChatLoopEvents } from "@/services/chat-loop/bridge";
 import { extractChatLoopEvent } from "@/services/chat-loop/stream";
 import { resolveUseMessageSendMode } from "@/hooks/useMessage.routing";
 import { syncChatSettingsForServerChat } from "@/services/chat-settings";
+import {
+  loadServicePromptSnapshot,
+  renderServicePromptPart,
+  type ServicePromptSnapshot,
+} from "@/services/service-prompts";
 
 const extractToolCalls = (generationInfo: unknown): ToolCall[] | undefined => {
   if (!generationInfo || typeof generationInfo !== "object") return undefined;
@@ -486,8 +491,17 @@ export const useMessage = () => {
     history: ChatHistory,
     signal: AbortSignal,
     embeddingSignal: AbortSignal,
+    servicePromptSnapshot: ServicePromptSnapshot,
     regenerateFromMessage?: Message,
   ) => {
+    const answerPrompt =
+      servicePromptSnapshot.definitions["chat.rag.answer"];
+    const rewritePrompt =
+      servicePromptSnapshot.definitions["chat.rag.question_rewrite"];
+    if (!answerPrompt || !rewritePrompt) {
+      throw new Error("The Sidepanel RAG Service Prompt snapshot is incomplete.");
+    }
+
     if (!selectedModel || selectedModel.trim().length === 0) {
       notification.error({
         message: t("error"),
@@ -609,8 +623,6 @@ export const useMessage = () => {
     setMessages(newMessage);
     try {
       let query = message;
-      const { ragPrompt: systemPrompt, ragQuestionPrompt: questionPrompt } =
-        await promptForRag();
       if (newMessage.length > 2) {
         const lastTenMessages = newMessage.slice(-10);
         lastTenMessages.pop();
@@ -619,12 +631,16 @@ export const useMessage = () => {
             return `${message.isBot ? "Assistant: " : "Human: "}${message.message}`;
           })
           .join("\n");
-        const promptForQuestion = questionPrompt
-          .replaceAll("{chat_history}", chat_history)
-          .replaceAll("{question}", message);
+        const promptForQuestion = renderServicePromptPart(
+          rewritePrompt.definition,
+          "template",
+          rewritePrompt.parts.template,
+          { chat_history, question: message },
+        );
         const questionOllama = await pageAssistModel({
           model,
           toolChoice: "none",
+          tools: [],
           saveToDb: false,
         });
         const questionMessage = await humanMessageFormatter({
@@ -669,9 +685,12 @@ export const useMessage = () => {
       let humanMessage = await humanMessageFormatter({
         content: [
           {
-            text: systemPrompt
-              .replace("{context}", context)
-              .replace("{question}", query),
+            text: renderServicePromptPart(
+              answerPrompt.definition,
+              "template",
+              answerPrompt.parts.template,
+              { context, question: query },
+            ),
             type: "text",
           },
         ],
@@ -2373,7 +2392,6 @@ export const useMessage = () => {
     };
     serverChatIdOverride?: string | null;
   }) => {
-    resetChatLoopState();
     const trimmedImageBackendOverride =
       typeof imageBackendOverride === "string"
         ? imageBackendOverride.trim()
@@ -2384,6 +2402,88 @@ export const useMessage = () => {
       requestOverrides.selectedModel.trim().length > 0
         ? requestOverrides.selectedModel.trim()
         : selectedModel || "";
+    const resolvedChatMode =
+      requestOverrides?.chatMode === "normal" ||
+      requestOverrides?.chatMode === "rag" ||
+      requestOverrides?.chatMode === "vision"
+        ? requestOverrides.chatMode
+        : chatMode;
+    const model =
+      (hasExplicitImageBackend
+        ? trimmedImageBackendOverride || resolvedSelectedModel
+        : resolvedSelectedModel
+      ).trim() || "image-generation";
+    const imageBackendCandidates = hasExplicitImageBackend
+      ? [trimmedImageBackendOverride]
+      : resolveImageBackendCandidates(
+          currentChatModelSettings?.apiProvider,
+          model,
+        );
+    const usesLegacySidepanelRag =
+      !hasExplicitImageBackend &&
+      imageBackendCandidates.length === 0 &&
+      (!uploadedFiles || uploadedFiles.length === 0) &&
+      (!docs || docs.length === 0) &&
+      !messageType &&
+      resolvedChatMode === "rag";
+    const activeController = controller ?? new AbortController();
+    const signal = activeController.signal;
+    let servicePromptSnapshot: ServicePromptSnapshot | undefined;
+    if (usesLegacySidepanelRag) {
+      try {
+        servicePromptSnapshot = await loadServicePromptSnapshot(
+          ["chat.rag.answer", "chat.rag.question_rewrite"],
+          { signal },
+        );
+      } catch (error) {
+        const errorName =
+          typeof error === "object" && error !== null && "name" in error
+            ? error.name
+            : undefined;
+        if (signal.aborted || errorName === "AbortError") {
+          return;
+        }
+        if (
+          typeof error === "object" &&
+          error !== null &&
+          "code" in error &&
+          error.code === "service_prompt_migration_required"
+        ) {
+          notification.warning({
+            message: t(
+              "workflowPromptsReviewRequired",
+              "Workflow prompts need review",
+            ),
+            description: (
+              <>
+                Browser-local prompt values must be imported or discarded.{" "}
+                <a
+                  href="/options.html#/settings/prompt"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Review workflow prompts
+                </a>
+              </>
+            ),
+          });
+          return;
+        }
+        notification.error({
+          message: t(
+            "workflowPromptsUnavailable",
+            "Workflow prompts unavailable",
+          ),
+          description: t(
+            "workflowPromptsUnavailableDescription",
+            "Unable to load workflow prompts from your tldw server. Check the connection and try again.",
+          ),
+        });
+        return;
+      }
+    }
+
+    resetChatLoopState();
     const resolvedSelectedSystemPrompt =
       requestOverrides &&
       Object.prototype.hasOwnProperty.call(
@@ -2406,12 +2506,6 @@ export const useMessage = () => {
       typeof requestOverrides?.webSearch === "boolean"
         ? requestOverrides.webSearch
         : webSearch;
-    const resolvedChatMode =
-      requestOverrides?.chatMode === "normal" ||
-      requestOverrides?.chatMode === "rag" ||
-      requestOverrides?.chatMode === "vision"
-        ? requestOverrides.chatMode
-        : chatMode;
     const conversationContextOverrides = {
       historyForModel: Array.isArray(requestOverrides?.historyForModel)
         ? requestOverrides.historyForModel
@@ -2433,23 +2527,7 @@ export const useMessage = () => {
       }
     }
 
-    const model =
-      (hasExplicitImageBackend
-        ? trimmedImageBackendOverride || resolvedSelectedModel
-        : resolvedSelectedModel
-      ).trim() || "image-generation";
-    let signal: AbortSignal;
-    let activeController: AbortController;
-    if (!controller) {
-      const newController = new AbortController();
-      activeController = newController;
-      signal = newController.signal;
-      setAbortController(newController);
-    } else {
-      activeController = controller;
-      setAbortController(controller);
-      signal = controller.signal;
-    }
+    setAbortController(activeController);
     const replyActive =
       Boolean(replyTarget) &&
       !isRegenerate &&
@@ -2470,12 +2548,6 @@ export const useMessage = () => {
       : {};
 
     try {
-      const imageBackendCandidates = hasExplicitImageBackend
-        ? [trimmedImageBackendOverride]
-        : resolveImageBackendCandidates(
-            currentChatModelSettings?.apiProvider,
-            model,
-          );
       if (hasExplicitImageBackend || imageBackendCandidates.length > 0) {
         await normalChatMode(
           message,
@@ -2800,6 +2872,7 @@ export const useMessage = () => {
             memory || history,
             signal,
             embeddingSignal,
+            servicePromptSnapshot!,
             regenerateFromMessage,
           );
         }
