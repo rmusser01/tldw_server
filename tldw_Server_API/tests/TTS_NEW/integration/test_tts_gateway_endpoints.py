@@ -9,9 +9,11 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from fastapi import status
+from fastapi import HTTPException, status
+from fastapi.routing import APIRoute
 
 from tldw_Server_API.app.api.v1.endpoints import audio as audio_endpoints
+from tldw_Server_API.app.api.v1.endpoints.audio import audio_tts
 from tldw_Server_API.app.api.v1.schemas.audio_schemas import OpenAISpeechRequest
 from tldw_Server_API.app.core.TTS.adapters.base import AudioFormat, TTSResponse
 from tldw_Server_API.app.core.TTS.gateway_config import normalize_gateway_specs
@@ -343,10 +345,58 @@ async def test_speech_backend_conflict_precedes_all_credential_resolution(
     resolve_legacy.assert_not_awaited()
 
 
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/providers",
+        "/tts/providers/{provider}/model-info",
+        "/voices/catalog",
+    ],
+)
+async def test_tts_catalog_routes_declare_rate_limit_dependency(path: str) -> None:
+    route = next(
+        route
+        for route in audio_tts.router.routes
+        if isinstance(route, APIRoute) and route.path == path and "GET" in route.methods
+    )
+
+    assert any(
+        dependency.dependency is audio_tts.check_rate_limit
+        for dependency in route.dependencies
+    )
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/v1/audio/providers",
+        "/api/v1/audio/tts/providers/openai/model-info",
+        "/api/v1/audio/voices/catalog",
+    ],
+)
+async def test_tts_catalog_routes_enforce_rate_limit_dependency(
+    test_client,
+    auth_headers,
+    path: str,
+) -> None:
+    async def _deny_rate_limit() -> None:
+        raise HTTPException(status_code=429, detail="rate limited in test")
+
+    test_client.app.dependency_overrides[audio_tts.check_rate_limit] = _deny_rate_limit
+    try:
+        response = test_client.get(path, headers=auth_headers)
+    finally:
+        test_client.app.dependency_overrides.pop(audio_tts.check_rate_limit, None)
+
+    assert response.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+
+
 async def test_gateway_provider_and_model_scoped_voice_catalog(
     test_client,
     auth_headers,
 ) -> None:
+    catalog_backends: list[str | None] = []
+
     class _Service:
         async def get_capabilities(self):
             return {"openai": {"models": ["tts-1"]}}
@@ -354,8 +404,14 @@ async def test_gateway_provider_and_model_scoped_voice_catalog(
         async def list_voices(self):
             return {"openai": [{"id": "alloy"}]}
 
-        async def get_gateway_provider_catalog(self, *, user_id: int):
+        async def get_gateway_provider_catalog(
+            self,
+            *,
+            user_id: int,
+            backend: str | None = None,
+        ):
             assert user_id == 1
+            catalog_backends.append(backend)
             return {
                 "gateway:company": {
                     "display_name": "Company Speech",
@@ -412,6 +468,62 @@ async def test_gateway_provider_and_model_scoped_voice_catalog(
     assert voices.status_code == status.HTTP_200_OK
     assert [voice["id"] for voice in voices.json()["gateway:company"]] == ["Narrator", "Guide"]
     assert {voice["model"] for voice in voices.json()["gateway:company"]} == {"Vendor/Exact"}
+    assert catalog_backends == [None, "gateway:company", "gateway:company"]
+
+
+async def test_catalog_endpoints_do_not_normalize_malformed_gateway_ids_into_lookups(
+    test_client,
+    auth_headers,
+) -> None:
+    spec = _gateway_spec()
+    resolver = AsyncMock(
+        return_value=SimpleNamespace(
+            api_key="effective-key",
+            credential_scope_token="scope-token",
+        )
+    )
+    catalog = AsyncMock()
+    catalog.get.return_value = SimpleNamespace(
+        models=("Vendor/Exact",),
+        discovery_status="fresh",
+        source="discovery",
+        stale=False,
+        fetched_at=1.0,
+        fresh_until=2.0,
+        stale_until=3.0,
+        discovered_model_count=1,
+    )
+    service = TTSServiceV2(
+        gateway_catalog=catalog,
+        gateway_config_manager=SimpleNamespace(
+            get_gateway_specs=lambda: {spec.backend_id: spec}
+        ),
+        gateway_credential_resolver=resolver,
+    )
+    service.get_status = MagicMock(return_value={"providers": {}})
+    service.get_capabilities = AsyncMock(return_value={})
+    service.list_voices = AsyncMock(return_value={})
+
+    async def _get_service():
+        return service
+
+    test_client.app.dependency_overrides[audio_endpoints.get_tts_service] = _get_service
+    try:
+        model_info = test_client.get(
+            "/api/v1/audio/tts/providers/GATEWAY:company/model-info",
+            headers=auth_headers,
+        )
+        voices = test_client.get(
+            "/api/v1/audio/voices/catalog?provider=%20gateway%3Acompany%20",
+            headers=auth_headers,
+        )
+    finally:
+        test_client.app.dependency_overrides.pop(audio_endpoints.get_tts_service, None)
+
+    assert model_info.status_code == status.HTTP_404_NOT_FOUND
+    assert voices.status_code == status.HTTP_404_NOT_FOUND
+    resolver.assert_not_awaited()
+    catalog.get.assert_not_awaited()
 
 
 async def test_legacy_provider_envelope_is_unchanged_except_support_flag(
@@ -484,6 +596,84 @@ async def test_catalog_uses_only_config_authority_and_effective_credential() -> 
         credential_scope_token="opaque-scope",
         api_key="user-key",
     )
+
+
+async def test_gateway_catalog_exact_backend_filter_only_discovers_selected_gateway() -> None:
+    definitions = {
+        "first": _gateway_definition(),
+        "second": _gateway_definition(),
+    }
+    specs = normalize_gateway_specs({}, definitions)
+    resolver = AsyncMock(
+        return_value=SimpleNamespace(
+            api_key="effective-key",
+            credential_scope_token="scope-token",
+        )
+    )
+    catalog = AsyncMock()
+    catalog.get.return_value = SimpleNamespace(
+        models=("Vendor/Exact",),
+        discovery_status="fresh",
+        source="discovery",
+        stale=False,
+        fetched_at=1.0,
+        fresh_until=2.0,
+        stale_until=3.0,
+        discovered_model_count=1,
+    )
+    service = TTSServiceV2(
+        gateway_catalog=catalog,
+        gateway_config_manager=SimpleNamespace(get_gateway_specs=lambda: specs),
+        gateway_credential_resolver=resolver,
+    )
+
+    result = await service.get_gateway_provider_catalog(
+        user_id=9,
+        backend="gateway:second",
+    )
+
+    assert list(result) == ["gateway:second"]
+    resolver.assert_awaited_once_with(
+        "gateway:second",
+        user_id=9,
+        gateway_spec=specs["gateway:second"],
+    )
+    catalog.get.assert_awaited_once_with(
+        specs["gateway:second"],
+        credential_scope_token="scope-token",
+        api_key="effective-key",
+    )
+
+
+@pytest.mark.parametrize(
+    "backend",
+    ["openai", "gateway:missing", "gateway:disabled", "GATEWAY:first"],
+)
+async def test_gateway_catalog_exact_filter_rejects_non_enabled_canonical_backend(
+    backend: str,
+) -> None:
+    disabled = _gateway_definition()
+    disabled["enabled"] = False
+    specs = normalize_gateway_specs(
+        {},
+        {
+            "first": _gateway_definition(),
+            "disabled": disabled,
+        },
+    )
+    resolver = AsyncMock(side_effect=AssertionError("credential lookup used"))
+    catalog = AsyncMock()
+    service = TTSServiceV2(
+        gateway_catalog=catalog,
+        gateway_config_manager=SimpleNamespace(get_gateway_specs=lambda: specs),
+        gateway_credential_resolver=resolver,
+    )
+
+    result = await service.get_gateway_provider_catalog(user_id=9, backend=backend)
+
+    assert result == {}
+    resolver.assert_not_awaited()
+    catalog.get.assert_not_awaited()
 
 
 async def test_byok_catalog_scopes_are_partitioned_and_rotation_changes_scope() -> None:

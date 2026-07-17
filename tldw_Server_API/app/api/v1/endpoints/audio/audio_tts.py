@@ -1425,7 +1425,10 @@ async def create_speech_metadata(
     return JSONResponse(content={"alignment": alignment_payload}, headers={"X-Request-Id": request_id})
 
 
-@router.get("/providers")
+@router.get(
+    "/providers",
+    dependencies=[Depends(check_rate_limit)],
+)
 async def list_tts_providers(
     request: Request,
     tts_service: TTSServiceV2 = Depends(get_tts_service),
@@ -1463,6 +1466,7 @@ async def list_tts_providers(
 @router.get(
     "/tts/providers/{provider}/model-info",
     summary="Get focused TTS provider model information",
+    dependencies=[Depends(check_rate_limit)],
 )
 async def get_tts_provider_model_info(
     provider: str,
@@ -1476,7 +1480,10 @@ async def get_tts_provider_model_info(
     try:
         gateway_catalog = getattr(tts_service, "get_gateway_provider_catalog", None)
         if callable(gateway_catalog):
-            dynamic = await gateway_catalog(user_id=_request_user_id(current_user))
+            dynamic = await gateway_catalog(
+                user_id=_request_user_id(current_user),
+                backend=provider,
+            )
             gateway_info = dynamic.get(provider_key) if isinstance(dynamic, dict) else None
             if isinstance(gateway_info, dict):
                 return {
@@ -1565,7 +1572,11 @@ async def unload_tts_provider(
         ) from e
 
 
-@router.get("/voices/catalog", summary="List available TTS voices across providers")
+@router.get(
+    "/voices/catalog",
+    summary="List available TTS voices across providers",
+    dependencies=[Depends(check_rate_limit)],
+)
 async def list_tts_voices(
     request: Request,
     provider: Optional[str] = None,
@@ -1586,7 +1597,10 @@ async def list_tts_voices(
         if provider_key is not None:
             gateway_catalog = getattr(tts_service, "get_gateway_provider_catalog", None)
             if callable(gateway_catalog):
-                dynamic = await gateway_catalog(user_id=_request_user_id(current_user))
+                dynamic = await gateway_catalog(
+                    user_id=_request_user_id(current_user),
+                    backend=provider,
+                )
                 gateway_info = dynamic.get(provider_key) if isinstance(dynamic, dict) else None
                 if isinstance(gateway_info, dict):
                     selected_models = [model] if model is not None else gateway_info.get("models", [])
