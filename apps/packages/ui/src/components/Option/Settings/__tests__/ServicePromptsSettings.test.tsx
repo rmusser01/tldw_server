@@ -941,6 +941,51 @@ describe("ServicePromptsSettings", () => {
     expect(await screen.findByText("Unable to save this workflow prompt."))
       .toBeInTheDocument()
     expect(editor).toHaveValue(draft)
+    expect(screen.getByText("Unsaved")).toBeInTheDocument()
+  })
+
+  it.each([
+    {
+      name: "wrong validation code",
+      options: {
+        status: 422,
+        code: "other_validation_failed",
+        fieldErrors: { template: "Rejected." }
+      }
+    },
+    {
+      name: "unknown field",
+      options: {
+        status: 422,
+        code: "service_prompt_validation_failed",
+        fieldErrors: { stale_part: "Rejected." }
+      }
+    },
+    {
+      name: "blank field message",
+      options: {
+        status: 422,
+        code: "service_prompt_validation_failed",
+        fieldErrors: { template: "   " }
+      }
+    }
+  ])("shows a generic save error for $name", async ({ options }) => {
+    renderSettings()
+    await openPrompt("RAG answer")
+    const editor = screen.getByRole("textbox", { name: "Template" })
+    const draft = "Context {context}; question {question}"
+    fireEvent.change(editor, { target: { value: draft } })
+    mocks.save.mockRejectedValueOnce(new ServicePromptApiError(
+      "Malformed validation response",
+      options
+    ))
+
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
+
+    expect(await screen.findByText("Unable to save this workflow prompt."))
+      .toBeInTheDocument()
+    expect(editor).toHaveValue(draft)
+    expect(screen.getByText("Unsaved")).toBeInTheDocument()
   })
 
   it("preserves the whole draft on conflict and reloads only on request", async () => {

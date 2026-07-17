@@ -417,6 +417,9 @@ def test_service_prompt_store_failure_is_content_free(api_context) -> None:
         def get_service_prompt_override(self, _definition_id: str):
             raise DatabaseError("BODY-MUST-NOT-LEAK")
 
+        def close_connection(self) -> None:
+            raise RuntimeError("CLOSE-MUST-NOT-LEAK")
+
     api_context.app.state.db = FailingDatabase()
     response = api_context.client.get(TRANSLATION_PATH)
 
@@ -428,6 +431,7 @@ def test_service_prompt_store_failure_is_content_free(api_context) -> None:
         }
     }
     assert "BODY-MUST-NOT-LEAK" not in response.text
+    assert "CLOSE-MUST-NOT-LEAK" not in response.text
 
 
 def test_service_prompt_dependency_and_auth_errors_keep_native_shapes(api_context) -> None:
@@ -490,6 +494,7 @@ def test_service_prompt_database_calls_run_off_the_event_loop(
 ) -> None:
     event_loop_threads: set[int] = set()
     database_threads: set[int] = set()
+    connection_close_threads: list[int] = []
 
     async def override_db() -> PromptsDatabase:
         event_loop_threads.add(threading.get_ident())
@@ -509,6 +514,18 @@ def test_service_prompt_database_calls_run_off_the_event_loop(
 
         monkeypatch.setattr(api_context.db, method_name, tracked)
 
+    original_close_connection = api_context.db.close_connection
+
+    def tracked_close_connection() -> None:
+        connection_close_threads.append(threading.get_ident())
+        original_close_connection()
+
+    monkeypatch.setattr(
+        api_context.db,
+        "close_connection",
+        tracked_close_connection,
+    )
+
     get_response = api_context.client.get(TRANSLATION_PATH)
     put_response = api_context.client.put(
         TRANSLATION_PATH,
@@ -519,13 +536,28 @@ def test_service_prompt_database_calls_run_off_the_event_loop(
         params={"expected_revision": put_response.json()["revision"]},
     )
 
-    assert [get_response.status_code, put_response.status_code, delete_response.status_code] == [
+    def fail_read(*_args, **_kwargs):
+        database_threads.add(threading.get_ident())
+        raise DatabaseError("forced read failure")
+
+    monkeypatch.setattr(api_context.db, "get_service_prompt_override", fail_read)
+    failed_response = api_context.client.get(TRANSLATION_PATH)
+
+    assert [
+        get_response.status_code,
+        put_response.status_code,
+        delete_response.status_code,
+        failed_response.status_code,
+    ] == [
         200,
         200,
         200,
+        500,
     ]
     assert event_loop_threads
     assert database_threads.isdisjoint(event_loop_threads)
+    assert len(connection_close_threads) == 4
+    assert database_threads <= set(connection_close_threads)
 
 
 def test_service_prompt_databases_are_isolated_by_dependency(api_context, tmp_path: Path) -> None:

@@ -67,7 +67,9 @@ const asFieldErrors = (value: unknown): Record<string, string> | undefined => {
   const record = asRecord(value)
   if (!record) return undefined
   const entries = Object.entries(record)
-  return entries.every(([, message]) => typeof message === "string")
+  return entries.length > 0 && entries.every(
+    ([, message]) => typeof message === "string" && message.trim().length > 0
+  )
     ? Object.fromEntries(entries) as Record<string, string>
     : undefined
 }
@@ -219,13 +221,16 @@ const normalizeServicePromptError = (error: unknown): ServicePromptApiError => {
     candidate?.details?.detail ?? candidate?.detail
   ) as ServicePromptErrorDetail | null
   const status = typeof candidate?.status === "number" ? candidate.status : 0
+  const code = asOptionalString(detail?.code)
   const message = asOptionalString(detail?.message)
     ?? (error instanceof Error ? error.message : "Service Prompt request failed.")
 
   return new ServicePromptApiError(message, {
     status,
-    code: asOptionalString(detail?.code),
-    fieldErrors: asFieldErrors(detail?.field_errors),
+    code,
+    fieldErrors: code === "service_prompt_validation_failed"
+      ? asFieldErrors(detail?.field_errors)
+      : undefined,
     currentRevision: asOptionalRevision(detail?.current_revision),
     revision: asOptionalString(detail?.revision),
     canReset: typeof detail?.can_reset === "boolean" ? detail.can_reset : undefined

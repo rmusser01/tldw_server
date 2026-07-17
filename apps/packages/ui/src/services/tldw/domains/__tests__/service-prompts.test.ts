@@ -148,7 +148,7 @@ describe("Service Prompt API methods", () => {
 
   it.each([
     {
-      name: "direct",
+      name: "top-level detail compatibility input",
       error: {
         status: 409,
         detail: {
@@ -159,7 +159,7 @@ describe("Service Prompt API methods", () => {
       }
     },
     {
-      name: "extension proxy",
+      name: "bgRequest details transport input",
       error: {
         status: 409,
         details: {
@@ -232,6 +232,104 @@ describe("Service Prompt API methods", () => {
       code: "service_prompt_corrupt_override",
       revision: "revision-corrupt",
       canReset: true
+    })
+  })
+
+  it.each([
+    {
+      name: "top-level detail compatibility input",
+      error: {
+        status: 422,
+        detail: [{ type: "missing", loc: ["body", "parts"] }]
+      }
+    },
+    {
+      name: "bgRequest details transport input",
+      error: {
+        status: 422,
+        details: {
+          detail: [{ type: "missing", loc: ["body", "parts"] }]
+        }
+      }
+    }
+  ])("keeps $name structural 422 errors generic", async ({ error }) => {
+    vi.mocked(bgRequest).mockRejectedValueOnce(error)
+
+    const rejection = await servicePromptMethods
+      .saveServicePrompt("chat.rag.answer", {
+        parts: { template: "{context} {question}" },
+        expected_revision: null
+      })
+      .catch((caught) => caught) as ServicePromptApiError
+
+    expect(rejection).toBeInstanceOf(ServicePromptApiError)
+    expect(rejection.status).toBe(422)
+    expect(rejection.code).toBeUndefined()
+    expect(rejection.fieldErrors).toBeUndefined()
+  })
+
+  it.each([
+    {
+      name: "wrong-code",
+      detail: {
+        code: "other_validation_failed",
+        field_errors: { template: "Rejected." }
+      }
+    },
+    {
+      name: "blank-message",
+      detail: {
+        code: "service_prompt_validation_failed",
+        field_errors: { template: "   " }
+      }
+    },
+    {
+      name: "non-string-message",
+      detail: {
+        code: "service_prompt_validation_failed",
+        field_errors: { template: 42 }
+      }
+    }
+  ])("does not expose $name field errors as semantic", async ({ detail }) => {
+    vi.mocked(bgRequest).mockRejectedValueOnce({
+      status: 422,
+      details: { detail }
+    })
+
+    const rejection = await servicePromptMethods
+      .saveServicePrompt("chat.rag.answer", {
+        parts: { template: "{context} {question}" },
+        expected_revision: null
+      })
+      .catch((caught) => caught) as ServicePromptApiError
+
+    expect(rejection).toBeInstanceOf(ServicePromptApiError)
+    expect(rejection.status).toBe(422)
+    expect(rejection.fieldErrors).toBeUndefined()
+  })
+
+  it("leaves well-formed field keys for the active prompt schema to validate", async () => {
+    vi.mocked(bgRequest).mockRejectedValueOnce({
+      status: 422,
+      details: {
+        detail: {
+          code: "service_prompt_validation_failed",
+          field_errors: { stale_part: "Rejected." }
+        }
+      }
+    })
+
+    const rejection = await servicePromptMethods
+      .saveServicePrompt("chat.rag.answer", {
+        parts: { template: "{context} {question}" },
+        expected_revision: null
+      })
+      .catch((caught) => caught) as ServicePromptApiError
+
+    expect(rejection).toMatchObject({
+      status: 422,
+      code: "service_prompt_validation_failed",
+      fieldErrors: { stale_part: "Rejected." }
     })
   })
 

@@ -9,6 +9,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.routing import APIRoute
+from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import require_api_key_scope
 from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import get_prompts_db_for_user
@@ -164,6 +165,20 @@ def _raise_domain_error(exc: Exception) -> NoReturn:
     raise _domain_error(exc) from exc
 
 
+def _close_worker_connection(db: object) -> None:
+    """Retire this worker's connection without replacing the request outcome."""
+
+    try:
+        close_connection = getattr(db, "close_connection", None)
+        if callable(close_connection):
+            close_connection()
+    except Exception as exc:  # noqa: BLE001 - cleanup must not replace the request outcome.
+        logger.warning(
+            "Failed to close Service Prompt worker connection (error_type={})",
+            type(exc).__name__,
+        )
+
+
 @router.get(
     "/service-prompts",
     response_model=list[ServicePromptCatalogItemResponse],
@@ -197,6 +212,8 @@ def get_service_prompt(
         DatabaseError,
     ) as exc:
         _raise_domain_error(exc)
+    finally:
+        _close_worker_connection(db)
 
 
 @router.put(
@@ -231,6 +248,8 @@ def update_service_prompt(
         DatabaseError,
     ) as exc:
         _raise_domain_error(exc)
+    finally:
+        _close_worker_connection(db)
 
 
 @router.delete(
@@ -268,6 +287,8 @@ def reset_service_prompt(
         DatabaseError,
     ) as exc:
         _raise_domain_error(exc)
+    finally:
+        _close_worker_connection(db)
 
 
 __all__ = ["router"]

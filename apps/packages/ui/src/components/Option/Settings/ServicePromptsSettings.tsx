@@ -921,12 +921,19 @@ export const ServicePromptsSettings = () => {
     } catch (error) {
       if (!isCurrentOperation(operation) || isAbortError(error)) return
       setOperationAnnouncement("")
-      if (error instanceof ServicePromptApiError &&
+      const validationEntries = error instanceof ServicePromptApiError &&
         error.status === 422 &&
-        error.fieldErrors &&
-        Object.keys(error.fieldErrors).length > 0
+        error.code === "service_prompt_validation_failed" &&
+        error.fieldErrors
+        ? Object.entries(error.fieldErrors)
+        : []
+      const partKeys = new Set(selectedDefinition.parts.map((part) => part.key))
+      if (validationEntries.length > 0 &&
+        validationEntries.every(([key, message]) =>
+          partKeys.has(key) && message.trim().length > 0
+        )
       ) {
-        setFieldErrors(error.fieldErrors)
+        setFieldErrors(Object.fromEntries(validationEntries))
       } else if (error instanceof ServicePromptApiError && error.status === 409) {
         setConflict(true)
       } else {
