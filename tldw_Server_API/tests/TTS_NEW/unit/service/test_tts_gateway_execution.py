@@ -10,6 +10,7 @@ from typing import Any
 import pytest
 
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import ResolvedByokCredentials
+from tldw_Server_API.app.core.TTS import gateway_execution
 from tldw_Server_API.app.core.TTS.adapters.base import AudioFormat, TTSRequest, TTSResponse
 from tldw_Server_API.app.core.TTS.gateway_config import GatewaySpec, normalize_gateway_specs
 from tldw_Server_API.app.core.TTS.gateway_execution import GatewayAttempt, GatewaySpeechExecutor
@@ -167,8 +168,9 @@ class FakeRegistry:
 
 
 class FakeBreaker:
-    def __init__(self, *, opened: bool = False) -> None:
+    def __init__(self, *, opened: bool = False, state: Any | None = None) -> None:
         self.opened = opened
+        self.state = state or ("open" if opened else "closed")
         self.successes = 0
         self.failures: list[BaseException] = []
         self.releases = 0
@@ -190,12 +192,23 @@ class FakeBreaker:
 
 
 class FakeCircuitManager:
-    def __init__(self, opened: set[str] | None = None) -> None:
+    def __init__(
+        self,
+        opened: set[str] | None = None,
+        states: Mapping[str, Any] | None = None,
+    ) -> None:
         self.breakers: dict[str, FakeBreaker] = {}
         self.opened = opened or set()
+        self.states = states or {}
 
     async def get_breaker(self, backend: str) -> FakeBreaker:
-        return self.breakers.setdefault(backend, FakeBreaker(opened=backend in self.opened))
+        return self.breakers.setdefault(
+            backend,
+            FakeBreaker(
+                opened=backend in self.opened,
+                state=self.states.get(backend),
+            ),
+        )
 
 
 class FakeProcessor:
@@ -269,7 +282,13 @@ def executor(
     touches: list[str] | None = None,
     sources: Mapping[str, str] | None = None,
     events: list[tuple[str, dict[str, Any]]] | None = None,
+    event_hook: Any | None = None,
 ) -> GatewaySpeechExecutor:
+    if event_hook is None and events is not None:
+        def record_event(name: str, payload: dict[str, Any]) -> None:
+            events.append((name, payload))
+
+        event_hook = record_event
     return GatewaySpeechExecutor(
         registry=registry,
         spec_provider=gateway_specs,
@@ -285,7 +304,7 @@ def executor(
             touches=touches,
             sources=sources,
         ),
-        event_hook=(lambda name, payload: events.append((name, payload))) if events is not None else None,
+        event_hook=event_hook,
     )
 
 
@@ -394,6 +413,144 @@ async def test_native_stream_success_preserves_caller_and_sets_safe_metadata_bef
 
 
 @pytest.mark.asyncio
+async def test_sync_event_hook_failures_do_not_change_success_or_log_exception_text() -> None:
+    gateway_specs = specs()
+    registry = FakeRegistry({"gateway:primary": [(MP3,)]})
+    secret = "distinctive-private-event-hook-token"
+    called: list[str] = []
+    logged_messages: list[str] = []
+
+    def failing_hook(name: str, payload: Mapping[str, Any]) -> None:
+        del payload
+        called.append(name)
+        raise RuntimeError(secret)
+
+    sink_id = gateway_execution.logger.add(
+        lambda message: logged_messages.append(message.record["message"]),
+        level="WARNING",
+    )
+    try:
+        result = await executor(
+            registry,
+            gateway_specs,
+            event_hook=failing_hook,
+        ).execute(request(stream=False), user_id=1)
+        assert await collect(result) == MP3
+    finally:
+        gateway_execution.logger.remove(sink_id)
+
+    assert "gateway_tts_attempt" in called
+    assert "gateway_tts_result" in called
+    assert any("event hook failed" in message.lower() for message in logged_messages)
+    assert all(secret not in message for message in logged_messages)
+
+
+@pytest.mark.asyncio
+async def test_async_result_hook_failure_does_not_block_fallback() -> None:
+    gateway_specs = specs(
+        primary_fallback={
+            "on": ["timeout"],
+            "max_attempts": 2,
+            "targets": [{"backend": "target", "model": "Target/Model", "voice": "TargetVoice"}],
+        }
+    )
+    registry = FakeRegistry(
+        {
+            "gateway:primary": [(TTSTimeoutError("private upstream"),)],
+            "gateway:target": [(MP3,)],
+        }
+    )
+
+    async def failing_result_hook(name: str, payload: Mapping[str, Any]) -> None:
+        del payload
+        if name == "gateway_tts_result":
+            raise ValueError("distinctive-private-result-hook-token")
+
+    result = await executor(
+        registry,
+        gateway_specs,
+        event_hook=failing_result_hook,
+    ).execute(request(stream=False), user_id=1)
+
+    assert await collect(result) == MP3
+    assert result.metadata["actual_backend"] == "gateway:target"
+
+
+@pytest.mark.asyncio
+async def test_async_result_hook_failure_does_not_replace_terminal_error() -> None:
+    gateway_specs = specs()
+    original = TTSNetworkError("private upstream")
+    registry = FakeRegistry({"gateway:primary": [(original,)]})
+
+    async def failing_result_hook(name: str, payload: Mapping[str, Any]) -> None:
+        del payload
+        if name == "gateway_tts_result":
+            raise ValueError("distinctive-private-result-hook-token")
+
+    result = await executor(
+        registry,
+        gateway_specs,
+        event_hook=failing_result_hook,
+    ).execute(request(stream=False), user_id=1)
+
+    with pytest.raises(TTSNetworkError) as raised:
+        await collect(result)
+    assert raised.value is original
+
+
+@pytest.mark.asyncio
+async def test_event_hook_cancellation_still_propagates_and_closes_attempt() -> None:
+    gateway_specs = specs()
+    registry = FakeRegistry({"gateway:primary": [(MP3,)]})
+
+    async def cancelled_hook(name: str, payload: Mapping[str, Any]) -> None:
+        del name, payload
+        raise asyncio.CancelledError
+
+    result = await executor(
+        registry,
+        gateway_specs,
+        event_hook=cancelled_hook,
+    ).execute(request(stream=False), user_id=1)
+
+    with pytest.raises(asyncio.CancelledError):
+        await collect(result)
+    assert registry.adapters[0].closed == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("breaker_state", "expected"),
+    [
+        ("half_open", "half_open"),
+        ("distinctive-private-state", "unknown"),
+        ({"private": "state"}, "unknown"),
+    ],
+)
+async def test_attempt_and_result_events_report_bounded_breaker_state(
+    breaker_state: Any,
+    expected: str,
+) -> None:
+    gateway_specs = specs()
+    registry = FakeRegistry({"gateway:primary": [(MP3,)]})
+    circuit = FakeCircuitManager(states={"gateway:primary": breaker_state})
+    events: list[tuple[str, dict[str, Any]]] = []
+    result = await executor(
+        registry,
+        gateway_specs,
+        circuit=circuit,
+        events=events,
+    ).execute(request(stream=False), user_id=1)
+
+    assert await collect(result) == MP3
+    assert [
+        payload["circuit"]
+        for name, payload in events
+        if name in {"gateway_tts_attempt", "gateway_tts_result"}
+    ] == [expected, expected]
+
+
+@pytest.mark.asyncio
 async def test_nonstream_discards_partial_primary_before_fallback() -> None:
     gateway_specs = specs(
         primary_fallback={
@@ -478,6 +635,7 @@ async def test_conversion_is_buffered_strict_bounded_and_uses_pinned_timeout_pat
             "strict": True,
             "timeout_seconds": 4.5,
             "ffmpeg_path": "/usr/bin/true",
+            "max_output_bytes": 2048,
         }
     ]
     assert result.metadata["conversion_used"] is True
@@ -506,6 +664,7 @@ async def test_conversion_and_final_validation_failures_never_fallback() -> None
     for processor in (
         FakeProcessor(error=RuntimeError("private ffmpeg detail")),
         FakeProcessor(converted=b"not-wave"),
+        FakeProcessor(converted=WAV + b"x" * 2048),
     ):
         registry = FakeRegistry(
             {"gateway:primary": [(MP3,)], "gateway:target": [(MP3,)]}
