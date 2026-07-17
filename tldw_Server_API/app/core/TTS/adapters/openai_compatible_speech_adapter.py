@@ -364,6 +364,7 @@ class OpenAICompatibleSpeechAdapter(TTSAdapter):
                     raise TTSAudioQualityError(
                         "Gateway response size exceeds the configured limit",
                         provider=self._backend_id,
+                        error_code="RESPONSE_SIZE_EXCEEDED",
                     )
                 if self._source_format is AudioFormat.PCM and declared_length % self._frame_bytes:
                     raise TTSAudioQualityError(
@@ -404,6 +405,7 @@ class OpenAICompatibleSpeechAdapter(TTSAdapter):
                 raise TTSAudioQualityError(
                     "Gateway response size exceeds the configured limit",
                     provider=self._backend_id,
+                    error_code="RESPONSE_SIZE_EXCEEDED",
                 )
             if validated:
                 yield chunk
@@ -450,6 +452,7 @@ class OpenAICompatibleSpeechAdapter(TTSAdapter):
                 raise TTSAudioQualityError(
                     "Gateway response size exceeds the configured limit",
                     provider=self._backend_id,
+                    error_code="RESPONSE_SIZE_EXCEEDED",
                 )
             if validated:
                 yield chunk
@@ -497,6 +500,7 @@ class OpenAICompatibleSpeechAdapter(TTSAdapter):
                 raise TTSAudioQualityError(
                     "Gateway response size exceeds the configured limit",
                     provider=self._backend_id,
+                    error_code="RESPONSE_SIZE_EXCEEDED",
                 )
             framed = tail + chunk
             complete = len(framed) - (len(framed) % self._frame_bytes)
