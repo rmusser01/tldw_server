@@ -314,6 +314,42 @@ def test_gateway_attempt_is_frozen_and_hides_credentials() -> None:
     assert "do-not-print" not in repr(attempt)
 
 
+def test_gateway_attempt_repr_hides_private_gateway_spec_configuration() -> None:
+    config = gateway_config("Private/Model", "PrivateVoice")
+    config.update(
+        {
+            "base_url": "https://private-tts.internal.example/v1/",
+            "speech_path": "audio/private-speech",
+            "headers": {"X-Private-Route": "distinctive-private-header-value"},
+        }
+    )
+    spec = normalize_gateway_specs({}, {"private": config})["gateway:private"]
+    credential = ResolvedByokCredentials(
+        provider=spec.backend_id,
+        api_key="distinctive-private-credential",
+        app_config=None,
+        credential_fields={},
+        source="server_default",
+        allowlisted=True,
+    )
+    attempt = GatewayAttempt(
+        backend_id=spec.backend_id,
+        model="Private/Model",
+        voice="PrivateVoice",
+        requested_format=AudioFormat.MP3,
+        source_format=AudioFormat.MP3,
+        credential=credential,
+        spec=spec,
+    )
+
+    rendered = repr(attempt)
+
+    assert "private-tts.internal.example" not in rendered
+    assert "audio/private-speech" not in rendered
+    assert "distinctive-private-header-value" not in rendered
+    assert "distinctive-private-credential" not in rendered
+
+
 @pytest.mark.asyncio
 async def test_native_stream_success_preserves_caller_and_sets_safe_metadata_before_first_chunk() -> None:
     gateway_specs = specs()
