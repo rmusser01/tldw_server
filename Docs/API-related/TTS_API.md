@@ -23,6 +23,177 @@ OmniVoice note:
 - Explicit caller-provided voices are preserved, including `custom:<voice_id>` selections.
 - Setup/install details for the dedicated runtime live in `Docs/STT-TTS/TTS-SETUP-GUIDE.md`.
 
+## Explicit OpenRouter and Named Gateway Routing
+
+Negotiated clients can select an enabled speech gateway with the optional
+`backend` request field. The built-in ID is `openrouter`; administrator-defined
+IDs use `gateway:<slug>`, such as `gateway:company-proxy`. If `backend` is
+omitted, model/provider inference and legacy global fallback behavior are
+unchanged.
+
+`X-TLDW-TTS-Backend` is an equivalent request mirror for clients that cannot add
+the JSON field. If both the body and header are present, their canonical values
+must match or the request returns `400 invalid_tts_backend`. `allow_fallback`
+defaults to `true` and controls only the selected backend's administrator-defined
+cross-backend fallback policy.
+
+### Capability and catalog discovery
+
+Start with `GET /api/v1/audio/providers`. A server that supports this extension
+returns top-level `supports_explicit_backend: true`. Each enabled gateway appears
+under `providers` with its canonical ID and includes:
+
+- `display_name`, exact-cased `models`, and `default_model`;
+- model-scoped formats, voices, defaults, limits, and capability flags under
+  `model_capabilities`;
+- discovery status/source/staleness timestamps;
+- whether configured fallback is available and its possible target backend IDs.
+
+Focused endpoints are:
+
+```text
+GET /api/v1/audio/tts/providers/{backend}/model-info
+GET /api/v1/audio/voices/catalog?provider={backend}&model={exact-model-id}
+```
+
+The `model` query is exact-cased and filters the gateway voice catalog. An empty
+voice list can be valid; `requires_freeform_voice` tells the client when the
+administrator has not configured a finite list.
+
+For explicit gateway synthesis, successful responses include:
+
+- `X-TLDW-TTS-Backend`: the canonical backend that produced the audio;
+- `X-TLDW-TTS-Fallback-Used`: `true` or `false`.
+
+These are response provenance headers, even when the request used the same
+`X-TLDW-TTS-Backend` name as an input mirror.
+
+### cURL examples
+
+The examples assume the tldw API is available at `$TLDW_BASE_URL` and the
+authenticated tldw key is in `$TLDW_API_KEY`. Upstream provider keys are never
+sent in the speech request.
+
+OpenRouter using the administrator key configured by the server:
+
+```bash
+curl -sS "$TLDW_BASE_URL/api/v1/audio/speech" \
+  -H "X-API-KEY: $TLDW_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "backend": "openrouter",
+    "model": "openai/gpt-4o-mini-tts-2025-12-15",
+    "voice": "nova",
+    "input": "This request uses the server-configured OpenRouter key.",
+    "response_format": "mp3",
+    "stream": false
+  }' \
+  --output openrouter-admin.mp3
+```
+
+OpenRouter using a stored user key first, then the same synthesis route. This
+requires BYOK to be configured; replace the placeholder locally and do not put a
+real key in shell history on shared systems. OpenRouter reuses its general
+provider record, so its normal provider-key validation/default-model setup must
+also be available when creating or rotating the key.
+
+```bash
+curl -sS "$TLDW_BASE_URL/api/v1/users/keys" \
+  -H "X-API-KEY: $TLDW_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "provider": "openrouter",
+    "api_key": "<OPENROUTER_USER_KEY>"
+  }'
+
+curl -sS "$TLDW_BASE_URL/api/v1/audio/speech" \
+  -H "X-API-KEY: $TLDW_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "backend": "openrouter",
+    "model": "openai/gpt-4o-mini-tts-2025-12-15",
+    "voice": "nova",
+    "input": "This request prefers my stored OpenRouter key.",
+    "response_format": "mp3",
+    "stream": false
+  }' \
+  --output openrouter-byok.mp3
+```
+
+A named gateway using the request-header mirror:
+
+```bash
+curl -sS "$TLDW_BASE_URL/api/v1/audio/speech" \
+  -H "X-API-KEY: $TLDW_API_KEY" \
+  -H "X-TLDW-TTS-Backend: gateway:company-proxy" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "Vendor/Expressive-TTS",
+    "voice": "narrator",
+    "input": "This request uses the administrator-named gateway.",
+    "response_format": "mp3",
+    "stream": false
+  }' \
+  --output company-proxy.mp3
+```
+
+Disabling configured cross-backend fallback for one request:
+
+```bash
+curl -sS "$TLDW_BASE_URL/api/v1/audio/speech" \
+  -H "X-API-KEY: $TLDW_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "backend": "openrouter",
+    "model": "openai/gpt-4o-mini-tts-2025-12-15",
+    "voice": "nova",
+    "input": "Do not make a second synthesis attempt.",
+    "response_format": "mp3",
+    "stream": false,
+    "allow_fallback": false
+  }' \
+  --output no-fallback.mp3
+```
+
+Passing OpenRouter provider-routing options through `extra_params`. This works
+only if the administrator has allowlisted both `/provider/order` and
+`/provider/allow_fallbacks` for the selected backend:
+
+```bash
+curl -sS "$TLDW_BASE_URL/api/v1/audio/speech" \
+  -H "X-API-KEY: $TLDW_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "backend": "openrouter",
+    "model": "openai/gpt-4o-mini-tts-2025-12-15",
+    "voice": "nova",
+    "input": "Use only the requested upstream provider order.",
+    "response_format": "mp3",
+    "stream": false,
+    "extra_params": {
+      "provider": {
+        "order": ["openai"],
+        "allow_fallbacks": false
+      }
+    }
+  }' \
+  --output provider-options.mp3
+```
+
+### Billing, streaming, conversion, and caching
+
+Synthesis POSTs are made once per configured route and are never transparently
+retried. If tldw cross-backend fallback is enabled, each fallback target is a
+new synthesis attempt with independently resolved credentials and can create an
+additional charge. Fallback stops once audio is committed; bytes from failed
+attempts are discarded rather than joined to later output.
+
+Native gateway output may stream. When the requested format requires local
+conversion, tldw buffers and validates the complete native response, performs a
+bounded conversion, and only then returns converted bytes. Conversion failures
+are terminal. Explicit gateway requests are not placed in the first-release
+WebUI reusable-audio cache.
+
 1. Client pattern (Python)
 
   Non‑streaming usage (stream: false), handling JSON errors vs audio:

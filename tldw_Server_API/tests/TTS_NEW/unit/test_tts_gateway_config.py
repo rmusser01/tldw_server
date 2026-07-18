@@ -6,6 +6,7 @@ from types import MappingProxyType
 from urllib.parse import quote
 
 import pytest
+import yaml
 from pydantic import ValidationError
 
 from tldw_Server_API.app.core.TTS.gateway_config import (
@@ -38,6 +39,22 @@ def _gateway(**overrides):
     }
     config.update(overrides)
     return config
+
+
+@pytest.mark.unit
+def test_checked_in_tts_gateway_examples_parse_without_environment_keys():
+    config_path = (
+        Path(__file__).resolve().parents[3]
+        / "Config_Files"
+        / "tts_providers_config.yaml"
+    )
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+
+    config = TTSConfig.model_validate(raw)
+    specs = normalize_gateway_specs(config.providers, config.gateways)
+
+    assert set(specs) == {"openrouter", "gateway:company-proxy"}
+    assert all(not spec.enabled for spec in specs.values())
 
 
 @pytest.mark.unit

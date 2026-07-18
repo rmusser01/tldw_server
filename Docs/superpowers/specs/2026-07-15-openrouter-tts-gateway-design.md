@@ -1,10 +1,10 @@
 # OpenRouter and Generic TTS Gateway Design
 
-**Status:** Approved for implementation planning
+**Status:** Implemented and verified
 
 **Date:** 2026-07-15
 
-**Updated:** 2026-07-16
+**Updated:** 2026-07-18
 
 **Backlog:** TASK-12116
 
@@ -244,7 +244,8 @@ gateways:
       - /provider/options/vendor/style
 
     fallback:
-      on: [timeout, upstream_5xx, rate_limited]
+      # Quote "on" because YAML 1.1 parsers otherwise coerce it to boolean true.
+      "on": [timeout, upstream_5xx, rate_limited]
       max_attempts: 2
       targets:
         - backend: openrouter

@@ -16,6 +16,125 @@ This guide explains how to set up each TTS provider, especially the local models
 OPENAI_API_KEY=your-api-key-here
 ```
 
+### OpenRouter and Named Speech Gateways
+
+OpenRouter and administrator-defined OpenAI-compatible speech gateways use the
+same server-side adapter. They are explicit backends: `openrouter` is the
+built-in ID, while each key under top-level `gateways` becomes
+`gateway:<slug>`. For example, `gateways.company-proxy` is selected as
+`gateway:company-proxy`. Omitting `backend` preserves the legacy TTS provider
+inference and global fallback path.
+
+The checked-in
+`tldw_Server_API/Config_Files/tts_providers_config.yaml` contains disabled
+examples for both backends. To enable one:
+
+1. Set its exact-cased `default_model`, `default_voice`, `allowed_models`, and
+   optional `model_overrides` for the upstream you operate.
+2. Configure an admin key through the referenced environment variable, enable
+   `allow_user_api_key`, or do both. An enabled gateway needs at least one
+   credential source.
+3. Review its fallback targets. Enable and configure every target, or set
+   `max_attempts: 1` with an empty target list before canarying only one backend.
+4. Set `enabled: true` and restart the server. Gateway definitions are validated
+   and registered at startup; hot reload is not supported in this release.
+5. Confirm the canonical ID and effective catalog with
+   `GET /api/v1/audio/providers` before sending synthesis traffic.
+
+OpenRouter currently documents an OpenAI-compatible speech endpoint and model
+discovery filtered with `output_modalities=speech`:
+
+- [OpenRouter TTS guide](https://openrouter.ai/docs/guides/overview/multimodal/tts)
+- [OpenRouter speech API](https://openrouter.ai/docs/api/api-reference/speech/create-audio-speech)
+
+Optional OpenRouter attribution headers are populated from
+`OPENROUTER_SITE_URL` and `OPENROUTER_SITE_NAME`. Do not put secrets in either
+value.
+
+#### Configuration precedence and overlays
+
+The TTS manager merges its supported sources in this order:
+
+1. built-in schema defaults;
+2. `tts_providers_config.yaml`;
+3. supported `[TTS-Settings]` and provider key values from `config.txt`;
+4. supported process-environment overrides.
+
+Gateway structure belongs in YAML. `${ENV_VAR}` placeholders anywhere in a
+gateway definition are resolved from the process environment before schema
+validation. A missing placeholder is omitted; if the gateway is enabled and the
+missing value is required, startup fails with the relevant configuration path.
+OpenRouter supplies built-in URL, speech path, and discovery defaults, but an
+explicit YAML value wins.
+
+Discovery never grants authority by itself. Static configuration is applied as
+an overlay:
+
+- `allowed_models` is an exact-cased allowlist. It cannot be combined with
+  `allow_discovered_models: true`.
+- `model_overrides` defines exact model voices, formats, defaults, and
+  capabilities. Model IDs are not lowercased.
+- `capability_defaults` applies only where a model overlay does not replace a
+  field.
+- Discovery uses fresh and bounded-stale credential-scoped caches. Startup
+  performs no discovery request and does not depend on upstream availability.
+
+#### URL and request authority
+
+Only an administrator can configure `base_url`, `speech_path`, `models_path`,
+static headers, authentication behavior, discovery query, and fallback targets.
+Users cannot submit any of those values through speech requests or stored key
+metadata.
+
+`base_url` must be an absolute HTTPS URL without embedded credentials, query, or
+fragment. HTTP requires `allow_insecure_http: true` and is restricted to
+localhost or private/local IP literals. `speech_path` and `models_path` must be
+strict relative paths: no leading slash, scheme, authority, query, fragment,
+backslash, empty/dot segment, or encoded traversal. Every upstream request and
+redirect is still subject to the central egress policy.
+
+`allowed_request_options` is a per-gateway set of exact RFC 6901 JSON Pointer
+leaves. Only matching JSON leaves from request `extra_params` are copied into
+the upstream body. Whole-object allowlisting and URL, credential, header,
+model, voice, format, language, or auth authority are rejected. In YAML, quote
+the fallback key as `"on"`; unquoted `on` is interpreted as a boolean by YAML
+1.1 parsers.
+
+#### Credentials and fallback
+
+For an explicit gateway attempt, credential precedence is:
+
+1. the authenticated user's stored key, when `allow_user_api_key: true` and a
+   record exists;
+2. the admin key from the gateway configuration.
+
+A present but unreadable or keyless user record is authoritative and fails
+closed; it does not fall through to the admin key. Each configured fallback
+target resolves its own credential independently, so a source key is never sent
+to another backend. See [BYOK User Guide](../User_Guides/Server/BYOK_User_Guide.md)
+for storage requirements and lifecycle details.
+
+Gateway fallback is separate from legacy global TTS fallback and from
+OpenRouter's own provider routing. It is bounded by each backend's `fallback`
+policy and can be disabled per request with `allow_fallback: false`. The server
+does not transparently retry synthesis POSTs. A fallback attempt is a second
+synthesis request and can incur another provider charge. Fallback is allowed
+only for configured failure categories before audio has been committed; audio
+from failed attempts is discarded and never concatenated.
+
+#### Output conversion and WebUI caching
+
+Native upstream audio can stream. Non-native output conversion is optional,
+requires the configured `source_format` plus an available ffmpeg executable,
+and is always full-buffer before response commitment. Input bytes, output bytes,
+and conversion time are bounded. Local conversion failures are terminal and do
+not trigger another billed synthesis attempt.
+
+The server adds no synthesized-audio cache for gateways. The WebUI also disables
+reusable audio caching for explicit gateway requests in this release because a
+safe cache key must include opaque credential revision and server configuration
+generation.
+
 ### ElevenLabs
 ```bash
 # Add to config.txt or environment
