@@ -18,6 +18,9 @@ class ProbeEgressDecision:
     reason: str
     resolved_ips: tuple[str, ...] = ()
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "resolved_ips", tuple(self.resolved_ips))
+
 
 class ProbeEgressGuard(Protocol):
     """Check fresh egress policy immediately before a probe dispatch."""

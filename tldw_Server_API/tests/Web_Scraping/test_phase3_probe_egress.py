@@ -4,6 +4,9 @@ import ast
 import asyncio
 import importlib
 import importlib.util
+import json
+import subprocess
+import sys
 from dataclasses import FrozenInstanceError, fields
 from pathlib import Path
 from types import MappingProxyType, SimpleNamespace
@@ -23,6 +26,9 @@ pytestmark = pytest.mark.unit
 _ROOT = Path(__file__).resolve().parents[2]
 _RUNTIME_POLICY_PATH = _ROOT / "app/core/Web_Scraping/runtime/policy.py"
 _POLICY_ADAPTERS_PATH = _ROOT / "app/core/Web_Scraping/policy/adapters.py"
+_POLICY_PROBE_PATH = _ROOT / "app/core/Web_Scraping/policy/probe.py"
+_POLICY_MODULE = "tldw_Server_API.app.core.Web_Scraping.policy"
+_PROBE_MODULE = f"{_POLICY_MODULE}.probe"
 _FACADE_MODULE = "tldw_Server_API.app.core.Web_Scraping.preflight.facade"
 
 
@@ -32,7 +38,14 @@ def _required_attribute(module: Any, name: str) -> Any:
 
 
 def _guard_type() -> type[Any]:
-    return _required_attribute(policy_adapters, "DefaultProbeEgressGuard")
+    policy_package = importlib.import_module(_POLICY_MODULE)
+    return _required_attribute(policy_package, "DefaultProbeEgressGuard")
+
+
+def _probe_implementation_module() -> Any:
+    if importlib.util.find_spec(_PROBE_MODULE) is None:
+        return policy_adapters
+    return importlib.import_module(_PROBE_MODULE)
 
 
 def _decision_type() -> type[Any]:
@@ -88,6 +101,71 @@ def test_probe_egress_runtime_contract_is_public_immutable_and_narrow() -> None:
     decision = decision_type(allowed=True, reason="allowed")
     with pytest.raises(FrozenInstanceError):
         decision.reason = "changed"
+
+
+def test_probe_egress_decision_copies_directly_supplied_resolved_ips() -> None:
+    resolved_ips = ["93.184.216.34"]
+
+    decision = _decision_type()(
+        allowed=True,
+        reason="allowed",
+        resolved_ips=resolved_ips,
+    )
+    resolved_ips.append("203.0.113.1")
+
+    assert decision.resolved_ips == ("93.184.216.34",)
+    assert isinstance(decision.resolved_ips, tuple)
+
+
+def test_public_probe_import_does_not_load_scrape_or_http_stacks() -> None:
+    script = f"""
+import json
+import sys
+
+from {_POLICY_MODULE} import DefaultProbeEgressGuard
+
+forbidden_exact = {{
+    'tldw_Server_API.app.core.Web_Scraping.outbound_policy',
+    'tldw_Server_API.app.core.Web_Scraping.filters',
+    'tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib',
+    'tldw_Server_API.app.core.http_client',
+}}
+forbidden_prefixes = (
+    'tldw_Server_API.app.core.Web_Scraping.Web_Scraping_Lib',
+    'tldw_Server_API.app.core.Metrics',
+)
+loaded = sorted(
+    name
+    for name in sys.modules
+    if name in forbidden_exact or name.startswith(forbidden_prefixes)
+)
+print(json.dumps(loaded))
+raise SystemExit(1 if loaded else 0)
+"""
+
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=_ROOT.parent,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert completed.stdout.strip(), completed.stderr
+    loaded = json.loads(completed.stdout.strip().splitlines()[-1])
+    assert completed.returncode == 0, loaded
+    assert loaded == []
+
+
+def test_probe_exports_preserve_direct_and_lazy_scrape_checker_compatibility() -> None:
+    assert _POLICY_PROBE_PATH.exists(), "narrow Task 3 probe module is missing"
+    probe_module = importlib.import_module(_PROBE_MODULE)
+    policy_package = importlib.import_module(_POLICY_MODULE)
+
+    assert policy_package.DefaultProbeEgressGuard is probe_module.DefaultProbeEgressGuard
+    assert policy_adapters.DefaultProbeEgressGuard is probe_module.DefaultProbeEgressGuard
+    assert policy_package.DefaultWebOutboundPolicyChecker is policy_adapters.DefaultWebOutboundPolicyChecker
 
 
 @pytest.mark.asyncio
@@ -245,12 +323,52 @@ async def test_probe_guard_maps_malformed_reason_values_to_other(
     assert decision.reason == "other"
 
 
+class _UnhashableString(str):
+    __hash__ = None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "result",
+    [
+        SimpleNamespace(
+            allowed=False,
+            reason="Invalid URL",
+            resolved_ips=(),
+            reason_code=_UnhashableString("invalid_url"),
+        ),
+        SimpleNamespace(
+            allowed=False,
+            reason=_UnhashableString("Invalid URL"),
+            resolved_ips=(),
+        ),
+    ],
+)
+async def test_probe_guard_rejects_non_builtin_string_reason_values(
+    monkeypatch: pytest.MonkeyPatch,
+    result: object,
+) -> None:
+    monkeypatch.setattr(egress, "evaluate_url_policy", lambda _url: result)
+
+    decision = await _guard_type()().decide(
+        "https://example.com",
+        context=RuntimeRequestContext(),
+    )
+
+    assert decision.reason == "other"
+
+
 @pytest.mark.asyncio
 async def test_probe_guard_denial_log_contains_only_sanitized_context_and_host(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fake_logger = _BoundLogger()
-    monkeypatch.setattr(policy_adapters, "logger", fake_logger, raising=False)
+    monkeypatch.setattr(
+        _probe_implementation_module(),
+        "logger",
+        fake_logger,
+        raising=False,
+    )
     monkeypatch.setattr(
         egress,
         "evaluate_url_policy",
@@ -296,7 +414,12 @@ async def test_probe_guard_evaluator_exception_fails_closed_and_sanitizes_log(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fake_logger = _BoundLogger()
-    monkeypatch.setattr(policy_adapters, "logger", fake_logger, raising=False)
+    monkeypatch.setattr(
+        _probe_implementation_module(),
+        "logger",
+        fake_logger,
+        raising=False,
+    )
 
     def raise_policy_error(_url: str) -> URLPolicyResult:
         raise RuntimeError("https://user:password@example.com/private?token=secret")
@@ -325,6 +448,83 @@ async def test_probe_guard_evaluator_exception_fails_closed_and_sanitizes_log(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("source", "stage", "expected_source", "expected_stage"),
+    [
+        ("enhanced_scrape", "fetch", "enhanced_scrape", "fetch"),
+        ("secretToken123", "tenant987", "web_scraping", "runtime"),
+        ("preflight" * 100, "pre_fetch" * 100, "web_scraping", "runtime"),
+    ],
+)
+async def test_probe_guard_logs_only_approved_low_cardinality_context_labels(
+    monkeypatch: pytest.MonkeyPatch,
+    source: str,
+    stage: str,
+    expected_source: str,
+    expected_stage: str,
+) -> None:
+    probe_module = _probe_implementation_module()
+    fake_logger = _BoundLogger()
+    monkeypatch.setattr(probe_module, "logger", fake_logger, raising=False)
+    monkeypatch.setattr(
+        egress,
+        "evaluate_url_policy",
+        lambda _url: URLPolicyResult(False, "Invalid URL", (), "invalid_url"),
+    )
+
+    await _guard_type()().decide(
+        "https://example.com/private?token=secret",
+        context=RuntimeRequestContext(source=source, stage=stage),
+    )
+
+    assert fake_logger.events == [
+        (
+            {
+                "source": expected_source,
+                "stage": expected_stage,
+                "host": "example.com",
+            },
+            "Probe egress policy denied target",
+        )
+    ]
+    rendered = repr(fake_logger.events)
+    assert "secretToken123" not in rendered
+    assert "tenant987" not in rendered
+
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        ("https://user:password@Example.COM/private?token=secret#fragment", "example.com"),
+        ("https://b\N{LATIN SMALL LETTER U WITH DIAERESIS}cher.example/path", "xn--bcher-kva.example"),
+        ("https://[2001:0db8::1]:443/path", "2001:db8::1"),
+        ("https://192.0.2.1:443/path", "192.0.2.1"),
+        ("https://example.com./path?token=secret#fragment", "example.com"),
+        ("https://example.com\\secret/path?token=secret", "unknown"),
+        ("https://[fe80::1%25secret-zone]/path", "unknown"),
+        ("https://example.com:secret/path", "unknown"),
+        ("https://example.com:99999/path", "unknown"),
+        ("https://exa_mple.com/path", "unknown"),
+        ("https://-bad.example/path", "unknown"),
+        ("https://user:password@/private?token=secret#fragment", "unknown"),
+        ("https://secret-token.example.com\\@safe.example/private", "unknown"),
+    ],
+)
+def test_probe_log_host_is_canonical_or_unknown(url: str, expected: str) -> None:
+    host_label = _required_attribute(
+        _probe_implementation_module(),
+        "_sanitized_host_label",
+    )
+
+    label = host_label(url)
+
+    assert label == expected
+    if expected == "unknown":
+        for secret in ("secret", "password", "private", "token", "zone"):
+            assert secret not in label
+
+
+@pytest.mark.asyncio
 async def test_probe_guard_propagates_cancellation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -332,7 +532,7 @@ async def test_probe_guard_propagates_cancellation(
         raise asyncio.CancelledError
 
     _guard_type()
-    adapter_asyncio = _required_attribute(policy_adapters, "asyncio")
+    adapter_asyncio = _required_attribute(_probe_implementation_module(), "asyncio")
     monkeypatch.setattr(adapter_asyncio, "to_thread", cancel_to_thread)
 
     with pytest.raises(asyncio.CancelledError):
@@ -367,20 +567,52 @@ async def test_probe_guard_copies_resolved_ips_into_immutable_decision(
 
 
 def test_reason_code_and_legacy_reason_boundaries_are_immutable() -> None:
-    reason_codes = _required_attribute(policy_adapters, "_ALLOWED_REASON_CODES")
-    legacy_reasons = _required_attribute(policy_adapters, "_LEGACY_REASON_MAP")
+    probe_module = _probe_implementation_module()
+    reason_codes = _required_attribute(probe_module, "_ALLOWED_REASON_CODES")
+    legacy_reasons = _required_attribute(probe_module, "_LEGACY_REASON_MAP")
+    source_labels = _required_attribute(probe_module, "_SOURCE_LABEL_MAP")
+    stage_labels = _required_attribute(probe_module, "_STAGE_LABEL_MAP")
 
     assert isinstance(reason_codes, frozenset)
     assert isinstance(legacy_reasons, MappingProxyType)
+    assert isinstance(source_labels, MappingProxyType)
+    assert isinstance(stage_labels, MappingProxyType)
+    assert dict(source_labels) == {
+        label: label
+        for label in (
+            "article_extract",
+            "characterization",
+            "enhanced_scrape",
+            "preflight",
+            "test",
+            "web_scraping",
+        )
+    }
+    assert dict(stage_labels) == {
+        label: label
+        for label in (
+            "fetch",
+            "pre_fetch",
+            "preflight",
+            "preflight_subrequest",
+            "runtime",
+        )
+    }
     with pytest.raises(AttributeError):
         reason_codes.add("future_code")
     with pytest.raises(TypeError):
         legacy_reasons["future reason"] = "future_code"
+    with pytest.raises(TypeError):
+        source_labels["tenant-secret"] = "tenant-secret"
+    with pytest.raises(TypeError):
+        stage_labels["tenant-stage"] = "tenant-stage"
 
 
 def test_runtime_policy_and_probe_adapter_preserve_import_direction() -> None:
+    assert _POLICY_PROBE_PATH.exists(), "narrow Task 3 probe module is missing"
     runtime_tree = ast.parse(_RUNTIME_POLICY_PATH.read_text(encoding="utf-8"))
     adapter_tree = ast.parse(_POLICY_ADAPTERS_PATH.read_text(encoding="utf-8"))
+    probe_tree = ast.parse(_POLICY_PROBE_PATH.read_text(encoding="utf-8"))
 
     def imported_modules(tree: ast.AST) -> set[str]:
         modules: set[str] = set()
@@ -398,6 +630,19 @@ def test_runtime_policy_and_probe_adapter_preserve_import_direction() -> None:
         for forbidden in ("security.egress", "preflight", "policy.adapters", "robots")
     )
     assert not any("robots" in module.lower() for module in imported_modules(adapter_tree))
+    probe_imports = imported_modules(probe_tree)
+    assert not any(
+        forbidden in module.lower()
+        for module in probe_imports
+        for forbidden in (
+            "outbound_policy",
+            "filters",
+            "robots",
+            "http_client",
+            "metrics",
+            "policy.adapters",
+        )
+    )
 
 
 @pytest.mark.asyncio
