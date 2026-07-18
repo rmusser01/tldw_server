@@ -224,6 +224,23 @@ class SlidesGenerationInputRow:
     created_at: str
 
 
+@dataclass(frozen=True, slots=True)
+class SlidesGenerationClaimResult:
+    """Atomic receipt/input claim result."""
+
+    receipt: SlidesGenerationReceiptRow
+    generation_input: SlidesGenerationInputRow | None
+    created: bool
+
+
+@dataclass(frozen=True, slots=True)
+class SlidesGenerationCommitResult:
+    """Atomic standalone commit result, including idempotent recovery."""
+
+    presentation: PresentationRow
+    created: bool
+
+
 @dataclass
 class VisualStyleRow:
     id: str
@@ -846,6 +863,53 @@ class SlidesDatabase:
                 ),
             )
 
+    def _insert_presentation_in_connection(
+        self,
+        conn: sqlite3.Connection,
+        candidate: Mapping[str, Any],
+    ) -> PresentationRow:
+        """Insert one validated presentation and its transactional side effects."""
+        self._validate_presentation_candidate(candidate)
+        conn.execute(
+            """
+            INSERT INTO presentations (
+                id, title, description, theme, marp_theme, template_id,
+                visual_style_id, visual_style_scope, visual_style_name,
+                visual_style_version, visual_style_snapshot, settings,
+                studio_data, slides, slides_text, source_type, source_ref,
+                source_query, custom_css, created_at, last_modified, deleted,
+                client_id, version, content_kind, html_document, html_sha256,
+                html_bytes, html_slide_count, generation_job_uuid,
+                generation_provenance_json
+            ) VALUES (
+                :id, :title, :description, :theme, :marp_theme, :template_id,
+                :visual_style_id, :visual_style_scope, :visual_style_name,
+                :visual_style_version, :visual_style_snapshot, :settings,
+                :studio_data, :slides, :slides_text, :source_type, :source_ref,
+                :source_query, :custom_css, :created_at, :last_modified, 0,
+                :client_id, 1, :content_kind, :html_document, :html_sha256,
+                :html_bytes, :html_slide_count, :generation_job_uuid,
+                :generation_provenance_json
+            )
+            """,
+            candidate,
+        )
+        presentation_id = str(candidate["id"])
+        row = self._fetch_presentation_by_id(
+            conn,
+            presentation_id,
+            include_deleted=True,
+        )
+        self._insert_version_snapshot(conn, row)
+        self._insert_sync_log(
+            conn,
+            entity_uuid=presentation_id,
+            operation="create",
+            version=1,
+            payload={"title": row.title, "theme": row.theme},
+        )
+        return row
+
     @staticmethod
     def _normalize_visual_style_payload(style_payload: str) -> str:
         if not style_payload:
@@ -1073,40 +1137,7 @@ class SlidesDatabase:
         }
         try:
             with self.transaction(immediate=True) as conn:
-                self._validate_presentation_candidate(candidate)
-                conn.execute(
-                    """
-                    INSERT INTO presentations (
-                        id, title, description, theme, marp_theme, template_id,
-                        visual_style_id, visual_style_scope, visual_style_name, visual_style_version, visual_style_snapshot,
-                        settings, studio_data, slides, slides_text,
-                        source_type, source_ref, source_query, custom_css,
-                        created_at, last_modified, deleted, client_id, version,
-                        content_kind, html_document, html_sha256, html_bytes,
-                        html_slide_count, generation_job_uuid,
-                        generation_provenance_json
-                    ) VALUES (
-                        :id, :title, :description, :theme, :marp_theme, :template_id,
-                        :visual_style_id, :visual_style_scope, :visual_style_name,
-                        :visual_style_version, :visual_style_snapshot, :settings,
-                        :studio_data, :slides, :slides_text, :source_type, :source_ref,
-                        :source_query, :custom_css, :created_at, :last_modified, 0,
-                        :client_id, 1, :content_kind, :html_document, :html_sha256,
-                        :html_bytes, :html_slide_count, :generation_job_uuid,
-                        :generation_provenance_json
-                    )
-                    """,
-                    candidate,
-                )
-                row = self._fetch_presentation_by_id(conn, pres_id, include_deleted=True)
-                self._insert_version_snapshot(conn, row)
-                self._insert_sync_log(
-                    conn,
-                    entity_uuid=pres_id,
-                    operation="create",
-                    version=1,
-                    payload={"title": title, "theme": theme},
-                )
+                row = self._insert_presentation_in_connection(conn, candidate)
             return row
         except sqlite3.IntegrityError as exc:
             message = str(exc).lower()
@@ -1779,6 +1810,398 @@ class SlidesDatabase:
         if not row:
             raise KeyError("presentation_version_not_found")
         return PresentationVersionRow(**dict(row))
+
+    @staticmethod
+    def _generation_receipt_from_connection(
+        conn: sqlite3.Connection,
+        receipt_id: str,
+        owner_user_id: str,
+    ) -> SlidesGenerationReceiptRow:
+        row = conn.execute(
+            f"SELECT {_RECEIPT_PROJECTION} FROM slides_generation_receipts "  # nosec B608
+            "WHERE id = ? AND owner_user_id = ?",
+            (receipt_id, owner_user_id),
+        ).fetchone()
+        if not row:
+            raise KeyError("slides_generation_receipt_not_found")
+        return SlidesGenerationReceiptRow(**dict(row))
+
+    @staticmethod
+    def _generation_input_from_connection(
+        conn: sqlite3.Connection,
+        receipt_id: str,
+        owner_user_id: str,
+    ) -> SlidesGenerationInputRow:
+        row = conn.execute(
+            f"SELECT {_INPUT_PROJECTION} FROM slides_generation_inputs i "  # nosec B608
+            "WHERE i.receipt_id = ? AND EXISTS ("
+            "SELECT 1 FROM slides_generation_receipts r "
+            "WHERE r.id = i.receipt_id AND r.owner_user_id = ?)",
+            (receipt_id, owner_user_id),
+        ).fetchone()
+        if not row:
+            raise KeyError("slides_generation_input_not_found")
+        return SlidesGenerationInputRow(**dict(row))
+
+    def find_generation_receipt_by_idempotency_digests(
+        self,
+        *,
+        owner_user_id: str,
+        digest_candidates: Iterable[str],
+    ) -> SlidesGenerationReceiptRow | None:
+        """Find one owner-scoped receipt using a bounded HMAC candidate set."""
+        candidates = tuple(digest_candidates)
+        if not candidates:
+            return None
+        placeholders = ",".join("?" for _ in candidates)
+        rows = (
+            self.get_connection()
+            .execute(
+                f"SELECT {_RECEIPT_PROJECTION} FROM slides_generation_receipts "  # nosec B608
+                f"WHERE owner_user_id = ? AND idempotency_key_hmac_sha256 IN ({placeholders}) "
+                "LIMIT 2",
+                (owner_user_id, *candidates),
+            )
+            .fetchall()
+        )
+        if len(rows) > 1:
+            raise SlidesDatabaseError("generation_receipt_correlation_ambiguous")
+        return SlidesGenerationReceiptRow(**dict(rows[0])) if rows else None
+
+    def claim_generation_receipt_input(
+        self,
+        *,
+        receipt: Mapping[str, Any],
+        generation_input: Mapping[str, Any],
+        replay_digest_candidates: Iterable[str],
+    ) -> SlidesGenerationClaimResult:
+        """Atomically claim one durable receipt plus its immutable input."""
+        candidates = tuple(replay_digest_candidates)
+        owner_user_id = str(receipt["owner_user_id"])
+        with self.transaction(immediate=True) as conn:
+            if candidates:
+                placeholders = ",".join("?" for _ in candidates)
+                rows = conn.execute(
+                    f"SELECT {_RECEIPT_PROJECTION} FROM slides_generation_receipts "  # nosec B608
+                    f"WHERE owner_user_id = ? AND idempotency_key_hmac_sha256 IN ({placeholders}) "
+                    "LIMIT 2",
+                    (owner_user_id, *candidates),
+                ).fetchall()
+                if len(rows) > 1:
+                    raise SlidesDatabaseError("generation_receipt_correlation_ambiguous")
+                if rows:
+                    existing = SlidesGenerationReceiptRow(**dict(rows[0]))
+                    try:
+                        stored_input = self._generation_input_from_connection(
+                            conn,
+                            existing.id,
+                            owner_user_id,
+                        )
+                    except KeyError:
+                        stored_input = None
+                    return SlidesGenerationClaimResult(
+                        receipt=existing,
+                        generation_input=stored_input,
+                        created=False,
+                    )
+            conn.execute(
+                """
+                INSERT INTO slides_generation_receipts (
+                    id, owner_user_id, digest_key_id,
+                    idempotency_key_hmac_sha256, jobs_idempotency_key,
+                    client_request_hmac_sha256, execution_hmac_sha256,
+                    job_id, job_uuid, presentation_id, receipt_status,
+                    error_code, error_message, created_at, updated_at, expires_at
+                ) VALUES (
+                    :id, :owner_user_id, :digest_key_id,
+                    :idempotency_key_hmac_sha256, :jobs_idempotency_key,
+                    :client_request_hmac_sha256, :execution_hmac_sha256,
+                    NULL, NULL, NULL, 'claimed', NULL, NULL,
+                    :created_at, :updated_at, NULL
+                )
+                """,
+                receipt,
+            )
+            conn.execute(
+                """
+                INSERT INTO slides_generation_inputs (
+                    receipt_id, source_kind, source_text, source_hmac_sha256,
+                    source_bytes, provenance_json, html_options_json, provider,
+                    model, adapter_id, endpoint_identity, system_prompt,
+                    prompt_sha256, prompt_contract_version, input_expires_at,
+                    created_at
+                ) VALUES (
+                    :receipt_id, :source_kind, :source_text,
+                    :source_hmac_sha256, :source_bytes, :provenance_json,
+                    :html_options_json, :provider, :model, :adapter_id,
+                    :endpoint_identity, :system_prompt, :prompt_sha256,
+                    :prompt_contract_version, :input_expires_at, :created_at
+                )
+                """,
+                generation_input,
+            )
+            return SlidesGenerationClaimResult(
+                receipt=self._generation_receipt_from_connection(
+                    conn,
+                    str(receipt["id"]),
+                    owner_user_id,
+                ),
+                generation_input=self._generation_input_from_connection(
+                    conn,
+                    str(receipt["id"]),
+                    owner_user_id,
+                ),
+                created=True,
+            )
+
+    def delete_unbound_generation_claim(
+        self,
+        *,
+        receipt_id: str,
+        owner_user_id: str,
+    ) -> bool:
+        """Remove a deterministically rejected, never-bound claim and input."""
+        with self.transaction(immediate=True) as conn:
+            cursor = conn.execute(
+                "DELETE FROM slides_generation_receipts "
+                "WHERE id = ? AND owner_user_id = ? "
+                "AND receipt_status = 'claimed' AND job_uuid IS NULL",
+                (receipt_id, owner_user_id),
+            )
+            return cursor.rowcount == 1
+
+    def bind_generation_job(
+        self,
+        *,
+        receipt_id: str,
+        owner_user_id: str,
+        job_id: int,
+        job_uuid: str,
+        updated_at: str,
+    ) -> SlidesGenerationReceiptRow:
+        """Bind an immutable Jobs UUID, storing its numeric ID only alongside it."""
+        with self.transaction(immediate=True) as conn:
+            current = self._generation_receipt_from_connection(
+                conn,
+                receipt_id,
+                owner_user_id,
+            )
+            if current.job_uuid is not None and current.job_uuid != job_uuid:
+                raise ConflictError("generation_correlation_mismatch")
+            if current.job_id is not None and current.job_id != int(job_id):
+                raise ConflictError("generation_correlation_mismatch")
+            stored_job_id = current.job_id if current.job_id is not None else int(job_id)
+            next_status = "queued" if current.receipt_status == "claimed" else current.receipt_status
+            conn.execute(
+                "UPDATE slides_generation_receipts SET job_id = ?, job_uuid = ?, "
+                "receipt_status = ?, updated_at = ? WHERE id = ? AND owner_user_id = ?",
+                (
+                    stored_job_id,
+                    job_uuid,
+                    next_status,
+                    updated_at,
+                    receipt_id,
+                    owner_user_id,
+                ),
+            )
+            return self._generation_receipt_from_connection(
+                conn,
+                receipt_id,
+                owner_user_id,
+            )
+
+    def set_generation_receipt_running(
+        self,
+        *,
+        receipt_id: str,
+        owner_user_id: str,
+        job_uuid: str,
+        updated_at: str,
+    ) -> SlidesGenerationReceiptRow:
+        """Move a bound nonterminal receipt to running."""
+        with self.transaction(immediate=True) as conn:
+            cursor = conn.execute(
+                "UPDATE slides_generation_receipts SET receipt_status = 'running', "
+                "error_code = NULL, error_message = NULL, updated_at = ? "
+                "WHERE id = ? AND owner_user_id = ? AND job_uuid = ? "
+                "AND receipt_status IN ('queued', 'running')",
+                (updated_at, receipt_id, owner_user_id, job_uuid),
+            )
+            if cursor.rowcount != 1:
+                raise ConflictError("generation_correlation_mismatch")
+            return self._generation_receipt_from_connection(
+                conn,
+                receipt_id,
+                owner_user_id,
+            )
+
+    def reset_generation_receipt_queued(
+        self,
+        *,
+        receipt_id: str,
+        owner_user_id: str,
+        job_uuid: str,
+        error_code: str,
+        error_message: str,
+        updated_at: str,
+    ) -> bool:
+        """Return retryable precommit work to queued without deleting input."""
+        with self.transaction(immediate=True) as conn:
+            cursor = conn.execute(
+                "UPDATE slides_generation_receipts SET receipt_status = 'queued', "
+                "error_code = ?, error_message = ?, updated_at = ? "
+                "WHERE id = ? AND owner_user_id = ? AND job_uuid = ? "
+                "AND receipt_status IN ('queued', 'running')",
+                (
+                    error_code,
+                    error_message,
+                    updated_at,
+                    receipt_id,
+                    owner_user_id,
+                    job_uuid,
+                ),
+            )
+            return cursor.rowcount == 1
+
+    def terminalize_generation_receipt(
+        self,
+        *,
+        receipt_id: str,
+        owner_user_id: str,
+        job_uuid: str | None,
+        status: str,
+        error_code: str,
+        error_message: str,
+        terminal_at: str,
+        expires_at: str,
+    ) -> bool:
+        """CAS a nonterminal receipt and delete input only when the CAS wins."""
+        if status not in {"failed", "cancelled"}:
+            raise InputError("generation terminal status is invalid")
+        with self.transaction(immediate=True) as conn:
+            conditions = [
+                "id = ?",
+                "owner_user_id = ?",
+                "receipt_status IN ('claimed', 'queued', 'running')",
+            ]
+            parameters: list[Any] = [receipt_id, owner_user_id]
+            if job_uuid is not None:
+                conditions.append("job_uuid = ?")
+                parameters.append(job_uuid)
+            cursor = conn.execute(
+                "UPDATE slides_generation_receipts SET receipt_status = ?, "
+                "error_code = ?, error_message = ?, updated_at = ?, expires_at = ? "
+                f"WHERE {' AND '.join(conditions)}",  # nosec B608
+                (status, error_code, error_message, terminal_at, expires_at, *parameters),
+            )
+            if cursor.rowcount != 1:
+                return False
+            conn.execute(
+                "DELETE FROM slides_generation_inputs WHERE receipt_id = ?",
+                (receipt_id,),
+            )
+            return True
+
+    def commit_generation_presentation(
+        self,
+        *,
+        receipt_id: str,
+        owner_user_id: str,
+        job_uuid: str,
+        html_document: str | bytes,
+        validation_result: StandaloneHtmlValidationResult,
+        generation_provenance_json: str,
+        committed_at: str,
+        expires_at: str,
+    ) -> SlidesGenerationCommitResult:
+        """Atomically insert one presentation, complete its receipt, and delete input."""
+        source = bind_validated_standalone_source(html_document, validation_result)
+        with self.transaction(immediate=True) as conn:
+            receipt = self._generation_receipt_from_connection(
+                conn,
+                receipt_id,
+                owner_user_id,
+            )
+            if receipt.receipt_status == "completed":
+                if not receipt.presentation_id:
+                    raise ConflictError("generation_correlation_mismatch")
+                presentation = self._fetch_presentation_by_id(
+                    conn,
+                    receipt.presentation_id,
+                    include_deleted=True,
+                )
+                if presentation.generation_job_uuid != job_uuid:
+                    raise ConflictError("generation_correlation_mismatch")
+                return SlidesGenerationCommitResult(presentation, created=False)
+            if receipt.receipt_status not in {"queued", "running"} or receipt.job_uuid != job_uuid:
+                raise ConflictError("generation_correlation_mismatch")
+            generation_input = self._generation_input_from_connection(
+                conn,
+                receipt_id,
+                owner_user_id,
+            )
+            try:
+                input_deadline = datetime.fromisoformat(generation_input.input_expires_at)
+                commit_time = datetime.fromisoformat(committed_at)
+            except ValueError as exc:
+                raise SlidesDatabaseError("generation_timestamp_invalid") from exc
+            if input_deadline.tzinfo is None or commit_time.tzinfo is None or commit_time >= input_deadline:
+                raise ConflictError("generation_expired")
+
+            candidate = {
+                "id": receipt_id,
+                "title": validation_result.title,
+                "description": None,
+                "theme": "black",
+                "marp_theme": None,
+                "template_id": None,
+                "visual_style_id": None,
+                "visual_style_scope": None,
+                "visual_style_name": None,
+                "visual_style_version": None,
+                "visual_style_snapshot": None,
+                "settings": None,
+                "studio_data": None,
+                "slides": "[]",
+                "slides_text": validation_result.indexable_text,
+                "source_type": generation_input.source_kind,
+                "source_ref": None,
+                "source_query": None,
+                "custom_css": None,
+                "created_at": committed_at,
+                "last_modified": committed_at,
+                "client_id": self.client_id,
+                "content_kind": "standalone_html",
+                "html_document": source,
+                "html_sha256": validation_result.html_sha256,
+                "html_bytes": validation_result.html_bytes,
+                "html_slide_count": validation_result.slide_count,
+                "generation_job_uuid": job_uuid,
+                "generation_provenance_json": generation_provenance_json,
+            }
+            presentation = self._insert_presentation_in_connection(conn, candidate)
+            cursor = conn.execute(
+                "UPDATE slides_generation_receipts SET presentation_id = ?, "
+                "receipt_status = 'completed', error_code = NULL, "
+                "error_message = NULL, updated_at = ?, expires_at = ? "
+                "WHERE id = ? AND owner_user_id = ? AND job_uuid = ? "
+                "AND receipt_status IN ('queued', 'running')",
+                (
+                    presentation.id,
+                    committed_at,
+                    expires_at,
+                    receipt_id,
+                    owner_user_id,
+                    job_uuid,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise ConflictError("generation_correlation_mismatch")
+            conn.execute(
+                "DELETE FROM slides_generation_inputs WHERE receipt_id = ?",
+                (receipt_id,),
+            )
+            return SlidesGenerationCommitResult(presentation, created=True)
 
     def get_generation_receipt(
         self,

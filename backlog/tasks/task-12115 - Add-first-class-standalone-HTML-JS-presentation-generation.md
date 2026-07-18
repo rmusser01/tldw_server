@@ -87,6 +87,9 @@ modified_files:
 - tldw_Server_API/tests/Jobs/test_jobs_finalize_idempotency_sqlite.py
 - tldw_Server_API/tests/Jobs/test_jobs_slides_generation_coordination_sqlite.py
 - tldw_Server_API/tests/Jobs/test_jobs_slides_generation_coordination_postgres.py
+- tldw_Server_API/app/core/Slides/standalone_html_service.py
+- tldw_Server_API/app/services/standalone_html_generation_jobs_worker.py
+- tldw_Server_API/tests/Slides/test_standalone_html_generation_jobs.py
 ---
 
 ## Description
@@ -237,4 +240,9 @@ Final verification: the 14-file affected matrix passed 589/589 with 11 existing 
 TDD and verification: the final queue-policy winner race reproduced first for active and archive rows (2 failed) and passed after rejection-path serialized replay (2 passed). The exact four-file Task 7 suite passed 94 tests with 21 repository-managed PostgreSQL fixture/runtime skips and 3 warnings across 115 collected tests. Ruff, Black, py_compile, git diff checks, and production Bandit were clean; Bandit reported 0 findings and 0 errors across 12,025 LOC at /tmp/bandit_task12115_root_final5.json. Immutable package review (SHA-256 d5feeba87cf09072b73a939ee9a59cb7c3c3f7a120705db95ac30c78f4517b41) returned Ready to merge: Yes with no blockers.
 
 Task 7 commits: 30fabc2bfd, 178ef50ebb, f2aad07ec7, 076742ba27, d2533d9d81, 7495834658. Overall TASK-12115 remains In Progress for Tasks 8+.
+2026-07-18 Task 8 implementation evidence: receipt-backed standalone HTML admission and worker commit paths are implemented. Jobs payloads remain receipt-only; owner-scoped receipt/input claims precede enqueue; active/archive recovery binds the immutable Jobs UUID and paired numeric hint; nonterminal replay verifies immutable source, options, prompt, target, provenance, and the canonical +24-hour input deadline; terminal CAS deletes input and retains receipts for +30 days. The worker acquires validator capacity before egress, rebuilds exact option-bearing user content, enforces the stored-target allowlist/kill/key gates, checks exhaustion/quarantine and live Jobs state before provider and commit, and atomically commits one presentation with completed-winner precedence. Interactive execution remains disabled and Task 9 lifecycle wiring was not added.
+
+TDD evidence: expanded RED collected 73 cases with 38 failed, 35 passed, 5 warnings (seed 3066732774); focused GREEN passed 73/73 with 5 warnings (seed 636255254). Final post-fix Task 8 plus structured-render regression passed 80/80 with 5 warnings in 10.64s (seed 381783820). Black --check left all four scoped files unchanged, Ruff passed, py_compile passed, and git diff --check passed. Production-only Bandit exited 0 with 0 findings and 0 errors across 4,049 LOC; 13 existing narrow SQL checks were skipped and no nosec suppressions were counted (report /tmp/bandit_task_8.json).
+
+Cohesion/ponytail review consolidated duplicated pre-provider and pre-commit Jobs checks into _fence_job. Remaining explicit receipt/CAS branches preserve distinct retry, terminal, completed-winner, and commit-conflict semantics. Overall TASK-12115 remains In Progress for Task 9+; root review gates and final plan/DoD checkboxes remain pending.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
