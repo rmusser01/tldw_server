@@ -106,7 +106,16 @@ class TestWorkspaceSources:
         with pytest.raises(ConflictError):
             db.update_workspace_source("ws-1", "src-1", {"title": "Z"}, expected_version=1)
 
-    def test_update_source_review_state_sets_and_clears_review_metadata(self, db):
+    def test_update_source_review_state_sets_and_clears_review_metadata(self, db, monkeypatch):
+        timestamps = iter(
+            [
+                "2026-07-18T18:18:10.000Z",
+                "2026-07-18T18:18:10.001Z",
+                "2026-07-18T18:18:10.002Z",
+                "2026-07-18T18:18:10.003Z",
+            ]
+        )
+        monkeypatch.setattr(db, "_get_current_utc_timestamp_iso", lambda: next(timestamps))
         created = db.add_workspace_source("ws-1", {
             "id": "src-1", "media_id": 1, "title": "X",
             "source_type": "video", "review_state": "needs_review",

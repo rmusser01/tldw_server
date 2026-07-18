@@ -85,6 +85,7 @@ from tldw_Server_API.app.core.Embeddings.provider_resolution import (
 from tldw_Server_API.app.core.Embeddings.orchestrator import (
     EmbeddingExecutorOutput,
     EmbeddingRequestOrchestrator,
+    PreparedEmbeddingRequest,
 )
 from tldw_Server_API.app.core.Embeddings.request_types import (
     EmbeddingDomainError,
@@ -97,6 +98,10 @@ from tldw_Server_API.app.core.Embeddings.request_types import (
     EmbeddingRateLimitError,
     EmbeddingRequestContext,
     ProviderModelIntent,
+)
+from tldw_Server_API.app.core.Embeddings.workflow_runner import (
+    EmbeddingInlineWorkflowRunner,
+    PreExecuteHook,
 )
 
 # Circuit Breaker
@@ -2861,6 +2866,15 @@ def _build_embedding_request_orchestrator(
     )
 
 
+def _build_embedding_inline_workflow_runner(
+    orchestrator: EmbeddingRequestOrchestrator,
+    *,
+    pre_execute: PreExecuteHook | None = None,
+) -> EmbeddingInlineWorkflowRunner:
+    """Build the inline workflow runner for the feature-flagged embeddings path."""
+    return EmbeddingInlineWorkflowRunner(orchestrator, pre_execute=pre_execute)
+
+
 def _orchestrator_backend_identity(
     provider: str,
     model: str,
@@ -3188,14 +3202,21 @@ async def _create_embedding_with_orchestrator(
         )
 
         try:
-            prepared = orchestrator.prepare(embedding_request.input, context)
-            rg_reserved_units = max(1, _prepared_total_tokens(prepared))
-            rg_governor, rg_handle_id, rg_commit_op_id, rg_reserved_units = await _reserve_embedding_rg_tokens(
-                request=request,
-                current_user=current_user,
-                token_total=rg_reserved_units,
+            async def _reserve_before_execute(prepared: PreparedEmbeddingRequest) -> None:
+                """Reserve RG units after planning and before cache/provider execution."""
+                nonlocal rg_governor, rg_handle_id, rg_commit_op_id, rg_reserved_units
+                rg_reserved_units = max(1, _prepared_total_tokens(prepared))
+                rg_governor, rg_handle_id, rg_commit_op_id, rg_reserved_units = await _reserve_embedding_rg_tokens(
+                    request=request,
+                    current_user=current_user,
+                    token_total=rg_reserved_units,
+                )
+
+            workflow_runner = _build_embedding_inline_workflow_runner(
+                orchestrator,
+                pre_execute=_reserve_before_execute,
             )
-            result = await orchestrator.execute(prepared)
+            result = await workflow_runner.run(embedding_request.input, context)
         except EmbeddingDomainError as domain_exc:
             mapped = _embedding_domain_error_to_http(domain_exc)
             if isinstance(mapped, JSONResponse):
