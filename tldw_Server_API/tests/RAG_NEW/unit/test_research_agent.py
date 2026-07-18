@@ -11,9 +11,9 @@ from tldw_Server_API.app.core.RAG.rag_service import research_agent as ra
 from tldw_Server_API.app.core.RAG.rag_service.query_classifier import QueryClassification
 from tldw_Server_API.app.core.RAG.rag_service.research_agent import create_default_registry
 from tldw_Server_API.tests.RAG_NEW.unit.test_generation_executor import (
-    _RecordingCredentialRuntime,
     _install_blocking_sync_chat_adapter,
     _install_explicit_chat_capture,
+    _RecordingCredentialRuntime,
 )
 
 pytestmark = pytest.mark.unit

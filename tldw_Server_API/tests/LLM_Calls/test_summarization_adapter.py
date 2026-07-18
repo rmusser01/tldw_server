@@ -76,6 +76,11 @@ def _disable_server_resolution(monkeypatch):
         "ensure_app_config",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("must not load config")),
     )
+    monkeypatch.setattr(
+        sgl,
+        "resolve_provider_api_key_from_config",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("must not load key")),
+    )
 
 
 def _provider_credentials(
@@ -116,11 +121,6 @@ def _provider_credentials(
             await runtime.close()
 
     return asyncio.run(issue())
-    monkeypatch.setattr(
-        sgl,
-        "resolve_provider_api_key_from_config",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("must not load key")),
-    )
 
 
 class _FakeResp:

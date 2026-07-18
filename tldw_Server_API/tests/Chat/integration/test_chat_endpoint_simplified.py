@@ -47,6 +47,9 @@ from tldw_Server_API.app.core.Chat.streaming_utils import StreamingResponseHandl
 from tldw_Server_API.app.core.exceptions import ProviderCredentialTerminalError
 from tldw_Server_API.app.core.LLM_Calls.routing.models import RouterRequest, RoutingPolicy
 from tldw_Server_API.app.main import app
+from tldw_Server_API.tests.provider_credential_test_helpers import (
+    issue_provider_call_credentials_async,
+)
 
 _CHAT_USER_SECRET = "sk-chat-user-secret-must-not-leak"
 _REGISTRY_OPENAI_BASE_URL = "https://registry-openai.test/v1"
@@ -344,13 +347,12 @@ def _credential_runtime_double(
                     provider,
                     f"{provider}-refreshed-runtime-key",
                 )
-            return SimpleNamespace(
-                provider=provider,
+            return await issue_provider_call_credentials_async(
+                provider,
                 api_key=key,
                 app_config={f"{provider}_api": {"model": "runtime-model"}},
                 auth_source=(auth_sources or {}).get(provider, auth_source),
-                endpoint_provenance="server_config",
-                credentials_resolved=True,
+                model=model,
             )
 
         async def mark_used(self, handle) -> None:
@@ -1220,8 +1222,8 @@ def test_health_fallback_keeps_model_policy_atomic_during_config_rotation(
                 if self._fallback_calls == 1:
                     fallback_resolution_started.set()
                     await asyncio.to_thread(release_fallback_resolution.wait, 2.0)
-            return SimpleNamespace(
-                provider=normalized,
+            return await issue_provider_call_credentials_async(
+                normalized,
                 api_key=f"{normalized}-runtime-key",
                 app_config={
                     f"{normalized}_api": {
@@ -1233,7 +1235,7 @@ def test_health_fallback_keeps_model_policy_atomic_during_config_rotation(
                     }
                 },
                 auth_source=None,
-                credentials_resolved=True,
+                model=model,
             )
 
         async def mark_used(self, handle) -> None:
@@ -1426,11 +1428,11 @@ async def test_real_adapter_router_boundary_has_exact_attempt_accounting(
     provider_manager = _RouterProviderManager()
     usage_log = AsyncMock(return_value=None)
     marked: list[str] = []
-    handle = SimpleNamespace(
-        provider="openai",
+    handle = await issue_provider_call_credentials_async(
+        "openai",
         api_key="router-boundary-key",
         app_config=_registry_openai_app_config(),
-        credentials_resolved=True,
+        model="router-model",
     )
 
     class Runtime:
@@ -1522,11 +1524,11 @@ async def test_router_mark_failure_does_not_reclassify_provider_success(
     provider_manager = _RouterProviderManager()
     usage_log = AsyncMock(return_value=None)
     mark_attempts: list[str] = []
-    handle = SimpleNamespace(
-        provider="openai",
+    handle = await issue_provider_call_credentials_async(
+        "openai",
         api_key="router-mark-failure-key",
         app_config=_registry_openai_app_config(),
-        credentials_resolved=True,
+        model="router-model",
     )
 
     class Runtime:
@@ -1611,16 +1613,20 @@ async def test_concurrent_router_mark_failure_is_request_isolated(
     mark_attempts = [0, 0]
     marked: list[list[str]] = [[], []]
     usage_log = AsyncMock(return_value=None)
+    handles = [
+        await issue_provider_call_credentials_async(
+            "openai",
+            api_key=f"router-mark-key-{index}",
+            app_config=_registry_openai_app_config(),
+            model="router-model",
+        )
+        for index in range(2)
+    ]
 
     class Runtime:
         def __init__(self, index: int) -> None:
             self.index = index
-            self.handle = SimpleNamespace(
-                provider="openai",
-                api_key=f"router-mark-key-{index}",
-                app_config=_registry_openai_app_config(),
-                credentials_resolved=True,
-            )
+            self.handle = handles[index]
 
         async def resolve(self, provider: str, *, model: str | None = None):
             assert (provider, model) == ("openai", "router-model")
@@ -1779,11 +1785,11 @@ async def test_normal_chat_router_marks_each_semantic_provider_success(
 
     sentinel = "normal-router-secret-/srv/provider"
     marked: list[str] = []
-    handle = SimpleNamespace(
-        provider="openai",
+    handle = await issue_provider_call_credentials_async(
+        "openai",
         api_key="router-key",
         app_config={},
-        credentials_resolved=True,
+        model="router-model",
     )
 
     class Runtime:
@@ -1929,16 +1935,20 @@ async def test_concurrent_chat_router_results_are_request_isolated(
     provider_managers = [_RouterProviderManager(), _RouterProviderManager()]
     active_index: ContextVar[int] = ContextVar("active_router_test_index")
     usage_log = AsyncMock(return_value=None)
+    handles = [
+        await issue_provider_call_credentials_async(
+            "openai",
+            api_key=f"router-key-{index}",
+            app_config=_registry_openai_app_config(),
+            model="router-model",
+        )
+        for index in range(2)
+    ]
 
     class Runtime:
         def __init__(self, index: int) -> None:
             self.index = index
-            self.handle = SimpleNamespace(
-                provider="openai",
-                api_key=f"router-key-{index}",
-                app_config=_registry_openai_app_config(),
-                credentials_resolved=True,
-            )
+            self.handle = handles[index]
 
         async def resolve(self, _provider: str, *, model: str | None = None):
             del model
@@ -2096,11 +2106,11 @@ async def test_chat_router_valid_result_drains_mark_before_cancellation(
     release_mark = asyncio.Event()
     drain_entered = _install_owned_worker_drain_probe(monkeypatch)
     marked: list[str] = []
-    handle = SimpleNamespace(
-        provider="openai",
+    handle = await issue_provider_call_credentials_async(
+        "openai",
         api_key="router-key",
         app_config={},
-        credentials_resolved=True,
+        model="router-model",
     )
 
     class Runtime:
@@ -2187,11 +2197,11 @@ async def test_auto_router_cancellation_marks_only_semantic_late_success(
     release = asyncio.Event()
     drain_entered = _install_owned_worker_drain_probe(monkeypatch)
     marked: list[str] = []
-    handle = SimpleNamespace(
-        provider="openai",
+    handle = await issue_provider_call_credentials_async(
+        "openai",
         api_key="router-key",
         app_config={},
-        credentials_resolved=True,
+        model="router-model",
     )
 
     class Runtime:
@@ -2316,11 +2326,11 @@ async def test_cancelled_router_drains_real_adapter_before_classify_mark_and_clo
             classify,
         )
 
-    handle = SimpleNamespace(
-        provider="openai",
+    handle = await issue_provider_call_credentials_async(
+        "openai",
         api_key="cancelled-router-key",
         app_config=_registry_openai_app_config(),
-        credentials_resolved=True,
+        model="router-model",
     )
 
     class Runtime:

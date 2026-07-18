@@ -3271,21 +3271,18 @@ async def create_chat_completion(
 
         request_model_was_explicit = bool(str(getattr(request_data, "model", None) or "").strip())
 
-        try:
-            (
-                metrics_provider,
-                metrics_model,
-                selected_provider,
-                selected_model,
-                provider_debug,
-            ) = resolve_provider_and_model(
-                request_data=request_data,
-                metrics_default_provider=DEFAULT_LLM_PROVIDER,
-                normalize_default_provider=_get_default_provider(),
-                routing_decision=routing_decision,
-            )
-        except BaseException:
-            raise
+        (
+            metrics_provider,
+            metrics_model,
+            selected_provider,
+            selected_model,
+            provider_debug,
+        ) = resolve_provider_and_model(
+            request_data=request_data,
+            metrics_default_provider=DEFAULT_LLM_PROVIDER,
+            normalize_default_provider=_get_default_provider(),
+            routing_decision=routing_decision,
+        )
 
         provider = metrics_provider
         model = metrics_model
@@ -3339,13 +3336,10 @@ async def create_chat_completion(
         _billing_enforcer: LimitEnforcer | None = None
         _billing_enforcer_entered = False
 
-        try:
-            _track_request_cm = metrics.track_request(
-                provider=provider, model=model, streaming=request_data.stream, client_id=client_id
-            )
-            span = await _track_request_cm.__aenter__()
-        except BaseException:
-            raise
+        _track_request_cm = metrics.track_request(
+            provider=provider, model=model, streaming=request_data.stream, client_id=client_id
+        )
+        span = await _track_request_cm.__aenter__()
         try:
             # Authentication is enforced via get_request_user dependency (JWT or X-API-KEY).
             # If it fails, FastAPI raises 401 before reaching here. No further checks needed.
@@ -3935,7 +3929,9 @@ async def create_chat_completion(
                         _supervised_engine = _guardian_runtime.supervised_engine
 
                     if self_monitoring_enabled and _guardian_runtime.guardian_db:
-                        from tldw_Server_API.app.core.Monitoring.self_monitoring_service import get_self_monitoring_service
+                        from tldw_Server_API.app.core.Monitoring.self_monitoring_service import (
+                            get_self_monitoring_service,
+                        )
                         _self_mon_service = get_self_monitoring_service(_guardian_runtime.guardian_db)
             except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as exc:
                 logger.warning("Guardian moderation bootstrap failed; continuing with base moderation only: {}", exc)
@@ -5533,7 +5529,7 @@ async def create_chat_completion(
                     HTTPException(status_code=http_status, detail=safe_detail)
                 )
 
-            except MandatoryAuditWriteError as e_chat:
+            except MandatoryAuditWriteError:
                 raise_detached_error(
                     HTTPException(
                         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

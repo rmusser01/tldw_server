@@ -53,7 +53,7 @@ class _FakeClient:
         )
         return _FakeResponse()
 
-    def stream(self, method: str, url: str, headers: Dict[str, str], json: Dict[str, Any]):
+    def stream(self, method: str, url: str, headers: dict[str, str], json: dict[str, Any]):
         self._captured["stream_method"] = method
         self._captured["url"] = url
         self._captured["headers"] = headers

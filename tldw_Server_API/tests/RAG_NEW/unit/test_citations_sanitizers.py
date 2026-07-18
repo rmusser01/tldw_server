@@ -2,8 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from tldw_Server_API.app.core.RAG.rag_service import citations
-from tldw_Server_API.app.core.RAG.rag_service import evidence_chains
+from tldw_Server_API.app.core.RAG.rag_service import citations, evidence_chains
 from tldw_Server_API.app.core.RAG.rag_service.citations import (
     AcademicCitationFormatter,
     CitationGenerator,
