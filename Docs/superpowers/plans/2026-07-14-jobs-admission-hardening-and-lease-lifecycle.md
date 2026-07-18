@@ -494,7 +494,7 @@ git commit -m "fix(jobs): fail closed when quota checks fail"
 - Consumes: owner/domain-scoped quota values already passed into `create_job_admission`.
 - Produces: unchanged public quota `ValueError`; PostgreSQL quota check and insert are serialized by owner/domain, while SQLite uses its shortest available database write transaction only when at least one owner-scoped admission quota is enabled.
 
-- [ ] **Step 1: Add deterministic PostgreSQL concurrency coverage**
+- [x] **Step 1: Add deterministic PostgreSQL concurrency coverage**
 
 In the per-test PostgreSQL database, install a temporary trigger that delays `jobs` inserts:
 
@@ -521,7 +521,7 @@ assert manager.count_jobs(domain="quota-race", owner_user_id="owner-1", status="
 
 Use different `job_type` values and no idempotency key so uniqueness does not hide the race. Before the fix, the trigger allows both quota reads to observe zero and both submissions succeed.
 
-- [ ] **Step 2: Add deterministic SQLite concurrency coverage**
+- [x] **Step 2: Add deterministic SQLite concurrency coverage**
 
 Create a test-only `JobManager` subclass whose `_connect` registers a `jobs_test_sleep` SQLite function, then install this trigger:
 
@@ -535,7 +535,7 @@ END;
 
 Start two owner/domain-equivalent submissions together. Assert one returns a row, one raises the public quota `ValueError`, neither leaks `sqlite3.OperationalError`, and exactly one queued job remains. Before the fix, both deferred transactions can pass the count and the loser attempts to upgrade a stale read transaction, exposing `database is locked` instead of a quota result.
 
-- [ ] **Step 3: Verify both concurrency tests are red**
+- [x] **Step 3: Verify both concurrency tests are red**
 
 ```bash
 RUN_JOBS=1 python -m pytest \
@@ -546,7 +546,7 @@ RUN_JOBS=1 python -m pytest \
 
 Expected before the fix: PostgreSQL reports two created rows; SQLite reports either two outcomes inconsistent with the limit or an operational lock error rather than one quota rejection.
 
-- [ ] **Step 4: Add a stable PostgreSQL quota lock key**
+- [x] **Step 4: Add a stable PostgreSQL quota lock key**
 
 Add `hashlib` and this helper to `operations/postgres/admission.py`:
 
@@ -567,7 +567,7 @@ if quota_enabled:
 
 The lock namespace includes a fixed operation prefix so future acquisition locks cannot accidentally share keys merely because owner and domain match.
 
-- [ ] **Step 5: Start SQLite quota transactions with `BEGIN IMMEDIATE`**
+- [x] **Step 5: Start SQLite quota transactions with `BEGIN IMMEDIATE`**
 
 Before entering the existing `with conn:` transaction:
 
@@ -582,13 +582,13 @@ with conn:
 
 Do not use `BEGIN IMMEDIATE` when quotas are disabled or there is no owner scope; ordinary admission keeps its current concurrency characteristics.
 
-- [ ] **Step 6: Prove lock scope and the SQLite no-quota fast path**
+- [x] **Step 6: Prove lock scope and the SQLite no-quota fast path**
 
 Extend the PostgreSQL concurrency file with submissions for different owner ids under the same domain. Use the delayed insert trigger and overlap events to prove both enter their inserts before either completes, then assert both jobs are created. This protects against replacing the scoped advisory lock with a global PostgreSQL lock.
 
 Add a SQLite direct-operation test with a recording connection proxy. Call `create_job_admission` with `max_queued_quota=0` and `submits_per_minute_quota=0`; assert the recorded statements do not contain `BEGIN IMMEDIATE`. Call again with an owner and `max_queued_quota=1`; assert `BEGIN IMMEDIATE` is the first transaction statement. SQLite cannot keep unrelated quota-enabled writes concurrent because its write lock is database-wide, so the required protection is limiting immediate locking to enabled quota decisions.
 
-- [ ] **Step 7: Run the full admission gate**
+- [x] **Step 7: Run the full admission gate**
 
 ```bash
 RUN_JOBS=1 python -m pytest \
@@ -607,7 +607,7 @@ RUN_JOBS=1 python -m pytest \
 
 Expected: all selected tests pass; no PostgreSQL tests skip.
 
-- [ ] **Step 8: Run security and syntax checks**
+- [x] **Step 8: Run security and syntax checks**
 
 ```bash
 python -m compileall -q \
@@ -623,7 +623,30 @@ python -m bandit -r \
 
 Expected: compile succeeds and Bandit reports no new findings in touched code.
 
-- [ ] **Step 9: Commit and open PR 1**
+- [x] **Step 9: Review the initial atomicity implementation**
+
+Commit `0cd9fb8f0e` passed strict specification review. Code-quality review identified four hypotheses. Validate them before changing production code:
+
+- idempotent retries can be rejected after their first queued job consumes the quota;
+- a PostgreSQL transaction that starts at `REPEATABLE READ` can retain the snapshot established by the advisory-lock query;
+- the configured PostgreSQL `lock_timeout` can surface a database error under prolonged contention;
+- trigger sleeps widen the race window but do not prove that both pre-fix admissions crossed the quota decision before either insert.
+
+The first, second, and fourth findings are validated for remediation. The third is an intentional consequence of the existing fail-closed database error boundary: keep the bounded database timeout and propagate its error rather than adding implicit whole-transaction retries without a public retry contract.
+
+- [ ] **Step 10: Add red review-regression tests**
+
+Add sequential and concurrent idempotent replay tests for both backends with `max_queued=1`; both calls must return the same job and leave one queued row. Add PostgreSQL coverage that begins admissions from `REPEATABLE READ` connections and still admits exactly one same-scope job. Replace timing-only same-scope coordination with test connection/cursor events that force the pre-fix quota-read-to-insert race while allowing the serialized implementation to complete. Ensure every worker thread is joined in cleanup paths.
+
+- [ ] **Step 11: Preserve replay semantics and pin the PostgreSQL quota transaction snapshot**
+
+Inside the serialized transaction, resolve an existing idempotency tuple before quota evaluation. Skip quota evaluation only for an existing tuple, then continue through the existing replay path so durable event and facade behavior remain unchanged. For PostgreSQL quota-enabled admissions, set the current transaction to `READ COMMITTED` before the advisory-lock `SELECT`, ensuring the quota query receives a fresh statement snapshot after any wait.
+
+- [ ] **Step 12: Re-run review, admission, security, and syntax gates**
+
+Repeat the focused red/green review tests, the Step 7 matrix with required real PostgreSQL execution and no skips, both review stages, compile checks, Ruff on changed files, and Bandit on touched production files.
+
+- [ ] **Step 13: Commit and open PR 1**
 
 ```bash
 git add tldw_Server_API/app/core/Jobs/operations/postgres/admission.py \
