@@ -232,6 +232,52 @@ describe("useMultiRenderState", () => {
     )
   })
 
+  it("passes explicit gateway settings and stores fallback provenance", async () => {
+    vi.mocked(resolveTtsProviderContext).mockResolvedValueOnce({
+      provider: "tldw",
+      utterance: "Gateway render",
+      playbackSpeed: 1,
+      supported: true,
+      normalizeText: vi.fn((text: string) => text),
+      synthesize: vi.fn().mockResolvedValue({
+        buffer: new ArrayBuffer(32),
+        format: "mp3",
+        mimeType: "audio/mpeg",
+        actualBackend: "gateway:backup",
+        fallbackUsed: true
+      })
+    })
+
+    const { result } = renderHook(() => useMultiRenderState())
+    act(() => {
+      result.current.addRender({
+        provider: "tldw",
+        backend: "gateway:primary",
+        allowFallback: false,
+        voice: "narrator",
+        model: "SpeechModel"
+      })
+    })
+
+    const id = result.current.renders[0].id
+    await act(async () => {
+      await result.current.generateRender(id, "Gateway render")
+    })
+
+    expect(resolveTtsProviderContext).toHaveBeenCalledWith(
+      "Gateway render",
+      expect.objectContaining({
+        tldwBackend: "gateway:primary",
+        tldwAllowFallback: false
+      })
+    )
+    expect(result.current.renders[0].metadata).toMatchObject({
+      requestedBackend: "gateway:primary",
+      actualBackend: "gateway:backup",
+      fallbackUsed: true
+    })
+  })
+
   it("duplicates render rows and skips disabled rows during generate all", async () => {
     const { result } = renderHook(() => useMultiRenderState())
     act(() => {

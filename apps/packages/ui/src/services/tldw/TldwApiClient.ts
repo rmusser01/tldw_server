@@ -6494,6 +6494,8 @@ export class TldwApiClientBase {
     lang_code?: string
     normalization_options?: Record<string, any>
     extra_params?: Record<string, any>
+    backend?: string
+    allow_fallback?: boolean
   }): Promise<{ job_id: number; status: string }> {
     return await bgRequest<{ job_id: number; status: string }>({
       path: "/api/v1/audio/speech/jobs",

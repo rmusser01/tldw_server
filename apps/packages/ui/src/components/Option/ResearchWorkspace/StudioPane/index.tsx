@@ -1075,8 +1075,11 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
     setShowTtsSettings,
     loadingVoices,
     previewingVoice,
+    explicitBackendSupported,
+    backendOptions,
     getVoiceOptions,
     getModelOptions: getTtsModelOptions,
+    handleBackendChange,
     handlePreviewVoice,
   } = audioTts
 
@@ -2238,6 +2241,46 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
                   options={TTS_PROVIDERS}
                 />
               </div>
+
+              {audioSettings.provider === "tldw" && explicitBackendSupported && (
+                <div className="space-y-2">
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-text-muted">
+                      {t("playground:studio.ttsBackend", "TTS Backend")}
+                    </label>
+                    <Select
+                      aria-label={t(
+                        "playground:studio.ttsBackend",
+                        "TTS Backend"
+                      )}
+                      size={studioControlSize}
+                      className="w-full"
+                      value={audioSettings.backend || ""}
+                      onChange={handleBackendChange}
+                      options={backendOptions}
+                    />
+                  </div>
+                  <label className="flex items-center justify-between gap-3 text-xs text-text-muted">
+                    <span>
+                      {t(
+                        "playground:studio.allowConfiguredFallback",
+                        "Allow configured fallback"
+                      )}
+                    </span>
+                    <Switch
+                      size="small"
+                      aria-label={t(
+                        "playground:studio.allowConfiguredFallback",
+                        "Allow configured fallback"
+                      )}
+                      checked={audioSettings.allowFallback !== false}
+                      onChange={(checked) =>
+                        setAudioSettings({ allowFallback: checked })
+                      }
+                    />
+                  </label>
+                </div>
+              )}
 
               {/* Model (for tldw and openai) */}
               {audioSettings.provider !== "browser" && (

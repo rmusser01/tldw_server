@@ -230,6 +230,7 @@ describe("tldw gateway speech client", () => {
     ["view", () => Uint8Array.from([0, 3, 4, 0]).subarray(1, 3)],
     ["Blob", () => new Blob([Uint8Array.from([5, 6])])]
   ])("normalizes %s detailed response data", async (_name, makeData) => {
+    if (_name === "Blob") vi.useRealTimers()
     const { client } = makeClient({
       config: {
         serverUrl: `https://buffer-${_name}.example.test`,

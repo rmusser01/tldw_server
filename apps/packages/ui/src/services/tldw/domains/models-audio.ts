@@ -261,7 +261,25 @@ const normalizeArrayBuffer = async (value: unknown): Promise<ArrayBuffer | null>
     }
   }
   if (typeof Blob !== "undefined" && value instanceof Blob) {
-    return await value.arrayBuffer()
+    const blob = value as Blob & {
+      arrayBuffer?: () => Promise<ArrayBuffer>
+    }
+    if (typeof blob.arrayBuffer === "function") {
+      return await blob.arrayBuffer()
+    }
+    if (typeof FileReader !== "undefined") {
+      return await new Promise<ArrayBuffer | null>((resolve) => {
+        const reader = new FileReader()
+        reader.onload = () =>
+          resolve(reader.result instanceof ArrayBuffer ? reader.result : null)
+        reader.onerror = () => resolve(null)
+        reader.readAsArrayBuffer(blob)
+      })
+    }
+    if (typeof Response !== "undefined") {
+      return await new Response(blob).arrayBuffer()
+    }
+    return null
   }
   const tag = Object.prototype.toString.call(value)
   if (tag === "[object ArrayBuffer]" && typeof (value as any).slice === "function") {
@@ -1240,6 +1258,8 @@ export const modelsAudioMethods = {
     lang_code?: string
     normalization_options?: Record<string, any>
     extra_params?: Record<string, any>
+    backend?: string
+    allow_fallback?: boolean
   }): Promise<{ job_id: number; status: string }> {
     return await bgRequest<{ job_id: number; status: string }>({
       path: "/api/v1/audio/speech/jobs",

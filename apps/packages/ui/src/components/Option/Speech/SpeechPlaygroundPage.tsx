@@ -112,6 +112,9 @@ type SpeechHistoryItem = {
   sttResponseFormat?: string
   sttUseSegmentation?: boolean
   mode?: "short" | "long"
+  requestedBackend?: string
+  actualBackends?: string[]
+  fallbackUsed?: boolean
 }
 
 const SAMPLE_TEXT =
@@ -168,6 +171,11 @@ const formatBytes = (value?: number | null) => {
 const buildHistoryParamsSummary = (item: SpeechHistoryItem) => {
   const parts: string[] = []
   if (item.type === "tts") {
+    if (item.requestedBackend) parts.push(`requested ${item.requestedBackend}`)
+    if (item.actualBackends?.length) {
+      parts.push(`actual ${item.actualBackends.join(", ")}`)
+    }
+    if (item.fallbackUsed) parts.push("fallback used")
     if (item.format) parts.push(`fmt ${item.format.toUpperCase()}`)
     if (typeof item.speed === "number") parts.push(`speed ${item.speed.toFixed(2)}`)
     if (item.responseSplitting) parts.push(`split ${item.responseSplitting}`)
@@ -193,6 +201,11 @@ const buildHistoryDetailTooltip = (item: SpeechHistoryItem) => {
   if (item.durationMs != null) rows.push(["Duration", `${(item.durationMs / 1000).toFixed(1)}s`])
   if (item.model) rows.push(["Model", item.model])
   if (item.provider) rows.push(["Provider", item.provider])
+  if (item.requestedBackend) rows.push(["Requested backend", item.requestedBackend])
+  if (item.actualBackends?.length) {
+    rows.push(["Actual backend", item.actualBackends.join(", ")])
+  }
+  if (item.fallbackUsed) rows.push(["Fallback", "Used"])
   if (item.voice) rows.push(["Voice", item.voice])
   if (item.format) rows.push(["Format", item.format.toUpperCase()])
   if (typeof item.speed === "number") rows.push(["Speed", item.speed.toFixed(2)])
@@ -808,9 +821,6 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
   const [outlineDraft, setOutlineDraft] = React.useState("")
   const [transcriptDraft, setTranscriptDraft] = React.useState("")
   const [draftErrors, setDraftErrors] = React.useState<{ outline?: string; transcript?: string }>({})
-  const [voicePreviewText, setVoicePreviewText] = React.useState(
-    "Hello, this is a preview of the selected voice."
-  )
   const [useTtsJob, setUseTtsJob] = React.useState(false)
   const [ttsJobId, setTtsJobId] = React.useState<number | null>(null)
   const [ttsJobStatus, setTtsJobStatus] = React.useState<"idle" | "running" | "success" | "error">("idle")
@@ -821,9 +831,6 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
   const ttsJobAbortRef = React.useRef<AbortController | null>(null)
   const [useVoiceRoles, setUseVoiceRoles] = React.useState(false)
   const [voiceCards, setVoiceCards] = React.useState<VoiceRoleCard[]>([])
-  const [voicePreviewUrl, setVoicePreviewUrl] = React.useState<string | null>(null)
-  const [voicePreviewCardId, setVoicePreviewCardId] = React.useState<string | null>(null)
-  const [voicePreviewingId, setVoicePreviewingId] = React.useState<string | null>(null)
 
   // Compose & Compare: Multi-render strips + voice picker
   const [voicePickerOpen, setVoicePickerOpen] = React.useState(false)
@@ -846,6 +853,7 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
   const [tldwFormat, setTldwFormat] = React.useState<string | undefined>(undefined)
   const [tldwLanguage, setTldwLanguage] = React.useState<string | undefined>(undefined)
   const [tldwStreaming, setTldwStreaming] = React.useState(false)
+  const [allowFallback, setAllowFallback] = React.useState(true)
   const [tldwEmotion, setTldwEmotion] = React.useState<string | undefined>(undefined)
   const [tldwEmotionIntensity, setTldwEmotionIntensity] = React.useState<number>(1)
   const [tldwNormalize, setTldwNormalize] = React.useState(true)
@@ -866,6 +874,7 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
   const [inlineElevenLabsDetailsOpen, setInlineElevenLabsDetailsOpen] = React.useState(true)
   const provider = ttsSettings?.ttsProvider || DEFAULT_TTS_PROVIDER
   const isTldw = provider === "tldw"
+  const configuredTldwBackend = String(ttsSettings?.tldwTtsBackend || "").trim()
   const inferredProviderKey = React.useMemo(() => {
     if (!isTldw) return null
     return inferTldwProviderFromModel(tldwModel || ttsSettings?.tldwTtsModel)
@@ -882,9 +891,15 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
     refetchElevenLabs
   } = useTtsProviderData({
     provider,
+    backend: configuredTldwBackend || undefined,
+    model: tldwModel || ttsSettings?.tldwTtsModel,
     elevenLabsApiKey: ttsSettings?.elevenLabsApiKey,
     inferredProviderKey
   })
+  const selectedTldwBackend =
+    providersInfo?.supports_explicit_backend === true
+      ? configuredTldwBackend
+      : ""
 
   const { data: customVoices = [] } = useQuery<TldwCustomVoice[]>({
     queryKey: ["tts-custom-voices"],
@@ -936,6 +951,8 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
 
     return {
       provider,
+      backend: selectedTldwBackend || undefined,
+      allowFallback,
       model:
         tldwModel ||
         ttsSettings?.tldwTtsModel ||
@@ -955,12 +972,16 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
     openAiModel,
     openAiVoice,
     provider,
+    selectedTldwBackend,
+    allowFallback,
     tldwFormat,
     tldwModel,
     tldwVoice,
     ttsSettings
   ])
-  const readinessProvider = isTldw && inferredProviderKey ? inferredProviderKey : provider
+  const readinessProvider = isTldw
+    ? selectedTldwBackend || inferredProviderKey || provider
+    : provider
   const ttsReadinessItems = React.useMemo(
     () =>
       buildTtsReadinessItems({
@@ -995,7 +1016,13 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
 
   const handleAddRenderStrip = React.useCallback(() => {
     // Try to use last-used voice config from localStorage
-    let lastVoice: { provider?: string; voice?: string; model?: string } | null = null
+    let lastVoice: {
+      provider?: string
+      voice?: string
+      model?: string
+      backend?: string
+      allowFallback?: boolean
+    } | null = null
     try {
       const stored = localStorage.getItem("tts-last-render-config")
       if (stored) lastVoice = JSON.parse(stored)
@@ -1005,7 +1032,10 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
     const defaultConfig = {
       ...currentTtsSelection,
       voice: matchingLastVoice?.voice || currentTtsSelection.voice,
-      model: matchingLastVoice?.model || currentTtsSelection.model
+      model: matchingLastVoice?.model || currentTtsSelection.model,
+      backend: matchingLastVoice?.backend ?? currentTtsSelection.backend,
+      allowFallback:
+        matchingLastVoice?.allowFallback ?? currentTtsSelection.allowFallback
     }
     multiRender.addRender(defaultConfig)
   }, [provider, currentTtsSelection, multiRender])
@@ -1014,7 +1044,17 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
     (selection: VoiceSelection) => {
       // Persist last-used voice config
       try {
-        localStorage.setItem("tts-last-render-config", JSON.stringify(selection))
+        localStorage.setItem(
+          "tts-last-render-config",
+          JSON.stringify({
+            ...selection,
+            backend:
+              selection.backend ??
+              (selection.provider === "tldw" ? selectedTldwBackend || undefined : undefined),
+            allowFallback:
+              selection.provider === "tldw" ? allowFallback : undefined
+          })
+        )
       } catch {}
 
       if (voicePickerTargetStripId) {
@@ -1024,6 +1064,11 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
           multiRender.updateConfig(voicePickerTargetStripId, {
             ...existing.config,
             provider: selection.provider,
+            backend:
+              selection.backend ??
+              (selection.provider === "tldw" ? selectedTldwBackend || undefined : undefined),
+            allowFallback:
+              selection.provider === "tldw" ? allowFallback : undefined,
             voice: selection.voice,
             // Only preserve old model if the provider didn't change; otherwise use selection.model
             // (which is undefined for openai/elevenlabs/browser — that's intentional)
@@ -1037,6 +1082,11 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
         // Add new render strip with the selected voice
         multiRender.addRender({
           provider: selection.provider,
+          backend:
+            selection.backend ??
+            (selection.provider === "tldw" ? selectedTldwBackend || undefined : undefined),
+          allowFallback:
+            selection.provider === "tldw" ? allowFallback : undefined,
           voice: selection.voice,
           model: selection.model,
           format: tldwFormat || ttsSettings?.tldwTtsResponseFormat || "mp3",
@@ -1044,7 +1094,14 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
         })
       }
     },
-    [voicePickerTargetStripId, multiRender, tldwFormat, ttsSettings]
+    [
+      voicePickerTargetStripId,
+      multiRender,
+      tldwFormat,
+      ttsSettings,
+      selectedTldwBackend,
+      allowFallback
+    ]
   )
 
   const handleRenderStripConfigTagClick = React.useCallback(
@@ -1080,16 +1137,6 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
       }
     }
   }, [])
-
-  React.useEffect(() => {
-    return () => {
-      if (voicePreviewUrl) {
-        try {
-          URL.revokeObjectURL(voicePreviewUrl)
-        } catch {}
-      }
-    }
-  }, [voicePreviewUrl])
 
   React.useEffect(() => {
     if (!ttsSettings) return
@@ -1184,6 +1231,8 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
       response_splitting: responseSplitting,
       normalization_options: normalizationOptions
     }
+    if (selectedTldwBackend) config.backend = selectedTldwBackend
+    config.allow_fallback = allowFallback
     if (currentTtsSelection.model) config.model = currentTtsSelection.model
     if (currentTtsSelection.voice) config.voice = currentTtsSelection.voice
     if (tldwLanguage) config.lang_code = tldwLanguage
@@ -1203,7 +1252,9 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
     tldwEmotion,
     tldwEmotionIntensity,
     tldwLanguage,
-    tldwStreaming
+    tldwStreaming,
+    selectedTldwBackend,
+    allowFallback
   ])
 
   const handleApplyServerTtsPreset = React.useCallback(
@@ -1250,6 +1301,12 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
         Number.isFinite(config.emotion_intensity)
           ? config.emotion_intensity
           : undefined
+      const nextBackend =
+        typeof config.backend === "string" ? config.backend.trim() : undefined
+      const nextAllowFallback =
+        typeof config.allow_fallback === "boolean"
+          ? config.allow_fallback
+          : undefined
       const normalizers =
         config.normalization_options &&
         typeof config.normalization_options === "object" &&
@@ -1276,6 +1333,9 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
       if (nextEmotion) setTldwEmotion(nextEmotion)
       if (typeof nextEmotionIntensity === "number") {
         setTldwEmotionIntensity(nextEmotionIntensity)
+      }
+      if (typeof nextAllowFallback === "boolean") {
+        setAllowFallback(nextAllowFallback)
       }
       setTldwNormalize(boolOr(normalizers.normalize, tldwNormalize))
       setTldwNormalizeUnits(
@@ -1321,6 +1381,13 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
             nextProvider !== "openai" && nextProvider !== "elevenlabs" && nextProvider !== "browser" && nextModel
               ? nextModel
               : currentSettings.tldwTtsModel,
+          tldwTtsBackend:
+            nextProvider !== "openai" &&
+            nextProvider !== "elevenlabs" &&
+            nextProvider !== "browser" &&
+            nextBackend !== undefined
+              ? nextBackend
+              : currentSettings.tldwTtsBackend,
           tldwTtsVoice:
             nextProvider !== "openai" && nextProvider !== "elevenlabs" && nextProvider !== "browser" && nextVoice
               ? nextVoice
@@ -1643,7 +1710,7 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
     const shouldStream =
       effectiveProvider === "tldw" &&
       tldwStreaming &&
-      Boolean(activeProviderCaps?.caps.supports_streaming) &&
+      canStream &&
       streamFormatSupported
     if (shouldStream) {
       await handleStreamPlay()
@@ -1671,6 +1738,8 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
           try {
             const ctx = await resolveTtsProviderContext(effectiveText, {
               provider: "tldw",
+              tldwBackend: selectedTldwBackend || undefined,
+              tldwAllowFallback: allowFallback,
               tldwModel: model,
               tldwVoice: voice,
               tldwResponseFormat: responseFormat
@@ -1687,7 +1756,9 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
             speed,
             lang_code: langCode || undefined,
             normalization_options: normalizationOptions,
-            extra_params: extraParams
+            extra_params: extraParams,
+            backend: selectedTldwBackend || undefined,
+            allow_fallback: allowFallback
           })
           setTtsJobId(job.job_id)
           const controller = new AbortController()
@@ -1729,7 +1800,12 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
                 blob,
                 format: first.format,
                 mimeType: blob.type || "audio/mpeg",
-                source: "generated"
+                source: "generated",
+                requestedBackend: selectedTldwBackend || undefined,
+                actualBackend: first.metadata?.actual_backend
+                  ? String(first.metadata.actual_backend)
+                  : undefined,
+                fallbackUsed: first.metadata?.fallback_used === true
               }
             ])
             setActiveSegmentIndex(0)
@@ -1746,7 +1822,12 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
               speed,
               responseSplitting,
               streaming: false,
-              mode: "long"
+              mode: "long",
+              requestedBackend: selectedTldwBackend || undefined,
+              actualBackends: first.metadata?.actual_backend
+                ? [String(first.metadata.actual_backend)]
+                : undefined,
+              fallbackUsed: first.metadata?.fallback_used === true
             })
             setTtsJobStatus("success")
           } else {
@@ -1774,6 +1855,8 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
         elevenLabsVoiceId: elevenVoiceId,
         tldwModel,
         tldwVoice,
+        tldwBackend: selectedTldwBackend || undefined,
+        tldwAllowFallback: allowFallback,
         tldwResponseFormat: tldwFormat,
         tldwSpeed: ttsSettings?.tldwTtsSpeed,
         tldwLanguage,
@@ -1798,7 +1881,16 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
           speed: ttsSettings?.tldwTtsSpeed,
           responseSplitting,
           streaming: false,
-          mode: "short"
+          mode: "short",
+          requestedBackend: selectedTldwBackend || undefined,
+          actualBackends: Array.from(
+            new Set(
+              created
+                .map((segment) => segment.actualBackend)
+                .filter((backend): backend is string => Boolean(backend))
+            )
+          ),
+          fallbackUsed: created.some((segment) => segment.fallbackUsed)
         })
       }
     }
@@ -1820,6 +1912,7 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
         openAITTSVoice: openAiVoice ?? ttsSettings.openAITTSVoice,
         ttsAutoPlay: ttsSettings.ttsAutoPlay,
         playbackSpeed: ttsSettings.playbackSpeed,
+        tldwTtsBackend: selectedTldwBackend || ttsSettings.tldwTtsBackend,
         tldwTtsModel: tldwModel ?? ttsSettings.tldwTtsModel,
         tldwTtsVoice: tldwVoice ?? ttsSettings.tldwTtsVoice,
         tldwTtsResponseFormat: tldwFormat ?? ttsSettings.tldwTtsResponseFormat,
@@ -1861,7 +1954,12 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
 
   const activeProviderCaps = React.useMemo(
     (): { key: string; caps: TldwTtsProviderCapabilities } | null => {
-      if (!providersInfo || !inferredProviderKey) return null
+      if (!providersInfo) return null
+      if (selectedTldwBackend) {
+        const caps = providersInfo.providers?.[selectedTldwBackend]
+        return caps ? { key: selectedTldwBackend, caps } : null
+      }
+      if (!inferredProviderKey) return null
       const entries = Object.entries(providersInfo.providers || {})
       const target = normalizeTtsProviderKey(inferredProviderKey)
       const match = entries.find(
@@ -1870,7 +1968,7 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
       if (!match) return null
       return { key: match[0], caps: match[1] }
     },
-    [providersInfo, inferredProviderKey]
+    [providersInfo, inferredProviderKey, selectedTldwBackend]
   )
 
   const activeVoices = React.useMemo((): TldwTtsVoiceInfo[] => {
@@ -2007,7 +2105,11 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
     }))
   }, [activeProviderCaps])
 
-  const canStream = Boolean(isTldw && activeProviderCaps?.caps.supports_streaming)
+  const canStream = Boolean(
+    isTldw &&
+      !selectedTldwBackend &&
+      activeProviderCaps?.caps.supports_streaming
+  )
   const applyTtsPreset = React.useCallback(
     async (presetKey: TtsPresetKey) => {
       const preset = TTS_PRESETS[presetKey]
@@ -2108,12 +2210,16 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
 
   const hasElevenLabsKey = Boolean(ttsSettings?.elevenLabsApiKey)
   const selectedTldwProviderLabel =
-    activeProviderCaps?.caps.provider_name || inferredProviderKey || providerLabel
+    activeProviderCaps?.caps.display_name ||
+    activeProviderCaps?.caps.provider_name ||
+    activeProviderCaps?.key ||
+    inferredProviderKey ||
+    providerLabel
   const selectedTldwProviderMissing =
     isTldw &&
     hasAudio &&
     Boolean(providersInfo) &&
-    Boolean(inferredProviderKey) &&
+    Boolean(selectedTldwBackend || inferredProviderKey) &&
     !activeProviderCaps
   const selectedTldwVoiceCatalogMissing =
     isTldw &&
@@ -2411,51 +2517,6 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
     )
   }
 
-  const resolvePreviewModel = (voiceId: string) => {
-    if (!voiceId)
-      return tldwModel || ttsSettings?.tldwTtsModel || DEFAULT_TLDW_TTS_MODEL
-    if (voiceId.startsWith("custom:")) {
-      const key = voiceId.replace("custom:", "")
-      const match = customVoices.find((voice) => voice.voice_id === key)
-      if (match?.provider) {
-        return match.provider
-      }
-    }
-    return tldwModel || ttsSettings?.tldwTtsModel || DEFAULT_TLDW_TTS_MODEL
-  }
-
-  const handleVoicePreview = async (card: VoiceRoleCard) => {
-    if (!card.voiceId) return
-    setVoicePreviewingId(card.id)
-    try {
-      const text =
-        voicePreviewText.trim() || "Hello, this is a preview of the selected voice."
-      const model = resolvePreviewModel(card.voiceId)
-      const buffer = await tldwClient.synthesizeSpeech(text, {
-        model,
-        voice: card.voiceId,
-        responseFormat: "mp3"
-      })
-      const blob = new Blob([buffer], { type: "audio/mpeg" })
-      const url = URL.createObjectURL(blob)
-      if (voicePreviewUrl) {
-        try {
-          URL.revokeObjectURL(voicePreviewUrl)
-        } catch {}
-      }
-      setVoicePreviewUrl(url)
-      setVoicePreviewCardId(card.id)
-    } catch (error: unknown) {
-      const classified = classifyAudioError(error)
-      notification.error({
-        message: "Preview failed",
-        description: classified.recovery || "Unable to generate preview audio."
-      })
-    } finally {
-      setVoicePreviewingId(null)
-    }
-  }
-
   const downloadBlob = React.useCallback((blob: Blob, filename: string) => {
     const url = URL.createObjectURL(blob)
     const link = document.createElement("a")
@@ -2531,6 +2592,8 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
         elevenLabsVoiceId: item.voice || elevenVoiceId,
         tldwModel: item.model || tldwModel,
         tldwVoice: item.voice || tldwVoice,
+        tldwBackend: item.requestedBackend || selectedTldwBackend || undefined,
+        tldwAllowFallback: allowFallback,
         tldwResponseFormat: item.format || tldwFormat,
         tldwSpeed: ttsSettings?.tldwTtsSpeed,
         tldwLanguage: tldwLanguage,
@@ -2560,6 +2623,8 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
       tldwLanguage,
       tldwModel,
       tldwVoice,
+      selectedTldwBackend,
+      allowFallback,
       ttsSettings?.ttsProvider,
       ttsSettings?.tldwTtsSpeed
     ]
@@ -2934,6 +2999,8 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
                     <AudioReadinessStrip items={ttsReadinessItems} label="TTS readiness" />
                     <TtsProviderStrip
                       provider={provider}
+                      backend={selectedTldwBackend || undefined}
+                      allowFallback={allowFallback}
                       model={currentTtsSelection.model}
                       voice={currentTtsSelection.voice}
                       format={currentTtsSelection.format}
@@ -3370,6 +3437,31 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
                             {t("playground:speech.segmentFormat", "Format")}:{" "}
                             {(segments[0]?.format || "mp3").toUpperCase()}
                           </Text>
+                          {(segments.some((segment) => segment.requestedBackend) ||
+                            segments.some((segment) => segment.actualBackend) ||
+                            segments.some((segment) => segment.fallbackUsed)) && (
+                            <div className="flex flex-wrap gap-1.5">
+                              {segments.find((segment) => segment.requestedBackend)
+                                ?.requestedBackend && (
+                                <Tag>
+                                  Requested {segments.find((segment) => segment.requestedBackend)
+                                    ?.requestedBackend}
+                                </Tag>
+                              )}
+                              {Array.from(
+                                new Set(
+                                  segments
+                                    .map((segment) => segment.actualBackend)
+                                    .filter((backend): backend is string => Boolean(backend))
+                                )
+                              ).map((backend) => (
+                                <Tag key={backend}>Actual {backend}</Tag>
+                              ))}
+                              {segments.some((segment) => segment.fallbackUsed) && (
+                                <Tag color="orange">Fallback used</Tag>
+                              )}
+                            </div>
+                          )}
                         </div>
                       </div>
                     )}
@@ -3548,6 +3640,8 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
                           })
                         }
                       }}
+                      allowFallback={allowFallback}
+                      onAllowFallbackChange={setAllowFallback}
                       isTldw={isTldw}
                       onOpenVoiceCloning={() => openInspectorAt("advanced")}
                       voiceCloningContent={
@@ -3780,6 +3874,7 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
         }}
         onSelect={handleVoicePickerSelect}
         providersInfo={providersInfo}
+        allowFallback={allowFallback}
       />
     </PageShell>
   )

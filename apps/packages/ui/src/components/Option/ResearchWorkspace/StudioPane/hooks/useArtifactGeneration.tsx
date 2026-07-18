@@ -1711,11 +1711,13 @@ ${sourceText}`
 
   // Generate audio using TTS API with user settings
   try {
-    const audioBuffer = await tldwClient.synthesizeSpeech(script, {
+    const result = await tldwClient.synthesizeSpeechDetailed(script, {
       model: options.audioSettings.model,
       voice: options.audioSettings.voice,
       responseFormat: options.audioSettings.format,
       speed: options.audioSettings.speed,
+      backend: options.audioSettings.backend || undefined,
+      allowFallback: options.audioSettings.allowFallback ?? true,
       signal: options.abortSignal
     })
 
@@ -1729,7 +1731,7 @@ ${sourceText}`
     }
 
     // Create a blob URL for playback
-    const audioBlob = new Blob([audioBuffer], {
+    const audioBlob = new Blob([result.buffer], {
       type: mimeTypes[options.audioSettings.format] || "audio/mpeg"
     })
     const audioUrl = URL.createObjectURL(audioBlob)
@@ -1738,6 +1740,11 @@ ${sourceText}`
       content: script,
       audioUrl,
       audioFormat: options.audioSettings.format,
+      data: {
+        requestedBackend: options.audioSettings.backend || undefined,
+        actualBackend: result.actualBackend,
+        fallbackUsed: result.fallbackUsed
+      },
       ...usage
     }
   } catch (ttsError) {
