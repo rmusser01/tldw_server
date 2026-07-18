@@ -28,6 +28,9 @@ from tldw_Server_API.tests.Web_Scraping.preflight_fakes import (
     FakePlaywrightLauncher,
     FakeProbeEgressGuard,
     FakeWebSocketRoute,
+    RealLikeBrowserContext,
+    RealLikeBrowserPage,
+    RealLikePlaywrightLauncher,
 )
 
 pytestmark = pytest.mark.unit
@@ -1499,7 +1502,7 @@ async def test_page_and_request_cleanup_share_one_idempotent_close_operation(
     assert all(task.exception() is None for task in done)
     assert page.close_calls == 1
     assert page.force_close_calls == 0
-    assert page.close_cancellations >= 1
+    assert page.close_cancellations == 0
     assert launcher.browser.contexts[0].close_calls == 0
     assert launcher.browser.close_calls == 0
     assert launcher.playwright.stop_calls == 0
@@ -1510,6 +1513,63 @@ async def test_page_and_request_cleanup_share_one_idempotent_close_operation(
         task
         for task in asyncio.all_tasks()
         if task is not asyncio.current_task() and task.get_name().startswith("preflight-browser-close")
+    }
+
+
+@pytest.mark.asyncio
+async def test_all_real_like_graph_uses_reserved_parent_teardown_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = _adapter_module()
+    assert adapter is not None
+    grace_s = 0.08
+    monkeypatch.setattr(adapter, "_BROWSER_CLEANUP_GRACE_S", grace_s)
+    controls = _controls()
+    launcher = RealLikePlaywrightLauncher()
+    probe = _probe(
+        controls=controls,
+        guard=FakeProbeEgressGuard([]),
+        launcher=launcher,
+    )
+    manager = probe.open_page(BrowserProbeOptions())
+    await manager.__aenter__()
+    context = launcher.browser.contexts[0]
+    assert isinstance(context, RealLikeBrowserContext)
+    page = context.pages[0]
+    assert isinstance(page, RealLikeBrowserPage)
+    resources = (page, context, launcher.browser, launcher.playwright)
+    assert all(not callable(getattr(resource, "force_close", None)) for resource in resources)
+
+    loop = asyncio.get_running_loop()
+    started_at = loop.time()
+    scope_cleanup = asyncio.create_task(manager.__aexit__(None, None, None))
+    await page.close_started.wait()
+    request_cleanup = asyncio.create_task(controls.close(grace_s=grace_s))
+    scope_cleanup.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        async with asyncio.timeout(grace_s * 3):
+            await scope_cleanup
+    async with asyncio.timeout(grace_s * 3):
+        await request_cleanup
+    elapsed_s = loop.time() - started_at
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    assert [resource.close_calls for resource in resources[:3]] == [1, 1, 1]
+    assert launcher.playwright.stop_calls == 1
+    assert page.closed
+    assert context.closed
+    assert launcher.browser.closed
+    assert launcher.playwright.stopped
+    assert context.close_started_at is not None
+    assert context.close_started_at - started_at < grace_s * 0.75
+    assert elapsed_s < grace_s * 1.25
+    assert not {
+        task
+        for task in asyncio.all_tasks()
+        if task is not asyncio.current_task()
+        and task.get_name().startswith(("preflight-browser-close", "preflight-cleanup"))
     }
 
 

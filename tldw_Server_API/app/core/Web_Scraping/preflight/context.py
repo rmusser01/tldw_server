@@ -25,6 +25,7 @@ if TYPE_CHECKING:
 
 
 BudgetKind = Literal["request", "browser", "active_probe"]
+_CLEANUP_FORCE_RESERVE_FRACTION = 0.5
 
 
 @dataclass(frozen=True, slots=True)
@@ -257,12 +258,13 @@ class PreflightRuntimeControls:
         entries = tuple(_CleanupEntry(handle=handle) for handle in handles)
         loop = asyncio.get_running_loop()
         grace_deadline = loop.time() + grace_s
+        graceful_deadline = grace_deadline - (grace_s * _CLEANUP_FORCE_RESERVE_FRACTION)
         graceful_task = asyncio.create_task(
             self._graceful_cleanup(entries),
             name="preflight-cleanup-graceful",
         )
         deadline_task = asyncio.create_task(
-            asyncio.sleep(max(0.0, grace_deadline - loop.time())),
+            asyncio.sleep(max(0.0, graceful_deadline - loop.time())),
             name="preflight-cleanup-deadline",
         )
 

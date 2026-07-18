@@ -188,16 +188,12 @@ class _BrowserCleanupHandle:
                     await result
                 return
 
-            operation, created = await self._operation()
+            operation, _ = await self._operation()
             if operation is None:
                 return
             async with self._operation_lock:
                 self._terminal = True
-            if created:
-                await asyncio.sleep(0)
-            if not operation.done():
-                operation.cancel()
-                await asyncio.sleep(0)
+            await operation
 
 
 def _cleanup_handle(resource: Any, *, kind: str) -> _BrowserCleanupHandle:

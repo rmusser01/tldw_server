@@ -727,3 +727,118 @@ class FakePlaywrightLauncher:
         self.start_calls += 1
         self.events.append("launch")
         return self.playwright
+
+
+class RealLikeBrowserPage(FakeBrowserPage):
+    """Page exposing only Playwright's public close operation."""
+
+    force_close = None
+
+    def __init__(self, context: FakeBrowserContext, events: list[str]) -> None:
+        super().__init__(context, events)
+        self.closed = False
+        self.close_started_at: float | None = None
+
+    async def close(self) -> None:
+        self.close_calls += 1
+        self.events.append("close:page")
+        self.close_started_at = asyncio.get_running_loop().time()
+        self.close_started.set()
+        await self._release_close.wait()
+        self.closed = True
+
+
+class RealLikeBrowserContext(FakeBrowserContext):
+    """Context close releases page closes and awaits browser teardown."""
+
+    force_close = None
+
+    def __init__(self, events: list[str]) -> None:
+        super().__init__(events, page_factory=RealLikeBrowserPage)
+        self.closed = False
+        self.close_started_at: float | None = None
+        self._release_close = asyncio.Event()
+
+    async def close(self) -> None:
+        self.close_calls += 1
+        self.events.append("close:context")
+        self.close_started_at = asyncio.get_running_loop().time()
+        for page in self.pages:
+            page.release_close()
+        await self._release_close.wait()
+        self.closed = True
+
+    def release_close(self) -> None:
+        self._release_close.set()
+
+
+class RealLikeBrowser(FakeBrowser):
+    """Browser close releases context closes and awaits Playwright stop."""
+
+    force_close = None
+
+    def __init__(
+        self,
+        events: list[str],
+        startup_gate: FakeBrowserStartupGate,
+    ) -> None:
+        super().__init__(
+            events,
+            context_factory=RealLikeBrowserContext,
+            startup_gate=startup_gate,
+        )
+        self.closed = False
+        self.close_started_at: float | None = None
+        self._release_close = asyncio.Event()
+
+    async def close(self) -> None:
+        self.close_calls += 1
+        self.events.append("close:browser")
+        self.close_started_at = asyncio.get_running_loop().time()
+        for context in self.contexts:
+            assert isinstance(context, RealLikeBrowserContext)
+            context.release_close()
+        await self._release_close.wait()
+        self.closed = True
+
+    def release_close(self) -> None:
+        self._release_close.set()
+
+
+class RealLikePlaywright(FakePlaywright):
+    """Playwright exposing only stop, which completes browser teardown."""
+
+    force_close = None
+
+    def __init__(
+        self,
+        browser: RealLikeBrowser,
+        events: list[str],
+        startup_gate: FakeBrowserStartupGate,
+    ) -> None:
+        super().__init__(browser, events, startup_gate)
+        self.browser = browser
+        self.stopped = False
+        self.stop_started_at: float | None = None
+
+    async def stop(self) -> None:
+        self.stop_calls += 1
+        self.events.append("close:playwright")
+        self.stop_started_at = asyncio.get_running_loop().time()
+        self.browser.release_close()
+        self.stopped = True
+
+
+class RealLikePlaywrightLauncher(FakePlaywrightLauncher):
+    """All-public-API resource graph with parent-driven teardown."""
+
+    def __init__(self) -> None:
+        self.events: list[str] = []
+        self.startup_gate = FakeBrowserStartupGate()
+        self.browser = RealLikeBrowser(self.events, self.startup_gate)
+        self.playwright = RealLikePlaywright(
+            self.browser,
+            self.events,
+            self.startup_gate,
+        )
+        self.start_calls = 0
