@@ -69,7 +69,7 @@ class _FailQuotaSelectConnection:
     def __init__(self, inner: sqlite3.Connection):
         self._inner = inner
 
-    def __enter__(self) -> "_FailQuotaSelectConnection":
+    def __enter__(self) -> _FailQuotaSelectConnection:
         self._inner.__enter__()
         return self
 
