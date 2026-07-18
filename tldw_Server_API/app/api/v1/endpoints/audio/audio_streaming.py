@@ -2526,7 +2526,6 @@ async def websocket_audio_chat_stream(
                 "app_config": app_config,
                 "credentials_resolved": provider_credentials.credentials_resolved,
                 PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY: provider_credentials,
-                "timeout": AUDIO_STREAM_FACTORY_TIMEOUT_SECONDS,
             }
             if provider_llm_extra_params:
                 for key, value in provider_llm_extra_params.items():
@@ -2596,7 +2595,12 @@ async def websocket_audio_chat_stream(
                         stream_method = adapter.astream
                         if inspect.iscoroutinefunction(stream_method):
                             source = await await_bounded_owned_operation(
-                                _await_and_store(stream_method(request_payload)),
+                                _await_and_store(
+                                    stream_method(
+                                        request_payload,
+                                        timeout=AUDIO_STREAM_FACTORY_TIMEOUT_SECONDS,
+                                    )
+                                ),
                                 timeout_seconds=AUDIO_STREAM_FACTORY_TIMEOUT_SECONDS,
                                 timeout_message="audio-stream-factory timed out",
                                 on_abandoned=_cleanup_abandoned_turn,
@@ -2604,7 +2608,10 @@ async def websocket_audio_chat_stream(
                             )
                         else:
                             def invoke_sync_factory() -> Any:
-                                candidate = stream_method(request_payload)
+                                candidate = stream_method(
+                                    request_payload,
+                                    timeout=AUDIO_STREAM_FACTORY_TIMEOUT_SECONDS,
+                                )
                                 stream_holder["source"] = candidate
                                 return candidate
 

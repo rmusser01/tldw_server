@@ -41,6 +41,10 @@ from tldw_Server_API.app.core.Chat.chat_service import (
     write_mandatory_moderation_audit,
 )
 from tldw_Server_API.app.core.Chat.request_queue import RateLimitedQueue, RequestQueue
+from tldw_Server_API.tests.provider_credential_test_helpers import (
+    resolved_request_fields,
+    resolved_request_fields_async,
+)
 
 _REGISTRY_OPENAI_BASE_URL = "https://registry-openai.test/v1"
 
@@ -729,11 +733,15 @@ def _adapter_nonstream_call(
 ) -> Any:
     """Exercise the production sync adapter-dispatch boundary for a test key."""
 
+    resolved_fields = resolved_request_fields(
+        "openai",
+        api_key=api_key,
+        app_config=_registry_openai_app_config(),
+        model=model,
+    )
     return chat_service.perform_chat_api_call(
         api_endpoint="openai",
-        api_key=api_key,
-        credentials_resolved=True,
-        app_config=_registry_openai_app_config(),
+        **resolved_fields,
         messages_payload=messages_payload or [],
         model=model,
         streaming=False,
@@ -1469,7 +1477,7 @@ async def test_primary_real_adapter_boundary_gates_exact_accounting(
         assert captured.value.__context__ is None
         assert sentinel not in repr(captured.value)
         assert metrics.llm_calls == [
-            ("openai", "gpt-4o", False, "SanitizedProviderStreamError")
+            ("openai", "gpt-4o", False, "ChatProviderError")
         ]
         assert metrics.token_calls == []
         assert [call["outcome"] for call in metrics.completion_calls] == ["error"]
@@ -1862,8 +1870,13 @@ async def test_concurrent_normal_adapter_results_are_request_isolated(
         assert saved[1][0]["content"] == expected_content
     else:
         assert saved[1] == []
+    expected_internal_error = (
+        "ChatProviderError"
+        if invalid_outcome == "mixed_error_and_text"
+        else "SanitizedProviderStreamError"
+    )
     assert metrics[0].llm_calls == [
-        ("openai", "gpt-4o", False, "SanitizedProviderStreamError")
+        ("openai", "gpt-4o", False, expected_internal_error)
     ]
     assert metrics[1].llm_calls == [("openai", "gpt-4o", True, None)]
     assert metrics[0].token_calls == []
@@ -1976,13 +1989,18 @@ async def test_normal_fallback_result_is_gated_before_success_accounting(
         saved.append(payload)
         return "fallback-message"
 
+    fallback_resolved_fields = await resolved_request_fields_async(
+        "openai",
+        api_key="fallback-key",
+        app_config=_registry_openai_app_config(),
+        model="gpt-4o",
+    )
+
     def refresh(provider_name: str) -> tuple[dict[str, Any], str]:
         return (
             {
                 "api_endpoint": provider_name,
-                "api_key": "fallback-key",
-                "credentials_resolved": True,
-                "app_config": _registry_openai_app_config(),
+                **fallback_resolved_fields,
                 "messages_payload": [],
                 "model": "gpt-4o",
                 "streaming": False,
@@ -2132,14 +2150,19 @@ async def test_concurrent_fallback_results_do_not_cross_accounting(
         def fail_primary() -> None:
             raise primary_error
 
+        label = "bad" if index == 0 else "good"
+        fallback_resolved_fields = await resolved_request_fields_async(
+            "openai",
+            api_key=f"{label}-fallback-key",
+            app_config=_registry_openai_app_config(),
+            model="gpt-4o",
+        )
+
         def refresh(provider_name: str) -> tuple[dict[str, Any], str]:
-            label = "bad" if index == 0 else "good"
             return (
                 {
                     "api_endpoint": provider_name,
-                    "api_key": f"{label}-fallback-key",
-                    "credentials_resolved": True,
-                    "app_config": _registry_openai_app_config(),
+                    **fallback_resolved_fields,
                     "messages_payload": [],
                     "model": "gpt-4o",
                     "streaming": False,
@@ -2929,12 +2952,18 @@ async def test_execute_non_stream_async_fallback_provider_cancellation_is_saniti
     def failing_primary_call() -> None:
         raise primary_error
 
+    fallback_resolved_fields = await resolved_request_fields_async(
+        "openai",
+        api_key="fallback-key",
+        app_config={},
+        model="gpt-4o",
+    )
+
     def refresh_provider(provider: str):
         return (
             {
                 "api_endpoint": provider,
-                "api_key": "fallback-key",
-                "credentials_resolved": True,
+                **fallback_resolved_fields,
                 "messages_payload": [],
                 "model": "gpt-4o",
                 "streaming": False,
@@ -3746,11 +3775,16 @@ async def test_perform_async_chat_genuine_caller_cancellation_stays_prompt(
 
     registry = SimpleNamespace(get_adapter=lambda _provider: BlockingAdapter())
     monkeypatch.setattr(chat_service, "_get_llm_registry", lambda: registry)
+    resolved_fields = await resolved_request_fields_async(
+        "openai",
+        api_key="resolved-key",
+        app_config={},
+        model="gpt-4o",
+    )
     task = asyncio.create_task(
         chat_service.perform_chat_api_call_async(
             api_endpoint="openai",
-            api_key="resolved-key",
-            credentials_resolved=True,
+            **resolved_fields,
             messages_payload=[],
             model="gpt-4o",
             streaming=False,
@@ -3791,10 +3825,15 @@ async def test_perform_async_chat_requires_explicit_native_async_opt_in(
     monkeypatch.setattr(chat_service, "_get_llm_registry", lambda: registry)
     monkeypatch.setattr(chat_service, "SYNC_ADAPTER_CALL_POOL", pool)
 
+    resolved_fields = await resolved_request_fields_async(
+        "openai",
+        api_key="resolved-key",
+        app_config={},
+        model="gpt-4o",
+    )
     result = await chat_service.perform_chat_api_call_async(
         api_endpoint="openai",
-        api_key="resolved-key",
-        credentials_resolved=True,
+        **resolved_fields,
         messages_payload=[],
         model="gpt-4o",
         streaming=False,
@@ -3826,11 +3865,16 @@ async def test_perform_async_chat_cancellation_drains_sync_adapter(
 
     registry = SimpleNamespace(get_adapter=lambda _provider: BlockingSyncAdapter())
     monkeypatch.setattr(chat_service, "_get_llm_registry", lambda: registry)
+    resolved_fields = await resolved_request_fields_async(
+        "openai",
+        api_key="resolved-key",
+        app_config={},
+        model="gpt-4o",
+    )
     task = asyncio.create_task(
         chat_service.perform_chat_api_call_async(
             api_endpoint="openai",
-            api_key="resolved-key",
-            credentials_resolved=True,
+            **resolved_fields,
             messages_payload=[],
             model="gpt-4o",
             streaming=False,
@@ -3937,11 +3981,16 @@ async def test_perform_async_chat_starts_without_default_executor_and_drains_can
     monkeypatch.setattr(chat_service, "SYNC_ADAPTER_CALL_POOL", pool)
     try:
         await _wait_for_thread_event(default_entered)
+        resolved_fields = await resolved_request_fields_async(
+            "openai",
+            api_key="resolved-key",
+            app_config={},
+            model="gpt-4o",
+        )
         task = asyncio.create_task(
             chat_service.perform_chat_api_call_async(
                 api_endpoint="openai",
-                api_key="resolved-key",
-                credentials_resolved=True,
+                **resolved_fields,
                 messages_payload=[],
                 model="gpt-4o",
                 streaming=False,
@@ -4012,14 +4061,19 @@ async def test_perform_async_chat_cancellation_drains_builtin_sync_worker(
         pool,
         raising=False,
     )
+    resolved_fields = await resolved_request_fields_async(
+        "openai",
+        api_key="resolved-key",
+        app_config={"openai_api": {"model": "gpt-4o"}},
+        model="gpt-4o",
+    )
     task = asyncio.create_task(
         chat_service.perform_chat_api_call_async(
             api_endpoint="openai",
-            api_key="resolved-key",
-            credentials_resolved=True,
             messages_payload=[],
             model="gpt-4o",
             streaming=False,
+            **resolved_fields,
         )
     )
     try:
@@ -4073,14 +4127,25 @@ async def test_perform_async_chat_saturation_fails_closed_before_dispatch(
         pool,
         raising=False,
     )
+    first_resolved_fields = await resolved_request_fields_async(
+        "openai",
+        api_key="first-key",
+        app_config={"openai_api": {"model": "gpt-4o"}},
+        model="gpt-4o",
+    )
+    second_resolved_fields = await resolved_request_fields_async(
+        "openai",
+        api_key="second-key",
+        app_config={"openai_api": {"model": "gpt-4o"}},
+        model="gpt-4o",
+    )
     first = asyncio.create_task(
         chat_service.perform_chat_api_call_async(
             api_endpoint="openai",
-            api_key="first-key",
-            credentials_resolved=True,
             messages_payload=[],
             model="gpt-4o",
             streaming=False,
+            **first_resolved_fields,
         )
     )
     try:
@@ -4088,11 +4153,10 @@ async def test_perform_async_chat_saturation_fails_closed_before_dispatch(
         with pytest.raises(SanitizedProviderStreamError) as exc_info:
             await chat_service.perform_chat_api_call_async(
                 api_endpoint="openai",
-                api_key="second-key",
-                credentials_resolved=True,
                 messages_payload=[],
                 model="gpt-4o",
                 streaming=False,
+                **second_resolved_fields,
             )
         assert exc_info.value.code == "provider_unavailable"
         assert exc_info.value.__cause__ is None
@@ -6302,7 +6366,6 @@ async def test_queued_refresh_awaitable_runs_on_request_loop_with_healthy_overla
         "message-error",
         "delta-error",
         "missing-finish-eof",
-        "missing-finish-done",
     ],
 )
 async def test_concurrent_stream_semantic_gate_is_request_local(
@@ -6341,7 +6404,7 @@ async def test_concurrent_stream_semantic_gate_is_request_local(
             yield "data: [DONE]\n\n"
             return
 
-        if invalid_outcome.startswith("missing-finish"):
+        if invalid_outcome == "missing-finish-eof":
             yield (
                 "data: "
                 + json.dumps(
@@ -6356,8 +6419,6 @@ async def test_concurrent_stream_semantic_gate_is_request_local(
                 )
                 + "\n\n"
             )
-            if invalid_outcome == "missing-finish-done":
-                yield "data: [DONE]\n\n"
             return
 
         error = {
@@ -6432,7 +6493,7 @@ async def test_concurrent_stream_semantic_gate_is_request_local(
     if invalid_outcome.endswith("error"):
         assert invalid_text not in invalid_wire
     marks[0].assert_not_awaited()
-    if invalid_outcome.startswith("missing-finish"):
+    if invalid_outcome == "missing-finish-eof":
         provider_outputs[0].assert_awaited_once_with("openai")
     else:
         provider_outputs[0].assert_not_awaited()

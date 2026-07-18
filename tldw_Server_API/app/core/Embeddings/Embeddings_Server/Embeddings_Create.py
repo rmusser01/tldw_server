@@ -195,9 +195,13 @@ def _get_explicit_openai_embeddings_batch(
     api_key: str,
     base_url: str,
     dimensions: int | None,
+    app_config: dict[str, Any],
 ) -> list[list[float]]:
     """Call OpenAI embeddings without exposing explicit credentials to legacy config paths."""
     from tldw_Server_API.app.core.http_client import RetryPolicy, fetch
+    from tldw_Server_API.app.core.LLM_Calls.openai_credentials import (
+        openai_credential_headers,
+    )
 
     endpoint = base_url if base_url.rstrip("/").endswith("/embeddings") else f"{base_url.rstrip('/')}/embeddings"
     payload: dict[str, Any] = {"input": texts, "model": model}
@@ -209,7 +213,7 @@ def _get_explicit_openai_embeddings_batch(
         response = fetch(
             method="POST",
             url=endpoint,
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            headers=openai_credential_headers(api_key, app_config),
             json=payload,
             timeout=60,
             retry=RetryPolicy(attempts=1),
@@ -1164,7 +1168,15 @@ def exponential_backoff(max_retries: int = 3, base_delay: int = 1):
     def decorator(fn):
         @wraps(fn)
         def wrapper(*args, **kwargs):
-            if kwargs.get("credentials_resolved") is True:
+            from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+                PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+            )
+
+            if (
+                kwargs.get("credentials_resolved") is True
+                or kwargs.get(PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY) is not None
+                or kwargs.get("_require_provider_call_credentials") is True
+            ):
                 return fn(*args, **kwargs)
             for attempt in range(max_retries + 1):  # +1 to include the initial attempt
                 try:
@@ -1916,6 +1928,8 @@ def create_embeddings_batch(
     api_key_override: str | None = None,
     base_url_override: str | None = None,
     credentials_resolved: bool = False,
+    _provider_call_credentials: object | None = None,
+    _require_provider_call_credentials: bool = False,
 ) -> list[list[float]]:
     """
     Creates embeddings for a batch of texts.
@@ -1930,6 +1944,11 @@ def create_embeddings_batch(
     if not texts:
         logger.warning("create_embeddings_batch called with empty list of texts.")
         return []
+
+    runtime_boundary_requested = (
+        _require_provider_call_credentials is True
+        or _provider_call_credentials is not None
+    )
 
     try:
         loop = asyncio.get_running_loop()
@@ -1950,7 +1969,7 @@ def create_embeddings_batch(
         # Pydantic will parse and validate. If it fails, it raises a ValidationError.
         embedding_service_config = EmbeddingConfigSchema(**user_app_config["embedding_config"])
     except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as e:  # Catch Pydantic ValidationError or other parsing issues
-        if credentials_resolved is True:
+        if credentials_resolved is True or runtime_boundary_requested:
             logger.error("Runtime-explicit embedding configuration is invalid")
             raise ValueError("Invalid embedding_config structure.") from None
         logger.exception(f"Failed to parse embedding_config: {str(e)}")
@@ -1965,6 +1984,31 @@ def create_embeddings_batch(
     model_id_to_use = resolved_key
 
     provider = model_spec.provider
+    runtime_openai_config: dict[str, Any] = {}
+    if runtime_boundary_requested and provider.lower() != "openai":
+        from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
+
+        raise ChatConfigurationError(
+            provider=provider,
+            message="Provider credentials do not match the embedding provider.",
+        )
+    runtime_bound_openai = provider.lower() == "openai" and runtime_boundary_requested
+    if runtime_bound_openai:
+        from tldw_Server_API.app.core.LLM_Calls.openai_credentials import (
+            bind_openai_embedding_credentials,
+        )
+
+        (
+            api_key_override,
+            base_url_override,
+            runtime_openai_config,
+        ) = bind_openai_embedding_credentials(
+            provider_credentials=_provider_call_credentials,
+            credentials_resolved=credentials_resolved,
+            api_key_override=api_key_override,
+            base_url_override=base_url_override,
+        )
+        credentials_resolved = True
 
     # Phase 2: RG middleware handles ingress rate limiting
 
@@ -2169,6 +2213,7 @@ def create_embeddings_batch(
                     api_key=api_key_override,
                     base_url=base_url_override or _EXPLICIT_OPENAI_API_BASE,
                     dimensions=model_spec.dimensions,
+                    app_config=runtime_openai_config,
                 )
             else:
                 openai_app_config = user_app_config
@@ -2306,6 +2351,8 @@ async def create_embeddings_batch_async(
     api_key_override: str | None = None,
     base_url_override: str | None = None,
     credentials_resolved: bool = False,
+    _provider_call_credentials: object | None = None,
+    _require_provider_call_credentials: bool = False,
 ) -> list[list[float]]:
     """
     Async wrapper for create_embeddings_batch.
@@ -2327,9 +2374,15 @@ async def create_embeddings_batch_async(
         api_key_override=api_key_override,
         base_url_override=base_url_override,
         credentials_resolved=credentials_resolved,
+        _provider_call_credentials=_provider_call_credentials,
+        _require_provider_call_credentials=_require_provider_call_credentials,
     )
     effective_provider: str | None = None
-    if credentials_resolved is True:
+    if (
+        credentials_resolved is True
+        or _provider_call_credentials is not None
+        or _require_provider_call_credentials is True
+    ):
         try:
             effective_provider = _resolve_effective_embedding_provider(
                 user_app_config,
@@ -2359,6 +2412,8 @@ def create_embedding(
     api_key_override: str | None = None,
     base_url_override: str | None = None,
     credentials_resolved: bool = False,
+    _provider_call_credentials: object | None = None,
+    _require_provider_call_credentials: bool = False,
 ) -> list[float]:
     """
     Creates an embedding for a single text using the batch function.
@@ -2393,6 +2448,8 @@ def create_embedding(
         api_key_override=api_key_override,
         base_url_override=base_url_override,
         credentials_resolved=credentials_resolved,
+        _provider_call_credentials=_provider_call_credentials,
+        _require_provider_call_credentials=_require_provider_call_credentials,
     )
 
     if not embeddings_list or not embeddings_list[0]:

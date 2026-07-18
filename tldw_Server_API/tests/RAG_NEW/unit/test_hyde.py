@@ -8,9 +8,15 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 
 import tldw_Server_API.app.core.LLM_Calls as llm_calls
+from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+)
 from tldw_Server_API.app.core.Chat.bounded_daemon import (
     BoundedDaemonPool,
     DaemonCapacityError,
+)
+from tldw_Server_API.app.core.LLM_Calls.openai_credentials import (
+    OPENAI_EMBEDDING_RUNTIME_BOUNDARY_FLAG,
 )
 from tldw_Server_API.app.core.RAG.rag_service import hyde
 from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
@@ -471,9 +477,8 @@ async def test_embed_text_uses_runtime_credentials_for_hosted_openai(monkeypatch
     assert runtime.resolved_models == ["text-embedding-3-small"]
     assert runtime.marked == [runtime.handle]
     assert captured["kwargs"] == {
-        "api_key_override": "runtime-embedding-key",
-        "base_url_override": "https://user-embeddings.example/v1",
-        "credentials_resolved": True,
+        PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY: runtime.handle,
+        OPENAI_EMBEDDING_RUNTIME_BOUNDARY_FLAG: True,
     }
 
 
@@ -1453,9 +1458,8 @@ async def test_batch_clustering_uses_runtime_credentials_for_hosted_embeddings(m
     assert runtime.resolved == ["openai"]
     assert runtime.marked == [runtime.handle]
     assert captured["kwargs"] == {
-        "api_key_override": "runtime-embedding-key",
-        "base_url_override": "https://batch-embeddings.example/v1",
-        "credentials_resolved": True,
+        PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY: runtime.handle,
+        OPENAI_EMBEDDING_RUNTIME_BOUNDARY_FLAG: True,
     }
 
 

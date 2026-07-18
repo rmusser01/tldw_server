@@ -764,7 +764,6 @@ async def run_speech_chat_turn(
                     "app_config": app_config,
                     "credentials_resolved": True,
                     PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY: provider_credentials,
-                    "timeout": SPEECH_CHAT_LLM_TIMEOUT_SECONDS,
                 }
                 request_payload.update(llm_extra_params)
                 try:
@@ -772,7 +771,10 @@ async def run_speech_chat_turn(
                         try:
                             response = await await_bounded_owned_operation(
                                 _await_and_classify_provider_response(
-                                    adapter.achat(request_payload)
+                                    adapter.achat(
+                                        request_payload,
+                                        timeout=SPEECH_CHAT_LLM_TIMEOUT_SECONDS,
+                                    )
                                 ),
                                 timeout_seconds=SPEECH_CHAT_LLM_TIMEOUT_SECONDS,
                                 timeout_message="speech-chat-provider-call timed out",
@@ -783,7 +785,10 @@ async def run_speech_chat_turn(
                         except NotImplementedError:
                             response = await _run_bounded_speech_sync_call(
                                 lambda: _classify_provider_response(
-                                    adapter.chat(request_payload)
+                                    adapter.chat(
+                                        request_payload,
+                                        timeout=SPEECH_CHAT_LLM_TIMEOUT_SECONDS,
+                                    )
                                 ),
                                 on_abandoned=_cleanup_abandoned_dispatch,
                                 cleanup_claimed=runtime_cleanup_claimed,
@@ -792,7 +797,10 @@ async def run_speech_chat_turn(
                     else:
                         response = await _run_bounded_speech_sync_call(
                             lambda: _classify_provider_response(
-                                adapter.chat(request_payload)
+                                adapter.chat(
+                                    request_payload,
+                                    timeout=SPEECH_CHAT_LLM_TIMEOUT_SECONDS,
+                                )
                             ),
                             on_abandoned=_cleanup_abandoned_dispatch,
                             cleanup_claimed=runtime_cleanup_claimed,

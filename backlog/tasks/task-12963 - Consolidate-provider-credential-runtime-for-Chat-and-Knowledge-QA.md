@@ -1,7 +1,7 @@
 ---
 id: TASK-12963
 title: Consolidate provider credential runtime for Chat and Knowledge QA
-status: Done
+status: In Progress
 assignee: []
 created_date: ''
 updated_date: 2026-07-14 03:30
@@ -16,12 +16,57 @@ documentation:
 - Docs/superpowers/plans/2026-07-14-secondary-llm-surfaces-atomic-credential-snapshot-implementation-plan.md
 - Docs/superpowers/plans/2026-07-16-prompt-studio-durable-provider-runtime-hardening-implementation-plan.md
 modified_files:
-- tldw_Server_API/app/api/v1/endpoints/chunking.py
-- tldw_Server_API/tests/Chunking/test_chunking_runtime_lifecycle.py
-- tldw_Server_API/tests/Evaluations/test_db_adapter.py
-- tldw_Server_API/tests/Evaluations/test_embeddings_abtest_hashing_property.py
-- tldw_Server_API/tests/Evaluations/test_evaluations_stage1_route_and_error_regressions.py
-- tldw_Server_API/tests/Evaluations/unit/test_evaluations_identity.py
+- .github/workflows/ci.yml
+- .github/workflows/e2e-required.yml
+- .github/workflows/e2e-smoke.yml
+- Docs/Deployment/Long_Term_Admin_Guide.md
+- Docs/Published/Deployment/Long_Term_Admin_Guide.md
+- Helper_Scripts/release.py
+- apps/tldw-frontend/e2e/smoke/smoke.setup.ts
+- apps/tldw-frontend/e2e/smoke/stage6-interaction-stage2.spec.ts
+- apps/tldw-frontend/lib/api/openapi.fingerprint.json
+- tldw_Server_API/app/api/v1/endpoints/audio/audio_streaming.py
+- tldw_Server_API/app/core/AuthNZ/byok_config.py
+- tldw_Server_API/app/core/AuthNZ/byok_runtime.py
+- tldw_Server_API/app/core/AuthNZ/byok_testing.py
+- tldw_Server_API/app/core/AuthNZ/llm_provider_overrides.py
+- tldw_Server_API/app/core/Chat/chat_service.py
+- tldw_Server_API/app/core/Embeddings/Embeddings_Server/Embeddings_Create.py
+- tldw_Server_API/app/core/Embeddings/async_embeddings.py
+- tldw_Server_API/app/core/Evaluations/ms_g_eval.py
+- tldw_Server_API/app/core/LLM_Calls/chat_calls.py
+- tldw_Server_API/app/core/LLM_Calls/openai_credentials.py
+- tldw_Server_API/app/core/LLM_Calls/providers/openai_adapter.py
+- tldw_Server_API/app/core/LLM_Calls/providers/openai_embeddings_adapter.py
+- tldw_Server_API/app/core/Prompt_Management/prompt_studio/evaluation_manager.py
+- tldw_Server_API/app/core/Prompt_Management/prompt_studio/prompt_executor.py
+- tldw_Server_API/app/core/Prompt_Management/prompt_studio/test_runner.py
+- tldw_Server_API/app/core/RAG/rag_service/agentic_execution.py
+- tldw_Server_API/app/core/RAG/rag_service/hyde.py
+- tldw_Server_API/app/core/Streaming/speech_chat_service.py
+- tldw_Server_API/tests/Audio/test_speech_chat_service.py
+- tldw_Server_API/tests/Audio/test_ws_audio_chat_stream.py
+- tldw_Server_API/tests/Audiobooks/integration/test_audiobook_alignment_flow.py
+- tldw_Server_API/tests/AuthNZ/test_websocket_cookie_route_contract.py
+- tldw_Server_API/tests/AuthNZ_Unit/test_byok_runtime.py
+- tldw_Server_API/tests/AuthNZ_Unit/test_byok_validation_boundary.py
+- tldw_Server_API/tests/AuthNZ_Unit/test_llm_provider_overrides.py
+- tldw_Server_API/tests/Chat/test_custom_openai_endpoint_provenance.py
+- tldw_Server_API/tests/Chat/unit/test_chat_service_fallback.py
+- tldw_Server_API/tests/Config/test_config_providers_endpoints.py
+- tldw_Server_API/tests/DB_Management/test_chacha_postgres_migration_v52.py
+- tldw_Server_API/tests/LLM_Adapters/unit/test_openai_embeddings_adapter_batch_single.py
+- tldw_Server_API/tests/LLM_Calls/test_async_streaming_dedup.py
+- tldw_Server_API/tests/LLM_Calls/test_provider_adapter_runtime_boundary.py
+- tldw_Server_API/tests/RAG_NEW/unit/test_advanced_retrieval_sanitizers.py
+- tldw_Server_API/tests/RAG_NEW/unit/test_agentic_execution.py
+- tldw_Server_API/tests/RAG_NEW/unit/test_embedding_credential_transport_boundary.py
+- tldw_Server_API/tests/RAG_NEW/unit/test_hyde.py
+- tldw_Server_API/tests/Utils/test_release_helper.py
+- tldw_Server_API/tests/e2e/test_chats_and_characters.py
+- tldw_Server_API/tests/http_client/test_http_client_sensitive_observability.py
+- tldw_Server_API/tests/prompt_studio/unit/test_evaluation_bg_propagation_unit.py
+- tldw_Server_API/tests/prompt_studio/unit/test_optimization_job_provider_runtime.py
 ---
 
 ## Description
@@ -138,4 +183,5 @@ Consolidated Chat, Knowledge QA/RAG, embeddings, secondary provider surfaces, Pr
 2026-07-17: Final production-safety review remains in progress; prior completion/merge-ready claims are withdrawn. Fresh full Prompt Studio verification passed 1001 with 17 expected skips and two separately documented WebSocket deselections; full Chat_NEW/Character unit+integration verification passed 785 with 11 expected external/performance skips after fixing a real OpenAI-compatible stream regression so semantic output plus `[DONE]` succeeds while silent exhaustion still fails closed. Independent reviews identified unresolved merge blockers that must be corrected after a semantic rebase onto current origin/dev: preserve dev's checked egress transports and exact-origin scope; replace forgeable `credentials_resolved=True` with authentic immutable server-issued key+endpoint provenance; apply placeholder filtering in the actual runtime snapshot path; sanitize every native adapter error override; close Prompt Studio secret/config/provider/rate/idempotency/ownership/contract gaps; and reconcile Jobs terminal/lease/cancellation state without starving heartbeats. PR remains draft. Deployment and rollback require coordinated API/worker drain; mixed-version rolling deployment is unsafe. Durable exactly-once WebSocket delivery remains a documented follow-up unless an outbox is implemented.
 2026-07-18: Final completion gate for PR #2727 passed after adversarial re-review. The last review cycle fixed terminal HTTP status masking by transport cleanup, restricted suppression to known transport cleanup exceptions, strengthened adapter-dispatch/SSE regressions, and removed a race-prone out-of-band Chat error synthesis that could reorder an error before an already-produced chunk. Final affected suites: HTTP 207 passed; Config 226 passed; LLM Calls/Adapters 1,110 passed and 2 skipped; Chat endpoint integration 195 passed and 1 skipped; Prompt Studio 1,087 passed, 17 skipped, and 2 intentional stale unauthenticated-WebSocket deselections; Jobs SQLite 482 passed and 2 skipped; strict real-PostgreSQL Jobs 261 passed and 1 stress-only skip. Ruff, compileall, Python 3.10 py_compile, git diff checks, and Bandit (0 findings/0 errors on the final production delta) passed. Independent re-review found no remaining issue. The two unrelated untracked watchlist templates remain untouched. PR #2727 stays draft until the requester supplies the policy-required human-written Change summary.
 2026-07-18: Post-rebase production-safety gate on origin/dev 29acaca8c781 (branch 0 commits behind). Git range-diff mapped 94 commits exactly and one expected semantic conflict commit; the embeddings resolution retains dev's PreparedEmbeddingRequest/EmbeddingInlineWorkflowRunner RG pre-execute hook together with this PR's vector validation, detached domain-error handling, and model-aware credential use. Fresh post-rebase results: embeddings endpoint parity 126 passed; isolated workflow contracts 39 passed; upstream ChaCha/PostgreSQL ownership regressions 57 passed; HTTP 207 passed; Config 226 passed; LLM Calls/Adapters 1,110 passed and 2 skipped; Chat endpoint integration 195 passed and 1 skipped; Prompt Studio 1,087 passed, 17 skipped, and 2 intentional legacy unauthenticated-WebSocket deselections; Jobs SQLite 482 passed and 2 skipped; Jobs PostgreSQL 259 passed with 3 configured skips plus both opt-in outbox tests passed, yielding the strict 261-pass/1 stress-skip coverage; targeted Knowledge QA/RAG frontend 75 passed and frontend API transport 21 passed. compileall, Python 3.10 py_compile for HTTP/Chat/embeddings, and both diff checks passed. Fatal Ruff passed on the final review delta; the whole 524-file historical branch scan remains noisy with 574 style/baseline findings, and all 17 fatal findings reproduce exactly on origin/dev (no new fatal lint delta). Bandit reported 0 findings and 0 errors across the final HTTP/Chat/embeddings production boundaries (17,717 LOC). The two unrelated untracked watchlist templates remain untouched. PR #2727 remains draft pending the requester-authored Change summary.
+2026-07-18: Final post-review/rebase production-safety gate completed on origin/dev 29acaca8c781 (0 commits behind). Closed the remaining embedding capability/transport boundary, atomic OpenAI metadata, Chat/audio timeout and stream semantics, Prompt Studio/G-Eval propagation, sensitive HTTP observability, Jobs state, CI shard, audiobook fixture, and release-helper defects; added real adapter-boundary and event-gated concurrency regressions. Fresh high-risk results: RAG_NEW unit 1,062 passed/3 skipped; Embeddings 658/18; credential/provider matrix 569/1; Chat fallback 359; HTTP 207; Audio 122; Jobs SQLite 482/2 and strict real PostgreSQL 259/3; frontend Knowledge/RAG 201, API/auth/runtime 110, workflow contracts 41, and two Chromium regressions. OpenAPI drift, CI shard coverage (0 new uncovered), Actionlint on all modified workflows, Ruff/fatal-Ruff baseline comparison, Python 3.10/3.11/3.12 compilation, Bandit (0 findings/0 errors), and git diff checks passed. Independent final security/correctness re-review found no blocker; its optional fixture-lifecycle hardening was applied and the exact file then passed 15/15 with Ruff/compile clean. The two unrelated untracked watchlist templates remain untouched. PR #2727 remains draft pending exact-new-head hosted CI and the requester-authored Change summary required by policy.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->

@@ -17,7 +17,6 @@ from ....core.AuthNZ.provider_credential_runtime import (
 )
 from ....core.Chat.Chat_Deps import ChatConfigurationError
 from ....core.Chat.streaming_utils import sanitized_provider_stream_exception
-from ....core.LLM_Calls.adapter_registry import get_registry
 from ....core.LLM_Calls.adapter_utils import (
     ensure_app_config,
     get_adapter_or_raise,
@@ -104,10 +103,7 @@ class EvaluationManager:
             "app_config": cfg,
             "credentials_resolved": resolved_credentials,
         }
-        if provider_credentials is not None and (
-            get_registry().is_local_provider_name(provider_name)
-            or provider_name.startswith("custom-openai-api")
-        ):
+        if provider_credentials is not None:
             request[PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY] = provider_credentials
         response = get_adapter_or_raise(provider_name).chat(request, timeout=timeout)
         return TestRunner._extract_response_text(response)

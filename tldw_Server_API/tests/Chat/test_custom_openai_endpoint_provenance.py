@@ -4,8 +4,12 @@ from typing import Any
 
 import pytest
 
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import ResolvedByokCredentials
+from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
+    ByokResolutionStatus,
+    ResolvedByokCredentials,
+)
 from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
     ProviderCallCredentials,
     ProviderCredentialRuntime,
 )
@@ -92,21 +96,45 @@ def test_chat_service_only_accepts_endpoint_owned_private_provenance() -> None:
     assert internal == {}
 
 
-def test_non_custom_provider_filters_only_private_endpoint_provenance() -> None:
+@pytest.mark.asyncio
+async def test_non_custom_provider_filters_only_private_endpoint_provenance() -> None:
     from tldw_Server_API.app.core.Chat import chat_service
 
-    args = {
-        "api_provider": "huggingface",
-        "messages": [{"role": "user", "content": "hi"}],
-        "model": "org/runtime-model",
-        "api_key": "stored-hf-key",
-        "credentials_resolved": True,
-        "_endpoint_provenance": "server_config",
-        "extra_headers": {"X-Provider-Extension": "allowed"},
-        "extra_body": {"declared_extension": "kept"},
-    }
+    async def resolve(provider: str, **_kwargs: Any) -> ResolvedByokCredentials:
+        return ResolvedByokCredentials(
+            provider=provider,
+            api_key="stored-hf-key",
+            app_config={},
+            credential_fields={},
+            source="user",
+            allowlisted=True,
+            status=ByokResolutionStatus.RESOLVED,
+            auth_source="api_key",
+        )
 
-    provider, request, internal = chat_service._build_adapter_request_from_chat_args(args)
+    runtime = ProviderCredentialRuntime(
+        user_id=1,
+        team_ids=(),
+        org_ids=(),
+        trusted_base_url_override=False,
+        server_config_snapshot={},
+        resolver=resolve,
+    )
+    try:
+        provider_credentials = await runtime.resolve("huggingface")
+        args = {
+            "api_provider": "huggingface",
+            "messages": [{"role": "user", "content": "hi"}],
+            "model": "org/runtime-model",
+            PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY: provider_credentials,
+            "_endpoint_provenance": "server_config",
+            "extra_headers": {"X-Provider-Extension": "allowed"},
+            "extra_body": {"declared_extension": "kept"},
+        }
+
+        provider, request, internal = chat_service._build_adapter_request_from_chat_args(args)
+    finally:
+        await runtime.close()
 
     assert provider == "huggingface"
     assert "_endpoint_provenance" not in request

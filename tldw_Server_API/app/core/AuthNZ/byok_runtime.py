@@ -448,6 +448,15 @@ _BYOK_OAUTH_TRANSPORT_EXCEPTIONS = (
     TimeoutError,
 )
 _CREDENTIAL_FIELDS_MISSING = object()
+_OPENAI_CREDENTIAL_METADATA_FIELDS = frozenset(
+    {
+        "organization",
+        "organization_id",
+        "org_id",
+        "project",
+        "project_id",
+    }
+)
 
 
 def _is_credential_store_unavailable(exc: Exception) -> bool:
@@ -849,6 +858,7 @@ def _build_app_config(
     *,
     auth_source: str | None = None,
     base_config: Mapping[str, Any] | None = None,
+    replace_credential_metadata: bool = False,
 ) -> dict[str, Any] | None:
     has_authoritative_base_config = base_config is not None
     if base_config is not None:
@@ -914,6 +924,18 @@ def _build_app_config(
                         break
         except _BYOK_RUNTIME_NONCRITICAL_EXCEPTIONS:
             scrubbed_cfg = {}
+    if replace_credential_metadata and provider_norm == _OPENAI_PROVIDER and section:
+        selected = scrubbed_cfg.get(section)
+        if isinstance(selected, dict):
+            selected_config = {
+                key: value
+                for key, value in selected.items()
+                if key not in _OPENAI_CREDENTIAL_METADATA_FIELDS
+            }
+            if selected_config:
+                scrubbed_cfg[section] = selected_config
+            else:
+                scrubbed_cfg.pop(section, None)
     merged = merge_app_config_overrides(scrubbed_cfg or None, provider, credential_fields)
     credential_base_url = credential_fields.get("base_url")
     if (
@@ -942,6 +964,7 @@ def merge_server_fallback_snapshot(
     credential_fields: Mapping[str, Any],
     auth_source: str | None,
     provider_config: Mapping[str, Any],
+    replace_credential_metadata: bool = False,
 ) -> ServerFallbackCredentials:
     """Overlay one flat provider override onto an already frozen fallback."""
     provider_norm = canonical_provider_name(provider)
@@ -982,6 +1005,7 @@ def merge_server_fallback_snapshot(
             selected_fields,
             auth_source=auth_source,
             base_config=base_config,
+            replace_credential_metadata=replace_credential_metadata,
         )
     except ByokResolutionError:
         raise
@@ -2442,6 +2466,7 @@ async def resolve_byok_credentials(
                             provider_norm,
                             credential_fields,
                             base_config=frozen_server_config,
+                            replace_credential_metadata=True,
                         ),
                         credential_fields=credential_fields,
                         source="user",
@@ -2585,6 +2610,7 @@ async def resolve_byok_credentials(
                         provider_norm,
                         credential_fields,
                         base_config=frozen_server_config,
+                        replace_credential_metadata=True,
                     ),
                     credential_fields=credential_fields,
                     source="team",
@@ -2672,6 +2698,7 @@ async def resolve_byok_credentials(
                         provider_norm,
                         credential_fields,
                         base_config=frozen_server_config,
+                        replace_credential_metadata=True,
                     ),
                     credential_fields=credential_fields,
                     source="org",

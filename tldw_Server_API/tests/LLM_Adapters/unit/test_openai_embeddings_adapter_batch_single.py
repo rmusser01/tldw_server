@@ -192,6 +192,8 @@ def test_concurrent_openai_native_embedding_routes_keep_endpoint_key_and_model_p
                     kwargs["headers"]["Authorization"],
                     kwargs["json"]["model"],
                     kwargs["json"]["input"],
+                    kwargs["headers"]["OpenAI-Organization"],
+                    kwargs["headers"]["OpenAI-Project"],
                 )
             )
             if len(calls) == 2:
@@ -214,6 +216,12 @@ def test_concurrent_openai_native_embedding_routes_keep_endpoint_key_and_model_p
                     "base_url": "https://openai-alpha.example/v1",
                     "credentials_resolved": True,
                     "_runtime_base_url_override": provenance,
+                    "app_config": {
+                        "openai_api": {
+                            "org_id": "org-alpha",
+                            "project_id": "project-alpha",
+                        }
+                    },
                 },
             ),
             executor.submit(
@@ -225,6 +233,12 @@ def test_concurrent_openai_native_embedding_routes_keep_endpoint_key_and_model_p
                     "base_url": "https://openai-beta.example/v1",
                     "credentials_resolved": True,
                     "_runtime_base_url_override": provenance,
+                    "app_config": {
+                        "openai_api": {
+                            "org_id": "org-beta",
+                            "project_id": "project-beta",
+                        }
+                    },
                 },
             ),
         ]
@@ -240,12 +254,16 @@ def test_concurrent_openai_native_embedding_routes_keep_endpoint_key_and_model_p
             "Bearer key-alpha",
             "model-alpha",
             "alpha",
+            "org-alpha",
+            "project-alpha",
         ),
         (
             "https://openai-beta.example/v1/embeddings",
             "Bearer key-beta",
             "model-beta",
             "beta",
+            "org-beta",
+            "project-beta",
         ),
     }
 

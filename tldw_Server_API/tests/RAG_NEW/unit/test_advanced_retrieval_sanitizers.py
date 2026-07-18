@@ -6,6 +6,12 @@ from typing import Any
 
 import pytest
 
+from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+)
+from tldw_Server_API.app.core.LLM_Calls.openai_credentials import (
+    OPENAI_EMBEDDING_RUNTIME_BOUNDARY_FLAG,
+)
 from tldw_Server_API.app.core.RAG.rag_service import advanced_retrieval as ar
 from tldw_Server_API.app.core.RAG.rag_service import database_retrievers as dr
 from tldw_Server_API.app.core.RAG.rag_service.types import Document
@@ -605,9 +611,8 @@ async def test_media_retriever_hosted_query_embedding_uses_runtime_credentials(m
     assert runtime.resolved_models == ["text-embedding-3-small"]
     assert runtime.marked == [runtime.handle]
     assert captured["kwargs"] == {
-        "api_key_override": "runtime-embedding-key",
-        "base_url_override": "https://user-embeddings.example/v1",
-        "credentials_resolved": True,
+        PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY: runtime.handle,
+        OPENAI_EMBEDDING_RUNTIME_BOUNDARY_FLAG: True,
     }
 
 
@@ -967,7 +972,10 @@ async def test_media_scoped_model_override_resolves_its_actual_hosted_provider(m
     assert runtime.resolved == ["openai"]
     assert runtime.resolved_models == ["text-embedding-3-small"]
     assert captured["model_id_override"] == "openai:text-embedding-3-small"
-    assert captured["kwargs"]["credentials_resolved"] is True
+    assert captured["kwargs"] == {
+        PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY: runtime.handle,
+        OPENAI_EMBEDDING_RUNTIME_BOUNDARY_FLAG: True,
+    }
 
 
 @pytest.mark.asyncio

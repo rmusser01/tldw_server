@@ -1234,6 +1234,9 @@ async def test_audio_chat_ws_keeps_static_snapshot_at_llm_boundary(
     """Every WebSocket LLM dispatch branch must keep one credential snapshot."""
     config_a = {"stub": {"model": "stub-model", "api_key": "config-key-a"}}
     boundary_requests: list[dict[str, Any]] = []
+    adapter_requests: list[dict[str, Any]] = []
+    fallback_requests: list[dict[str, Any]] = []
+    adapter_timeouts: list[float | None] = []
     lifecycle: list[object] = []
 
     class FakeRuntime:
@@ -1258,12 +1261,22 @@ async def test_audio_chat_ws_keeps_static_snapshot_at_llm_boundary(
         raise AssertionError("audio WebSocket bypassed ProviderCredentialRuntime")
 
     async def fallback_call(**kwargs: Any) -> AsyncIterator[str]:
-        boundary_requests.append(dict(kwargs))
+        request = dict(kwargs)
+        boundary_requests.append(request)
+        fallback_requests.append(request)
         return await _llm_stub(**kwargs)
 
     class RecordingAdapter:
-        def astream(self, request: dict[str, Any]) -> AsyncIterator[str]:
-            boundary_requests.append(dict(request))
+        def astream(
+            self,
+            request: dict[str, Any],
+            *,
+            timeout: float | None = None,
+        ) -> AsyncIterator[str]:
+            captured = dict(request)
+            boundary_requests.append(captured)
+            adapter_requests.append(captured)
+            adapter_timeouts.append(timeout)
 
             async def _stream() -> AsyncIterator[str]:
                 async for line in await _llm_stub():
@@ -1272,8 +1285,16 @@ async def test_audio_chat_ws_keeps_static_snapshot_at_llm_boundary(
             return _stream()
 
     class NotImplementedAdapter:
-        async def astream(self, request: dict[str, Any]) -> AsyncIterator[str]:
-            boundary_requests.append(dict(request))
+        async def astream(
+            self,
+            request: dict[str, Any],
+            *,
+            timeout: float | None = None,
+        ) -> AsyncIterator[str]:
+            captured = dict(request)
+            boundary_requests.append(captured)
+            adapter_requests.append(captured)
+            adapter_timeouts.append(timeout)
             raise NotImplementedError
 
     adapter = None
@@ -1327,9 +1348,15 @@ async def test_audio_chat_ws_keeps_static_snapshot_at_llm_boundary(
     assert all(request["api_key"] == captured_key for request in boundary_requests)
     assert all(request["app_config"] == config_a for request in boundary_requests)
     assert all(request["credentials_resolved"] is True for request in boundary_requests)
+    assert all("timeout" not in request for request in adapter_requests)
     assert all(
-        request["timeout"] == audio_streaming_module.AUDIO_STREAM_FACTORY_TIMEOUT_SECONDS
-        for request in boundary_requests
+        timeout == audio_streaming_module.AUDIO_STREAM_FACTORY_TIMEOUT_SECONDS
+        for timeout in adapter_timeouts
+    )
+    assert all(
+        request["timeout"]
+        == audio_streaming_module.AUDIO_STREAM_FACTORY_TIMEOUT_SECONDS
+        for request in fallback_requests
     )
     assert all("base_url" not in request for request in boundary_requests)
     assert all(request.get("seed") == 7 or request.get("extra_body", {}).get("seed") == 7 for request in boundary_requests)
@@ -1774,7 +1801,14 @@ async def test_audio_chat_ws_accepts_bedrock_default_chain_runtime_auth(
             lifecycle.append("runtime_close")
 
     class Adapter:
-        def astream(self, request: dict[str, Any]) -> AsyncIterator[str]:
+        def astream(
+            self,
+            request: dict[str, Any],
+            *,
+            timeout: float | None = None,
+        ) -> AsyncIterator[str]:
+            assert "timeout" not in request
+            assert timeout == audio_streaming_module.AUDIO_STREAM_FACTORY_TIMEOUT_SECONDS
             requests.append(request)
 
             async def _stream() -> AsyncIterator[str]:
@@ -2013,6 +2047,7 @@ async def test_audio_chat_ws_concurrent_turns_keep_runtime_snapshots_isolated(
 ) -> None:
     """Concurrent WebSockets must not mix resolved keys or provider config."""
     boundary_requests: list[dict[str, Any]] = []
+    adapter_timeouts: dict[str, float | None] = {}
     lifecycle: list[tuple[str, str]] = []
     runtimes: list[Any] = []
     acquisition_barrier = threading.Barrier(2)
@@ -2070,10 +2105,16 @@ async def test_audio_chat_ws_concurrent_turns_keep_runtime_snapshots_isolated(
             lifecycle.append(("runtime_close", self.model))
 
     class Adapter:
-        def astream(self, request: dict[str, Any]) -> AsyncIterator[str]:
+        def astream(
+            self,
+            request: dict[str, Any],
+            *,
+            timeout: float | None = None,
+        ) -> AsyncIterator[str]:
             acquisition_barrier.wait(timeout=5)
             boundary_requests.append(dict(request))
             model = str(request["model"])
+            adapter_timeouts[model] = timeout
 
             async def _stream() -> AsyncIterator[str]:
                 yield json.dumps(
@@ -2121,6 +2162,11 @@ async def test_audio_chat_ws_concurrent_turns_keep_runtime_snapshots_isolated(
     assert observed == {
         ("model-a", "key-model-a", "config-model-a"),
         ("model-b", "key-model-b", "config-model-b"),
+    }
+    assert all("timeout" not in request for request in boundary_requests)
+    assert adapter_timeouts == {
+        "model-a": audio_streaming_module.AUDIO_STREAM_FACTORY_TIMEOUT_SECONDS,
+        "model-b": audio_streaming_module.AUDIO_STREAM_FACTORY_TIMEOUT_SECONDS,
     }
     assert all(
         is_runtime_issued_provider_call_credentials(
@@ -2207,7 +2253,14 @@ async def test_audio_chat_ws_keeps_empty_runtime_config_frozen_after_live_reload
                 await self.inner.close()
 
     class Adapter:
-        async def astream(self, request: dict[str, Any]) -> AsyncIterator[str]:
+        async def astream(
+            self,
+            request: dict[str, Any],
+            *,
+            timeout: float | None = None,
+        ) -> AsyncIterator[str]:
+            assert "timeout" not in request
+            assert timeout == audio_streaming_module.AUDIO_STREAM_FACTORY_TIMEOUT_SECONDS
             requests.append(dict(request))
 
             async def stream() -> AsyncIterator[str]:

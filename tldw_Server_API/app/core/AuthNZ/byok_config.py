@@ -53,6 +53,18 @@ _LOCAL_ENDPOINT_CONFIG_FIELDS = {
     "aphrodite": "api_ip",
 }
 
+_ENDPOINT_CONFIG_ALIASES = frozenset(
+    {
+        "base_url",
+        "api_base_url",
+        "api_base",
+        "api_url",
+        "api_ip",
+        "endpoint",
+        "runtime_endpoint",
+    }
+)
+
 # Environment values that participate in one atomic execution credential
 # snapshot. The first non-empty alias wins, matching the adapters' legacy
 # precedence. Custom OpenAI slots are generated from their canonical helpers.
@@ -289,6 +301,9 @@ def merge_app_config_overrides(
         existing = merged.get(section)
         merged_section = dict(existing or {}) if isinstance(existing, dict) else {}
         if isinstance(values, dict):
+            if any(field in values for field in _ENDPOINT_CONFIG_ALIASES):
+                for field in _ENDPOINT_CONFIG_ALIASES:
+                    merged_section.pop(field, None)
             merged_section.update(values)
         merged[section] = merged_section
     return merged

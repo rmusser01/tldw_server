@@ -18,6 +18,9 @@ from tldw_Server_API.app.api.v1.schemas.prompt_studio_schemas import (
     EvaluationCreate,
     ExecutePromptSimpleRequest,
 )
+from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+)
 from tldw_Server_API.app.main import app
 
 
@@ -254,18 +257,23 @@ async def test_direct_prompt_endpoint_uses_scoped_runtime_and_shared_adapter_poo
 
     assert active_during_dispatch == 1
     assert pool.active_count == 0
-    assert adapter_requests == [
-        {
-            "messages": [{"role": "user", "content": "request-1"}],
-            "system_message": None,
-            "model": "model-1",
-            "api_key": "scoped-key-7",
-            "temperature": 0.7,
-            "max_tokens": 1000,
-            "app_config": {"openai_api": {"model": "scoped-model-7"}},
-            "credentials_resolved": True,
-        }
-    ]
+    assert len(adapter_requests) == 1
+    adapter_request = adapter_requests[0]
+    assert adapter_request[PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY] is handle
+    assert {
+        key: value
+        for key, value in adapter_request.items()
+        if key != PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY
+    } == {
+        "messages": [{"role": "user", "content": "request-1"}],
+        "system_message": None,
+        "model": "model-1",
+        "api_key": "scoped-key-7",
+        "temperature": 0.7,
+        "max_tokens": 1000,
+        "app_config": {"openai_api": {"model": "scoped-model-7"}},
+        "credentials_resolved": True,
+    }
     assert lifecycle[0][0] == "init"
     assert lifecycle[0][1]["user_id"] == 7
     assert lifecycle[0][1]["team_ids"] == [21]

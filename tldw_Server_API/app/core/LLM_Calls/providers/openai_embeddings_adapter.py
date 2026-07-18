@@ -31,11 +31,16 @@ class OpenAIEmbeddingsAdapter(EmbeddingsProvider):
         from tldw_Server_API.app.core.LLM_Calls.adapter_utils import _resolve_openai_api_base
         return _resolve_openai_api_base(openai_cfg or {})
 
-    def _headers(self, api_key: str | None) -> dict[str, str]:
-        h = {"Content-Type": "application/json"}
-        if api_key:
-            h["Authorization"] = f"Bearer {api_key}"
-        return h
+    def _headers(
+        self,
+        api_key: str | None,
+        app_config: dict[str, Any] | None = None,
+    ) -> dict[str, str]:
+        from tldw_Server_API.app.core.LLM_Calls.openai_credentials import (
+            openai_credential_headers,
+        )
+
+        return openai_credential_headers(api_key, app_config, provider=self.name)
 
     def _normalize_response(self, raw: dict[str, Any], *, multi: bool) -> dict[str, Any]:
         # Pass-through OpenAI shape if present; otherwise synthesize a basic structure
@@ -102,7 +107,7 @@ class OpenAIEmbeddingsAdapter(EmbeddingsProvider):
                     dim = None
                 if dim and dim > 0:
                     payload["dimensions"] = dim
-            headers = self._headers(api_key)
+            headers = self._headers(api_key, app_config)
             provider_error: Exception | None = None
             try:
                 resp = _fetch(method="POST", url=url, headers=headers, json=payload, timeout=timeout or 60.0)

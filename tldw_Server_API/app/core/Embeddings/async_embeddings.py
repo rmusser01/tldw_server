@@ -193,6 +193,8 @@ class AsyncEmbeddingProvider:
         api_key_override: Optional[str] = None,
         base_url_override: Optional[str] = None,
         credentials_resolved: bool = False,
+        _provider_call_credentials: object | None = None,
+        _require_provider_call_credentials: bool = False,
     ) -> list[float]:
         """Create embedding asynchronously"""
         raise NotImplementedError
@@ -205,8 +207,29 @@ class AsyncEmbeddingProvider:
         api_key_override: Optional[str] = None,
         base_url_override: Optional[str] = None,
         credentials_resolved: bool = False,
+        _provider_call_credentials: object | None = None,
+        _require_provider_call_credentials: bool = False,
     ) -> list[list[float]]:
         """Create embeddings for multiple texts"""
+        runtime_boundary_requested = (
+            _provider_call_credentials is not None
+            or _require_provider_call_credentials is True
+        )
+        if runtime_boundary_requested and self.provider_name != "openai":
+            from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
+
+            raise ChatConfigurationError(
+                provider=self.provider_name,
+                message="Provider credentials do not match the embedding provider.",
+            )
+        runtime_kwargs: dict[str, Any] = {}
+        if self.provider_name == "openai":
+            if _provider_call_credentials is not None:
+                runtime_kwargs["_provider_call_credentials"] = (
+                    _provider_call_credentials
+                )
+            if _require_provider_call_credentials:
+                runtime_kwargs["_require_provider_call_credentials"] = True
         tasks = [
             self.create_embedding(
                 text,
@@ -215,6 +238,7 @@ class AsyncEmbeddingProvider:
                 api_key_override=api_key_override,
                 base_url_override=base_url_override,
                 credentials_resolved=credentials_resolved,
+                **runtime_kwargs,
             )
             for text in texts
         ]
@@ -243,6 +267,8 @@ class AsyncOpenAIProvider(AsyncEmbeddingProvider):
         base_url_override: Optional[str] = None,
         api_key_override: Optional[str] = None,
         credentials_resolved: bool = False,
+        _provider_call_credentials: object | None = None,
+        _require_provider_call_credentials: bool = False,
     ) -> list[float]:
         """Create embedding using OpenAI API"""
         import time as _time
@@ -276,9 +302,35 @@ class AsyncOpenAIProvider(AsyncEmbeddingProvider):
 
         # Get connection pool for this provider
         pool = self.pool_manager.get_pool(self.provider_name)
-        headers = {"Content-Type": "application/json"}
-        api_key = api_key_override if credentials_resolved is True else self.api_key
-        if credentials_resolved is True and not (isinstance(api_key, str) and api_key.strip()):
+        explicit_credentials = (
+            credentials_resolved is True
+            or _provider_call_credentials is not None
+            or _require_provider_call_credentials is True
+        )
+        runtime_bound_credentials = (
+            _provider_call_credentials is not None
+            or _require_provider_call_credentials is True
+        )
+        runtime_config: dict[str, Any] = {}
+        if runtime_bound_credentials:
+            from tldw_Server_API.app.core.LLM_Calls.openai_credentials import (
+                bind_openai_embedding_credentials,
+            )
+
+            api_key, base_url_override, runtime_config = bind_openai_embedding_credentials(
+                provider_credentials=_provider_call_credentials,
+                credentials_resolved=credentials_resolved,
+                api_key_override=api_key_override,
+                base_url_override=base_url_override,
+            )
+        else:
+            api_key = api_key_override if credentials_resolved is True else self.api_key
+        from tldw_Server_API.app.core.LLM_Calls.openai_credentials import (
+            openai_credential_headers,
+        )
+
+        headers = openai_credential_headers(api_key, runtime_config)
+        if explicit_credentials and not (isinstance(api_key, str) and api_key.strip()):
             raise EmbeddingCredentialError(self.provider_name)
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
@@ -291,20 +343,20 @@ class AsyncOpenAIProvider(AsyncEmbeddingProvider):
         try:
             data = await pool.request(
                 method="POST",
-                url=self._resolve_url(base_url_override, credentials_resolved),
+                url=self._resolve_url(base_url_override, explicit_credentials),
                 headers=headers,
                 json_data=payload,
                 sensitive_observability=(
-                    credentials_resolved is True
+                    explicit_credentials
                     and isinstance(base_url_override, str)
                     and bool(base_url_override.strip())
                 ),
-                bypass_circuit_breaker=credentials_resolved is True,
+                bypass_circuit_breaker=explicit_credentials,
             )
             if isinstance(data, dict) and "error" in data:
                 status = "failure"
                 self.metrics.log_error(self.provider_name, "APIError")
-                if credentials_resolved is True:
+                if explicit_credentials:
                     error_status = _embedding_error_status(data)
                     error_code = "authentication" if error_status in {401, 403} else "provider_failure"
                     raise EmbeddingProviderError(
@@ -719,6 +771,8 @@ class AsyncEmbeddingService:
         base_url_override: Optional[str] = None,
         credentials_resolved: bool = False,
         on_provider_success: Callable[[], Awaitable[None]] | None = None,
+        _provider_call_credentials: object | None = None,
+        _require_provider_call_credentials: bool = False,
     ) -> list[float]:
         """
         Create embedding with full async pipeline.
@@ -744,7 +798,21 @@ class AsyncEmbeddingService:
         actual_provider = provider
         actual_model = model
         provider_config = self._get_provider_config(provider)
-        explicit_credentials = credentials_resolved is True
+        runtime_boundary_requested = (
+            _provider_call_credentials is not None
+            or _require_provider_call_credentials is True
+        )
+        if runtime_boundary_requested and provider != "openai":
+            from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
+
+            raise ChatConfigurationError(
+                provider=provider,
+                message="Provider credentials do not match the embedding provider.",
+            )
+        explicit_credentials = (
+            credentials_resolved is True
+            or runtime_boundary_requested
+        )
         cache_enabled = use_cache and not explicit_credentials
         effective_base_url = base_url_override if explicit_credentials else None
         if (
@@ -761,8 +829,12 @@ class AsyncEmbeddingService:
                 use_batching = False
         if explicit_credentials:
             use_batching = False
-            if provider in {"openai", "huggingface"} and not (
+            if (
+                provider in {"openai", "huggingface"}
+                and _provider_call_credentials is None
+                and not (
                 isinstance(api_key_override, str) and api_key_override.strip()
+                )
             ):
                 raise EmbeddingCredentialError(provider)
             if provider == "local_api" and not (
@@ -809,6 +881,12 @@ class AsyncEmbeddingService:
                         base_url_override=effective_base_url,
                         credentials_resolved=explicit_credentials,
                     )
+                    if provider == "openai" and _provider_call_credentials is not None:
+                        call_kwargs["_provider_call_credentials"] = (
+                            _provider_call_credentials
+                        )
+                    if provider == "openai" and _require_provider_call_credentials:
+                        call_kwargs["_require_provider_call_credentials"] = True
                 elif effective_base_url and provider in {"openai", "huggingface"}:
                     call_kwargs["base_url_override"] = effective_base_url
                 embedding = await provider_instance.create_embedding(**call_kwargs)
@@ -880,6 +958,8 @@ class AsyncEmbeddingService:
         base_url_override: Optional[str] = None,
         credentials_resolved: bool = False,
         on_provider_success: Callable[[], Awaitable[None]] | None = None,
+        _provider_call_credentials: object | None = None,
+        _require_provider_call_credentials: bool = False,
     ) -> list[list[float]]:
         """
         Create embeddings for multiple texts.
@@ -909,6 +989,8 @@ class AsyncEmbeddingService:
                     base_url_override=base_url_override,
                     credentials_resolved=credentials_resolved,
                     on_provider_success=on_provider_success,
+                    _provider_call_credentials=_provider_call_credentials,
+                    _require_provider_call_credentials=_require_provider_call_credentials,
                 )
                 for text in texts
             ]
@@ -926,6 +1008,8 @@ class AsyncEmbeddingService:
                     base_url_override=base_url_override,
                     credentials_resolved=credentials_resolved,
                     on_provider_success=on_provider_success,
+                    _provider_call_credentials=_provider_call_credentials,
+                    _require_provider_call_credentials=_require_provider_call_credentials,
                 )
                 embeddings.append(embedding)
         return _validate_runtime_embedding_batch(

@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import copy
 import contextlib
+import copy
 import inspect
 import json as _json
 import os
@@ -36,11 +36,6 @@ from tldw_Server_API.app.core.Audit.unified_audit_service import (
     AuditEventType,
     MandatoryAuditWriteError,
 )
-from tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib_facade import replace_placeholders
-from tldw_Server_API.app.core.Character_Chat.modules.character_utils import (
-    map_sender_to_role,
-    sanitize_sender_name,
-)
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
     ByokResolutionError,
     ServerFallbackCredentials,
@@ -48,6 +43,18 @@ from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
 )
 from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+)
+from tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib_facade import replace_placeholders
+from tldw_Server_API.app.core.Character_Chat.modules.character_utils import (
+    map_sender_to_role,
+    sanitize_sender_name,
+)
+from tldw_Server_API.app.core.Chat.bounded_daemon import (
+    SYNC_ADAPTER_CALL_POOL,
+    DaemonCapacityError,
+    await_bounded_sync_call,
+    await_owned_worker,
+    start_bounded_stream_daemon,
 )
 from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatAPIError,
@@ -59,32 +66,25 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ProviderCredentialTerminalError,
     SanitizedProviderStreamError,
 )
-from tldw_Server_API.app.core.Chat.bounded_daemon import (
-    DaemonCapacityError,
-    SYNC_ADAPTER_CALL_POOL,
-    await_bounded_sync_call,
-    await_owned_worker,
-    start_bounded_stream_daemon,
-)
 from tldw_Server_API.app.core.Chat.chat_exceptions import get_request_id
-from tldw_Server_API.app.core.exceptions import raise_detached_error
 
 # Reuse existing helpers from chat_helpers and prompt templating
 from tldw_Server_API.app.core.Chat.chat_helpers import (
     get_or_create_character_context,
     get_or_create_conversation,
 )
+from tldw_Server_API.app.core.Chat.chat_loop_engine import is_chat_loop_mode_enabled
 from tldw_Server_API.app.core.Chat.message_utils import should_persist_message_role
-from tldw_Server_API.app.core.Chat.prompt_template_manager import (
-    DEFAULT_RAW_PASSTHROUGH_TEMPLATE,
-    apply_template_to_string,
-    load_template,
-)
 from tldw_Server_API.app.core.Chat.prompt_cost_envelope import build_prompt_cost_envelope
 from tldw_Server_API.app.core.Chat.prompt_cost_guardrails import (
     PromptCostGuardrailDecision,
     evaluate_prompt_cost_guardrails,
     load_prompt_cost_guardrail_config,
+)
+from tldw_Server_API.app.core.Chat.prompt_template_manager import (
+    DEFAULT_RAW_PASSTHROUGH_TEMPLATE,
+    apply_template_to_string,
+    load_template,
 )
 from tldw_Server_API.app.core.Chat.request_queue import (
     QueueStreamChannel,
@@ -92,13 +92,17 @@ from tldw_Server_API.app.core.Chat.request_queue import (
     RequestPriority,
     get_request_queue,
 )
+from tldw_Server_API.app.core.Chat.run_first_presentation import (
+    present_chat_tools,
+    tool_names_from_definitions,
+)
 from tldw_Server_API.app.core.Chat.streaming_utils import (
     CHAT_STREAM_INCLUDE_METADATA,
     await_stream_operation_bounded,
     cancel_stream_tasks_bounded,
     create_streaming_response_with_timeout,
-    is_trusted_local_stream_frame,
     invoke_stream_close_bounded,
+    is_trusted_local_stream_frame,
     normalize_provider_stream_error,
     provider_payload_has_structural_error,
     provider_result_contains_error,
@@ -112,17 +116,11 @@ from tldw_Server_API.app.core.Chat.streaming_utils import (
 from tldw_Server_API.app.core.Chat.streaming_utils import (
     STREAMING_IDLE_TIMEOUT as CHAT_IDLE_TIMEOUT,
 )
-from tldw_Server_API.app.core.LLM_Calls.provider_readiness import normalize_catalog_provider_for_chat
-from tldw_Server_API.app.core.Chat.chat_loop_engine import is_chat_loop_mode_enabled
-from tldw_Server_API.app.core.Chat.run_first_presentation import (
-    present_chat_tools,
-    tool_names_from_definitions,
-)
 from tldw_Server_API.app.core.Chat.tool_auto_exec import execute_assistant_tool_calls
-from tldw_Server_API.app.core.config import load_comprehensive_config
 from tldw_Server_API.app.core.config import (
-    resolve_chat_run_first_provider_allowlist,
+    load_comprehensive_config,
     resolve_chat_run_first_presentation_variant,
+    resolve_chat_run_first_provider_allowlist,
     resolve_chat_run_first_rollout_mode,
     resolve_run_first_cohort_label,
 )
@@ -132,16 +130,20 @@ from tldw_Server_API.app.core.custom_openai_providers import (
     custom_openai_provider_number,
     iter_custom_openai_provider_numbers,
 )
-from tldw_Server_API.app.core.exceptions import EgressPolicyError
+from tldw_Server_API.app.core.exceptions import EgressPolicyError, raise_detached_error
 from tldw_Server_API.app.core.LLM_Calls import adapter_registry as _adapter_registry
-from tldw_Server_API.app.core.LLM_Calls.openrouter_model_inventory import (
-    clear_openrouter_model_cache as _clear_openrouter_model_cache_shared,
-    discover_openrouter_models as _discover_openrouter_models_shared,
-)
 from tldw_Server_API.app.core.LLM_Calls.llamacpp_request_extensions import (
     resolve_llamacpp_request_extensions,
     resolve_llamacpp_runtime_caps,
 )
+from tldw_Server_API.app.core.LLM_Calls.openrouter_model_inventory import (
+    clear_openrouter_model_cache as _clear_openrouter_model_cache_shared,
+)
+from tldw_Server_API.app.core.LLM_Calls.openrouter_model_inventory import (
+    discover_openrouter_models as _discover_openrouter_models_shared,
+)
+from tldw_Server_API.app.core.LLM_Calls.provider_readiness import normalize_catalog_provider_for_chat
+from tldw_Server_API.app.core.LLM_Calls.routing.models import RoutingDecision
 from tldw_Server_API.app.core.LLM_Calls.streaming import wrap_sync_stream
 from tldw_Server_API.app.core.LLM_Calls.structured_generation import (
     StructuredGenerationCapabilityError,
@@ -152,7 +154,6 @@ from tldw_Server_API.app.core.LLM_Calls.structured_generation import (
     negotiate_structured_response_mode,
     parse_and_validate_structured_output,
 )
-from tldw_Server_API.app.core.LLM_Calls.routing.models import RoutingDecision
 from tldw_Server_API.app.core.Moderation.moderation_service import get_moderation_service
 from tldw_Server_API.app.core.Moderation.review_service import (
     capture_moderation_review_item,
@@ -161,13 +162,15 @@ from tldw_Server_API.app.core.Moderation.review_service import (
 from tldw_Server_API.app.core.Monitoring.topic_monitoring_service import get_topic_monitoring_service
 from tldw_Server_API.app.core.testing import (
     is_test_mode as _shared_is_test_mode,
+)
+from tldw_Server_API.app.core.testing import (
     is_truthy as _shared_is_truthy,
 )
+from tldw_Server_API.app.core.Usage.llm_usage_normalizer import normalize_llm_usage
 from tldw_Server_API.app.core.Usage.pricing_catalog import (
     get_pricing_catalog,
     list_provider_models,
 )
-from tldw_Server_API.app.core.Usage.llm_usage_normalizer import normalize_llm_usage
 from tldw_Server_API.app.core.Usage.usage_tracker import log_llm_usage
 from tldw_Server_API.app.core.Utils.cpu_bound_handler import process_large_json_async
 
@@ -668,7 +671,7 @@ def _discover_openrouter_models_for_chat(*, force_refresh: bool = False) -> tupl
     if os.getenv("PYTEST_CURRENT_TEST") and not _shared_is_truthy(
         os.getenv("CHAT_ALLOW_OPENROUTER_DISCOVERY_IN_TESTS", "0")
     ):
-        return tuple()
+        return ()
 
     return tuple(
         _discover_openrouter_models_shared(
@@ -919,15 +922,15 @@ def _configured_models_for_provider_cached(provider: str) -> tuple[str, ...]:
     provider_key = (provider or "").strip().lower()
     mapping = _PROVIDER_MODEL_CONFIG_FIELDS.get(provider_key)
     if not mapping:
-        return tuple()
+        return ()
 
     section, field = mapping
     try:
         if not _config or not _config.has_section(section):
-            return tuple()
+            return ()
         raw_value = _config.get(section, field, fallback="")
     except _CHAT_NONCRITICAL_EXCEPTIONS:
-        return tuple()
+        return ()
 
     return tuple(_split_model_list(raw_value))
 
@@ -937,7 +940,7 @@ def known_models_for_provider_cached(provider: str) -> tuple[str, ...]:
     """Return known model IDs for a provider from catalog + configured values."""
     provider_key = (provider or "").strip().lower()
     if not provider_key:
-        return tuple()
+        return ()
 
     known: set[str] = set()
     try:
@@ -1505,7 +1508,7 @@ def _find_catalog_providers_for_model_cached(model: str) -> tuple[str, ...]:
     """Return providers whose pricing catalog contains the model (exact, case-insensitive)."""
     model_key = (model or "").strip().lower()
     if not model_key:
-        return tuple()
+        return ()
 
     matches: set[str] = set()
     try:
@@ -1524,7 +1527,7 @@ def _find_catalog_providers_for_model_cached(model: str) -> tuple[str, ...]:
                         matches.add(provider_key)
                     break
     except _CHAT_NONCRITICAL_EXCEPTIONS:
-        return tuple()
+        return ()
 
     return tuple(sorted(matches))
 
@@ -2369,6 +2372,7 @@ def _build_adapter_request_from_chat_args(chat_args: dict[str, Any]) -> tuple[st
         "http_client_factory",
         "http_fetcher",
         "http_streamer",
+        "timeout",
         PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
         "_structured_requested_response_format",
         "stream",
@@ -2390,7 +2394,9 @@ def _build_adapter_request_from_chat_args(chat_args: dict[str, Any]) -> tuple[st
     ):
         request["_endpoint_provenance"] = provenance
 
-    return provider, request, {}
+    timeout = chat_args.get("timeout")
+    internal = {"timeout": timeout} if timeout is not None else {}
+    return provider, request, internal
 
 
 def _attach_internal_http_hooks(adapter: Any, request: dict[str, Any], internal: dict[str, Any]) -> None:
@@ -2460,10 +2466,15 @@ def perform_chat_api_call(**kwargs: Any) -> Any:
     if adapter is None:
         raise ChatConfigurationError(provider=provider, message="LLM adapter unavailable.")
     _attach_internal_http_hooks(adapter, request, internal)
+    timeout = internal.get("timeout")
+    timeout_kwargs = {"timeout": timeout} if timeout is not None else {}
     try:
         if request.get("stream"):
-            return _map_sync_stream_egress_errors(provider, adapter.stream(request))
-        return adapter.chat(request)
+            return _map_sync_stream_egress_errors(
+                provider,
+                adapter.stream(request, **timeout_kwargs),
+            )
+        return adapter.chat(request, **timeout_kwargs)
     except EgressPolicyError as exc:
         raise _map_provider_egress_error(provider, exc) from exc
 
@@ -2475,16 +2486,18 @@ async def perform_chat_api_call_async(**kwargs: Any) -> Any:
     if adapter is None:
         raise ChatConfigurationError(provider=provider, message="LLM adapter unavailable.")
     _attach_internal_http_hooks(adapter, request, internal)
+    timeout = internal.get("timeout")
+    timeout_kwargs = {"timeout": timeout} if timeout is not None else {}
 
     try:
         if request.get("stream"):
             try:
-                stream_iter = adapter.astream(request)
+                stream_iter = adapter.astream(request, **timeout_kwargs)
                 if inspect.isawaitable(stream_iter):
                     stream_iter = await stream_iter
                 return _map_async_stream_egress_errors(provider, stream_iter)
             except NotImplementedError:
-                stream_iter = adapter.stream(request)
+                stream_iter = adapter.stream(request, **timeout_kwargs)
                 return _map_async_stream_egress_errors(
                     provider,
                     wrap_sync_stream(stream_iter),
@@ -2492,11 +2505,11 @@ async def perform_chat_api_call_async(**kwargs: Any) -> Any:
 
         if getattr(adapter, "async_chat_is_native", None) is True:
             try:
-                return await adapter.achat(request)
+                return await adapter.achat(request, **timeout_kwargs)
             except NotImplementedError:
                 pass
         return await await_bounded_sync_call(
-            partial(adapter.chat, request),
+            partial(adapter.chat, request, **timeout_kwargs),
             pool=SYNC_ADAPTER_CALL_POOL,
             exhaustion_message="Provider adapter capacity is exhausted",
         )
@@ -2649,8 +2662,6 @@ def build_call_params_from_request(
         pinned_tool_name = _tool_choice_name(pinned_tool_choice)
         effective_tool_names = set(run_first_presentation.effective_tool_names)
         if pinned_tool_name and pinned_tool_name not in effective_tool_names:
-            call_params.pop("tool_choice", None)
-        elif not effective_tool_names and pinned_tool_name:
             call_params.pop("tool_choice", None)
     call_params["_chat_effective_tool_names"] = run_first_presentation.effective_tool_names
     call_params["_chat_run_first_eligible"] = run_first_presentation.eligible
@@ -5804,8 +5815,6 @@ async def execute_streaming_call(
             try:
                 async for line in sse_stream.iter_sse():
                     yield line
-            except asyncio.CancelledError:
-                raise
             finally:
                 await cancel_stream_tasks_bounded([prod])
 
@@ -6572,23 +6581,20 @@ async def execute_non_stream_call(
                             metrics.track_moderation_output(str(req_user_id or client_id), "redact", streaming=False, category=(out_category2 or "default"))
                     except _CHAT_NONCRITICAL_EXCEPTIONS:
                         pass
-                    try:
-                        if audit_service and audit_context:
-                            await write_mandatory_moderation_audit(
-                                audit_service=audit_service,
-                                audit_context=audit_context,
-                                audit_event_type=AuditEventType.SECURITY_VIOLATION,
-                                action="moderation.output",
-                                result="success",
-                                metadata={
-                                    "phase": "output",
-                                    "streaming": False,
-                                    "action": "redact",
-                                    "pattern": sample,
-                                },
-                            )
-                    except MandatoryAuditWriteError:
-                        raise
+                    if audit_service and audit_context:
+                        await write_mandatory_moderation_audit(
+                            audit_service=audit_service,
+                            audit_context=audit_context,
+                            audit_event_type=AuditEventType.SECURITY_VIOLATION,
+                            action="moderation.output",
+                            result="success",
+                            metadata={
+                                "phase": "output",
+                                "streaming": False,
+                                "action": "redact",
+                                "pattern": sample,
+                            },
+                        )
                     await _capture_moderation_review_item_safely_async(
                         phase="output",
                         action="redact",

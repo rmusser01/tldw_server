@@ -129,12 +129,13 @@ def _provider_validation_runtime(
     """Issue one execution-owned capability for a candidate credential test."""
 
     captured_fields = dict(credential_fields or {})
+    captured_provider = canonical_provider_name(provider)
 
     async def resolve_candidate(
         normalized_provider: str,
         **_kwargs: Any,
     ) -> ResolvedByokCredentials:
-        if normalize_provider(normalized_provider) != normalize_provider(provider):
+        if canonical_provider_name(normalized_provider) != captured_provider:
             raise RuntimeError("Provider credential validation context is invalid")
         return ResolvedByokCredentials(
             provider=normalized_provider,

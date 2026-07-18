@@ -3,12 +3,14 @@ from __future__ import annotations
 import importlib
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from types import SimpleNamespace
 from typing import Any
 
 import httpx
 import pytest
 from loguru import logger
 
+from tldw_Server_API.app.core.AuthNZ.byok_config import merge_app_config_overrides
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
     ByokResolutionStatus,
     ResolvedByokCredentials,
@@ -23,7 +25,20 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatAPIError,
     ChatConfigurationError,
 )
+from tldw_Server_API.app.core.Evaluations import ms_g_eval
 from tldw_Server_API.app.core.LLM_Calls import Summarization_General_Lib as sgl
+from tldw_Server_API.app.core.LLM_Calls.providers import (
+    bedrock_adapter,
+    custom_openai_adapter,
+    openai_adapter,
+)
+from tldw_Server_API.app.core.Prompt_Management.prompt_studio import (
+    evaluation_manager as prompt_evaluation_manager,
+)
+from tldw_Server_API.app.core.Prompt_Management.prompt_studio import (
+    prompt_executor,
+    test_runner,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -33,6 +48,7 @@ async def _issue_credentials(
     *,
     api_key: str,
     app_config: dict[str, Any],
+    credential_fields: dict[str, Any] | None = None,
 ) -> ProviderCallCredentials:
     """Issue one authentic provider-call capability for boundary tests."""
 
@@ -44,7 +60,7 @@ async def _issue_credentials(
             provider=normalized_provider,
             api_key=api_key,
             app_config=app_config,
-            credential_fields={},
+            credential_fields=dict(credential_fields or {}),
             source="user",
             allowlisted=True,
             status=ByokResolutionStatus.RESOLVED,
@@ -63,6 +79,138 @@ async def _issue_credentials(
         return await runtime.resolve(provider, model="test-model")
     finally:
         await runtime.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.concurrent
+@pytest.mark.parametrize(
+    "provider",
+    ["custom-openai-api-2", "bedrock"],
+)
+async def test_concurrent_credential_endpoints_replace_stale_server_aliases_at_transport(
+    monkeypatch: pytest.MonkeyPatch,
+    provider: str,
+) -> None:
+    """A validated credential endpoint stays atomic with its key at real adapters."""
+
+    section = "custom_openai_api_2" if provider == "custom-openai-api-2" else "bedrock_api"
+    stale_field = "api_ip" if provider == "custom-openai-api-2" else "runtime_endpoint"
+    handles = []
+    for label in ("a", "b"):
+        credential_endpoint = f"https://credential-{label}.example/v1"
+        credential_fields = {"base_url": credential_endpoint}
+        app_config = merge_app_config_overrides(
+            {
+                section: {
+                    stale_field: f"https://stale-server-{label}.example/openai",
+                    "model": "meta.llama3-8b-instruct",
+                }
+            },
+            provider,
+            credential_fields,
+        )
+        handles.append(
+            await _issue_credentials(
+                provider,
+                api_key=f"credential-{label}-key",
+                app_config=app_config,
+                credential_fields=credential_fields,
+            )
+        )
+
+    both_entered = threading.Event()
+    release = threading.Event()
+    capture_lock = threading.Lock()
+    captured: list[tuple[str, str | None, float | None]] = []
+
+    def record(
+        url: str,
+        headers: dict[str, str],
+        timeout: float | None,
+    ) -> httpx.Response:
+        with capture_lock:
+            captured.append((url, headers.get("Authorization"), timeout))
+            if len(captured) == 2:
+                both_entered.set()
+        assert release.wait(timeout=5)
+        return httpx.Response(
+            200,
+            request=httpx.Request("POST", url),
+            json={"choices": [{"message": {"content": "ok"}}]},
+        )
+
+    if provider == "custom-openai-api-2":
+        adapter = custom_openai_adapter.CustomOpenAIAdapter2()
+
+        def fetch(**kwargs: Any) -> httpx.Response:
+            scope = kwargs["configured_endpoint"]
+            assert scope.matches(kwargs["url"])
+            return record(kwargs["url"], kwargs["headers"], kwargs["timeout"])
+
+        adapter.http_fetcher = fetch
+    else:
+        class RecordingClient:
+            def __init__(self, timeout: float | None) -> None:
+                self.timeout = timeout
+
+            def __enter__(self) -> RecordingClient:
+                return self
+
+            def __exit__(self, *_args: Any) -> bool:
+                return False
+
+            def post(
+                self,
+                url: str,
+                *,
+                headers: dict[str, str],
+                json: dict[str, Any],
+            ) -> httpx.Response:
+                del json
+                return record(url, headers, self.timeout)
+
+        monkeypatch.setattr(
+            bedrock_adapter,
+            "http_client_factory",
+            lambda *, timeout=None: RecordingClient(timeout),
+        )
+        adapter = bedrock_adapter.BedrockAdapter()
+
+    def invoke(handle: ProviderCallCredentials, timeout: float) -> dict[str, Any]:
+        return adapter.chat(
+            {
+                "messages": [{"role": "user", "content": "hello"}],
+                "model": "meta.llama3-8b-instruct",
+                "api_key": "loose-attacker-key",
+                "app_config": {section: {stale_field: "https://loose-attacker.invalid"}},
+                "credentials_resolved": True,
+                PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY: handle,
+            },
+            timeout=timeout,
+        )
+
+    calls = [(handles[0], 11.0), (handles[1], 23.0)]
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(invoke, handle, timeout) for handle, timeout in calls]
+        try:
+            assert both_entered.wait(timeout=5)
+        finally:
+            release.set()
+        for future in futures:
+            future.result(timeout=5)
+
+    assert set(captured) == {
+        (
+            "https://credential-a.example/v1/chat/completions",
+            "Bearer credential-a-key",
+            11.0,
+        ),
+        (
+            "https://credential-b.example/v1/chat/completions",
+            "Bearer credential-b-key",
+            23.0,
+        ),
+    }
 
 
 _ADAPTER_BOUNDARIES = (
@@ -282,7 +430,7 @@ async def test_summary_translation_forwards_genuine_cloud_handle(
 
 @pytest.mark.asyncio
 @pytest.mark.concurrent
-async def test_event_gated_cloud_calls_keep_rotated_credentials_isolated(
+async def test_event_gated_cloud_calls_keep_rotated_credentials_and_timeouts_isolated(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Concurrent same-provider calls retain their exact A/B runtime snapshots."""
@@ -299,7 +447,7 @@ async def test_event_gated_cloud_calls_keep_rotated_credentials_isolated(
     both_entered = threading.Event()
     release = threading.Event()
     lock = threading.Lock()
-    captured: list[dict[str, Any]] = []
+    captured: list[tuple[dict[str, Any], float | None]] = []
 
     class RecordingAdapter:
         def chat(
@@ -308,9 +456,8 @@ async def test_event_gated_cloud_calls_keep_rotated_credentials_isolated(
             *,
             timeout: float | None = None,
         ) -> dict[str, Any]:
-            del timeout
             with lock:
-                captured.append(request)
+                captured.append((request, timeout))
                 if len(captured) == 2:
                     both_entered.set()
             assert release.wait(timeout=5)
@@ -323,7 +470,10 @@ async def test_event_gated_cloud_calls_keep_rotated_credentials_isolated(
 
     monkeypatch.setattr(chat_service, "_get_llm_registry", lambda: Registry())
 
-    def invoke(handle: ProviderCallCredentials) -> dict[str, Any]:
+    def invoke(
+        handle: ProviderCallCredentials,
+        timeout: float,
+    ) -> dict[str, Any]:
         assert start.wait(timeout=5)
         return chat_service.perform_chat_api_call(
             api_provider="openai",
@@ -332,11 +482,16 @@ async def test_event_gated_cloud_calls_keep_rotated_credentials_isolated(
             api_key="loose-untrusted-key",
             app_config={"openai_api": {"rotation": "attacker"}},
             credentials_resolved=True,
+            timeout=timeout,
             **{PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY: handle},
         )
 
+    calls = [(handles[0], 11.0), (handles[1], 23.0)]
     with ThreadPoolExecutor(max_workers=2) as executor:
-        futures = [executor.submit(invoke, handle) for handle in handles]
+        futures = [
+            executor.submit(invoke, handle, timeout)
+            for handle, timeout in calls
+        ]
         start.set()
         try:
             assert both_entered.wait(timeout=5)
@@ -349,12 +504,198 @@ async def test_event_gated_cloud_calls_keep_rotated_credentials_isolated(
         "rotation-b-key",
     }
     assert {
-        request[PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY] for request in captured
+        request[PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY]
+        for request, _timeout in captured
     } == set(handles)
-    for request in captured:
+    assert {
+        request["api_key"]: timeout
+        for request, timeout in captured
+    } == {
+        "rotation-a-key": 11.0,
+        "rotation-b-key": 23.0,
+    }
+    for request, _timeout in captured:
         handle = request[PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY]
         assert request["api_key"] == handle.api_key
         assert request["app_config"] == handle.app_config
+        assert "timeout" not in request
+
+
+@pytest.mark.asyncio
+@pytest.mark.concurrent
+@pytest.mark.parametrize(
+    "entrypoint",
+    ["prompt-executor", "test-runner", "prompt-evaluation", "g-eval"],
+)
+async def test_shared_cloud_callers_reach_real_adapter_with_isolated_runtime_snapshots(
+    monkeypatch: pytest.MonkeyPatch,
+    entrypoint: str,
+) -> None:
+    """Shared Prompt/Eval callers preserve each capability through the real adapter."""
+
+    handles = [
+        await _issue_credentials(
+            "openai",
+            api_key=f"shared-{label}-key",
+            app_config={
+                "openai_api": {
+                    "api_base_url": f"https://runtime-{label}.example/v1",
+                    "model": "test-model",
+                }
+            },
+        )
+        for label in ("a", "b")
+    ]
+    start = threading.Event()
+    both_entered = threading.Event()
+    release = threading.Event()
+    lock = threading.Lock()
+    captured: list[tuple[str, str, float | None]] = []
+
+    class RecordingClient:
+        def __init__(self, timeout: float | None) -> None:
+            self.timeout = timeout
+
+        def __enter__(self) -> RecordingClient:
+            return self
+
+        def __exit__(self, *_args: Any) -> bool:
+            return False
+
+        def post(
+            self,
+            url: str,
+            *,
+            headers: dict[str, str],
+            json: dict[str, Any],
+        ) -> httpx.Response:
+            del json
+            authorization = headers["Authorization"]
+            with lock:
+                captured.append((url, authorization, self.timeout))
+                if len(captured) == 2:
+                    both_entered.set()
+            assert release.wait(timeout=5)
+            return httpx.Response(
+                200,
+                request=httpx.Request("POST", url),
+                json={
+                    "choices": [
+                        {"message": {"content": authorization}}
+                    ]
+                },
+            )
+
+    monkeypatch.setenv("LLM_ADAPTERS_NATIVE_HTTP_OPENAI", "1")
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    monkeypatch.setattr(
+        openai_adapter,
+        "http_client_factory",
+        lambda *, timeout=None: RecordingClient(timeout),
+    )
+    adapter = openai_adapter.OpenAIAdapter()
+    monkeypatch.setattr(
+        test_runner,
+        "get_adapter_or_raise",
+        lambda provider: adapter if provider == "openai" else None,
+    )
+    monkeypatch.setattr(
+        prompt_evaluation_manager,
+        "get_adapter_or_raise",
+        lambda provider: adapter if provider == "openai" else None,
+    )
+    monkeypatch.setattr(
+        prompt_evaluation_manager,
+        "is_test_mode",
+        lambda: False,
+    )
+    monkeypatch.setattr(
+        ms_g_eval,
+        "get_adapter_or_raise",
+        lambda provider: adapter if provider == "openai" else None,
+    )
+
+    def invoke(handle: ProviderCallCredentials, timeout: float) -> Any:
+        assert start.wait(timeout=5)
+        common = {
+            "provider_credentials": handle,
+            "credentials_resolved": True,
+        }
+        if entrypoint == "prompt-executor":
+            request = prompt_executor.PromptExecutor(
+                SimpleNamespace(client_id="boundary-test")
+            )._build_adapter_request(
+                provider="openai",
+                model="test-model",
+                messages=[{"role": "user", "content": "hello"}],
+                system_prompt=None,
+                temperature=0.2,
+                max_tokens=16,
+                params={},
+                app_config={"openai_api": {"api_base_url": "https://attacker.invalid"}},
+                api_key_override="loose-attacker-key",
+                **common,
+            )
+            return adapter.chat(request, timeout=timeout)
+        if entrypoint == "test-runner":
+            return test_runner.TestRunner(object())._call_adapter(
+                provider="openai",
+                model="test-model",
+                messages_payload=[{"role": "user", "content": "hello"}],
+                system_message=None,
+                temperature=0.2,
+                max_tokens=16,
+                app_config={"openai_api": {"api_base_url": "https://attacker.invalid"}},
+                api_key_override="loose-attacker-key",
+                timeout_seconds=timeout,
+                **common,
+            )
+        if entrypoint == "prompt-evaluation":
+            return prompt_evaluation_manager.EvaluationManager._call_adapter_text(
+                provider="openai",
+                messages_payload=[{"role": "user", "content": "hello"}],
+                temperature=0.2,
+                max_tokens=16,
+                api_key="loose-attacker-key",
+                model="test-model",
+                app_config={"openai_api": {"api_base_url": "https://attacker.invalid"}},
+                timeout=timeout,
+                **common,
+            )
+        return ms_g_eval._call_adapter_text(
+            api_endpoint="openai",
+            messages_payload=[{"role": "user", "content": "hello"}],
+            temperature=0.2,
+            api_key="loose-attacker-key",
+            model="test-model",
+            app_config={"openai_api": {"api_base_url": "https://attacker.invalid"}},
+            timeout=timeout,
+            **common,
+        )
+
+    calls = [(handles[0], 11.0), (handles[1], 23.0)]
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [
+            executor.submit(invoke, handle, timeout)
+            for handle, timeout in calls
+        ]
+        start.set()
+        if not both_entered.wait(timeout=2):
+            release.set()
+            for future in futures:
+                future.result(timeout=5)
+            pytest.fail("Both adapter transports were not reached")
+        release.set()
+        results = [future.result(timeout=5) for future in futures]
+
+    assert len(results) == 2
+    assert {
+        authorization: (url, timeout)
+        for url, authorization, timeout in captured
+    } == {
+        "Bearer shared-a-key": ("https://runtime-a.example/v1/chat/completions", 11.0),
+        "Bearer shared-b-key": ("https://runtime-b.example/v1/chat/completions", 23.0),
+    }
 
 
 _UNSAFE_ADAPTERS = (

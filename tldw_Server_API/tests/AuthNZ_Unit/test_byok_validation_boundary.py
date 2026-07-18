@@ -40,6 +40,9 @@ from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
     bind_provider_call_credentials,
 )
 from tldw_Server_API.app.services import admin_byok_service as shared_service
+from tldw_Server_API.tests.provider_credential_test_helpers import (
+    resolved_request_fields_async,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -498,6 +501,28 @@ async def test_provider_validation_dispatch_binds_authentic_candidate_credential
     assert len(observed) == 1
     assert observed[0]["api_key"] == "sk-candidate-runtime"
     assert observed[0]["app_config"]["openai_api"]["tenant"] == "runtime-tenant"
+    assert PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY not in observed[0]
+
+
+@pytest.mark.asyncio
+async def test_provider_validation_alias_dispatches_through_canonical_adapter_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A provider alias must bind the canonical adapter credential capability."""
+    observed: list[dict[str, Any]] = []
+    pool = _ObservedPool(1)
+    _install_boundary(monkeypatch, _CredentialBoundaryAdapter(observed), pool)
+
+    model = await byok_testing.test_provider_credentials(
+        provider="oai",
+        api_key="sk-alias-candidate-runtime",
+        app_config={"openai_api": {"model": "alias-model"}},
+        model="alias-model",
+    )
+
+    assert model == "alias-model"
+    assert len(observed) == 1
+    assert observed[0]["api_key"] == "sk-alias-candidate-runtime"
     assert PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY not in observed[0]
 
 
@@ -1296,15 +1321,20 @@ async def test_shared_admin_health_pool_rejects_chat_before_secret_dispatch(
     )
     try:
         await asyncio.wait_for(admin_adapter.entered.wait(), timeout=1.0)
+        resolved_fields = await resolved_request_fields_async(
+            "openai",
+            api_key=sentinel,
+            app_config={"openai_api": {"model": "gpt-4o"}},
+            model="gpt-4o",
+        )
 
         with pytest.raises(SanitizedProviderStreamError) as exc_info:
             await chat_service.perform_chat_api_call_async(
                 api_endpoint="openai",
-                api_key=sentinel,
-                credentials_resolved=True,
                 messages_payload=[],
                 model="gpt-4o",
                 streaming=False,
+                **resolved_fields,
             )
 
         assert exc_info.value.code == "provider_unavailable"
@@ -1337,14 +1367,19 @@ async def test_shared_admin_health_pool_rejects_admin_before_secret_dispatch(
         chat_adapter=chat_adapter,
         pool=pool,
     )
+    resolved_fields = await resolved_request_fields_async(
+        "openai",
+        api_key="sk-chat-blocking",
+        app_config={"openai_api": {"model": "gpt-4o"}},
+        model="gpt-4o",
+    )
     first = asyncio.create_task(
         chat_service.perform_chat_api_call_async(
             api_endpoint="openai",
-            api_key="sk-chat-blocking",
-            credentials_resolved=True,
             messages_payload=[],
             model="gpt-4o",
             streaming=False,
+            **resolved_fields,
         )
     )
     try:

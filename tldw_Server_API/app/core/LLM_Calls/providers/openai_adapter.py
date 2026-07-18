@@ -10,7 +10,6 @@ try:
 except ImportError:  # pragma: no cover - optional for static analysis
     httpx = None
 
-from tldw_Server_API.app.core.exceptions import ChatConfigurationError
 from tldw_Server_API.app.core.http_client import (
     create_client as _hc_create_client,
 )
@@ -20,6 +19,9 @@ from tldw_Server_API.app.core.LLM_Calls.cache_intents import (
     attach_cache_intent_metadata,
 )
 from tldw_Server_API.app.core.LLM_Calls.capability_registry import normalize_payload, validate_payload
+from tldw_Server_API.app.core.LLM_Calls.openai_credentials import (
+    openai_credential_headers,
+)
 from tldw_Server_API.app.core.LLM_Calls.payload_utils import merge_extra_body, merge_extra_headers
 from tldw_Server_API.app.core.LLM_Calls.sse import (
     finalize_stream,
@@ -48,8 +50,6 @@ _OPENAI_ADAPTER_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     UnicodeError,
     ValueError,
 ) + _OPENAI_HTTP_EXCEPTIONS
-
-_MAX_CREDENTIAL_HEADER_VALUE_LENGTH = 512
 
 # Reuse the existing, stable implementation to ensure behavior parity during migration
 # Do not import legacy handler at module import time to keep tests patchable.
@@ -269,50 +269,11 @@ class OpenAIAdapter(ChatProvider):
         api_key: str | None,
         request: dict[str, Any],
     ) -> dict[str, str]:
-        headers = {"Content-Type": "application/json"}
-        if api_key:
-            headers["Authorization"] = f"Bearer {api_key}"
-        config = request.get("app_config") or {}
-        provider_config: Any = {}
-        if isinstance(config, dict):
-            provider_config = config.get("openai_api") or {}
-        if not isinstance(provider_config, dict):
-            provider_config = {}
-        organization = (
-            provider_config.get("org_id")
-            or provider_config.get("organization_id")
-            or provider_config.get("organization")
+        return openai_credential_headers(
+            api_key,
+            request.get("app_config"),
+            provider=self.name,
         )
-        project = provider_config.get("project_id") or provider_config.get("project")
-        organization = self._credential_header_value(organization)
-        project = self._credential_header_value(project)
-        if organization is not None:
-            headers["OpenAI-Organization"] = organization
-        if project is not None:
-            headers["OpenAI-Project"] = project
-        return headers
-
-    def _credential_header_value(self, value: Any) -> str | None:
-        """Validate an optional credential-derived HTTP header value."""
-        if value is None:
-            return None
-        if not isinstance(value, str):
-            raise ChatConfigurationError(
-                provider=self.name,
-                message="Invalid OpenAI credential header configuration.",
-            ) from None
-        cleaned = value.strip()
-        if (
-            not cleaned
-            or len(cleaned) > _MAX_CREDENTIAL_HEADER_VALUE_LENGTH
-            or not cleaned.isascii()
-            or any(ord(character) < 32 or ord(character) == 127 for character in cleaned)
-        ):
-            raise ChatConfigurationError(
-                provider=self.name,
-                message="Invalid OpenAI credential header configuration.",
-            ) from None
-        return cleaned
 
     def chat(self, request: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
         request = self._bind_request_credentials(request)

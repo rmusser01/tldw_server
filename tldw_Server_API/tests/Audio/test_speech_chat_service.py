@@ -150,10 +150,17 @@ class _RecordingAdapter:
 
     def __init__(self) -> None:
         self.requests: list[dict[str, Any]] = []
+        self.timeouts: list[float | None] = []
 
-    async def achat(self, request: dict[str, Any]) -> dict[str, Any]:
+    async def achat(
+        self,
+        request: dict[str, Any],
+        *,
+        timeout: float | None = None,
+    ) -> dict[str, Any]:
         """Record an async chat request and return a deterministic response."""
         self.requests.append(request)
+        self.timeouts.append(timeout)
         return {
             "choices": [
                 {"message": {"role": "assistant", "content": "adapter assistant reply"}}
@@ -899,6 +906,7 @@ async def test_speech_chat_keeps_static_snapshot_at_llm_boundary(
     monkeypatch.setattr(speech_chat_service, "provider_requires_api_key", lambda _provider: False)
     monkeypatch.setattr(speech_chat_service, "chat_api_call_async", fallback_call)
 
+    adapter: _RecordingAdapter | None = None
     if dispatch == "adapter":
         adapter = _RecordingAdapter()
         monkeypatch.setattr(
@@ -923,10 +931,17 @@ async def test_speech_chat_keeps_static_snapshot_at_llm_boundary(
     assert all(request["api_key"] == captured_key for request in boundary_requests)
     assert all(request["app_config"] == config_a for request in boundary_requests)
     assert all(request["credentials_resolved"] is True for request in boundary_requests)
-    assert all(
-        request["timeout"] == speech_chat_service.SPEECH_CHAT_LLM_TIMEOUT_SECONDS
-        for request in boundary_requests
-    )
+    if adapter is not None:
+        assert all("timeout" not in request for request in adapter.requests)
+        assert adapter.timeouts == [
+            speech_chat_service.SPEECH_CHAT_LLM_TIMEOUT_SECONDS
+        ]
+    else:
+        assert all(
+            request["timeout"]
+            == speech_chat_service.SPEECH_CHAT_LLM_TIMEOUT_SECONDS
+            for request in boundary_requests
+        )
     init_kwargs = lifecycle[0][1]
     assert init_kwargs["user_id"] == 1
     assert init_kwargs["team_ids"] == [2]
@@ -970,12 +985,24 @@ async def test_speech_chat_sync_adapter_cancellation_drains_before_runtime_close
             runtime_closed.set()
 
     class SyncFallbackAdapter:
-        async def achat(self, _request: dict[str, Any]) -> dict[str, Any]:
+        async def achat(
+            self,
+            _request: dict[str, Any],
+            *,
+            timeout: float | None = None,
+        ) -> dict[str, Any]:
+            assert timeout == speech_chat_service.SPEECH_CHAT_LLM_TIMEOUT_SECONDS
             raise NotImplementedError
 
-        def chat(self, request: dict[str, Any]) -> dict[str, Any]:
+        def chat(
+            self,
+            request: dict[str, Any],
+            *,
+            timeout: float | None = None,
+        ) -> dict[str, Any]:
             assert request["api_key"] == "runtime-key"
-            assert request["timeout"] == speech_chat_service.SPEECH_CHAT_LLM_TIMEOUT_SECONDS
+            assert "timeout" not in request
+            assert timeout == speech_chat_service.SPEECH_CHAT_LLM_TIMEOUT_SECONDS
             entered.set()
             release.wait(timeout=2.0)
             lifecycle.append("worker_returned")
@@ -1042,6 +1069,7 @@ async def test_speech_chat_sync_adapter_timeout_capacity_and_recovery(
     started = threading.Event()
     release = threading.Event()
     requests: list[dict[str, Any]] = []
+    adapter_timeouts: list[float | None] = []
     closed_runtime_ids: list[int] = []
     marked_runtime_ids: list[int] = []
     runtime_pool_states: list[tuple[str, int, int]] = []
@@ -1074,10 +1102,10 @@ async def test_speech_chat_sync_adapter_timeout_capacity_and_recovery(
         *,
         timeout: float | None = None,
     ) -> dict[str, Any]:
-        del timeout
         nonlocal call_count
         call_count += 1
         requests.append(dict(request))
+        adapter_timeouts.append(timeout)
         started.set()
         if call_count == 1:
             release.wait(timeout=2.0)
@@ -1151,7 +1179,8 @@ async def test_speech_chat_sync_adapter_timeout_capacity_and_recovery(
     assert marked_runtime_ids == [1, 3]
     assert ("mark", 3, 0) in runtime_pool_states
     assert ("close", 3, 0) in runtime_pool_states
-    assert all(request["timeout"] == 0.02 for request in requests)
+    assert all("timeout" not in request for request in requests)
+    assert adapter_timeouts == [0.02, 0.02]
 
 
 @pytest.mark.asyncio
@@ -1166,6 +1195,7 @@ async def test_speech_chat_async_adapter_timeout_retains_runtime_until_release(
     release = asyncio.Event()
     runtime_closed = asyncio.Event()
     requests: list[dict[str, Any]] = []
+    adapter_timeouts: list[float | None] = []
     lifecycle: list[str] = []
 
     class Runtime:
@@ -1186,8 +1216,14 @@ async def test_speech_chat_async_adapter_timeout_retains_runtime_until_release(
     class BlockingAdapter:
         async_chat_is_native = True
 
-        async def achat(self, request: dict[str, Any]) -> dict[str, Any]:
+        async def achat(
+            self,
+            request: dict[str, Any],
+            *,
+            timeout: float | None = None,
+        ) -> dict[str, Any]:
             requests.append(request)
+            adapter_timeouts.append(timeout)
             started.set()
             await release.wait()
             lifecycle.append("adapter_exit")
@@ -1222,7 +1258,8 @@ async def test_speech_chat_async_adapter_timeout_retains_runtime_until_release(
         assert exc_info.value.status_code == status.HTTP_502_BAD_GATEWAY
         assert exc_info.value.detail == "LLM provider error during speech chat"
         assert "runtime_close" not in lifecycle
-        assert requests[0]["timeout"] == 0.01
+        assert "timeout" not in requests[0]
+        assert adapter_timeouts == [0.01]
     finally:
         release.set()
 
@@ -1275,7 +1312,14 @@ async def test_speech_chat_late_usage_requires_valid_nonempty_content(
     class Adapter:
         async_chat_is_native = True
 
-        async def achat(self, _request: dict[str, Any]) -> dict[str, Any]:
+        async def achat(
+            self,
+            request: dict[str, Any],
+            *,
+            timeout: float | None = None,
+        ) -> dict[str, Any]:
+            assert "timeout" not in request
+            assert timeout == speech_chat_service.SPEECH_CHAT_LLM_TIMEOUT_SECONDS
             adapter_started.set()
             await adapter_release.wait()
             lifecycle.append("adapter_exit")
@@ -1702,7 +1746,14 @@ async def test_speech_chat_accepts_bedrock_default_chain_runtime_auth(
     class Adapter:
         async_chat_is_native = True
 
-        async def achat(self, request: dict[str, Any]) -> dict[str, Any]:
+        async def achat(
+            self,
+            request: dict[str, Any],
+            *,
+            timeout: float | None = None,
+        ) -> dict[str, Any]:
+            assert "timeout" not in request
+            assert timeout == speech_chat_service.SPEECH_CHAT_LLM_TIMEOUT_SECONDS
             requests.append(request)
             return {"choices": [{"message": {"content": "bedrock reply"}}]}
 
@@ -1763,7 +1814,14 @@ async def test_speech_chat_empty_provider_response_is_not_marked_used(
     class Adapter:
         async_chat_is_native = True
 
-        async def achat(self, _request: dict[str, Any]) -> dict[str, Any]:
+        async def achat(
+            self,
+            request: dict[str, Any],
+            *,
+            timeout: float | None = None,
+        ) -> dict[str, Any]:
+            assert "timeout" not in request
+            assert timeout == speech_chat_service.SPEECH_CHAT_LLM_TIMEOUT_SECONDS
             return {"choices": []}
 
     monkeypatch.setattr(
@@ -1806,6 +1864,7 @@ async def test_concurrent_speech_chat_calls_keep_runtime_snapshots_isolated(
     entered = {"model-a": asyncio.Event(), "model-b": asyncio.Event()}
     release = {"model-a": asyncio.Event(), "model-b": asyncio.Event()}
     requests: list[dict[str, Any]] = []
+    adapter_timeouts: dict[str, float | None] = {}
     runtimes: list[Any] = []
 
     class Runtime:
@@ -1859,9 +1918,15 @@ async def test_concurrent_speech_chat_calls_keep_runtime_snapshots_isolated(
     class Adapter:
         async_chat_is_native = True
 
-        async def achat(self, request: dict[str, Any]) -> dict[str, Any]:
+        async def achat(
+            self,
+            request: dict[str, Any],
+            *,
+            timeout: float | None = None,
+        ) -> dict[str, Any]:
             model = request["model"]
             requests.append(dict(request))
+            adapter_timeouts[model] = timeout
             entered[model].set()
             await release[model].wait()
             return {"choices": [{"message": {"content": f"reply-{model}"}}]}
@@ -1911,6 +1976,11 @@ async def test_concurrent_speech_chat_calls_keep_runtime_snapshots_isolated(
     } == {
         ("model-a", "model-a-key"),
         ("model-b", "model-b-key"),
+    }
+    assert all("timeout" not in request for request in requests)
+    assert adapter_timeouts == {
+        "model-a": speech_chat_service.SPEECH_CHAT_LLM_TIMEOUT_SECONDS,
+        "model-b": speech_chat_service.SPEECH_CHAT_LLM_TIMEOUT_SECONDS,
     }
     assert len(runtimes) == 2
     assert all(
@@ -1995,7 +2065,14 @@ async def test_concurrent_speech_chat_calls_keep_empty_runtime_config_frozen(
     class Adapter:
         async_chat_is_native = True
 
-        async def achat(self, request: dict[str, Any]) -> dict[str, Any]:
+        async def achat(
+            self,
+            request: dict[str, Any],
+            *,
+            timeout: float | None = None,
+        ) -> dict[str, Any]:
+            assert "timeout" not in request
+            assert timeout == speech_chat_service.SPEECH_CHAT_LLM_TIMEOUT_SECONDS
             requests.append(dict(request))
             return {
                 "choices": [
@@ -2229,7 +2306,14 @@ async def test_run_speech_chat_turn_sanitizes_adapter_http_exception(
     class _FailingAdapter:
         async_chat_is_native = True
 
-        async def achat(self, _request: dict[str, Any]) -> dict[str, Any]:
+        async def achat(
+            self,
+            request: dict[str, Any],
+            *,
+            timeout: float | None = None,
+        ) -> dict[str, Any]:
+            assert "timeout" not in request
+            assert timeout == speech_chat_service.SPEECH_CHAT_LLM_TIMEOUT_SECONDS
             raise HTTPException(
                 status_code=status.HTTP_418_IM_A_TEAPOT,
                 detail={"message": sentinel, "authorization": sentinel},

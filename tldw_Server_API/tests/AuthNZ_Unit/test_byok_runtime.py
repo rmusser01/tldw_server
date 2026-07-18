@@ -1895,6 +1895,7 @@ def test_build_app_config_is_provider_scoped_and_scrubs_secrets(monkeypatch):
             "org_id": "byok-org",
             "project_id": "byok-project",
         },
+        replace_credential_metadata=True,
     )
 
     assert app_config == {
@@ -1904,7 +1905,6 @@ def test_build_app_config_is_provider_scoped_and_scrubs_secrets(monkeypatch):
             "api_retries": 2,
             "api_retry_delay": 0.25,
             "api_base_url": "https://byok-openai.example/v1",
-            "organization_id": "org-safe",
             "org_id": "byok-org",
             "project_id": "byok-project",
         },
@@ -1921,6 +1921,164 @@ def test_build_app_config_is_provider_scoped_and_scrubs_secrets(monkeypatch):
     }
     app_config["HTTP"]["proxy_allowlist"].append("mutated.example")
     assert source_proxy_allowlist == ["proxy.example"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.concurrent
+async def test_concurrent_openai_user_keys_do_not_inherit_server_credential_headers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Each user key carries only its own OpenAI organization/project metadata."""
+
+    from tldw_Server_API.app.core.AuthNZ import byok_runtime
+    from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+        PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+        ProviderCredentialRuntime,
+    )
+    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+    from tldw_Server_API.app.core.LLM_Calls.providers import openai_adapter
+
+    monkeypatch.setenv("BYOK_ENCRYPTION_KEY", _b64_key(b"k"))
+    monkeypatch.setenv("LLM_ADAPTERS_NATIVE_HTTP_OPENAI", "1")
+    reset_settings()
+    rows = {
+        1: _encrypted_row(build_secret_payload("user-key-a")),
+        2: _encrypted_row(
+            build_secret_payload(
+                "user-key-b",
+                credential_fields={
+                    "org_id": "user-org-b",
+                    "project_id": "user-project-b",
+                },
+            )
+        ),
+    }
+
+    class UserRepo:
+        async def fetch_secret_for_active_user(
+            self,
+            user_id: int,
+            _provider: str,
+            **_kwargs: Any,
+        ) -> dict[str, Any] | None:
+            return rows.get(user_id)
+
+    repo = UserRepo()
+
+    async def get_user_repo() -> UserRepo:
+        return repo
+
+    monkeypatch.setattr(byok_runtime, "_get_user_repo", get_user_repo)
+    monkeypatch.setattr(byok_runtime, "is_byok_enabled", lambda: True)
+    monkeypatch.setattr(byok_runtime, "is_provider_allowlisted", lambda _provider: True)
+    server_config = {
+        "openai_api": {
+            "api_base_url": "https://server-openai.example/v1",
+            "organization": "server-org",
+            "organization_id": "server-org-id",
+            "org_id": "server-org-short",
+            "project": "server-project",
+            "project_id": "server-project-id",
+        }
+    }
+    runtimes = [
+        ProviderCredentialRuntime(
+            user_id=user_id,
+            team_ids=(),
+            org_ids=(),
+            trusted_base_url_override=False,
+            server_config_snapshot=server_config,
+        )
+        for user_id in (1, 2)
+    ]
+    handles = await asyncio.gather(
+        *(runtime.resolve("openai", model="gpt-4o-mini") for runtime in runtimes)
+    )
+
+    both_entered = threading.Event()
+    release = threading.Event()
+    capture_lock = threading.Lock()
+    captured: list[tuple[str, str | None, str | None, float | None]] = []
+
+    class Response:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, Any]:
+            return {"choices": [{"message": {"content": "ok"}}]}
+
+    class Client:
+        def __init__(self, timeout: float | None) -> None:
+            self.timeout = timeout
+
+        def __enter__(self) -> Client:
+            return self
+
+        def __exit__(self, *_args: Any) -> bool:
+            return False
+
+        def post(
+            self,
+            _url: str,
+            *,
+            headers: dict[str, str],
+            json: dict[str, Any],
+        ) -> Response:
+            del json
+            with capture_lock:
+                captured.append(
+                    (
+                        headers["Authorization"],
+                        headers.get("OpenAI-Organization"),
+                        headers.get("OpenAI-Project"),
+                        self.timeout,
+                    )
+                )
+                if len(captured) == 2:
+                    both_entered.set()
+            assert release.wait(timeout=5)
+            return Response()
+
+    monkeypatch.setattr(
+        openai_adapter,
+        "http_client_factory",
+        lambda *, timeout=None: Client(timeout),
+    )
+    adapter = openai_adapter.OpenAIAdapter()
+
+    async def invoke(handle: Any, timeout: float) -> dict[str, Any]:
+        return await adapter.achat(
+            {
+                "messages": [{"role": "user", "content": "hello"}],
+                "model": "gpt-4o-mini",
+                "credentials_resolved": True,
+                PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY: handle,
+            },
+            timeout=timeout,
+        )
+
+    tasks = [
+        asyncio.create_task(invoke(handles[0], 11.0)),
+        asyncio.create_task(invoke(handles[1], 23.0)),
+    ]
+    try:
+        assert await asyncio.to_thread(both_entered.wait, 5)
+    finally:
+        release.set()
+    try:
+        await asyncio.gather(*tasks)
+    finally:
+        await asyncio.gather(*(runtime.close() for runtime in runtimes))
+
+    assert set(captured) == {
+        ("Bearer user-key-a", None, None, 11.0),
+        (
+            "Bearer user-key-b",
+            "user-org-b",
+            "user-project-b",
+            23.0,
+        ),
+    }
 
 
 @pytest.mark.asyncio

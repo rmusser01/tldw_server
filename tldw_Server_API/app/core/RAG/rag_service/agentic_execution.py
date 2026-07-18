@@ -22,6 +22,9 @@ import numpy as np
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
+from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+)
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
 from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
 from tldw_Server_API.app.core.LLM_Calls.structured_output import (
@@ -32,6 +35,7 @@ from tldw_Server_API.app.core.LLM_Calls.structured_output import (
 from .agentic_tools import make_default_registry
 from .evidence_models import DerivedEvidence, RetrievedEvidence
 from .hyde import (
+    _credential_base_url,
     _embedding_model_from_config,
     _embedding_model_spec_from_config,
     _embedding_provider_from_config,
@@ -575,7 +579,12 @@ class AgenticToolbox:
                 ):
                     try:
                         endpoint = str(
-                            self.embedding_call_kwargs.get("base_url_override")
+                            _credential_base_url(
+                                self.embedding_call_kwargs.get(
+                                    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY
+                                )
+                            )
+                            or self.embedding_call_kwargs.get("base_url_override")
                             or _effective_embedding_endpoint(
                                 self.embedding_app_config,
                                 getattr(self.cfg, "agentic_provider_embedding_model_id", None),
@@ -592,7 +601,11 @@ class AgenticToolbox:
                             f"{self.embedding_provider}|{self.embedding_model_id}|"
                             f"{endpoint_identity}|prov"
                         )
-                        cache_allowed = self.embedding_call_kwargs.get("credentials_resolved") is not True
+                        cache_allowed = (
+                            self.embedding_call_kwargs.get("credentials_resolved") is not True
+                            and PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY
+                            not in self.embedding_call_kwargs
+                        )
                         cached = _INTRA_DOC_VEC_CACHE.get(key) if cache_allowed else None
                         if cached is not None:
                             self._query_vecs[doc.id] = cached[0]

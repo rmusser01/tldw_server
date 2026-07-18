@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager, contextmanager
 from threading import Barrier
@@ -15,6 +16,20 @@ from opentelemetry import context as otel_context
 from tldw_Server_API.app.core import http_client
 
 pytestmark = pytest.mark.unit
+
+
+@pytest.fixture(autouse=True)
+def _allow_synthetic_public_observability_host(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep the public test host reachable under CI's hostile egress allowlist."""
+    configured = os.getenv("WORKFLOWS_EGRESS_ALLOWLIST", "")
+    if not configured.strip():
+        return
+    entries = [entry.strip() for entry in configured.split(",") if entry.strip()]
+    if "8.8.8.8" not in entries:
+        entries.append("8.8.8.8")
+    monkeypatch.setenv("WORKFLOWS_EGRESS_ALLOWLIST", ",".join(entries))
 
 
 class _MetricRecorder:

@@ -331,10 +331,7 @@ class PromptExecutor:
             "credentials_resolved": resolved_credentials,
         }
 
-        if provider_credentials is not None and (
-            get_registry().is_local_provider_name(provider_name)
-            or provider_name.startswith("custom-openai-api")
-        ):
+        if provider_credentials is not None:
             request[PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY] = provider_credentials
 
         for canonical, aliases in self._PARAM_ALIASES.items():

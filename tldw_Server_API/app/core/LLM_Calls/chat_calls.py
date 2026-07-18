@@ -45,6 +45,9 @@ from tldw_Server_API.app.core.LLM_Calls.error_utils import (
 from tldw_Server_API.app.core.LLM_Calls.http_helpers import (
     create_session_with_retries as _legacy_create_session_with_retries,
 )
+from tldw_Server_API.app.core.LLM_Calls.openai_credentials import (
+    openai_credential_headers,
+)
 from tldw_Server_API.app.core.Utils.Utils import logging
 
 # -----------------------------------------------------------------------------
@@ -204,10 +207,7 @@ def get_openai_embeddings(
     )
     logging.debug(f"OpenAI Embeddings (single): Using model: {model}")
 
-    headers = {
-        'Authorization': f'Bearer {api_key}',
-        'Content-Type': 'application/json'
-    }
+    headers = openai_credential_headers(api_key, {"openai_api": openai_cfg})
     request_data = {
         "input": input_data,
         "model": model,
@@ -299,10 +299,7 @@ def get_openai_embeddings_batch(
     logging.debug("OpenAI Embeddings (batch): Using configured API key")
     logging.debug(f"OpenAI Embeddings (batch): Using model: {model}")
 
-    headers = {
-        'Authorization': f'Bearer {api_key}',
-        'Content-Type': 'application/json'
-    }
+    headers = openai_credential_headers(api_key, {"openai_api": openai_cfg})
     # OpenAI API expects a list of strings for the "input" field for batching
     request_data = {
         "input": texts,

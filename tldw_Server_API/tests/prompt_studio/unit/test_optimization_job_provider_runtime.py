@@ -24,6 +24,9 @@ from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
 from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
     ProviderOverridePolicyError,
 )
+from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+)
 from tldw_Server_API.app.core.Chat.bounded_daemon import (
     DaemonCapacityError,
     await_owned_worker,
@@ -3773,7 +3776,15 @@ async def test_valid_baseline_then_optimizer_failure_fails_job_without_completio
 
     class _ExecutorAdapter:
         def chat(self, request: dict[str, Any], **_kwargs: Any) -> dict[str, Any]:
-            request_text = json.dumps(request, sort_keys=True)
+            assert request[PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY] is handle
+            request_text = json.dumps(
+                {
+                    key: value
+                    for key, value in request.items()
+                    if key != PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY
+                },
+                sort_keys=True,
+            )
             should_fail = failure_stage == "generation"
             should_fail = should_fail or (
                 failure_stage == "scorer"
@@ -3916,9 +3927,20 @@ async def test_concurrent_same_and_different_owner_jobs_use_distinct_runtimes(
 
         def chat(self, request: dict[str, Any], **_kwargs: Any) -> dict[str, Any]:
             model = str(request["model"])
+            provider_credentials = request[PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY]
+            captured_request = copy.deepcopy(
+                {
+                    key: value
+                    for key, value in request.items()
+                    if key != PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY
+                }
+            )
+            captured_request[PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY] = (
+                provider_credentials
+            )
             with request_lock:
                 adapter_requests.append(
-                    (self.boundary, self.provider, copy.deepcopy(request))
+                    (self.boundary, self.provider, captured_request)
                 )
                 wait_at_barrier = model not in barrier_models
                 barrier_models.add(model)
@@ -4075,7 +4097,15 @@ async def test_concurrent_same_and_different_owner_jobs_use_distinct_runtimes(
             list[tuple[str, str, dict[str, Any]]],
         ] = {marker: [] for marker in expected_requests}
         for boundary, request_provider, request in adapter_requests:
-            serialized_request = json.dumps(request, sort_keys=True)
+            provider_credentials = request[PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY]
+            serialized_request = json.dumps(
+                {
+                    key: value
+                    for key, value in request.items()
+                    if key != PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY
+                },
+                sort_keys=True,
+            )
             matching_markers = [
                 marker
                 for marker in expected_requests
@@ -4105,6 +4135,16 @@ async def test_concurrent_same_and_different_owner_jobs_use_distinct_runtimes(
                 }
             }
             assert request["credentials_resolved"] is True
+            matching_handles = [
+                runtime.resolved_outcome
+                for runtime in factory.instances
+                if isinstance(runtime.resolved_outcome, _Handle)
+                and runtime.resolved_outcome.app_config
+                == request["app_config"]
+                and runtime.resolved_outcome.api_key == request["api_key"]
+            ]
+            assert len(matching_handles) == 1
+            assert provider_credentials is matching_handles[0]
 
         for marker, marker_requests in requests_by_marker.items():
             assert marker_requests

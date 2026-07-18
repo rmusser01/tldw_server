@@ -39,7 +39,6 @@ from tldw_Server_API.app.core.Chat.chat_helpers import extract_response_content
 from tldw_Server_API.app.core.config import load_comprehensive_config
 from tldw_Server_API.app.core.custom_openai_providers import custom_openai_provider_number
 from tldw_Server_API.app.core.exceptions import raise_detached_error
-from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
     ensure_app_config,
     get_adapter_or_raise,
@@ -129,10 +128,7 @@ def _call_adapter_text(
         "credentials_resolved": credentials_resolved,
     }
     request.update(extra_kwargs)
-    if provider_credentials is not None and (
-        get_registry().is_local_provider_name(provider)
-        or provider.startswith("custom-openai-api")
-    ):
+    if provider_credentials is not None:
         request[PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY] = provider_credentials
     response = get_adapter_or_raise(provider).chat(request, timeout=timeout)
     return extract_response_content(response) or str(response)

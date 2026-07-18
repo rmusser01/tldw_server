@@ -994,6 +994,7 @@ def _server_fallback_from_override(
         credential_fields=effective_fields,
         auth_source=auth_source,
         provider_config=config,
+        replace_credential_metadata=use_override_credentials,
     )
     if (
         base_fallback is None

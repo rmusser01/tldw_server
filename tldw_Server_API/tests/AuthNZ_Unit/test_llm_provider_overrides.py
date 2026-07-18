@@ -2516,3 +2516,42 @@ def test_override_fallback_accepts_authoritative_empty_static_config() -> None:
     assert fallback is not None
     assert fallback.api_key == "static-key"
     assert fallback.app_config == {"openai_api": {"model": "gpt-override"}}
+
+
+def test_override_key_replacement_drops_static_openai_credential_metadata() -> None:
+    """An admin key override cannot inherit org/project fields from the server key."""
+
+    set_llm_provider_overrides_cache_for_tests(
+        {
+            "openai": LLMProviderOverride(
+                provider="openai",
+                api_key="override-key",
+            )
+        }
+    )
+    static_fallback = ServerFallbackCredentials(
+        api_key="static-key",
+        credential_fields={
+            "org_id": "static-org-short",
+            "project_id": "static-project-id",
+        },
+        app_config={
+            "openai_api": {
+                "model": "gpt-static",
+                "organization": "static-org",
+                "organization_id": "static-org-id",
+                "org_id": "static-org-short",
+                "project": "static-project",
+                "project_id": "static-project-id",
+            }
+        },
+    )
+
+    fallback = capture_provider_override_call_snapshot("openai").server_fallback(
+        static_fallback
+    )
+
+    assert fallback is not None
+    assert fallback.api_key == "override-key"
+    assert fallback.credential_fields == {}
+    assert fallback.app_config == {"openai_api": {"model": "gpt-static"}}

@@ -6,6 +6,12 @@ from typing import Any
 import pytest
 
 import tldw_Server_API.app.core.RAG.rag_service.agentic_execution as agentic_execution
+from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+)
+from tldw_Server_API.app.core.LLM_Calls.openai_credentials import (
+    OPENAI_EMBEDDING_RUNTIME_BOUNDARY_FLAG,
+)
 from tldw_Server_API.app.core.RAG.rag_service.agentic_execution import (
     AgenticConfig,
     AgenticToolbox,
@@ -44,6 +50,27 @@ class _CredentialRuntime:
 
     async def mark_used(self, handle: Any) -> None:
         self.marked.append(handle)
+
+
+def _runtime_api_key(kwargs: dict[str, Any]) -> str | None:
+    handle = kwargs.get(PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY)
+    value = getattr(handle, "api_key", None)
+    return value if isinstance(value, str) else None
+
+
+def _runtime_base_url(kwargs: dict[str, Any]) -> str | None:
+    handle = kwargs.get(PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY)
+    app_config = getattr(handle, "app_config", None)
+    section = app_config.get("openai_api") if isinstance(app_config, dict) else None
+    value = section.get("base_url") if isinstance(section, dict) else None
+    return value if isinstance(value, str) else None
+
+
+def _runtime_embedding_kwargs(runtime: _CredentialRuntime) -> dict[str, Any]:
+    return {
+        PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY: runtime.handle,
+        OPENAI_EMBEDDING_RUNTIME_BOUNDARY_FLAG: True,
+    }
 
 
 def _configure_agentic_provider_embedding_test(
@@ -91,7 +118,7 @@ def _capture_agentic_query_vectors(
     captured: dict[str, list[list[float]]] = {}
 
     def capture(toolbox: AgenticToolbox):
-        api_key = str(toolbox.embedding_call_kwargs.get("api_key_override") or "legacy")
+        api_key = str(_runtime_api_key(toolbox.embedding_call_kwargs) or "legacy")
         captured.setdefault(api_key, []).append(toolbox._query_vecs[document_id].tolist())
         return original_registry_factory(toolbox)
 
@@ -265,11 +292,7 @@ async def test_tool_loop_uses_runtime_credentials_for_hosted_provider_embeddings
     assert runtime.resolved == ["openai"]
     assert runtime.marked == [runtime.handle]
     assert captured["texts"][0] == "alpha"
-    assert captured["kwargs"] == {
-        "api_key_override": "runtime-agentic-key",
-        "base_url_override": "https://agentic-embeddings.example/v1",
-        "credentials_resolved": True,
-    }
+    assert captured["kwargs"] == _runtime_embedding_kwargs(runtime)
 
 
 @pytest.mark.asyncio
@@ -280,7 +303,7 @@ async def test_explicit_agentic_embeddings_isolate_identical_requests_by_credent
 
     def fake_create(texts, _app_config, _model_id_override=None, **kwargs):
         assert texts == ["same query", "alpha paragraph", "beta paragraph"]
-        api_key = kwargs["api_key_override"]
+        api_key = _runtime_api_key(kwargs)
         dispatches.append(api_key)
         return _credential_specific_vectors(api_key)
 
@@ -309,7 +332,7 @@ async def test_repeated_explicit_agentic_embedding_calls_always_dispatch(
     dispatches: list[str] = []
 
     def fake_create(_texts, _app_config, _model_id_override=None, **kwargs):
-        api_key = kwargs["api_key_override"]
+        api_key = _runtime_api_key(kwargs)
         dispatches.append(api_key)
         return _credential_specific_vectors(api_key)
 
@@ -362,7 +385,7 @@ async def test_concurrent_explicit_agentic_embedding_calls_do_not_share_vectors(
                 raise AssertionError("timed out waiting to release the first runtime")
 
     def fake_create(_texts, _app_config, _model_id_override=None, **kwargs):
-        api_key = kwargs["api_key_override"]
+        api_key = _runtime_api_key(kwargs)
         dispatches.append(api_key)
         return _credential_specific_vectors(api_key)
 
@@ -404,7 +427,7 @@ async def test_failed_explicit_agentic_runtime_cannot_poison_another_runtime(
             raise RuntimeError("usage mark failed")
 
     def fake_create(_texts, _app_config, _model_id_override=None, **kwargs):
-        api_key = kwargs["api_key_override"]
+        api_key = _runtime_api_key(kwargs)
         dispatches.append(api_key)
         return _credential_specific_vectors(api_key)
 
@@ -606,7 +629,7 @@ async def test_agentic_provider_vector_cache_identity_includes_authorized_endpoi
     }
 
     def fake_create(texts, app_config, model_id_override=None, **kwargs):
-        calls.append(kwargs["base_url_override"])
+        calls.append(_runtime_base_url(kwargs))
         return [[1.0, 0.0] for _ in texts]
 
     monkeypatch.setattr(
@@ -719,7 +742,9 @@ async def test_tool_loop_uses_one_scrubbed_embedding_config_snapshot(
     assert "changed-local.example" not in repr(captured["app_config"])
     assert "openai_api" not in captured["app_config"]
     assert not any(secret in repr(captured["app_config"]) for secret in secret_values)
-    assert captured["kwargs"]["api_key_override"] == "runtime-agentic-key"
+    runtime_kwargs = captured["kwargs"]
+    assert _runtime_api_key(runtime_kwargs) == "runtime-agentic-key"
+    assert runtime_kwargs[OPENAI_EMBEDDING_RUNTIME_BOUNDARY_FLAG] is True
 
 
 @pytest.mark.asyncio

@@ -235,6 +235,7 @@ def _install_config_validation_adapter_boundary(
     snapshot_loader: Any,
     pool: BoundedDaemonPool | None = None,
     health_capacity: int = 3,
+    enforce_egress: bool = False,
 ) -> BoundedDaemonPool:
     """Install the real configured adapter helper beneath the public endpoint."""
     boundary_pool = pool or BoundedDaemonPool(max(health_capacity + 1, 2))
@@ -279,6 +280,12 @@ def _install_config_validation_adapter_boundary(
         "PROVIDER_CREDENTIAL_VALIDATION_PER_PROVIDER_CONCURRENCY",
         "1",
     )
+    if not enforce_egress:
+        monkeypatch.setattr(
+            byok_testing,
+            "_enforce_validation_endpoint_egress",
+            lambda _endpoint: None,
+        )
 
     def _reject_live_model_fallback(*_args: Any, **_kwargs: Any) -> None:
         raise AssertionError("Provider validation consulted live model configuration")
@@ -378,7 +385,6 @@ def _install_real_http_validation_boundary(
         "_httpx_request_io",
         fake_httpx_request_io,
     )
-    monkeypatch.setenv("HTTP_CLIENT_BACKEND", "httpx")
     monkeypatch.setenv("WORKFLOWS_EGRESS_PROFILE", "permissive")
     monkeypatch.setenv("WORKFLOWS_EGRESS_BLOCK_PRIVATE", "true")
     monkeypatch.setenv("WORKFLOWS_EGRESS_ALLOWED_PORTS", "80,443,8080")
@@ -394,6 +400,7 @@ def _install_real_http_validation_boundary(
         monkeypatch,
         adapters={provider: adapter},
         snapshot_loader=lambda: copy.deepcopy(snapshot),
+        enforce_egress=True,
     )
 
 
@@ -1723,6 +1730,7 @@ class TestValidateProviderKey:
                     "model": "hf-validation-model",
                 }
             },
+            enforce_egress=True,
         )
 
         response = await validate_provider_key(
