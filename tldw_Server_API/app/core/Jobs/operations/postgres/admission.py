@@ -284,7 +284,7 @@ def create_job_admission(
             idempotent_replay = False
             if quota_enabled and command.idempotency_key:
                 cur.execute(
-                    "SELECT 1 FROM jobs WHERE domain = %s AND queue = %s AND job_type = %s AND idempotency_key = %s",
+                    "SELECT 1 FROM jobs WHERE domain = %s AND queue = %s AND job_type = %s AND idempotency_key = %s FOR KEY SHARE",
                     (command.domain, command.queue, command.job_type, command.idempotency_key),
                 )
                 idempotent_replay = cur.fetchone() is not None
