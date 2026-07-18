@@ -9,7 +9,7 @@ from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 from loguru import logger
 
@@ -36,6 +36,7 @@ from tldw_Server_API.app.core.Web_Scraping.runtime.requests import (
 
 _HTTP_ROUTE_PATTERN = "**/*"
 _HTTP_SCHEMES = frozenset({"http", "https"})
+_WEBSOCKET_POLICY_SCHEMES = {"ws": "http", "wss": "https"}
 _INTERNAL_BLANK_PAGE = "about:blank"
 _BROWSER_CLEANUP_GRACE_S = 2.0
 
@@ -223,6 +224,19 @@ def _is_playwright_timeout(exc: BaseException) -> bool:
     return isinstance(exc, PlaywrightTimeoutError)
 
 
+def _websocket_policy_url(url: str) -> str | None:
+    """Map a valid WebSocket URL to the guard's transport-equivalent URL."""
+    try:
+        parsed = urlsplit(url)
+        policy_scheme = _WEBSOCKET_POLICY_SCHEMES.get(parsed.scheme.lower())
+        if policy_scheme is None or not parsed.netloc or parsed.hostname is None or parsed.fragment:
+            return None
+        _ = parsed.port
+    except (TypeError, ValueError):
+        return None
+    return urlunsplit((policy_scheme, parsed.netloc, parsed.path, parsed.query, ""))
+
+
 class _GuardedPlaywrightPage:
     def __init__(
         self,
@@ -377,13 +391,14 @@ class GuardedPlaywrightBrowserProbe:
                 ),
                 check_after=True,
             )
+            return bool(decision.allowed)
         except asyncio.CancelledError:
             raise
         except PreflightDeadlineExceeded:
             raise
         except Exception:  # noqa: BLE001 - egress policy failures fail closed
+            logger.warning("Browser egress decision failed.")
             return False
-        return bool(decision.allowed)
 
     async def _abort_http(self, route: RuntimeBrowserRoute) -> None:
         try:
@@ -433,19 +448,38 @@ class GuardedPlaywrightBrowserProbe:
         options: BrowserProbeOptions,
     ) -> Callable[[RuntimeBrowserRoute], Any]:
         async def _route_http(route: RuntimeBrowserRoute) -> None:
-            if route.request.resource_type in options.block_resource_types:
-                await self._abort_http(route)
-                return
-            if await self._decision_allowed(route.request.url):
-                await self._continue_http(route)
-            else:
+            try:
+                request = route.request
+                if request.resource_type in options.block_resource_types:
+                    await self._abort_http(route)
+                    return
+                if await self._decision_allowed(request.url):
+                    await self._continue_http(route)
+                else:
+                    await self._abort_http(route)
+            except (asyncio.CancelledError, PreflightDeadlineExceeded):
+                raise
+            except Exception:  # noqa: BLE001 - route accessors fail closed
+                logger.warning("Browser HTTP route evaluation failed.")
                 await self._abort_http(route)
 
         return _route_http
 
     def _websocket_handler(self) -> Callable[[RuntimeWebSocketRoute], Any]:
         async def _route_web_socket(route: RuntimeWebSocketRoute) -> None:
-            if not await self._decision_allowed(route.url):
+            try:
+                policy_url = _websocket_policy_url(route.url)
+                if policy_url is None or not await self._decision_allowed(policy_url):
+                    await self._close_websocket(
+                        route,
+                        code=1008,
+                        reason="Policy denied",
+                    )
+                    return
+            except (asyncio.CancelledError, PreflightDeadlineExceeded):
+                raise
+            except Exception:  # noqa: BLE001 - route accessors fail closed
+                logger.warning("Browser WebSocket route evaluation failed.")
                 await self._close_websocket(
                     route,
                     code=1008,

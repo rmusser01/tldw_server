@@ -346,6 +346,137 @@ async def test_http_route_action_cancellation_propagates(action: str) -> None:
 
 
 @pytest.mark.asyncio
+async def test_decision_allowed_accessor_failure_is_contained_and_sanitized() -> None:
+    class RaisingDecision:
+        @property
+        def allowed(self) -> bool:
+            raise RuntimeError("https://secret.example/?token=raw")
+
+    class RaisingDecisionGuard:
+        async def decide(self, *_args: Any, **_kwargs: Any) -> RaisingDecision:
+            return RaisingDecision()
+
+    messages: list[str] = []
+    sink = logger.add(messages.append, format="{message}")
+    controls = _controls()
+    launcher = FakePlaywrightLauncher()
+    probe = _probe(
+        controls=controls,
+        guard=RaisingDecisionGuard(),  # type: ignore[arg-type]
+        launcher=launcher,
+    )
+    try:
+        async with probe.open_page(BrowserProbeOptions()):
+            context = launcher.browser.contexts[0]
+            assert context.http_handler is not None
+            route = FakeBrowserRoute(
+                FakeBrowserRequest("https://allowed.example"),
+                launcher.events,
+            )
+            await context.http_handler(route)
+        await controls.close()
+    finally:
+        logger.remove(sink)
+
+    assert route.abort_calls == 1
+    assert route.continue_calls == 0
+    rendered = "".join(messages)
+    assert rendered
+    assert "secret.example" not in rendered
+    assert "token=raw" not in rendered
+    assert "RuntimeError" not in rendered
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failing_accessor", ["request", "resource_type", "url"])
+async def test_http_accessor_failure_is_contained_sanitized_and_aborted(
+    failing_accessor: str,
+) -> None:
+    class RaisingRequest:
+        @property
+        def resource_type(self) -> str:
+            if failing_accessor == "resource_type":
+                raise RuntimeError("https://secret.example/resource")
+            return "document"
+
+        @property
+        def url(self) -> str:
+            if failing_accessor == "url":
+                raise RuntimeError("https://secret.example/?token=raw")
+            return "https://allowed.example"
+
+    class RaisingRoute:
+        def __init__(self) -> None:
+            self.abort_calls = 0
+            self.continue_calls = 0
+
+        @property
+        def request(self) -> RaisingRequest:
+            if failing_accessor == "request":
+                raise RuntimeError("https://secret.example/request")
+            return RaisingRequest()
+
+        async def abort(self) -> None:
+            self.abort_calls += 1
+
+        async def continue_(self) -> None:
+            self.continue_calls += 1
+
+    messages: list[str] = []
+    sink = logger.add(messages.append, format="{message}")
+    controls = _controls()
+    launcher = FakePlaywrightLauncher()
+    probe = _probe(
+        controls=controls,
+        guard=FakeProbeEgressGuard([True]),
+        launcher=launcher,
+    )
+    route = RaisingRoute()
+    try:
+        async with probe.open_page(BrowserProbeOptions()):
+            context = launcher.browser.contexts[0]
+            assert context.http_handler is not None
+            await context.http_handler(route)  # type: ignore[arg-type]
+        await controls.close()
+    finally:
+        logger.remove(sink)
+
+    assert route.abort_calls == 1
+    assert route.continue_calls == 0
+    rendered = "".join(messages)
+    assert rendered
+    assert "secret.example" not in rendered
+    assert "token=raw" not in rendered
+    assert "RuntimeError" not in rendered
+
+
+@pytest.mark.asyncio
+async def test_http_accessor_cancellation_propagates() -> None:
+    class CancellingRoute:
+        @property
+        def request(self) -> Any:
+            raise asyncio.CancelledError()
+
+        async def abort(self) -> None:
+            pytest.fail("abort must not replace cancellation")
+
+    controls = _controls()
+    launcher = FakePlaywrightLauncher()
+    probe = _probe(
+        controls=controls,
+        guard=FakeProbeEgressGuard([]),
+        launcher=launcher,
+    )
+
+    async with probe.open_page(BrowserProbeOptions()):
+        context = launcher.browser.contexts[0]
+        assert context.http_handler is not None
+        with pytest.raises(asyncio.CancelledError):
+            await context.http_handler(CancellingRoute())  # type: ignore[arg-type]
+    await controls.close()
+
+
+@pytest.mark.asyncio
 async def test_blocked_resource_type_aborts_without_guard_decision() -> None:
     controls = _controls()
     guard = FakeProbeEgressGuard([])
@@ -423,6 +554,137 @@ async def test_websocket_guard_cancellation_propagates() -> None:
         with pytest.raises(asyncio.CancelledError):
             await launcher.browser.contexts[0].dispatch_websocket("wss://allowed.example/socket")
     await controls.close()
+
+
+@pytest.mark.asyncio
+async def test_websocket_url_accessor_failure_is_contained_sanitized_and_closed() -> None:
+    class RaisingWebSocketRoute:
+        def __init__(self) -> None:
+            self.close_calls: list[tuple[int | None, str | None]] = []
+            self.connect_calls = 0
+
+        @property
+        def url(self) -> str:
+            raise RuntimeError("wss://secret.example/?token=raw")
+
+        def connect_to_server(self) -> None:
+            self.connect_calls += 1
+
+        async def close(
+            self,
+            *,
+            code: int | None = None,
+            reason: str | None = None,
+        ) -> None:
+            self.close_calls.append((code, reason))
+
+    messages: list[str] = []
+    sink = logger.add(messages.append, format="{message}")
+    controls = _controls()
+    launcher = FakePlaywrightLauncher()
+    probe = _probe(
+        controls=controls,
+        guard=FakeProbeEgressGuard([]),
+        launcher=launcher,
+    )
+    route = RaisingWebSocketRoute()
+    try:
+        async with probe.open_page(BrowserProbeOptions()):
+            context = launcher.browser.contexts[0]
+            assert context.websocket_handler is not None
+            await context.websocket_handler(route)  # type: ignore[arg-type]
+        await controls.close()
+    finally:
+        logger.remove(sink)
+
+    assert route.close_calls == [(1008, "Policy denied")]
+    assert route.connect_calls == 0
+    rendered = "".join(messages)
+    assert rendered
+    assert "secret.example" not in rendered
+    assert "token=raw" not in rendered
+    assert "RuntimeError" not in rendered
+
+
+@pytest.mark.asyncio
+async def test_websocket_url_accessor_deadline_propagates() -> None:
+    class DeadlineWebSocketRoute:
+        @property
+        def url(self) -> str:
+            raise PreflightDeadlineExceeded()
+
+        async def close(self, **_kwargs: Any) -> None:
+            pytest.fail("close must not replace the deadline")
+
+    controls = _controls()
+    launcher = FakePlaywrightLauncher()
+    probe = _probe(
+        controls=controls,
+        guard=FakeProbeEgressGuard([]),
+        launcher=launcher,
+    )
+
+    async with probe.open_page(BrowserProbeOptions()):
+        context = launcher.browser.contexts[0]
+        assert context.websocket_handler is not None
+        with pytest.raises(PreflightDeadlineExceeded):
+            await context.websocket_handler(DeadlineWebSocketRoute())  # type: ignore[arg-type]
+    await controls.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("route_url", "guard_url"),
+    [
+        ("ws://socket.example/path?q=1", "http://socket.example/path?q=1"),
+        ("wss://socket.example/path?q=1", "https://socket.example/path?q=1"),
+        ("ws://socket.example:80/path", "http://socket.example:80/path"),
+        ("wss://socket.example:443/path", "https://socket.example:443/path"),
+    ],
+)
+async def test_websocket_policy_uses_transport_equivalent_http_url(
+    route_url: str,
+    guard_url: str,
+) -> None:
+    controls = _controls()
+    guard = FakeProbeEgressGuard([True])
+    launcher = FakePlaywrightLauncher()
+    probe = _probe(controls=controls, guard=guard, launcher=launcher)
+
+    async with probe.open_page(BrowserProbeOptions()):
+        route = await launcher.browser.contexts[0].dispatch_websocket(route_url)
+    await controls.close()
+
+    assert guard.urls == [guard_url]
+    assert route.connect_calls == 1
+    assert route.close_calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "route_url",
+    [
+        "https://socket.example/path",
+        "ws:///missing-host",
+        "wss://socket.example:invalid/path",
+        "wss://socket.example/path#fragment",
+    ],
+)
+async def test_malformed_or_non_websocket_url_fails_closed_without_guard(
+    route_url: str,
+) -> None:
+    controls = _controls()
+    guard = FakeProbeEgressGuard([])
+    launcher = FakePlaywrightLauncher()
+    probe = _probe(controls=controls, guard=guard, launcher=launcher)
+
+    async with probe.open_page(BrowserProbeOptions()):
+        route = await launcher.browser.contexts[0].dispatch_websocket(route_url)
+    await controls.close()
+
+    assert guard.urls == []
+    assert route.connect_calls == 0
+    assert route.close_calls == [(1008, "Policy denied")]
 
 
 @pytest.mark.asyncio
