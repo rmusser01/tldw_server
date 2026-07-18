@@ -57,6 +57,7 @@ class FakeCleanupHandle:
         block_close: bool = False,
         suppress_close_cancellation: bool = False,
         block_force_close: bool = False,
+        suppress_force_cancellation: bool = False,
         force_releases_close: bool = True,
         close_error: BaseException | None = None,
         events: list[str] | None = None,
@@ -65,6 +66,7 @@ class FakeCleanupHandle:
         self.block_close = block_close
         self.suppress_close_cancellation = suppress_close_cancellation
         self.block_force_close = block_force_close
+        self.suppress_force_cancellation = suppress_force_cancellation
         self.force_releases_close = force_releases_close
         self.close_error = close_error
         self.events = events
@@ -116,10 +118,13 @@ class FakeCleanupHandle:
             self._release_close.set()
         try:
             if self.block_force_close:
-                await self._release_force_close.wait()
-        except asyncio.CancelledError:
-            self.force_close_cancellations += 1
-            raise
+                while not self._release_force_close.is_set():
+                    try:
+                        await self._release_force_close.wait()
+                    except asyncio.CancelledError:
+                        self.force_close_cancellations += 1
+                        if not self.suppress_force_cancellation:
+                            raise
         finally:
             self.force_close_finished.set()
 

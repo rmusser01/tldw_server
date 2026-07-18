@@ -717,6 +717,57 @@ async def test_cleanup_supervisor_bounds_cancellation_suppressing_workers() -> N
 
 
 @pytest.mark.asyncio
+async def test_cleanup_consumes_force_task_that_suppresses_cancellation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    consumed_tasks: list[asyncio.Task[None]] = []
+    consume_cleanup_task = PreflightRuntimeControls._consume_cleanup_task
+
+    def record_consumed_task(task: asyncio.Task[None]) -> None:
+        consumed_tasks.append(task)
+        consume_cleanup_task(task)
+
+    monkeypatch.setattr(
+        PreflightRuntimeControls,
+        "_consume_cleanup_task",
+        staticmethod(record_consumed_task),
+    )
+    cleanup = FakeCleanupHandle(
+        block_close=True,
+        block_force_close=True,
+        suppress_force_cancellation=True,
+    )
+    controls = PreflightRuntimeControls(request_context=_request_context())
+    controls.register_cleanup(cleanup)
+    close_task = asyncio.create_task(controls.close(grace_s=0.01))
+    started_at = asyncio.get_running_loop().time()
+    await cleanup.force_close_started.wait()
+
+    completed_in_time = await _complete_close_tasks_with_fallback({close_task}, cleanup)
+    elapsed_s = asyncio.get_running_loop().time() - started_at
+    force_task = cleanup.force_close_tasks[0]
+
+    assert completed_in_time, f"cleanup exceeded scheduling bound: {elapsed_s:.3f}s"
+    assert close_task.result() is None
+    assert cleanup.force_close_calls == 1
+    assert cleanup.force_close_cancellations == 1
+    assert not cleanup.force_close_finished.is_set()
+    assert not force_task.done()
+
+    cleanup.release_force_close()
+    await cleanup.force_close_finished.wait()
+    await asyncio.sleep(0)
+
+    assert force_task.done()
+    assert force_task in consumed_tasks
+    assert not {
+        pending
+        for pending in asyncio.all_tasks()
+        if pending is not asyncio.current_task() and pending.get_name().startswith("preflight-cleanup")
+    }
+
+
+@pytest.mark.asyncio
 async def test_cleanup_preserves_caller_cancellation_after_bounded_force_close() -> None:
     cleanup = FakeCleanupHandle(
         block_close=True,
