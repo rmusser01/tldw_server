@@ -47,3 +47,7 @@ def __getattr__(name: str) -> Any:
         globals().update(fetch_exports)
         return fetch_exports[name]
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()).union(__all__))

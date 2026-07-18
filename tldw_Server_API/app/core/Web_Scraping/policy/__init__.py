@@ -19,3 +19,7 @@ def __getattr__(name: str) -> Any:
         globals()[name] = DefaultWebOutboundPolicyChecker
         return DefaultWebOutboundPolicyChecker
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()).union(__all__))

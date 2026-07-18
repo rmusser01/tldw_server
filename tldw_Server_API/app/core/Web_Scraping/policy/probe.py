@@ -97,6 +97,17 @@ def _bounded_context_label(
     return labels.get(value, fallback)
 
 
+def _is_canonical_idna_label(label: str) -> bool:
+    if not label.startswith("xn--"):
+        return True
+    try:
+        decoded = label.encode("ascii").decode("idna")
+        canonical = decoded.encode("idna").decode("ascii")
+    except UnicodeError:
+        return False
+    return canonical == label
+
+
 def _is_valid_dns_name(host: str) -> bool:
     if len(host) > 253 or host.replace(".", "").isdigit():
         return False
@@ -106,12 +117,13 @@ def _is_valid_dns_name(host: str) -> bool:
         and label[0].isalnum()
         and label[-1].isalnum()
         and all(character.isascii() and (character.isalnum() or character == "-") for character in label)
+        and _is_canonical_idna_label(label)
         for label in labels
     )
 
 
 def _sanitized_host_label(url: str) -> str:
-    if type(url) is not str or "\\" in url:
+    if type(url) is not str or "\\" in url or any(ord(character) < 32 or ord(character) == 127 for character in url):
         return "unknown"
     try:
         parsed = urlsplit(url)

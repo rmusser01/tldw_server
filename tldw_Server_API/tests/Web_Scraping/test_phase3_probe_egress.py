@@ -158,6 +158,94 @@ raise SystemExit(1 if loaded else 0)
     assert loaded == []
 
 
+def test_lazy_public_names_are_discoverable_without_loading_forbidden_stacks() -> None:
+    script = f"""
+import json
+import sys
+
+import {_POLICY_MODULE} as policy_package
+import tldw_Server_API.app.core.Web_Scraping.runtime as runtime_package
+
+policy_first = policy_package.__dir__()
+policy_second = policy_package.__dir__()
+policy_builtin = dir(policy_package)
+runtime_first = runtime_package.__dir__()
+runtime_second = runtime_package.__dir__()
+runtime_builtin = dir(runtime_package)
+forbidden_exact = {{
+    'tldw_Server_API.app.core.Web_Scraping.outbound_policy',
+    'tldw_Server_API.app.core.Web_Scraping.filters',
+    'tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib',
+    'tldw_Server_API.app.core.http_client',
+}}
+forbidden_prefixes = (
+    'tldw_Server_API.app.core.Web_Scraping.Web_Scraping_Lib',
+    'tldw_Server_API.app.core.Metrics',
+)
+result = {{
+    'policy_defines_dir': '__dir__' in policy_package.__dict__,
+    'policy_builtin_matches': policy_builtin == policy_first,
+    'policy_exact': policy_first == sorted(
+        set(policy_package.__dict__) | set(policy_package.__all__)
+    ),
+    'policy_fresh': policy_first is not policy_second,
+    'policy_missing': sorted(set(policy_package.__all__) - set(policy_first)),
+    'runtime_defines_dir': '__dir__' in runtime_package.__dict__,
+    'runtime_builtin_matches': runtime_builtin == runtime_first,
+    'runtime_exact': runtime_first == sorted(
+        set(runtime_package.__dict__) | set(runtime_package.__all__)
+    ),
+    'runtime_fresh': runtime_first is not runtime_second,
+    'runtime_missing': sorted(set(runtime_package.__all__) - set(runtime_first)),
+    'forbidden': sorted(
+        name
+        for name in sys.modules
+        if name in forbidden_exact or name.startswith(forbidden_prefixes)
+    ),
+}}
+print(json.dumps(result))
+raise SystemExit(0 if all((
+    result['policy_defines_dir'],
+    result['policy_builtin_matches'],
+    result['policy_exact'],
+    result['policy_fresh'],
+    not result['policy_missing'],
+    result['runtime_defines_dir'],
+    result['runtime_builtin_matches'],
+    result['runtime_exact'],
+    result['runtime_fresh'],
+    not result['runtime_missing'],
+    not result['forbidden'],
+)) else 1)
+"""
+
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=_ROOT.parent,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert completed.stdout.strip(), completed.stderr
+    result = json.loads(completed.stdout.strip().splitlines()[-1])
+    assert completed.returncode == 0, result
+    assert result == {
+        "policy_defines_dir": True,
+        "policy_builtin_matches": True,
+        "policy_exact": True,
+        "policy_fresh": True,
+        "policy_missing": [],
+        "runtime_defines_dir": True,
+        "runtime_builtin_matches": True,
+        "runtime_exact": True,
+        "runtime_fresh": True,
+        "runtime_missing": [],
+        "forbidden": [],
+    }
+
+
 def test_probe_exports_preserve_direct_and_lazy_scrape_checker_compatibility() -> None:
     assert _POLICY_PROBE_PATH.exists(), "narrow Task 3 probe module is missing"
     probe_module = importlib.import_module(_PROBE_MODULE)
@@ -522,6 +610,47 @@ def test_probe_log_host_is_canonical_or_unknown(url: str, expected: str) -> None
     if expected == "unknown":
         for secret in ("secret", "password", "private", "token", "zone"):
             assert secret not in label
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://example.com\nsecret/path",
+        "https://example.com\rsecret/path",
+        "https://example.com\tsecret/path",
+        "\x01https://example.com/path",
+        "https://example.com/path\x7fsecret",
+    ],
+)
+def test_probe_log_host_rejects_raw_c0_controls_and_del(url: str) -> None:
+    host_label = _required_attribute(
+        _probe_implementation_module(),
+        "_sanitized_host_label",
+    )
+
+    assert host_label(url) == "unknown"
+
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        ("https://xn--a.example/path", "unknown"),
+        ("https://xn--0.example/path", "unknown"),
+        ("https://xn--example.example/path", "unknown"),
+        ("https://b\N{LATIN SMALL LETTER U WITH DIAERESIS}cher.example/path", "xn--bcher-kva.example"),
+        ("https://xn--bcher-kva.example/path", "xn--bcher-kva.example"),
+    ],
+)
+def test_probe_log_host_requires_canonical_idna_alabels(
+    url: str,
+    expected: str,
+) -> None:
+    host_label = _required_attribute(
+        _probe_implementation_module(),
+        "_sanitized_host_label",
+    )
+
+    assert host_label(url) == expected
 
 
 @pytest.mark.asyncio
