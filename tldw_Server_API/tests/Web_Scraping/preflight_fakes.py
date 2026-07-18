@@ -6,6 +6,11 @@ import asyncio
 from collections.abc import Mapping
 from typing import Any
 
+from tldw_Server_API.app.core.Web_Scraping.runtime import (
+    ProbeEgressDecision,
+    RuntimeRequestContext,
+)
+
 
 class FakeClock:
     """Mutable monotonic clock controlled by tests."""
@@ -170,3 +175,118 @@ class FakeBrowserProbe:
 class FakeExternalToolProbe:
     async def run_waf(self, *_args: Any, **_kwargs: Any) -> Any:
         raise AssertionError("external probing is not expected in contract tests")
+
+
+class FakeProbeEgressGuard:
+    """Queue-backed probe guard that records each fresh decision."""
+
+    def __init__(
+        self,
+        decisions: list[bool | str | ProbeEgressDecision],
+        *,
+        events: list[str] | None = None,
+    ) -> None:
+        self._decisions = list(decisions)
+        self.events = events
+        self.urls: list[str] = []
+        self.contexts: list[RuntimeRequestContext] = []
+
+    async def decide(
+        self,
+        url: str,
+        *,
+        context: RuntimeRequestContext,
+    ) -> ProbeEgressDecision:
+        self.urls.append(url)
+        self.contexts.append(context)
+        if self.events is not None:
+            self.events.append(f"guard:{url}")
+        if not self._decisions:
+            raise AssertionError("unexpected egress decision")
+        decision = self._decisions.pop(0)
+        if isinstance(decision, ProbeEgressDecision):
+            return decision
+        if isinstance(decision, str):
+            return ProbeEgressDecision(allowed=False, reason=decision)
+        return ProbeEgressDecision(
+            allowed=decision,
+            reason="allowed" if decision else "address_forbidden",
+        )
+
+
+class FakeRawResponse:
+    """Minimal async response with deterministic close controls."""
+
+    def __init__(
+        self,
+        status_code: int,
+        *,
+        headers: Mapping[str, str] | None = None,
+        text: str = "",
+        url: str | None = None,
+        close_error: BaseException | None = None,
+        block_close: bool = False,
+        events: list[str] | None = None,
+    ) -> None:
+        self.status_code = status_code
+        self.headers = dict(headers or {})
+        self.text = text
+        self.url = url
+        self.close_error = close_error
+        self.block_close = block_close
+        self.events = events
+        self.close_calls = 0
+        self.closed = False
+        self.close_started = asyncio.Event()
+        self._release_close = asyncio.Event()
+
+    async def aclose(self) -> None:
+        self.close_calls += 1
+        self.close_started.set()
+        if self.events is not None:
+            self.events.append("response:close")
+        if self.block_close:
+            await self._release_close.wait()
+        self.closed = True
+        if self.close_error is not None:
+            raise self.close_error
+
+    def release_close(self) -> None:
+        self._release_close.set()
+
+
+class FakeHttpTransport:
+    """Queue-backed async HTTP transport with immutable call capture."""
+
+    def __init__(
+        self,
+        responses: list[Any],
+        *,
+        events: list[str] | None = None,
+        block_send: bool = False,
+    ) -> None:
+        self.responses = list(responses)
+        self.events = events
+        self.block_send = block_send
+        self.calls: list[Any] = []
+        self.send_started = asyncio.Event()
+        self._release_send = asyncio.Event()
+
+    async def send(self, request: Any) -> Any:
+        self.calls.append(request)
+        self.send_started.set()
+        if self.events is not None:
+            self.events.append(f"transport:{request.url}")
+        if self.block_send:
+            await self._release_send.wait()
+        if not self.responses:
+            raise AssertionError("unexpected HTTP transport dispatch")
+        result = self.responses.pop(0)
+        if callable(result):
+            result = result()
+        if isinstance(result, BaseException):
+            raise result
+        return result
+
+    def release_send(self) -> None:
+        self._release_send.set()
