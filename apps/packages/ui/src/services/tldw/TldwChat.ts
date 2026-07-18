@@ -13,6 +13,8 @@ import {
   type ChatRequestDebugMetadata
 } from "./chat-request-debug"
 import { normalizeChatToolsForRequest } from "@/utils/chat-tools"
+import type { ServicePromptRequestScope } from "./domains/service-prompts"
+import { isRequestConfigScopeChangedError } from "./service-prompt-scope-error"
 
 const normalizeProvider = (value?: string): string =>
   String(value || "").trim().toLowerCase()
@@ -282,6 +284,7 @@ export interface TldwChatOptions {
   // Caller-owned AbortSignal (e.g. the UI Stop signal). When it fires, the
   // internal per-call controller is aborted so the underlying request stops.
   signal?: AbortSignal
+  requestScope?: ServicePromptRequestScope
 }
 export { getLastChatCompletionDebugSnapshot }
 export type { ChatCompletionDebugSnapshot }
@@ -403,7 +406,9 @@ export class TldwChatService {
       })
 
       const response = await tldwClient.createChatCompletion(request, {
-        debugMetadata: options.chatDebugMetadata
+        debugMetadata: options.chatDebugMetadata,
+        signal: options.signal,
+        requestScope: options.requestScope
       })
       const data = await response.json().catch(() => null)
       if (onResponse) {
@@ -415,6 +420,9 @@ export class TldwChatService {
       }
       throw new Error('Invalid response format from tldw server')
     } catch (error) {
+      if (isAbortLikeError(error) || isRequestConfigScopeChangedError(error)) {
+        throw error
+      }
       console.error('Chat completion failed:', error)
       throw new Error('Chat completion failed', { cause: error })
     }
@@ -531,7 +539,8 @@ export class TldwChatService {
       const stream = tldwClient.streamChatCompletion(request, {
         signal: controller.signal,
         streamIdleTimeoutMs,
-        debugMetadata: options.chatDebugMetadata
+        debugMetadata: options.chatDebugMetadata,
+        requestScope: options.requestScope
       })
 
       let idleTimer: ReturnType<typeof setTimeout> | null = null
@@ -626,6 +635,7 @@ export class TldwChatService {
       }
     } catch (error) {
       console.warn('Stream completion failed:', readErrorMessage(error))
+      if (isRequestConfigScopeChangedError(error)) throw error
       if (isAbortLikeError(error)) {
         throw createAbortError(readErrorMessage(error))
       }

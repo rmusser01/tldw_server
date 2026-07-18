@@ -8,14 +8,13 @@ const mocks = vi.hoisted(() => ({
   localWatch: vi.fn(),
   localUnwatch: vi.fn(),
   initialize: vi.fn(),
-  getConfig: vi.fn(),
+  ensureConfig: vi.fn(),
   getCurrentUser: vi.fn(),
   listServicePrompts: vi.fn(),
   getServicePrompt: vi.fn(),
   saveServicePrompt: vi.fn(),
   promptForRag: vi.fn(),
   getWebSearchPrompt: vi.fn(),
-  buildScope: vi.fn(),
   isHosted: vi.fn(),
   bgRequest: vi.fn()
 }))
@@ -38,7 +37,7 @@ vi.mock("@/services/background-proxy", () => ({
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     initialize: (...args: unknown[]) => mocks.initialize(...args),
-    getConfig: (...args: unknown[]) => mocks.getConfig(...args),
+    ensureConfigForRequest: (...args: unknown[]) => mocks.ensureConfig(...args),
     listServicePrompts: (...args: unknown[]) => mocks.listServicePrompts(...args),
     getServicePrompt: (...args: unknown[]) => mocks.getServicePrompt(...args),
     saveServicePrompt: (...args: unknown[]) => mocks.saveServicePrompt(...args)
@@ -49,11 +48,6 @@ vi.mock("@/services/tldw/TldwAuth", () => ({
   tldwAuth: {
     getCurrentUser: (...args: unknown[]) => mocks.getCurrentUser(...args)
   }
-}))
-
-vi.mock("@/services/chat-surface-scope", () => ({
-  buildChatSurfaceScopeKeyFromConfig: (...args: unknown[]) =>
-    mocks.buildScope(...args)
 }))
 
 vi.mock("@/services/tldw/deployment-mode", () => ({
@@ -89,6 +83,7 @@ import type {
 } from "@/services/tldw/domains/service-prompts"
 import { ServicePromptApiError } from "@/services/tldw/domains/service-prompts"
 import { servicePromptMethods } from "@/services/tldw/domains/service-prompts"
+import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope"
 
 const definition = (
   id: KnownServicePromptId,
@@ -287,6 +282,26 @@ const config = {
   apiKey: "test-key"
 }
 
+const jwtForUser = (userId: string | number): string =>
+  `header.${btoa(JSON.stringify({ sub: String(userId) }))}.signature`
+
+const targetConfig = (value: {
+  serverUrl: string
+  authMode: "single-user" | "multi-user"
+  orgId?: number
+  authSource?: "manual" | "cookie-session"
+}) => ({
+  serverUrl: value.serverUrl,
+  authMode: value.authMode,
+  authSource: value.authSource,
+  orgId: value.orgId
+})
+
+const scopeKeyFor = (
+  value: NonNullable<Parameters<typeof buildChatSurfaceScopeKeyFromConfig>[0]>,
+  userId: string | number | null
+) => buildChatSurfaceScopeKeyFromConfig(value, { userId })
+
 const VALID_REVISION = "123e4567-e89b-42d3-a456-426614174000"
 
 const detailFor = (
@@ -321,9 +336,8 @@ describe("Service Prompt migration and runtime snapshots", () => {
     mocks.localRemove.mockResolvedValue(undefined)
     mocks.syncRemove.mockResolvedValue(undefined)
     mocks.initialize.mockResolvedValue(undefined)
-    mocks.getConfig.mockResolvedValue(config)
+    mocks.ensureConfig.mockResolvedValue(config)
     mocks.getCurrentUser.mockResolvedValue({ id: 42, username: "user" })
-    mocks.buildScope.mockReturnValue("scope:server:user")
     mocks.isHosted.mockReturnValue(false)
     mocks.listServicePrompts.mockResolvedValue(catalog)
     mocks.getServicePrompt.mockImplementation(async (id: KnownServicePromptId) =>
@@ -400,38 +414,164 @@ describe("Service Prompt migration and runtime snapshots", () => {
   })
 
   it("resolves multi-user and hosted scope through the authenticated user, never anonymous", async () => {
-    mocks.getConfig.mockResolvedValue({ ...config, authMode: "multi-user" })
+    const multiUserConfig = {
+      ...config,
+      authMode: "multi-user" as const,
+      accessToken: jwtForUser(84)
+    }
+    const multiUserTarget = targetConfig(multiUserConfig)
+    mocks.ensureConfig.mockResolvedValue(multiUserConfig)
     mocks.getCurrentUser.mockResolvedValue({ id: 84, username: "resolved" })
 
     await expect(resolveServicePromptScope()).resolves.toEqual({
-      config: { ...config, authMode: "multi-user" },
-      scopeKey: "scope:server:user"
+      config: multiUserTarget,
+      scopeKey: scopeKeyFor(multiUserConfig, 84),
+      userId: 84,
+      clientPrincipalVerified: true
     })
     expect(mocks.getCurrentUser).toHaveBeenCalledTimes(1)
-    expect(mocks.buildScope).toHaveBeenCalledWith(
-      { ...config, authMode: "multi-user" },
-      { userId: 84 }
-    )
-    expect(mocks.buildScope.mock.calls.flat().join(" ")).not.toContain(
-      "user:anonymous"
-    )
+    expect(mocks.initialize).toHaveBeenCalledTimes(2)
 
     vi.clearAllMocks()
     mocks.isHosted.mockReturnValue(true)
-    mocks.getConfig.mockResolvedValue(config)
+    mocks.ensureConfig.mockResolvedValue(config)
     mocks.getCurrentUser.mockResolvedValue({ id: 85, username: "hosted" })
-    mocks.buildScope.mockReturnValue("scope:hosted:user")
 
-    await resolveServicePromptScope()
+    const hosted = await resolveServicePromptScope()
     expect(mocks.getCurrentUser).toHaveBeenCalledTimes(1)
-    expect(mocks.buildScope).toHaveBeenCalledWith(config, { userId: 85 })
+    expect(hosted.userId).toBe(85)
+    expect(hosted.clientPrincipalVerified).toBe(false)
+    expect(hosted.config).not.toHaveProperty("apiKey")
+    expect(hosted.config).not.toHaveProperty("accessToken")
+  })
+
+  it("marks a missing authenticated user with a stable scope error code", async () => {
+    mocks.ensureConfig.mockResolvedValue({
+      ...config,
+      authMode: "multi-user" as const,
+      accessToken: "valid-token"
+    })
+    mocks.getCurrentUser.mockResolvedValue(null)
+
+    await expect(resolveServicePromptScope()).rejects.toMatchObject({
+      code: "service_prompt_scope_unresolved"
+    })
+  })
+
+  it("marks an authenticated-user 401 as an unresolved scope", async () => {
+    mocks.ensureConfig.mockResolvedValue({
+      ...config,
+      authMode: "multi-user" as const,
+      accessToken: "rejected-token"
+    })
+    mocks.getCurrentUser.mockRejectedValue(Object.assign(
+      new Error("redacted"),
+      { status: 401 }
+    ))
+
+    await expect(resolveServicePromptScope()).rejects.toMatchObject({
+      code: "service_prompt_scope_unresolved"
+    })
+  })
+
+  it("preserves transient authenticated-user resolution failures", async () => {
+    const transient = Object.assign(new Error("temporarily offline"), {
+      status: 503
+    })
+    mocks.ensureConfig.mockResolvedValue({
+      ...config,
+      authMode: "multi-user" as const,
+      accessToken: "valid-token"
+    })
+    mocks.getCurrentUser.mockRejectedValue(transient)
+
+    await expect(resolveServicePromptScope()).rejects.toBe(transient)
+  })
+
+  it("marks a stored multi-user logout as an unresolved scope", async () => {
+    const loggedOutConfig = {
+      ...config,
+      authMode: "multi-user" as const,
+      accessToken: undefined,
+      refreshToken: undefined
+    }
+    mocks.ensureConfig.mockImplementation(async (requireAuth: boolean) => {
+      if (requireAuth) throw new Error("Not authenticated")
+      return loggedOutConfig
+    })
+
+    await expect(resolveServicePromptScope()).rejects.toMatchObject({
+      code: "service_prompt_scope_unresolved"
+    })
+    expect(mocks.getCurrentUser).not.toHaveBeenCalled()
+  })
+
+  it("captures credentials refreshed while resolving the authenticated user", async () => {
+    const expiredConfig = {
+      ...config,
+      authMode: "multi-user" as const,
+      accessToken: "expired-token"
+    }
+    const refreshedConfig = {
+      ...expiredConfig,
+      accessToken: "refreshed-token"
+    }
+    let clientRefreshed = false
+    mocks.ensureConfig.mockImplementation(async () =>
+      clientRefreshed ? refreshedConfig : expiredConfig
+    )
+    mocks.getCurrentUser.mockImplementation(async () => {
+      clientRefreshed = true
+      return { id: 84, username: "resolved" }
+    })
+
+    await expect(resolveServicePromptScope()).resolves.toMatchObject({
+      config: targetConfig(refreshedConfig),
+      userId: 84
+    })
+    expect(mocks.ensureConfig).toHaveBeenCalledTimes(2)
+    expect(mocks.initialize).toHaveBeenCalledTimes(2)
+  })
+
+  it("rejects a server target change during authenticated-user resolution", async () => {
+    const firstConfig = {
+      ...config,
+      authMode: "multi-user" as const,
+      accessToken: "first-token"
+    }
+    const changedConfig = {
+      ...firstConfig,
+      serverUrl: "https://other-server.example",
+      accessToken: "other-token"
+    }
+    let clientRefreshed = false
+    mocks.ensureConfig.mockImplementation(async () =>
+      clientRefreshed ? changedConfig : firstConfig
+    )
+    mocks.getCurrentUser.mockImplementation(async () => {
+      clientRefreshed = true
+      return { id: 84, username: "resolved" }
+    })
+
+    await expect(resolveServicePromptScope()).rejects.toThrow(
+      "Authenticated Service Prompt scope changed while resolving."
+    )
   })
 
   it("does not resolve a user for single-user scope", async () => {
-    await resolveServicePromptScope()
+    mocks.ensureConfig.mockResolvedValue({
+      ...config,
+      apiKey: "effective-runtime-key"
+    })
+
+    await expect(resolveServicePromptScope()).resolves.toMatchObject({
+      config: targetConfig(config),
+      userId: null,
+      clientPrincipalVerified: true
+    })
 
     expect(mocks.getCurrentUser).not.toHaveBeenCalled()
-    expect(mocks.buildScope).toHaveBeenCalledWith(config, { userId: null })
+    expect(mocks.ensureConfig).toHaveBeenCalledWith(true)
   })
 
   it("uses compatibility getters only when the catalog alone returns 404", async () => {
@@ -452,8 +592,8 @@ describe("Service Prompt migration and runtime snapshots", () => {
       "chat.web_search.answer"
     ])
 
-    expect(snapshot).toEqual({
-      scopeKey: "scope:server:user",
+    expect(snapshot).toMatchObject({
+      scopeKey: scopeKeyFor(config, null),
       capability: "legacy-404",
       definitions: {
         "chat.rag.answer": {
@@ -478,7 +618,42 @@ describe("Service Prompt migration and runtime snapshots", () => {
         }
       }
     })
+    expect(snapshot.scopeSignal).toBeInstanceOf(AbortSignal)
+    expect(snapshot.release).toBeTypeOf("function")
+    expect(snapshot.requestScope).toEqual({
+      config: targetConfig(config),
+      userId: null
+    })
+    expect(Object.isFrozen(snapshot.requestScope)).toBe(true)
+    expect(Object.isFrozen(snapshot.requestScope.config)).toBe(true)
+    snapshot.release()
     expect(mocks.getServicePrompt).not.toHaveBeenCalled()
+  })
+
+  it("refuses legacy compatibility when a cookie-session principal cannot be verified", async () => {
+    const hostedConfig = {
+      serverUrl: config.serverUrl,
+      authMode: "multi-user" as const,
+      authSource: "cookie-session" as const,
+      orgId: config.orgId
+    }
+    mocks.isHosted.mockReturnValue(true)
+    mocks.ensureConfig.mockResolvedValue(hostedConfig)
+    mocks.getCurrentUser.mockResolvedValue({ id: 84, username: "hosted" })
+    mocks.listServicePrompts.mockRejectedValue(
+      new ServicePromptApiError("Not found", { status: 404 })
+    )
+
+    await expect(
+      loadServicePromptSnapshot(["chat.rag.answer"])
+    ).rejects.toMatchObject({
+      status: 412,
+      details: {
+        detail: { code: "request_config_scope_changed" }
+      }
+    })
+
+    expect(mocks.promptForRag).not.toHaveBeenCalled()
   })
 
   it.each([401, 403, 500, 0])(
@@ -525,13 +700,13 @@ describe("Service Prompt migration and runtime snapshots", () => {
         : undefined
     )
 
-    await expect(
-      loadServicePromptSnapshot(["chat.web_search.answer"])
-    ).resolves.toMatchObject({ capability: "supported" })
+    const snapshot = await loadServicePromptSnapshot(["chat.web_search.answer"])
+    expect(snapshot).toMatchObject({ capability: "supported" })
     expect(mocks.getServicePrompt).toHaveBeenCalledWith(
       "chat.web_search.answer",
       expect.objectContaining({ signal: expect.any(AbortSignal) })
     )
+    snapshot.release()
   })
 
   it("loads requested details concurrently and freshly for every invocation", async () => {
@@ -553,17 +728,19 @@ describe("Service Prompt migration and runtime snapshots", () => {
     })
     resolveAnswer(detailFor("chat.rag.answer"))
     resolveRewrite(detailFor("chat.rag.question_rewrite"))
-    await pending
+    const first = await pending
 
     mocks.getServicePrompt.mockImplementation(async (id: KnownServicePromptId) =>
       detailFor(id)
     )
-    await loadServicePromptSnapshot([
+    const second = await loadServicePromptSnapshot([
       "chat.rag.answer",
       "chat.rag.question_rewrite"
     ])
     expect(mocks.listServicePrompts).toHaveBeenCalledTimes(2)
     expect(mocks.getServicePrompt).toHaveBeenCalledTimes(4)
+    first.release()
+    second.release()
   })
 
   it("never converts a supported detail failure into legacy fallback", async () => {
@@ -596,9 +773,10 @@ describe("Service Prompt migration and runtime snapshots", () => {
       resolved.parts.template,
       { context: "Frozen context", question: "Frozen question" }
     )).toContain("Frozen context")
+    snapshot.release()
   })
 
-  it("propagates invocation aborts and aborts old reads on config changes", async () => {
+  it("propagates invocation aborts", async () => {
     let detailSignal: AbortSignal | undefined
     mocks.getServicePrompt.mockImplementation(
       async (_id: KnownServicePromptId, options: { signal?: AbortSignal }) => {
@@ -618,12 +796,6 @@ describe("Service Prompt migration and runtime snapshots", () => {
     controller.abort()
 
     await expect(pending).rejects.toMatchObject({ name: "AbortError" })
-    expect(detailSignal?.aborted).toBe(true)
-
-    const second = loadServicePromptSnapshot(["chat.rag.answer"])
-    await vi.waitFor(() => expect(detailSignal?.aborted).toBe(false))
-    window.dispatchEvent(new Event("tldw:config-updated"))
-    await expect(second).rejects.toMatchObject({ name: "AbortError" })
     expect(detailSignal?.aborted).toBe(true)
   })
 
@@ -661,7 +833,12 @@ describe("Service Prompt migration and runtime snapshots", () => {
 
     const pending = loadServicePromptSnapshot(["chat.rag.answer"])
     await vi.waitFor(() => expect(mocks.promptForRag).toHaveBeenCalled())
-    window.dispatchEvent(new Event("tldw:config-updated"))
+    const watched = mocks.localWatch.mock.calls.at(-1)?.[0] as
+      | { tldwConfig?: (change: { newValue?: unknown }) => void }
+      | undefined
+    watched?.tldwConfig?.({
+      newValue: { ...config, serverUrl: "https://other.example" }
+    })
     resolvePrompts({
       ragPrompt: "legacy {context} {question}",
       ragQuestionPrompt: "legacy {chat_history} {question}"
@@ -719,28 +896,128 @@ describe("Service Prompt migration and runtime snapshots", () => {
     expect(mocks.localUnwatch).toHaveBeenCalledWith(watched)
   })
 
+  it("aborts a single-user lease when the API-key account changes", async () => {
+    let detailSignal: AbortSignal | undefined
+    mocks.getServicePrompt.mockImplementation(
+      async (_id: KnownServicePromptId, options: { signal?: AbortSignal }) => {
+        detailSignal = options.signal
+        return await new Promise<ServicePromptDetail>((_resolve, reject) => {
+          options.signal?.addEventListener("abort", () =>
+            reject(new DOMException("Aborted", "AbortError")))
+        })
+      }
+    )
+
+    const pending = loadServicePromptSnapshot(["chat.rag.answer"])
+    await vi.waitFor(() => expect(detailSignal).toBeDefined())
+    const watched = mocks.localWatch.mock.calls.at(-1)?.[0] as
+      | { tldwConfig?: (change: { newValue?: unknown }) => void }
+      | undefined
+    watched?.tldwConfig?.({
+      newValue: { ...config, apiKey: "different-account-key" }
+    })
+
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" })
+    expect(watched?.tldwConfig).toBeTypeOf("function")
+  })
+
+  it("keeps same-user token rotation alive and aborts the retained turn lease on account change", async () => {
+    const multiUserConfig = {
+      serverUrl: config.serverUrl,
+      authMode: "multi-user" as const,
+      orgId: config.orgId,
+      accessToken: jwtForUser(42)
+    }
+    mocks.ensureConfig.mockResolvedValue(multiUserConfig)
+    mocks.getCurrentUser.mockResolvedValue({ id: 42, username: "user" })
+    let resolveDetail!: (value: ServicePromptDetail) => void
+    mocks.getServicePrompt.mockImplementation(() =>
+      new Promise<ServicePromptDetail>((resolve) => {
+        resolveDetail = resolve
+      })
+    )
+
+    const pending = loadServicePromptSnapshot(["chat.rag.answer"])
+    await vi.waitFor(() => expect(mocks.getServicePrompt).toHaveBeenCalledOnce())
+    const watched = mocks.localWatch.mock.calls.at(-1)?.[0] as
+      | { tldwConfig?: (change: { newValue?: unknown }) => void }
+      | undefined
+
+    watched?.tldwConfig?.({
+      newValue: { ...multiUserConfig, accessToken: jwtForUser(42) }
+    })
+    resolveDetail(detailFor("chat.rag.answer"))
+    const snapshot = await pending
+
+    expect(snapshot.scopeSignal).toBeInstanceOf(AbortSignal)
+    expect(snapshot.scopeSignal?.aborted).toBe(false)
+    expect(mocks.localUnwatch).not.toHaveBeenCalledWith(watched)
+
+    watched?.tldwConfig?.({
+      newValue: { ...multiUserConfig, accessToken: jwtForUser(84) }
+    })
+
+    expect(snapshot.scopeSignal?.aborted).toBe(true)
+    expect(snapshot.scopeInvalidatedSignal?.aborted).toBe(true)
+    expect(mocks.localUnwatch).not.toHaveBeenCalledWith(watched)
+    snapshot.release()
+    expect(mocks.localUnwatch).toHaveBeenCalledWith(watched)
+  })
+
+  it("keeps watching for scope invalidation after the caller aborts", async () => {
+    const multiUserConfig = {
+      serverUrl: config.serverUrl,
+      authMode: "multi-user" as const,
+      orgId: config.orgId,
+      accessToken: jwtForUser(42)
+    }
+    mocks.ensureConfig.mockResolvedValue(multiUserConfig)
+    mocks.getCurrentUser.mockResolvedValue({ id: 42, username: "user" })
+    const parent = new AbortController()
+    const snapshot = await loadServicePromptSnapshot(
+      ["chat.rag.answer"],
+      { signal: parent.signal }
+    )
+    const watched = mocks.localWatch.mock.calls.at(-1)?.[0] as
+      | { tldwConfig?: (change: { newValue?: unknown }) => void }
+      | undefined
+
+    parent.abort()
+
+    expect(snapshot.scopeSignal.aborted).toBe(true)
+    expect(snapshot.scopeInvalidatedSignal?.aborted).toBe(false)
+    expect(mocks.localUnwatch).not.toHaveBeenCalledWith(watched)
+
+    watched?.tldwConfig?.({
+      newValue: { ...multiUserConfig, accessToken: jwtForUser(84) }
+    })
+
+    expect(snapshot.scopeInvalidatedSignal?.aborted).toBe(true)
+    expect(mocks.localUnwatch).not.toHaveBeenCalledWith(watched)
+    snapshot.release()
+    expect(mocks.localUnwatch).toHaveBeenCalledWith(watched)
+  })
+
   it("rehydrates client config at the start of every invocation", async () => {
     const nextConfig = { ...config, serverUrl: "https://next.example" }
     let liveConfig = config
-    mocks.getConfig.mockImplementation(async () => liveConfig)
+    mocks.ensureConfig.mockImplementation(async () => liveConfig)
     mocks.initialize.mockImplementation(async () => {
       if (mocks.initialize.mock.calls.length === 2) {
         liveConfig = nextConfig
       }
     })
-    mocks.buildScope.mockImplementation((cfg: typeof config) =>
-      `scope:${cfg.serverUrl}`
-    )
-
     const first = await loadServicePromptSnapshot(["chat.rag.answer"])
     const second = await loadServicePromptSnapshot(["chat.rag.answer"])
 
     expect(mocks.initialize).toHaveBeenCalledTimes(2)
-    expect(first.scopeKey).toBe("scope:https://server.example")
-    expect(second.scopeKey).toBe("scope:https://next.example")
+    expect(first.scopeKey).toBe(scopeKeyFor(config, null))
+    expect(second.scopeKey).toBe(scopeKeyFor(nextConfig, null))
+    first.release()
+    second.release()
   })
 
-  it("treats an initialize-time config normalization write as scope cancellation", async () => {
+  it("does not treat initialize-time normalization of the same target as cancellation", async () => {
     mocks.initialize.mockImplementation(async () => {
       const watched = mocks.localWatch.mock.calls.at(-1)?.[0] as
         | { tldwConfig?: (change: { newValue?: unknown }) => void }
@@ -748,74 +1025,21 @@ describe("Service Prompt migration and runtime snapshots", () => {
       watched?.tldwConfig?.({ newValue: config })
     })
 
-    await expect(
-      loadServicePromptSnapshot(["chat.rag.answer"])
-    ).rejects.toMatchObject({ name: "AbortError" })
-    expect(mocks.getConfig).not.toHaveBeenCalled()
+    const snapshot = await loadServicePromptSnapshot(["chat.rag.answer"])
+    expect(snapshot).toMatchObject({ capability: "supported" })
+    expect(mocks.ensureConfig).toHaveBeenCalled()
+    snapshot.release()
   })
 
-  it("aborts when the hosted principal changes before a supported return", async () => {
-    mocks.isHosted.mockReturnValue(true)
-    mocks.getCurrentUser
-      .mockResolvedValueOnce({ id: 42, username: "first" })
-      .mockResolvedValueOnce({ id: 84, username: "second" })
-    mocks.buildScope.mockImplementation(
-      (_cfg: typeof config, options?: { userId?: number }) =>
-        `scope:user:${options?.userId}`
-    )
-
-    await expect(
-      loadServicePromptSnapshot(["chat.rag.answer"])
-    ).rejects.toMatchObject({ name: "AbortError" })
-    expect(mocks.getCurrentUser).toHaveBeenCalledTimes(2)
-  })
-
-  it("confirms hosted principal before legacy return and migration-required errors", async () => {
-    mocks.isHosted.mockReturnValue(true)
-    mocks.buildScope.mockImplementation(
-      (_cfg: typeof config, options?: { userId?: number }) =>
-        `scope:user:${options?.userId}`
-    )
-    mocks.listServicePrompts.mockRejectedValueOnce(
-      new ServicePromptApiError("Not found", { status: 404 })
-    )
-    mocks.getCurrentUser
-      .mockResolvedValueOnce({ id: 42, username: "first" })
-      .mockResolvedValueOnce({ id: 84, username: "second" })
-
-    await expect(
-      loadServicePromptSnapshot(["chat.rag.answer"])
-    ).rejects.toMatchObject({ name: "AbortError" })
-
-    vi.clearAllMocks()
-    mocks.initialize.mockResolvedValue(undefined)
-    mocks.isHosted.mockReturnValue(true)
-    mocks.getConfig.mockResolvedValue(config)
-    mocks.buildScope.mockImplementation(
-      (_cfg: typeof config, options?: { userId?: number }) =>
-        `scope:user:${options?.userId}`
-    )
-    mocks.listServicePrompts.mockResolvedValue(catalog)
-    mocks.localGet.mockImplementation(async (key: string) =>
-      key === "systemPromptForRag"
-        ? "legacy {context} {question}"
-        : undefined
-    )
-    mocks.syncGet.mockResolvedValue(undefined)
-    mocks.getCurrentUser
-      .mockResolvedValueOnce({ id: 42, username: "first" })
-      .mockResolvedValueOnce({ id: 84, username: "second" })
-
-    await expect(
-      loadServicePromptSnapshot(["chat.rag.answer"])
-    ).rejects.toMatchObject({ name: "AbortError" })
-  })
-
-  it("always removes the per-invocation config watcher", async () => {
-    await loadServicePromptSnapshot(["chat.rag.answer"])
+  it("retains the per-turn config watcher until the snapshot owner releases it", async () => {
+    const snapshot = await loadServicePromptSnapshot(["chat.rag.answer"])
 
     const watched = mocks.localWatch.mock.calls[0]?.[0]
     expect(watched).toBeDefined()
+    expect(mocks.localUnwatch).not.toHaveBeenCalledWith(watched)
+
+    snapshot.release()
+
     expect(mocks.localUnwatch).toHaveBeenCalledWith(watched)
   })
 
@@ -893,6 +1117,38 @@ describe("Service Prompt migration and runtime snapshots", () => {
       candidate,
       detailFor("chat.rag.answer")
     )).rejects.toMatchObject({ code: "service_prompt_protocol_error" })
+    expect(mocks.localRemove).not.toHaveBeenCalled()
+    expect(mocks.syncRemove).not.toHaveBeenCalled()
+  })
+
+  it("does not clear a legacy value when its scope aborts after PUT", async () => {
+    let resolveSave!: (value: ServicePromptDetail) => void
+    mocks.saveServicePrompt.mockImplementationOnce(() =>
+      new Promise<ServicePromptDetail>((resolve) => {
+        resolveSave = resolve
+      })
+    )
+    const controller = new AbortController()
+    const candidate = {
+      definitionId: "chat.rag.answer" as const,
+      partKey: "template" as const,
+      storageKey: "systemPromptForRag" as const,
+      value: "import {context} {question}"
+    }
+    const pending = importLegacyServicePromptCandidate(
+      candidate,
+      detailFor("chat.rag.answer"),
+      { signal: controller.signal }
+    )
+    await vi.waitFor(() => expect(mocks.saveServicePrompt).toHaveBeenCalled())
+
+    controller.abort()
+    resolveSave(detailFor("chat.rag.answer", {
+      source: "user",
+      revision: "revision-new"
+    }))
+
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" })
     expect(mocks.localRemove).not.toHaveBeenCalled()
     expect(mocks.syncRemove).not.toHaveBeenCalled()
   })

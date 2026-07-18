@@ -32,6 +32,8 @@ type TabChatModeParams = {
   setIsProcessing: (value: boolean) => void
   setStreaming: (value: boolean) => void
   setAbortController: (controller: AbortController | null) => void
+  releaseAbortControllerIfOwned?: (signal: AbortSignal) => boolean
+  discardCurrentTurnOnAbort?: () => boolean
   historyId: string | null
   setHistoryId: (id: string) => void
   systemPromptAppendix?: string
@@ -140,22 +142,34 @@ export const tabChatMode = async (
   params: Omit<TabChatModeParams, "documents">
 ): Promise<ChatSubmitResult> => {
   console.log("Using tabChatMode")
+  const ownsServicePromptSnapshot = !params.servicePromptSnapshot
   const servicePromptSnapshot =
     params.servicePromptSnapshot ??
     (await loadServicePromptSnapshot(["chat.rag.answer"], { signal }))
-  getRequiredServicePrompt(servicePromptSnapshot, "chat.rag.answer")
-  return runChatPipeline(
-    tabChatModeDefinition,
-    message,
-    image,
-    isRegenerate,
-    messages,
-    history,
-    signal,
-    {
-      ...params,
-      documents,
-      servicePromptSnapshot
-    }
-  )
+  const executionSignal = servicePromptSnapshot.scopeSignal
+  const scopeInvalidatedSignal = servicePromptSnapshot.scopeInvalidatedSignal
+  try {
+    getRequiredServicePrompt(servicePromptSnapshot, "chat.rag.answer")
+    return await runChatPipeline(
+      tabChatModeDefinition,
+      message,
+      image,
+      isRegenerate,
+      messages,
+      history,
+      executionSignal,
+      {
+        ...params,
+        documents,
+        servicePromptSnapshot,
+        discardCurrentTurnOnAbort: () =>
+          scopeInvalidatedSignal.aborted,
+        releaseAbortControllerIfOwned: params.releaseAbortControllerIfOwned
+          ? () => params.releaseAbortControllerIfOwned!(signal)
+          : undefined
+      }
+    )
+  } finally {
+    if (ownsServicePromptSnapshot) servicePromptSnapshot.release()
+  }
 }

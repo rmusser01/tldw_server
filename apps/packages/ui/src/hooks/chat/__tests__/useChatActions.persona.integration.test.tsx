@@ -16,7 +16,9 @@ const {
   syncChatSettingsForServerChatMock,
   getConfigMock,
   savePlaygroundSessionMock,
-  buildChatSurfaceScopeKeyFromConfigMock
+  buildChatSurfaceScopeKeyFromConfigMock,
+  loadServicePromptSnapshotMock,
+  releaseServicePromptSnapshotMock
 } = vi.hoisted(() => ({
   createChatMock: vi.fn(),
   getChatMock: vi.fn(),
@@ -30,7 +32,13 @@ const {
   syncChatSettingsForServerChatMock: vi.fn(async () => null),
   getConfigMock: vi.fn(),
   savePlaygroundSessionMock: vi.fn(),
-  buildChatSurfaceScopeKeyFromConfigMock: vi.fn()
+  buildChatSurfaceScopeKeyFromConfigMock: vi.fn(),
+  loadServicePromptSnapshotMock: vi.fn(),
+  releaseServicePromptSnapshotMock: vi.fn()
+}))
+
+vi.mock("@/services/service-prompts", () => ({
+  loadServicePromptSnapshot: loadServicePromptSnapshotMock
 }))
 
 vi.mock("@/hooks/chat-modes/normalChatMode", () => ({
@@ -254,6 +262,42 @@ const createHookOptions = () => ({
   clearMessageSteering: vi.fn()
 })
 
+const servicePromptSnapshot = {
+  scopeKey: "scope:captured-user",
+  requestScope: {
+    config: {
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "multi-user" as const,
+      authSource: "manual" as const
+    },
+    userId: 42
+  },
+  capability: "supported" as const,
+  scopeSignal: new AbortController().signal,
+  scopeInvalidatedSignal: new AbortController().signal,
+  definitions: {
+    "chat.rag.answer": {
+      definition: { id: "chat.rag.answer", parts: [] },
+      parts: { template: "Answer" },
+      source: "packaged" as const,
+      revision: null
+    },
+    "chat.rag.question_rewrite": {
+      definition: { id: "chat.rag.question_rewrite", parts: [] },
+      parts: { template: "Rewrite" },
+      source: "packaged" as const,
+      revision: null
+    },
+    "chat.web_search.answer": {
+      definition: { id: "chat.web_search.answer", parts: [] },
+      parts: { template: "Web answer" },
+      source: "packaged" as const,
+      revision: null
+    }
+  },
+  release: releaseServicePromptSnapshotMock
+}
+
 describe("useChatActions persona integration", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -264,6 +308,7 @@ describe("useChatActions persona integration", () => {
       apiKey: "test-key"
     })
     buildChatSurfaceScopeKeyFromConfigMock.mockReturnValue("scope:chat")
+    loadServicePromptSnapshotMock.mockResolvedValue(servicePromptSnapshot)
     createChatMock.mockResolvedValue({
       id: "persona-chat-1",
       title: "Persona chat",
@@ -357,6 +402,27 @@ describe("useChatActions persona integration", () => {
         serverChatId: "persona-chat-1"
       })
     )
+  })
+
+  it("persists the canonical captured scope for a prompt-backed persona turn", async () => {
+    const options = {
+      ...createHookOptions(),
+      webSearch: true
+    }
+    const { result } = renderHook(() => useChatActions(options as any))
+
+    await act(async () => {
+      await result.current.onSubmit({
+        message: "Search with this persona",
+        image: ""
+      })
+    })
+
+    expect(savePlaygroundSessionMock).toHaveBeenCalledWith(
+      expect.objectContaining({ scopeKey: "scope:captured-user" })
+    )
+    expect(buildChatSurfaceScopeKeyFromConfigMock).not.toHaveBeenCalled()
+    expect(releaseServicePromptSnapshotMock).toHaveBeenCalledTimes(1)
   })
 
   it("passes workspace scope through when creating a persona-backed chat", async () => {
@@ -520,7 +586,9 @@ describe("useChatActions persona integration", () => {
       expect.objectContaining({
         state: "in-progress"
       }),
-      { scope }
+      expect.objectContaining({
+        scope
+      })
     )
     expect(options.setServerChatId).toHaveBeenCalledWith("workspace-plain-chat")
     expect(options.setServerChatAssistantKind).toHaveBeenCalledWith(null)
@@ -604,7 +672,7 @@ describe("useChatActions persona integration", () => {
       expect.objectContaining({
         state: "in-progress"
       }),
-      { scope }
+      expect.objectContaining({ scope })
     )
     expect(options.setServerChatId).toHaveBeenLastCalledWith(
       "workspace-fresh-chat"
@@ -661,7 +729,11 @@ describe("useChatActions persona integration", () => {
       expect.objectContaining({
         state: "in-progress"
       }),
-      { scope }
+      expect.objectContaining({
+        scope,
+        requestScope: servicePromptSnapshot.requestScope,
+        signal: servicePromptSnapshot.scopeSignal
+      })
     )
     expect(ragModeMock).toHaveBeenCalledWith(
       "Use staged source",

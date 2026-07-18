@@ -39,6 +39,7 @@ import {
   renderServicePromptPart,
   type ServicePromptSnapshot
 } from "@/services/service-prompts"
+import { isRequestConfigScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
 
 interface WebSearchPayload {
   query: string
@@ -152,6 +153,8 @@ type NormalChatModeParams = {
   setIsProcessing: (value: boolean) => void
   setStreaming: (value: boolean) => void
   setAbortController: (controller: AbortController | null) => void
+  releaseAbortControllerIfOwned?: (signal: AbortSignal) => boolean
+  discardCurrentTurnOnAbort?: () => boolean
   historyId: string | null
   serverChatId?: string | null
   setHistoryId: (id: string) => void
@@ -478,7 +481,8 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
 
         const res = await tldwClient.webSearch({
           ...payload,
-          signal: ctx.signal
+          signal: ctx.signal,
+          requestScope: ctx.servicePromptSnapshot?.requestScope
         })
 
         if (res?.error) {
@@ -492,6 +496,12 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
         webSearchResults = res?.web_search_results_dict?.results || []
         webSearchSources = buildWebSearchSources(webSearchResults)
       } catch (error) {
+        if (
+          ctx.signal.aborted ||
+          isRequestConfigScopeChangedError(error)
+        ) {
+          throw error
+        }
         console.error("Web search failed, continuing without context", error)
       } finally {
         if (ctx.setIsSearchingInternet) {
@@ -599,25 +609,44 @@ export const normalChatMode = async (
   params: NormalChatModeParams
 ): Promise<ChatSubmitResult> => {
   console.log("Using normalChatMode")
+  const ownsServicePromptSnapshot = !params.servicePromptSnapshot && params.webSearch
   const servicePromptSnapshot =
     params.servicePromptSnapshot ??
     (params.webSearch
       ? await loadServicePromptSnapshot(["chat.web_search.answer"], { signal })
       : undefined)
-  if (params.webSearch) {
-    getRequiredServicePrompt(servicePromptSnapshot, "chat.web_search.answer")
-  }
-  const resolvedImage =
-    image.length > 0 ? `data:image/jpeg;base64,${image.split(",")[1]}` : ""
+  const executionSignal = servicePromptSnapshot
+    ? servicePromptSnapshot.scopeSignal
+    : signal
+  try {
+    if (params.webSearch) {
+      getRequiredServicePrompt(servicePromptSnapshot, "chat.web_search.answer")
+    }
+    const resolvedImage =
+      image.length > 0 ? `data:image/jpeg;base64,${image.split(",")[1]}` : ""
 
-  return runChatPipeline(
-    normalChatModeDefinition,
-    message,
-    resolvedImage,
-    isRegenerate,
-    messages,
-    history,
-    signal,
-    { ...params, servicePromptSnapshot }
-  )
+    return await runChatPipeline(
+      normalChatModeDefinition,
+      message,
+      resolvedImage,
+      isRegenerate,
+      messages,
+      history,
+      executionSignal,
+      {
+        ...params,
+        servicePromptSnapshot,
+        discardCurrentTurnOnAbort: servicePromptSnapshot
+          ? () => servicePromptSnapshot.scopeInvalidatedSignal.aborted
+          : undefined,
+        releaseAbortControllerIfOwned: params.releaseAbortControllerIfOwned
+          ? () => params.releaseAbortControllerIfOwned!(signal)
+          : undefined
+      }
+    )
+  } finally {
+    if (ownsServicePromptSnapshot && servicePromptSnapshot) {
+      servicePromptSnapshot.release()
+    }
+  }
 }

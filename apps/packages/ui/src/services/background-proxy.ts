@@ -1,5 +1,4 @@
 import { browser } from "wxt/browser"
-import { Storage } from "@plasmohq/storage"
 import { createSafeStorage } from "@/utils/safe-storage"
 import { formatErrorMessage } from "@/utils/format-error-message"
 import {
@@ -9,6 +8,7 @@ import {
   resolveBrowserRequestTransport,
   tldwRequest
 } from "@/services/tldw/request-core"
+import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
 import {
   isCookieSessionBrowserTransport,
   resolveAdvancedRequestTransportGuard
@@ -18,6 +18,11 @@ import {
   resolveDirectBrowserConfig as resolveDirectConfig,
   type DirectRuntimeStorage
 } from "@/services/tldw/direct-browser-config"
+import {
+  hasNewerCurrentAccessToken,
+  storeRefreshRotationIfCurrent,
+  waitForNewerCurrentAccessToken
+} from "@/services/tldw/single-user-credential"
 import {
   BACKEND_UNREACHABLE_EVENT,
   type BackendUnreachableDetail
@@ -38,6 +43,18 @@ import {
   isAbsoluteUrlAllowlisted,
   isSameOriginAbsoluteUrlForConfiguredServer
 } from "@/utils/absolute-url-guard"
+import type {
+  ServicePromptTargetConfig,
+  TldwConfig
+} from "@/services/tldw/TldwApiClient"
+import {
+  createServicePromptScopeChangedError,
+  isRequestConfigScopeChangedError,
+  isServicePromptRequestPath,
+  servicePromptPrincipalMatches,
+  servicePromptRefreshLineageMatches,
+  servicePromptTargetsMatch
+} from "@/services/tldw/service-prompt-scope-error"
 
 const ERROR_LOG_THROTTLE_MS = 15_000
 const RATE_LIMIT_LOG_THROTTLE_MS = 60_000
@@ -79,6 +96,32 @@ const errorLogHistory = new Map<string, number>()
 let lastBackendUnreachableEventAt = 0
 let lastStreamRuntimeHealthCheckAt = 0
 let streamRuntimePortUsable: boolean | null = null
+let runtimeRequestSequence = 0
+
+const createRuntimeRequestId = (): string => {
+  try {
+    const randomId = globalThis.crypto?.randomUUID?.()
+    if (randomId) return randomId
+  } catch {
+    // Fall back to a locally unique id when randomUUID is unavailable.
+  }
+  runtimeRequestSequence += 1
+  return `tldw-${Date.now()}-${runtimeRequestSequence}-${Math.random().toString(36).slice(2, 10)}`
+}
+
+const cancelRuntimeWorkerRequest = (requestId?: string): void => {
+  if (!requestId) return
+  try {
+    void Promise.resolve(
+      browser.runtime.sendMessage({
+        type: "tldw:cancel-request",
+        payload: { requestId }
+      })
+    ).catch(() => undefined)
+  } catch {
+    // Cancellation is best effort when the extension context is closing.
+  }
+}
 
 const normalizeKnownPathQuirks = <P extends PathOrUrl>(rawPath: P): P => {
   if (typeof rawPath !== "string") return rawPath
@@ -285,6 +328,13 @@ const isExtensionTransportFailure = (error: unknown): boolean => {
   )
 }
 
+const isProvenNoReceiverError = (error: unknown): boolean => {
+  const message = error instanceof Error ? error.message : String(error || "")
+  const normalized = message.toLowerCase()
+  return normalized.includes("receiving end does not exist") ||
+    normalized.includes("could not establish connection")
+}
+
 type RequestAbortError = Error & {
   status?: number
   code?: string
@@ -410,6 +460,46 @@ export interface BgRequestInit<
   suppressBackendUnavailableEvent?: boolean
   expectedStatuses?: number[]
   sanitizeRagProviderError?: boolean
+  servicePromptConfig?: ServicePromptTargetConfig
+}
+
+const resolveCurrentServicePromptConfig = async (
+  storage: DirectRuntimeStorage,
+  checked: ServicePromptTargetConfig
+): Promise<TldwConfig> => {
+  const current = await resolveDirectConfig(storage)
+  if ((!current && !isHostedTldwDeployment()) ||
+    (current && !servicePromptTargetsMatch(current, checked)) ||
+    (current &&
+      checked.expectedUserId !== null &&
+      checked.expectedUserId !== undefined &&
+      current.authMode === "multi-user" &&
+      !isHostedTldwDeployment() &&
+      current.authSource !== "cookie-session" &&
+      !servicePromptPrincipalMatches(current, checked.expectedUserId)) ||
+    (current &&
+      !servicePromptRefreshLineageMatches(
+        current,
+        checked.expectedRefreshToken
+      )) ||
+    (current?.authMode === "multi-user" &&
+      !isHostedTldwDeployment() &&
+      current.authSource !== "cookie-session" &&
+      !String(current.accessToken || "").trim())
+  ) {
+    throw createServicePromptScopeChangedError()
+  }
+  const effective = current ?? checked
+  return {
+    ...effective,
+    serverUrl: checked.serverUrl,
+    authMode: checked.authMode,
+    authSource: checked.authSource,
+    orgId: checked.orgId,
+    apiKey: current?.apiKey,
+    accessToken: current?.accessToken,
+    refreshToken: current?.refreshToken
+  }
 }
 
 // In-flight coalescing for idempotent GET requests: when several callers issue
@@ -477,15 +567,148 @@ const pruneRateLimitedGetResults = () => {
 // instead of a stampede that would each spend and rotate the refresh token,
 // persisting a dead one.
 let webRefreshInFlight: Promise<void> | null = null
+const scopedWebRefreshes = new Map<string, Promise<void>>()
+
+const scopedRefreshKey = (
+  checked: ServicePromptTargetConfig,
+  refreshToken: string
+): string => JSON.stringify([
+  checked.serverUrl ?? null,
+  checked.authMode ?? null,
+  checked.authSource ?? null,
+  checked.orgId ?? null,
+  refreshToken
+])
+
+const commitDirectRefresh = async (
+  storage: DirectRuntimeStorage,
+  checked: TldwConfig,
+  capturedAccessToken: string,
+  expectedRefreshToken: string,
+  tokens: Readonly<{ accessToken: string; refreshToken: string }>
+): Promise<TldwConfig> => {
+  const stored = await storeRefreshRotationIfCurrent(
+    storage,
+    checked,
+    expectedRefreshToken,
+    tokens
+  )
+  const observedNewerToken = await hasNewerCurrentAccessToken(
+    storage,
+    checked,
+    capturedAccessToken
+  )
+  const latest = await resolveDirectConfig(storage)
+  const responseApplied = Boolean(
+    latest &&
+    String(latest.accessToken || "").trim() === tokens.accessToken &&
+    String(latest.refreshToken || "").trim() === tokens.refreshToken
+  )
+  if (
+    !latest ||
+    latest.authMode !== "multi-user" ||
+    !servicePromptTargetsMatch(latest, checked) ||
+    (!stored && !observedNewerToken) ||
+    (!responseApplied && !observedNewerToken)
+  ) {
+    throw createServicePromptScopeChangedError()
+  }
+  return latest
+}
 
 const refreshAuthDirect = async (
-  storage: DirectRuntimeStorage
+  storage: DirectRuntimeStorage,
+  checked?: ServicePromptTargetConfig,
+  originalConfig?: TldwConfig
 ): Promise<void> => {
+  if (checked) {
+    const cfg = originalConfig ??
+      await resolveCurrentServicePromptConfig(storage, checked)
+    const refreshToken = String(cfg.refreshToken || "").trim()
+    const capturedAccessToken = String(cfg.accessToken || "").trim()
+    if (!refreshToken) {
+      throw new Error("Token refresh failed: no refresh token available")
+    }
+    if (
+      originalConfig &&
+      await hasNewerCurrentAccessToken(
+        storage,
+        checked,
+        capturedAccessToken
+      )
+    ) {
+      return
+    }
+    const current = originalConfig
+      ? await resolveCurrentServicePromptConfig(storage, checked)
+      : cfg
+    if (String(current.refreshToken || "").trim() !== refreshToken) {
+      throw createServicePromptScopeChangedError()
+    }
+    const key = scopedRefreshKey(checked, refreshToken)
+    let refresh = scopedWebRefreshes.get(key)
+    if (!refresh) {
+      refresh = (async () => {
+        try {
+          const resp = await tldwRequest(
+            {
+              path: "/api/v1/auth/refresh",
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: { refresh_token: refreshToken },
+              noAuth: true
+            },
+            { getConfig: async () => cfg }
+          )
+          const tokens = (resp?.ok ? resp.data : null) as
+            | { access_token?: string; refresh_token?: string }
+            | null
+          if (!tokens?.access_token) {
+            throw new Error(
+              `Token refresh failed: ${resp?.error || `no access token in refresh response (status ${resp?.status ?? "unknown"})`}`
+            )
+          }
+          const stored = await storeRefreshRotationIfCurrent(
+            storage,
+            { ...checked, accessToken: capturedAccessToken },
+            refreshToken,
+            {
+              accessToken: tokens.access_token,
+              refreshToken: tokens.refresh_token || refreshToken
+            }
+          )
+          if (!stored) {
+            throw createServicePromptScopeChangedError()
+          }
+        } catch (error) {
+          if (isRequestConfigScopeChangedError(error)) throw error
+          if (
+            originalConfig &&
+            await waitForNewerCurrentAccessToken(
+              storage,
+              checked,
+              capturedAccessToken
+            )
+          ) {
+            return
+          }
+          throw error
+        } finally {
+          scopedWebRefreshes.delete(key)
+        }
+      })()
+      scopedWebRefreshes.set(key, refresh)
+    }
+    await refresh
+    return
+  }
+
   if (!webRefreshInFlight) {
     webRefreshInFlight = (async () => {
       const cfg =
         (await resolveDirectConfig(storage)) || null
       const refreshToken = String((cfg?.refreshToken as string) || "").trim()
+      const capturedAccessToken = String(cfg?.accessToken || "").trim()
       // Signal failure (throw) rather than resolving silently: request-core
       // treats a resolved refreshAuth as success and would retry with the stale
       // token. Throwing makes it mark the refresh as failed so a still-401 retry
@@ -511,17 +734,19 @@ const refreshAuthDirect = async (
           `Token refresh failed: ${resp?.error || `no access token in refresh response (status ${resp?.status ?? "unknown"})`}`
         )
       }
-      const latest =
-        (await resolveDirectConfig(storage)) ||
-        cfg
-      await storage.set("tldwConfig", {
-        ...(latest || {}),
-        accessToken: tokens.access_token,
-        refreshToken:
-          tokens.refresh_token ||
-          (latest?.refreshToken as string) ||
-          refreshToken
-      })
+      if (!cfg || cfg.authMode !== "multi-user") {
+        throw new Error("Token refresh failed: account configuration changed")
+      }
+      await commitDirectRefresh(
+        storage,
+        cfg,
+        capturedAccessToken,
+        refreshToken,
+        {
+          accessToken: tokens.access_token,
+          refreshToken: tokens.refresh_token || refreshToken
+        }
+      )
     })().finally(() => {
       webRefreshInFlight = null
     })
@@ -532,10 +757,31 @@ const refreshAuthDirect = async (
 // Runtime for the web/direct fallback. Supplies a working `refreshAuth` so
 // request-core's 401 refresh-and-retry runs in the browser (not just inside the
 // extension worker), and single-flights it across concurrent callers.
-const createDirectRuntime = (storage: DirectRuntimeStorage) => ({
-  getConfig: () => resolveDirectConfig(storage),
-  refreshAuth: () => refreshAuthDirect(storage)
-})
+const createDirectRuntime = (
+  storage: DirectRuntimeStorage,
+  servicePromptConfig?: ServicePromptTargetConfig
+) => {
+  let originalConfig: TldwConfig | undefined
+  return {
+    getConfig: servicePromptConfig
+      ? async () => {
+          const current = await resolveCurrentServicePromptConfig(
+            storage,
+            servicePromptConfig
+          )
+          originalConfig ??= current
+          return current
+        }
+      : () => resolveDirectConfig(storage),
+    refreshAuth: async () => {
+      await refreshAuthDirect(
+        storage,
+        servicePromptConfig,
+        originalConfig
+      )
+    }
+  }
+}
 
 export async function bgRequest<
   T = any,
@@ -551,6 +797,7 @@ export async function bgRequest<
     !init.preferDirect &&
     !init.suppressBackendUnavailableEvent &&
     !init.sanitizeRagProviderError &&
+    !init.servicePromptConfig &&
     !init.expectedStatuses?.length
   if (!coalescable) {
     return bgRequestImpl<T, P, M>(init)
@@ -643,8 +890,16 @@ async function bgRequestImpl<
     preferDirect = false,
     suppressBackendUnavailableEvent = false,
     expectedStatuses,
-    sanitizeRagProviderError = false
+    sanitizeRagProviderError = false,
+    servicePromptConfig
   } = init
+  if (servicePromptConfig) {
+    if (!isServicePromptRequestPath(rawPath, method)) {
+      throw new Error(
+        "A Service Prompt config can only be used with Service Prompt requests."
+      )
+    }
+  }
   const path = normalizeKnownPathQuirks(rawPath)
   const expectedStatusSet = normalizeExpectedStatuses(expectedStatuses)
   const isExpectedStatus = (status: unknown): boolean =>
@@ -654,7 +909,7 @@ async function bgRequestImpl<
   let resolvedNoAuth = noAuthExplicit ? noAuth : (noAuth || isAbsoluteUrl)
   if (!noAuthExplicit && isAbsoluteUrl) {
     const storage = createSafeStorage({ area: "local" })
-    const cfg = await resolveDirectConfig(storage)
+    const cfg = servicePromptConfig ?? await resolveDirectConfig(storage)
     const sameOriginAbsolute = isSameOriginAbsoluteUrlForConfiguredServer(
       String(path),
       cfg as unknown as Record<string, unknown>
@@ -753,7 +1008,21 @@ async function bgRequestImpl<
       status: resp?.status,
       error: rawMessage
     })
-    const sanitized: NormalizedRequestFailure = sanitizeRagProviderError
+    const scopedError =
+      servicePromptConfig &&
+      isRequestConfigScopeChangedError({
+        status: resp?.status,
+        details: resp?.data
+      })
+        ? createServicePromptScopeChangedError()
+        : null
+    const sanitized: NormalizedRequestFailure = scopedError
+      ? {
+          message: scopedError.message,
+          status: scopedError.status,
+          details: scopedError.details
+        }
+      : sanitizeRagProviderError
       ? isAbortErrorMessage(rawMessage)
         ? {
             message: "Aborted",
@@ -816,7 +1085,7 @@ async function bgRequestImpl<
         sanitized.details,
         sanitized.code
       ),
-      response: sanitizeRagProviderError
+      response: sanitizeRagProviderError || scopedError
         ? {
             ...resp,
             error: sanitized.message,
@@ -839,7 +1108,7 @@ async function bgRequestImpl<
         abortSignal,
         responseType
       },
-      createDirectRuntime(storage)
+      createDirectRuntime(storage, servicePromptConfig)
     )
   }
   const resolveArrayBufferResponse = async (
@@ -892,7 +1161,7 @@ async function bgRequestImpl<
         abortSignal,
         responseType
       },
-      createDirectRuntime(storage)
+      createDirectRuntime(storage, servicePromptConfig)
     )
     if (!resp?.ok) {
       const failure = await handleFailedResponse(resp, "direct")
@@ -907,6 +1176,10 @@ async function bgRequestImpl<
   // If extension messaging is available, use it (extension context)
   try {
     if (hasRuntimeMessage) {
+      const requestId =
+        servicePromptConfig && abortSignal
+          ? createRuntimeRequestId()
+          : undefined
       const payload = {
         type: 'tldw:request',
         payload: {
@@ -916,7 +1189,9 @@ async function bgRequestImpl<
           body,
           noAuth: resolvedNoAuth,
           timeoutMs,
-          responseType
+          responseType,
+          servicePromptConfig,
+          ...(requestId ? { requestId } : {})
         }
       }
 
@@ -947,7 +1222,7 @@ async function bgRequestImpl<
       }
 
       if (abortSignal.aborted) {
-        throw markNoFallbackError(new Error("Aborted"))
+        throw markNoFallbackError(createAbortError())
       }
 
       const messagePromise = browser.runtime.sendMessage(payload) as Promise<
@@ -958,23 +1233,30 @@ async function bgRequestImpl<
       const resp = await new Promise<
         { ok: boolean; error?: string; status?: number; data: T } | undefined | null
       >((resolve, reject) => {
-        const onAbort = () => {
-          reject(new Error('Aborted'))
-        }
-        const timeoutId = setTimeout(() => {
+        let timeoutId: ReturnType<typeof setTimeout>
+        const cleanup = () => {
+          clearTimeout(timeoutId)
           abortSignal.removeEventListener('abort', onAbort)
-          resolve(null) // timeout - fall through to direct request
+        }
+        const onAbort = () => {
+          cleanup()
+          cancelRuntimeWorkerRequest(requestId)
+          reject(markNoFallbackError(createAbortError()))
+        }
+        timeoutId = setTimeout(() => {
+          abortSignal.removeEventListener('abort', onAbort)
+          cancelRuntimeWorkerRequest(requestId)
+          resolve(null)
         }, runtimeMessageTimeoutMs)
         abortSignal.addEventListener('abort', onAbort, { once: true })
+        if (abortSignal.aborted) onAbort()
         messagePromise
           .then((r) => {
-            clearTimeout(timeoutId)
-            abortSignal.removeEventListener('abort', onAbort)
+            cleanup()
             resolve(r)
           })
           .catch((e) => {
-            clearTimeout(timeoutId)
-            abortSignal.removeEventListener('abort', onAbort)
+            cleanup()
             reject(e)
           })
       })
@@ -1008,13 +1290,20 @@ async function bgRequestImpl<
       } else {
         throw e
       }
-    } else if (!methodIsSafeFallback && !isExtensionTransportFailure(e)) {
-      throw e
+    } else if (!methodIsSafeFallback) {
+      const canReplayIdempotentWrite =
+        allowIdempotentWriteFallback && isExtensionTransportFailure(e)
+      if (!isProvenNoReceiverError(e) && !canReplayIdempotentWrite) {
+        throw e
+      }
     }
   }
 
   // Fallback: direct fetch (web/dev context)
   const storage = createSafeStorage({ area: "local" })
+  if (servicePromptConfig) {
+    await resolveCurrentServicePromptConfig(storage, servicePromptConfig)
+  }
   const resp = await tldwRequest(
     {
       path,
@@ -1026,7 +1315,7 @@ async function bgRequestImpl<
       abortSignal,
       responseType
     },
-    createDirectRuntime(storage)
+    createDirectRuntime(storage, servicePromptConfig)
   )
   if (!resp?.ok) {
     const failure = await handleFailedResponse(resp, "direct")
@@ -1050,6 +1339,7 @@ export interface BgStreamInit<
   abortSignal?: AbortSignal
   onOpen?: () => void
   sanitizeRagProviderStreamError?: boolean
+  servicePromptConfig?: ServicePromptTargetConfig
 }
 
 const deriveStreamIdleTimeout = (cfg: any, path: string, override?: number) => {
@@ -1135,10 +1425,17 @@ async function* bgStreamDirectUnsafe<
   P extends AllowedPath = AllowedPath,
   M extends AllowedMethodFor<P> = AllowedMethodFor<P>
 >(
-  { path, method = 'POST' as UpperLower<M>, headers = {}, body, streamIdleTimeoutMs, abortSignal, onOpen }: BgStreamInit<P, M>
+  { path, method = 'POST' as UpperLower<M>, headers = {}, body, streamIdleTimeoutMs, abortSignal, onOpen, servicePromptConfig }: BgStreamInit<P, M>
 ): AsyncGenerator<string> {
+  if (servicePromptConfig && !isServicePromptRequestPath(path, method)) {
+    throw new Error(
+      "A Service Prompt config can only be used with Service Prompt requests."
+    )
+  }
   const storage = createSafeStorage({ area: "local" })
-  const cfg = (await resolveDirectConfig(storage)) || null
+  const cfg = servicePromptConfig
+    ? await resolveCurrentServicePromptConfig(storage, servicePromptConfig)
+    : (await resolveDirectConfig(storage)) || null
   const normalizedPath = normalizeKnownPathQuirks(path)
   const isAbsolute = typeof normalizedPath === "string" && /^https?:/i.test(normalizedPath)
   const absolutePath = isAbsolute ? String(normalizedPath) : ""
@@ -1299,30 +1596,46 @@ async function* bgStreamDirectUnsafe<
     cfg?.refreshToken
   ) {
     try {
-      const refreshResp = await fetch(`${baseUrl}/api/v1/auth/refresh`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ refresh_token: cfg.refreshToken })
-      })
-      if (refreshResp.ok) {
-        const tokens = await refreshResp.json().catch(() => null)
-        if (tokens?.access_token) {
-          const latestCfg =
-            (await resolveDirectConfig(storage)) || null
-          const updated = {
-            ...(latestCfg || cfg || {}),
-            accessToken: tokens.access_token,
-            refreshToken:
-              tokens?.refresh_token ||
-              latestCfg?.refreshToken ||
-              cfg?.refreshToken
-          }
-          await storage.set("tldwConfig", updated)
-          resolvedHeaders["Authorization"] = `Bearer ${tokens.access_token}`
+      if (servicePromptConfig) {
+        await refreshAuthDirect(storage, servicePromptConfig, cfg)
+        const latestCfg = await resolveCurrentServicePromptConfig(
+          storage,
+          servicePromptConfig
+        )
+        if (latestCfg.accessToken) {
+          resolvedHeaders["Authorization"] = `Bearer ${latestCfg.accessToken}`
           resp = await fetchStream()
         }
+      } else {
+        const refreshResp = await fetch(`${baseUrl}/api/v1/auth/refresh`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ refresh_token: cfg.refreshToken }),
+          signal: controller.signal
+        })
+        if (refreshResp.ok) {
+          const tokens = await refreshResp.json().catch(() => null)
+          if (tokens?.access_token && !controller.signal.aborted) {
+            const latestCfg = await commitDirectRefresh(
+              storage,
+              cfg,
+              String(cfg.accessToken || "").trim(),
+              String(cfg.refreshToken || "").trim(),
+              {
+                accessToken: tokens.access_token,
+                refreshToken: tokens.refresh_token || cfg.refreshToken
+              }
+            )
+            resolvedHeaders["Authorization"] =
+              `Bearer ${latestCfg.accessToken}`
+            resp = await fetchStream()
+          }
+        }
       }
-    } catch {
+    } catch (error) {
+      if (isRequestConfigScopeChangedError(error)) {
+        throw error
+      }
       // ignore refresh failures and continue with original response
     }
   }
@@ -1426,7 +1739,17 @@ export async function* bgStream<
   P extends AllowedPath = AllowedPath,
   M extends AllowedMethodFor<P> = AllowedMethodFor<P>
 >(
-  { path, method = 'POST' as UpperLower<M>, headers = {}, body, streamIdleTimeoutMs, abortSignal, onOpen, sanitizeRagProviderStreamError = false }: BgStreamInit<P, M>
+  {
+    path,
+    method = 'POST' as UpperLower<M>,
+    headers = {},
+    body,
+    streamIdleTimeoutMs,
+    abortSignal,
+    onOpen,
+    sanitizeRagProviderStreamError = false,
+    servicePromptConfig
+  }: BgStreamInit<P, M>
 ): AsyncGenerator<string> {
   const hasHttpStatus = (value: unknown): boolean =>
     extractHttpStatus(value) !== null
@@ -1481,7 +1804,8 @@ export async function* bgStream<
       streamIdleTimeoutMs,
       abortSignal,
       onOpen: notifyOpen,
-      sanitizeRagProviderStreamError
+      sanitizeRagProviderStreamError,
+      servicePromptConfig
     })
     return
   }
@@ -1517,7 +1841,8 @@ export async function* bgStream<
         streamIdleTimeoutMs,
         abortSignal,
         onOpen: notifyOpen,
-        sanitizeRagProviderStreamError
+        sanitizeRagProviderStreamError,
+        servicePromptConfig
       })
       return
     }
@@ -1638,6 +1963,9 @@ export async function* bgStream<
       if (sanitizeRagProviderStreamError) {
         portPayload.sanitizeRagProviderStreamError = true
       }
+      if (servicePromptConfig) {
+        portPayload.servicePromptConfig = servicePromptConfig
+      }
       port.postMessage(portPayload)
     } catch (e) {
       clearTimeout(connectionTimer)
@@ -1682,7 +2010,8 @@ export async function* bgStream<
           streamIdleTimeoutMs,
           abortSignal,
           onOpen: notifyOpen,
-          sanitizeRagProviderStreamError
+          sanitizeRagProviderStreamError,
+          servicePromptConfig
         })
         return
       }
@@ -1708,7 +2037,8 @@ export async function* bgStream<
           streamIdleTimeoutMs,
           abortSignal,
           onOpen: notifyOpen,
-          sanitizeRagProviderStreamError
+          sanitizeRagProviderStreamError,
+          servicePromptConfig
         })
         return
       }
@@ -1776,6 +2106,7 @@ export type BgUploadFile = {
 export interface BgUploadInit<P extends AllowedPath = AllowedPath, M extends AllowedMethodFor<P> = AllowedMethodFor<P>> {
   path: P
   method?: UpperLower<M>
+  headers?: Record<string, string>
   // key/value fields to include alongside file in FormData
   fields?: Record<string, any>
   // File payload as raw bytes with metadata (structured-cloneable)
@@ -1785,23 +2116,33 @@ export interface BgUploadInit<P extends AllowedPath = AllowedPath, M extends All
   fileFieldName?: string
   // Optional timeout override for upload requests
   timeoutMs?: number
+  abortSignal?: AbortSignal
   responseType?: "json" | "text" | "arrayBuffer"
   preferDirect?: boolean
+  servicePromptConfig?: ServicePromptTargetConfig
 }
 
 export async function bgUpload<T = any, P extends AllowedPath = AllowedPath, M extends AllowedMethodFor<P> = AllowedMethodFor<P>>(
   {
     path,
     method = 'POST' as UpperLower<M>,
+    headers = {},
     fields = {},
     file,
     files,
     fileFieldName,
     timeoutMs,
+    abortSignal,
     responseType,
-    preferDirect = false
+    preferDirect = false,
+    servicePromptConfig
   }: BgUploadInit<P, M>
 ): Promise<T> {
+  if (servicePromptConfig && !isServicePromptRequestPath(path, method)) {
+    throw new Error(
+      "A Service Prompt config can only be used with Service Prompt requests."
+    )
+  }
   const hasRuntimeMessage =
     !preferDirect &&
     Boolean(browser?.runtime?.sendMessage && browser?.runtime?.id)
@@ -1817,14 +2158,67 @@ export async function bgUpload<T = any, P extends AllowedPath = AllowedPath, M e
           ? timeoutMs
           : DEFAULT_UPLOAD_RUNTIME_MESSAGE_TIMEOUT_MS
       const uploadTimeout = Math.max(5000, resolvedTimeout)
+      if (abortSignal?.aborted) {
+        throw markNoFallbackError(createAbortError())
+      }
+      const requestId =
+        servicePromptConfig && abortSignal
+          ? createRuntimeRequestId()
+          : undefined
       const uploadPromise = browser.runtime.sendMessage({
         type: 'tldw:upload',
-        payload: { path, method, fields, file, files, fileFieldName, timeoutMs: resolvedTimeout, responseType }
+        payload: {
+          path,
+          method,
+          headers,
+          fields,
+          file,
+          files,
+          fileFieldName,
+          timeoutMs: resolvedTimeout,
+          responseType,
+          servicePromptConfig,
+          ...(requestId ? { requestId } : {})
+        }
       })
-      const uploadTimeoutPromise = new Promise<null>((resolve) =>
-        setTimeout(() => resolve(null), uploadTimeout)
-      )
-      const resp = await Promise.race([uploadPromise, uploadTimeoutPromise]) as { ok: boolean; error?: string; status?: number; data: T } | undefined | null
+      const resp = await new Promise<{
+        ok: boolean
+        error?: string
+        status?: number
+        data: T
+      } | undefined | null>((resolve, reject) => {
+        let timeoutId: ReturnType<typeof setTimeout>
+        const onAbort = () => {
+          clearTimeout(timeoutId)
+          abortSignal?.removeEventListener('abort', onAbort)
+          cancelRuntimeWorkerRequest(requestId)
+          reject(markNoFallbackError(createAbortError()))
+        }
+        timeoutId = setTimeout(() => {
+          abortSignal?.removeEventListener('abort', onAbort)
+          cancelRuntimeWorkerRequest(requestId)
+          resolve(null)
+        }, uploadTimeout)
+        abortSignal?.addEventListener('abort', onAbort, { once: true })
+        if (abortSignal?.aborted) onAbort()
+        uploadPromise.then(
+          (response) => {
+            clearTimeout(timeoutId)
+            abortSignal?.removeEventListener('abort', onAbort)
+            resolve(response as {
+              ok: boolean
+              error?: string
+              status?: number
+              data: T
+            } | undefined)
+          },
+          (error) => {
+            clearTimeout(timeoutId)
+            abortSignal?.removeEventListener('abort', onAbort)
+            reject(error)
+          }
+        )
+      })
       if (resp === null) {
         throw markNoFallbackError(
           new Error("Extension messaging timeout"),
@@ -1851,7 +2245,7 @@ export async function bgUpload<T = any, P extends AllowedPath = AllowedPath, M e
         } else {
           throw e
         }
-      } else if (!methodIsSafeFallback && !isExtensionTransportFailure(e)) {
+      } else if (!methodIsSafeFallback && !isProvenNoReceiverError(e)) {
         throw e
       }
     }
@@ -1914,8 +2308,16 @@ export async function bgUpload<T = any, P extends AllowedPath = AllowedPath, M e
 
   const storage = createSafeStorage({ area: "local" })
   const resp = await tldwRequest(
-    { path, method, body: formData, timeoutMs, responseType },
-    createDirectRuntime(storage)
+    {
+      path,
+      method,
+      headers,
+      body: formData,
+      timeoutMs,
+      abortSignal,
+      responseType
+    },
+    createDirectRuntime(storage, servicePromptConfig)
   )
   if (!resp?.ok) {
     const msg = formatErrorMessage(

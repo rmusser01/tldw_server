@@ -12,8 +12,15 @@ import {
   formatToChatHistory,
   formatToMessage,
   getSessionFiles,
-  getPromptById
+  getPromptById,
+  updateLastUsedModel,
+  updateLastUsedPrompt,
+  updateChatHistoryCreatedAt
 } from "@/db/dexie/helpers"
+import {
+  rollbackScopedComparePersistence,
+  runChatPersistenceTransaction
+} from "@/db/dexie/chat-persistence-transaction"
 import { getModelNicknameByID } from "@/db/dexie/nickname"
 import { isReasoningEnded, isReasoningStarted } from "@/libs/reasoning"
 import type { ChatDocuments } from "@/models/ChatTypes"
@@ -141,7 +148,7 @@ import {
   type ToolChoice
 } from "@/store/option"
 import type { ChatModelSettings } from "@/store/model"
-import type { SaveMessageData } from "@/types/chat-modes"
+import type { SaveMessageData, SaveMessageErrorData } from "@/types/chat-modes"
 import type { DynamicUIRequest } from "@/types/dynamic-ui"
 import type { VisualIdentityResolveResponse } from "@/types/visual-identities"
 import {
@@ -161,6 +168,10 @@ import {
   loadServicePromptSnapshot,
   type ServicePromptSnapshot
 } from "@/services/service-prompts"
+import {
+  createServicePromptScopeChangedError,
+  isRequestConfigScopeChangedError
+} from "@/services/tldw/service-prompt-scope-error"
 
 type ChatModelSettingsStore = ChatModelSettings & {
   setSystemPrompt?: (prompt: string) => void
@@ -179,12 +190,14 @@ const persistTrackedPersonaPlaygroundSession = async ({
   chatId,
   historyId,
   assistant,
-  personaMemoryMode
+  personaMemoryMode,
+  scopeKey
 }: {
   chatId: string
   historyId: string | null
   assistant: AssistantSelection & { kind: "persona" }
   personaMemoryMode: "read_only" | "read_write"
+  scopeKey?: string
 }) => {
   const assistantId = String(assistant.id)
   const trackedAssistantSelection = {
@@ -197,8 +210,9 @@ const persistTrackedPersonaPlaygroundSession = async ({
   }
 
   try {
-    const config = await tldwClient.getConfig().catch(() => null)
-    const scopeKey = buildChatSurfaceScopeKeyFromConfig(config)
+    const resolvedScopeKey = scopeKey || buildChatSurfaceScopeKeyFromConfig(
+      await tldwClient.getConfig().catch(() => null)
+    )
     usePlaygroundSessionStore.getState().saveSession({
       historyId,
       serverChatId: chatId,
@@ -211,13 +225,21 @@ const persistTrackedPersonaPlaygroundSession = async ({
       trackedAssistantAvatarUrl:
         typeof assistant.avatar_url === "string" ? assistant.avatar_url : null,
       serverChatPersonaMemoryMode: personaMemoryMode,
-      scopeKey
+      scopeKey: resolvedScopeKey
     })
   } catch (error) {
     console.warn(
       "[useChatActions] Failed to persist tracked persona session",
       error
     )
+  }
+}
+
+const throwIfServicePromptScopeInvalidated = (
+  snapshot?: ServicePromptSnapshot
+) => {
+  if (snapshot?.scopeInvalidatedSignal.aborted) {
+    throw createServicePromptScopeChangedError()
   }
 }
 
@@ -939,6 +961,10 @@ export const useChatActions = ({
         images: nextImages,
         generationInfo: nextGenerationInfo
       }).catch(() => null)
+      return {
+        generationInfo: nextGenerationInfo,
+        assistantImages: nextImages
+      }
     },
     [setMessages]
   )
@@ -946,13 +972,21 @@ export const useChatActions = ({
   const saveMessageOnSuccess = async (
     payload?: SaveMessagePayload
   ): Promise<string | null> => {
+    const scopeSignal = payload?.scopeSignal
+    const scopeInvalidatedSignal = payload?.scopeInvalidatedSignal
+    const throwIfScopeChanged = () => {
+      if (!scopeInvalidatedSignal?.aborted) return
+      const error = new Error("Request scope changed")
+      error.name = "AbortError"
+      throw error
+    }
     const payloadConversationId =
       typeof payload?.conversationId === "string"
         ? payload.conversationId
         : payload?.conversationId != null
           ? String(payload.conversationId)
           : null
-    const payloadWithHistory = payload
+    let payloadForLocalPersistence = payload
       ? {
           ...payload,
           setHistoryId:
@@ -967,14 +1001,41 @@ export const useChatActions = ({
             })
         }
       : undefined
-    const historyKey = await baseSaveMessageOnSuccess(payloadWithHistory)
-
-    if (!payload?.historyId && historyKey) {
-      markCompareHistoryCreated(historyKey)
+    const persistLocally = async (): Promise<string | null> => {
+      throwIfScopeChanged()
+      const key = await baseSaveMessageOnSuccess(payloadForLocalPersistence)
+      throwIfScopeChanged()
+      if (!payload?.historyId && key) {
+        markCompareHistoryCreated(key)
+      }
+      return key
     }
+    let historyKey = scopeSignal ? null : await persistLocally()
 
     if (temporaryChat) {
+      if (scopeSignal) historyKey = await persistLocally()
       return historyKey
+    }
+
+    const mirrorOptions = scope || scopeSignal || payload?.requestScope
+      ? {
+          ...(scope ? { scope } : {}),
+          ...(scopeSignal ? { signal: scopeSignal } : {}),
+          ...(payload?.requestScope
+            ? { requestScope: payload.requestScope }
+            : {})
+        }
+      : undefined
+    const addMirroredMessage = async (
+      chatId: string,
+      message: Record<string, unknown>
+    ) => {
+      throwIfScopeChanged()
+      const result = mirrorOptions
+        ? await tldwClient.addChatMessage(chatId, message, mirrorOptions)
+        : await tldwClient.addChatMessage(chatId, message)
+      throwIfScopeChanged()
+      return result
     }
 
     let skipServerWrite = false
@@ -1009,12 +1070,32 @@ export const useChatActions = ({
       "inherit"
     )
     const imageEventSyncMode = resolveImageEventSyncModeForPayload(payload)
+    const updateImageSyncMetadata = async (
+      update: Parameters<typeof updateImageEventSyncMetadata>[1]
+    ) => {
+      if (!payload) return
+      const metadata = await updateImageEventSyncMetadata(payload, update)
+      if (scopeSignal && metadata && payloadForLocalPersistence) {
+        payloadForLocalPersistence = {
+          ...payloadForLocalPersistence,
+          ...metadata
+        }
+      }
+    }
 
     if (isServerConversation && payload?.saveToDb) {
       try {
+        throwIfScopeChanged()
         const caps = await getServerCapabilities()
+        throwIfScopeChanged()
         skipServerWrite = Boolean(caps?.hasChatSaveToDb)
-      } catch {
+      } catch (error) {
+        if (
+          scopeInvalidatedSignal?.aborted ||
+          isRequestConfigScopeChangedError(error)
+        ) {
+          throw error
+        }
         skipServerWrite = false
       }
     }
@@ -1034,7 +1115,7 @@ export const useChatActions = ({
         imageEventSyncMode === "on" &&
         payload?.assistantMessageId
       ) {
-        await updateImageEventSyncMetadata(payload, {
+        await updateImageSyncMetadata({
           status: "pending",
           mode: imageEventSyncMode,
           policy: imageEventSyncPolicy
@@ -1126,16 +1207,15 @@ export const useChatActions = ({
             imageDataUrl: latestPreview
           })
 
-          const mirroredMessage = await tldwClient.addChatMessage(
+          const mirroredMessage = await addMirroredMessage(
             resolvedServerConversationId,
             {
               role: "assistant",
               content: mirroredContent
-            },
-            scope ? { scope } : undefined
+            }
           )
 
-          await updateImageEventSyncMetadata(payload, {
+          await updateImageSyncMetadata({
             status: "synced",
             mode: imageEventSyncMode,
             policy: imageEventSyncPolicy,
@@ -1143,11 +1223,17 @@ export const useChatActions = ({
               mirroredMessage?.id != null ? String(mirroredMessage.id) : undefined
           })
         } catch (error) {
+          if (
+            scopeInvalidatedSignal?.aborted ||
+            isRequestConfigScopeChangedError(error)
+          ) {
+            throw error
+          }
           const reason =
             error instanceof Error && error.message.trim().length > 0
               ? error.message
               : "Failed to mirror image event to server history."
-          await updateImageEventSyncMetadata(payload, {
+          await updateImageSyncMetadata({
             status: "failed",
             mode: imageEventSyncMode,
             policy: imageEventSyncPolicy,
@@ -1167,7 +1253,7 @@ export const useChatActions = ({
           const assistantContent = payload.fullText.trim()
 
           if (userContent.length > 0) {
-            await tldwClient.addChatMessage(
+            await addMirroredMessage(
               cid,
               {
                 role: "user",
@@ -1175,28 +1261,33 @@ export const useChatActions = ({
                 ...(payload.userMetadataExtra
                   ? { metadata_extra: payload.userMetadataExtra }
                   : {})
-              },
-              scope ? { scope } : undefined
+              }
             )
           }
 
           if (assistantContent.length > 0) {
-            await tldwClient.addChatMessage(
+            await addMirroredMessage(
               cid,
               {
                 role: "assistant",
                 content: assistantContent,
                 metadata_extra: payload.assistantMetadataExtra
-              },
-              scope ? { scope } : undefined
+              }
             )
           }
-        } catch {
+        } catch (error) {
+          if (
+            scopeInvalidatedSignal?.aborted ||
+            isRequestConfigScopeChangedError(error)
+          ) {
+            throw error
+          }
           // Ignore sync errors; local history is still saved.
         }
       }
     }
 
+    if (scopeSignal) historyKey = await persistLocally()
     return historyKey
   }
 
@@ -1283,11 +1374,13 @@ export const useChatActions = ({
     async ({
       assistant,
       serverChatIdOverride,
-      requestedPersonaMemoryMode
+      requestedPersonaMemoryMode,
+      servicePromptSnapshot
     }: {
       assistant: AssistantSelection & { kind: "persona" }
       serverChatIdOverride?: string | null
       requestedPersonaMemoryMode?: PersonaMemoryMode | null
+      servicePromptSnapshot?: ServicePromptSnapshot
     }): Promise<{
       chatId: string
       historyId: string | null
@@ -1311,6 +1404,10 @@ export const useChatActions = ({
         historyId,
         temporaryChat,
         scope,
+        requestScope: servicePromptSnapshot?.requestScope,
+        signal: servicePromptSnapshot?.scopeSignal,
+        scopeInvalidatedSignal:
+          servicePromptSnapshot?.scopeInvalidatedSignal,
         createChat: (payload, options) =>
           options
             ? tldwClient.createChat(payload, options)
@@ -1368,10 +1465,12 @@ export const useChatActions = ({
   const ensureWorkspaceServerChatForTurn = React.useCallback(
     async ({
       message,
-      serverChatIdOverride
+      serverChatIdOverride,
+      servicePromptSnapshot
     }: {
       message: string
       serverChatIdOverride?: string | null
+      servicePromptSnapshot?: ServicePromptSnapshot
     }): Promise<{ chatId: string | null; historyId: string | null }> => {
       const overrideChatId =
         typeof serverChatIdOverride === "string" &&
@@ -1404,6 +1503,7 @@ export const useChatActions = ({
         }
 
         if (!validatedServerChatId) {
+          throwIfServicePromptScopeInvalidated(servicePromptSnapshot)
           setServerChatId(null)
           setServerChatTitle(null)
           setServerChatCharacterId(null)
@@ -1419,10 +1519,12 @@ export const useChatActions = ({
           setServerChatExternalRef(null)
           invalidateServerChatHistory()
         } else {
+          throwIfServicePromptScopeInvalidated(servicePromptSnapshot)
           const ensuredHistoryId = await ensureServerChatHistoryId(
             validatedServerChatId,
             serverChatTitle || undefined
           )
+          throwIfServicePromptScopeInvalidated(servicePromptSnapshot)
           return { chatId: validatedServerChatId, historyId: ensuredHistoryId }
         }
       }
@@ -1437,8 +1539,12 @@ export const useChatActions = ({
         external_ref: serverChatExternalRef || undefined
       }
       const created = (await tldwClient.createChat(createPayload, {
-        scope
+        scope,
+        requestScope: servicePromptSnapshot?.requestScope,
+        signal: servicePromptSnapshot?.scopeSignal
       })) as TldwChatMeta
+
+      throwIfServicePromptScopeInvalidated(servicePromptSnapshot)
 
       let rawId: string | number | undefined
       if (created && typeof created === "object") {
@@ -1488,6 +1594,7 @@ export const useChatActions = ({
         normalizedId,
         createdTitle || titleSeed || undefined
       )
+      throwIfServicePromptScopeInvalidated(servicePromptSnapshot)
       return { chatId: normalizedId, historyId: ensuredHistoryId }
     },
     [
@@ -3090,6 +3197,57 @@ export const useChatActions = ({
       requestOverrides,
       uploadedFiles
     })
+    const turnWebSearchEnabled =
+      typeof requestOverrides?.webSearch === "boolean"
+        ? requestOverrides.webSearch
+        : webSearch
+    const turnShouldUseRag = shouldUseRagForTurn({
+      selectedKnowledge: turnSelectedKnowledge,
+      fileRetrievalEnabled: turnFileRetrievalEnabled,
+      ragMediaIds: turnRagMediaIds
+    })
+    const turnSendMode = resolveUseMessageSendMode({
+      effectiveMode: effectiveAssistantState.mode,
+      hasEffectiveAssistant: Boolean(
+        effectiveSelectedAssistant?.kind && effectiveSelectedAssistant?.id
+      ),
+      draftAssistantKind: routingSelectedAssistant?.kind ?? null,
+      draftAssistantSelectionMode: getAssistantSelectionMode(
+        routingSelectedAssistant
+      )
+    })
+    const turnResolvedSendMode =
+      getAssistantSelectionMode(routingSelectedAssistant) === "tracked" &&
+      routingSelectedAssistant?.kind === "persona"
+        ? "tracked_persona"
+        : getAssistantSelectionMode(routingSelectedAssistant) === "tracked" &&
+            routingSelectedAssistant?.kind === "character"
+          ? "tracked_character"
+          : turnSendMode
+    const turnHasExplicitImageBackend =
+      trimmedImageBackendOverride.length > 0
+    const turnImageBackendCandidates = turnHasExplicitImageBackend
+      ? [trimmedImageBackendOverride]
+      : resolveImageBackendCandidates(
+          currentChatModelSettings?.apiProvider,
+          effectiveSelectedModel
+        )
+    const turnUsesImageMode =
+      turnHasExplicitImageBackend || turnImageBackendCandidates.length > 0
+    const turnPromptIds: Parameters<typeof loadServicePromptSnapshot>[0] =
+      isContinue || turnUsesImageMode
+        ? []
+        : turnContextFiles.length > 0
+          ? ["chat.rag.answer", "chat.rag.question_rewrite"]
+          : docs?.length > 0 || documentContext?.length > 0
+            ? ["chat.rag.answer"]
+            : turnShouldUseRag
+              ? ["chat.rag.answer", "chat.rag.question_rewrite"]
+              : turnWebSearchEnabled &&
+                  (compareModeActive ||
+                    turnResolvedSendMode !== "tracked_character")
+                ? ["chat.web_search.answer"]
+                : []
     // Declared before the try so the catch/finally can still read them even if
     // a pre-stream await throws below.
     const capturedReplyTargetId = replyTarget?.id ?? null
@@ -3099,25 +3257,32 @@ export const useChatActions = ({
       !isRegenerate &&
       !isContinue &&
       !selectedCharacter?.id
+    let compareServicePromptSnapshot: ServicePromptSnapshot | undefined
+    let turnServicePromptSnapshot: ServicePromptSnapshot | undefined
+    const compareScopeInvalidated = () => Boolean(
+      compareServicePromptSnapshot &&
+      compareServicePromptSnapshot.scopeInvalidatedSignal.aborted
+    )
 
     try {
       // Pre-stream awaits run inside the try so a failure resets streaming state
       // (and lets the caller drain its queue) instead of stranding the UI.
-      const compareWebSearchEnabled =
-        compareModeActive &&
-        (typeof requestOverrides?.webSearch === "boolean"
-          ? requestOverrides.webSearch
-          : webSearch)
-      let compareServicePromptSnapshot: ServicePromptSnapshot | undefined
-      if (compareWebSearchEnabled) {
-        compareServicePromptSnapshot = await loadServicePromptSnapshot(
-          ["chat.web_search.answer"],
-          { signal }
-        )
-        getRequiredServicePrompt(
-          compareServicePromptSnapshot,
-          "chat.web_search.answer"
-        )
+      if (turnPromptIds.length > 0) {
+        const loadedSnapshot = await loadServicePromptSnapshot(turnPromptIds, {
+          signal
+        })
+        if (
+          compareModeActive &&
+          turnPromptIds.length === 1 &&
+          turnPromptIds[0] === "chat.web_search.answer"
+        ) {
+          compareServicePromptSnapshot = loadedSnapshot
+        } else {
+          turnServicePromptSnapshot = loadedSnapshot
+        }
+        for (const promptId of turnPromptIds) {
+          getRequiredServicePrompt(loadedSnapshot, promptId)
+        }
       }
       const chatModeParams = await buildChatModeParams({
         ...(requestOverrides ?? {}),
@@ -3238,15 +3403,8 @@ export const useChatActions = ({
         return toChatSubmitResult(continueResult)
       }
 
-      const hasExplicitImageBackend = trimmedImageBackendOverride.length > 0
-      const imageBackendCandidates = hasExplicitImageBackend
-        ? [trimmedImageBackendOverride]
-        : resolveImageBackendCandidates(
-            currentChatModelSettings?.apiProvider,
-            effectiveSelectedModel
-          )
-      if (hasExplicitImageBackend || imageBackendCandidates.length > 0) {
-        const resolvedImageModelLabel = hasExplicitImageBackend
+      if (turnUsesImageMode) {
+        const resolvedImageModelLabel = turnHasExplicitImageBackend
           ? trimmedImageBackendOverride ||
             (effectiveSelectedModel || "").trim() ||
             currentChatModelSettings?.apiProvider ||
@@ -3257,8 +3415,8 @@ export const useChatActions = ({
         const enhancedChatModeParams = {
           ...chatModeParamsWithRegen,
           selectedModel: resolvedImageModelLabel,
-          uploadedFiles: hasExplicitImageBackend ? [] : turnUploadedFiles,
-          imageBackendOverride: hasExplicitImageBackend
+          uploadedFiles: turnHasExplicitImageBackend ? [] : turnUploadedFiles,
+          imageBackendOverride: turnHasExplicitImageBackend
             ? trimmedImageBackendOverride
             : undefined
         }
@@ -3284,7 +3442,10 @@ export const useChatActions = ({
           memory || history,
           signal,
           turnContextFiles,
-          chatModeParamsWithRegen
+          {
+            ...chatModeParamsWithRegen,
+            servicePromptSnapshot: turnServicePromptSnapshot
+          }
         )
         // setFileRetrievalEnabled(false)
         return toChatSubmitResult(documentResult)
@@ -3307,27 +3468,31 @@ export const useChatActions = ({
           chatHistory || messages,
           memory || history,
           signal,
-          chatModeParamsWithRegen
+          {
+            ...chatModeParamsWithRegen,
+            servicePromptSnapshot: turnServicePromptSnapshot
+          }
         )
         return toChatSubmitResult(tabResult)
       }
 
-      const shouldUseRag = shouldUseRagForTurn({
-        selectedKnowledge: turnSelectedKnowledge,
-        fileRetrievalEnabled: turnFileRetrievalEnabled,
-        ragMediaIds: turnRagMediaIds
-      })
-      if (shouldUseRag) {
+      if (turnShouldUseRag) {
         markSteeringApplied()
         const workspaceServerChat = await ensureWorkspaceServerChatForTurn({
           message,
-          serverChatIdOverride
+          serverChatIdOverride,
+          servicePromptSnapshot: turnServicePromptSnapshot
         })
+        const ragModeParamsWithSnapshot = {
+          ...chatModeParamsWithRegen,
+          servicePromptSnapshot: turnServicePromptSnapshot
+        }
         const scopedRagModeParams = workspaceServerChat.chatId
           ? {
-              ...chatModeParamsWithRegen,
+              ...ragModeParamsWithSnapshot,
               historyId:
-                workspaceServerChat.historyId ?? chatModeParamsWithRegen.historyId,
+                workspaceServerChat.historyId ??
+                ragModeParamsWithSnapshot.historyId,
               serverChatId: workspaceServerChat.chatId,
               conversationId: workspaceServerChat.chatId,
               saveMessageOnSuccess: (data: SaveMessageData) =>
@@ -3336,7 +3501,7 @@ export const useChatActions = ({
                   conversationId: workspaceServerChat.chatId
                 })
             }
-          : chatModeParamsWithRegen
+          : ragModeParamsWithSnapshot
         const ragResult = await ragMode(
           message,
           image,
@@ -3355,24 +3520,7 @@ export const useChatActions = ({
         }
         const baseMessages = chatHistory || messages
         const baseHistory = memory || history
-        const sendMode = resolveUseMessageSendMode({
-          effectiveMode: effectiveAssistantState.mode,
-          hasEffectiveAssistant: Boolean(
-            effectiveSelectedAssistant?.kind && effectiveSelectedAssistant?.id
-          ),
-          draftAssistantKind: routingSelectedAssistant?.kind ?? null,
-          draftAssistantSelectionMode: getAssistantSelectionMode(
-            routingSelectedAssistant
-          )
-        })
-        const resolvedSendMode =
-          getAssistantSelectionMode(routingSelectedAssistant) === "tracked" &&
-          routingSelectedAssistant?.kind === "persona"
-            ? "tracked_persona"
-            : getAssistantSelectionMode(routingSelectedAssistant) === "tracked" &&
-                routingSelectedAssistant?.kind === "character"
-              ? "tracked_character"
-              : sendMode
+        const resolvedSendMode = turnResolvedSendMode
         const trackedPersonaAssistantForSend =
           resolvedSendMode === "tracked_persona"
             ? isPersonaAssistantSelection(routingSelectedAssistant) &&
@@ -3382,6 +3530,12 @@ export const useChatActions = ({
                 ? effectiveSelectedAssistant
                 : null
             : null
+        const servicePromptChatModeParams = turnServicePromptSnapshot
+          ? {
+              ...enhancedChatModeParams,
+              servicePromptSnapshot: turnServicePromptSnapshot
+            }
+          : enhancedChatModeParams
 
         if (!compareModeActive) {
           if (resolvedSendMode === "tracked_persona" && trackedPersonaAssistantForSend) {
@@ -3400,14 +3554,18 @@ export const useChatActions = ({
             const personaServerChat = await ensurePersonaServerChatWithState({
               assistant: trackedPersonaAssistantForSend,
               serverChatIdOverride,
-              requestedPersonaMemoryMode: selectedPersonaMemoryMode
+              requestedPersonaMemoryMode: selectedPersonaMemoryMode,
+              servicePromptSnapshot: turnServicePromptSnapshot
             })
+            throwIfServicePromptScopeInvalidated(turnServicePromptSnapshot)
             await persistTrackedPersonaPlaygroundSession({
               chatId: personaServerChat.chatId,
               historyId: personaServerChat.historyId,
               assistant: trackedPersonaAssistantForSend,
-              personaMemoryMode: personaServerChat.personaMemoryMode
+              personaMemoryMode: personaServerChat.personaMemoryMode,
+              scopeKey: turnServicePromptSnapshot?.scopeKey
             })
+            throwIfServicePromptScopeInvalidated(turnServicePromptSnapshot)
             const assistantIdentity = {
               name: trackedPersonaAssistantForSend.name,
               avatarUrl:
@@ -3424,7 +3582,7 @@ export const useChatActions = ({
               baseHistory,
               signal,
               {
-                ...enhancedChatModeParams,
+                ...servicePromptChatModeParams,
                 assistantIdentity,
                 historyId: personaServerChat.historyId,
                 serverChatId: personaServerChat.chatId,
@@ -3493,7 +3651,7 @@ export const useChatActions = ({
           const normalModeParams =
             resolvedSendMode === "overlay" && effectiveSelectedAssistant
               ? {
-                  ...enhancedChatModeParams,
+                  ...servicePromptChatModeParams,
                   assistantIdentity: {
                     name: effectiveSelectedAssistant.name,
                     avatarUrl:
@@ -3504,10 +3662,11 @@ export const useChatActions = ({
                   overlaySystemPrompt:
                     effectiveAssistantState.systemPromptSnapshot ?? undefined
                 }
-              : enhancedChatModeParams
+              : servicePromptChatModeParams
           const workspaceServerChat = await ensureWorkspaceServerChatForTurn({
             message,
-            serverChatIdOverride
+            serverChatIdOverride,
+            servicePromptSnapshot: turnServicePromptSnapshot
           })
           const scopedNormalModeParams = workspaceServerChat.chatId
             ? {
@@ -3596,41 +3755,30 @@ export const useChatActions = ({
               })) || []
           }
 
-          setMessages((prev) => [...prev, compareUserMessage])
-          setHistory((prev) => [
-            ...prev,
-            {
-              role: "user" as const,
-              content: compareUserMessage.message,
-              image: compareUserMessage.images?.[0],
-              messageType: compareUserMessage.messageType
-            }
-          ])
-
           let activeHistoryId = enhancedChatModeParams.historyId
-          if (temporaryChat) {
-            if (historyId !== "temp") {
-              setHistoryId("temp")
-            }
-            activeHistoryId = "temp"
-          } else if (!activeHistoryId) {
-            const title = await generateTitle(
-              uniqueModels[0] || effectiveSelectedModel || "",
-              message,
-              message
-            )
-            const compareTitle = buildCompareHistoryTitle(title)
-            const newHistory = await saveHistory(compareTitle, false, "web-ui")
-            updatePageTitle(compareTitle)
-            activeHistoryId = newHistory.id
-            setHistoryId(newHistory.id)
-            markCompareHistoryCreated(newHistory.id)
+          let scopedCreatedHistory:
+            | { id: string; title: string }
+            | null = null
+          const deferredHistoryMetadata = new Map<
+            string,
+            Pick<SaveMessageData, "selectedModel" | "prompt_content" | "prompt_id">
+          >()
+          const appendSharedCompareTurn = () => {
+            setMessages((prev) => [...prev, compareUserMessage])
+            setHistory((prev) => [
+              ...prev,
+              {
+                role: "user" as const,
+                content: compareUserMessage.message,
+                image: compareUserMessage.images?.[0],
+                messageType: compareUserMessage.messageType
+              }
+            ])
           }
-
-          if (!temporaryChat && activeHistoryId) {
-            await saveMessage({
+          const saveSharedCompareMessage = (targetHistoryId: string) =>
+            saveMessage({
               id: compareUserMessageId,
-              history_id: activeHistoryId,
+              history_id: targetHistoryId,
               name: effectiveSelectedModel || uniqueModels[0] || "You",
               role: "user",
               content: message,
@@ -3647,6 +3795,70 @@ export const useChatActions = ({
                   processed: file.processed
                 })) || []
             })
+
+          if (compareServicePromptSnapshot) {
+            if (temporaryChat) {
+              activeHistoryId = "temp"
+            } else {
+              const compareTitle = activeHistoryId
+                ? null
+                : buildCompareHistoryTitle(
+                    await generateTitle(
+                      uniqueModels[0] || effectiveSelectedModel || "",
+                      message,
+                      message,
+                      {
+                        signal: compareServicePromptSnapshot.scopeSignal,
+                        requestScope: compareServicePromptSnapshot.requestScope
+                      }
+                    )
+                  )
+              const existingHistoryId = activeHistoryId
+              activeHistoryId = await runChatPersistenceTransaction(
+                compareServicePromptSnapshot.scopeSignal,
+                async () => {
+                  const targetHistoryId = existingHistoryId ?? (
+                    await saveHistory(compareTitle!, false, "web-ui")
+                  ).id
+                  await saveSharedCompareMessage(targetHistoryId)
+                  return targetHistoryId
+                }
+              )
+              if (!existingHistoryId) {
+                scopedCreatedHistory = {
+                  id: activeHistoryId,
+                  title: compareTitle!
+                }
+              }
+            }
+            // The scope-bound title and shared-user transaction are the
+            // pre-branch commit boundary. Apply UI state only after it succeeds.
+            appendSharedCompareTurn()
+          } else {
+            // Preserve the legacy unscoped ordering when Compare web search is off.
+            appendSharedCompareTurn()
+            if (temporaryChat) {
+              if (historyId !== "temp") {
+                setHistoryId("temp")
+              }
+              activeHistoryId = "temp"
+            } else if (!activeHistoryId) {
+              const title = await generateTitle(
+                uniqueModels[0] || effectiveSelectedModel || "",
+                message,
+                message
+              )
+              const compareTitle = buildCompareHistoryTitle(title)
+              const newHistory = await saveHistory(compareTitle, false, "web-ui")
+              updatePageTitle(compareTitle)
+              activeHistoryId = newHistory.id
+              setHistoryId(newHistory.id)
+              markCompareHistoryCreated(newHistory.id)
+            }
+
+            if (!temporaryChat && activeHistoryId) {
+              await saveSharedCompareMessage(activeHistoryId)
+            }
           }
 
           setIsProcessing(true)
@@ -3666,7 +3878,35 @@ export const useChatActions = ({
           const compareEnhancedParams = {
             ...compareChatModeParams,
             uploadedFiles: turnUploadedFiles,
-            servicePromptSnapshot: compareServicePromptSnapshot
+            servicePromptSnapshot: compareServicePromptSnapshot,
+            saveMessageOnSuccess: async (data: SaveMessageData) => {
+              const result = await compareChatModeParams.saveMessageOnSuccess({
+                ...data,
+                deferHistoryMetadata: Boolean(compareServicePromptSnapshot)
+              })
+              if (compareServicePromptSnapshot) {
+                deferredHistoryMetadata.set(data.selectedModel, {
+                  selectedModel: data.selectedModel,
+                  prompt_content: data.prompt_content,
+                  prompt_id: data.prompt_id
+                })
+              }
+              return result
+            },
+            saveMessageOnError: async (data: SaveMessageErrorData) => {
+              const result = await compareChatModeParams.saveMessageOnError({
+                ...data,
+                deferHistoryMetadata: Boolean(compareServicePromptSnapshot)
+              })
+              if (compareServicePromptSnapshot) {
+                deferredHistoryMetadata.set(data.selectedModel, {
+                  selectedModel: data.selectedModel,
+                  prompt_content: data.prompt_content,
+                  prompt_id: data.prompt_id
+                })
+              }
+              return result
+            }
           }
 
           const comparePromises = models.map(async (modelId) => {
@@ -3692,6 +3932,12 @@ export const useChatActions = ({
                 )
               )
             } catch (e) {
+              if (
+                compareScopeInvalidated() ||
+                isRequestConfigScopeChangedError(e)
+              ) {
+                return chatSubmitSkipped("Request scope changed")
+              }
               const errorMessage =
                 e instanceof Error
                   ? e.message
@@ -3706,11 +3952,88 @@ export const useChatActions = ({
 
           markSteeringApplied()
           const compareResults = await Promise.all(comparePromises)
-          refreshHistoryFromMessages()
+          let requestScopeChanged = Boolean(
+            compareServicePromptSnapshot && (
+              compareScopeInvalidated() ||
+              compareResults.some(
+                (result) =>
+                  result.status === "skipped" &&
+                  result.reason === "Request scope changed"
+              )
+            )
+          )
+          if (
+            !requestScopeChanged &&
+            compareServicePromptSnapshot &&
+            !temporaryChat &&
+            activeHistoryId
+          ) {
+            const metadata = [...models]
+              .reverse()
+              .map((modelId) => deferredHistoryMetadata.get(modelId))
+              .find((entry) => entry !== undefined)
+            if (metadata) {
+              try {
+                await runChatPersistenceTransaction(
+                  compareServicePromptSnapshot.scopeInvalidatedSignal,
+                  async () => {
+                    await updateLastUsedModel(
+                      activeHistoryId!,
+                      metadata.selectedModel
+                    )
+                    if (metadata.prompt_id || metadata.prompt_content) {
+                      await updateLastUsedPrompt(activeHistoryId!, {
+                        prompt_content: metadata.prompt_content,
+                        prompt_id: metadata.prompt_id
+                      })
+                    }
+                    if (!scopedCreatedHistory) {
+                      await updateChatHistoryCreatedAt(activeHistoryId!)
+                    }
+                  }
+                )
+              } catch (error) {
+                if (
+                  isRequestConfigScopeChangedError(error) ||
+                  compareScopeInvalidated()
+                ) {
+                  requestScopeChanged = true
+                } else {
+                  throw error
+                }
+              }
+            }
+          }
+          if (requestScopeChanged) {
+            // Fan-out requests cannot share one database transaction. Restore
+            // the shared in-memory turn and compensate the local pre-branch
+            // commit after every branch has settled.
+            setMessages(baseMessages)
+            setHistory(baseHistory)
+            if (!temporaryChat && activeHistoryId) {
+              await rollbackScopedComparePersistence({
+                clusterId,
+                historyId: activeHistoryId,
+                removeHistory: Boolean(scopedCreatedHistory)
+              })
+            }
+          } else if (compareServicePromptSnapshot) {
+            if (temporaryChat) {
+              if (historyId !== "temp") setHistoryId("temp")
+            } else if (scopedCreatedHistory) {
+              updatePageTitle(scopedCreatedHistory.title)
+              setHistoryId(scopedCreatedHistory.id)
+              markCompareHistoryCreated(scopedCreatedHistory.id)
+            }
+          }
+          if (!requestScopeChanged) refreshHistoryFromMessages()
           setIsProcessing(false)
           setStreaming(false)
           setAbortController(null)
           activeAbortControllerRef.current = null
+          if (requestScopeChanged) {
+            return chatSubmitSkipped("Request scope changed")
+          }
           return aggregateChatSubmitResults(compareResults)
         }
       }
@@ -3730,6 +4053,8 @@ export const useChatActions = ({
       setStreaming(false)
       return chatSubmitFailed(errorMessage)
     } finally {
+      if (compareServicePromptSnapshot) compareServicePromptSnapshot.release()
+      if (turnServicePromptSnapshot) turnServicePromptSnapshot.release()
       if (replyActive && capturedReplyTargetId != null) {
         const currentReplyTarget = useStoreMessageOption.getState().replyTarget
         if (currentReplyTarget?.id === capturedReplyTargetId) {
@@ -3787,14 +4112,43 @@ export const useChatActions = ({
       clusterId,
       modelId
     )
+    let replyServicePromptSnapshot: ServicePromptSnapshot | undefined
 
     try {
+      const replyShouldUseRag = shouldUseRagForTurn({
+        selectedKnowledge,
+        fileRetrievalEnabled,
+        ragMediaIds: resolveTurnRagMediaIds({
+          requestOverrides: null,
+          ragMediaIds
+        })
+      })
+      const replyPromptIds: Parameters<typeof loadServicePromptSnapshot>[0] =
+        contextFiles.length > 0
+          ? ["chat.rag.answer", "chat.rag.question_rewrite"]
+          : documentContext && documentContext.length > 0
+            ? ["chat.rag.answer"]
+            : replyShouldUseRag
+              ? ["chat.rag.answer", "chat.rag.question_rewrite"]
+              : webSearch
+                ? ["chat.web_search.answer"]
+                : []
+      if (replyPromptIds.length > 0) {
+        replyServicePromptSnapshot = await loadServicePromptSnapshot(
+          replyPromptIds,
+          { signal }
+        )
+        for (const promptId of replyPromptIds) {
+          getRequiredServicePrompt(replyServicePromptSnapshot, promptId)
+        }
+      }
       const chatModeParams = await buildChatModeParams({
         messageSteering: messageSteeringForTurn
       })
       const enhancedChatModeParams = {
         ...chatModeParams,
-        uploadedFiles: uploadedFiles
+        uploadedFiles: uploadedFiles,
+        servicePromptSnapshot: replyServicePromptSnapshot
       }
       const historyForModel = buildHistoryForModel(baseMessages, modelId)
       const perModelOverrides = {
@@ -3821,7 +4175,8 @@ export const useChatActions = ({
           contextFiles,
           {
             ...chatModeParams,
-            ...perModelOverrides
+            ...perModelOverrides,
+            servicePromptSnapshot: replyServicePromptSnapshot
           }
         )
         return
@@ -3838,21 +4193,14 @@ export const useChatActions = ({
           signal,
           {
             ...chatModeParams,
-            ...perModelOverrides
+            ...perModelOverrides,
+            servicePromptSnapshot: replyServicePromptSnapshot
           }
         )
         return
       }
 
-      const shouldUseRag = shouldUseRagForTurn({
-        selectedKnowledge,
-        fileRetrievalEnabled,
-        ragMediaIds: resolveTurnRagMediaIds({
-          requestOverrides: null,
-          ragMediaIds
-        })
-      })
-      if (shouldUseRag) {
+      if (replyShouldUseRag) {
         await ragMode(
           trimmed,
           "",
@@ -3862,7 +4210,8 @@ export const useChatActions = ({
           signal,
           {
             ...chatModeParams,
-            ...perModelOverrides
+            ...perModelOverrides,
+            servicePromptSnapshot: replyServicePromptSnapshot
           }
         )
         return
@@ -3888,6 +4237,7 @@ export const useChatActions = ({
         description: errorMessage
       })
     } finally {
+      replyServicePromptSnapshot?.release()
       // Only reset shared streaming state if this turn still owns the
       // controller (an inner chat mode may already have released it).
       if (releaseAbortControllerIfOwned(signal)) {

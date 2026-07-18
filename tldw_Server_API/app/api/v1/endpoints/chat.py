@@ -50,7 +50,16 @@ from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
 # ---------------------------------------------------------------------------
 # Imports
 # ---------------------------------------------------------------------------
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal, get_request_user, rbac_rate_limit, RequirePermission, resolve_user_id_for_request, TokenScopeGuard, User
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    get_auth_principal,
+    get_request_user,
+    rbac_rate_limit,
+    require_expected_user,
+    RequirePermission,
+    resolve_user_id_for_request,
+    TokenScopeGuard,
+    User,
+)
 from tldw_Server_API.app.core.Utils.image_validation import (
     get_max_base64_bytes,
     validate_image_url,
@@ -3095,6 +3104,7 @@ async def _persist_system_message_if_needed(
         status.HTTP_504_GATEWAY_TIMEOUT: {"description": "Upstream LLM provider timed out."},
     },
     dependencies=[
+        Depends(require_expected_user),
         Depends(rbac_rate_limit("chat.create")),
         Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="chat.completions", count_as="call")),
         Depends(get_auth_principal),  # Establish AuthPrincipal/AuthContext early for guardrails

@@ -49,13 +49,24 @@ vi.mock("@/services/app", () => ({
 
 vi.mock("@/services/rag/unified-rag", () => ({
   DEFAULT_RAG_SETTINGS: {
+    collection_id: null,
     include_note_ids: [],
     include_media_ids: [],
+    ground_truth_doc_ids: [],
     top_k: 8,
     search_mode: "hybrid",
     enable_generation: true,
     enable_citations: true,
-    enable_intent_routing: true
+    enable_intent_routing: true,
+    accumulation_time_budget_sec: null,
+    subquery_time_budget_sec: null,
+    subquery_doc_budget: null,
+    grading_model: null,
+    grading_provider: null,
+    fast_hallucination_provider: null,
+    fast_hallucination_model: null,
+    utility_grading_provider: null,
+    utility_grading_model: null
   }
 }))
 
@@ -116,7 +127,17 @@ import { __testing__ } from "../ragMode"
 
 const servicePromptSnapshot = {
   scopeKey: "test-scope",
+  requestScope: {
+    config: {
+      serverUrl: "https://example.test",
+      authMode: "single-user" as const
+    },
+    userId: 1
+  },
   capability: "supported" as const,
+  scopeSignal: new AbortController().signal,
+  scopeInvalidatedSignal: new AbortController().signal,
+  release: vi.fn(),
   definitions: {
     "chat.rag.answer": {
       definition: {
@@ -247,6 +268,79 @@ describe("ragMode sanitizer", () => {
     expect(sanitized).toEqual({ include_media_ids: [321] })
   })
 
+  it("preserves validated ground-truth document id arrays", () => {
+    const sanitized = __testing__.sanitizeRagAdvancedOptions({
+      ground_truth_doc_ids: [" doc-1 ", "doc-2"]
+    })
+
+    expect(sanitized.ground_truth_doc_ids).toEqual(["doc-1", "doc-2"])
+  })
+
+  it("preserves finite values and nulls for nullable numeric settings", () => {
+    const sanitized = __testing__.sanitizeRagAdvancedOptions({
+      collection_id: 7,
+      accumulation_time_budget_sec: null,
+      subquery_time_budget_sec: 1.5,
+      subquery_doc_budget: 4
+    })
+    const cleared = __testing__.sanitizeRagAdvancedOptions({
+      collection_id: null,
+      accumulation_time_budget_sec: 0,
+      subquery_time_budget_sec: null,
+      subquery_doc_budget: null
+    })
+
+    expect(sanitized).toEqual({
+      collection_id: 7,
+      accumulation_time_budget_sec: null,
+      subquery_time_budget_sec: 1.5,
+      subquery_doc_budget: 4
+    })
+    expect(cleared).toEqual({
+      collection_id: null,
+      accumulation_time_budget_sec: 0,
+      subquery_time_budget_sec: null,
+      subquery_doc_budget: null
+    })
+  })
+
+  it("preserves trimmed values and nulls for nullable string settings", () => {
+    const sanitized = __testing__.sanitizeRagAdvancedOptions({
+      grading_model: " grader-model ",
+      grading_provider: null,
+      fast_hallucination_provider: " fast-provider ",
+      fast_hallucination_model: null,
+      utility_grading_provider: " utility-provider ",
+      utility_grading_model: null
+    })
+
+    expect(sanitized).toEqual({
+      grading_model: "grader-model",
+      grading_provider: null,
+      fast_hallucination_provider: "fast-provider",
+      fast_hallucination_model: null,
+      utility_grading_provider: "utility-provider",
+      utility_grading_model: null
+    })
+  })
+
+  it("rejects malformed advanced settings and transport controls", () => {
+    const sanitized = __testing__.sanitizeRagAdvancedOptions({
+      ground_truth_doc_ids: ["doc-1", 2],
+      collection_id: "7",
+      accumulation_time_budget_sec: Number.NaN,
+      subquery_time_budget_sec: Number.POSITIVE_INFINITY,
+      subquery_doc_budget: "4",
+      grading_model: 1,
+      grading_provider: "  ",
+      signal: new AbortController().signal,
+      requestScope: { userId: 1 },
+      query: "do not override the submitted query"
+    })
+
+    expect(sanitized).toEqual({})
+  })
+
   it("disables intent routing and reuses retrieval for selected workspace media sources", async () => {
     mocks.ragSearch.mockResolvedValue({
       documents: [
@@ -354,6 +448,20 @@ describe("ragMode sanitizer", () => {
       fullText: expect.stringContaining("Could you clarify")
     })
     expect(response?.fullText).toContain("did not send this as general chat")
+  })
+
+  it("does not convert a selected-source scope rejection into a handled response", async () => {
+    const scopeError = Object.assign(new Error("scope changed"), {
+      status: 412,
+      details: {
+        detail: { code: "request_config_scope_changed" }
+      }
+    })
+    mocks.ragSearch.mockRejectedValueOnce(scopeError)
+
+    await expect(
+      __testing__.ragModeDefinition.preflight?.(createRagContext())
+    ).rejects.toBe(scopeError)
   })
 
   it("does not require an LLM query rewrite before retrieving selected workspace media sources", async () => {

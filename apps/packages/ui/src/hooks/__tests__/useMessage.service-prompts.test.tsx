@@ -18,10 +18,14 @@ const mocks = vi.hoisted(() => {
     info: vi.fn(),
     success: vi.fn()
   }
-  const saveMessageOnSuccess = vi.fn(async () => undefined)
-  const saveMessageOnError = vi.fn(async () => false)
+  const saveMessageOnSuccess = vi.fn<
+    (payload: any) => Promise<string | undefined>
+  >(async () => undefined)
+  const saveMessageOnError = vi.fn<
+    (payload: any) => Promise<string | false>
+  >(async () => false)
   const finalModel = {
-    stream: vi.fn(async () => []),
+    stream: vi.fn<(...args: any[]) => Promise<any>>(async () => []),
     invoke: vi.fn()
   }
   const rewriteModel = {
@@ -146,9 +150,23 @@ const mocks = vi.hoisted(() => {
   const makeSnapshot = (
     capability: "supported" | "legacy-404" = "supported",
     answerTemplate = "custom answer {context} :: {question}",
-    rewriteTemplate = "custom rewrite {chat_history} :: {question}"
+    rewriteTemplate = "custom rewrite {chat_history} :: {question}",
+    lifetime?: {
+      scopeSignal?: AbortSignal
+      scopeInvalidatedSignal?: AbortSignal
+      release?: () => void
+    }
   ) => Object.freeze({
     scopeKey: "scope:user-1",
+    requestScope: Object.freeze({
+      config: Object.freeze({
+        serverUrl: "https://example.test",
+        authMode: "multi-user" as const,
+        authSource: "manual" as const,
+        orgId: 9
+      }),
+      userId: 42
+    }),
     capability,
     definitions: Object.freeze({
       "chat.rag.answer": Object.freeze({
@@ -163,7 +181,11 @@ const mocks = vi.hoisted(() => {
         source: "user" as const,
         revision: capability === "supported" ? "rewrite-revision" : null
       })
-    })
+    }),
+    scopeSignal: lifetime?.scopeSignal ?? new AbortController().signal,
+    scopeInvalidatedSignal:
+      lifetime?.scopeInvalidatedSignal ?? new AbortController().signal,
+    release: lifetime?.release ?? vi.fn()
   })
 
   return {
@@ -430,7 +452,9 @@ describe("useMessage legacy Sidepanel Service Prompts", () => {
         }
       ]
     })
-    mocks.addMedia.mockResolvedValue(undefined)
+    mocks.addMedia.mockResolvedValue({
+      results: [{ status: "Success", db_id: 321 }]
+    })
     mocks.humanMessageFormatter.mockImplementation(async (input: unknown) => input)
     mocks.renderServicePromptPart.mockImplementation(
       (_definition: unknown, _partKey: string, authored: string, values: Record<string, string>) =>
@@ -635,6 +659,15 @@ describe("useMessage legacy Sidepanel Service Prompts", () => {
 
   it("releases controller ownership when the Sidepanel preamble fails", async () => {
     const controller = new AbortController()
+    const release = vi.fn()
+    mocks.loadServicePromptSnapshot.mockResolvedValueOnce(
+      mocks.makeSnapshot(
+        "supported",
+        "custom answer {context} :: {question}",
+        "custom rewrite {chat_history} :: {question}",
+        { release }
+      )
+    )
     mocks.pageAssistModel.mockRejectedValueOnce(new Error("preamble failed"))
     const { result } = renderHook(() => useMessage())
 
@@ -650,10 +683,48 @@ describe("useMessage legacy Sidepanel Service Prompts", () => {
     const releaseController = mocks.setAbortController.mock.calls.at(-1)?.[0]
     expect(releaseController).toEqual(expect.any(Function))
     expect(releaseController(controller)).toBeNull()
+    expect(release).toHaveBeenCalledTimes(1)
+  })
+
+  it("releases the prompt scope when pre-dispatch setup throws", async () => {
+    const controller = new AbortController()
+    const release = vi.fn()
+    mocks.loadServicePromptSnapshot.mockResolvedValueOnce(
+      mocks.makeSnapshot(
+        "supported",
+        "custom answer {context} :: {question}",
+        "custom rewrite {chat_history} :: {question}",
+        { release }
+      )
+    )
+    mocks.resetChatLoopState.mockImplementationOnce(() => {
+      throw new Error("pre-dispatch setup failed")
+    })
+    const { result } = renderHook(() => useMessage())
+
+    await act(async () => {
+      await expect(result.current.onSubmit({
+        message: "Current follow-up",
+        image: "",
+        controller
+      })).rejects.toThrow("pre-dispatch setup failed")
+    })
+
+    expect(release).toHaveBeenCalledTimes(1)
+    const releaseController = mocks.setAbortController.mock.calls.at(-1)?.[0]
+    expect(releaseController).toEqual(expect.any(Function))
+    expect(releaseController(controller)).toBeNull()
   })
 
   it("reuses the snapshot for a tool-disabled rewrite and the final Sidepanel answer", async () => {
-    const snapshot = mocks.makeSnapshot()
+    const scopeController = new AbortController()
+    const release = vi.fn()
+    const snapshot = mocks.makeSnapshot(
+      "supported",
+      "custom answer {context} :: {question}",
+      "custom rewrite {chat_history} :: {question}",
+      { scopeSignal: scopeController.signal, release }
+    )
     mocks.loadServicePromptSnapshot.mockResolvedValue(snapshot)
     const controller = new AbortController()
     const { result } = renderHook(() => useMessage())
@@ -667,13 +738,15 @@ describe("useMessage legacy Sidepanel Service Prompts", () => {
     })
 
     expect(mocks.pageAssistModel).toHaveBeenNthCalledWith(1, {
-      model: "model-1"
+      model: "model-1",
+      requestScope: snapshot.requestScope
     })
     expect(mocks.pageAssistModel).toHaveBeenNthCalledWith(2, {
       model: "model-1",
       toolChoice: "none",
       tools: [],
-      saveToDb: false
+      saveToDb: false,
+      requestScope: snapshot.requestScope
     })
     expect(mocks.renderServicePromptPart).toHaveBeenNthCalledWith(
       1,
@@ -691,9 +764,18 @@ describe("useMessage legacy Sidepanel Service Prompts", () => {
     )
     expect(mocks.ragSearch).toHaveBeenCalledWith("standalone retrieval query", {
       top_k: 4,
-      filters: { url: "https://source.example/page" }
+      sources: ["media_db"],
+      include_media_ids: [321],
+      signal: scopeController.signal,
+      requestScope: snapshot.requestScope
     })
-    expect(mocks.addMedia).toHaveBeenCalledWith("https://source.example/page")
+    expect(mocks.addMedia).toHaveBeenCalledWith("https://source.example/page", {
+      signal: scopeController.signal,
+      requestScope: snapshot.requestScope
+    })
+    expect(mocks.addMedia.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.ragSearch.mock.invocationCallOrder[0]
+    )
     expect(mocks.renderServicePromptPart).toHaveBeenNthCalledWith(
       2,
       snapshot.definitions["chat.rag.answer"]?.definition,
@@ -751,13 +833,14 @@ describe("useMessage legacy Sidepanel Service Prompts", () => {
       model: "model-1",
       useOCR: true
     })
-    expect(mocks.rewriteModel.invoke).toHaveBeenCalledWith([
-      await rewriteMessage
-    ])
+    expect(mocks.rewriteModel.invoke).toHaveBeenCalledWith(
+      [await rewriteMessage],
+      { signal: scopeController.signal }
+    )
     expect(mocks.finalModel.stream).toHaveBeenCalledWith(
       [await finalMessage],
       {
-        signal: controller.signal,
+        signal: scopeController.signal,
         callbacks: [
           {
             handleLLMEnd: expect.any(Function)
@@ -765,5 +848,387 @@ describe("useMessage legacy Sidepanel Service Prompts", () => {
         ]
       }
     )
+    expect(release).toHaveBeenCalledTimes(1)
+  })
+
+  it("falls back to inline context when best-effort media ingest fails normally", async () => {
+    mocks.addMedia.mockRejectedValueOnce(new Error("ingest unavailable"))
+    const snapshot = mocks.makeSnapshot()
+    mocks.loadServicePromptSnapshot.mockResolvedValue(snapshot)
+    const { result } = renderHook(() => useMessage())
+
+    await act(async () => {
+      await result.current.onSubmit({
+        message: "Current follow-up",
+        image: "",
+        controller: new AbortController()
+      })
+    })
+
+    expect(mocks.addMedia).toHaveBeenCalledWith("https://source.example/page", {
+      signal: snapshot.scopeSignal,
+      requestScope: snapshot.requestScope
+    })
+    expect(mocks.ragSearch).not.toHaveBeenCalled()
+    expect(mocks.saveMessageOnSuccess).toHaveBeenCalledTimes(1)
+  })
+
+  it("stops Sidepanel retrieval when media ingest rejects the captured account", async () => {
+    mocks.addMedia.mockRejectedValueOnce(Object.assign(new Error("scope changed"), {
+      status: 412,
+      details: {
+        detail: { code: "request_config_scope_changed" }
+      }
+    }))
+    const snapshot = mocks.makeSnapshot()
+    mocks.loadServicePromptSnapshot.mockResolvedValue(snapshot)
+    const { result } = renderHook(() => useMessage())
+
+    await act(async () => {
+      await result.current.onSubmit({
+        message: "Current follow-up",
+        image: "",
+        controller: new AbortController()
+      })
+    })
+
+    expect(mocks.ragSearch).not.toHaveBeenCalled()
+    expect(mocks.saveMessageOnSuccess).not.toHaveBeenCalled()
+    expect(mocks.saveMessageOnError).not.toHaveBeenCalled()
+    expect(mocks.setMessages).toHaveBeenLastCalledWith(mocks.storeState.messages)
+    expect(mocks.setHistory).toHaveBeenLastCalledWith(mocks.history)
+  })
+
+  it("discards partial Sidepanel output when the prompt scope changes", async () => {
+    const scopeController = new AbortController()
+    const release = vi.fn()
+    mocks.loadServicePromptSnapshot.mockResolvedValue(
+      mocks.makeSnapshot(
+        "supported",
+        "custom answer {context} :: {question}",
+        "custom rewrite {chat_history} :: {question}",
+        {
+          scopeSignal: scopeController.signal,
+          scopeInvalidatedSignal: scopeController.signal,
+          release
+        }
+      )
+    )
+    mocks.finalModel.stream.mockResolvedValueOnce(
+      (async function* () {
+        yield "partial old-scope answer"
+        scopeController.abort()
+      })()
+    )
+    const { result } = renderHook(() => useMessage())
+
+    await act(async () => {
+      await result.current.onSubmit({
+        message: "Current follow-up",
+        image: "",
+        controller: new AbortController()
+      })
+    })
+
+    expect(mocks.saveMessageOnSuccess).not.toHaveBeenCalled()
+    expect(mocks.saveMessageOnError).not.toHaveBeenCalled()
+    expect(mocks.setMessages).toHaveBeenLastCalledWith(mocks.storeState.messages)
+    expect(mocks.setHistory).toHaveBeenLastCalledWith(mocks.history)
+    expect(release).toHaveBeenCalledTimes(1)
+  })
+
+  it("discards a server-rejected Sidepanel turn before the scope signal aborts", async () => {
+    const scopeChangedError = Object.assign(new Error("scope changed"), {
+      status: 412,
+      details: {
+        detail: { code: "request_config_scope_changed" }
+      }
+    })
+    const release = vi.fn()
+    mocks.loadServicePromptSnapshot.mockResolvedValue(
+      mocks.makeSnapshot(
+        "supported",
+        "custom answer {context} :: {question}",
+        "custom rewrite {chat_history} :: {question}",
+        { release }
+      )
+    )
+    mocks.finalModel.stream.mockResolvedValueOnce(
+      (async function* () {
+        yield "partial old-scope answer"
+        throw scopeChangedError
+      })()
+    )
+    const { result } = renderHook(() => useMessage())
+
+    await act(async () => {
+      await result.current.onSubmit({
+        message: "Current follow-up",
+        image: "",
+        controller: new AbortController()
+      })
+    })
+
+    expect(mocks.saveMessageOnSuccess).not.toHaveBeenCalled()
+    expect(mocks.saveMessageOnError).not.toHaveBeenCalled()
+    expect(mocks.setMessages).toHaveBeenLastCalledWith(mocks.storeState.messages)
+    expect(mocks.setHistory).toHaveBeenLastCalledWith(mocks.history)
+    expect(release).toHaveBeenCalledTimes(1)
+  })
+
+  it("discards a Sidepanel turn when its prompt scope changes during final persistence", async () => {
+    let resolveSave!: () => void
+    const pendingSave = new Promise<void>((resolve) => {
+      resolveSave = resolve
+    })
+    mocks.saveMessageOnSuccess.mockReturnValueOnce(pendingSave)
+    const scopeController = new AbortController()
+    const release = vi.fn()
+    const snapshot = mocks.makeSnapshot(
+      "supported",
+      "custom answer {context} :: {question}",
+      "custom rewrite {chat_history} :: {question}",
+      {
+        scopeSignal: scopeController.signal,
+        scopeInvalidatedSignal: scopeController.signal,
+        release
+      }
+    )
+    mocks.loadServicePromptSnapshot.mockResolvedValue(snapshot)
+    const { result } = renderHook(() => useMessage())
+
+    const submission = result.current.onSubmit({
+      message: "Current follow-up",
+      image: "",
+      controller: new AbortController()
+    })
+    await vi.waitFor(() => {
+      expect(mocks.saveMessageOnSuccess).toHaveBeenCalledTimes(1)
+    })
+    expect(mocks.saveMessageOnSuccess).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestScope: snapshot.requestScope,
+        scopeSignal: scopeController.signal
+      })
+    )
+    scopeController.abort()
+    resolveSave()
+
+    await act(async () => {
+      await submission
+    })
+
+    expect(mocks.saveMessageOnError).not.toHaveBeenCalled()
+    expect(mocks.setMessages).toHaveBeenLastCalledWith(mocks.storeState.messages)
+    expect(mocks.setHistory).toHaveBeenLastCalledWith(mocks.history)
+    expect(release).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not duplicate a completed Sidepanel turn when Stop fires during final persistence", async () => {
+    let resolveSave!: () => void
+    const pendingSave = new Promise<void>((resolve) => {
+      resolveSave = resolve
+    })
+    mocks.saveMessageOnSuccess.mockReturnValueOnce(pendingSave)
+    const userController = new AbortController()
+    const executionController = new AbortController()
+    const scopeController = new AbortController()
+    const release = vi.fn()
+    const snapshot = mocks.makeSnapshot(
+      "supported",
+      "custom answer {context} :: {question}",
+      "custom rewrite {chat_history} :: {question}",
+      {
+        scopeSignal: executionController.signal,
+        scopeInvalidatedSignal: scopeController.signal,
+        release
+      }
+    )
+    mocks.loadServicePromptSnapshot.mockResolvedValue(snapshot)
+    const { result } = renderHook(() => useMessage())
+
+    const submission = result.current.onSubmit({
+      message: "Current follow-up",
+      image: "",
+      controller: userController
+    })
+    await vi.waitFor(() => {
+      expect(mocks.saveMessageOnSuccess).toHaveBeenCalledTimes(1)
+    })
+
+    userController.abort()
+    executionController.abort()
+    resolveSave()
+
+    await act(async () => {
+      await submission
+    })
+
+    expect(scopeController.signal.aborted).toBe(false)
+    expect(mocks.saveMessageOnError).not.toHaveBeenCalled()
+    expect(mocks.setMessages).not.toHaveBeenLastCalledWith(
+      mocks.storeState.messages
+    )
+    expect(mocks.setHistory).not.toHaveBeenLastCalledWith(mocks.history)
+    expect(release).toHaveBeenCalledTimes(1)
+  })
+
+  it("persists a manual-stop Sidepanel partial under a scoped lease", async () => {
+    const userController = new AbortController()
+    const executionController = new AbortController()
+    const scopeController = new AbortController()
+    const release = vi.fn()
+    const snapshot = mocks.makeSnapshot(
+      "supported",
+      "custom answer {context} :: {question}",
+      "custom rewrite {chat_history} :: {question}",
+      {
+        scopeSignal: executionController.signal,
+        scopeInvalidatedSignal: scopeController.signal,
+        release
+      }
+    )
+    mocks.loadServicePromptSnapshot.mockResolvedValue(snapshot)
+    mocks.finalModel.stream.mockResolvedValueOnce(
+      (async function* () {
+        yield "partial answer"
+        userController.abort()
+        executionController.abort()
+      })()
+    )
+    const { result } = renderHook(() => useMessage())
+
+    await act(async () => {
+      await result.current.onSubmit({
+        message: "Current follow-up",
+        image: "",
+        controller: userController
+      })
+    })
+
+    expect(mocks.saveMessageOnError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        botMessage: expect.stringContaining("partial answer"),
+        requestScope: snapshot.requestScope,
+        scopeSignal: executionController.signal,
+        scopeInvalidatedSignal: scopeController.signal,
+        shouldAbortForScopeChange: expect.any(Function)
+      })
+    )
+    const [savePayload] = mocks.saveMessageOnError.mock.calls.at(-1)!
+    expect(savePayload.shouldAbortForScopeChange()).toBe(false)
+    expect(release).toHaveBeenCalledTimes(1)
+  })
+
+  it("discards a Sidepanel turn when its prompt scope changes during error persistence", async () => {
+    let resolveSave!: (value: string) => void
+    const pendingSave = new Promise<string>((resolve) => {
+      resolveSave = resolve
+    })
+    mocks.saveMessageOnError.mockReturnValueOnce(pendingSave)
+    const executionController = new AbortController()
+    const scopeController = new AbortController()
+    const release = vi.fn()
+    const snapshot = mocks.makeSnapshot(
+      "supported",
+      "custom answer {context} :: {question}",
+      "custom rewrite {chat_history} :: {question}",
+      {
+        scopeSignal: executionController.signal,
+        scopeInvalidatedSignal: scopeController.signal,
+        release
+      }
+    )
+    mocks.loadServicePromptSnapshot.mockResolvedValue(snapshot)
+    mocks.finalModel.stream.mockResolvedValueOnce(
+      (async function* () {
+        yield "partial answer"
+        throw new Error("provider failed")
+      })()
+    )
+    const { result } = renderHook(() => useMessage())
+
+    const submission = result.current.onSubmit({
+      message: "Current follow-up",
+      image: "",
+      controller: new AbortController()
+    })
+    await vi.waitFor(() => {
+      expect(mocks.saveMessageOnError).toHaveBeenCalledTimes(1)
+    })
+    const [savePayload] = mocks.saveMessageOnError.mock.calls[0]!
+    expect(savePayload).toMatchObject({
+      requestScope: snapshot.requestScope,
+      scopeSignal: executionController.signal,
+      scopeInvalidatedSignal: scopeController.signal
+    })
+    expect(savePayload.shouldAbortForScopeChange).toEqual(expect.any(Function))
+    scopeController.abort()
+    expect(savePayload.shouldAbortForScopeChange()).toBe(true)
+    resolveSave("history-1")
+
+    await act(async () => {
+      await submission
+    })
+
+    expect(mocks.setMessages).toHaveBeenLastCalledWith(mocks.storeState.messages)
+    expect(mocks.setHistory).toHaveBeenLastCalledWith(mocks.history)
+    expect(release).toHaveBeenCalledTimes(1)
+  })
+
+  it("discards a stopped Sidepanel turn if its account changes during error persistence", async () => {
+    let resolveSave!: (value: string) => void
+    const pendingSave = new Promise<string>((resolve) => {
+      resolveSave = resolve
+    })
+    mocks.saveMessageOnError.mockReturnValueOnce(pendingSave)
+    const userController = new AbortController()
+    const executionController = new AbortController()
+    const scopeController = new AbortController()
+    const release = vi.fn()
+    const snapshot = mocks.makeSnapshot(
+      "supported",
+      "custom answer {context} :: {question}",
+      "custom rewrite {chat_history} :: {question}",
+      {
+        scopeSignal: executionController.signal,
+        scopeInvalidatedSignal: scopeController.signal,
+        release
+      }
+    )
+    mocks.loadServicePromptSnapshot.mockResolvedValue(snapshot)
+    mocks.finalModel.stream.mockResolvedValueOnce(
+      (async function* () {
+        yield "partial answer"
+        throw new Error("provider failed")
+      })()
+    )
+    const { result } = renderHook(() => useMessage())
+
+    const submission = result.current.onSubmit({
+      message: "Current follow-up",
+      image: "",
+      controller: userController
+    })
+    await vi.waitFor(() => {
+      expect(mocks.saveMessageOnError).toHaveBeenCalledTimes(1)
+    })
+    const [savePayload] = mocks.saveMessageOnError.mock.calls[0]!
+
+    userController.abort()
+    executionController.abort()
+    expect(savePayload.shouldAbortForScopeChange()).toBe(false)
+
+    scopeController.abort()
+    expect(savePayload.shouldAbortForScopeChange()).toBe(true)
+    resolveSave("history-1")
+
+    await act(async () => {
+      await submission
+    })
+
+    expect(mocks.setMessages).toHaveBeenLastCalledWith(mocks.storeState.messages)
+    expect(mocks.setHistory).toHaveBeenLastCalledWith(mocks.history)
+    expect(release).toHaveBeenCalledTimes(1)
   })
 })

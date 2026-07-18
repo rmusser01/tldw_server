@@ -33,10 +33,12 @@ import {
 
 const mocks = vi.hoisted(() => ({
   confirmDanger: vi.fn(),
+  initialize: vi.fn(),
   resolveScope: vi.fn(),
   readLegacy: vi.fn(),
   clearLegacy: vi.fn(),
   importLegacy: vi.fn(),
+  subscribeConfig: vi.fn(),
   renderPart: vi.fn(),
   list: vi.fn(),
   get: vi.fn(),
@@ -60,6 +62,7 @@ vi.mock("@/components/Common/confirm-danger", async () => {
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
+    initialize: (...args: unknown[]) => mocks.initialize(...args),
     listServicePrompts: (...args: unknown[]) => mocks.list(...args),
     getServicePrompt: (...args: unknown[]) => mocks.get(...args),
     saveServicePrompt: (...args: unknown[]) => mocks.save(...args),
@@ -81,6 +84,8 @@ vi.mock("@/services/service-prompts", async () => {
       mocks.clearLegacy(...args),
     importLegacyServicePromptCandidate: (...args: unknown[]) =>
       mocks.importLegacy(...args),
+    subscribeToServicePromptConfigChanges: (...args: unknown[]) =>
+      mocks.subscribeConfig(...args),
     renderServicePromptPart: (...args: Parameters<typeof actual.renderServicePromptPart>) => {
       mocks.renderPart(...args)
       return actual.renderServicePromptPart(...args)
@@ -216,19 +221,32 @@ const detailFor = (
 const scopeOne = {
   config: {
     serverUrl: "https://research-one.test",
-    authMode: "multi-user" as const,
-    accessToken: "secret"
+    authMode: "multi-user" as const
   },
-  scopeKey: "server:research-one:auth:multi-user:org:none:user:42"
+  scopeKey: "server:research-one:auth:multi-user:org:none:user:42",
+  userId: 42
 }
 
 const scopeTwo = {
   config: {
     serverUrl: "https://research-two.test",
-    authMode: "multi-user" as const,
-    accessToken: "other-secret"
+    authMode: "multi-user" as const
   },
-  scopeKey: "server:research-two:auth:multi-user:org:none:user:84"
+  scopeKey: "server:research-two:auth:multi-user:org:none:user:84",
+  userId: 84
+}
+
+const rotatedScopeOne = {
+  ...scopeOne,
+  config: { ...scopeOne.config }
+}
+
+const accountTwoSameServer = {
+  config: {
+    ...scopeOne.config
+  },
+  scopeKey: "server:research-one:auth:multi-user:org:none:user:84",
+  userId: 84
 }
 
 const legacyRagCandidate = {
@@ -343,6 +361,7 @@ describe("ServicePromptsSettings", () => {
   beforeEach(() => {
     vi.resetAllMocks()
     window.history.replaceState({}, "", "/settings/prompt")
+    mocks.initialize.mockResolvedValue(undefined)
     mocks.resolveScope.mockResolvedValue(scopeOne)
     mocks.list.mockResolvedValue(catalog)
     mocks.get.mockImplementation(async (id: string) => {
@@ -371,6 +390,7 @@ describe("ServicePromptsSettings", () => {
         parts: { ...detail.effective_parts, template: candidate.value }
       }
     ))
+    mocks.subscribeConfig.mockImplementation(() => () => undefined)
     mocks.confirmDanger.mockImplementation((options, confirmDanger) =>
       confirmDanger(options)
     )
@@ -738,7 +758,10 @@ describe("ServicePromptsSettings", () => {
           },
           expected_revision: "22222222-2222-4222-8222-222222222222"
         },
-        { signal: expect.any(AbortSignal) }
+        {
+          signal: expect.any(AbortSignal),
+          requestScope: scopeOne
+        }
       )
     })
     expect(await screen.findByText("Customized")).toBeInTheDocument()
@@ -769,7 +792,10 @@ describe("ServicePromptsSettings", () => {
     expect(mocks.save).toHaveBeenCalledWith(
       "chat.rag.answer",
       expect.objectContaining({ parts: { template: submittedValue } }),
-      { signal: expect.any(AbortSignal) }
+      {
+        signal: expect.any(AbortSignal),
+        requestScope: scopeOne
+      }
     )
     expect(screen.getByRole("button", { name: /Save changes/ })).toBeDisabled()
     expect(screen.getByRole("button", { name: "Reset to default" })).toBeDisabled()
@@ -884,7 +910,10 @@ describe("ServicePromptsSettings", () => {
       expect(mocks.reset).toHaveBeenCalledWith(
         "chat.rag.answer",
         "11111111-1111-4111-8111-111111111111",
-        { signal: expect.any(AbortSignal) }
+        {
+          signal: expect.any(AbortSignal),
+          requestScope: scopeOne
+        }
       )
     })
     expect(await screen.findByRole("status")).toHaveTextContent(
@@ -1080,7 +1109,10 @@ describe("ServicePromptsSettings", () => {
       expect(mocks.reset).toHaveBeenCalledWith(
         "chat.rag.answer",
         revision,
-        { signal: expect.any(AbortSignal) }
+        {
+          signal: expect.any(AbortSignal),
+          requestScope: scopeOne
+        }
       )
     })
   })
@@ -1160,7 +1192,10 @@ describe("ServicePromptsSettings", () => {
         2,
         "chat.rag.answer",
         secondRevision,
-        { signal: expect.any(AbortSignal) }
+        {
+          signal: expect.any(AbortSignal),
+          requestScope: scopeOne
+        }
       )
     })
   })
@@ -1186,6 +1221,37 @@ describe("ServicePromptsSettings", () => {
     expect(screen.queryByText("Workflow prompts require a server update"))
       .not.toBeInTheDocument()
   })
+
+  it.each(["catalog", "detail"] as const)(
+    "re-resolves the connected scope when a %s query is rejected as stale",
+    async (query) => {
+      const scopeError = new ServicePromptApiError(
+        "The server or authenticated account changed before the request was sent.",
+        { status: 412, code: "request_config_scope_changed" }
+      )
+      mocks.resolveScope
+        .mockResolvedValueOnce(scopeOne)
+        .mockResolvedValue(scopeTwo)
+      if (query === "catalog") {
+        mocks.list.mockRejectedValueOnce(scopeError).mockResolvedValue(catalog)
+      } else {
+        mocks.get.mockRejectedValueOnce(scopeError)
+      }
+
+      renderSettings()
+      if (query === "detail") {
+        fireEvent.click(await screen.findByRole("button", { name: "RAG answer" }))
+        await screen.findByText("Unable to load this workflow prompt")
+      }
+
+      expect(await screen.findByText(/Server or account changed/i))
+        .toBeInTheDocument()
+      expect(mocks.resolveScope).toHaveBeenCalledTimes(2)
+      expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({
+        requestScope: scopeTwo
+      }))
+    }
+  )
 
   it("shows and retries a legacy probe failure even when no candidates were returned", async () => {
     mocks.readLegacy
@@ -1274,7 +1340,10 @@ describe("ServicePromptsSettings", () => {
         value: "Legacy {context} {question}"
       }),
       expect.objectContaining({ id: "chat.rag.answer" }),
-      { signal: expect.any(AbortSignal) }
+      {
+        signal: expect.any(AbortSignal),
+        requestScope: scopeOne
+      }
     ))
     expect(screen.queryByText("Browser-local workflow prompts found"))
       .not.toBeInTheDocument()
@@ -1303,7 +1372,10 @@ describe("ServicePromptsSettings", () => {
     await waitFor(() => expect(mocks.importLegacy).toHaveBeenCalledWith(
       expect.objectContaining({ value: legacyRagCandidate.value }),
       expect.objectContaining({ id: "chat.rag.answer" }),
-      { signal: expect.any(AbortSignal) }
+      {
+        signal: expect.any(AbortSignal),
+        requestScope: scopeOne
+      }
     ))
     expect(repair).toBeDisabled()
     expect(repair).toHaveValue(legacyRagCandidate.value)
@@ -1395,6 +1467,7 @@ describe("ServicePromptsSettings", () => {
     })
     renderSettings()
     await screen.findByText("Browser-local workflow prompts found")
+    mocks.initialize.mockClear()
 
     fireEvent.click(screen.getByRole("button", { name: "Discard local values" }))
     const dialog = await screen.findByRole("dialog")
@@ -1405,6 +1478,7 @@ describe("ServicePromptsSettings", () => {
       expect(mocks.clearLegacy).toHaveBeenCalledWith("chat.rag.answer")
       expect(mocks.clearLegacy).toHaveBeenCalledWith("chat.web_search.answer")
     })
+    expect(mocks.initialize).not.toHaveBeenCalled()
     expect(await screen.findByText("1 browser-local prompt still needs attention."))
       .toBeInTheDocument()
   })
@@ -1447,7 +1521,10 @@ describe("ServicePromptsSettings", () => {
         .mockResolvedValueOnce([])
       const pendingClear = deferred<void>()
       mocks.clearLegacy.mockReturnValueOnce(pendingClear.promise)
-      mocks.resolveScope.mockResolvedValueOnce(scopeOne).mockResolvedValueOnce(scopeTwo)
+      mocks.resolveScope
+        .mockResolvedValueOnce(scopeOne)
+        .mockResolvedValueOnce(scopeTwo)
+        .mockResolvedValueOnce(scopeTwo)
       renderSettings()
       await screen.findByText("Browser-local workflow prompts found")
       fireEvent.click(screen.getByRole("button", { name: "Discard local values" }))
@@ -1457,7 +1534,7 @@ describe("ServicePromptsSettings", () => {
 
       window.dispatchEvent(new Event("tldw:config-updated"))
       await waitFor(() => {
-        expect(mocks.resolveScope).toHaveBeenCalledTimes(2)
+        expect(mocks.resolveScope).toHaveBeenCalledTimes(3)
         expect(mocks.readLegacy).toHaveBeenCalledTimes(2)
       })
       await act(async () => {
@@ -1509,6 +1586,173 @@ describe("ServicePromptsSettings", () => {
     })
     expect(await screen.findByText(/Server or account changed/i))
       .toBeInTheDocument()
+  })
+
+  it("reconciles cross-tab credentials without discarding a same-user dirty draft", async () => {
+    const unsubscribe = vi.fn()
+    mocks.subscribeConfig.mockReturnValue(unsubscribe)
+    const view = renderSettings()
+    await openPrompt("RAG answer")
+    const editor = screen.getByRole("textbox", { name: "Template" })
+    const authored = "Dirty after rotation {context} {question}"
+    fireEvent.change(editor, { target: { value: authored } })
+    await waitFor(() => expect(mocks.subscribeConfig).toHaveBeenCalled())
+    const latestSubscription = mocks.subscribeConfig.mock.calls.at(-1)
+    const notifyConfigChanged = latestSubscription?.[0] as () => void
+
+    mocks.resolveScope.mockResolvedValue(rotatedScopeOne)
+    act(() => notifyConfigChanged())
+
+    await waitFor(() => expect(mocks.resolveScope).toHaveBeenCalledTimes(2))
+    expect(screen.getByRole("textbox", { name: "Template" })).toHaveValue(authored)
+    expect(screen.getByText("Unsaved")).toBeInTheDocument()
+    expect(screen.queryByText(/Server or account changed/i)).not.toBeInTheDocument()
+
+    mocks.resolveScope.mockResolvedValue(accountTwoSameServer)
+    act(() => notifyConfigChanged())
+
+    expect(await screen.findByText(/Server or account changed/i))
+      .toBeInTheDocument()
+    await waitFor(() => {
+      expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({
+        requestScope: accountTwoSameServer
+      }))
+      expect(screen.queryByRole("textbox", { name: "Template" }))
+        .not.toBeInTheDocument()
+    })
+
+    view.unmount()
+    expect(unsubscribe).toHaveBeenCalled()
+  })
+
+  it.each([
+    "tldw:config-updated",
+    "tldw:auth-credentials-changed"
+  ] as const)(
+    "preserves a dirty draft when %s reconciliation temporarily fails",
+    async (eventName) => {
+      renderSettings()
+      await openPrompt("RAG answer")
+      const editor = screen.getByRole("textbox", { name: "Template" })
+      const authored = "Dirty while offline {context} {question}"
+      fireEvent.change(editor, { target: { value: authored } })
+      mocks.resolveScope.mockRejectedValueOnce(new Error("temporarily offline"))
+
+      window.dispatchEvent(new Event(eventName))
+
+      await waitFor(() => expect(mocks.resolveScope).toHaveBeenCalledTimes(2))
+      expect(screen.queryByRole("textbox", { name: "Template" }))
+        .not.toBeInTheDocument()
+      expect(screen.queryByText("Unsaved")).not.toBeInTheDocument()
+      expect(screen.queryByText(/Server or account changed/i))
+        .not.toBeInTheDocument()
+      expect(screen.queryByRole("button", { name: "Save changes" }))
+        .not.toBeInTheDocument()
+      expect(mocks.save).not.toHaveBeenCalled()
+
+      mocks.resolveScope.mockResolvedValueOnce(rotatedScopeOne)
+      window.dispatchEvent(new Event(eventName))
+
+      await waitFor(() => expect(mocks.resolveScope).toHaveBeenCalledTimes(3))
+      const saveButton = await screen.findByRole("button", {
+        name: "Save changes"
+      })
+      await waitFor(() => expect(saveButton).toBeEnabled())
+      expect(screen.getByRole("textbox", { name: "Template" }))
+        .toHaveValue(authored)
+      expect(screen.getByText("Unsaved")).toBeInTheDocument()
+    }
+  )
+
+  it("ignores a late save result while same-scope verification is pending", async () => {
+    const pendingSave = deferred<ServicePromptDetail>()
+    mocks.save.mockReturnValueOnce(pendingSave.promise)
+    renderSettings()
+    await openPrompt("RAG answer")
+    const authored = "Dirty during verification {context} {question}"
+    fireEvent.change(screen.getByRole("textbox", { name: "Template" }), {
+      target: { value: authored }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
+    await waitFor(() => expect(mocks.save).toHaveBeenCalledOnce())
+
+    mocks.resolveScope.mockRejectedValueOnce(new Error("temporarily offline"))
+    window.dispatchEvent(new Event("tldw:config-updated"))
+    await waitFor(() => expect(mocks.resolveScope).toHaveBeenCalledTimes(2))
+
+    await act(async () => {
+      pendingSave.resolve(detailFor(catalog[0], {
+        source: "user",
+        parts: { template: "Late server value {context} {question}" }
+      }))
+    })
+
+    mocks.resolveScope.mockResolvedValueOnce(rotatedScopeOne)
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }))
+    expect(await screen.findByRole("textbox", { name: "Template" }))
+      .toHaveValue(authored)
+    expect(screen.getByText("Unsaved")).toBeInTheDocument()
+  })
+
+  it("conceals migration values while the server and account are unverified", async () => {
+    mocks.readLegacy.mockResolvedValue([legacyRagCandidate])
+    renderSettings()
+    expect(await screen.findByText("Browser-local workflow prompts found"))
+      .toBeInTheDocument()
+    mocks.resolveScope.mockRejectedValueOnce(new Error("temporarily offline"))
+
+    window.dispatchEvent(new Event("tldw:auth-credentials-changed"))
+
+    await waitFor(() => expect(mocks.resolveScope).toHaveBeenCalledTimes(2))
+    expect(screen.queryByText("Browser-local workflow prompts found"))
+      .not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Discard local values" }))
+      .not.toBeInTheDocument()
+    expect(mocks.clearLegacy).not.toHaveBeenCalled()
+  })
+
+  it("invalidates a dirty draft when authenticated scope becomes unresolved", async () => {
+    const { client } = renderSettings()
+    const cancel = vi.spyOn(client, "cancelQueries")
+    await openPrompt("RAG answer")
+    fireEvent.change(screen.getByRole("textbox", { name: "Template" }), {
+      target: { value: "Dirty before logout {context} {question}" }
+    })
+    mocks.resolveScope.mockRejectedValueOnce(Object.assign(
+      new Error("redacted"),
+      { code: "service_prompt_scope_unresolved" }
+    ))
+
+    window.dispatchEvent(new Event("tldw:auth-credentials-changed"))
+
+    expect(await screen.findByText(/Server or account changed/i))
+      .toBeInTheDocument()
+    expect(cancel).toHaveBeenCalledWith({
+      queryKey: ["service-prompts", scopeOne.scopeKey]
+    })
+    await waitFor(() => {
+      expect(screen.queryByRole("textbox", { name: "Template" }))
+        .not.toBeInTheDocument()
+    })
+  })
+
+  it("invalidates the page when the server rejects a changed request scope", async () => {
+    renderSettings()
+    await openPrompt("RAG answer")
+    fireEvent.change(screen.getByRole("textbox", { name: "Template" }), {
+      target: { value: "Dirty {context} {question}" }
+    })
+    mocks.save.mockRejectedValueOnce(new ServicePromptApiError(
+      "The server or authenticated account changed before the request was sent.",
+      { status: 412, code: "request_config_scope_changed" }
+    ))
+
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
+
+    expect(await screen.findByText(/Server or account changed/i))
+      .toBeInTheDocument()
+    expect(screen.queryByText("This prompt changed on the server."))
+      .not.toBeInTheDocument()
   })
 
   it("guards dirty query selection and eligible same-origin anchor navigation", async () => {

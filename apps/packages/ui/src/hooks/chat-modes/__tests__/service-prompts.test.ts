@@ -146,6 +146,16 @@ import { documentChatMode } from "../documentChatMode"
 import { normalChatMode } from "../normalChatMode"
 import { LEGACY_SERVICE_PROMPT_DEFAULTS } from "~/services/tldw-server"
 
+const requestScope = Object.freeze({
+  config: Object.freeze({
+    serverUrl: "https://example.test",
+    authMode: "single-user" as const,
+    authSource: "manual" as const,
+    orgId: 7
+  }),
+  userId: 42
+})
+
 const definition = (
   id: "chat.rag.answer" | "chat.rag.question_rewrite" | "chat.web_search.answer",
   requiredVariables: readonly string[],
@@ -173,10 +183,14 @@ const snapshot = (
       "chat.rag.answer" | "chat.rag.question_rewrite" | "chat.web_search.answer",
       string
     >
-  > = {}
+  > = {},
+  scopeSignal = new AbortController().signal
 ): ServicePromptSnapshot => ({
   scopeKey: "server:https://example.test|auth:single-user|user:single-user",
+  requestScope,
   capability: "supported",
+  scopeSignal,
+  release: vi.fn(),
   definitions: {
     ...(ids.includes("chat.rag.answer")
       ? {
@@ -313,6 +327,58 @@ beforeEach(() => {
 })
 
 describe("Service Prompt mode wrapper ownership", () => {
+  it("uses and releases a freshly loaded snapshot lease for the whole pipeline", async () => {
+    const scopeController = new AbortController()
+    const release = vi.fn()
+    const resolved: ServicePromptSnapshot = {
+      ...snapshot(["chat.rag.answer", "chat.rag.question_rewrite"]),
+      scopeSignal: scopeController.signal,
+      release
+    }
+    mocks.loadServicePromptSnapshot.mockResolvedValue(resolved)
+    const ownerSignal = new AbortController().signal
+    const releaseAbortControllerIfOwned = vi.fn(() => true)
+
+    await ragMode(
+      "question",
+      "",
+      false,
+      [],
+      [],
+      ownerSignal,
+      { ...ragParams(), releaseAbortControllerIfOwned }
+    )
+
+    expect(mocks.runChatPipeline.mock.calls[0]?.[6]).toBe(scopeController.signal)
+    const pipelineParams = mocks.runChatPipeline.mock.calls[0]?.[7]
+    pipelineParams.releaseAbortControllerIfOwned(scopeController.signal)
+    expect(releaseAbortControllerIfOwned).toHaveBeenCalledWith(ownerSignal)
+    expect(release).toHaveBeenCalledOnce()
+  })
+
+  it("uses but does not release a caller-owned snapshot lease", async () => {
+    const scopeController = new AbortController()
+    const release = vi.fn()
+    const supplied: ServicePromptSnapshot = {
+      ...snapshot(["chat.rag.answer", "chat.rag.question_rewrite"]),
+      scopeSignal: scopeController.signal,
+      release
+    }
+
+    await ragMode(
+      "question",
+      "",
+      false,
+      [],
+      [],
+      new AbortController().signal,
+      ragParams(supplied)
+    )
+
+    expect(mocks.runChatPipeline.mock.calls[0]?.[6]).toBe(scopeController.signal)
+    expect(release).not.toHaveBeenCalled()
+  })
+
   it("loads the Main RAG answer and rewrite snapshot before entering the pipeline", async () => {
     const resolved = snapshot([
       "chat.rag.answer",
@@ -391,6 +457,41 @@ describe("Service Prompt mode wrapper ownership", () => {
     expect(mocks.runChatPipeline.mock.calls[0]?.[7]).toMatchObject({
       servicePromptSnapshot: resolved
     })
+  })
+
+  it("forwards new Document session files into the atomic chat save", async () => {
+    const resolved = snapshot([
+      "chat.rag.answer",
+      "chat.rag.question_rewrite"
+    ])
+    const existingFile = { id: "existing", filename: "existing.txt" }
+    const newFile = { id: "new", filename: "new.txt" }
+    mocks.getSessionFiles.mockResolvedValueOnce([existingFile])
+    const params = {
+      ...documentParams(resolved),
+      historyId: "history-1"
+    }
+
+    await documentChatMode(
+      "question",
+      "",
+      false,
+      [],
+      [],
+      new AbortController().signal,
+      [existingFile, newFile] as any,
+      params
+    )
+    const pipelineParams = mocks.runChatPipeline.mock.calls[0]?.[7]
+    await pipelineParams.saveMessageOnSuccess({ fullText: "answer" })
+
+    expect(params.saveMessageOnSuccess).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fullText: "answer",
+        sessionFilesToAdd: [newFile]
+      })
+    )
+    expect(mocks.addFileToSession).not.toHaveBeenCalled()
   })
 
   it("loads the web-search snapshot only when Normal Chat enables web search", async () => {
@@ -730,27 +831,28 @@ describe("Service Prompt mode definitions", () => {
     const originalQuestion = "Current {context} $' \\ question"
     const retrievedContext = "Evidence $& {question} \\ context"
     const systemPromptAppendix = "APPENDIX {context} $&"
+    const signal = new AbortController().signal
     const resolved = snapshot(
       ["chat.rag.answer", "chat.rag.question_rewrite"],
       {
         "chat.rag.answer": "ANSWER[{context}] QUESTION[{question}]",
         "chat.rag.question_rewrite":
           "REWRITE[{chat_history}] CURRENT[{question}]"
-      }
+      },
+      signal
     )
     const invoke = vi.fn(async () => ({ content: "standalone retrieval query" }))
     mocks.pageAssistModel.mockResolvedValue({ invoke })
     mocks.ragSearch.mockResolvedValue({
       results: [{ content: retrievedContext, metadata: { title: "Source" } }]
     })
-
     const prepared = (await ragMode(
       originalQuestion,
       "",
       false,
       previousMessages,
       history,
-      new AbortController().signal,
+      signal,
       {
         ...ragParams(resolved),
         systemPromptAppendix,
@@ -764,7 +866,8 @@ describe("Service Prompt mode definitions", () => {
       model: "model-a",
       toolChoice: "none",
       tools: [],
-      saveToDb: false
+      saveToDb: false,
+      requestScope
     })
     expect(mocks.humanMessageFormatter.mock.calls[0]?.[0]).toMatchObject({
       content: [
@@ -777,7 +880,11 @@ describe("Service Prompt mode definitions", () => {
     })
     expect(mocks.ragSearch).toHaveBeenCalledWith(
       "standalone retrieval query",
-      expect.any(Object)
+      expect.objectContaining({ signal, requestScope })
+    )
+    expect(invoke).toHaveBeenCalledWith(
+      [expect.anything()],
+      { signal }
     )
     expect(promptText(prepared)).toBe(
       "ANSWER[Evidence $& {question} \\ context] " +
@@ -850,27 +957,28 @@ describe("Service Prompt mode definitions", () => {
     const originalQuestion = "Document {context} $' \\ question"
     const retrievedContext = "Document evidence $& {question}"
     const appendix = "DOCUMENT APPENDIX {context}"
+    const signal = new AbortController().signal
     const resolved = snapshot(
       ["chat.rag.answer", "chat.rag.question_rewrite"],
       {
         "chat.rag.answer": "DOC[{context}] QUESTION[{question}]",
         "chat.rag.question_rewrite":
           "DOC REWRITE[{chat_history}] CURRENT[{question}]"
-      }
+      },
+      signal
     )
     const invoke = vi.fn(async () => ({ content: "document retrieval query" }))
     mocks.pageAssistModel.mockResolvedValue({ invoke })
     mocks.ragSearch.mockResolvedValue({
       results: [{ content: retrievedContext, metadata: { title: "Document" } }]
     })
-
     const prepared = (await documentChatMode(
       originalQuestion,
       "",
       false,
       previousMessages,
       history,
-      new AbortController().signal,
+      signal,
       [],
       {
         ...documentParams(resolved),
@@ -884,7 +992,8 @@ describe("Service Prompt mode definitions", () => {
       model: "model-a",
       toolChoice: "none",
       tools: [],
-      saveToDb: false
+      saveToDb: false,
+      requestScope
     })
     expect(mocks.humanMessageFormatter.mock.calls[0]?.[0]).toMatchObject({
       content: [
@@ -900,12 +1009,44 @@ describe("Service Prompt mode definitions", () => {
       "document retrieval query",
       expect.objectContaining({
         sources: ["media_db"],
-        enable_generation: false
+        enable_generation: false,
+        signal,
+        requestScope
       })
+    )
+    expect(invoke).toHaveBeenCalledWith(
+      [expect.anything()],
+      { signal }
     )
     expect(promptText(prepared)).toBe(
       `DOC[${retrievedContext}] QUESTION[${originalQuestion}]\n\n${appendix}`
     )
+  })
+
+  it("does not convert selected-source account cancellation into a handled response", async () => {
+    useDefinitionPipeline(true)
+    const controller = new AbortController()
+    const aborted = new DOMException("Aborted", "AbortError")
+    mocks.ragSearch.mockImplementation(async () => {
+      controller.abort()
+      throw aborted
+    })
+
+    await expect(ragMode(
+      "question",
+      "",
+      false,
+      [],
+      [],
+      controller.signal,
+      {
+        ...ragParams(snapshot([
+          "chat.rag.answer",
+          "chat.rag.question_rewrite"
+        ], {}, controller.signal)),
+        ragMediaIds: [42]
+      }
+    )).rejects.toBe(aborted)
   })
 
   it("renders the web-search ISO timestamp and normalized results in one pass", async () => {
@@ -955,7 +1096,8 @@ describe("Service Prompt mode definitions", () => {
         engine: "google",
         result_count: 2,
         google_domain: "google.com",
-        signal: expect.any(AbortSignal)
+        signal: expect.any(AbortSignal),
+        requestScope
       })
     } finally {
       vi.useRealTimers()
@@ -1000,6 +1142,60 @@ describe("Service Prompt mode definitions", () => {
       "Web search failed, continuing without context",
       expect.any(Error)
     )
+  })
+
+  it("does not swallow a web-search scope rejection before the signal aborts", async () => {
+    useDefinitionPipeline()
+    const scopeError = Object.assign(new Error("scope changed"), {
+      status: 412,
+      details: {
+        detail: { code: "request_config_scope_changed" }
+      }
+    })
+    mocks.webSearch.mockRejectedValue(scopeError)
+
+    await expect(normalChatMode(
+      "search question",
+      "",
+      false,
+      [],
+      [],
+      new AbortController().signal,
+      normalParams(true, snapshot(["chat.web_search.answer"]))
+    )).rejects.toBe(scopeError)
+  })
+
+  it("does not replace a document RAG scope rejection with inline context", async () => {
+    useDefinitionPipeline()
+    const scopeError = Object.assign(new Error("scope changed"), {
+      status: 412,
+      details: {
+        detail: { code: "request_config_scope_changed" }
+      }
+    })
+    mocks.ragSearch.mockRejectedValue(scopeError)
+
+    await expect(documentChatMode(
+      "document question",
+      "",
+      false,
+      [],
+      [],
+      new AbortController().signal,
+      [{
+        id: "file-1",
+        filename: "notes.txt",
+        type: "text/plain",
+        content: "stale fallback",
+        size: 14,
+        uploadedAt: 1,
+        processed: true
+      }],
+      documentParams(snapshot([
+        "chat.rag.answer",
+        "chat.rag.question_rewrite"
+      ]))
+    )).rejects.toBe(scopeError)
   })
 
   it("does not convert a selected-source prompt failure into a grounding fallback", async () => {

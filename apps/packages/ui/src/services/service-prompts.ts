@@ -1,14 +1,25 @@
 import { createSafeStorage } from "@/utils/safe-storage"
-import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope"
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
 import { tldwAuth } from "@/services/tldw/TldwAuth"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
+import { deriveScopedUserId } from "@/utils/media-navigation-scope"
+import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope"
 import { ServicePromptApiError } from "@/services/tldw/domains/service-prompts"
 import type {
   KnownServicePromptId,
   ServicePromptDetail,
+  ServicePromptRequestScope,
   ServicePromptSource
 } from "@/services/tldw/domains/service-prompts"
+import type {
+  ServicePromptTargetConfig,
+  TldwConfig
+} from "@/services/tldw/TldwApiClient"
+import {
+  createServicePromptScopeChangedError,
+  servicePromptPrincipalMatches,
+  servicePromptTargetsMatch
+} from "@/services/tldw/service-prompt-scope-error"
 import {
   getWebSearchPrompt,
   LEGACY_SERVICE_PROMPT_DEFAULTS,
@@ -18,6 +29,8 @@ import {
 const MAX_PART_CODE_POINTS = 20_000
 const FIELD_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/
 const PYTHON_WHITESPACE_ONLY =
+  // Keep browser validation aligned with Python's control-character whitespace.
+  // eslint-disable-next-line no-control-regex
   /^[\u0009-\u000d\u001c-\u001f\u0020\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]*$/u
 
 type TemplateToken =
@@ -219,12 +232,30 @@ export type LegacyServicePromptCandidate = Readonly<{
 }>
 
 export type ServicePromptScope = Readonly<{
-  config: NonNullable<Awaited<ReturnType<typeof tldwClient.getConfig>>>
+  config: ServicePromptTargetConfig
   scopeKey: string
+  userId: string | number | null
+  clientPrincipalVerified: boolean
 }>
+
+const SERVICE_PROMPT_SCOPE_UNRESOLVED = "service_prompt_scope_unresolved"
+
+export const isServicePromptScopeUnresolvedError = (
+  error: unknown
+): boolean => Boolean(
+  error &&
+  typeof error === "object" &&
+  (error as { code?: unknown }).code === SERVICE_PROMPT_SCOPE_UNRESOLVED
+)
+
+const unresolvedServicePromptScopeError = () => Object.assign(
+  new Error("Authenticated Service Prompt scope is unresolved."),
+  { code: SERVICE_PROMPT_SCOPE_UNRESOLVED }
+)
 
 export type ServicePromptSnapshot = Readonly<{
   scopeKey: string
+  requestScope: ServicePromptRequestScope
   capability: "supported" | "legacy-404"
   definitions: Readonly<
     Partial<Record<KnownServicePromptId, Readonly<{
@@ -234,6 +265,9 @@ export type ServicePromptSnapshot = Readonly<{
       revision: string | null
     }>>>
   >
+  scopeSignal: AbortSignal
+  scopeInvalidatedSignal: AbortSignal
+  release: () => void
 }>
 
 type SnapshotDefinition = {
@@ -283,6 +317,14 @@ const LEGACY_RENDER_DEFINITIONS = Object.freeze({
 
 const legacyLocalStorage = createSafeStorage({ area: "local" })
 const legacySyncStorage = createSafeStorage({ area: "sync" })
+
+export const subscribeToServicePromptConfigChanges = (
+  listener: () => void
+): (() => void) => {
+  const watchers = { tldwConfig: listener }
+  legacyLocalStorage.watch(watchers)
+  return () => legacyLocalStorage.unwatch(watchers)
+}
 
 type SignalOptions = { signal?: AbortSignal }
 
@@ -359,32 +401,184 @@ export const resolveServicePromptScope = async (
   options: SignalOptions = {}
 ): Promise<ServicePromptScope> => {
   throwIfAborted(options.signal)
-  const config = await tldwClient.getConfig()
+  await tldwClient.initialize()
   throwIfAborted(options.signal)
-  if (!config) {
+  let initialConfig
+  try {
+    initialConfig = await tldwClient.ensureConfigForRequest(true)
+  } catch (error) {
+    throwIfAborted(options.signal)
+    const storedConfig = await tldwClient
+      .ensureConfigForRequest(false)
+      .catch(() => null)
+    throwIfAborted(options.signal)
+    if (
+      !isHostedTldwDeployment() &&
+      storedConfig?.authMode === "multi-user" &&
+      storedConfig.authSource !== "cookie-session" &&
+      !String(storedConfig.accessToken || "").trim() &&
+      !String(storedConfig.refreshToken || "").trim()
+    ) {
+      throw unresolvedServicePromptScopeError()
+    }
+    throw error
+  }
+  throwIfAborted(options.signal)
+  if (!initialConfig) {
     throw new Error("tldw server is not configured.")
   }
 
   let userId: string | number | null = null
-  if (isHostedTldwDeployment() || config.authMode === "multi-user") {
-    const user = await tldwAuth.getCurrentUser()
+  let resolvedConfig = initialConfig
+  if (isHostedTldwDeployment() || initialConfig.authMode === "multi-user") {
+    const user = await tldwAuth.getCurrentUser().catch((error) => {
+      if (error && typeof error === "object" &&
+        (error as { status?: unknown }).status === 401) {
+        throw unresolvedServicePromptScopeError()
+      }
+      throw error
+    })
     throwIfAborted(options.signal)
     if (user?.id === null || user?.id === undefined) {
-      throw new Error("Authenticated Service Prompt scope is unresolved.")
+      throw unresolvedServicePromptScopeError()
     }
+    await tldwClient.initialize()
+    throwIfAborted(options.signal)
+    const refreshedConfig = await tldwClient.ensureConfigForRequest(true)
+    throwIfAborted(options.signal)
+    if (!refreshedConfig) {
+      throw new Error("tldw server is not configured.")
+    }
+    if (!servicePromptTargetsMatch(initialConfig, refreshedConfig)) {
+      throw new Error("Authenticated Service Prompt scope changed while resolving.")
+    }
+    resolvedConfig = refreshedConfig
     userId = user.id
   }
 
+  const config = Object.freeze({
+    serverUrl: resolvedConfig.serverUrl,
+    authMode: resolvedConfig.authMode,
+    authSource: resolvedConfig.authSource,
+    orgId: resolvedConfig.orgId
+  })
+
   return Object.freeze({
     config,
-    scopeKey: buildChatSurfaceScopeKeyFromConfig(config, { userId })
+    scopeKey: buildChatSurfaceScopeKeyFromConfig(resolvedConfig, { userId }),
+    userId,
+    clientPrincipalVerified:
+      userId === null || servicePromptPrincipalMatches(resolvedConfig, userId)
+  })
+}
+
+type ServicePromptScopeLease = Readonly<{
+  signal: AbortSignal
+  scopeInvalidatedSignal: AbortSignal
+  bind: (scope: ServicePromptScope) => void
+  release: () => void
+}>
+
+const storedConfigMatchesScope = (
+  value: unknown,
+  scope: ServicePromptScope
+): boolean => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false
+  const config = value as Record<string, unknown>
+  if (!servicePromptTargetsMatch(config, scope.config)) {
+    return false
+  }
+  if (scope.config.authMode === "single-user") {
+    return buildChatSurfaceScopeKeyFromConfig(
+      config as unknown as TldwConfig,
+      { userId: null }
+    ) === scope.scopeKey
+  }
+  if (scope.userId === null) return true
+  const accessToken = typeof config.accessToken === "string"
+    ? config.accessToken
+    : null
+  const currentUser = deriveScopedUserId({
+    userId: null,
+    authMode: typeof config.authMode === "string" ? config.authMode : null,
+    accessToken
+  })
+  const expectedUser = deriveScopedUserId({
+    userId: scope.userId,
+    authMode: scope.config.authMode,
+    accessToken: null
+  })
+  return currentUser === expectedUser
+}
+
+const createServicePromptScopeLease = (
+  parentSignal?: AbortSignal
+): ServicePromptScopeLease => {
+  const controller = new AbortController()
+  const scopeController = new AbortController()
+  let active = true
+  let bound = false
+  let scope: ServicePromptScope | null = null
+  const storageWatch = {
+    tldwConfig: (change: { newValue?: unknown }) => {
+      if (scope && !storedConfigMatchesScope(change?.newValue, scope)) {
+        invalidateScope()
+      }
+    }
+  }
+  const release = () => {
+    if (!active) return
+    active = false
+    parentSignal?.removeEventListener("abort", abortRequest)
+    if (bound) legacyLocalStorage.unwatch(storageWatch)
+    if (typeof window !== "undefined") {
+      window.removeEventListener(
+        "tldw:auth-credentials-changed",
+        invalidateScope
+      )
+    }
+  }
+  const abortRequest = () => {
+    if (!controller.signal.aborted) controller.abort()
+  }
+  const invalidateScope = () => {
+    if (!scopeController.signal.aborted) scopeController.abort()
+    abortRequest()
+  }
+
+  if (parentSignal?.aborted) {
+    abortRequest()
+  } else {
+    parentSignal?.addEventListener("abort", abortRequest, { once: true })
+    if (typeof window !== "undefined") {
+      window.addEventListener(
+        "tldw:auth-credentials-changed",
+        invalidateScope
+      )
+    }
+  }
+
+  return Object.freeze({
+    signal: controller.signal,
+    scopeInvalidatedSignal: scopeController.signal,
+    bind: (resolvedScope: ServicePromptScope) => {
+      if (!active || bound) return
+      scope = resolvedScope
+      bound = true
+      legacyLocalStorage.watch(storageWatch)
+    },
+    release
   })
 }
 
 const freezeSnapshot = (
-  scopeKey: string,
+  scope: ServicePromptScope,
   capability: ServicePromptSnapshot["capability"],
-  definitions: Partial<Record<KnownServicePromptId, SnapshotDefinition>>
+  definitions: Partial<Record<KnownServicePromptId, SnapshotDefinition>>,
+  lease: Pick<
+    ServicePromptScopeLease,
+    "signal" | "scopeInvalidatedSignal" | "release"
+  >
 ): ServicePromptSnapshot => {
   const frozenDefinitions: Partial<Record<KnownServicePromptId, Readonly<{
     definition: ServicePromptRenderDefinition
@@ -400,18 +594,28 @@ const freezeSnapshot = (
     })
   }
   return Object.freeze({
-    scopeKey,
+    scopeKey: scope.scopeKey,
+    requestScope: Object.freeze({
+      config: scope.config,
+      userId: scope.userId
+    }),
     capability,
-    definitions: Object.freeze(frozenDefinitions)
+    definitions: Object.freeze(frozenDefinitions),
+    scopeSignal: lease.signal,
+    scopeInvalidatedSignal: lease.scopeInvalidatedSignal,
+    release: lease.release
   })
 }
 
 const legacySnapshot = async (
   ids: readonly KnownServicePromptId[],
-  scopeKey: string,
-  signal: AbortSignal
+  scope: ServicePromptScope,
+  lease: Pick<
+    ServicePromptScopeLease,
+    "signal" | "scopeInvalidatedSignal" | "release"
+  >
 ): Promise<ServicePromptSnapshot> => {
-  throwIfAborted(signal)
+  throwIfAborted(lease.signal)
   const requested = new Set(ids)
   const definitions: Partial<Record<KnownServicePromptId, SnapshotDefinition>> = {}
 
@@ -420,7 +624,7 @@ const legacySnapshot = async (
     requested.has("chat.rag.question_rewrite")
   ) {
     const prompts = await promptForRag()
-    throwIfAborted(signal)
+    throwIfAborted(lease.signal)
     if (requested.has("chat.rag.answer")) {
       definitions["chat.rag.answer"] = {
         definition: LEGACY_RENDER_DEFINITIONS["chat.rag.answer"],
@@ -447,7 +651,7 @@ const legacySnapshot = async (
 
   if (requested.has("chat.web_search.answer")) {
     const prompt = await getWebSearchPrompt()
-    throwIfAborted(signal)
+    throwIfAborted(lease.signal)
     definitions["chat.web_search.answer"] = {
       definition: LEGACY_RENDER_DEFINITIONS["chat.web_search.answer"],
       parts: { template: prompt },
@@ -459,87 +663,49 @@ const legacySnapshot = async (
     }
   }
 
-  throwIfAborted(signal)
-  return freezeSnapshot(scopeKey, "legacy-404", definitions)
-}
-
-const createInvocationSignal = (signal?: AbortSignal): {
-  signal: AbortSignal
-  cleanup: () => void
-} => {
-  const controller = new AbortController()
-  const abort = () => controller.abort()
-  const storageWatch = { tldwConfig: abort }
-  if (signal?.aborted) {
-    abort()
-  } else {
-    signal?.addEventListener("abort", abort, { once: true })
-  }
-  legacyLocalStorage.watch(storageWatch)
-  if (typeof window !== "undefined") {
-    window.addEventListener("tldw:config-updated", abort)
-    window.addEventListener("tldw:auth-credentials-changed", abort)
-  }
-  return {
-    signal: controller.signal,
-    cleanup: () => {
-      signal?.removeEventListener("abort", abort)
-      legacyLocalStorage.unwatch(storageWatch)
-      if (typeof window !== "undefined") {
-        window.removeEventListener("tldw:config-updated", abort)
-        window.removeEventListener("tldw:auth-credentials-changed", abort)
-      }
-    }
-  }
-}
-
-const confirmServicePromptScope = async (
-  expectedScopeKey: string,
-  signal: AbortSignal
-): Promise<void> => {
-  const current = await resolveServicePromptScope({ signal })
-  throwIfAborted(signal)
-  if (current.scopeKey !== expectedScopeKey) throwAbortError()
+  throwIfAborted(lease.signal)
+  return freezeSnapshot(scope, "legacy-404", definitions, lease)
 }
 
 export const loadServicePromptSnapshot = async (
   ids: readonly KnownServicePromptId[],
   options: { signal?: AbortSignal } = {}
 ): Promise<ServicePromptSnapshot> => {
-  const invocation = createInvocationSignal(options.signal)
+  const lease = createServicePromptScopeLease(options.signal)
   try {
-    throwIfAborted(invocation.signal)
-    await tldwClient.initialize()
-    throwIfAborted(invocation.signal)
-    const scope = await resolveServicePromptScope({ signal: invocation.signal })
-    throwIfAborted(invocation.signal)
+    throwIfAborted(lease.signal)
+    const scope = await resolveServicePromptScope({ signal: lease.signal })
+    lease.bind(scope)
+    throwIfAborted(lease.signal)
     try {
-      await tldwClient.listServicePrompts({ signal: invocation.signal })
-      throwIfAborted(invocation.signal)
+      await tldwClient.listServicePrompts({
+        signal: lease.signal,
+        requestScope: scope
+      })
+      throwIfAborted(lease.signal)
     } catch (error) {
       if (error instanceof ServicePromptApiError && error.status === 404) {
-        const snapshot = await legacySnapshot(
+        if (!scope.clientPrincipalVerified) {
+          throw createServicePromptScopeChangedError()
+        }
+        return await legacySnapshot(
           ids,
-          scope.scopeKey,
-          invocation.signal
+          scope,
+          lease
         )
-        throwIfAborted(invocation.signal)
-        await confirmServicePromptScope(scope.scopeKey, invocation.signal)
-        return snapshot
       }
       throw error
     }
 
     const requested = [...new Set(ids)]
     const candidates = await readLegacyServicePromptCandidates({
-      signal: invocation.signal
+      signal: lease.signal
     })
-    throwIfAborted(invocation.signal)
+    throwIfAborted(lease.signal)
     const unresolved = candidates.filter((candidate) =>
       requested.includes(candidate.definitionId)
     )
     if (unresolved.length > 0) {
-      await confirmServicePromptScope(scope.scopeKey, invocation.signal)
       const error = new Error(
         "Review workflow prompts before continuing; browser-local values must be imported or discarded."
       ) as Error & { code: string; definitionIds: KnownServicePromptId[] }
@@ -550,9 +716,12 @@ export const loadServicePromptSnapshot = async (
     }
 
     const details = await Promise.all(requested.map((id) =>
-      tldwClient.getServicePrompt(id, { signal: invocation.signal })
+      tldwClient.getServicePrompt(id, {
+        signal: lease.signal,
+        requestScope: scope
+      })
     ))
-    throwIfAborted(invocation.signal)
+    throwIfAborted(lease.signal)
     const definitions: Partial<Record<KnownServicePromptId, SnapshotDefinition>> = {}
     for (const detail of details) {
       definitions[detail.id as KnownServicePromptId] = {
@@ -562,19 +731,20 @@ export const loadServicePromptSnapshot = async (
         revision: detail.revision
       }
     }
-    const snapshot = freezeSnapshot(scope.scopeKey, "supported", definitions)
-    throwIfAborted(invocation.signal)
-    await confirmServicePromptScope(scope.scopeKey, invocation.signal)
-    return snapshot
-  } finally {
-    invocation.cleanup()
+    return freezeSnapshot(scope, "supported", definitions, lease)
+  } catch (error) {
+    lease.release()
+    throw error
   }
 }
 
 export const importLegacyServicePromptCandidate = async (
   candidate: LegacyServicePromptCandidate,
   detail: ServicePromptDetail,
-  options: { signal?: AbortSignal } = {}
+  options: {
+    signal?: AbortSignal
+    requestScope?: ServicePromptRequestScope
+  } = {}
 ): Promise<ServicePromptDetail> => {
   const saved = await tldwClient.saveServicePrompt(
     candidate.definitionId,
@@ -585,8 +755,12 @@ export const importLegacyServicePromptCandidate = async (
       },
       expected_revision: detail.revision
     },
-    { signal: options.signal }
+    {
+      signal: options.signal,
+      requestScope: options.requestScope
+    }
   )
+  throwIfAborted(options.signal)
   await clearLegacyServicePromptCandidate(candidate.definitionId)
   return saved
 }

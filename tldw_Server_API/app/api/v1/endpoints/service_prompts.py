@@ -11,7 +11,10 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.routing import APIRoute
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import require_api_key_scope
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    require_api_key_scope,
+    require_expected_user,
+)
 from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import get_prompts_db_for_user
 from tldw_Server_API.app.api.v1.schemas.service_prompt_schemas import (
     ServicePromptCatalogItemResponse,
@@ -37,6 +40,34 @@ from tldw_Server_API.app.core.Prompt_Management.service_prompts import (
     validate_service_prompt_parts,
 )
 
+_SAFE_VALIDATION_LOCATION_SEGMENTS = frozenset(
+    {
+        "body",
+        "cookie",
+        "definition_id",
+        "expected_revision",
+        "header",
+        "parts",
+        "path",
+        "query",
+        "x-tldw-expected-user-id",
+    }
+)
+
+
+def _sanitize_validation_location(
+    location: tuple[str | int, ...],
+) -> list[str | int]:
+    """Keep public schema locations without echoing authored field names."""
+
+    return [
+        segment
+        if isinstance(segment, int)
+        or segment in _SAFE_VALIDATION_LOCATION_SEGMENTS
+        else "field"
+        for segment in location
+    ]
+
 
 class _ServicePromptRoute(APIRoute):
     """Keep FastAPI validation errors useful without echoing authored prompts."""
@@ -53,7 +84,11 @@ class _ServicePromptRoute(APIRoute):
                 return await original_route_handler(request)
             except RequestValidationError as exc:
                 safe_errors = [
-                    {key: error[key] for key in ("type", "loc", "msg") if key in error}
+                    {
+                        "type": error["type"],
+                        "loc": _sanitize_validation_location(error["loc"]),
+                        "msg": error["msg"],
+                    }
                     for error in exc.errors()
                 ]
                 raise HTTPException(
@@ -65,7 +100,10 @@ class _ServicePromptRoute(APIRoute):
         return sanitized_route_handler
 
 
-router = APIRouter(route_class=_ServicePromptRoute)
+router = APIRouter(
+    route_class=_ServicePromptRoute,
+    dependencies=[Depends(require_expected_user)],
+)
 
 
 def _catalog_item(definition: ServicePromptDefinition) -> ServicePromptCatalogItemResponse:

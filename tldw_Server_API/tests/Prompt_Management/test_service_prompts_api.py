@@ -207,6 +207,82 @@ def test_service_prompt_put_activates_immediately_and_identical_retry_keeps_revi
     assert retry.json()["revision"] == first_body["revision"]
 
 
+@pytest.mark.parametrize("method", ["get", "put", "delete"])
+def test_service_prompt_detail_rejects_changed_expected_user_without_mutation(
+    api_context,
+    method: str,
+) -> None:
+    expected_source = "packaged"
+    if method == "delete":
+        seeded = api_context.client.put(
+            TRANSLATION_PATH,
+            json={"parts": CUSTOM_PARTS, "expected_revision": None},
+        )
+        assert seeded.status_code == 200
+        expected_source = "user"
+    kwargs: dict[str, object] = {
+        "headers": {"X-TLDW-Expected-User-ID": "999"},
+    }
+    if method == "put":
+        kwargs["json"] = {"parts": CUSTOM_PARTS, "expected_revision": None}
+
+    response = getattr(api_context.client, method)(TRANSLATION_PATH, **kwargs)
+
+    assert response.status_code == 412
+    assert response.headers["cache-control"] == "no-store"
+    assert response.json() == {
+        "detail": {
+            "code": "request_config_scope_changed",
+            "message": "The server or authenticated account changed before the request was sent.",
+        }
+    }
+    assert api_context.client.get(TRANSLATION_PATH).json()["source"] == expected_source
+
+
+def test_service_prompt_detail_accepts_matching_expected_user(api_context) -> None:
+    response = api_context.client.put(
+        TRANSLATION_PATH,
+        headers={"X-TLDW-Expected-User-ID": "1"},
+        json={"parts": CUSTOM_PARTS, "expected_revision": None},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["source"] == "user"
+
+
+def test_service_prompt_catalog_rejects_changed_expected_user(api_context) -> None:
+    response = api_context.client.get(
+        "/api/v1/service-prompts",
+        headers={"X-TLDW-Expected-User-ID": "999"},
+    )
+
+    assert response.status_code == 412
+    assert response.headers["cache-control"] == "no-store"
+    assert response.json()["detail"]["code"] == "request_config_scope_changed"
+
+
+def test_service_prompt_detail_openapi_declares_optional_expected_user_header(
+    api_context,
+) -> None:
+    paths = api_context.app.openapi()["paths"]
+    collection_parameter = next(
+        item
+        for item in paths["/api/v1/service-prompts"]["get"]["parameters"]
+        if item["in"] == "header" and item["name"] == "X-TLDW-Expected-User-ID"
+    )
+    assert collection_parameter["required"] is False
+
+    path = paths["/api/v1/service-prompts/{definition_id}"]
+
+    for method in ("get", "put", "delete"):
+        parameter = next(
+            item
+            for item in path[method]["parameters"]
+            if item["in"] == "header" and item["name"] == "X-TLDW-Expected-User-ID"
+        )
+        assert parameter["required"] is False
+
+
 def test_service_prompt_delete_resets_and_is_idempotent(api_context) -> None:
     saved = api_context.client.put(
         TRANSLATION_PATH,
@@ -391,7 +467,10 @@ def test_service_prompt_structural_validation_stays_fastapi_native(
     response = getattr(api_context.client, method)(path, **kwargs)
 
     assert response.status_code == 422
-    assert isinstance(response.json()["detail"], list)
+    errors = response.json()["detail"]
+    assert isinstance(errors, list)
+    assert errors
+    assert all(set(error) == {"type", "loc", "msg"} for error in errors)
 
 
 def test_service_prompt_structural_validation_hides_authored_parts(api_context) -> None:
@@ -410,6 +489,34 @@ def test_service_prompt_structural_validation_hides_authored_parts(api_context) 
     assert isinstance(response.json()["detail"], list)
     assert secret not in response.text
     assert response.headers["cache-control"] == "no-store"
+
+
+def test_service_prompt_structural_validation_hides_authored_field_names(
+    api_context,
+) -> None:
+    sentinel = "STRUCTURAL-FIELD-NAME-MUST-NOT-LEAK"
+    response = api_context.client.put(
+        TRANSLATION_PATH,
+        json={
+            "parts": CUSTOM_PARTS,
+            "expected_revision": None,
+            sentinel: "attacker-controlled value",
+        },
+    )
+
+    assert response.status_code == 422
+    errors = response.json()["detail"]
+    assert errors
+    assert all(set(error) == {"type", "loc", "msg"} for error in errors)
+    assert sentinel not in response.text
+
+
+def test_service_prompt_validation_location_preserves_only_public_segments() -> None:
+    sentinel = "STRUCTURAL-LOCATION-MUST-NOT-LEAK"
+
+    assert service_prompts_module._sanitize_validation_location(
+        ("body", "parts", sentinel, 3)
+    ) == ["body", "parts", "field", 3]
 
 
 def test_service_prompt_store_failure_is_content_free(api_context) -> None:

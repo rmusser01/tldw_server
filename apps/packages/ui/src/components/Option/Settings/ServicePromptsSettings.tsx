@@ -10,9 +10,11 @@ import { RecoveryCallout } from "@/components/ui/state"
 import {
   clearLegacyServicePromptCandidate,
   importLegacyServicePromptCandidate,
+  isServicePromptScopeUnresolvedError,
   readLegacyServicePromptCandidates,
   renderServicePromptPart,
   resolveServicePromptScope,
+  subscribeToServicePromptConfigChanges,
   validateServicePromptParts,
   type LegacyServicePromptCandidate,
   type ServicePromptScope
@@ -248,6 +250,9 @@ export const ServicePromptsSettings = () => {
   const [scopeLoading, setScopeLoading] = React.useState(true)
   const [scopeGeneration, setScopeGeneration] = React.useState(0)
   const [scopeChanged, setScopeChanged] = React.useState(false)
+  const [scopeVerified, setScopeVerified] = React.useState(false)
+  const [scopeVerificationError, setScopeVerificationError] =
+    React.useState(false)
   const [draft, setDraft] = React.useState<Draft | null>(null)
   const [dirty, setDirty] = React.useState(false)
   const [fieldErrors, setFieldErrors] = React.useState<Record<string, string>>({})
@@ -264,6 +269,7 @@ export const ServicePromptsSettings = () => {
   const [migrationProbeGeneration, setMigrationProbeGeneration] = React.useState(0)
 
   const scopeRef = React.useRef<ServicePromptScope | null>(null)
+  const scopeVerifiedRef = React.useRef(false)
   const selectedIdRef = React.useRef<string | null>(selectedId)
   const dirtyRef = React.useRef(false)
   const historyIndexRef = React.useRef(0)
@@ -295,6 +301,7 @@ export const ServicePromptsSettings = () => {
   const migrationProbedScopeRef = React.useRef<string | null>(null)
   const detailFocusRef = React.useRef<HTMLElement | null>(null)
   const pendingFocusDefinitionRef = React.useRef<string | null>(null)
+  const scopeReconcileControllerRef = React.useRef<AbortController | null>(null)
 
   const abortActiveOperation = React.useCallback(() => {
     activeOperationRef.current?.controller.abort()
@@ -323,6 +330,7 @@ export const ServicePromptsSettings = () => {
 
   const isCurrentOperation = React.useCallback((operation: ActiveOperation) =>
     !operation.controller.signal.aborted &&
+    scopeVerifiedRef.current &&
     activeOperationRef.current?.identity === operation.identity &&
     scopeRef.current?.scopeKey === operation.scopeKey &&
     (!operation.definitionId || selectedIdRef.current === operation.definitionId), [])
@@ -459,12 +467,17 @@ export const ServicePromptsSettings = () => {
 
   React.useEffect(() => {
     const controller = new AbortController()
+    scopeVerifiedRef.current = false
+    setScopeVerified(false)
+    setScopeVerificationError(false)
     setScopeLoading(true)
     setScopeError(null)
     void resolveServicePromptScope({ signal: controller.signal })
       .then((resolved) => {
         if (controller.signal.aborted) return
         setScope(resolved)
+        scopeVerifiedRef.current = true
+        setScopeVerified(true)
         setScopeLoading(false)
       })
       .catch((error) => {
@@ -475,47 +488,107 @@ export const ServicePromptsSettings = () => {
     return () => controller.abort()
   }, [scopeGeneration])
 
-  React.useEffect(() => {
-    const handleScopeChange = () => {
-      const oldScope = scopeRef.current
-      clearPendingHistoryRestore()
-      claimedHistoryRestoreRef.current = null
-      pendingHistoryDestinationRef.current = null
-      dirtyRef.current = false
-      abortActiveOperation()
-      if (oldScope) {
-        const queryKey = ["service-prompts", oldScope.scopeKey]
-        void queryClient.cancelQueries({ queryKey })
-        void queryClient.invalidateQueries({ queryKey, refetchType: "none" })
-      }
-      migrationProbedScopeRef.current = null
-      pendingFocusDefinitionRef.current = null
-      setMigrationItems([])
-      setMigrationError(null)
-      setMigrationMessage(null)
-      setMigrationProbeError(null)
-      setScope(null)
-      setScopeError(null)
-      setScopeLoading(true)
-      setScopeChanged(true)
-      setDirty(false)
-      setFieldErrors({})
-      setPreview(null)
-      setConflict(false)
-      setOperationError(null)
-      const next = new URLSearchParams(searchParams)
-      next.delete("prompt")
-      setSearchParams(next, { replace: true })
-      setScopeGeneration((value) => value + 1)
+  const invalidateScope = React.useCallback(() => {
+    const oldScope = scopeRef.current
+    scopeReconcileControllerRef.current?.abort()
+    scopeReconcileControllerRef.current = null
+    clearPendingHistoryRestore()
+    claimedHistoryRestoreRef.current = null
+    pendingHistoryDestinationRef.current = null
+    dirtyRef.current = false
+    abortActiveOperation()
+    if (oldScope) {
+      const queryKey = ["service-prompts", oldScope.scopeKey]
+      void queryClient.cancelQueries({ queryKey })
+      void queryClient.invalidateQueries({ queryKey, refetchType: "none" })
     }
-
-    window.addEventListener("tldw:config-updated", handleScopeChange)
-    window.addEventListener("tldw:auth-credentials-changed", handleScopeChange)
-    return () => {
-      window.removeEventListener("tldw:config-updated", handleScopeChange)
-      window.removeEventListener("tldw:auth-credentials-changed", handleScopeChange)
-    }
+    migrationProbedScopeRef.current = null
+    pendingFocusDefinitionRef.current = null
+    setMigrationItems([])
+    setMigrationError(null)
+    setMigrationMessage(null)
+    setMigrationProbeError(null)
+    setScope(null)
+    scopeVerifiedRef.current = false
+    setScopeVerified(false)
+    setScopeVerificationError(false)
+    setScopeError(null)
+    setScopeLoading(true)
+    setScopeChanged(true)
+    setDirty(false)
+    setFieldErrors({})
+    setPreview(null)
+    setConflict(false)
+    setOperationError(null)
+    const next = new URLSearchParams(searchParams)
+    next.delete("prompt")
+    setSearchParams(next, { replace: true })
+    setScopeGeneration((value) => value + 1)
   }, [abortActiveOperation, queryClient, searchParams, setSearchParams])
+
+  const reconcileScope = React.useCallback(() => {
+    const expectedScope = scopeRef.current
+    if (!expectedScope) return
+    scopeVerifiedRef.current = false
+    setScopeVerified(false)
+    setScopeVerificationError(false)
+    abortActiveOperation()
+    scopeReconcileControllerRef.current?.abort()
+    const controller = new AbortController()
+    scopeReconcileControllerRef.current = controller
+    void resolveServicePromptScope({ signal: controller.signal })
+      .then((currentScope) => {
+        if (controller.signal.aborted ||
+          scopeRef.current?.scopeKey !== expectedScope.scopeKey) {
+          return
+        }
+        if (currentScope.scopeKey !== expectedScope.scopeKey) {
+          invalidateScope()
+          return
+        }
+        setScope(currentScope)
+        scopeVerifiedRef.current = true
+        setScopeVerified(true)
+      })
+      .catch((error) => {
+        if (controller.signal.aborted ||
+          scopeRef.current?.scopeKey !== expectedScope.scopeKey) {
+          return
+        }
+        if (isServicePromptScopeUnresolvedError(error)) {
+          invalidateScope()
+          return
+        }
+        setScopeVerificationError(true)
+      })
+      .finally(() => {
+        if (scopeReconcileControllerRef.current === controller) {
+          scopeReconcileControllerRef.current = null
+        }
+      })
+  }, [abortActiveOperation, invalidateScope])
+
+  React.useEffect(() => {
+    const unsubscribe = subscribeToServicePromptConfigChanges(reconcileScope)
+    window.addEventListener("tldw:config-updated", reconcileScope)
+    window.addEventListener("tldw:auth-credentials-changed", reconcileScope)
+    return () => {
+      scopeReconcileControllerRef.current?.abort()
+      scopeReconcileControllerRef.current = null
+      unsubscribe()
+      window.removeEventListener("tldw:config-updated", reconcileScope)
+      window.removeEventListener("tldw:auth-credentials-changed", reconcileScope)
+    }
+  }, [reconcileScope])
+
+  const handleRequestScopeChanged = React.useCallback((error: unknown) => {
+    if (!(error instanceof ServicePromptApiError) ||
+      error.code !== "request_config_scope_changed") {
+      return false
+    }
+    invalidateScope()
+    return true
+  }, [invalidateScope])
 
   const catalogKey = [
     "service-prompts",
@@ -525,8 +598,15 @@ export const ServicePromptsSettings = () => {
   const catalogQuery = useQuery({
     queryKey: catalogKey,
     enabled: Boolean(scope),
-    queryFn: ({ signal }) => tldwClient.listServicePrompts({ signal })
+    queryFn: ({ signal }) => tldwClient.listServicePrompts({
+      signal,
+      requestScope: scope!
+    })
   })
+
+  React.useEffect(() => {
+    if (catalogQuery.error) handleRequestScopeChanged(catalogQuery.error)
+  }, [catalogQuery.error, handleRequestScopeChanged])
 
   React.useEffect(() => {
     if (!scope || !catalogQuery.data || migrationProbedScopeRef.current === scope.scopeKey) {
@@ -567,8 +647,14 @@ export const ServicePromptsSettings = () => {
     queryKey: detailKey,
     enabled: Boolean(scope && selectedDefinition),
     queryFn: ({ signal }) =>
-      tldwClient.getServicePrompt(selectedDefinition!.id, { signal })
+      tldwClient.getServicePrompt(selectedDefinition!.id, {
+        signal,
+        requestScope: scope!
+      })
   })
+  React.useEffect(() => {
+    if (detailQuery.error) handleRequestScopeChanged(detailQuery.error)
+  }, [detailQuery.error, handleRequestScopeChanged])
   const detailFocusReady = Boolean(
     detailQuery.data && draft && scope && selectedDefinition &&
     draft.scopeKey === scope.scopeKey &&
@@ -874,7 +960,8 @@ export const ServicePromptsSettings = () => {
   }
 
   const saveDraft = async () => {
-    if (!selectedDefinition || !scope || !draftIsCurrent || !draft) return
+    if (!selectedDefinition || !scope || !scopeVerifiedRef.current ||
+      !draftIsCurrent || !draft) return
     const errors = validateServicePromptParts(selectedDefinition, draft.parts)
     setFieldErrors(errors)
     if (Object.keys(errors).length > 0) return
@@ -899,7 +986,10 @@ export const ServicePromptsSettings = () => {
           parts: { ...draft.parts },
           expected_revision: draft.revision
         },
-        { signal: operation.controller.signal }
+        {
+          signal: operation.controller.signal,
+          requestScope: scope
+        }
       )
       if (!isCurrentOperation(operation)) return
       queryClient.setQueryData(operationDetailKey, saved)
@@ -919,7 +1009,9 @@ export const ServicePromptsSettings = () => {
         refetchType: "none"
       })
     } catch (error) {
-      if (!isCurrentOperation(operation) || isAbortError(error)) return
+      if (!isCurrentOperation(operation) ||
+        handleRequestScopeChanged(error) ||
+        isAbortError(error)) return
       setOperationAnnouncement("")
       const validationEntries = error instanceof ServicePromptApiError &&
         error.status === 422 &&
@@ -947,7 +1039,7 @@ export const ServicePromptsSettings = () => {
   }
 
   const reloadServerValue = async () => {
-    if (!selectedDefinition || !scope) return
+    if (!selectedDefinition || !scope || !scopeVerifiedRef.current) return
     const operationScope = scope.scopeKey
     const definitionId = selectedDefinition.id
     const operation = startOperation("reload", operationScope, definitionId)
@@ -962,7 +1054,8 @@ export const ServicePromptsSettings = () => {
     setOperationAnnouncement("")
     try {
       const result = await tldwClient.getServicePrompt(definitionId, {
-        signal: operation.controller.signal
+        signal: operation.controller.signal,
+        requestScope: scope
       })
       if (!isCurrentOperation(operation)) return
       queryClient.setQueryData(operationDetailKey, result)
@@ -976,7 +1069,9 @@ export const ServicePromptsSettings = () => {
       setConflict(false)
       setOperationError(null)
     } catch (error) {
-      if (!isCurrentOperation(operation) || isAbortError(error)) return
+      if (!isCurrentOperation(operation) ||
+        handleRequestScopeChanged(error) ||
+        isAbortError(error)) return
       setDirty(true)
       setConflict(true)
       setOperationError(t("servicePrompts.errors.reloadFailed", {
@@ -988,7 +1083,8 @@ export const ServicePromptsSettings = () => {
   }
 
   const resetPrompt = async (revision: string | null, corrupt = false) => {
-    if (!selectedDefinition || !scope || (!corrupt && !draftIsCurrent) ||
+    if (!selectedDefinition || !scope || !scopeVerifiedRef.current ||
+      (!corrupt && !draftIsCurrent) ||
       activeOperationRef.current !== null) {
       return
     }
@@ -1031,11 +1127,15 @@ export const ServicePromptsSettings = () => {
       setOperationAnnouncement(t("servicePrompts.operations.resetting", {
         defaultValue: "Resetting workflow prompt…"
       }))
+      const requestScope = scope
       try {
         const reset = await tldwClient.resetServicePrompt(
           definitionId,
           revision,
-          { signal: operation.controller.signal }
+          {
+            signal: operation.controller.signal,
+            requestScope
+          }
         )
         if (!isCurrentOperation(operation)) return
         queryClient.setQueryData(operationDetailKey, reset)
@@ -1057,7 +1157,9 @@ export const ServicePromptsSettings = () => {
           refetchType: "none"
         })
       } catch (error) {
-        if (!isCurrentOperation(operation) || isAbortError(error)) return
+        if (!isCurrentOperation(operation) ||
+          handleRequestScopeChanged(error) ||
+          isAbortError(error)) return
         setOperationAnnouncement("")
         if (error instanceof ServicePromptApiError && error.status === 409) {
           if (corrupt) {
@@ -1065,7 +1167,8 @@ export const ServicePromptsSettings = () => {
               const refreshed = await queryClient.fetchQuery({
                 queryKey: operationDetailKey,
                 queryFn: () => tldwClient.getServicePrompt(definitionId, {
-                  signal: operation.controller.signal
+                  signal: operation.controller.signal,
+                  requestScope
                 }),
                 retry: false,
                 staleTime: 0
@@ -1080,7 +1183,9 @@ export const ServicePromptsSettings = () => {
               setDirty(false)
               setConflict(false)
             } catch (refreshError) {
-              if (!isCurrentOperation(operation) || isAbortError(refreshError)) return
+              if (!isCurrentOperation(operation) ||
+                handleRequestScopeChanged(refreshError) ||
+                isAbortError(refreshError)) return
               if (!(refreshError instanceof ServicePromptApiError &&
                 refreshError.code === "service_prompt_corrupt_override" &&
                 refreshError.canReset === true &&
@@ -1117,7 +1222,8 @@ export const ServicePromptsSettings = () => {
     })
 
   const importMigration = async () => {
-    if (!scope || migrationItems.length === 0 || activeKind !== null) return
+    if (!scope || !scopeVerifiedRef.current || migrationItems.length === 0 ||
+      activeKind !== null) return
     const operationScope = scope.scopeKey
     const operation = startOperation("migration-import", operationScope)
     setOperationAnnouncement("")
@@ -1143,7 +1249,8 @@ export const ServicePromptsSettings = () => {
 
       for (const item of nextItems) {
         const detail = await tldwClient.getServicePrompt(item.definitionId, {
-          signal: operation.controller.signal
+          signal: operation.controller.signal,
+          requestScope: scope
         })
         if (!isCurrentOperation(operation)) return
         details.set(item.definitionId, detail)
@@ -1182,7 +1289,10 @@ export const ServicePromptsSettings = () => {
           const saved = await importLegacyServicePromptCandidate(
             item,
             details.get(item.definitionId)!,
-            { signal: operation.controller.signal }
+            {
+              signal: operation.controller.signal,
+              requestScope: scope
+            }
           )
           if (!isCurrentOperation(operation)) return
           queryClient.setQueryData([
@@ -1200,7 +1310,9 @@ export const ServicePromptsSettings = () => {
             refetchType: "none"
           })
         } catch (error) {
-          if (!isCurrentOperation(operation) || isAbortError(error)) return
+          if (!isCurrentOperation(operation) ||
+            handleRequestScopeChanged(error) ||
+            isAbortError(error)) return
           remaining = remaining.map((candidate) =>
             candidate.definitionId === item.definitionId
               ? {
@@ -1218,7 +1330,9 @@ export const ServicePromptsSettings = () => {
         setMigrationMessage(remainingMigrationMessage(remaining.length))
       }
     } catch (error) {
-      if (!isCurrentOperation(operation) || isAbortError(error)) return
+      if (!isCurrentOperation(operation) ||
+        handleRequestScopeChanged(error) ||
+        isAbortError(error)) return
       setMigrationItems(nextItems)
       setMigrationError(t("servicePrompts.migration.prepareFailed", {
         defaultValue:
@@ -1231,7 +1345,8 @@ export const ServicePromptsSettings = () => {
   }
 
   const discardMigration = async () => {
-    if (!scope || migrationItems.length === 0 || activeKind !== null ||
+    if (!scope || !scopeVerifiedRef.current || migrationItems.length === 0 ||
+      activeKind !== null ||
       activeOperationRef.current !== null) {
       return
     }
@@ -1349,6 +1464,25 @@ export const ServicePromptsSettings = () => {
         </Alert>
       ) : null}
 
+      {scope && !scopeVerified ? (
+        <Alert
+          variant="warning"
+          title={scopeVerificationError
+            ? t("servicePrompts.scope.verificationFailedTitle", {
+                defaultValue: "Server and account could not be verified"
+              })
+            : t("servicePrompts.scope.verifyingTitle", {
+                defaultValue: "Verifying server and account…"
+              })}
+        >
+          {scopeVerificationError ? (
+            <Button size="small" onClick={reconcileScope}>
+              {t("servicePrompts.actions.retry", { defaultValue: "Retry" })}
+            </Button>
+          ) : null}
+        </Alert>
+      ) : null}
+
       {scopeLoading ? (
         <div
           role="status"
@@ -1380,6 +1514,8 @@ export const ServicePromptsSettings = () => {
             onClick: retryScope
           }}
         />
+      ) : scope && !scopeVerified ? (
+        null
       ) : catalogQuery.isPending ? (
         <div
           role="status"
@@ -1516,7 +1652,7 @@ export const ServicePromptsSettings = () => {
                 <Button
                   type="primary"
                   loading={activeKind === "migration-import"}
-                  disabled={activeKind !== null}
+                  disabled={!scopeVerified || activeKind !== null}
                   onClick={() => void importMigration()}
                 >
                   {t("servicePrompts.migration.importAction", {
@@ -1526,7 +1662,7 @@ export const ServicePromptsSettings = () => {
                 <Button
                   danger
                   loading={activeKind === "migration-discard"}
-                  disabled={activeKind !== null}
+                  disabled={!scopeVerified || activeKind !== null}
                   onClick={() => void discardMigration()}
                 >
                   {t("servicePrompts.migration.discardButton", {
@@ -1620,7 +1756,7 @@ export const ServicePromptsSettings = () => {
                     }),
                     onClick: () => void resetPrompt(corruptRevision, true),
                     loading: isResetting,
-                    disabled: activeKind !== null
+                    disabled: !scopeVerified || activeKind !== null
                   }
                 ]}
               >
@@ -1711,7 +1847,7 @@ export const ServicePromptsSettings = () => {
                       }),
                       onClick: () => void reloadServerValue(),
                       loading: activeKind === "reload",
-                      disabled: activeKind !== null
+                      disabled: !scopeVerified || activeKind !== null
                     }}
                   >
                     {t("servicePrompts.conflict.description", {
@@ -1812,7 +1948,8 @@ export const ServicePromptsSettings = () => {
                       type="primary"
                       htmlType="submit"
                       loading={isSaving}
-                      disabled={!dirty || !draftIsCurrent || activeKind !== null}
+                      disabled={!dirty || !draftIsCurrent || !scopeVerified ||
+                        activeKind !== null}
                     >
                       {t("servicePrompts.actions.save", { defaultValue: "Save changes" })}
                     </Button>
@@ -1820,7 +1957,7 @@ export const ServicePromptsSettings = () => {
                       danger
                       loading={isResetting}
                       disabled={detailQuery.data.source !== "user" || !draftIsCurrent ||
-                        activeKind !== null}
+                        !scopeVerified || activeKind !== null}
                       onClick={() => void resetPrompt(draft.revision)}
                     >
                       {t("servicePrompts.actions.reset", {

@@ -1,5 +1,8 @@
 import { bgRequest } from "@/services/background-proxy"
 import type { AllowedPath } from "@/services/tldw/openapi-guard"
+import type {
+  ServicePromptTargetConfig
+} from "@/services/tldw/TldwApiClient"
 
 export type KnownServicePromptId =
   | "chat.rag.answer"
@@ -43,6 +46,16 @@ export type ServicePromptUpdateRequest = {
   expected_revision: string | null
 }
 
+export type ServicePromptRequestScope = Readonly<{
+  config: ServicePromptTargetConfig
+  userId: string | number | null
+}>
+
+type ServicePromptRequestOptions = {
+  signal?: AbortSignal
+  requestScope?: ServicePromptRequestScope
+}
+
 type ServicePromptErrorDetail = {
   code?: unknown
   message?: unknown
@@ -51,6 +64,12 @@ type ServicePromptErrorDetail = {
   revision?: unknown
   can_reset?: unknown
 }
+
+export type ServicePromptRequestError = Readonly<{
+  type: string
+  loc: readonly (string | number)[]
+  msg: string
+}>
 
 const asRecord = (value: unknown): Record<string, unknown> | null =>
   value && typeof value === "object" && !Array.isArray(value)
@@ -72,6 +91,26 @@ const asFieldErrors = (value: unknown): Record<string, string> | undefined => {
   )
     ? Object.fromEntries(entries) as Record<string, string>
     : undefined
+}
+
+const asRequestErrors = (
+  value: unknown
+): ServicePromptRequestError[] | undefined => {
+  if (!Array.isArray(value) || value.length === 0) return undefined
+  const errors: ServicePromptRequestError[] = []
+  for (const item of value) {
+    const record = asRecord(item)
+    const type = asOptionalString(record?.type)?.trim()
+    const msg = asOptionalString(record?.msg)?.trim()
+    const loc = record?.loc
+    if (!type || !msg || !Array.isArray(loc) || loc.length === 0 ||
+      !loc.every((part) => typeof part === "string" || typeof part === "number")
+    ) {
+      return undefined
+    }
+    errors.push(Object.freeze({ type, loc: Object.freeze([...loc]), msg }))
+  }
+  return errors
 }
 
 const isStringArray = (value: unknown): value is string[] =>
@@ -184,6 +223,7 @@ export class ServicePromptApiError extends Error {
   currentRevision?: string | null
   revision?: string
   canReset?: boolean
+  requestErrors?: ServicePromptRequestError[]
 
   constructor(message: string, options: {
     status: number
@@ -192,6 +232,7 @@ export class ServicePromptApiError extends Error {
     currentRevision?: string | null
     revision?: string
     canReset?: boolean
+    requestErrors?: ServicePromptRequestError[]
   }) {
     super(message)
     this.name = "ServicePromptApiError"
@@ -201,6 +242,7 @@ export class ServicePromptApiError extends Error {
     this.currentRevision = options.currentRevision
     this.revision = options.revision
     this.canReset = options.canReset
+    this.requestErrors = options.requestErrors
   }
 }
 
@@ -217,9 +259,8 @@ const normalizeServicePromptError = (error: unknown): ServicePromptApiError => {
     details?: { detail?: unknown }
     detail?: unknown
   } | null
-  const detail = asRecord(
-    candidate?.details?.detail ?? candidate?.detail
-  ) as ServicePromptErrorDetail | null
+  const rawDetail = candidate?.details?.detail ?? candidate?.detail
+  const detail = asRecord(rawDetail) as ServicePromptErrorDetail | null
   const status = typeof candidate?.status === "number" ? candidate.status : 0
   const code = asOptionalString(detail?.code)
   const message = asOptionalString(detail?.message)
@@ -233,7 +274,8 @@ const normalizeServicePromptError = (error: unknown): ServicePromptApiError => {
       : undefined,
     currentRevision: asOptionalRevision(detail?.current_revision),
     revision: asOptionalString(detail?.revision),
-    canReset: typeof detail?.can_reset === "boolean" ? detail.can_reset : undefined
+    canReset: typeof detail?.can_reset === "boolean" ? detail.can_reset : undefined,
+    requestErrors: status === 422 ? asRequestErrors(rawDetail) : undefined
   })
 }
 
@@ -251,15 +293,38 @@ const request = async <T>(init: Parameters<typeof bgRequest>[0]): Promise<T> => 
 const detailPath = (id: string): AllowedPath =>
   `/api/v1/service-prompts/${encodeURIComponent(id)}`
 
+export const requestScopeFields = (
+  requestScope?: ServicePromptRequestScope
+): {
+  servicePromptConfig?: ServicePromptTargetConfig
+  headers?: Record<string, string>
+} => requestScope
+  ? {
+      servicePromptConfig: {
+        ...requestScope.config,
+        expectedUserId: requestScope.userId
+      },
+      ...(requestScope.userId === null
+        ? {}
+        : {
+            headers: {
+              "X-TLDW-Expected-User-ID": String(requestScope.userId)
+            }
+          })
+    }
+  : {}
+
 export const servicePromptMethods = {
   async listServicePrompts(
-    options?: { signal?: AbortSignal }
+    options?: ServicePromptRequestOptions
   ): Promise<ServicePromptCatalogItem[]> {
+    const scopeFields = requestScopeFields(options?.requestScope)
     const response = await request<unknown>({
       path: "/api/v1/service-prompts",
       method: "GET",
-      expectedStatuses: [404],
-      abortSignal: options?.signal
+      expectedStatuses: [404, 412],
+      abortSignal: options?.signal,
+      ...scopeFields
     })
     if (!Array.isArray(response) || !response.every(isServicePromptCatalogItem)) {
       throw invalidProtocolResponse()
@@ -269,13 +334,14 @@ export const servicePromptMethods = {
 
   async getServicePrompt(
     id: string,
-    options?: { signal?: AbortSignal }
+    options?: ServicePromptRequestOptions
   ): Promise<ServicePromptDetail> {
     const response = await request<unknown>({
       path: detailPath(id),
       method: "GET",
-      expectedStatuses: [404, 500],
-      abortSignal: options?.signal
+      expectedStatuses: [404, 412, 500],
+      abortSignal: options?.signal,
+      ...requestScopeFields(options?.requestScope)
     })
     if (!isServicePromptDetail(response, id)) {
       throw invalidProtocolResponse()
@@ -286,15 +352,22 @@ export const servicePromptMethods = {
   async saveServicePrompt(
     id: string,
     payload: ServicePromptUpdateRequest,
-    options?: { signal?: AbortSignal }
+    options?: ServicePromptRequestOptions
   ): Promise<ServicePromptDetail> {
+    const scopeFields = requestScopeFields(options?.requestScope)
     const response = await request<unknown>({
       path: detailPath(id),
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...scopeFields.headers
+      },
       body: payload,
-      expectedStatuses: [404, 409, 422, 500],
-      abortSignal: options?.signal
+      expectedStatuses: [404, 409, 412, 422, 500],
+      abortSignal: options?.signal,
+      ...(scopeFields.servicePromptConfig
+        ? { servicePromptConfig: scopeFields.servicePromptConfig }
+        : {})
     })
     if (!isServicePromptDetail(response, id) ||
       response.source !== "user" ||
@@ -310,7 +383,7 @@ export const servicePromptMethods = {
   async resetServicePrompt(
     id: string,
     expectedRevision: string | null,
-    options?: { signal?: AbortSignal }
+    options?: ServicePromptRequestOptions
   ): Promise<ServicePromptDetail> {
     const path = detailPath(id)
     const response = await request<unknown>({
@@ -318,8 +391,9 @@ export const servicePromptMethods = {
         ? path
         : `${path}?expected_revision=${encodeURIComponent(expectedRevision)}`,
       method: "DELETE",
-      expectedStatuses: [404, 409, 422, 500],
-      abortSignal: options?.signal
+      expectedStatuses: [404, 409, 412, 422, 500],
+      abortSignal: options?.signal,
+      ...requestScopeFields(options?.requestScope)
     })
     if (!isServicePromptDetail(response, id) || response.source !== "packaged") {
       throw invalidProtocolResponse()

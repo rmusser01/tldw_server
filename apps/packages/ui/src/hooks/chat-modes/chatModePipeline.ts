@@ -49,6 +49,7 @@ import type { DynamicUIRequest } from "@/types/dynamic-ui"
 import type { MessageMetadataExtra } from "@/store/option"
 import type { ServicePromptSnapshot } from "@/services/service-prompts"
 import type { KnownServicePromptId } from "@/services/tldw/domains/service-prompts"
+import { isRequestConfigScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
 
 const STREAMING_UPDATE_INTERVAL_MS = 80
 const EMPTY_RESPONSE_ERROR_MESSAGE = "No response text was returned."
@@ -71,6 +72,9 @@ export type ChatModeParamsBase = {
   // does not clobber a newer in-flight turn's streaming flag / controller.
   // When omitted, callers get the previous unconditional reset behavior.
   releaseAbortControllerIfOwned?: (signal: AbortSignal) => boolean
+  // Scope leases use a derived signal. When that signal aborts without a user
+  // cancellation, discard the entire turn so no old-scope output is saved.
+  discardCurrentTurnOnAbort?: () => boolean
   historyId: string | null
   setHistoryId: (id: string) => void
   actorSettings?: ActorSettings
@@ -611,8 +615,20 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
         saveToDb: preflight.saveToDb ?? false,
         conversationId: preflight.conversationId,
         imageEventSyncPolicy,
+        scopeSignal: params.servicePromptSnapshot?.scopeSignal,
+        scopeInvalidatedSignal:
+          params.servicePromptSnapshot?.scopeInvalidatedSignal,
+        requestScope: params.servicePromptSnapshot?.requestScope,
         userMetadataExtra: !isRegenerate ? params.userMetadataExtra : undefined
       })
+      if (
+        params.servicePromptSnapshot &&
+        params.servicePromptSnapshot.scopeInvalidatedSignal.aborted
+      ) {
+        const error = new Error("Request scope changed")
+        error.name = "AbortError"
+        throw error
+      }
       return chatSubmitSubmitted()
     }
 
@@ -646,7 +662,8 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
       model: selectedModel,
       toolChoice,
       conversationId,
-      researchContext: context.researchContext
+      researchContext: context.researchContext,
+      requestScope: params.servicePromptSnapshot?.requestScope
     })
 
     let generationInfo: unknown = undefined
@@ -857,9 +874,19 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
         isContinue: mode.isContinue,
         prompt_content: promptContent,
         prompt_id: promptId,
+        scopeSignal: params.servicePromptSnapshot?.scopeSignal,
+        scopeInvalidatedSignal:
+          params.servicePromptSnapshot?.scopeInvalidatedSignal,
+        requestScope: params.servicePromptSnapshot?.requestScope,
+        shouldAbortForScopeChange: params.discardCurrentTurnOnAbort,
         userMetadataExtra: !isRegenerate ? params.userMetadataExtra : undefined,
         assistantMetadataExtra
       })
+      if (params.discardCurrentTurnOnAbort?.() === true) {
+        setMessages(messages)
+        setHistorySafely(history)
+        return chatSubmitSkipped("Request scope changed")
+      }
       return chatSubmitSkipped(interruptionReason)
     }
 
@@ -900,14 +927,36 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
       saveToDb: Boolean(modelClient.saveToDb),
       conversationId: modelClient.conversationId,
       imageEventSyncPolicy,
+      scopeSignal: params.servicePromptSnapshot?.scopeSignal,
+      scopeInvalidatedSignal:
+        params.servicePromptSnapshot?.scopeInvalidatedSignal,
+      requestScope: params.servicePromptSnapshot?.requestScope,
       userMetadataExtra: !isRegenerate ? params.userMetadataExtra : undefined,
       assistantMetadataExtra
     })
+    if (
+      params.servicePromptSnapshot &&
+      params.servicePromptSnapshot.scopeInvalidatedSignal.aborted
+    ) {
+      const error = new Error("Request scope changed")
+      error.name = "AbortError"
+      throw error
+    }
     return chatSubmitSubmitted()
   } catch (e) {
     cancelStreamingUpdate()
     signal.removeEventListener("abort", abortCancelStreamingUpdate)
+    if (isRequestConfigScopeChangedError(e)) {
+      setMessages(messages)
+      setHistorySafely(history)
+      return chatSubmitSkipped("Request scope changed")
+    }
     const isAbort = signal.aborted || isAbortLikeError(e)
+    if (isAbort && params.discardCurrentTurnOnAbort?.() === true) {
+      setMessages(messages)
+      setHistorySafely(history)
+      return chatSubmitSkipped("Request cancelled")
+    }
     if (isAbort && !isImageGenerationTurn && fullText.trim().length === 0) {
       // Aborted before any content arrived (the pull was still in flight).
       if (isRegenerate) {
@@ -958,33 +1007,57 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
       )
     )
 
-    const errorSave = await saveMessageOnError({
-      e,
-      botMessage: assistantContent,
-      history,
-      historyId,
-      image,
-      selectedModel,
-      setHistory: setHistorySafely,
-      setHistoryId,
-      userMessage: message,
-      isRegenerating: isRegenerate,
-      userMessageType,
-      assistantMessageType,
-      clusterId,
-      modelId: resolvedModelId,
-      userModelId,
-      userMessageId: resolvedUserMessageId,
-      assistantMessageId: resolvedAssistantMessageId,
-      userParentMessageId: userParentMessageId ?? null,
-      assistantParentMessageId: assistantParentMessageId ?? null,
-      documents,
-      isContinue: mode.isContinue,
-      prompt_content: promptContent,
-      prompt_id: promptId,
-      userMetadataExtra: !isRegenerate ? params.userMetadataExtra : undefined,
-      assistantMetadataExtra: assistantErrorMetadataExtra
-    })
+    let errorSave: string | null
+    try {
+      errorSave = await saveMessageOnError({
+        e,
+        botMessage: assistantContent,
+        history,
+        historyId,
+        image,
+        selectedModel,
+        setHistory: setHistorySafely,
+        setHistoryId,
+        userMessage: message,
+        isRegenerating: isRegenerate,
+        userMessageType,
+        assistantMessageType,
+        clusterId,
+        modelId: resolvedModelId,
+        userModelId,
+        userMessageId: resolvedUserMessageId,
+        assistantMessageId: resolvedAssistantMessageId,
+        userParentMessageId: userParentMessageId ?? null,
+        assistantParentMessageId: assistantParentMessageId ?? null,
+        documents,
+        isContinue: mode.isContinue,
+        prompt_content: promptContent,
+        prompt_id: promptId,
+        scopeSignal: params.servicePromptSnapshot?.scopeSignal,
+        scopeInvalidatedSignal:
+          params.servicePromptSnapshot?.scopeInvalidatedSignal,
+        requestScope: params.servicePromptSnapshot?.requestScope,
+        shouldAbortForScopeChange: params.discardCurrentTurnOnAbort,
+        userMetadataExtra: !isRegenerate ? params.userMetadataExtra : undefined,
+        assistantMetadataExtra: assistantErrorMetadataExtra
+      })
+    } catch (persistenceError) {
+      if (
+        isRequestConfigScopeChangedError(persistenceError) ||
+        params.discardCurrentTurnOnAbort?.() === true
+      ) {
+        setMessages(messages)
+        setHistorySafely(history)
+        return chatSubmitSkipped("Request scope changed")
+      }
+      throw persistenceError
+    }
+
+    if (params.discardCurrentTurnOnAbort?.() === true) {
+      setMessages(messages)
+      setHistorySafely(history)
+      return chatSubmitSkipped("Request scope changed")
+    }
 
     if (isAbort) {
       return chatSubmitSkipped(interruptionReason)

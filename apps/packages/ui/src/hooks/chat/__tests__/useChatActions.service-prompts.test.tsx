@@ -7,20 +7,43 @@ import { useChatActions } from "../useChatActions";
 
 const {
   events,
+  createChatMock,
+  documentChatModeMock,
   generateTitleMock,
   loadServicePromptSnapshotMock,
   normalChatModeMock,
+  ragModeMock,
+  releaseSnapshotMock,
+  rollbackScopedComparePersistenceMock,
+  runChatPersistenceTransactionMock,
   saveHistoryMock,
   saveMessageMock,
+  setLastUsedModelMock,
+  setLastUsedPromptMock,
   tabChatModeMock,
+  updateCreatedAtMock,
+  updatePageTitleMock,
 } = vi.hoisted(() => ({
   events: [] as string[],
+  createChatMock: vi.fn(),
+  documentChatModeMock: vi.fn(),
   generateTitleMock: vi.fn(),
   loadServicePromptSnapshotMock: vi.fn(),
   normalChatModeMock: vi.fn(),
+  ragModeMock: vi.fn(),
+  releaseSnapshotMock: vi.fn(),
+  rollbackScopedComparePersistenceMock: vi.fn(async () => undefined),
+  runChatPersistenceTransactionMock: vi.fn(
+    async (_signal: AbortSignal | undefined, operation: () => Promise<unknown>) =>
+      operation(),
+  ),
   saveHistoryMock: vi.fn(),
   saveMessageMock: vi.fn(),
+  setLastUsedModelMock: vi.fn(async () => undefined),
+  setLastUsedPromptMock: vi.fn(async () => undefined),
   tabChatModeMock: vi.fn(),
+  updateCreatedAtMock: vi.fn(async () => undefined),
+  updatePageTitleMock: vi.fn(),
 }));
 
 vi.mock("@/services/service-prompts", () => ({
@@ -36,7 +59,7 @@ vi.mock("@/hooks/chat-modes/continueChatMode", () => ({
 }));
 
 vi.mock("@/hooks/chat-modes/ragMode", () => ({
-  ragMode: vi.fn(),
+  ragMode: ragModeMock,
 }));
 
 vi.mock("@/hooks/chat-modes/tabChatMode", () => ({
@@ -44,7 +67,7 @@ vi.mock("@/hooks/chat-modes/tabChatMode", () => ({
 }));
 
 vi.mock("@/hooks/chat-modes/documentChatMode", () => ({
-  documentChatMode: vi.fn(),
+  documentChatMode: documentChatModeMock,
 }));
 
 vi.mock("@/hooks/utils/messageHelpers", () => ({
@@ -76,6 +99,9 @@ vi.mock("@/db/dexie/helpers", () => ({
   formatToMessage: vi.fn((items: unknown) => items),
   getSessionFiles: vi.fn(async () => []),
   getPromptById: vi.fn(async () => null),
+  updateLastUsedModel: setLastUsedModelMock,
+  updateLastUsedPrompt: setLastUsedPromptMock,
+  updateChatHistoryCreatedAt: updateCreatedAtMock,
 }));
 
 vi.mock("@/db/dexie/nickname", () => ({
@@ -95,7 +121,12 @@ vi.mock("@/services/title", () => ({
 }));
 
 vi.mock("@/utils/update-page-title", () => ({
-  updatePageTitle: vi.fn(),
+  updatePageTitle: updatePageTitleMock,
+}));
+
+vi.mock("@/db/dexie/chat-persistence-transaction", () => ({
+  rollbackScopedComparePersistence: rollbackScopedComparePersistenceMock,
+  runChatPersistenceTransaction: runChatPersistenceTransactionMock,
 }));
 
 vi.mock("@/utils/selected-character-storage", () => ({
@@ -140,7 +171,7 @@ vi.mock("@/services/chat-settings", () => ({
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
-    createChat: vi.fn(),
+    createChat: createChatMock,
     streamCharacterChatCompletion: vi.fn(),
     initialize: vi.fn(async () => null),
   },
@@ -148,7 +179,18 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
 
 const snapshot = Object.freeze({
   scopeKey: "http://server.test|user:7",
+  requestScope: Object.freeze({
+    config: Object.freeze({
+      serverUrl: "http://server.test",
+      authMode: "multi-user" as const,
+      authSource: "manual" as const,
+      orgId: 3,
+    }),
+    userId: 7,
+  }),
   capability: "supported" as const,
+  scopeSignal: new AbortController().signal,
+  scopeInvalidatedSignal: new AbortController().signal,
   definitions: Object.freeze({
     "chat.web_search.answer": Object.freeze({
       definition: Object.freeze({
@@ -168,7 +210,38 @@ const snapshot = Object.freeze({
       source: "user" as const,
       revision: "revision-compare-7",
     }),
+    "chat.rag.answer": Object.freeze({
+      definition: Object.freeze({
+        id: "chat.rag.answer",
+        parts: Object.freeze([
+          Object.freeze({
+            key: "template",
+            mode: "template" as const,
+            required_variables: Object.freeze(["context", "question"]),
+          }),
+        ]),
+      }),
+      parts: Object.freeze({ template: "Context: {context}\nQuestion: {question}" }),
+      source: "packaged" as const,
+      revision: null,
+    }),
+    "chat.rag.question_rewrite": Object.freeze({
+      definition: Object.freeze({
+        id: "chat.rag.question_rewrite",
+        parts: Object.freeze([
+          Object.freeze({
+            key: "template",
+            mode: "template" as const,
+            required_variables: Object.freeze(["question"]),
+          }),
+        ]),
+      }),
+      parts: Object.freeze({ template: "Rewrite: {question}" }),
+      source: "packaged" as const,
+      revision: null,
+    }),
   }),
+  release: releaseSnapshotMock,
 });
 
 const deferred = <T,>() => {
@@ -289,6 +362,9 @@ describe("useChatActions Compare service prompt snapshot", () => {
       const params = args[6] as { selectedModel: string };
       events.push(`normalChatMode:${params.selectedModel}`);
     });
+    documentChatModeMock.mockResolvedValue(undefined);
+    ragModeMock.mockResolvedValue(undefined);
+    createChatMock.mockResolvedValue({ id: "server-chat-created" });
     generateTitleMock.mockImplementation(async () => {
       events.push("generateTitle");
       return "Compare title";
@@ -345,6 +421,305 @@ describe("useChatActions Compare service prompt snapshot", () => {
       firstParams.servicePromptSnapshot.definitions["chat.web_search.answer"]
         .revision,
     ).toBe("revision-compare-7");
+    expect(releaseSnapshotMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("binds title and the atomic shared-user commit to the captured Compare scope", async () => {
+    const options = createHookOptions();
+    const { result } = renderHook(() =>
+      useChatActions(
+        options as unknown as Parameters<typeof useChatActions>[0],
+      ),
+    );
+
+    await act(async () => {
+      await result.current.onSubmit({ message: "Compare this", image: "" });
+    });
+
+    expect(generateTitleMock).toHaveBeenCalledWith(
+      "model-a",
+      "Compare this",
+      "Compare this",
+      {
+        signal: snapshot.scopeSignal,
+        requestScope: snapshot.requestScope,
+      },
+    );
+    expect(runChatPersistenceTransactionMock).toHaveBeenCalledWith(
+      snapshot.scopeSignal,
+      expect.any(Function),
+    );
+  });
+
+  it("leaves no shared UI or title state when scoped title generation returns 412", async () => {
+    const scopeChangedError = Object.assign(new Error("scope changed"), {
+      status: 412,
+      details: { code: "request_config_scope_changed" },
+    });
+    generateTitleMock.mockRejectedValueOnce(scopeChangedError);
+    const options = createHookOptions();
+    const { result } = renderHook(() =>
+      useChatActions(
+        options as unknown as Parameters<typeof useChatActions>[0],
+      ),
+    );
+    options.setMessages.mockClear();
+    options.setHistory.mockClear();
+
+    await act(async () => {
+      await result.current.onSubmit({ message: "Compare this", image: "" });
+    });
+
+    expect(options.setMessages).not.toHaveBeenCalled();
+    expect(options.setHistory).not.toHaveBeenCalled();
+    expect(runChatPersistenceTransactionMock).not.toHaveBeenCalled();
+    expect(saveHistoryMock).not.toHaveBeenCalled();
+    expect(saveMessageMock).not.toHaveBeenCalled();
+    expect(updatePageTitleMock).not.toHaveBeenCalled();
+    expect(options.setHistoryId).not.toHaveBeenCalled();
+    expect(options.markCompareHistoryCreated).not.toHaveBeenCalled();
+    expect(normalChatModeMock).not.toHaveBeenCalled();
+  });
+
+  it("leaves no shared UI or title state when the scoped atomic commit aborts", async () => {
+    const abortError = new Error("scope changed");
+    abortError.name = "AbortError";
+    runChatPersistenceTransactionMock.mockRejectedValueOnce(abortError);
+    const options = createHookOptions();
+    const { result } = renderHook(() =>
+      useChatActions(
+        options as unknown as Parameters<typeof useChatActions>[0],
+      ),
+    );
+    options.setMessages.mockClear();
+    options.setHistory.mockClear();
+
+    await act(async () => {
+      await result.current.onSubmit({ message: "Compare this", image: "" });
+    });
+
+    expect(options.setMessages).not.toHaveBeenCalled();
+    expect(options.setHistory).not.toHaveBeenCalled();
+    expect(saveHistoryMock).not.toHaveBeenCalled();
+    expect(saveMessageMock).not.toHaveBeenCalled();
+    expect(updatePageTitleMock).not.toHaveBeenCalled();
+    expect(options.setHistoryId).not.toHaveBeenCalled();
+    expect(options.markCompareHistoryCreated).not.toHaveBeenCalled();
+    expect(normalChatModeMock).not.toHaveBeenCalled();
+  });
+
+  it("rolls back the shared UI turn when any Compare branch rejects the request scope", async () => {
+    normalChatModeMock.mockImplementation(async (...args: unknown[]) => {
+      const params = args[6] as {
+        selectedModel: string;
+        saveMessageOnSuccess: (payload: Record<string, unknown>) => Promise<string | null>;
+      };
+      await params.saveMessageOnSuccess({
+        historyId: "history-compare",
+        isRegenerate: true,
+        selectedModel: params.selectedModel,
+        message: "Compare this",
+        image: "",
+        fullText: `${params.selectedModel} answer`,
+        source: [],
+        modelId: params.selectedModel,
+        assistantMessageId: `${params.selectedModel}-assistant`,
+        reasoning_time_taken: 0,
+        prompt_id: "prompt-1",
+        scopeSignal: snapshot.scopeSignal,
+        scopeInvalidatedSignal: snapshot.scopeInvalidatedSignal,
+        requestScope: snapshot.requestScope,
+      });
+      return params.selectedModel === "model-b"
+        ? { status: "skipped", reason: "Request scope changed" }
+        : { status: "submitted" };
+    });
+    const options = createHookOptions();
+    const { result } = renderHook(() =>
+      useChatActions(
+        options as unknown as Parameters<typeof useChatActions>[0],
+      ),
+    );
+    options.setMessages.mockClear();
+    options.setHistory.mockClear();
+
+    let submissionResult: Awaited<ReturnType<typeof result.current.onSubmit>>;
+    await act(async () => {
+      submissionResult = await result.current.onSubmit({
+        message: "Compare this",
+        image: "",
+      });
+    });
+
+    expect(submissionResult!).toEqual({
+      status: "skipped",
+      reason: "Request scope changed",
+    });
+    expect(options.setMessages).toHaveBeenLastCalledWith(options.messages);
+    expect(options.setHistory).toHaveBeenLastCalledWith(options.history);
+    expect(options.setHistory).toHaveBeenCalledTimes(2);
+    expect(rollbackScopedComparePersistenceMock).toHaveBeenCalledWith({
+      clusterId: "generated-id",
+      historyId: "history-compare",
+      removeHistory: true,
+    });
+    expect(updatePageTitleMock).not.toHaveBeenCalled();
+    expect(options.setHistoryId).not.toHaveBeenCalled();
+    expect(options.markCompareHistoryCreated).not.toHaveBeenCalled();
+    expect(setLastUsedModelMock).not.toHaveBeenCalled();
+    expect(setLastUsedPromptMock).not.toHaveBeenCalled();
+    expect(updateCreatedAtMock).not.toHaveBeenCalled();
+  });
+
+  it("removes only the rejected Compare cluster from an existing history", async () => {
+    normalChatModeMock.mockImplementation(async (...args: unknown[]) => {
+      const params = args[6] as { selectedModel: string };
+      return params.selectedModel === "model-b"
+        ? { status: "skipped", reason: "Request scope changed" }
+        : { status: "submitted" };
+    });
+    const options = createHookOptions({ historyId: "history-existing" });
+    const { result } = renderHook(() =>
+      useChatActions(
+        options as unknown as Parameters<typeof useChatActions>[0],
+      ),
+    );
+
+    await act(async () => {
+      await result.current.onSubmit({ message: "Compare this", image: "" });
+    });
+
+    expect(rollbackScopedComparePersistenceMock).toHaveBeenCalledWith({
+      clusterId: "generated-id",
+      historyId: "history-existing",
+      removeHistory: false,
+    });
+  });
+
+  it("applies existing-history metadata only after every scoped Compare branch succeeds", async () => {
+    normalChatModeMock.mockImplementation(async (...args: unknown[]) => {
+      const params = args[6] as {
+        selectedModel: string;
+        saveMessageOnSuccess: (payload: Record<string, unknown>) => Promise<string | null>;
+      };
+      await params.saveMessageOnSuccess({
+        historyId: "history-existing",
+        isRegenerate: true,
+        selectedModel: params.selectedModel,
+        message: "Compare this",
+        image: "",
+        fullText: `${params.selectedModel} answer`,
+        source: [],
+        modelId: params.selectedModel,
+        assistantMessageId: `${params.selectedModel}-assistant`,
+        reasoning_time_taken: 0,
+        prompt_id: "prompt-1",
+        scopeSignal: snapshot.scopeSignal,
+        scopeInvalidatedSignal: snapshot.scopeInvalidatedSignal,
+        requestScope: snapshot.requestScope,
+      });
+      return { status: "submitted" };
+    });
+    const options = createHookOptions({ historyId: "history-existing" });
+    const { result } = renderHook(() =>
+      useChatActions(options as unknown as Parameters<typeof useChatActions>[0]),
+    );
+
+    await act(async () => {
+      await result.current.onSubmit({ message: "Compare this", image: "" });
+    });
+
+    expect(setLastUsedModelMock).toHaveBeenCalledTimes(1);
+    expect(setLastUsedModelMock).toHaveBeenCalledWith(
+      "history-existing",
+      "model-b",
+    );
+    expect(setLastUsedPromptMock).toHaveBeenCalledWith("history-existing", {
+      prompt_content: undefined,
+      prompt_id: "prompt-1",
+    });
+    expect(updateCreatedAtMock).toHaveBeenCalledWith("history-existing");
+    expect(rollbackScopedComparePersistenceMock).not.toHaveBeenCalled();
+  });
+
+  it("applies deferred Compare metadata when Stop preserves partial branch output", async () => {
+    const controller = new AbortController();
+    const scopeInvalidatedController = new AbortController();
+    loadServicePromptSnapshotMock.mockResolvedValueOnce(
+      Object.freeze({
+        ...snapshot,
+        scopeSignal: controller.signal,
+        scopeInvalidatedSignal: scopeInvalidatedController.signal,
+      }),
+    );
+    normalChatModeMock.mockImplementation(async (...args: unknown[]) => {
+      const params = args[6] as {
+        selectedModel: string;
+        saveMessageOnError: (payload: Record<string, unknown>) => Promise<string | null>;
+      };
+      controller.abort();
+      await params.saveMessageOnError({
+        historyId: "history-existing",
+        selectedModel: params.selectedModel,
+        prompt_id: "prompt-1",
+      });
+      return { status: "skipped", reason: "Request cancelled" };
+    });
+    const options = createHookOptions({ historyId: "history-existing" });
+    const { result } = renderHook(() =>
+      useChatActions(options as unknown as Parameters<typeof useChatActions>[0]),
+    );
+
+    await act(async () => {
+      await result.current.onSubmit({
+        message: "Compare this",
+        image: "",
+        controller,
+      });
+    });
+
+    expect(setLastUsedModelMock).toHaveBeenCalledOnce();
+    expect(setLastUsedModelMock).toHaveBeenCalledWith(
+      "history-existing",
+      "model-b",
+    );
+    expect(setLastUsedPromptMock).toHaveBeenCalledWith("history-existing", {
+      prompt_content: undefined,
+      prompt_id: "prompt-1",
+    });
+    expect(updateCreatedAtMock).toHaveBeenCalledWith("history-existing");
+    expect(rollbackScopedComparePersistenceMock).not.toHaveBeenCalled();
+  });
+
+  it("preserves user cancellation instead of misclassifying it as a scope change", async () => {
+    const controller = new AbortController();
+    loadServicePromptSnapshotMock.mockResolvedValueOnce(
+      Object.freeze({ ...snapshot, scopeSignal: controller.signal }),
+    );
+    normalChatModeMock.mockImplementation(async () => {
+      controller.abort();
+      return { status: "skipped", reason: "Request cancelled" };
+    });
+    const options = createHookOptions();
+    const { result } = renderHook(() =>
+      useChatActions(
+        options as unknown as Parameters<typeof useChatActions>[0],
+      ),
+    );
+
+    let submissionResult: Awaited<ReturnType<typeof result.current.onSubmit>>;
+    await act(async () => {
+      submissionResult = await result.current.onSubmit({
+        message: "Compare this",
+        image: "",
+        controller,
+      });
+    });
+
+    expect(submissionResult!).toEqual({
+      status: "skipped",
+      reason: "Request cancelled",
+    });
   });
 
   it("does not create a shared user message or history when snapshot loading fails", async () => {
@@ -371,6 +746,162 @@ describe("useChatActions Compare service prompt snapshot", () => {
     expect(saveHistoryMock).not.toHaveBeenCalled();
     expect(saveMessageMock).not.toHaveBeenCalled();
     expect(normalChatModeMock).not.toHaveBeenCalled();
+    expect(releaseSnapshotMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      label: "document",
+      options: {
+        contextFiles: [{ id: "file-1", filename: "notes.pdf" }],
+        selectedKnowledge: null,
+      },
+      submit: {},
+      ids: ["chat.rag.answer", "chat.rag.question_rewrite"],
+      modeMock: documentChatModeMock,
+    },
+    {
+      label: "tab",
+      options: { contextFiles: [], selectedKnowledge: null },
+      submit: { docs: [{ type: "tab", tabId: 7 }] },
+      ids: ["chat.rag.answer"],
+      modeMock: tabChatModeMock,
+    },
+    {
+      label: "RAG",
+      options: { contextFiles: [], selectedKnowledge: "knowledge-1" },
+      submit: {},
+      ids: ["chat.rag.answer", "chat.rag.question_rewrite"],
+      modeMock: ragModeMock,
+    },
+    {
+      label: "normal web-search",
+      options: { contextFiles: [], selectedKnowledge: null },
+      submit: {},
+      ids: ["chat.web_search.answer"],
+      modeMock: normalChatModeMock,
+      webSearch: true,
+    },
+  ])("gates $label history work on prompt preflight", async ({
+    options: optionOverrides,
+    submit,
+    ids,
+    modeMock,
+    webSearch: caseWebSearch = false,
+  }) => {
+    loadServicePromptSnapshotMock.mockRejectedValueOnce(
+      new Error("Workflow prompts are unavailable"),
+    );
+    const options = {
+      ...createHookOptions({
+        webSearch: caseWebSearch,
+        serverChatId: "server-chat-7",
+      }),
+      compareModeActive: false,
+      compareSelectedModels: [],
+      ...optionOverrides,
+    };
+    const { result } = renderHook(() =>
+      useChatActions(options as unknown as Parameters<typeof useChatActions>[0]),
+    );
+    options.setMessages.mockClear();
+    options.setHistory.mockClear();
+
+    await act(async () => {
+      await result.current.onSubmit({
+        message: "Prompt-gated turn",
+        image: "",
+        ...submit,
+      });
+    });
+
+    expect(loadServicePromptSnapshotMock).toHaveBeenCalledWith(ids, {
+      signal: expect.any(AbortSignal),
+    });
+    expect(options.ensureServerChatHistoryId).not.toHaveBeenCalled();
+    expect(options.setMessages).not.toHaveBeenCalled();
+    expect(options.setHistory).not.toHaveBeenCalled();
+    expect(saveHistoryMock).not.toHaveBeenCalled();
+    expect(saveMessageMock).not.toHaveBeenCalled();
+    expect(modeMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      label: "document",
+      options: {
+        contextFiles: [{ id: "file-1", filename: "notes.pdf" }],
+        documentContext: null,
+        selectedKnowledge: null,
+      },
+      ids: ["chat.rag.answer", "chat.rag.question_rewrite"],
+      modeMock: documentChatModeMock,
+    },
+    {
+      label: "tab",
+      options: {
+        contextFiles: [],
+        documentContext: [{ type: "tab", tabId: 7 }],
+        selectedKnowledge: null,
+      },
+      ids: ["chat.rag.answer"],
+      modeMock: tabChatModeMock,
+    },
+    {
+      label: "RAG",
+      options: {
+        contextFiles: [],
+        documentContext: null,
+        selectedKnowledge: "knowledge-1",
+      },
+      ids: ["chat.rag.answer", "chat.rag.question_rewrite"],
+      modeMock: ragModeMock,
+    },
+    {
+      label: "normal web-search",
+      options: {
+        contextFiles: [],
+        documentContext: null,
+        selectedKnowledge: null,
+        webSearch: true,
+      },
+      ids: ["chat.web_search.answer"],
+      modeMock: normalChatModeMock,
+    },
+  ])("gates per-model $label replies on prompt preflight", async ({
+    options: optionOverrides,
+    ids,
+    modeMock,
+  }) => {
+    loadServicePromptSnapshotMock.mockRejectedValueOnce(
+      new Error("Workflow prompts are unavailable"),
+    );
+    const options = {
+      ...createHookOptions({
+        webSearch: false,
+        serverChatId: "server-chat-7",
+      }),
+      ...optionOverrides,
+    };
+    const { result } = renderHook(() =>
+      useChatActions(options as unknown as Parameters<typeof useChatActions>[0]),
+    );
+
+    await act(async () => {
+      await result.current.sendPerModelReply({
+        clusterId: "cluster-1",
+        modelId: "model-a",
+        message: "Follow up",
+      });
+    });
+
+    expect(loadServicePromptSnapshotMock).toHaveBeenCalledWith(ids, {
+      signal: expect.any(AbortSignal),
+    });
+    expect(options.ensureServerChatHistoryId).not.toHaveBeenCalled();
+    expect(saveHistoryMock).not.toHaveBeenCalled();
+    expect(saveMessageMock).not.toHaveBeenCalled();
+    expect(modeMock).not.toHaveBeenCalled();
   });
 
   it("gates server-backed Compare history creation on the exact turn signal", async () => {
@@ -422,6 +953,7 @@ describe("useChatActions Compare service prompt snapshot", () => {
     expect(saveHistoryMock).not.toHaveBeenCalled();
     expect(saveMessageMock).not.toHaveBeenCalled();
     expect(normalChatModeMock).not.toHaveBeenCalled();
+    expect(releaseSnapshotMock).not.toHaveBeenCalled();
   });
 
   it("uses the ensured server history only after the snapshot gate succeeds", async () => {
@@ -489,6 +1021,7 @@ describe("useChatActions Compare service prompt snapshot", () => {
     expect(secondParams.historyId).toBe("history-from-server");
     expect(firstParams.servicePromptSnapshot).toBe(snapshot);
     expect(secondParams.servicePromptSnapshot).toBe(snapshot);
+    expect(releaseSnapshotMock).toHaveBeenCalledTimes(1);
   });
 
   it("rejects a loaded snapshot missing the required Compare prompt before side effects", async () => {
@@ -519,6 +1052,7 @@ describe("useChatActions Compare service prompt snapshot", () => {
     expect(saveHistoryMock).not.toHaveBeenCalled();
     expect(saveMessageMock).not.toHaveBeenCalled();
     expect(normalChatModeMock).not.toHaveBeenCalled();
+    expect(releaseSnapshotMock).toHaveBeenCalledTimes(1);
   });
 
   it("does not read a Service Prompt and preserves server history when Compare web search is disabled", async () => {

@@ -34,6 +34,7 @@ import {
   renderServicePromptPart,
   type ServicePromptSnapshot
 } from "@/services/service-prompts"
+import { isRequestConfigScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
 
 const RAG_STRING_ARRAY_KEYS = new Set([
   "sources",
@@ -43,7 +44,8 @@ const RAG_STRING_ARRAY_KEYS = new Set([
   "content_policy_types",
   "html_allowed_tags",
   "html_allowed_attrs",
-  "batch_queries"
+  "batch_queries",
+  "ground_truth_doc_ids"
 ])
 const RAG_NUMBER_ARRAY_KEYS = new Set(["include_media_ids"])
 const RAG_NULLABLE_STRING_KEYS = new Set([
@@ -51,7 +53,19 @@ const RAG_NULLABLE_STRING_KEYS = new Set([
   "generation_provider",
   "generation_prompt",
   "user_id",
-  "session_id"
+  "session_id",
+  "grading_model",
+  "grading_provider",
+  "fast_hallucination_provider",
+  "fast_hallucination_model",
+  "utility_grading_provider",
+  "utility_grading_model"
+])
+const RAG_NULLABLE_NUMBER_KEYS = new Set([
+  "collection_id",
+  "accumulation_time_budget_sec",
+  "subquery_time_budget_sec",
+  "subquery_doc_budget"
 ])
 const RAG_ALLOWED_KEYS = new Set([
   ...Object.keys(DEFAULT_RAG_SETTINGS).filter((key) => key !== "query")
@@ -85,9 +99,18 @@ const sanitizeRagAdvancedOptions = (options?: Record<string, unknown>) => {
   if (!options) return {}
   const sanitized: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(options)) {
-    if (value === undefined || value === null) continue
-    if (typeof value === "string" && value.trim() === "") continue
+    if (value === undefined) continue
     if (!RAG_ALLOWED_KEYS.has(key)) continue
+    if (value === null) {
+      if (
+        RAG_NULLABLE_STRING_KEYS.has(key) ||
+        RAG_NULLABLE_NUMBER_KEYS.has(key)
+      ) {
+        sanitized[key] = null
+      }
+      continue
+    }
+    if (typeof value === "string" && value.trim() === "") continue
 
     if (RAG_STRING_ARRAY_KEYS.has(key)) {
       if (!Array.isArray(value)) continue
@@ -130,6 +153,12 @@ const sanitizeRagAdvancedOptions = (options?: Record<string, unknown>) => {
       if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
         continue
       }
+      sanitized[key] = value
+      continue
+    }
+
+    if (RAG_NULLABLE_NUMBER_KEYS.has(key)) {
+      if (typeof value !== "number" || !Number.isFinite(value)) continue
       sanitized[key] = value
       continue
     }
@@ -214,6 +243,8 @@ type RagModeParams = {
   setIsProcessing: (value: boolean) => void
   setStreaming: (value: boolean) => void
   setAbortController: (controller: AbortController | null) => void
+  releaseAbortControllerIfOwned?: (signal: AbortSignal) => boolean
+  discardCurrentTurnOnAbort?: () => boolean
   historyId: string | null
   setHistoryId: (id: string) => void
   ragMediaIds: number[] | null
@@ -362,7 +393,8 @@ const resolveRagQuery = async (
     model: ctx.selectedModel,
     toolChoice: "none",
     tools: [],
-    saveToDb: false
+    saveToDb: false,
+    requestScope: ctx.servicePromptSnapshot?.requestScope
   })
   const questionMessage = await humanMessageFormatter({
     content: [
@@ -374,7 +406,10 @@ const resolveRagQuery = async (
     model: ctx.selectedModel,
     useOCR: ctx.useOCR
   })
-  const response = await questionOllama.invoke([questionMessage])
+  const response = await questionOllama.invoke(
+    [questionMessage],
+    { signal: ctx.signal }
+  )
   return removeReasoning(response.content.toString())
 }
 
@@ -440,6 +475,8 @@ const buildRagOptions = async (
     ragOptions.enable_intent_routing = false
     ragOptions.enable_pre_retrieval_clarification = false
   }
+  ragOptions.signal = ctx.signal
+  ragOptions.requestScope = ctx.servicePromptSnapshot?.requestScope
   return ragOptions
 }
 
@@ -528,6 +565,9 @@ const ragModeDefinition: ChatModeDefinition<RagModeParams> = {
         retrieval.rawResponse
       )
     } catch (error) {
+      if (ctx.signal.aborted || isRequestConfigScopeChangedError(error)) {
+        throw error
+      }
       return buildSelectedSourceGroundingResponse(
         buildSelectedSourceRetrievalErrorText(error),
         "selected_source_retrieval_failed",
@@ -558,6 +598,7 @@ const ragModeDefinition: ChatModeDefinition<RagModeParams> = {
         throw new Error(buildSelectedSourceNoEvidenceText(retrieval.rawResponse))
       }
     } catch (e) {
+      if (ctx.signal.aborted || isRequestConfigScopeChangedError(e)) throw e
       if (hasSelectedMediaSources(ctx)) {
         throw e
       }
@@ -618,24 +659,39 @@ export const ragMode = async (
   params: RagModeParams
 ): Promise<ChatSubmitResult> => {
   console.log("Using ragMode")
+  const ownsServicePromptSnapshot = !params.servicePromptSnapshot
   const servicePromptSnapshot =
     params.servicePromptSnapshot ??
     (await loadServicePromptSnapshot(
       ["chat.rag.answer", "chat.rag.question_rewrite"],
       { signal }
     ))
-  getRequiredServicePrompt(servicePromptSnapshot, "chat.rag.answer")
-  getRequiredServicePrompt(servicePromptSnapshot, "chat.rag.question_rewrite")
-  return runChatPipeline(
-    ragModeDefinition,
-    message,
-    image,
-    isRegenerate,
-    messages,
-    history,
-    signal,
-    { ...params, servicePromptSnapshot }
-  )
+  const executionSignal = servicePromptSnapshot.scopeSignal
+  const scopeInvalidatedSignal = servicePromptSnapshot.scopeInvalidatedSignal
+  try {
+    getRequiredServicePrompt(servicePromptSnapshot, "chat.rag.answer")
+    getRequiredServicePrompt(servicePromptSnapshot, "chat.rag.question_rewrite")
+    return await runChatPipeline(
+      ragModeDefinition,
+      message,
+      image,
+      isRegenerate,
+      messages,
+      history,
+      executionSignal,
+      {
+        ...params,
+        servicePromptSnapshot,
+        discardCurrentTurnOnAbort: () =>
+          scopeInvalidatedSignal.aborted,
+        releaseAbortControllerIfOwned: params.releaseAbortControllerIfOwned
+          ? () => params.releaseAbortControllerIfOwned!(signal)
+          : undefined
+      }
+    )
+  } finally {
+    if (ownsServicePromptSnapshot) servicePromptSnapshot.release()
+  }
 }
 
 export const __testing__ = {

@@ -1408,6 +1408,33 @@ async def get_auth_principal(
     return principal
 
 
+async def require_expected_user(
+    expected_user_id: str | None = Header(
+        default=None,
+        alias="X-TLDW-Expected-User-ID",
+        description="Authenticated user ID observed when the request scope was loaded.",
+    ),
+    principal: AuthPrincipal = Depends(get_auth_principal),
+) -> None:
+    """Reject a request when its optional user-scope assertion is stale."""
+
+    if expected_user_id is None:
+        return
+    actual_user_id = principal.user_id
+    if actual_user_id is not None and expected_user_id.strip() == str(actual_user_id):
+        return
+    raise HTTPException(
+        status_code=status.HTTP_412_PRECONDITION_FAILED,
+        headers={"Cache-Control": "no-store"},
+        detail={
+            "code": "request_config_scope_changed",
+            "message": (
+                "The server or authenticated account changed before the request was sent."
+            ),
+        },
+    )
+
+
 def require_permissions(*permissions: str) -> Callable[[AuthPrincipal], Awaitable[AuthPrincipal]]:
     """
     Dependency factory that enforces required permission claims on the principal.

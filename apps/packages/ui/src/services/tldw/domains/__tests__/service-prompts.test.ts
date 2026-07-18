@@ -60,8 +60,33 @@ describe("Service Prompt API methods", () => {
     expect(bgRequest).toHaveBeenCalledWith({
       path: "/api/v1/service-prompts",
       method: "GET",
-      expectedStatuses: [404],
+      expectedStatuses: [404, 412],
       abortSignal: controller.signal
+    })
+  })
+
+  it("binds the catalog request to the checked user and target", async () => {
+    vi.mocked(bgRequest).mockResolvedValueOnce([detail])
+    const requestScope = {
+      config: {
+        serverUrl: "https://research-one.test",
+        authMode: "multi-user" as const
+      },
+      userId: 42
+    }
+
+    await servicePromptMethods.listServicePrompts({ requestScope })
+
+    expect(bgRequest).toHaveBeenCalledWith({
+      path: "/api/v1/service-prompts",
+      method: "GET",
+      expectedStatuses: [404, 412],
+      abortSignal: undefined,
+      headers: { "X-TLDW-Expected-User-ID": "42" },
+      servicePromptConfig: {
+        ...requestScope.config,
+        expectedUserId: 42
+      }
     })
   })
 
@@ -79,7 +104,7 @@ describe("Service Prompt API methods", () => {
     expect(bgRequest).toHaveBeenCalledWith({
       path: "/api/v1/service-prompts/chat.rag.answer%2Funsafe",
       method: "GET",
-      expectedStatuses: [404, 500],
+      expectedStatuses: [404, 412, 500],
       abortSignal: controller.signal
     })
   })
@@ -95,16 +120,33 @@ describe("Service Prompt API methods", () => {
     await servicePromptMethods.saveServicePrompt(
       "chat.rag.answer",
       request,
-      { signal: controller.signal }
+      {
+        signal: controller.signal,
+        requestScope: {
+          config: {
+            serverUrl: "https://research-one.test",
+            authMode: "multi-user"
+          },
+          userId: 42
+        }
+      }
     )
 
     expect(bgRequest).toHaveBeenCalledWith({
       path: "/api/v1/service-prompts/chat.rag.answer",
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "X-TLDW-Expected-User-ID": "42"
+      },
       body: request,
-      expectedStatuses: [404, 409, 422, 500],
-      abortSignal: controller.signal
+      expectedStatuses: [404, 409, 412, 422, 500],
+      abortSignal: controller.signal,
+      servicePromptConfig: {
+        serverUrl: "https://research-one.test",
+        authMode: "multi-user",
+        expectedUserId: 42
+      }
     })
   })
 
@@ -118,15 +160,30 @@ describe("Service Prompt API methods", () => {
     await servicePromptMethods.resetServicePrompt(
       "chat.rag.answer/unsafe",
       "revision/value",
-      { signal: controller.signal }
+      {
+        signal: controller.signal,
+        requestScope: {
+          config: {
+            serverUrl: "https://research-one.test",
+            authMode: "multi-user"
+          },
+          userId: "84"
+        }
+      }
     )
 
     expect(bgRequest).toHaveBeenCalledWith({
       path:
         "/api/v1/service-prompts/chat.rag.answer%2Funsafe?expected_revision=revision%2Fvalue",
       method: "DELETE",
-      expectedStatuses: [404, 409, 422, 500],
-      abortSignal: controller.signal
+      headers: { "X-TLDW-Expected-User-ID": "84" },
+      expectedStatuses: [404, 409, 412, 422, 500],
+      abortSignal: controller.signal,
+      servicePromptConfig: {
+        serverUrl: "https://research-one.test",
+        authMode: "multi-user",
+        expectedUserId: "84"
+      }
     })
   })
 
@@ -141,7 +198,7 @@ describe("Service Prompt API methods", () => {
     expect(bgRequest).toHaveBeenCalledWith({
       path: "/api/v1/service-prompts/chat.rag.answer",
       method: "DELETE",
-      expectedStatuses: [404, 409, 422, 500],
+      expectedStatuses: [404, 409, 412, 422, 500],
       abortSignal: undefined
     })
   })
@@ -240,7 +297,12 @@ describe("Service Prompt API methods", () => {
       name: "top-level detail compatibility input",
       error: {
         status: 422,
-        detail: [{ type: "missing", loc: ["body", "parts"] }]
+        detail: [{
+          type: "missing",
+          loc: ["body", "parts"],
+          msg: "Field required",
+          input: "must-not-copy"
+        }]
       }
     },
     {
@@ -248,11 +310,16 @@ describe("Service Prompt API methods", () => {
       error: {
         status: 422,
         details: {
-          detail: [{ type: "missing", loc: ["body", "parts"] }]
+          detail: [{
+            type: "missing",
+            loc: ["body", "parts"],
+            msg: "Field required",
+            input: "must-not-copy"
+          }]
         }
       }
     }
-  ])("keeps $name structural 422 errors generic", async ({ error }) => {
+  ])("preserves sanitized metadata for $name structural 422 errors", async ({ error }) => {
     vi.mocked(bgRequest).mockRejectedValueOnce(error)
 
     const rejection = await servicePromptMethods
@@ -266,6 +333,33 @@ describe("Service Prompt API methods", () => {
     expect(rejection.status).toBe(422)
     expect(rejection.code).toBeUndefined()
     expect(rejection.fieldErrors).toBeUndefined()
+    expect(rejection.requestErrors).toEqual([{
+      type: "missing",
+      loc: ["body", "parts"],
+      msg: "Field required"
+    }])
+    expect(rejection.requestErrors?.[0]).not.toHaveProperty("input")
+  })
+
+  it("fails closed on malformed structural validation entries", async () => {
+    vi.mocked(bgRequest).mockRejectedValueOnce({
+      status: 422,
+      details: {
+        detail: [
+          { type: "missing", loc: ["body", {}], msg: "Field required" },
+          { type: "missing", loc: ["body", "parts"], msg: "   " }
+        ]
+      }
+    })
+
+    const rejection = await servicePromptMethods
+      .saveServicePrompt("chat.rag.answer", {
+        parts: { template: "{context} {question}" },
+        expected_revision: null
+      })
+      .catch((caught) => caught) as ServicePromptApiError
+
+    expect(rejection.requestErrors).toBeUndefined()
   })
 
   it.each([

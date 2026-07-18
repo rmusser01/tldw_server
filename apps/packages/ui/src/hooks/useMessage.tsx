@@ -110,6 +110,7 @@ import {
   renderServicePromptPart,
   type ServicePromptSnapshot,
 } from "@/services/service-prompts";
+import { isRequestConfigScopeChangedError } from "@/services/tldw/service-prompt-scope-error";
 
 const extractToolCalls = (generationInfo: unknown): ToolCall[] | undefined => {
   if (!generationInfo || typeof generationInfo !== "object") return undefined;
@@ -494,6 +495,10 @@ export const useMessage = () => {
     servicePromptSnapshot: ServicePromptSnapshot,
     regenerateFromMessage?: Message,
   ) => {
+    const executionSignal = servicePromptSnapshot.scopeSignal;
+    const scopeInvalidatedSignal = servicePromptSnapshot.scopeInvalidatedSignal;
+    const shouldAbortForScopeChange = () =>
+      scopeInvalidatedSignal.aborted;
     const answerPrompt =
       servicePromptSnapshot.definitions["chat.rag.answer"];
     const rewritePrompt =
@@ -516,6 +521,7 @@ export const useMessage = () => {
 
     const ollama = await pageAssistModel({
       model,
+      requestScope: servicePromptSnapshot.requestScope,
     });
 
     let newMessage: Message[] = [];
@@ -642,6 +648,7 @@ export const useMessage = () => {
           toolChoice: "none",
           tools: [],
           saveToDb: false,
+          requestScope: servicePromptSnapshot.requestScope,
         });
         const questionMessage = await humanMessageFormatter({
           content: [
@@ -653,7 +660,9 @@ export const useMessage = () => {
           model,
           useOCR,
         });
-        const response = await questionOllama.invoke([questionMessage]);
+        const response = await questionOllama.invoke([questionMessage], {
+          signal: executionSignal,
+        });
         query = response.content.toString();
         query = removeReasoning(query);
       }
@@ -677,6 +686,8 @@ export const useMessage = () => {
           embedPDF,
           maxWebsiteContext,
           query,
+          signal: executionSignal,
+          requestScope: servicePromptSnapshot.requestScope,
         });
         context = websiteContext.context;
         source = websiteContext.source;
@@ -705,7 +716,7 @@ export const useMessage = () => {
       const chunks = await ollama.stream(
         [...applicationChatHistory, humanMessage],
         {
-          signal: signal,
+          signal: executionSignal,
           callbacks: [
             {
               handleLLMEnd(output: any): any {
@@ -763,6 +774,12 @@ export const useMessage = () => {
         count++;
       }
 
+      if (executionSignal.aborted) {
+        const abortError = new Error("Request cancelled");
+        abortError.name = "AbortError";
+        throw abortError;
+      }
+
       const toolCalls = extractToolCalls(generationInfo);
       applyMcpModuleDisclosureFromToolCalls(toolCalls);
       setMessages((prev) => {
@@ -808,11 +825,30 @@ export const useMessage = () => {
         userMessageId: resolvedUserMessageId,
         assistantMessageId: resolvedAssistantMessageId,
         assistantParentMessageId: resolvedAssistantParentMessageId ?? null,
+        scopeSignal: servicePromptSnapshot.scopeSignal,
+        scopeInvalidatedSignal:
+          servicePromptSnapshot.scopeInvalidatedSignal,
+        requestScope: servicePromptSnapshot.requestScope,
       });
+
+      if (scopeInvalidatedSignal.aborted) {
+        const abortError = new Error("Request scope changed");
+        abortError.name = "AbortError";
+        throw abortError;
+      }
 
       setIsProcessing(false);
       setStreaming(false);
     } catch (e) {
+      const scopeAborted = shouldAbortForScopeChange();
+      if (scopeAborted || isRequestConfigScopeChangedError(e)) {
+        setMessages(messages);
+        setHistory(history);
+        setIsProcessing(false);
+        setStreaming(false);
+        setIsEmbedding(false);
+        return;
+      }
       if (
         discardAbortedTurnIfRequested({
           discardRequested: discardCurrentTurnOnAbortRef.current,
@@ -838,22 +874,52 @@ export const useMessage = () => {
             : msg,
         ),
       );
-      const errorSave = await saveMessageOnError({
-        e,
-        botMessage: assistantContent,
-        history,
-        historyId,
-        image,
-        selectedModel: model,
-        setHistory,
-        setHistoryId,
-        userMessage: message,
-        isRegenerating: isRegenerate,
-        message_source: "copilot",
-        userMessageId: resolvedUserMessageId,
-        assistantMessageId: resolvedAssistantMessageId,
-        assistantParentMessageId: resolvedAssistantParentMessageId ?? null,
-      });
+      let errorSave: string | null;
+      try {
+        errorSave = await saveMessageOnError({
+          e,
+          botMessage: assistantContent,
+          history,
+          historyId,
+          image,
+          selectedModel: model,
+          setHistory,
+          setHistoryId,
+          userMessage: message,
+          isRegenerating: isRegenerate,
+          message_source: "copilot",
+          userMessageId: resolvedUserMessageId,
+          assistantMessageId: resolvedAssistantMessageId,
+          assistantParentMessageId: resolvedAssistantParentMessageId ?? null,
+          scopeSignal: servicePromptSnapshot.scopeSignal,
+          scopeInvalidatedSignal:
+            servicePromptSnapshot.scopeInvalidatedSignal,
+          requestScope: servicePromptSnapshot.requestScope,
+          shouldAbortForScopeChange,
+        });
+      } catch (persistenceError) {
+        if (
+          shouldAbortForScopeChange() ||
+          isRequestConfigScopeChangedError(persistenceError)
+        ) {
+          setMessages(messages);
+          setHistory(history);
+          setIsProcessing(false);
+          setStreaming(false);
+          setIsEmbedding(false);
+          return;
+        }
+        throw persistenceError;
+      }
+
+      if (shouldAbortForScopeChange()) {
+        setMessages(messages);
+        setHistory(history);
+        setIsProcessing(false);
+        setStreaming(false);
+        setIsEmbedding(false);
+        return;
+      }
 
       if (!errorSave) {
         notification.error({
@@ -2488,7 +2554,9 @@ export const useMessage = () => {
       }
     }
 
-    resetChatLoopState();
+    let replyActive = false;
+    try {
+      resetChatLoopState();
     const resolvedSelectedSystemPrompt =
       requestOverrides &&
       Object.prototype.hasOwnProperty.call(
@@ -2522,26 +2590,19 @@ export const useMessage = () => {
     };
     if (!hasExplicitImageBackend) {
       if (!validateBeforeSubmit(resolvedSelectedModel, t, notification)) {
-        if (usesLegacySidepanelRag) releaseActiveController();
         return;
       }
       let modelAvailable: boolean;
-      try {
-        modelAvailable = await ensureSelectedChatModelIsAvailable(
-          resolvedSelectedModel,
-        );
-      } catch (error) {
-        if (usesLegacySidepanelRag) releaseActiveController();
-        throw error;
-      }
+      modelAvailable = await ensureSelectedChatModelIsAvailable(
+        resolvedSelectedModel,
+      );
       if (!modelAvailable) {
-        if (usesLegacySidepanelRag) releaseActiveController();
         return;
       }
     }
 
     if (!usesLegacySidepanelRag) setAbortController(activeController);
-    const replyActive =
+    replyActive =
       Boolean(replyTarget) &&
       !isRegenerate &&
       !messageType &&
@@ -2560,7 +2621,6 @@ export const useMessage = () => {
         })()
       : {};
 
-    try {
       if (hasExplicitImageBackend || imageBackendCandidates.length > 0) {
         await normalChatMode(
           message,
@@ -2891,7 +2951,10 @@ export const useMessage = () => {
         }
       }
     } finally {
-      if (usesLegacySidepanelRag) releaseActiveController();
+      if (usesLegacySidepanelRag) {
+        servicePromptSnapshot!.release();
+        releaseActiveController();
+      }
       if (replyActive) {
         clearReplyTarget();
       }
