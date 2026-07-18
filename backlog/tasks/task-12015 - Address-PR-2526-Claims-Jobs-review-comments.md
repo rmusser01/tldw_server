@@ -1,7 +1,7 @@
 ---
 id: TASK-12015
 title: 'Address PR #2526 Claims Jobs review comments'
-status: Done
+status: In Progress
 created_date: 2026-06-26 06:34
 labels:
 - claims
@@ -10,7 +10,7 @@ labels:
 references:
 - https://github.com/rmusser01/tldw_server/pull/2526
 - TASK-9937
-updated_date: 2026-06-26 06:50
+updated_date: 2026-07-18 18:04
 modified_files:
 - tldw_Server_API/app/core/Claims_Extraction/claims_job_handlers.py
 - tldw_Server_API/app/core/Claims_Extraction/claims_notifications.py
@@ -47,6 +47,7 @@ Verify and address validated review comments on PR #2526 after rebasing Claims J
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verified PR #2526 review comments against current code: process_claims_job directly invoked synchronous Claims work from an async handler, and deliver_claim_review_notifications_now dereferenced None when managed_media_database suppressed initialization failure. Added regression tests first; initial focused run failed with the expected three event-loop-thread assertions and one NoneType AttributeError. Implemented asyncio.to_thread offload for rebuild, review notification, and alert delivery handlers, plus a failed database_initialization_failed outcome for unavailable DB sessions. Verification before rebase: focused tests 26 passed; broader Claims Jobs slice 69 passed; Ruff check on touched files passed; Bandit JSON report /tmp/bandit_claims_pr2526_comments.json had 0 results.
 Post-rebase verification after git rebase origin/dev: branch is 0 behind and 40 ahead of origin/dev; Claims Jobs test slice passed with 69 passed; Ruff check on touched files passed; Bandit JSON report /tmp/bandit_claims_pr2526_comments_post_rebase.json had 0 results.
+2026-07-18 follow-up: reopening task to rebase PR #2526 onto latest origin/dev and verify/address the later CodeRabbit/Qodo review comments, including fallback behavior, owner scoping, alert/notification delivery reliability, DB abstraction placement, and focused test-review comments.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
