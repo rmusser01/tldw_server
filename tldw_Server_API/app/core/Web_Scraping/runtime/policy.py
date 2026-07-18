@@ -3,10 +3,33 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 from .requests import RuntimeRequestContext
 from .responses import PolicyDecision
+
+
+@dataclass(frozen=True, slots=True)
+class ProbeEgressDecision:
+    """Fresh egress decision for one concrete probe dispatch."""
+
+    allowed: bool
+    reason: str
+    resolved_ips: tuple[str, ...] = ()
+
+
+class ProbeEgressGuard(Protocol):
+    """Check fresh egress policy immediately before a probe dispatch."""
+
+    async def decide(
+        self,
+        url: str,
+        *,
+        context: RuntimeRequestContext,
+    ) -> ProbeEgressDecision:
+        """Return the probe-level egress decision for one URL."""
+        raise NotImplementedError
 
 
 class OutboundPolicyChecker(Protocol):

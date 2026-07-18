@@ -5,7 +5,7 @@ from __future__ import annotations
 from .browser import BrowserLaunchOptions, RuntimeBrowserContext, RuntimeBrowserLauncher, RuntimeBrowserPage
 from .cancellation import is_cancellation
 from .fetch import DefaultFetchClient, FetchClient
-from .policy import OutboundPolicyChecker
+from .policy import OutboundPolicyChecker, ProbeEgressDecision, ProbeEgressGuard
 from .requests import FetchRequest, RuntimeRequestContext
 from .responses import FetchResponse, PolicyDecision
 from .sessions import RuntimeCookie, RuntimeSessionState
@@ -19,6 +19,8 @@ __all__ = [
     "FetchResponse",
     "OutboundPolicyChecker",
     "PolicyDecision",
+    "ProbeEgressDecision",
+    "ProbeEgressGuard",
     "RuntimeBrowserContext",
     "RuntimeBrowserLauncher",
     "RuntimeBrowserPage",

@@ -2,6 +2,6 @@
 
 from __future__ import annotations
 
-from .adapters import DefaultWebOutboundPolicyChecker
+from .adapters import DefaultProbeEgressGuard, DefaultWebOutboundPolicyChecker
 
-__all__ = ["DefaultWebOutboundPolicyChecker"]
+__all__ = ["DefaultProbeEgressGuard", "DefaultWebOutboundPolicyChecker"]
