@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Callable
-from contextlib import AbstractContextManager
+from contextlib import AbstractContextManager, contextmanager
 from datetime import datetime, timezone
 from typing import Any
 
@@ -35,6 +35,21 @@ _COUNTER_NONCRITICAL_ERRORS: tuple[type[BaseException], ...] = (
     ValueError,
     *_PG_ERRORS,
 )
+
+
+@contextmanager
+def _read_committed_quota_transaction(conn: Any, *, enabled: bool):
+    if not enabled:
+        yield
+        return
+
+    previous_isolation = conn.isolation_level
+    conn.isolation_level = psycopg.IsolationLevel.READ_COMMITTED
+    try:
+        yield
+    finally:
+        if not getattr(conn, "closed", False):
+            conn.isolation_level = previous_isolation
 
 
 def _quota_lock_key(command: CreateJobCommand) -> int:
@@ -259,22 +274,31 @@ def create_job_admission(
 
     payload_json = json.dumps(command.payload)
     available_at = _future_available_at(command.available_at, now=now)
+    quota_enabled = bool(command.owner_user_id and (max_queued_quota or submits_per_minute_quota))
 
-    with conn:
+    with _read_committed_quota_transaction(conn, enabled=quota_enabled), conn:
         with cursor_factory(conn) as cur:
-            quota_enabled = bool(command.owner_user_id and (max_queued_quota or submits_per_minute_quota))
             if quota_enabled:
                 cur.execute("SELECT pg_advisory_xact_lock(%s)", (_quota_lock_key(command),))
 
-            quota_result = _quota_rejection(
-                cur,
-                command=command,
-                now=now,
-                max_queued_quota=max_queued_quota,
-                submits_per_minute_quota=submits_per_minute_quota,
-            )
-            if quota_result is not None:
-                return quota_result
+            idempotent_replay = False
+            if quota_enabled and command.idempotency_key:
+                cur.execute(
+                    "SELECT 1 FROM jobs WHERE domain = %s AND queue = %s AND job_type = %s AND idempotency_key = %s",
+                    (command.domain, command.queue, command.job_type, command.idempotency_key),
+                )
+                idempotent_replay = cur.fetchone() is not None
+
+            if not idempotent_replay:
+                quota_result = _quota_rejection(
+                    cur,
+                    command=command,
+                    now=now,
+                    max_queued_quota=max_queued_quota,
+                    submits_per_minute_quota=submits_per_minute_quota,
+                )
+                if quota_result is not None:
+                    return quota_result
 
             if command.idempotency_key:
                 row = _insert_job(

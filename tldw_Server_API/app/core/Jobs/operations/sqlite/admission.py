@@ -245,15 +245,24 @@ def create_job_admission(
         conn.execute("BEGIN IMMEDIATE")
 
     with conn:
-        quota_result = _quota_rejection(
-            conn,
-            command=command,
-            now_sql=now_sql,
-            max_queued_quota=max_queued_quota,
-            submits_per_minute_quota=submits_per_minute_quota,
-        )
-        if quota_result is not None:
-            return quota_result
+        idempotent_replay = False
+        if quota_enabled and command.idempotency_key:
+            row = conn.execute(
+                "SELECT 1 FROM jobs WHERE domain = ? AND queue = ? AND job_type = ? AND idempotency_key = ?",
+                (command.domain, command.queue, command.job_type, command.idempotency_key),
+            ).fetchone()
+            idempotent_replay = row is not None
+
+        if not idempotent_replay:
+            quota_result = _quota_rejection(
+                conn,
+                command=command,
+                now_sql=now_sql,
+                max_queued_quota=max_queued_quota,
+                submits_per_minute_quota=submits_per_minute_quota,
+            )
+            if quota_result is not None:
+                return quota_result
 
         if command.idempotency_key:
             row_id = _insert_job(
