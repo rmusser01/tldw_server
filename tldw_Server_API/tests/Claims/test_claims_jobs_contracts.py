@@ -37,6 +37,20 @@ def test_rebuild_payload_validation_rejects_non_scalar_owner_user_id(
     assert exc.failure_code == "claims_missing_owner"  # nosec B101
 
 
+@pytest.mark.parametrize("owner_user_id", ["", "0", "007", " 7", "7 ", "abc"])
+def test_rebuild_payload_validation_rejects_noncanonical_owner_user_id(
+    owner_user_id: str,
+) -> None:
+    with pytest.raises(contracts.ClaimsJobError) as excinfo:
+        contracts.validate_rebuild_media_payload(
+            {"version": 1, "owner_user_id": owner_user_id, "media_id": 42}
+        )
+
+    exc = excinfo.value
+    assert exc.retryable is False  # nosec B101
+    assert exc.failure_code == "claims_missing_owner"  # nosec B101
+
+
 @pytest.mark.parametrize("media_id", [True, False, 3.7, "", "abc", 0, -1])
 def test_rebuild_payload_validation_rejects_non_integral_media_id(media_id: object) -> None:
     with pytest.raises(contracts.ClaimsJobError) as excinfo:
@@ -130,12 +144,12 @@ def test_payload_validation_rejects_unknown_top_level_keys(
     assert exc.failure_code == "claims_invalid_payload"  # nosec B101
 
 
-def test_payload_validation_rejects_paths_and_synthetic_owner() -> None:
+def test_payload_validation_rejects_paths() -> None:
     with pytest.raises(contracts.ClaimsJobError) as excinfo:
         contracts.validate_rebuild_media_payload(
             {
                 "version": 1,
-                "owner_user_id": "0",
+                "owner_user_id": "7",
                 "media_id": 42,
                 "db_path": "/tmp/Media_DB_v2.db",  # nosec B108
             }

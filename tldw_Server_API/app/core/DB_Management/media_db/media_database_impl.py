@@ -37,6 +37,10 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.bootstrap_lifecycle
     initialize_db,
     initialize_media_database,
 )
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.chatbook_scope_counts import (
+    count_chatbook_scope_category,
+    list_chatbook_scope_ids,
+)
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.chunk_fts_ops import (
     ensure_chunk_fts,
     maybe_rebuild_chunk_fts_if_empty,
@@ -51,10 +55,6 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.chunk_ops import (
     process_chunks,
     process_unvectorized_chunks,
     update_chunking_template,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.chatbook_scope_counts import (
-    count_chatbook_scope_category,
-    list_chatbook_scope_ids,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_analytics_export_ops import (
     cleanup_claims_analytics_exports,
@@ -110,6 +110,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_monitoring_c
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_monitoring_event_ops import (
     get_claims_monitoring_event,
     get_latest_claims_monitoring_event_delivery,
+    has_successful_claims_monitoring_event_delivery,
     insert_claims_monitoring_event,
     list_claims_monitoring_events,
     list_undelivered_claims_monitoring_events,
@@ -142,6 +143,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_read_ops imp
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_review_metrics_ops import (
     count_claims_review_extractor_metrics_daily,
     get_claims_review_extractor_metrics_daily,
+    get_claims_review_latency_stats,
     list_claims_review_extractor_metrics_daily,
     list_claims_review_user_ids,
     upsert_claims_review_extractor_metrics_daily,
@@ -2036,6 +2038,7 @@ MediaDatabase.count_claims_review_extractor_metrics_daily = (
     count_claims_review_extractor_metrics_daily
 )
 MediaDatabase.list_claims_review_user_ids = list_claims_review_user_ids
+MediaDatabase.get_claims_review_latency_stats = get_claims_review_latency_stats
 MediaDatabase.get_claim_clusters_by_ids = get_claim_clusters_by_ids
 MediaDatabase.get_claim_cluster_member_counts = get_claim_cluster_member_counts
 MediaDatabase.update_claim_clusters_watchlist_counts = (
@@ -2087,6 +2090,9 @@ MediaDatabase.mark_claims_monitoring_events_delivered = (
 )
 MediaDatabase.get_latest_claims_monitoring_event_delivery = (
     get_latest_claims_monitoring_event_delivery
+)
+MediaDatabase.has_successful_claims_monitoring_event_delivery = (
+    has_successful_claims_monitoring_event_delivery
 )
 MediaDatabase._resolve_email_sync_source_row_id = _resolve_email_sync_source_row_id
 MediaDatabase._fetch_email_sync_state_row = _fetch_email_sync_state_row

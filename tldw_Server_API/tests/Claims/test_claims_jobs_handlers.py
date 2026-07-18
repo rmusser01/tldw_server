@@ -15,7 +15,6 @@ from tldw_Server_API.app.core.Claims_Extraction.claims_job_contracts import (
 pytestmark = pytest.mark.unit
 
 
-@pytest.mark.asyncio
 async def test_rebuild_handler_uses_owner_db_path_and_returns_result(monkeypatch) -> None:
     calls: list[dict[str, object]] = []
 
@@ -43,7 +42,6 @@ async def test_rebuild_handler_uses_owner_db_path_and_returns_result(monkeypatch
     assert calls == [{"db_path": "/tmp/user-7/Media_DB_v2.db", "media_id": 42}]
 
 
-@pytest.mark.asyncio
 async def test_rebuild_handler_runs_sync_work_off_event_loop_thread(monkeypatch) -> None:
     event_loop_thread = threading.get_ident()
     handler_threads: list[int] = []
@@ -72,7 +70,6 @@ async def test_rebuild_handler_runs_sync_work_off_event_loop_thread(monkeypatch)
     assert handler_threads and handler_threads[0] != event_loop_thread
 
 
-@pytest.mark.asyncio
 async def test_handler_rejects_owner_mismatch() -> None:
     with pytest.raises(ClaimsJobError) as excinfo:
         await claims_job_handlers.process_claims_job(
@@ -88,7 +85,6 @@ async def test_handler_rejects_owner_mismatch() -> None:
     assert excinfo.value.failure_code == "claims_owner_scope_violation"
 
 
-@pytest.mark.asyncio
 async def test_handler_rejects_missing_row_owner() -> None:
     with pytest.raises(ClaimsJobError) as excinfo:
         await claims_job_handlers.process_claims_job(
@@ -104,8 +100,7 @@ async def test_handler_rejects_missing_row_owner() -> None:
     assert excinfo.value.failure_code == "claims_owner_scope_violation"
 
 
-@pytest.mark.asyncio
-async def test_handler_rejects_noncanonical_owner(monkeypatch) -> None:
+async def test_handler_rejects_noncanonical_owner(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         claims_job_handlers,
         "rebuild_claims_for_media",
@@ -118,7 +113,7 @@ async def test_handler_rejects_noncanonical_owner(monkeypatch) -> None:
                 "id": 1,
                 "job_type": CLAIMS_REBUILD_MEDIA_JOB_TYPE,
                 "owner_user_id": "007",
-                "payload": {"version": 1, "owner_user_id": "007", "media_id": 42},
+                "payload": {"version": 1, "owner_user_id": "7", "media_id": 42},
             }
         )
 
@@ -126,7 +121,6 @@ async def test_handler_rejects_noncanonical_owner(monkeypatch) -> None:
     assert excinfo.value.failure_code == "claims_owner_scope_violation"
 
 
-@pytest.mark.asyncio
 async def test_review_notification_delivery_failure_is_retryable(monkeypatch) -> None:
     monkeypatch.setattr(
         claims_job_handlers,
@@ -153,7 +147,6 @@ async def test_review_notification_delivery_failure_is_retryable(monkeypatch) ->
     assert excinfo.value.failure_code == "claims_review_notification_delivery_failed"
 
 
-@pytest.mark.asyncio
 async def test_review_notification_handler_runs_sync_work_off_event_loop_thread(monkeypatch) -> None:
     event_loop_thread = threading.get_ident()
     handler_threads: list[int] = []
@@ -182,7 +175,6 @@ async def test_review_notification_handler_runs_sync_work_off_event_loop_thread(
     assert handler_threads and handler_threads[0] != event_loop_thread
 
 
-@pytest.mark.asyncio
 async def test_alert_delivery_uses_existing_db_and_preserves_slack_payload(monkeypatch) -> None:
     open_kwargs: dict[str, object] = {}
     delivered: list[dict[str, object]] = []
@@ -206,8 +198,8 @@ async def test_alert_delivery_uses_existing_db_and_preserves_slack_payload(monke
                 "slack_webhook_url": "https://example.test/slack",
             }
 
-        def list_claims_monitoring_events(self, **_kwargs) -> list[dict[str, object]]:
-            return []
+        def has_successful_claims_monitoring_event_delivery(self, **_kwargs) -> bool:
+            return False
 
     @contextmanager
     def _fake_managed_media_database(*_args, **kwargs):
@@ -240,7 +232,6 @@ async def test_alert_delivery_uses_existing_db_and_preserves_slack_payload(monke
     )
 
 
-@pytest.mark.asyncio
 async def test_alert_delivery_handler_runs_sync_work_off_event_loop_thread(monkeypatch) -> None:
     event_loop_thread = threading.get_ident()
     handler_threads: list[int] = []
@@ -264,7 +255,6 @@ async def test_alert_delivery_handler_runs_sync_work_off_event_loop_thread(monke
     assert handler_threads and handler_threads[0] != event_loop_thread
 
 
-@pytest.mark.asyncio
 async def test_alert_delivery_skips_event_owner_mismatch(monkeypatch) -> None:
     class _Db:
         def get_claims_monitoring_event(self, event_id: int) -> dict[str, object]:
@@ -293,7 +283,6 @@ async def test_alert_delivery_skips_event_owner_mismatch(monkeypatch) -> None:
     assert result == {"outcome": "skipped", "reason": "event_missing", "event_id": 9}
 
 
-@pytest.mark.asyncio
 async def test_alert_delivery_skips_alert_owner_mismatch(monkeypatch) -> None:
     class _Db:
         def get_claims_monitoring_event(self, event_id: int) -> dict[str, object]:
@@ -323,7 +312,6 @@ async def test_alert_delivery_skips_alert_owner_mismatch(monkeypatch) -> None:
     assert result == {"outcome": "skipped", "reason": "alert_missing", "alert_id": 3}
 
 
-@pytest.mark.asyncio
 async def test_alert_delivery_skips_already_delivered(monkeypatch) -> None:
     class _Db:
         def get_claims_monitoring_event(self, event_id: int) -> dict[str, object]:
@@ -340,14 +328,9 @@ async def test_alert_delivery_skips_already_delivered(monkeypatch) -> None:
                 "webhook_url": "https://example.test/webhook",
             }
 
-        def list_claims_monitoring_events(self, **_kwargs) -> list[dict[str, object]]:
-            return [
-                {
-                    "payload_json": json.dumps(
-                        {"status": "success", "event_id": 9, "alert_id": 3, "channel": "webhook"}
-                    )
-                }
-            ]
+        def has_successful_claims_monitoring_event_delivery(self, **kwargs) -> bool:
+            assert kwargs == {"user_id": "7", "event_id": 9, "alert_id": 3, "channel": "webhook"}
+            return True
 
     @contextmanager
     def _fake_managed_media_database(*_args, **_kwargs):
@@ -373,7 +356,6 @@ async def test_alert_delivery_skips_already_delivered(monkeypatch) -> None:
     assert result == {"outcome": "skipped", "reason": "already_delivered", "alert_id": 3}
 
 
-@pytest.mark.asyncio
 async def test_alert_delivery_failure_is_retryable(monkeypatch) -> None:
     class _Db:
         def get_claims_monitoring_event(self, event_id: int) -> dict[str, object]:
@@ -390,8 +372,8 @@ async def test_alert_delivery_failure_is_retryable(monkeypatch) -> None:
                 "webhook_url": "https://example.test/webhook",
             }
 
-        def list_claims_monitoring_events(self, **_kwargs) -> list[dict[str, object]]:
-            return []
+        def has_successful_claims_monitoring_event_delivery(self, **_kwargs) -> bool:
+            return False
 
     @contextmanager
     def _fake_managed_media_database(*_args, **_kwargs):

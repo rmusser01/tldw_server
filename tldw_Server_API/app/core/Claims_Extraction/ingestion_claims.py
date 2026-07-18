@@ -686,20 +686,25 @@ def store_claims(
             )
             if notification_ids:
                 from tldw_Server_API.app.core.Claims_Extraction import claims_jobs
+                from tldw_Server_API.app.core.Claims_Extraction.claims_notifications import (
+                    dispatch_claim_review_notifications,
+                )
 
+                dispatched_via_jobs = False
                 if claims_jobs.claims_jobs_enabled():
                     try:
                         claims_jobs.enqueue_claims_review_notification(
                             owner_user_id=str(owner_user_id),
                             notification_ids=notification_ids,
                         )
+                        dispatched_via_jobs = True
                     except _CLAIMS_STORE_EXCEPTIONS as exc:
-                        logger.debug("Failed to enqueue claims review assignment notification job: {}", exc)
-                else:
-                    from tldw_Server_API.app.core.Claims_Extraction.claims_notifications import (
-                        dispatch_claim_review_notifications,
-                    )
-
+                        logger.debug(
+                            "Failed to enqueue claims review assignment notification job; "
+                            "falling back to legacy dispatch: {}",
+                            exc,
+                        )
+                if not dispatched_via_jobs:
                     dispatch_claim_review_notifications(
                         db_path=str(db.db_path_str),
                         owner_user_id=str(owner_user_id),

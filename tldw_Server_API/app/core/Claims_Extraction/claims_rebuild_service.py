@@ -93,7 +93,15 @@ def rebuild_claims_for_media(*, db_path: str, media_id: int) -> dict[str, Any]:
         )
         if not claims:
             logger.info(f"Claims rebuild: no claims extracted for media_id={media_id}")
-            return {"outcome": "skipped", "reason": "no_claims_extracted", "media_id": media_id}
+            with db.transaction():
+                deleted = db.soft_delete_claims_for_media(media_id)
+            return {
+                "outcome": "ok",
+                "reason": "no_claims_extracted",
+                "media_id": media_id,
+                "deleted": int(deleted),
+                "inserted": 0,
+            }
         chunk_text_map: dict[int, str] = {}
         for ch in chunks:
             meta = (ch or {}).get("metadata", {}) or {}

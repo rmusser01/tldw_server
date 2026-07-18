@@ -138,6 +138,108 @@ def test_claims_webhook_backoff_schedule(monkeypatch, tmp_path):
     assert total == 5
 
 
+def test_claims_webhook_4xx_does_not_retry(monkeypatch, tmp_path):
+    db_path = tmp_path / "media.db"
+    db = MediaDatabase(db_path=str(db_path), client_id="test")
+    db.initialize_db()
+    db.close_connection()
+
+    class DummyClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    class DummyResponse:
+        def __init__(self, status_code: int) -> None:
+            self.status_code = status_code
+
+    fetch_calls: list[dict[str, object]] = []
+    delivery_calls: list[dict[str, object]] = []
+    sleeps: list[float] = []
+
+    def fake_fetch(*args, **kwargs):
+        fetch_calls.append({"args": args, "kwargs": kwargs})
+        return DummyResponse(404)
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.http_client.create_client",
+        lambda **_kwargs: DummyClient(),
+    )
+    monkeypatch.setattr("tldw_Server_API.app.core.http_client.fetch", fake_fetch)
+    monkeypatch.setattr(claims_alert_delivery, "record_claims_webhook_delivery", lambda **kwargs: delivery_calls.append(kwargs))
+    monkeypatch.setattr(claims_alert_delivery.random, "uniform", lambda *_args, **_kwargs: 1.0)
+    proxy_time = types.SimpleNamespace(
+        time=claims_alert_delivery.time.time,
+        sleep=lambda delay: sleeps.append(delay),
+    )
+    monkeypatch.setattr(claims_alert_delivery, "time", proxy_time)
+
+    delivered = claims_alert_delivery.deliver_claims_alert_webhook(
+        url="https://example.com/webhook",
+        payload={"ok": False},
+        channel="webhook",
+        db_path=str(db_path),
+        user_id="1",
+        alert_id=99,
+    )
+
+    assert delivered is False
+    assert len(fetch_calls) == 1
+    assert sleeps == []
+    assert len(delivery_calls) == 1
+    assert delivery_calls[0]["status"] == "failure"
+    assert delivery_calls[0]["reason"] == "http_4xx"
+
+
+def test_claims_webhook_success_ignores_telemetry_failures(monkeypatch, tmp_path):
+    db_path = tmp_path / "media.db"
+    db = MediaDatabase(db_path=str(db_path), client_id="test")
+    db.initialize_db()
+    db.close_connection()
+
+    class DummyClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    class DummyResponse:
+        status_code = 204
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.http_client.create_client",
+        lambda **_kwargs: DummyClient(),
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.http_client.fetch",
+        lambda *_args, **_kwargs: DummyResponse(),
+    )
+    monkeypatch.setattr(
+        claims_alert_delivery,
+        "record_claims_webhook_delivery",
+        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("metrics unavailable")),
+    )
+    monkeypatch.setattr(
+        claims_alert_delivery,
+        "_record_webhook_event",
+        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("db unavailable")),
+    )
+
+    delivered = claims_alert_delivery.deliver_claims_alert_webhook(
+        url="https://example.com/webhook",
+        payload={"ok": True},
+        channel="webhook",
+        db_path=str(db_path),
+        user_id="1",
+        alert_id=99,
+    )
+
+    assert delivered is True
+
+
 def test_record_webhook_event_uses_managed_media_database(monkeypatch):
     class _FakeDb:
         def __init__(self) -> None:

@@ -6,31 +6,31 @@ falsification triggering, anti-context retrieval, and adjudication.
 """
 
 import asyncio
-import pytest
 from dataclasses import dataclass, field
 from typing import Any, Optional
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
-from tldw_Server_API.app.core.Claims_Extraction.fva_pipeline import (
-    FVAPipeline,
-    FVAConfig,
-    FVAResult,
-    FVABatchResult,
-    create_fva_pipeline,
-)
+import pytest
+
 from tldw_Server_API.app.core.Claims_Extraction.budget_guard import (
     ClaimsJobBudget,
-    ClaimsJobContext,
+)
+from tldw_Server_API.app.core.Claims_Extraction.fva_pipeline import (
+    FVABatchResult,
+    FVAConfig,
+    FVAPipeline,
+    FVAResult,
+    create_fva_pipeline,
 )
 
 # Import types
 try:
     from tldw_Server_API.app.core.RAG.rag_service.types import (
-        VerificationStatus,
+        ClaimType,
         Document,
         MatchLevel,
         SourceAuthority,
-        ClaimType,
+        VerificationStatus,
     )
 except ImportError:
     from enum import Enum
@@ -304,19 +304,29 @@ class TestFVAPipelineProcessClaim:
 
         with patch(
             "tldw_Server_API.app.core.Claims_Extraction.fva_pipeline.observe_histogram"
-        ) as observe_histogram:
+        ) as observe_histogram, patch(
+            "tldw_Server_API.app.core.Claims_Extraction.fva_pipeline.increment_counter"
+        ) as increment_counter:
             await pipeline.process_claim(
                 claim=MockClaim(id="1", text="Test claim"),
                 query="test",
                 documents=[Document(id="1", content="Support", metadata={}, score=0.8)],
             )
 
+        histogram_names = [call.args[0] for call in observe_histogram.call_args_list if call.args]
+        anti_context_index = histogram_names.index("fva_anti_context_docs")
+        first_adjudication_index = histogram_names.index("fva_adjudication_scores")
+        assert anti_context_index < first_adjudication_index
         score_types = {
             call.kwargs["labels"]["score_type"]
             for call in observe_histogram.call_args_list
             if call.args and call.args[0] == "fva_adjudication_scores"
         }
         assert score_types == {"support", "contradict", "contestation"}
+        assert not any(
+            call.args and call.args[0] == "fva_wasted_falsification_total"
+            for call in increment_counter.call_args_list
+        )
 
     @pytest.mark.unit
     @pytest.mark.asyncio

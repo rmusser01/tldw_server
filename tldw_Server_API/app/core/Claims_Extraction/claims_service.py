@@ -593,20 +593,77 @@ def _fva_claims_analyze_call(
 
 def _enqueue_claim_rebuild_if_needed(*, media_id: int, db_path: str, owner_user_id: str | None = None) -> None:
     """Best-effort enqueue of a claims rebuild task for a media item."""
-    try:
-        if claims_jobs.claims_jobs_enabled():
-            if not owner_user_id:
-                logger.debug("Claims rebuild Jobs enqueue skipped: missing owner_user_id")
+    if claims_jobs.claims_jobs_enabled():
+        if not owner_user_id:
+            logger.debug("Claims rebuild Jobs enqueue skipped: missing owner_user_id")
+        else:
+            try:
+                claims_jobs.enqueue_claims_rebuild_media(
+                    media_id=int(media_id),
+                    owner_user_id=str(owner_user_id),
+                )
                 return
-            claims_jobs.enqueue_claims_rebuild_media(
-                media_id=int(media_id),
-                owner_user_id=str(owner_user_id),
-            )
-            return
+            except _CLAIMS_NONCRITICAL_EXCEPTIONS as exc:
+                logger.debug("Claims rebuild Jobs enqueue failed; falling back to legacy queue: {}", exc)
+    try:
         svc = get_claims_rebuild_service()
         svc.submit(media_id=int(media_id), db_path=str(db_path))
     except _CLAIMS_NONCRITICAL_EXCEPTIONS as exc:
         logger.debug("Claims rebuild enqueue failed: {}", exc)
+
+
+def _enqueue_or_dispatch_claim_review_notifications(
+    *,
+    db_path: str,
+    owner_user_id: str,
+    notification_ids: list[int],
+) -> None:
+    if not notification_ids:
+        return
+    if claims_jobs.claims_jobs_enabled():
+        try:
+            claims_jobs.enqueue_claims_review_notification(
+                owner_user_id=str(owner_user_id),
+                notification_ids=notification_ids,
+            )
+            return
+        except _CLAIMS_NONCRITICAL_EXCEPTIONS as exc:
+            logger.debug("Failed to enqueue claims review notification job; falling back to legacy dispatch: {}", exc)
+    dispatch_claim_review_notifications(
+        db_path=str(db_path),
+        owner_user_id=str(owner_user_id),
+        notification_ids=notification_ids,
+    )
+
+
+def _enqueue_or_dispatch_claim_alert_delivery(
+    *,
+    config_row: dict[str, Any],
+    event_id: int,
+    owner_user_id: str,
+    payload: dict[str, Any],
+    db_path: str,
+) -> bool:
+    if claims_jobs.claims_jobs_enabled():
+        try:
+            if (
+                _enqueue_claims_alert_delivery_jobs(
+                    config_row=config_row,
+                    event_id=event_id,
+                    owner_user_id=owner_user_id,
+                )
+                > 0
+            ):
+                return True
+        except _CLAIMS_NONCRITICAL_EXCEPTIONS as exc:
+            logger.debug("Claims alert delivery Jobs enqueue failed; falling back to legacy dispatch: {}", exc)
+    _dispatch_claims_alert_notifications(
+        config_row=config_row,
+        payload=payload,
+        db_path=str(db_path),
+        user_id=str(owner_user_id),
+    )
+    return False
 
 
 def _build_alert_channels(
@@ -758,14 +815,15 @@ def _enqueue_claims_alert_delivery_jobs(
     config_row: dict[str, Any],
     event_id: int,
     owner_user_id: str,
-) -> None:
+) -> int:
     """Best-effort enqueue of alert delivery jobs for Jobs-owned Claims queues."""
     channels = _normalize_channels(config_row.get("channels_json") or config_row.get("channels"))
     try:
         alert_id = int(config_row.get("id") or 0)
     except _CLAIMS_NONCRITICAL_EXCEPTIONS as exc:
         logger.debug("Failed to enqueue claims alert delivery job: {}", exc)
-        return
+        return 0
+    enqueued = 0
     for channel in ("slack", "webhook"):
         if not channels.get(channel):
             continue
@@ -776,8 +834,10 @@ def _enqueue_claims_alert_delivery_jobs(
                 alert_id=alert_id,
                 channel=channel,
             )
+            enqueued += 1
         except _CLAIMS_NONCRITICAL_EXCEPTIONS as exc:
             logger.debug("Failed to enqueue claims alert delivery job: {}", exc)
+    return enqueued
 
 
 async def _send_claims_alert_email_digest(
@@ -1390,70 +1450,7 @@ def _claims_owner_join(
 
 
 def _build_review_latency_stats(db: MediaDatabase, owner_user_id: str | None) -> dict[str, float | None]:
-    claims_table, _media_table, placeholder = _claims_analytics_tables(db)
-    owner_join, owner_predicate, owner_params = _claims_owner_join(db, owner_user_id)
-    avg_latency_sec = None
-    if db.backend_type == BackendType.POSTGRESQL:
-        avg_row = db.execute_query(
-            "SELECT AVG(EXTRACT(EPOCH FROM (c.reviewed_at - c.created_at))) AS avg_sec "  # nosec B608
-            f"FROM {claims_table} c{owner_join} WHERE c.reviewed_at IS NOT NULL AND c.deleted = 0"
-            + owner_predicate,
-            tuple(owner_params),
-        ).fetchone()
-    else:
-        avg_row = db.execute_query(
-            "SELECT AVG((julianday(c.reviewed_at) - julianday(c.created_at)) * 86400.0) AS avg_sec "  # nosec B608
-            f"FROM {claims_table} c{owner_join} WHERE c.reviewed_at IS NOT NULL AND c.deleted = 0"
-            + owner_predicate,
-            tuple(owner_params),
-        ).fetchone()
-    if avg_row:
-        try:
-            avg_latency_sec = float(avg_row[0]) if avg_row[0] is not None else None
-        except _CLAIMS_NONCRITICAL_EXCEPTIONS:
-            avg_latency_sec = None
-
-    total_rows = db.execute_query(
-        f"SELECT COUNT(*) AS count FROM {claims_table} c{owner_join} "  # nosec B608
-        "WHERE c.reviewed_at IS NOT NULL AND c.deleted = 0"
-        + owner_predicate,
-        tuple(owner_params),
-    ).fetchone()
-    total = int(total_rows[0]) if total_rows and total_rows[0] is not None else 0
-    p95_latency = None
-    if total > 0:
-        offset = max(0, int(math.ceil(total * 0.95)) - 1)
-        if db.backend_type == BackendType.POSTGRESQL:
-            latency_expr = "EXTRACT(EPOCH FROM (c.reviewed_at - c.created_at))"
-            sql = (
-                "SELECT "
-                + latency_expr
-                + f" AS latency FROM {claims_table} c{owner_join} "
-                "WHERE c.reviewed_at IS NOT NULL AND c.deleted = 0 "
-                + owner_predicate
-                + f" ORDER BY {latency_expr} LIMIT 1 OFFSET {placeholder}"
-            )
-            row = db.execute_query(sql, (*owner_params, offset)).fetchone()
-        else:
-            latency_expr = "(julianday(c.reviewed_at) - julianday(c.created_at)) * 86400.0"
-            sql = (
-                "SELECT "
-                + latency_expr
-                + f" AS latency FROM {claims_table} c{owner_join} "
-                "WHERE c.reviewed_at IS NOT NULL AND c.deleted = 0 "
-                + owner_predicate
-                + f" ORDER BY {latency_expr} LIMIT 1 OFFSET {placeholder}"
-            )
-            row = db.execute_query(sql, (*owner_params, offset)).fetchone()
-        if row:
-            try:
-                p95_latency = float(row[0]) if row[0] is not None else None
-            except _CLAIMS_NONCRITICAL_EXCEPTIONS:
-                p95_latency = None
-    return {
-        "avg_review_latency_sec": avg_latency_sec,
-        "p95_review_latency_sec": p95_latency,
-    }
+    return db.get_claims_review_latency_stats(owner_user_id=owner_user_id)
 
 
 def _build_review_throughput(db: MediaDatabase, window_days: int, owner_user_id: str | None) -> dict[str, Any]:
@@ -2575,20 +2572,19 @@ def _evaluate_claims_alerts_for_user(
             )
             event_row = event_row or {}
             event_id = 0
-            delivered_via_jobs = False
-            if claims_jobs.claims_jobs_enabled():
-                try:
-                    event_id = int(event_row.get("id") or 0)
-                except _CLAIMS_NONCRITICAL_EXCEPTIONS as exc:
-                    logger.debug("Claims alert delivery Jobs enqueue skipped: invalid event_id: {}", exc)
-                if event_id > 0:
-                    _enqueue_claims_alert_delivery_jobs(
-                        config_row=dict(cfg),
-                        event_id=event_id,
-                        owner_user_id=target_user_id,
-                    )
-                    delivered_via_jobs = True
-            if not delivered_via_jobs:
+            try:
+                event_id = int(event_row.get("id") or 0)
+            except _CLAIMS_NONCRITICAL_EXCEPTIONS as exc:
+                logger.debug("Claims alert delivery enqueue skipped: invalid event_id: {}", exc)
+            if event_id > 0:
+                _enqueue_or_dispatch_claim_alert_delivery(
+                    config_row=dict(cfg),
+                    event_id=event_id,
+                    owner_user_id=target_user_id,
+                    payload=payload,
+                    db_path=db.db_path_str,
+                )
+            else:
                 _dispatch_claims_alert_notifications(
                     config_row=dict(cfg),
                     payload=payload,
@@ -2873,20 +2869,11 @@ async def review_claim(
                 )
                 notif_id = created.get("id") if isinstance(created, dict) else None
                 if notif_id is not None:
-                    if claims_jobs.claims_jobs_enabled():
-                        try:
-                            claims_jobs.enqueue_claims_review_notification(
-                                owner_user_id=str(owner_user_id),
-                                notification_ids=[int(notif_id)],
-                            )
-                        except _CLAIMS_NONCRITICAL_EXCEPTIONS as exc:
-                            logger.debug("Failed to enqueue claims review notification job: {}", exc)
-                    else:
-                        dispatch_claim_review_notifications(
-                            db_path=str(target_db.db_path_str),
-                            owner_user_id=str(owner_user_id),
-                            notification_ids=[int(notif_id)],
-                        )
+                    _enqueue_or_dispatch_claim_review_notifications(
+                        db_path=str(target_db.db_path_str),
+                        owner_user_id=str(owner_user_id),
+                        notification_ids=[int(notif_id)],
+                    )
             except _CLAIMS_NONCRITICAL_EXCEPTIONS as exc:
                 logger.debug("Failed to emit claims review notification: {}", exc)
         return _normalize_claim_row(dict(updated))
@@ -2938,6 +2925,7 @@ def bulk_review_claims(
         owner_filter=False,
     ) as (target_db, _owner_filter):
         updated_ids: list[int] = []
+        updated_ids_by_owner: dict[str, list[int]] = {}
         conflicts: list[int] = []
         missing: list[int] = []
         invalid: list[int] = []
@@ -2970,15 +2958,17 @@ def bulk_review_claims(
                 missing.append(int(cid))
             else:
                 updated_ids.append(int(cid))
+                owner_for_claim = _resolve_claim_owner_user_id(
+                    claim_row,
+                    int(user_id) if user_id is not None else int(current_user.id),
+                )
+                if owner_for_claim:
+                    updated_ids_by_owner.setdefault(str(owner_for_claim), []).append(int(cid))
                 if desired_status in {"flagged", "reassigned"} and desired_status != current_status:
                     with suppress(_CLAIMS_NONCRITICAL_EXCEPTIONS):
                         media_id = int(claim_row.get("media_id") or 0)
-                        owner_for_rebuild = _resolve_claim_owner_user_id(
-                            claim_row,
-                            int(user_id) if user_id is not None else int(current_user.id),
-                        )
-                        if media_id > 0 and owner_for_rebuild:
-                            rebuild_media_owners[media_id] = str(owner_for_rebuild)
+                        if media_id > 0 and owner_for_claim:
+                            rebuild_media_owners[media_id] = str(owner_for_claim)
 
         if updated_ids:
             record_claims_review_metrics(processed=len(updated_ids))
@@ -2988,11 +2978,10 @@ def bulk_review_claims(
                 db_path=str(target_db.db_path_str),
                 owner_user_id=owner_for_rebuild,
             )
-        if updated_ids:
-            owner_user_id = str(user_id) if user_id is not None else str(current_user.id)
+        for owner_user_id, owner_updated_ids in updated_ids_by_owner.items():
             try:
                 notif_payload = {
-                    "claim_ids": updated_ids,
+                    "claim_ids": owner_updated_ids,
                     "status": desired_status,
                     "reviewer_id": payload.get("reviewer_id"),
                     "review_group": payload.get("review_group"),
@@ -3010,20 +2999,11 @@ def bulk_review_claims(
                 )
                 notif_id = created.get("id") if isinstance(created, dict) else None
                 if notif_id is not None:
-                    if claims_jobs.claims_jobs_enabled():
-                        try:
-                            claims_jobs.enqueue_claims_review_notification(
-                                owner_user_id=str(owner_user_id),
-                                notification_ids=[int(notif_id)],
-                            )
-                        except _CLAIMS_NONCRITICAL_EXCEPTIONS as exc:
-                            logger.debug("Failed to enqueue claims review notification job: {}", exc)
-                    else:
-                        dispatch_claim_review_notifications(
-                            db_path=str(target_db.db_path_str),
-                            owner_user_id=str(owner_user_id),
-                            notification_ids=[int(notif_id)],
-                        )
+                    _enqueue_or_dispatch_claim_review_notifications(
+                        db_path=str(target_db.db_path_str),
+                        owner_user_id=str(owner_user_id),
+                        notification_ids=[int(notif_id)],
+                    )
             except _CLAIMS_NONCRITICAL_EXCEPTIONS as exc:
                 logger.debug("Failed to emit claims bulk review notification: {}", exc)
         return {

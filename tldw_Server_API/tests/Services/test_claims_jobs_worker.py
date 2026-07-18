@@ -37,7 +37,6 @@ def test_claims_jobs_worker_spec_is_job_poller() -> None:
     assert spec.enabled(_context({"CLAIMS_JOBS_WORKER_ENABLED": False})) is False
 
 
-@pytest.mark.asyncio
 async def test_start_claims_jobs_worker_uses_worker_sdk_without_owner_filter(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -56,6 +55,7 @@ async def test_start_claims_jobs_worker_uses_worker_sdk_without_owner_filter(
 
     monkeypatch.setattr(claims_jobs_worker, "WorkerSDK", _FakeSDK)
     monkeypatch.setattr(claims_jobs_worker, "jobs_manager_from_env", lambda: "manager")
+    monkeypatch.delenv("CLAIMS_JOBS_QUEUE", raising=False)
     stop_event = asyncio.Event()
     stop_event.set()
 

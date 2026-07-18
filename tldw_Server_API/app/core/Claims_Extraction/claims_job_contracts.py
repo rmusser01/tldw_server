@@ -107,10 +107,20 @@ def _owner_user_id(value: Any) -> str:
             retryable=False,
             failure_code="claims_missing_owner",
         )
-    owner = str(value).strip()
-    if not owner or owner == "0":
+    if isinstance(value, int):
+        owner = str(value)
+    else:
+        owner = value
+    if (
+        not owner
+        or owner != owner.strip()
+        or not owner.isascii()
+        or not owner.isdigit()
+        or owner == "0"
+        or (len(owner) > 1 and owner.startswith("0"))
+    ):
         raise ClaimsJobError(
-            "claims job payload missing real owner_user_id",
+            "claims job payload owner_user_id must be a canonical positive integer",
             retryable=False,
             failure_code="claims_missing_owner",
         )

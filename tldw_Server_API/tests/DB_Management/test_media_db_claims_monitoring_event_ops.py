@@ -15,6 +15,9 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_monitoring_e
     get_latest_claims_monitoring_event_delivery as helper_get_latest_claims_monitoring_event_delivery,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_monitoring_event_ops import (
+    has_successful_claims_monitoring_event_delivery as helper_has_successful_claims_monitoring_event_delivery,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_monitoring_event_ops import (
     insert_claims_monitoring_event as helper_insert_claims_monitoring_event,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_monitoring_event_ops import (
@@ -330,5 +333,50 @@ def test_get_latest_claims_monitoring_event_delivery_returns_none_and_supports_t
             user_id="1",
             event_type="unsupported_ratio",
         ) == "2026-03-22T12:00:00Z"
+    finally:
+        db.close_connection()
+
+
+def test_has_successful_claims_monitoring_event_delivery_checks_bounded_recent_events(
+    tmp_path: Path,
+) -> None:
+    db = _make_db(tmp_path, "claims-monitoring-event-dedupe.db")
+    try:
+        assert (
+            db.has_successful_claims_monitoring_event_delivery.__func__
+            is helper_has_successful_claims_monitoring_event_delivery
+        )
+
+        db.insert_claims_monitoring_event(
+            user_id="1",
+            event_type="webhook_delivery",
+            severity="warning",
+            payload_json="{not-json",
+        )
+        db.insert_claims_monitoring_event(
+            user_id="1",
+            event_type="webhook_delivery",
+            severity="warning",
+            payload_json='{"status":"failure","event_id":7,"alert_id":3,"channel":"webhook"}',
+        )
+        db.insert_claims_monitoring_event(
+            user_id="1",
+            event_type="webhook_delivery",
+            severity="info",
+            payload_json='{"status":"success","event_id":7,"alert_id":3,"channel":"webhook"}',
+        )
+
+        assert db.has_successful_claims_monitoring_event_delivery(
+            user_id="1",
+            event_id=7,
+            alert_id=3,
+            channel="webhook",
+        ) is True
+        assert db.has_successful_claims_monitoring_event_delivery(
+            user_id="1",
+            event_id=7,
+            alert_id=3,
+            channel="slack",
+        ) is False
     finally:
         db.close_connection()

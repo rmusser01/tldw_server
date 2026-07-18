@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
@@ -134,6 +135,60 @@ def mark_claims_monitoring_events_delivered(self, ids: list[int]) -> int:
         return int(getattr(cursor, "rowcount", 0) or 0)
     except _MEDIA_NONCRITICAL_EXCEPTIONS:
         return 0
+
+
+def has_successful_claims_monitoring_event_delivery(
+    self,
+    *,
+    user_id: str,
+    event_id: int,
+    alert_id: int,
+    channel: str,
+    limit: int = 1000,
+) -> bool:
+    try:
+        event_id = int(event_id)
+        alert_id = int(alert_id)
+        limit = int(limit)
+    except _MEDIA_NONCRITICAL_EXCEPTIONS:
+        return False
+    if event_id <= 0 or alert_id <= 0:
+        return False
+    limit = max(1, min(5000, limit))
+    rows = self.execute_query(
+        (
+            "SELECT payload_json FROM claims_monitoring_events "
+            "WHERE user_id = ? AND event_type = ? "
+            "ORDER BY created_at DESC, id DESC LIMIT ?"
+        ),
+        (str(user_id), "webhook_delivery", limit),
+    ).fetchall()
+    wanted_channel = str(channel)
+    for row in rows:
+        try:
+            raw_payload = row["payload_json"]
+        except _MEDIA_NONCRITICAL_EXCEPTIONS:
+            try:
+                raw_payload = row[0]
+            except _MEDIA_NONCRITICAL_EXCEPTIONS:
+                continue
+        try:
+            payload = json.loads(str(raw_payload or "{}"))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        try:
+            if (
+                str(payload.get("status")) == "success"
+                and int(payload.get("event_id") or 0) == event_id
+                and int(payload.get("alert_id") or 0) == alert_id
+                and str(payload.get("channel") or "") == wanted_channel
+            ):
+                return True
+        except _MEDIA_NONCRITICAL_EXCEPTIONS:
+            continue
+    return False
 
 
 def get_latest_claims_monitoring_event_delivery(

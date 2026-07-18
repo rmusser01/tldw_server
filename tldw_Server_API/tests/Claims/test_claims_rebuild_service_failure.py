@@ -310,6 +310,74 @@ def test_rebuild_claims_for_media_returns_success_result(monkeypatch, tmp_path):
     ]
 
 
+def test_rebuild_claims_for_media_soft_deletes_stale_claims_when_extraction_empty(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    class _FakeDb:
+        def __init__(self) -> None:
+            self.deleted_media_ids: list[int] = []
+
+        def get_media_by_id(self, media_id, include_deleted=False, include_trash=False):
+            assert media_id == 7
+            assert include_deleted is False
+            assert include_trash is False
+            return {
+                "id": media_id,
+                "title": "Doc",
+                "content": "No extractable claims.",
+            }
+
+        def soft_delete_claims_for_media(self, media_id):
+            self.deleted_media_ids.append(media_id)
+            return 2
+
+        @contextmanager
+        def transaction(self):
+            yield self
+
+        def close_connection(self) -> None:
+            pass
+
+    fake_db = _FakeDb()
+
+    @contextmanager
+    def _fake_managed_media_database(*_args, **_kwargs):
+        yield fake_db
+
+    monkeypatch.setattr(claims_rebuild_service, "managed_media_database", _fake_managed_media_database)
+    monkeypatch.setattr(
+        claims_rebuild_service,
+        "chunk_for_embedding",
+        lambda content, file_name: [{"text": content, "metadata": {"chunk_index": 0}}],
+    )
+    monkeypatch.setattr(claims_rebuild_service, "resolve_claims_job_budget", lambda settings: None)
+    monkeypatch.setattr(
+        claims_rebuild_service,
+        "extract_claims_for_chunks",
+        lambda chunks, extractor_mode, max_per_chunk, budget: [],
+    )
+    monkeypatch.setattr(
+        claims_rebuild_service,
+        "store_claims",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError(f"store should not run: {kwargs}")),
+    )
+
+    result = claims_rebuild_service.rebuild_claims_for_media(
+        db_path=str(tmp_path / "claims-empty.db"),
+        media_id=7,
+    )
+
+    assert result == {
+        "outcome": "ok",
+        "reason": "no_claims_extracted",
+        "media_id": 7,
+        "deleted": 2,
+        "inserted": 0,
+    }
+    assert fake_db.deleted_media_ids == [7]
+
+
 def test_claims_rebuild_process_task_rolls_back_soft_delete_when_store_returns_zero(monkeypatch, tmp_path):
     db_path = str(tmp_path / "claims-rebuild-rollback.db")
     seed_db = MediaDatabase(db_path=db_path, client_id="1")

@@ -100,15 +100,6 @@ def _payload_dict(row: dict[str, Any]) -> dict[str, Any]:
     return parsed if isinstance(parsed, dict) else {}
 
 
-def _positive_int_or_zero(value: Any) -> int:
-    try:
-        if isinstance(value, bool):
-            return 0
-        return int(value)
-    except (TypeError, ValueError):
-        return 0
-
-
 def _enabled(value: Any) -> bool:
     if value is None:
         return True
@@ -118,20 +109,12 @@ def _enabled(value: Any) -> bool:
 
 
 def _already_delivered(db: Any, *, owner_user_id: str, event_id: int, alert_id: int, channel: str) -> bool:
-    rows = db.list_claims_monitoring_events(
+    return bool(db.has_successful_claims_monitoring_event_delivery(
         user_id=str(owner_user_id),
-        event_type="webhook_delivery",
-    )
-    for row in rows:
-        payload = _payload_dict(dict(row))
-        if (
-            str(payload.get("status")) == "success"
-            and _positive_int_or_zero(payload.get("event_id")) == int(event_id)
-            and _positive_int_or_zero(payload.get("alert_id")) == int(alert_id)
-            and str(payload.get("channel") or "") == str(channel)
-        ):
-            return True
-    return False
+        event_id=int(event_id),
+        alert_id=int(alert_id),
+        channel=str(channel),
+    ))
 
 
 def _deliver_alert(payload: dict[str, Any]) -> dict[str, Any]:
@@ -204,6 +187,19 @@ def _deliver_alert(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 async def process_claims_job(job: dict[str, Any]) -> dict[str, Any]:
+    """Validate and dispatch one Claims job through the Jobs worker runtime.
+
+    Args:
+        job: WorkerSDK job dictionary containing a Claims job_type, owner_user_id,
+            and payload object or JSON object string.
+
+    Returns:
+        Structured handler outcome data for the processed job.
+
+    Raises:
+        ClaimsJobError: If the job type, owner scope, payload, or downstream
+            Claims operation cannot be processed by this worker.
+    """
     job_type = str(job.get("job_type") or "").strip()
     if job_type == CLAIMS_REBUILD_MEDIA_JOB_TYPE:
         payload = validate_rebuild_media_payload(_payload(job))

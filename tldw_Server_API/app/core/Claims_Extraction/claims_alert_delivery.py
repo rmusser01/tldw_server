@@ -147,14 +147,54 @@ def _record_webhook_event(
                 payload["alert_id"] = int(alert_id)
             if event_id is not None:
                 payload["event_id"] = int(event_id)
+            if db is None:
+                logger.debug("Claims webhook delivery event was not recorded: database unavailable")
+                return
             db.insert_claims_monitoring_event(
                 user_id=str(user_id),
                 event_type="webhook_delivery",
                 severity="info" if status == "success" else "warning",
                 payload_json=json.dumps(payload),
             )
-    except _CLAIMS_ALERT_DELIVERY_NONCRITICAL_EXCEPTIONS:
-        pass
+    except _CLAIMS_ALERT_DELIVERY_NONCRITICAL_EXCEPTIONS as exc:
+        logger.debug("Claims webhook delivery event was not recorded: {}", exc)
+
+
+def _record_webhook_delivery_telemetry(
+    *,
+    metric_status: str,
+    latency_s: float,
+    db_path: str,
+    user_id: str,
+    channel: str,
+    event_status: str,
+    attempt: int,
+    reason: str | None = None,
+    status_code: int | None = None,
+    alert_id: int | None = None,
+    event_id: int | None = None,
+) -> None:
+    try:
+        if reason:
+            record_claims_webhook_delivery(status=metric_status, reason=reason, latency_s=latency_s)
+        else:
+            record_claims_webhook_delivery(status=metric_status, latency_s=latency_s)
+    except _CLAIMS_ALERT_DELIVERY_NONCRITICAL_EXCEPTIONS as exc:
+        logger.debug("Claims webhook delivery metric was not recorded: {}", exc)
+    try:
+        _record_webhook_event(
+            db_path=db_path,
+            user_id=user_id,
+            channel=channel,
+            status=event_status,
+            attempt=attempt,
+            reason=reason,
+            status_code=status_code,
+            alert_id=alert_id,
+            event_id=event_id,
+        )
+    except _CLAIMS_ALERT_DELIVERY_NONCRITICAL_EXCEPTIONS as exc:
+        logger.debug("Claims webhook delivery event was not recorded: {}", exc)
 
 
 def deliver_claims_alert_webhook(
@@ -199,12 +239,13 @@ def deliver_claims_alert_webhook(
                     attempt,
                     status_code,
                 )
-                record_claims_webhook_delivery(status="success", latency_s=duration)
-                _record_webhook_event(
+                _record_webhook_delivery_telemetry(
+                    metric_status="success",
+                    latency_s=duration,
                     db_path=db_path,
                     user_id=user_id,
                     channel=channel,
-                    status="success",
+                    event_status="success",
                     attempt=attempt,
                     status_code=status_code,
                     alert_id=alert_id,
@@ -224,18 +265,21 @@ def deliver_claims_alert_webhook(
                 status_code,
                 reason,
             )
-            record_claims_webhook_delivery(status="failure", reason=reason, latency_s=duration)
-            _record_webhook_event(
+            _record_webhook_delivery_telemetry(
+                metric_status="failure",
+                latency_s=duration,
                 db_path=db_path,
                 user_id=user_id,
                 channel=channel,
-                status="failure",
+                event_status="failure",
                 attempt=attempt,
                 reason=reason,
                 status_code=status_code,
                 alert_id=alert_id,
                 event_id=event_id,
             )
+            if reason == "http_4xx":
+                return False
         except _CLAIMS_ALERT_DELIVERY_NONCRITICAL_EXCEPTIONS as exc:
             reason = _classify_webhook_exception(exc)
             duration = time.time() - start_ts
@@ -245,12 +289,13 @@ def deliver_claims_alert_webhook(
                 attempt,
                 reason,
             )
-            record_claims_webhook_delivery(status="failure", reason=reason, latency_s=duration)
-            _record_webhook_event(
+            _record_webhook_delivery_telemetry(
+                metric_status="failure",
+                latency_s=duration,
                 db_path=db_path,
                 user_id=user_id,
                 channel=channel,
-                status="failure",
+                event_status="failure",
                 attempt=attempt,
                 reason=reason,
                 alert_id=alert_id,

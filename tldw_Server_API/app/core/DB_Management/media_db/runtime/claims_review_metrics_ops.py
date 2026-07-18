@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
@@ -9,8 +10,87 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.noncritical import 
     MEDIA_NONCRITICAL_EXCEPTIONS,
 )
 
-
 _MEDIA_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = MEDIA_NONCRITICAL_EXCEPTIONS
+
+
+def _claims_review_tables(self) -> tuple[str, str, str]:
+    if self.backend_type == BackendType.POSTGRESQL:
+        return "claims", "media", "%s"
+    return "Claims", "Media", "?"
+
+
+def _claims_review_owner_join(
+    self,
+    owner_user_id: str | None,
+) -> tuple[str, str, list[Any]]:
+    if not owner_user_id:
+        return "", "", []
+    _claims_table, media_table, placeholder = _claims_review_tables(self)
+    return (
+        f" JOIN {media_table} m ON m.id = c.media_id",  # nosec B608
+        f" AND COALESCE(CAST(m.owner_user_id AS TEXT), m.client_id) = {placeholder}",
+        [str(owner_user_id)],
+    )
+
+
+def get_claims_review_latency_stats(
+    self,
+    *,
+    owner_user_id: str | None = None,
+) -> dict[str, float | None]:
+    claims_table, _media_table, placeholder = _claims_review_tables(self)
+    owner_join, owner_predicate, owner_params = _claims_review_owner_join(self, owner_user_id)
+    if self.backend_type == BackendType.POSTGRESQL:
+        latency_expr = "EXTRACT(EPOCH FROM (c.reviewed_at - c.created_at))"
+    else:
+        latency_expr = "(julianday(c.reviewed_at) - julianday(c.created_at)) * 86400.0"
+
+    avg_row = self.execute_query(
+        f"SELECT AVG({latency_expr}) AS avg_sec "  # nosec B608
+        f"FROM {claims_table} c{owner_join} WHERE c.reviewed_at IS NOT NULL AND c.deleted = 0"
+        + owner_predicate,
+        tuple(owner_params),
+    ).fetchone()
+    avg_latency_sec = None
+    if avg_row:
+        try:
+            avg_latency_sec = float(avg_row[0]) if avg_row[0] is not None else None
+        except _MEDIA_NONCRITICAL_EXCEPTIONS:
+            avg_latency_sec = None
+
+    total_row = self.execute_query(
+        f"SELECT COUNT(*) AS count FROM {claims_table} c{owner_join} "  # nosec B608
+        "WHERE c.reviewed_at IS NOT NULL AND c.deleted = 0"
+        + owner_predicate,
+        tuple(owner_params),
+    ).fetchone()
+    try:
+        total = int(total_row[0]) if total_row and total_row[0] is not None else 0
+    except _MEDIA_NONCRITICAL_EXCEPTIONS:
+        total = 0
+
+    p95_latency_sec = None
+    if total > 0:
+        offset = max(0, int(math.ceil(total * 0.95)) - 1)
+        row = self.execute_query(
+            "SELECT "
+            + latency_expr
+            + f" AS latency FROM {claims_table} c{owner_join} "  # nosec B608
+            "WHERE c.reviewed_at IS NOT NULL AND c.deleted = 0"
+            + owner_predicate
+            + f" ORDER BY {latency_expr} LIMIT 1 OFFSET {placeholder}",
+            (*owner_params, offset),
+        ).fetchone()
+        if row:
+            try:
+                p95_latency_sec = float(row[0]) if row[0] is not None else None
+            except _MEDIA_NONCRITICAL_EXCEPTIONS:
+                p95_latency_sec = None
+
+    return {
+        "avg_review_latency_sec": avg_latency_sec,
+        "p95_review_latency_sec": p95_latency_sec,
+    }
 
 
 def get_claims_review_extractor_metrics_daily(

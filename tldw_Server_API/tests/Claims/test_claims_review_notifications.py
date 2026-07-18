@@ -256,6 +256,60 @@ def test_deliver_claim_review_notifications_now_returns_success_contract(monkeyp
     ]
 
 
+def test_deliver_claim_review_notifications_now_requires_all_configured_channels(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    class _FakeDb:
+        def __init__(self) -> None:
+            self.marked_ids: list[int] = []
+
+        def get_claims_monitoring_settings(self, user_id):
+            assert user_id == "1"
+            return {
+                "enabled": True,
+                "slack_webhook_url": "https://example.test/slack",
+                "webhook_url": None,
+                "email_recipients": json.dumps(["review@example.com"]),
+            }
+
+        def get_claim_notifications_by_ids(self, notification_ids):
+            assert notification_ids == [7]
+            return [
+                {
+                    "id": 7,
+                    "user_id": "1",
+                    "kind": "review_update",
+                    "payload_json": json.dumps({"claim_text": "A.", "new_status": "approved"}),
+                    "created_at": "2026-03-16T00:00:00Z",
+                    "delivered_at": None,
+                }
+            ]
+
+        def mark_claim_notifications_delivered(self, notification_ids):
+            self.marked_ids.extend(notification_ids)
+            return len(notification_ids)
+
+    fake_db = _FakeDb()
+
+    @contextmanager
+    def _fake_managed_media_database(*_args, **_kwargs):
+        yield fake_db
+
+    monkeypatch.setattr(claims_notifications, "managed_media_database", _fake_managed_media_database)
+    monkeypatch.setattr(claims_notifications, "_deliver_review_webhook", lambda **_kwargs: False)
+    monkeypatch.setattr(claims_notifications, "_deliver_review_email_sync", lambda **_kwargs: True)
+
+    result = claims_notifications.deliver_claim_review_notifications_now(
+        db_path=str(tmp_path / "claims-review.db"),
+        owner_user_id="1",
+        notification_ids=[7],
+    )
+
+    assert result == {"outcome": "failed", "reason": "delivery_failed", "notification_ids": [7]}
+    assert fake_db.marked_ids == []
+
+
 def test_deliver_claim_review_notifications_now_marks_only_pending_notifications(monkeypatch, tmp_path):
     class _FakeDb:
         def __init__(self) -> None:

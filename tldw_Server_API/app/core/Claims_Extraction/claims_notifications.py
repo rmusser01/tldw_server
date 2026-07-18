@@ -460,7 +460,7 @@ def deliver_claim_review_notifications_now(
         pending_ids = [notification_id for notification_id in normalized_ids if notification_id in pending_id_set]
 
         payload = _build_review_digest_payload(user_id=str(owner_user_id), notifications=notifications)
-        delivered = False
+        delivery_results: dict[str, bool] = {}
 
         slack_url = config_row.get("slack_webhook_url")
         webhook_url = config_row.get("webhook_url")
@@ -468,38 +468,29 @@ def deliver_claim_review_notifications_now(
 
         if channels.get("slack") and slack_url:
             slack_text = f"Claims review notifications: {len(notifications)} items"
-            delivered = (
-                _deliver_review_webhook(
-                    url=str(slack_url),
-                    payload={"text": slack_text},
-                    channel="slack",
-                )
-                or delivered
+            delivery_results["slack"] = _deliver_review_webhook(
+                url=str(slack_url),
+                payload={"text": slack_text},
+                channel="slack",
             )
 
         if channels.get("webhook") and webhook_url:
-            delivered = (
-                _deliver_review_webhook(
-                    url=str(webhook_url),
-                    payload=payload,
-                    channel="webhook",
-                )
-                or delivered
+            delivery_results["webhook"] = _deliver_review_webhook(
+                url=str(webhook_url),
+                payload=payload,
+                channel="webhook",
             )
 
         if channels.get("email") and recipients:
             html_body, text_body = _build_review_email_bodies(notifications)
-            delivered = (
-                _deliver_review_email_sync(
-                    recipients=recipients,
-                    subject=f"Claims review notifications ({len(notifications)})",
-                    html_body=html_body,
-                    text_body=text_body,
-                )
-                or delivered
+            delivery_results["email"] = _deliver_review_email_sync(
+                recipients=recipients,
+                subject=f"Claims review notifications ({len(notifications)})",
+                html_body=html_body,
+                text_body=text_body,
             )
 
-        if not delivered:
+        if not delivery_results or not all(delivery_results.values()):
             return {"outcome": "failed", "reason": "delivery_failed", "notification_ids": normalized_ids}
 
         marked = db.mark_claim_notifications_delivered(pending_ids)
