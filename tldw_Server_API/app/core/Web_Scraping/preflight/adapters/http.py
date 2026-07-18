@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import ipaddress
+import unicodedata
 from collections.abc import Mapping
 from dataclasses import replace
 from typing import Any, Protocol
@@ -13,6 +14,7 @@ from urllib.parse import urljoin, urlsplit, urlunsplit
 from loguru import logger
 
 from tldw_Server_API.app.core import http_client
+from tldw_Server_API.app.core.exceptions import NetworkError
 from tldw_Server_API.app.core.Web_Scraping.preflight.context import (
     PreflightDeadlineExceeded,
     PreflightRuntimeControls,
@@ -41,7 +43,10 @@ except ImportError:  # pragma: no cover - optional dependency
 _DEFAULT_SESSION_FACTORY = object()
 _REDIRECT_STATUS_CODES = frozenset({301, 302, 303, 307, 308})
 _ALLOWED_SCHEMES = frozenset({"http", "https"})
-_TIMEOUT_CLASS_NAMES = frozenset({"Timeout", "TimeoutError", "TimeoutException"})
+_HEX_DIGITS = frozenset("0123456789abcdefABCDEF")
+_UNRESERVED_CHARACTERS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
+_CLEANUP_GRACE_SECONDS = 2.0
+_CLEANUP_TASKS: set[asyncio.Task[Any]] = set()
 
 
 class _HttpTransport(Protocol):
@@ -96,36 +101,71 @@ async def _invoke_close(resource: Any) -> None:
         await result
 
 
-async def _close_resource(resource: Any, *, label: str) -> None:
-    """Finish one acquired-resource close while preserving caller cancellation."""
-    cleanup_task = asyncio.create_task(
-        _invoke_close(resource),
-        name=f"preflight-http-close-{label}",
-    )
-    pending_cancellation: asyncio.CancelledError | None = None
-    while not cleanup_task.done():
-        try:
-            await asyncio.shield(cleanup_task)
-        except asyncio.CancelledError as exc:
-            current_task = asyncio.current_task()
-            caller_was_cancelled = current_task is not None and current_task.cancelling() > 0
-            if caller_was_cancelled and pending_cancellation is None:
-                pending_cancellation = exc
-        except Exception:  # noqa: BLE001 - inspected below without raw details
-            break
-
+def _consume_cleanup_task(task: asyncio.Task[Any], *, label: str) -> None:
+    _CLEANUP_TASKS.discard(task)
     try:
-        cleanup_task.result()
+        task.result()
     except asyncio.CancelledError:
-        if pending_cancellation is None:
-            logger.warning(f"HTTP probe {label} cleanup failed.")
+        return
     except Exception:  # noqa: BLE001 - cleanup failure is deliberately secondary
         logger.warning(f"HTTP probe {label} cleanup failed.")
-    if pending_cancellation is not None:
-        raise pending_cancellation
+
+
+def _track_cleanup_task(task: asyncio.Task[Any], *, label: str) -> None:
+    _CLEANUP_TASKS.add(task)
+    task.add_done_callback(lambda completed: _consume_cleanup_task(completed, label=label))
+
+
+async def _close_resources(resources: tuple[tuple[Any, str], ...]) -> None:
+    """Attempt all closes concurrently within one bounded grace window."""
+    tasks = {
+        asyncio.create_task(
+            _invoke_close(resource),
+            name=f"preflight-http-close-{label}",
+        ): label
+        for resource, label in resources
+    }
+    if not tasks:
+        return
+
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + _CLEANUP_GRACE_SECONDS
+    pending = set(tasks)
+    caller_cancellation: asyncio.CancelledError | None = None
+    while pending:
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            break
+        try:
+            done, pending = await asyncio.wait(
+                pending,
+                timeout=remaining,
+                return_when=asyncio.ALL_COMPLETED,
+            )
+        except asyncio.CancelledError as exc:
+            current_task = asyncio.current_task()
+            if current_task is not None and current_task.cancelling() > 0 and caller_cancellation is None:
+                caller_cancellation = exc
+            continue
+        for task in done:
+            _consume_cleanup_task(task, label=tasks[task])
+
+    for task in pending:
+        task.cancel()
+        _track_cleanup_task(task, label=tasks[task])
+
+    if caller_cancellation is not None:
+        raise caller_cancellation
+
+
+async def _close_resource(resource: Any, *, label: str) -> None:
+    await _close_resources(((resource, label),))
 
 
 async def _close_response(raw: Any) -> None:
+    if isinstance(raw, _CurlResponse):
+        await raw.aclose()
+        return
     await _close_resource(raw, label="response")
 
 
@@ -156,10 +196,52 @@ def _redirect_location(response: ProbeHttpResponse) -> str | None:
         if name.lower() == "location":
             if not value or not value.strip():
                 raise ProbeError("invalid_redirect", "Redirect target is invalid.")
-            if any(ord(character) < 32 or ord(character) == 127 for character in value):
+            if _contains_invalid_raw_url_codepoint(value):
                 raise ProbeError("invalid_redirect", "Redirect target is invalid.")
             return value.strip()
     return None
+
+
+def _is_noncharacter(codepoint: int) -> bool:
+    return 0xFDD0 <= codepoint <= 0xFDEF or codepoint & 0xFFFF in {
+        0xFFFE,
+        0xFFFF,
+    }
+
+
+def _contains_invalid_raw_url_codepoint(value: str) -> bool:
+    for character in value:
+        codepoint = ord(character)
+        if (
+            codepoint <= 32
+            or codepoint == 127
+            or unicodedata.category(character) in {"Cc", "Cf", "Cs"}
+            or _is_noncharacter(codepoint)
+        ):
+            return True
+    return False
+
+
+def _normalize_percent_encoding(component: str) -> str | None:
+    normalized: list[str] = []
+    index = 0
+    while index < len(component):
+        character = component[index]
+        if character != "%":
+            normalized.append(character)
+            index += 1
+            continue
+        if (
+            index + 2 >= len(component)
+            or component[index + 1] not in _HEX_DIGITS
+            or component[index + 2] not in _HEX_DIGITS
+        ):
+            return None
+        encoded = component[index + 1 : index + 3].upper()
+        decoded = chr(int(encoded, 16))
+        normalized.append(decoded if decoded in _UNRESERVED_CHARACTERS else f"%{encoded}")
+        index += 3
+    return "".join(normalized)
 
 
 def _canonical_host(host: str) -> str | None:
@@ -170,6 +252,10 @@ def _canonical_host(host: str) -> str | None:
         return ipaddress.ip_address(normalized).compressed
     except ValueError:
         pass
+    if ":" in normalized or (
+        "." in normalized and all(character.isdigit() or character == "." for character in normalized)
+    ):
+        return None
     if normalized.endswith("."):
         normalized = normalized[:-1]
     if not normalized or normalized.endswith("."):
@@ -181,28 +267,39 @@ def _canonical_host(host: str) -> str | None:
     if len(normalized) > 253:
         return None
     labels = normalized.split(".")
+    for label in labels:
+        if label.startswith("xn--"):
+            try:
+                decoded = label.encode("ascii").decode("idna")
+                round_trip = decoded.encode("idna").decode("ascii").lower()
+            except UnicodeError:
+                return None
+            if round_trip != label:
+                return None
     if not all(
         1 <= len(label) <= 63
         and label[0].isalnum()
         and label[-1].isalnum()
-        and all(character.isalnum() or character == "-" for character in label)
+        and all(character.isascii() and (character.isalnum() or character == "-") for character in label)
         for label in labels
     ):
         return None
     return normalized
 
 
-def _normalized_origin(url: str) -> tuple[str, str, int] | None:
+def _validated_absolute_url(
+    url: str,
+) -> tuple[Any, str, str, int] | None:
     if not isinstance(url, str):
         return None
-    if "\\" in url or any(ord(character) <= 32 or ord(character) == 127 for character in url):
+    if "\\" in url or _contains_invalid_raw_url_codepoint(url):
         return None
     try:
         parsed = urlsplit(url)
         scheme = parsed.scheme.lower()
         if scheme not in _ALLOWED_SCHEMES or not parsed.netloc:
             return None
-        if "@" in parsed.netloc:
+        if parsed.username is not None or parsed.password is not None:
             return None
         host = _canonical_host(parsed.hostname or "")
         if host is None:
@@ -210,12 +307,44 @@ def _normalized_origin(url: str) -> tuple[str, str, int] | None:
         port = parsed.port
     except (AttributeError, TypeError, UnicodeError, ValueError):
         return None
-    if port is None:
-        port = 443 if scheme == "https" else 80
-    return scheme, host, int(port)
+    authority = parsed.netloc.rsplit("@", 1)[-1]
+    if authority.endswith(":") or (port is not None and port == 0):
+        return None
+    if any(
+        _normalize_percent_encoding(component) is None for component in (parsed.path, parsed.query, parsed.fragment)
+    ):
+        return None
+    normalized_port = port if port is not None else (443 if scheme == "https" else 80)
+    return parsed, scheme, host, int(normalized_port)
+
+
+def _normalized_origin(url: str) -> tuple[str, str, int] | None:
+    validated = _validated_absolute_url(url)
+    if validated is None:
+        return None
+    _, scheme, host, port = validated
+    return scheme, host, port
+
+
+def _canonical_redirect_key(url: str) -> str:
+    validated = _validated_absolute_url(url)
+    if validated is None:
+        raise ProbeError("invalid_redirect", "Redirect target is invalid.")
+    parsed, scheme, host, port = validated
+    path = _normalize_percent_encoding(parsed.path)
+    query = _normalize_percent_encoding(parsed.query)
+    if path is None or query is None:
+        raise ProbeError("invalid_redirect", "Redirect target is invalid.")
+    authority = f"[{host}]" if ":" in host else host
+    default_port = 443 if scheme == "https" else 80
+    if port != default_port:
+        authority = f"{authority}:{port}"
+    return urlunsplit((scheme, authority, path or "/", query, ""))
 
 
 def _resolve_redirect(current_url: str, location: str) -> str:
+    if "\\" in location or _contains_invalid_raw_url_codepoint(location):
+        raise ProbeError("invalid_redirect", "Redirect target is invalid.")
     try:
         location_parts = urlsplit(location)
     except (TypeError, UnicodeError, ValueError):
@@ -224,6 +353,15 @@ def _resolve_redirect(current_url: str, location: str) -> str:
         raise ProbeError("invalid_redirect", "Redirect target is invalid.")
     if location.startswith("//") and not location_parts.netloc:
         raise ProbeError("invalid_redirect", "Redirect target is invalid.")
+    if any(
+        _normalize_percent_encoding(component) is None
+        for component in (
+            location_parts.path,
+            location_parts.query,
+            location_parts.fragment,
+        )
+    ):
+        raise ProbeError("invalid_redirect", "Redirect target is invalid.")
     try:
         resolved = urljoin(current_url, location)
         parsed = urlsplit(resolved)
@@ -231,9 +369,10 @@ def _resolve_redirect(current_url: str, location: str) -> str:
     except (TypeError, UnicodeError, ValueError):
         raise ProbeError("invalid_redirect", "Redirect target is invalid.") from None
     current_origin = _normalized_origin(current_url)
-    target_origin = _normalized_origin(resolved)
-    if target_origin is None:
+    validated_target = _validated_absolute_url(resolved)
+    if validated_target is None:
         raise ProbeError("invalid_redirect", "Redirect target is invalid.")
+    target_origin = validated_target[1:]
     if current_origin is not None and current_origin[0] == "https" and target_origin[0] == "http":
         raise ProbeError("invalid_redirect", "Redirect target is invalid.")
     return resolved
@@ -265,11 +404,11 @@ def _credentials_for_hop(
 def _is_timeout_error(exc: Exception) -> bool:
     if isinstance(exc, TimeoutError):
         return True
+    if isinstance(exc, NetworkError):
+        return exc.classification == "timeout"
     httpx_module = getattr(http_client, "httpx", None)
     httpx_timeout = getattr(httpx_module, "TimeoutException", None)
-    if isinstance(httpx_timeout, type) and isinstance(exc, httpx_timeout):
-        return True
-    return type(exc).__name__ in _TIMEOUT_CLASS_NAMES
+    return isinstance(httpx_timeout, type) and isinstance(exc, httpx_timeout)
 
 
 class HttpxProbeTransport:
@@ -285,6 +424,7 @@ class HttpxProbeTransport:
             allow_redirects=False,
             proxies=_mutable_proxies(request.proxies),
             retry=http_client.RetryPolicy(attempts=1),
+            sensitive_observability=True,
         )
 
 
@@ -299,23 +439,12 @@ class _CurlResponse:
         return getattr(self._response, name)
 
     async def aclose(self) -> None:
-        response_error: BaseException | None = None
-        try:
-            await _invoke_close(self._response)
-        except asyncio.CancelledError as exc:
-            response_error = exc
-        except Exception as exc:  # noqa: BLE001 - cleanup must continue to session
-            response_error = exc
-        try:
-            await _invoke_close(self._session)
-        except asyncio.CancelledError as exc:
-            if response_error is None:
-                response_error = exc
-        except Exception as exc:  # noqa: BLE001 - cleanup failures stay secondary
-            if response_error is None:
-                response_error = exc
-        if response_error is not None:
-            raise response_error
+        await _close_resources(
+            (
+                (self._response, "response"),
+                (self._session, "session"),
+            )
+        )
 
 
 class CurlCffiProbeTransport:
@@ -419,9 +548,10 @@ class GuardedHttpProbe:
         visited: set[str] = set()
 
         for hop in range(http_client.DEFAULT_MAX_REDIRECTS + 1):
-            if current_url in visited:
+            current_key = _canonical_redirect_key(current_url)
+            if current_key in visited:
                 raise ProbeError("redirect_loop", "Redirect loop detected.")
-            visited.add(current_url)
+            visited.add(current_key)
             await self._controls.reserve("request")
             decision = await _fresh_decision(
                 self._egress_guard,

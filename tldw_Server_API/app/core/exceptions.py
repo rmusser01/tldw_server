@@ -31,6 +31,9 @@ class EgressPolicyError(Exception):
         self.reason_code = reason_code
 
 
+NetworkErrorClassification = Literal["timeout"]
+
+
 class NetworkError(Exception):
     """Raised for sanitized transport failures, optionally with an HTTP status."""
 
@@ -42,6 +45,16 @@ class NetworkError(Exception):
                 raise ValueError("status_code must be a valid HTTP status")
         self.status_code = status_code
         super().__init__(message)
+
+    def __init__(
+        self,
+        *args: object,
+        classification: NetworkErrorClassification | None = None,
+    ) -> None:
+        if classification not in (None, "timeout"):
+            raise ValueError("Unsupported network error classification")
+        self.classification = classification
+        super().__init__(*args)
 
 
 HTTPHopErrorCode = Literal[

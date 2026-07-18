@@ -226,6 +226,8 @@ class FakeRawResponse:
         url: str | None = None,
         close_error: BaseException | None = None,
         block_close: bool = False,
+        suppress_close_cancellation: bool = False,
+        close_error_after_release: BaseException | None = None,
         events: list[str] | None = None,
     ) -> None:
         self.status_code = status_code
@@ -234,8 +236,11 @@ class FakeRawResponse:
         self.url = url
         self.close_error = close_error
         self.block_close = block_close
+        self.suppress_close_cancellation = suppress_close_cancellation
+        self.close_error_after_release = close_error_after_release
         self.events = events
         self.close_calls = 0
+        self.close_cancellations = 0
         self.closed = False
         self.close_started = asyncio.Event()
         self._release_close = asyncio.Event()
@@ -246,10 +251,18 @@ class FakeRawResponse:
         if self.events is not None:
             self.events.append("response:close")
         if self.block_close:
-            await self._release_close.wait()
+            while not self._release_close.is_set():
+                try:
+                    await self._release_close.wait()
+                except asyncio.CancelledError:
+                    self.close_cancellations += 1
+                    if not self.suppress_close_cancellation:
+                        raise
         self.closed = True
         if self.close_error is not None:
             raise self.close_error
+        if self.close_error_after_release is not None:
+            raise self.close_error_after_release
 
     def release_close(self) -> None:
         self._release_close.set()

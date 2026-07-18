@@ -89,16 +89,25 @@ class _FakeSession:
         events: list[str] | None = None,
         block_get: bool = False,
         close_error: BaseException | None = None,
+        block_close: bool = False,
+        suppress_close_cancellation: bool = False,
+        close_error_after_release: BaseException | None = None,
     ) -> None:
         self.responses = list(responses)
         self.events = events
         self.block_get = block_get
         self.close_error = close_error
+        self.block_close = block_close
+        self.suppress_close_cancellation = suppress_close_cancellation
+        self.close_error_after_release = close_error_after_release
         self.get_calls: list[tuple[str, dict[str, Any]]] = []
         self.get_started = asyncio.Event()
         self._release_get = asyncio.Event()
         self.close_calls = 0
+        self.close_cancellations = 0
         self.closed = False
+        self.close_started = asyncio.Event()
+        self._release_close = asyncio.Event()
 
     async def get(self, url: str, **kwargs: Any) -> Any:
         self.get_calls.append((url, dict(kwargs)))
@@ -116,14 +125,28 @@ class _FakeSession:
 
     async def close(self) -> None:
         self.close_calls += 1
-        self.closed = True
+        self.close_started.set()
         if self.events is not None:
             self.events.append("session:close")
+        if self.block_close:
+            while not self._release_close.is_set():
+                try:
+                    await self._release_close.wait()
+                except asyncio.CancelledError:
+                    self.close_cancellations += 1
+                    if not self.suppress_close_cancellation:
+                        raise
+        self.closed = True
         if self.close_error is not None:
             raise self.close_error
+        if self.close_error_after_release is not None:
+            raise self.close_error_after_release
 
     def release_get(self) -> None:
         self._release_get.set()
+
+    def release_close(self) -> None:
+        self._release_close.set()
 
 
 class _SessionFactory:
@@ -262,6 +285,51 @@ async def test_redirect_loop_fails_before_reservation_guard_or_dispatch() -> Non
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
+    ("initial_url", "location"),
+    [
+        ("https://EXAMPLE.com", "https://example.com:443/#same"),
+        (
+            "https://example.com/%7euser?token=%41",
+            "https://EXAMPLE.com:443/~user?token=A#same",
+        ),
+        (
+            "https://b\u00fccher.example/start",
+            "https://xn--bcher-kva.example/start#same",
+        ),
+        (
+            "https://example.com./start",
+            "https://example.com/start#same",
+        ),
+    ],
+)
+async def test_equivalent_redirect_variants_loop_before_second_dispatch(
+    initial_url: str,
+    location: str,
+) -> None:
+    controls = _controls()
+    raw = FakeRawResponse(302, headers={"Location": location})
+    guard = FakeProbeEgressGuard([True])
+    transport = FakeHttpTransport([raw])
+    probe = _probe(controls=controls, guard=guard, transport=transport)
+
+    with pytest.raises(ProbeError) as raised:
+        await probe.get(ProbeHttpRequest(url=initial_url))
+
+    assert raised.value.error_code == "redirect_loop"
+    assert controls.consumed.requests == 1
+    assert guard.urls == [initial_url]
+    assert len(transport.calls) == 1
+
+
+def test_redirect_key_preserves_reserved_path_query_and_dot_segment_semantics() -> None:
+    canonical_key = _required("_canonical_redirect_key")
+
+    assert canonical_key("https://example.com/a%2fb?b=2&a=1") != canonical_key("https://example.com/a/b?a=1&b=2")
+    assert canonical_key("https://example.com/a/../b") != canonical_key("https://example.com/b")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
     "location",
     [" ", "https://", "mailto:secret@example.com", "https://[bad", "\n/next"],
 )
@@ -283,6 +351,99 @@ async def test_invalid_redirect_fails_closed_without_target_dispatch(
     assert len(guard.urls) == 1
     assert len(transport.calls) == 1
     assert raw.closed is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "location",
+    [
+        "https://example.com/%",
+        "https://example.com/%GG",
+        "https://example.com/%0G",
+        "https://xn--a.example/",
+        "https://999.1.1.1/",
+        "https://example.com:99999/",
+        "https://[gg::1]/",
+        "https://example.com/\u0085secret",
+        "https://example.com/\u200bsecret",
+        "https://example.com/\ud800",
+        "https://example.com/\ufdd0",
+        "https://example.com\\secret",
+    ],
+    ids=[
+        "truncated-percent",
+        "non-hex-percent",
+        "partial-hex-percent",
+        "malformed-a-label",
+        "malformed-ipv4",
+        "out-of-range-port",
+        "malformed-ipv6",
+        "raw-c1-control",
+        "raw-format-codepoint",
+        "raw-surrogate",
+        "raw-noncharacter",
+        "backslash",
+    ],
+)
+async def test_strict_redirect_validation_rejects_malformed_targets(
+    location: str,
+) -> None:
+    controls = _controls()
+    raw = FakeRawResponse(302, headers={"Location": location})
+    guard = FakeProbeEgressGuard([True])
+    transport = FakeHttpTransport([raw])
+    probe = _probe(controls=controls, guard=guard, transport=transport)
+
+    with pytest.raises(ProbeError) as raised:
+        await probe.get(ProbeHttpRequest(url="https://example.com/start"))
+
+    assert raised.value.error_code == "invalid_redirect"
+    assert controls.consumed.requests == 1
+    assert len(guard.urls) == 1
+    assert len(transport.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_scheme_relative_redirect_gets_fresh_guard_and_strips_credentials() -> None:
+    guard = FakeProbeEgressGuard([True, True])
+    transport = FakeHttpTransport(
+        [
+            FakeRawResponse(302, headers={"Location": "//other.example/next"}),
+            FakeRawResponse(200),
+        ]
+    )
+    probe = _probe(controls=_controls(), guard=guard, transport=transport)
+
+    await probe.get(
+        ProbeHttpRequest(
+            url="https://example.com/start",
+            headers={"Authorization": "Bearer secret", "Accept": "text/html"},
+            cookies={"session": "secret"},
+        )
+    )
+
+    assert guard.urls == [
+        "https://example.com/start",
+        "https://other.example/next",
+    ]
+    assert dict(transport.calls[1].headers) == {"Accept": "text/html"}
+    assert dict(transport.calls[1].cookies) == {}
+
+
+@pytest.mark.asyncio
+async def test_fragment_only_redirect_is_loop_before_second_reservation() -> None:
+    controls = _controls()
+    guard = FakeProbeEgressGuard([True])
+    transport = FakeHttpTransport([FakeRawResponse(302, headers={"Location": "#same-document"})])
+    probe = _probe(controls=controls, guard=guard, transport=transport)
+
+    with pytest.raises(ProbeError) as raised:
+        await probe.get(ProbeHttpRequest(url="https://example.com/start?order=1"))
+
+    assert raised.value.error_code == "redirect_loop"
+    assert controls.consumed.requests == 1
+    assert len(guard.urls) == 1
+    assert len(transport.calls) == 1
 
 
 @pytest.mark.asyncio
@@ -467,6 +628,50 @@ async def test_transport_timeout_is_overall_deadline_when_deadline_expires() -> 
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("deadline_expires", [False, True])
+async def test_central_afetch_timeout_classification_reaches_probe_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+    deadline_expires: bool,
+) -> None:
+    clock = FakeClock(0.0)
+    controls = _controls(
+        deadline=1.0 if deadline_expires else None,
+        clock=clock,
+    )
+
+    async def allow_egress(*_args: Any, **_kwargs: Any) -> None:
+        return None
+
+    async def raise_timeout(**_kwargs: Any) -> None:
+        if deadline_expires:
+            clock.advance(2.0)
+        raise http_client.httpx.ReadTimeout(
+            "central-timeout-secret",
+            request=http_client.httpx.Request("GET", "https://example.com/"),
+        )
+
+    monkeypatch.setattr(http_client, "_avalidate_egress_or_raise", allow_egress)
+    monkeypatch.setattr(http_client, "_httpx_arequest_io", raise_timeout)
+    monkeypatch.setattr(
+        http_client,
+        "_get_transport_adapter",
+        lambda _name: http_client.HttpxAdapter(),
+    )
+    guard = FakeProbeEgressGuard([True])
+    probe = _probe(
+        controls=controls,
+        guard=guard,
+        transport=_required("HttpxProbeTransport")(),
+    )
+
+    expected_error = PreflightDeadlineExceeded if deadline_expires else ProbeTimeout
+    with pytest.raises(expected_error):
+        await probe.get(ProbeHttpRequest(url="https://example.com/timeout"))
+
+    assert controls.consumed.requests == 1
+
+
+@pytest.mark.asyncio
 async def test_caller_cancellation_propagates_from_transport() -> None:
     guard = FakeProbeEgressGuard([True])
     transport = FakeHttpTransport([FakeRawResponse(200)], block_send=True)
@@ -517,6 +722,170 @@ async def test_response_close_failure_does_not_replace_success() -> None:
     assert response.text == "ok"
     assert raw.closed is True
     assert raw.close_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_never_returning_response_close_is_bounded_and_preserves_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _adapter_module()
+    assert module is not None
+    monkeypatch.setattr(module, "_CLEANUP_GRACE_SECONDS", 0.01, raising=False)
+    raw = FakeRawResponse(200, text="ok", block_close=True)
+    probe = _probe(
+        controls=_controls(),
+        guard=FakeProbeEgressGuard([True]),
+        transport=FakeHttpTransport([raw]),
+    )
+    task = asyncio.create_task(probe.get(ProbeHttpRequest(url="https://example.com/start")))
+    await raw.close_started.wait()
+
+    await asyncio.sleep(0.03)
+    completed_in_grace = task.done()
+    raw.release_close()
+    response = await task
+
+    assert completed_in_grace is True
+    assert response.text == "ok"
+    assert raw.close_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_cleanup_preserves_primary_error_after_bounded_grace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _adapter_module()
+    assert module is not None
+    monkeypatch.setattr(module, "_CLEANUP_GRACE_SECONDS", 0.01, raising=False)
+
+    class SnapshotFailureResponse(FakeRawResponse):
+        @property
+        def text(self) -> str:
+            raise RuntimeError("primary-snapshot-secret")
+
+        @text.setter
+        def text(self, value: str) -> None:
+            self._unused_text = value
+
+    raw = SnapshotFailureResponse(200, block_close=True)
+    probe = _probe(
+        controls=_controls(),
+        guard=FakeProbeEgressGuard([True]),
+        transport=FakeHttpTransport([raw]),
+    )
+    task = asyncio.create_task(probe.get(ProbeHttpRequest(url="https://example.com/start")))
+    await raw.close_started.wait()
+
+    await asyncio.sleep(0.03)
+    completed_in_grace = task.done()
+    raw.release_close()
+    with pytest.raises(ProbeError) as raised:
+        await task
+
+    assert completed_in_grace is True
+    assert raised.value.error_code == "probe_error"
+    assert "secret" not in str(raised.value)
+
+
+@pytest.mark.asyncio
+async def test_caller_cancellation_returns_after_cleanup_grace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _adapter_module()
+    assert module is not None
+    monkeypatch.setattr(module, "_CLEANUP_GRACE_SECONDS", 0.01, raising=False)
+    raw = FakeRawResponse(
+        200,
+        block_close=True,
+        suppress_close_cancellation=True,
+    )
+    probe = _probe(
+        controls=_controls(),
+        guard=FakeProbeEgressGuard([True]),
+        transport=FakeHttpTransport([raw]),
+    )
+    task = asyncio.create_task(probe.get(ProbeHttpRequest(url="https://example.com/start")))
+    await raw.close_started.wait()
+    task.cancel()
+
+    await asyncio.sleep(0.03)
+    completed_in_grace = task.done()
+    raw.release_close()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert completed_in_grace is True
+
+
+@pytest.mark.asyncio
+async def test_curl_cleanup_uses_one_bounded_window_and_consumes_late_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _adapter_module()
+    assert module is not None
+    monkeypatch.setattr(module, "_CLEANUP_GRACE_SECONDS", 0.01, raising=False)
+    raw = FakeRawResponse(
+        200,
+        block_close=True,
+        suppress_close_cancellation=True,
+        close_error_after_release=RuntimeError("late-response-secret"),
+    )
+    session = _FakeSession(
+        [raw],
+        block_close=True,
+        suppress_close_cancellation=True,
+        close_error_after_release=RuntimeError("late-session-secret"),
+    )
+    controls = _controls()
+    guard = FakeProbeEgressGuard([True, True])
+    curl = _required("CurlCffiProbeTransport")(
+        egress_guard=guard,
+        request_context=controls.request_context,
+        session_factory=_SessionFactory([session]),
+    )
+    probe = _probe(
+        controls=controls,
+        guard=guard,
+        transport=FakeHttpTransport([]),
+        curl_transport=curl,
+    )
+    loop = asyncio.get_running_loop()
+    previous_handler = loop.get_exception_handler()
+    unhandled: list[dict[str, Any]] = []
+    loop.set_exception_handler(lambda _loop, context: unhandled.append(dict(context)))
+    task = asyncio.create_task(
+        probe.get(
+            ProbeHttpRequest(
+                url="https://example.com/start",
+                impersonate="chrome120",
+            )
+        )
+    )
+    await raw.close_started.wait()
+
+    try:
+        await asyncio.sleep(0.03)
+        session_started_in_grace = session.close_started.is_set()
+        completed_in_grace = task.done()
+        raw.release_close()
+        session.release_close()
+        response = await task
+        for _ in range(20):
+            if not getattr(module, "_CLEANUP_TASKS", set()):
+                break
+            await asyncio.sleep(0)
+    finally:
+        raw.release_close()
+        session.release_close()
+        loop.set_exception_handler(previous_handler)
+
+    assert session_started_in_grace is True
+    assert completed_in_grace is True
+    assert response.status == 200
+    assert raw.close_cancellations == 1
+    assert session.close_cancellations == 1
+    assert getattr(module, "_CLEANUP_TASKS", set()) == set()
+    assert unhandled == []
 
 
 @pytest.mark.asyncio
@@ -651,6 +1020,7 @@ async def test_httpx_transport_uses_central_single_attempt_boundary(
     assert calls[0]["proxies"] == dict(request.proxies)
     assert isinstance(calls[0]["retry"], http_client.RetryPolicy)
     assert calls[0]["retry"].attempts == 1
+    assert calls[0]["sensitive_observability"] is True
 
 
 @pytest.mark.asyncio
