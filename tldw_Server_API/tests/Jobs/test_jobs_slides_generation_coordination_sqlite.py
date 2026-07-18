@@ -29,6 +29,7 @@ def _insert_archive(
     idempotency_key: str | None = "idem-1",
     payload: str = "{}",
     result: str | None = None,
+    archived_at: datetime = NOW,
 ) -> None:
     conn.execute(
         """
@@ -37,7 +38,7 @@ def _insert_archive(
             idempotency_key, payload, result, status, archived_at
         ) VALUES (?, ?, 'slides', 'default', 'presentation.generate', ?, ?, ?, ?, 'completed', ?)
         """,
-        (job_id, job_uuid, owner, idempotency_key, payload, result, NOW.isoformat()),
+        (job_id, job_uuid, owner, idempotency_key, payload, result, archived_at.isoformat()),
     )
 
 
@@ -906,7 +907,7 @@ def test_sqlite_ambiguous_legacy_generation_rows_fail_only_standalone_readiness(
     )["uuid"]
 
 
-def test_sqlite_multiple_uuid_candidates_for_one_full_scope_are_diagnosed(tmp_path):
+def test_sqlite_active_generation_wins_over_distinct_archived_scope_candidate(tmp_path):
     db_path = ensure_jobs_tables(tmp_path / "slides-multiple-candidates.db")
     jm = JobManager(db_path)
     active = jm.create_job(
@@ -929,8 +930,15 @@ def test_sqlite_multiple_uuid_candidates_for_one_full_scope_are_diagnosed(tmp_pa
 
     ensure_jobs_tables(db_path)
 
-    readiness = JobManager(db_path).get_slides_generation_readiness()
-    assert readiness["diagnostic_code"] == "ambiguous_generation_legacy_row"
+    manager = JobManager(db_path)
+    assert manager.get_slides_generation_readiness()["ready"] is True
+    found = manager.lookup_slides_generation_job(
+        owner_user_id="owner-1",
+        idempotency_key="same-correlation",
+    )
+    assert found is not None
+    assert found["uuid"] == active["uuid"]
+    assert found["archived"] is False
 
 
 def test_sqlite_generation_lookup_requires_uuid_owner_scope_key_and_rejects_numeric_reuse(tmp_path):
@@ -1025,7 +1033,9 @@ def test_sqlite_nullable_legacy_archive_id_never_matches_expected_numeric_id(tmp
             idempotency_key="nullable-id",
         )
         conn.commit()
+    ensure_jobs_tables(db_path)
     manager = JobManager(db_path)
+    assert manager.get_slides_generation_readiness()["ready"] is True
 
     assert (
         manager.resolve_slides_generation_job(
@@ -1085,6 +1095,59 @@ def test_sqlite_public_generation_lookup_is_active_first_and_needs_no_expected_u
     assert archived is not None
     assert archived["uuid"] == "stale-archive-uuid"
     assert archived["archived"] is True
+
+
+def test_sqlite_archive_lookup_selects_expected_uuid_or_newest_distinct_candidate(tmp_path):
+    db_path = ensure_jobs_tables(tmp_path / "slides-distinct-archive-authority.db")
+    with sqlite3.connect(db_path) as conn:
+        _insert_archive(
+            conn,
+            job_id=101,
+            job_uuid="older-authority",
+            owner="owner-1",
+            idempotency_key="reused-idempotency-key",
+            archived_at=NOW - timedelta(hours=1),
+        )
+        _insert_archive(
+            conn,
+            job_id=202,
+            job_uuid="newest-authority",
+            owner="owner-1",
+            idempotency_key="reused-idempotency-key",
+            archived_at=NOW,
+        )
+        conn.commit()
+    ensure_jobs_tables(db_path)
+    manager = JobManager(db_path)
+    assert manager.get_slides_generation_readiness()["ready"] is True
+
+    newest = manager.lookup_slides_generation_job(
+        owner_user_id="owner-1",
+        idempotency_key="reused-idempotency-key",
+    )
+    assert newest is not None
+    assert newest["uuid"] == "newest-authority"
+    assert newest["archived"] is True
+
+    expected = manager.lookup_slides_generation_job(
+        owner_user_id="owner-1",
+        idempotency_key="reused-idempotency-key",
+        expected_job_uuid="older-authority",
+        expected_job_id=101,
+    )
+    assert expected is not None
+    assert expected["uuid"] == "older-authority"
+    assert expected["id"] == 101
+    assert expected["archived"] is True
+
+    assert (
+        manager.lookup_slides_generation_job(
+            owner_user_id="owner-1",
+            idempotency_key="reused-idempotency-key",
+            expected_job_uuid="missing-authority",
+        )
+        is None
+    )
 
 
 def test_sqlite_archived_generation_replay_precedes_quota_admission(tmp_path, monkeypatch):

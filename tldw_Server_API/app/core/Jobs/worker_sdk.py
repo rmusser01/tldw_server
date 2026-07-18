@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hmac
 import os
 import re
 import secrets
@@ -31,6 +32,17 @@ CompletionCallback = Callable[
     [dict[str, Any], dict[str, Any]],
     Awaitable[None],
 ]
+_SLIDES_JOBS_KEY_RE = re.compile(r"slides:v1:[0-9a-f]{64}\Z")
+
+
+def _same_slides_jobs_key(left: object, right: object) -> bool:
+    return bool(
+        isinstance(left, str)
+        and _SLIDES_JOBS_KEY_RE.fullmatch(left) is not None
+        and isinstance(right, str)
+        and _SLIDES_JOBS_KEY_RE.fullmatch(right) is not None
+        and hmac.compare_digest(left, right)
+    )
 
 
 class WorkerTerminalizationConflict(Exception):
@@ -406,6 +418,37 @@ class WorkerSDK:
                     continue
                 if isinstance(result, WorkerTerminalOutcome):
                     try:
+                        current = self.jm.resolve_slides_generation_job(
+                            job_uuid=str(job.get("uuid") or ""),
+                            owner_user_id=str(job.get("owner_user_id") or ""),
+                            idempotency_key=str(job.get("idempotency_key") or ""),
+                        )
+                        if (
+                            current is None
+                            or any(
+                                current.get(field) != job.get(field)
+                                for field in (
+                                    "uuid",
+                                    "owner_user_id",
+                                    "domain",
+                                    "queue",
+                                    "job_type",
+                                )
+                            )
+                            or (not current.get("archived") and current.get("id") != job.get("id"))
+                            or not _same_slides_jobs_key(
+                                current.get("idempotency_key"),
+                                job.get("idempotency_key"),
+                            )
+                        ):
+                            raise WorkerTerminalizationConflict(f"terminal identity changed for job {job_id}")
+                        current_status = current.get("status")
+                        if current_status in {"failed", "cancelled", "quarantined"}:
+                            continue
+                        if current_status != "processing":
+                            raise WorkerTerminalizationConflict(
+                                f"terminal status changed to {current_status} for job {job_id}"
+                            )
                         terminal_result = self.jm.terminalize_job_from_worker(
                             job_id=job_id,
                             job_uuid=str(job.get("uuid") or ""),
@@ -420,9 +463,11 @@ class WorkerSDK:
                             error_code=result.error_code,
                             error_message=result.message,
                         )
+                    except WorkerTerminalizationConflict:
+                        raise
                     except _WORKER_SDK_NONCRITICAL_EXCEPTIONS as exc:
                         raise WorkerTerminalizationConflict(f"terminal CAS failed for job {job_id}") from exc
-                    if terminal_result not in {"APPLIED", "IDEMPOTENT"}:
+                    if terminal_result not in {"APPLIED", "IDEMPOTENT", "ALREADY_TERMINAL"}:
                         raise WorkerTerminalizationConflict(f"terminal CAS returned {terminal_result} for job {job_id}")
                     continue
                 if result is None:

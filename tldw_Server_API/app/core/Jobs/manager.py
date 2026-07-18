@@ -1429,7 +1429,7 @@ class JobManager:
                 cur.execute(
                     "SELECT * FROM jobs_archive WHERE domain='slides' AND queue='default' "
                     "AND job_type='presentation.generate' AND owner_user_id=%s "
-                    "AND idempotency_key=%s ORDER BY archived_at DESC, uuid LIMIT 2",
+                    "AND idempotency_key=%s ORDER BY archived_at DESC, uuid",
                     (owner_user_id, idempotency_key),
                 )
                 rows = list(cur.fetchall() or [])
@@ -1449,27 +1449,46 @@ class JobManager:
                     conn.execute(
                         "SELECT * FROM jobs_archive WHERE domain='slides' AND queue='default' "
                         "AND job_type='presentation.generate' AND owner_user_id=? "
-                        "AND idempotency_key=? ORDER BY archived_at DESC, uuid LIMIT 2",
+                        "AND idempotency_key=? ORDER BY archived_at DESC, uuid",
                         (owner_user_id, idempotency_key),
                     ).fetchall()
                 )
                 archived = bool(rows)
-        uuids = {str(dict(row).get("uuid") or "").strip() for row in rows}
-        if len(rows) > 1 or (rows and uuids == {""}):
-            diagnostic = (
-                "duplicate_archive_uuid"
-                if archived and "" not in uuids and len(uuids) < len(rows)
-                else "ambiguous_generation_legacy_row"
-            )
+        if not rows:
+            return None
+        uuid_values = [str(dict(row).get("uuid") or "").strip() for row in rows]
+        if not archived and len(rows) > 1:
             self._record_slides_generation_diagnostic(
                 conn,
-                code=diagnostic,
+                code="ambiguous_generation_legacy_row",
                 count=len(rows),
             )
             raise SlidesGenerationJobsUnavailableError("presentation.generate correlation is unsafe")
-        if not rows:
-            return None
-        result = self._normalize_archived_job(rows[0]) if archived else dict(rows[0])
+        if any(not value for value in uuid_values):
+            self._record_slides_generation_diagnostic(
+                conn,
+                code="ambiguous_generation_legacy_row",
+                count=len(rows),
+            )
+            raise SlidesGenerationJobsUnavailableError("presentation.generate correlation is unsafe")
+        if archived and len(set(uuid_values)) < len(uuid_values):
+            self._record_slides_generation_diagnostic(
+                conn,
+                code="duplicate_archive_uuid",
+                count=len(rows),
+            )
+            raise SlidesGenerationJobsUnavailableError("presentation.generate correlation is unsafe")
+        selected = rows[0]
+        if archived and expected_job_uuid is not None:
+            matching_rows = [
+                row
+                for row, candidate_uuid in zip(rows, uuid_values)
+                if candidate_uuid == expected_job_uuid
+            ]
+            if not matching_rows:
+                return None
+            selected = matching_rows[0]
+        result = self._normalize_archived_job(selected) if archived else dict(selected)
         job_uuid = str(result.get("uuid") or "").strip()
         if not job_uuid:
             self._record_slides_generation_diagnostic(
@@ -5736,12 +5755,15 @@ class JobManager:
             if row is None:
                 return "MISSING"
             stored = dict(row)
-            exact_correlation = (
+            stable_correlation = (
                 stored.get("uuid") == job_uuid
                 and stored.get("owner_user_id") == owner_user_id
                 and stored.get("domain") == domain
                 and stored.get("queue") == queue
                 and stored.get("job_type") == job_type
+            )
+            exact_correlation = (
+                stable_correlation
                 and stored.get("worker_id") == worker_id
                 and stored.get("lease_id") == lease_id
             )
@@ -5753,6 +5775,13 @@ class JobManager:
             )
             if exact_correlation and identical_terminal:
                 return "IDEMPOTENT"
+            generic_terminal_winner = (
+                stored.get("status") == "quarantined"
+                or (stored.get("status") == "failed" and stored.get("last_error") is not None)
+                or (stored.get("status") == "cancelled" and stored.get("completed_at") is None)
+            )
+            if stable_correlation and generic_terminal_winner:
+                return "ALREADY_TERMINAL"
             return "CONFLICT"
         finally:
             conn.close()

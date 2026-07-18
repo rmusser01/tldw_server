@@ -586,10 +586,90 @@ def test_postgres_reconciler_terminalizer_serializes_before_uuid_authority_check
 def test_postgres_admission_and_public_lookup_hold_serialized_readiness_lock():
     readiness_source = inspect.getsource(JobManager._slides_generation_ready_in_connection)
     lookup_source = inspect.getsource(JobManager.lookup_slides_generation_job)
+    audit_source = inspect.getsource(jobs_pg_migrations._audit_slides_generation_pg)
 
     assert "FOR SHARE" in readiness_source
     assert "_serialized_slides_generation_replay" in lookup_source
     assert "get_slides_generation_readiness" not in lookup_source
+    assert "COUNT(DISTINCT uuid)" not in audit_source
+
+
+@pytest.mark.pg_jobs
+def test_postgres_archive_lookup_selects_expected_uuid_or_newest_distinct_candidate(
+    jobs_pg_dsn,
+):
+    manager = JobManager(None, backend="postgres", db_url=jobs_pg_dsn)
+    older = manager.create_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        payload={"receipt_id": "older"},
+        owner_user_id="owner-archive-authority",
+        idempotency_key="archive-authority-older",
+    )
+    newest = manager.create_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        payload={"receipt_id": "newest"},
+        owner_user_id="owner-archive-authority",
+        idempotency_key="archive-authority-newest",
+    )
+    projection = ", ".join(("id", *SLIDES_ARCHIVE_EXACT_FIELDS))
+    shared_key = "archive-authority-shared"
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        for job, archived_at in (
+            (older, NOW - timedelta(hours=1)),
+            (newest, NOW),
+        ):
+            cur.execute(
+                f"INSERT INTO jobs_archive ({projection}) "  # nosec B608 - closed projection
+                f"SELECT {projection} FROM jobs WHERE id=%s",  # nosec B608 - closed projection
+                (int(job["id"]),),
+            )
+            cur.execute(
+                "UPDATE jobs_archive SET idempotency_key=%s, archived_at=%s WHERE uuid=%s",
+                (shared_key, archived_at, str(job["uuid"])),
+            )
+            cur.execute("DELETE FROM jobs WHERE id=%s", (int(job["id"]),))
+
+    ensure_jobs_tables_pg(jobs_pg_dsn)
+    assert manager.get_slides_generation_readiness()["ready"] is True
+    selected = manager.lookup_slides_generation_job(
+        owner_user_id="owner-archive-authority",
+        idempotency_key=shared_key,
+    )
+    assert selected is not None
+    assert selected["uuid"] == newest["uuid"]
+    expected = manager.lookup_slides_generation_job(
+        owner_user_id="owner-archive-authority",
+        idempotency_key=shared_key,
+        expected_job_uuid=str(older["uuid"]),
+        expected_job_id=int(older["id"]),
+    )
+    assert expected is not None
+    assert expected["uuid"] == older["uuid"]
+    active = manager.create_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        payload={"receipt_id": "active"},
+        owner_user_id="owner-archive-authority",
+        idempotency_key="archive-authority-active",
+    )
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE jobs SET idempotency_key=%s WHERE id=%s",
+            (shared_key, int(active["id"])),
+        )
+    ensure_jobs_tables_pg(jobs_pg_dsn)
+    active_first = manager.lookup_slides_generation_job(
+        owner_user_id="owner-archive-authority",
+        idempotency_key=shared_key,
+    )
+    assert active_first is not None
+    assert active_first["uuid"] == active["uuid"]
+    assert active_first["archived"] is False
 
 
 def test_postgres_archive_index_shape_helper_rejects_wrong_catalog_rows():

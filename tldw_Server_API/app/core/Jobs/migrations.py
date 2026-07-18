@@ -876,28 +876,6 @@ def _audit_and_index_slides_generation(conn: sqlite3.Connection) -> None:
         """
     ).fetchone()
     invalid_count = int(invalid_row[0] or 0) if invalid_row else 0
-    conflicting_row = conn.execute(
-        """
-        SELECT COUNT(*) FROM (
-          SELECT owner_user_id, domain, queue, job_type, idempotency_key
-          FROM (
-            SELECT owner_user_id, domain, queue, job_type, idempotency_key, uuid
-            FROM jobs
-            WHERE domain='slides' AND queue='default' AND job_type='presentation.generate'
-            UNION ALL
-            SELECT owner_user_id, domain, queue, job_type, idempotency_key, uuid
-            FROM jobs_archive
-            WHERE domain='slides' AND queue='default' AND job_type='presentation.generate'
-          ) scoped
-          WHERE uuid IS NOT NULL AND TRIM(uuid) <> ''
-            AND owner_user_id IS NOT NULL AND TRIM(owner_user_id) <> ''
-            AND idempotency_key IS NOT NULL AND TRIM(idempotency_key) <> ''
-          GROUP BY owner_user_id, domain, queue, job_type, idempotency_key
-          HAVING COUNT(DISTINCT uuid) > 1
-        ) conflicts
-        """
-    ).fetchone()
-    conflict_count = int(conflicting_row[0] or 0) if conflicting_row else 0
     active_projection = ", ".join(f"active.{field}" for field in SLIDES_ARCHIVE_EXACT_FIELDS)
     archived_projection = ", ".join(f"archived.{field}" for field in SLIDES_ARCHIVE_EXACT_FIELDS)
     cross_table_rows = conn.execute(
@@ -942,9 +920,9 @@ def _audit_and_index_slides_generation(conn: sqlite3.Connection) -> None:
     if duplicate_count:
         diagnostic_code = "duplicate_archive_uuid"
         diagnostic_count = duplicate_count
-    elif invalid_count or conflict_count or cross_table_count:
+    elif invalid_count or cross_table_count:
         diagnostic_code = "ambiguous_generation_legacy_row"
-        diagnostic_count = invalid_count + conflict_count + cross_table_count
+        diagnostic_count = invalid_count + cross_table_count
     for index_name, (unique, columns, predicate) in _SLIDES_ARCHIVE_INDEXES.items():
         if not _sqlite_archive_index_matches(
             conn,

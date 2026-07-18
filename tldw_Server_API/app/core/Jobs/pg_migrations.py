@@ -911,28 +911,6 @@ def _audit_slides_generation_pg(cur) -> tuple[str | None, int]:
         """
     )
     invalid_count = int((cur.fetchone() or [0])[0] or 0)
-    cur.execute(
-        """
-        SELECT COUNT(*) FROM (
-          SELECT owner_user_id, domain, queue, job_type, idempotency_key
-          FROM (
-            SELECT owner_user_id, domain, queue, job_type, idempotency_key, uuid
-            FROM jobs
-            WHERE domain='slides' AND queue='default' AND job_type='presentation.generate'
-            UNION ALL
-            SELECT owner_user_id, domain, queue, job_type, idempotency_key, uuid
-            FROM jobs_archive
-            WHERE domain='slides' AND queue='default' AND job_type='presentation.generate'
-          ) scoped
-          WHERE uuid IS NOT NULL AND BTRIM(uuid) <> ''
-            AND owner_user_id IS NOT NULL AND BTRIM(owner_user_id) <> ''
-            AND idempotency_key IS NOT NULL AND BTRIM(idempotency_key) <> ''
-          GROUP BY owner_user_id, domain, queue, job_type, idempotency_key
-          HAVING COUNT(DISTINCT uuid) > 1
-        ) conflicts
-        """
-    )
-    conflict_count = int((cur.fetchone() or [0])[0] or 0)
     active_projection = ", ".join(
         f"active.{field} AS active_{field}" for field in SLIDES_ARCHIVE_EXACT_FIELDS
     )
@@ -998,9 +976,9 @@ def _audit_slides_generation_pg(cur) -> tuple[str | None, int]:
     if duplicate_count:
         diagnostic_code = "duplicate_archive_uuid"
         diagnostic_count = duplicate_count
-    elif invalid_count or conflict_count or cross_table_count:
+    elif invalid_count or cross_table_count:
         diagnostic_code = "ambiguous_generation_legacy_row"
-        diagnostic_count = invalid_count + conflict_count + cross_table_count
+        diagnostic_count = invalid_count + cross_table_count
     cur.execute(
         """
         UPDATE slides_standalone_reconciliation

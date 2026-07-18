@@ -40,6 +40,10 @@ class DummySleep:
         await self._orig_sleep(0)
 
 
+def _slides_jobs_key(character: str) -> str:
+    return "slides:v1:" + character * 64
+
+
 @pytest.mark.asyncio
 async def test_run_with_job_type_filter_only_handles_matching_jobs(tmp_path):
     db_path = tmp_path / "jobs_wsdk_job_type.db"
@@ -939,7 +943,7 @@ async def test_run_terminal_outcome_uses_exact_terminalizer_without_complete_or_
         job_type="presentation.generate",
         payload={},
         owner_user_id="owner-1",
-        idempotency_key=f"idem-{terminal_status}",
+        idempotency_key=_slides_jobs_key("a" if terminal_status == "failed" else "b"),
     )
     sdk = WorkerSDK(
         jm,
@@ -993,6 +997,147 @@ async def test_run_terminal_outcome_uses_exact_terminalizer_without_complete_or_
 
 
 @pytest.mark.asyncio
+async def test_terminal_outcome_accepts_exact_already_terminal_race(monkeypatch, tmp_path):
+    db_path = tmp_path / "jobs_wsdk_terminal_race.db"
+    ensure_jobs_tables(db_path)
+    jm = JobManager(db_path)
+    jm.create_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        payload={},
+        owner_user_id="owner-1",
+        idempotency_key=_slides_jobs_key("c"),
+    )
+    sdk = WorkerSDK(
+        jm,
+        WorkerConfig(domain="slides", queue="default", worker_id="slides-worker"),
+    )
+    sdk._sleep = DummySleep(asyncio.sleep)
+    terminal_calls = 0
+
+    def race_winner(**_kwargs):
+        nonlocal terminal_calls
+        terminal_calls += 1
+        return "ALREADY_TERMINAL"
+
+    monkeypatch.setattr(jm, "terminalize_job_from_worker", race_winner)
+
+    async def handler(_job_row):
+        sdk.stop()
+        return worker_sdk_module.WorkerTerminalOutcome(
+            status="failed",
+            error_code="slides_render_failed",
+            message="safe",
+        )
+
+    await asyncio.wait_for(
+        sdk.run(handler=handler, job_type="presentation.generate"),
+        timeout=1,
+    )
+    assert terminal_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_terminal_outcome_observes_uuid_authoritative_compressed_archive(
+    monkeypatch,
+    tmp_path,
+):
+    db_path = tmp_path / "jobs_wsdk_terminal_archive.db"
+    ensure_jobs_tables(db_path)
+    jm = JobManager(db_path)
+    job = jm.create_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        payload={"receipt_id": "receipt-archive"},
+        owner_user_id="owner-1",
+        idempotency_key=_slides_jobs_key("d"),
+    )
+    sdk = WorkerSDK(
+        jm,
+        WorkerConfig(domain="slides", queue="default", worker_id="slides-worker"),
+    )
+    sdk._sleep = DummySleep(asyncio.sleep)
+    terminal_calls = 0
+    original_terminalize = jm.terminalize_job_from_worker
+
+    def record_terminalize(**kwargs):
+        nonlocal terminal_calls
+        terminal_calls += 1
+        return original_terminalize(**kwargs)
+
+    monkeypatch.setattr(jm, "terminalize_job_from_worker", record_terminalize)
+    monkeypatch.setenv("JOBS_ARCHIVE_BEFORE_DELETE", "true")
+    monkeypatch.setenv("JOBS_ARCHIVE_COMPRESS", "true")
+    monkeypatch.setenv("JOBS_ARCHIVE_COMPRESS_DROP_JSON", "true")
+
+    async def handler(job_row):
+        lease_id = str(job_row["lease_id"])
+        assert jm.fail_job(
+            int(job_row["id"]),
+            error="generic archived winner",
+            retryable=False,
+            worker_id="slides-worker",
+            lease_id=lease_id,
+            completion_token=lease_id,
+            enforce=True,
+            error_code="archived_terminal_winner",
+            error_class="ArchivedTerminalWinner",
+        )
+        connection = jm._connect()
+        try:
+            with connection:
+                connection.execute(
+                    "UPDATE jobs SET completed_at='2000-01-01 00:00:00' WHERE id=?",
+                    (int(job_row["id"]),),
+                )
+        finally:
+            connection.close()
+        assert (
+            jm.prune_jobs(
+                statuses=["failed"],
+                older_than_days=0,
+                domain="slides",
+                queue="default",
+                job_type="presentation.generate",
+            )
+            == 1
+        )
+        connection = jm._connect()
+        try:
+            with connection:
+                connection.execute(
+                    "UPDATE jobs_archive SET id=NULL WHERE uuid=?",
+                    (str(job_row["uuid"]),),
+                )
+        finally:
+            connection.close()
+        sdk.stop()
+        return worker_sdk_module.WorkerTerminalOutcome(
+            status="failed",
+            error_code="handler_terminal_outcome",
+            message="safe",
+        )
+
+    await asyncio.wait_for(
+        sdk.run(handler=handler, job_type="presentation.generate"),
+        timeout=1,
+    )
+    assert terminal_calls == 0
+    archived = jm.resolve_slides_generation_job(
+        job_uuid=str(job["uuid"]),
+        owner_user_id="owner-1",
+        idempotency_key=_slides_jobs_key("d"),
+    )
+    assert archived is not None
+    assert archived["archived"] is True
+    assert archived["id"] is None
+    assert archived["status"] == "failed"
+    assert archived["payload"] == {"receipt_id": "receipt-archive"}
+
+
+@pytest.mark.asyncio
 async def test_terminal_cas_conflict_raises_dedicated_error_without_numeric_fallback(monkeypatch, tmp_path):
     db_path = tmp_path / "jobs_wsdk_terminal_conflict.db"
     ensure_jobs_tables(db_path)
@@ -1003,7 +1148,7 @@ async def test_terminal_cas_conflict_raises_dedicated_error_without_numeric_fall
         job_type="presentation.generate",
         payload={},
         owner_user_id="owner-1",
-        idempotency_key="idem-conflict",
+        idempotency_key=_slides_jobs_key("e"),
     )
     sdk = WorkerSDK(
         jm,
