@@ -514,32 +514,34 @@ git commit -m "feat(jobs): add Slides UUID and fencing primitives (TASK-12115)"
 - Modify: `tldw_Server_API/app/core/Slides/slides_db.py`
 - Test: `tldw_Server_API/tests/Slides/test_standalone_html_generation_jobs.py`
 
-- [ ] **Step 1: Write failing claim/replay and worker tests**
+- [x] **Step 1: Write failing claim/replay and worker tests**
 
 Cover strict idempotency-key syntax, canonical manifests with `ensure_ascii=False`, domain-separated HMACs, constant-time equality, atomic owner/client claim, same-key exact queued/running/completed/failed/cancelled replay, same-key/different-request conflict, cross-owner indistinguishable lookup, stale config only after replay lookup, exact prompt/source/target snapshots, `input_expires_at` fixed at receipt creation plus 24 hours, deterministic 30-day terminal expiry, and source deletion only on terminal CAS.
 
 Also cover receipt-only payload bytes under Jobs normalization/truncation—including `JOBS_JSON_TRUNCATE=true` and a deliberately tiny JSON limit—API-first/worker-first immutable UUID binding, retryable return-to-queued behavior, final lease/state/cancel recheck, exactly one committed presentation, commit-before-Jobs-complete recovery, cancel-before/after-check races, late-result discard, exhausted/nonretryable cleanup, and completed-presentation precedence.
 
-- [ ] **Step 2: Run tests and confirm failure**
+- [x] **Step 2: Run tests and confirm failure**
 
 ```bash
 source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate
 python -m pytest -q tldw_Server_API/tests/Slides/test_standalone_html_generation_jobs.py
 ```
 
-- [ ] **Step 3: Implement the atomic receipt/input service**
+- [x] **Step 3: Implement the atomic receipt/input service**
 
 Keep the Jobs payload exactly `{\"receipt_id\": \"uuid\"}` with domain `slides`, queue `default`, and type `presentation.generate`. Claim receipt plus immutable input in the per-user Slides transaction before enqueue. Bind numeric Jobs ID only together with the immutable Jobs UUID; numeric ID is never correlation authority.
 
-- [ ] **Step 4: Implement the worker handler and fenced commit**
+- [x] **Step 4: Implement the worker handler and fenced commit**
 
 Load the owner-scoped receipt/input, validate correlation HMACs, and reread no mutable source. Acquire Task 2's low-priority generation validation reservation before the provider call so saturation produces zero provider calls; consume that reservation when the returned document enters validation. Recheck key/kill/target, invoke Task 6, validate, perform the final Jobs check, and atomically commit presentation/receipt/input. Return normal bounded metadata only for completed Jobs; use typed retry or `WorkerTerminalOutcome` for every other path.
 
-- [ ] **Step 5: Run tests and structured worker regressions**
+- [x] **Step 5: Run tests and structured worker regressions**
 
 Run Step 2 plus `tldw_Server_API/tests/Slides/test_presentation_render_jobs.py`.
 
-- [ ] **Step 6: Commit**
+Final Task 8 verification: TDD reproduced and closed the receipt, worker-fencing, terminal-CAS, bounded-archive, provenance-HMAC, quarantine-parity, and deadline/lease race defects. The focused standalone suite passed 113 tests; the affected matrix passed 226 tests with 26 repository-managed PostgreSQL fixture/runtime skips. `py_compile`, scoped Ruff, changed-hunk Black, Git diff, and Bandit checks passed; Bandit reported zero findings across 11,234 lines. Full-file lint/format output contains only documented pre-existing baseline debt. Fresh immutable specification and quality reviews of `fb470bb0b6` found no Critical or Important blockers, with independent 212-test and 211-test passes. Task 8 is recorded in commits `169bdf9b20`, `56644c7f3b`, and `fb470bb0b6`; Task 9 remains untouched and interactive execution remains disabled.
+
+- [x] **Step 6: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/Slides/standalone_html_service.py tldw_Server_API/app/services/standalone_html_generation_jobs_worker.py tldw_Server_API/app/core/Slides/slides_db.py tldw_Server_API/tests/Slides/test_standalone_html_generation_jobs.py "backlog/tasks/task-12115 - Add-first-class-standalone-HTML-JS-presentation-generation.md"
