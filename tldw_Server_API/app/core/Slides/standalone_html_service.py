@@ -640,6 +640,7 @@ class StandaloneHtmlGenerationService:
                     "kind": generation_input.source_kind,
                     "hmac_sha256": generation_input.source_hmac_sha256,
                     "bytes": generation_input.source_bytes,
+                    "provenance_sha256": hashlib.sha256(generation_input.provenance_json.encode("utf-8")).hexdigest(),
                 },
                 "html_options": dict(html_options),
                 "target": {

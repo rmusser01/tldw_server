@@ -1144,12 +1144,21 @@ class JobManager:
             rows = list(cur.fetchall() or [])
             archived = False
             if not rows:
-                cur.execute(
-                    "SELECT * FROM jobs_archive WHERE domain='slides' AND queue='default' "
-                    "AND job_type='presentation.generate' AND owner_user_id=%s "
-                    "AND idempotency_key=%s ORDER BY archived_at DESC, uuid",
-                    (owner_user_id, idempotency_key),
-                )
+                if expected_job_uuid is None:
+                    cur.execute(
+                        "SELECT * FROM jobs_archive WHERE domain='slides' AND queue='default' "
+                        "AND job_type='presentation.generate' AND owner_user_id=%s "
+                        "AND idempotency_key=%s ORDER BY archived_at DESC, uuid LIMIT 1",
+                        (owner_user_id, idempotency_key),
+                    )
+                else:
+                    cur.execute(
+                        "SELECT * FROM jobs_archive WHERE domain='slides' AND queue='default' "
+                        "AND job_type='presentation.generate' AND owner_user_id=%s "
+                        "AND idempotency_key=%s AND uuid=%s "
+                        "ORDER BY archived_at DESC, uuid LIMIT 2",
+                        (owner_user_id, idempotency_key, expected_job_uuid),
+                    )
                 rows = list(cur.fetchall() or [])
                 archived = bool(rows)
         else:
@@ -1163,14 +1172,26 @@ class JobManager:
             )
             archived = False
             if not rows:
-                rows = list(
-                    conn.execute(
+                if expected_job_uuid is None:
+                    archived_query = (
                         "SELECT * FROM jobs_archive WHERE domain='slides' AND queue='default' "
                         "AND job_type='presentation.generate' AND owner_user_id=? "
-                        "AND idempotency_key=? ORDER BY archived_at DESC, uuid",
-                        (owner_user_id, idempotency_key),
-                    ).fetchall()
-                )
+                        "AND idempotency_key=? ORDER BY archived_at DESC, uuid LIMIT 1"
+                    )
+                    archived_params = (owner_user_id, idempotency_key)
+                else:
+                    archived_query = (
+                        "SELECT * FROM jobs_archive WHERE domain='slides' AND queue='default' "
+                        "AND job_type='presentation.generate' AND owner_user_id=? "
+                        "AND idempotency_key=? AND uuid=? "
+                        "ORDER BY archived_at DESC, uuid LIMIT 2"
+                    )
+                    archived_params = (
+                        owner_user_id,
+                        idempotency_key,
+                        expected_job_uuid,
+                    )
+                rows = list(conn.execute(archived_query, archived_params).fetchall())
                 archived = bool(rows)
         if not rows:
             return None
@@ -4662,7 +4683,7 @@ class JobManager:
                     cur.execute(
                         """
                         UPDATE jobs
-                        SET status=%s, error_code=%s, error_message=%s,
+                        SET status=%s, error_code=%s, error_message=%s, last_error=NULL,
                             completion_token=%s, completed_at=NOW(), leased_until=NULL,
                             cancelled_at=CASE WHEN %s='cancelled' THEN NOW() ELSE cancelled_at END,
                             cancellation_reason=CASE WHEN %s='cancelled' THEN %s ELSE cancellation_reason END
@@ -4730,7 +4751,7 @@ class JobManager:
                     updated = conn.execute(
                         """
                         UPDATE jobs
-                        SET status=?, error_code=?, error_message=?, completion_token=?,
+                        SET status=?, error_code=?, error_message=?, last_error=NULL, completion_token=?,
                             completed_at=?, leased_until=NULL,
                             cancelled_at=CASE WHEN ?='cancelled' THEN ? ELSE cancelled_at END,
                             cancellation_reason=CASE WHEN ?='cancelled' THEN ? ELSE cancellation_reason END
@@ -4831,9 +4852,7 @@ class JobManager:
                 and stored.get("job_type") == job_type
             )
             exact_correlation = (
-                stable_correlation
-                and stored.get("worker_id") == worker_id
-                and stored.get("lease_id") == lease_id
+                stable_correlation and stored.get("worker_id") == worker_id and stored.get("lease_id") == lease_id
             )
             identical_terminal = (
                 stored.get("status") == status
@@ -4843,12 +4862,19 @@ class JobManager:
             )
             if exact_correlation and identical_terminal:
                 return "IDEMPOTENT"
-            generic_terminal_winner = (
-                stored.get("status") == "quarantined"
-                or (stored.get("status") == "failed" and stored.get("last_error") is not None)
-                or (stored.get("status") == "cancelled" and stored.get("completed_at") is None)
+            terminal_status = stored.get("status")
+            worker_terminal_winner = (
+                exact_correlation
+                and terminal_status in {"failed", "cancelled"}
+                and stored.get("completion_token") == stored.get("lease_id")
+                and stored.get("last_error") is None
+                and stored.get("completed_at") is not None
             )
-            if stable_correlation and generic_terminal_winner:
+            if (
+                stable_correlation
+                and terminal_status in {"failed", "cancelled", "quarantined"}
+                and not worker_terminal_winner
+            ):
                 return "ALREADY_TERMINAL"
             return "CONFLICT"
         finally:
@@ -6089,6 +6115,7 @@ class JobManager:
             raise ValueError("completion_token required by JOBS_REQUIRE_COMPLETION_TOKEN")  # noqa: TRY003
         if enforce is None:
             enforce = self._should_enforce_ack()
+        streak_code = error_code or error
         conn = self._connect()
         _test_mode = _is_test_mode()
         try:
@@ -6149,27 +6176,29 @@ class JobManager:
                             if enforce:
                                 cur.execute(
                                     (
-                                        "UPDATE jobs SET status = CASE WHEN (COALESCE(failure_streak_count,0) + 1) >= %s THEN 'quarantined' ELSE 'queued' END, "
+                                        "UPDATE jobs SET status = CASE WHEN (CASE WHEN COALESCE(failure_streak_code, '') = %s THEN COALESCE(failure_streak_count,0) + 1 ELSE 1 END) >= %s THEN 'quarantined' ELSE 'queued' END, "
                                         "retry_count = retry_count + 1, last_error = %s, error_message = %s, error_code = %s, error_class = %s, error_stack = %s::jsonb, "
-                                        "failure_streak_code = CASE WHEN error_code = %s THEN error_code ELSE %s END, "
-                                        "failure_streak_count = CASE WHEN error_code = %s THEN COALESCE(failure_streak_count,0) + 1 ELSE 1 END, "
-                                        "available_at = CASE WHEN (COALESCE(failure_streak_count,0) + 1) >= %s THEN available_at ELSE NOW() + (%s || ' seconds')::interval END, "
-                                        "quarantined_at = CASE WHEN (COALESCE(failure_streak_count,0) + 1) >= %s THEN NOW() ELSE quarantined_at END, "
+                                        "failure_streak_code = %s, "
+                                        "failure_streak_count = CASE WHEN COALESCE(failure_streak_code, '') = %s THEN COALESCE(failure_streak_count,0) + 1 ELSE 1 END, "
+                                        "available_at = CASE WHEN (CASE WHEN COALESCE(failure_streak_code, '') = %s THEN COALESCE(failure_streak_count,0) + 1 ELSE 1 END) >= %s THEN available_at ELSE NOW() + (%s || ' seconds')::interval END, "
+                                        "quarantined_at = CASE WHEN (CASE WHEN COALESCE(failure_streak_code, '') = %s THEN COALESCE(failure_streak_count,0) + 1 ELSE 1 END) >= %s THEN NOW() ELSE quarantined_at END, "
                                         "leased_until = NULL, worker_id = NULL, lease_id = NULL "
                                         "WHERE id = %s AND status = 'processing' AND retry_count < max_retries AND worker_id = %s AND lease_id = %s"
                                     ),
                                     (
+                                        streak_code,
                                         int(thresh),
-                                        (error_code or error),
+                                        streak_code,
                                         error,
                                         error_code,
                                         error_class,
                                         (json.dumps(error_stack) if error_stack is not None else None),
-                                        error_code,
-                                        error_code,
-                                        error_code,
+                                        streak_code,
+                                        streak_code,
+                                        streak_code,
                                         int(thresh),
                                         int(delay),
+                                        streak_code,
                                         int(thresh),
                                         int(job_id),
                                         worker_id,
@@ -6179,32 +6208,35 @@ class JobManager:
                             else:
                                 cur.execute(
                                     (
-                                        "UPDATE jobs SET status = CASE WHEN (COALESCE(failure_streak_count,0) + 1) >= %s THEN 'quarantined' ELSE 'queued' END, "
+                                        "UPDATE jobs SET status = CASE WHEN (CASE WHEN COALESCE(failure_streak_code, '') = %s THEN COALESCE(failure_streak_count,0) + 1 ELSE 1 END) >= %s THEN 'quarantined' ELSE 'queued' END, "
                                         "retry_count = retry_count + 1, last_error = %s, error_message = %s, error_code = %s, error_class = %s, error_stack = %s::jsonb, "
-                                        "failure_streak_code = CASE WHEN error_code = %s THEN error_code ELSE %s END, "
-                                        "failure_streak_count = CASE WHEN error_code = %s THEN COALESCE(failure_streak_count,0) + 1 ELSE 1 END, "
-                                        "available_at = CASE WHEN (COALESCE(failure_streak_count,0) + 1) >= %s THEN available_at ELSE NOW() + (%s || ' seconds')::interval END, "
-                                        "quarantined_at = CASE WHEN (COALESCE(failure_streak_count,0) + 1) >= %s THEN NOW() ELSE quarantined_at END, "
+                                        "failure_streak_code = %s, "
+                                        "failure_streak_count = CASE WHEN COALESCE(failure_streak_code, '') = %s THEN COALESCE(failure_streak_count,0) + 1 ELSE 1 END, "
+                                        "available_at = CASE WHEN (CASE WHEN COALESCE(failure_streak_code, '') = %s THEN COALESCE(failure_streak_count,0) + 1 ELSE 1 END) >= %s THEN available_at ELSE NOW() + (%s || ' seconds')::interval END, "
+                                        "quarantined_at = CASE WHEN (CASE WHEN COALESCE(failure_streak_code, '') = %s THEN COALESCE(failure_streak_count,0) + 1 ELSE 1 END) >= %s THEN NOW() ELSE quarantined_at END, "
                                         "leased_until = NULL, worker_id = NULL, lease_id = NULL "
                                         "WHERE id = %s AND status = 'processing' AND retry_count < max_retries"
                                     ),
                                     (
+                                        streak_code,
                                         int(thresh),
-                                        (error_code or error),
+                                        streak_code,
                                         error,
                                         error_code,
                                         error_class,
                                         (json.dumps(error_stack) if error_stack is not None else None),
-                                        error_code,
-                                        error_code,
-                                        error_code,
+                                        streak_code,
+                                        streak_code,
+                                        streak_code,
                                         int(thresh),
                                         int(delay),
+                                        streak_code,
                                         int(thresh),
                                         int(job_id),
                                     ),
                                 )
                             if cur.rowcount > 0:
+                                _srow = None
                                 try:
                                     cur.execute("SELECT status, uuid FROM jobs WHERE id = %s", (int(job_id),))
                                     _srow = cur.fetchone()
@@ -6245,9 +6277,8 @@ class JobManager:
                                                 dmn = elem.get("domain")
                                                 qq = elem.get("queue")
                                                 jt = elem.get("job_type")
-                                                prev_streak = int(elem.get("failure_streak_count") or 0)
-                                                will_quarantine = (prev_streak + 1) >= int(
-                                                    os.getenv("JOBS_QUARANTINE_THRESHOLD", "2") or "2"
+                                                will_quarantine = bool(
+                                                    _srow and str(_srow.get("status")) == "quarantined"
                                                 )
                                                 add_ready = 0
                                                 add_sched = 0
@@ -6545,26 +6576,29 @@ class JobManager:
                         if enforce:
                             conn.execute(
                                 (
-                                    "UPDATE jobs SET status = CASE WHEN (COALESCE(failure_streak_count,0) + 1) >= ? THEN 'quarantined' ELSE 'queued' END, "
+                                    "UPDATE jobs SET status = CASE WHEN (CASE WHEN COALESCE(failure_streak_code, '') = ? THEN COALESCE(failure_streak_count,0) + 1 ELSE 1 END) >= ? THEN 'quarantined' ELSE 'queued' END, "
                                     "retry_count = retry_count + 1, last_error = ?, error_message = ?, error_code = ?, error_class = ?, error_stack = ?, "
                                     "failure_streak_count = CASE WHEN COALESCE(failure_streak_code, '') = ? THEN COALESCE(failure_streak_count,0) + 1 ELSE 1 END, "
                                     "failure_streak_code = ?, "
-                                    "available_at = CASE WHEN (COALESCE(failure_streak_count,0) + 1) >= ? THEN available_at ELSE DATETIME('now', ?) END, "
-                                    "quarantined_at = CASE WHEN (COALESCE(failure_streak_count,0) + 1) >= ? THEN DATETIME('now') ELSE quarantined_at END, "
+                                    "available_at = CASE WHEN (CASE WHEN COALESCE(failure_streak_code, '') = ? THEN COALESCE(failure_streak_count,0) + 1 ELSE 1 END) >= ? THEN available_at ELSE DATETIME('now', ?) END, "
+                                    "quarantined_at = CASE WHEN (CASE WHEN COALESCE(failure_streak_code, '') = ? THEN COALESCE(failure_streak_count,0) + 1 ELSE 1 END) >= ? THEN DATETIME('now') ELSE quarantined_at END, "
                                     "leased_until = NULL, worker_id = NULL, lease_id = NULL "
                                     "WHERE id = ? AND status = 'processing' AND retry_count < max_retries AND worker_id = ? AND lease_id = ?"
                                 ),
                                 (
+                                    streak_code,
                                     int(thresh),
-                                    (error_code or error),
+                                    streak_code,
                                     error,
                                     error_code,
                                     error_class,
                                     (json.dumps(error_stack) if error_stack is not None else None),
-                                    error_code,
-                                    error_code,
+                                    streak_code,
+                                    streak_code,
+                                    streak_code,
                                     int(thresh),
                                     f"+{delay} seconds",
+                                    streak_code,
                                     int(thresh),
                                     job_id,
                                     worker_id,
@@ -6574,26 +6608,29 @@ class JobManager:
                         else:
                             conn.execute(
                                 (
-                                    "UPDATE jobs SET status = CASE WHEN (COALESCE(failure_streak_count,0) + 1) >= ? THEN 'quarantined' ELSE 'queued' END, "
+                                    "UPDATE jobs SET status = CASE WHEN (CASE WHEN COALESCE(failure_streak_code, '') = ? THEN COALESCE(failure_streak_count,0) + 1 ELSE 1 END) >= ? THEN 'quarantined' ELSE 'queued' END, "
                                     "retry_count = retry_count + 1, last_error = ?, error_message = ?, error_code = ?, error_class = ?, error_stack = ?, "
                                     "failure_streak_count = CASE WHEN COALESCE(failure_streak_code, '') = ? THEN COALESCE(failure_streak_count,0) + 1 ELSE 1 END, "
                                     "failure_streak_code = ?, "
-                                    "available_at = CASE WHEN (COALESCE(failure_streak_count,0) + 1) >= ? THEN available_at ELSE DATETIME('now', ?) END, "
-                                    "quarantined_at = CASE WHEN (COALESCE(failure_streak_count,0) + 1) >= ? THEN DATETIME('now') ELSE quarantined_at END, "
+                                    "available_at = CASE WHEN (CASE WHEN COALESCE(failure_streak_code, '') = ? THEN COALESCE(failure_streak_count,0) + 1 ELSE 1 END) >= ? THEN available_at ELSE DATETIME('now', ?) END, "
+                                    "quarantined_at = CASE WHEN (CASE WHEN COALESCE(failure_streak_code, '') = ? THEN COALESCE(failure_streak_count,0) + 1 ELSE 1 END) >= ? THEN DATETIME('now') ELSE quarantined_at END, "
                                     "leased_until = NULL, worker_id = NULL, lease_id = NULL "
                                     "WHERE id = ? AND status = 'processing' AND retry_count < max_retries"
                                 ),
                                 (
+                                    streak_code,
                                     int(thresh),
-                                    (error_code or error),
+                                    streak_code,
                                     error,
                                     error_code,
                                     error_class,
                                     (json.dumps(error_stack) if error_stack is not None else None),
-                                    error_code,
-                                    error_code,
+                                    streak_code,
+                                    streak_code,
+                                    streak_code,
                                     int(thresh),
                                     f"+{delay} seconds",
+                                    streak_code,
                                     int(thresh),
                                     job_id,
                                 ),
