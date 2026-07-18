@@ -1016,18 +1016,16 @@ def _attach_credential_runtime_cleanup(
                     await runtime.close()
             return
 
-        has_output = False
         error_emitted = False
 
         async def emit(chunk: Any):
-            nonlocal has_output, error_emitted
+            nonlocal error_emitted
             if is_trusted_local_stream_frame(chunk):
                 # Provenance is process-local only; strip the subclass before
                 # handing the frame to Starlette/ASGI or any later consumer.
                 yield str(chunk)
                 return
-            error_code, chunk_has_output, _ = _inspect_provider_stream_chunk(chunk)
-            has_output = has_output or chunk_has_output
+            error_code, _, _ = _inspect_provider_stream_chunk(chunk)
             pending_code = (stream_error_state or {}).get("code")
             if (
                 error_emitted
@@ -1037,9 +1035,6 @@ def _attach_credential_runtime_cleanup(
                 return
             error_emitted = error_emitted or error_code is not None
             yield _provider_stream_error_frame_for_code(error_code) if error_code else chunk
-            if has_output and pending_code and not error_emitted:
-                error_emitted = True
-                yield _provider_stream_error_frame_for_code(str(pending_code))
 
         try:
             for chunk in initial_chunks:

@@ -18,7 +18,7 @@ PR: https://github.com/rmusser01/tldw_server/pull/2727
 - Database/Jobs payload assertions proving sentinels and credential handles are absent.
 - Concurrent request isolation for two provider/model configurations.
 
-**Status**: In Progress
+**Status**: Complete
 
 ## Stage 2: Owner-scoped runtime lifecycle
 
@@ -36,7 +36,7 @@ PR: https://github.com/rmusser01/tldw_server/pull/2727
 - Revoked/store-unavailable/missing credential failures remain typed, sanitized, and fail closed.
 - Admin cross-owner create/status/history parity and worker-time authoritative test-case ownership revalidation.
 
-**Status**: In Progress
+**Status**: Complete
 
 ## Stage 3: Canonical provider/model propagation
 
@@ -54,7 +54,7 @@ PR: https://github.com/rmusser01/tldw_server/pull/2727
 - Legacy alias compatibility controls.
 - Concurrent multi-provider isolation with distinct snapshots and marks.
 
-**Status**: In Progress
+**Status**: Complete
 
 ## Stage 4: Strict provider-failure semantics
 
@@ -72,7 +72,7 @@ PR: https://github.com/rmusser01/tldw_server/pull/2727
 - Job completion regressions proving zero validated calls cannot produce `completed`.
 - Valid zero-score evaluation compatibility controls.
 
-**Status**: In Progress
+**Status**: Complete
 
 ## Stage 5: Integration and production-safety gate
 
@@ -91,4 +91,4 @@ PR: https://github.com/rmusser01/tldw_server/pull/2727
 - Post-rebase high-risk rerun before push.
 - SQLite and real-PostgreSQL lease exhaustion, completion bookkeeping, post-commit observer, paged cancellation reconciliation, archived cancellation, and tenant-database shutdown parity.
 
-**Status**: In Progress
+**Status**: Complete

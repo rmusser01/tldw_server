@@ -29,6 +29,9 @@ from tldw_Server_API.app.api.v1.endpoints.config_info import (
     validate_provider_key,
 )
 from tldw_Server_API.app.core.AuthNZ import byok_testing
+from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+)
 from tldw_Server_API.app.core.Chat import chat_service
 from tldw_Server_API.app.core.Chat.bounded_daemon import BoundedDaemonPool
 from tldw_Server_API.app.core.Chat.Chat_Deps import (
@@ -38,6 +41,9 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import (
 )
 from tldw_Server_API.app.core.Chat.streaming_utils import (
     PROVIDER_STREAM_ERROR_MESSAGES,
+)
+from tldw_Server_API.tests.provider_credential_test_helpers import (
+    resolved_request_fields_async,
 )
 
 
@@ -97,6 +103,18 @@ def _make_mock_request(client_host: str = "127.0.0.1") -> MagicMock:
     return req
 
 
+def _capture_validation_request(request: dict[str, Any]) -> dict[str, Any]:
+    """Copy a validation request while preserving its non-copyable capability."""
+    return {
+        key: (
+            value
+            if key == PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY
+            else copy.deepcopy(value)
+        )
+        for key, value in request.items()
+    }
+
+
 class _RecordingValidationAdapter:
     """Record immutable adapter-boundary requests for provider validation tests."""
 
@@ -120,7 +138,7 @@ class _RecordingValidationAdapter:
     ) -> dict[str, Any]:
         del timeout
         with self._lock:
-            self.calls.append(copy.deepcopy(request))
+            self.calls.append(_capture_validation_request(request))
         if self.error is not None:
             raise self.error
         return {"choices": [{"message": {"content": "ok"}}]}
@@ -145,7 +163,7 @@ class _GatedValidationAdapter(_RecordingValidationAdapter):
     ) -> dict[str, Any]:
         del timeout
         with self._lock:
-            self.calls.append(copy.deepcopy(request))
+            self.calls.append(_capture_validation_request(request))
             self.active_count += 1
             if len(self.calls) >= self.expected_calls:
                 self.all_entered.set()
@@ -337,12 +355,13 @@ def _install_real_http_validation_boundary(
             }
         }
 
-    client = _ProviderValidationHTTPClient(calls)
-    monkeypatch.setattr(
-        adapter_module,
-        "http_client_factory",
-        lambda **_kwargs: client,
-    )
+    if provider == "openai":
+        client = _ProviderValidationHTTPClient(calls)
+        monkeypatch.setattr(
+            adapter_module,
+            "http_client_factory",
+            lambda **_kwargs: client,
+        )
 
     def fake_httpx_request_io(**kwargs: Any) -> _ProviderValidationHTTPResponse:
         calls.append(
@@ -855,15 +874,12 @@ class TestValidateProviderKey:
             http_dispatches += 1
             raise AssertionError("Missing custom endpoint reached HTTP dispatch")
 
-        monkeypatch.setattr(
-            custom_openai_adapter,
-            "http_client_factory",
-            unexpected_http_dispatch,
-        )
+        adapter = custom_openai_adapter.CustomOpenAIAdapter2()
+        monkeypatch.setattr(adapter, "http_fetcher", unexpected_http_dispatch)
         _install_config_validation_adapter_boundary(
             monkeypatch,
             adapters={
-                "custom-openai-api-2": custom_openai_adapter.CustomOpenAIAdapter2(),
+                "custom-openai-api-2": adapter,
             },
             snapshot_loader=lambda: {
                 "custom_openai_api_2": {"model": "custom-snapshot-model"},
@@ -1282,13 +1298,18 @@ class TestValidateProviderKey:
                 asyncio.to_thread(anthropic_adapter.all_entered.wait, 1.0),
             )
             assert entered == [True, True]
+            chat_credentials = await resolved_request_fields_async(
+                "groq",
+                api_key="sk-foreground-chat",
+                app_config={},
+                model="foreground-chat-model",
+            )
             await chat_service.perform_chat_api_call_async(
                 api_endpoint="groq",
-                api_key="sk-foreground-chat",
-                credentials_resolved=True,
                 messages_payload=[{"role": "user", "content": "ping"}],
                 model="foreground-chat-model",
                 streaming=False,
+                **chat_credentials,
             )
             assert chat_adapter.call_count == 1
             assert pool.active_count == 2
@@ -1436,9 +1457,6 @@ class TestValidateProviderKey:
     ) -> None:
         """Sensitive observability must cover the real worker adapter call."""
         from tldw_Server_API.app.core import http_client as http_client_mod
-        from tldw_Server_API.app.core.LLM_Calls.providers import (
-            custom_openai_adapter,
-        )
 
         endpoint = (
             "https://8.8.8.8/provider-validation-log-secret"
@@ -1449,37 +1467,61 @@ class TestValidateProviderKey:
         suppression_states: list[object] = []
         auto_instrumented_urls: list[str] = []
         stdlib_messages: list[str] = []
+        manual_span_attributes: list[dict[str, Any]] = []
+
+        @contextmanager
+        def capture_manual_span(
+            _name: str,
+            *,
+            attributes: dict[str, Any],
+        ) -> Iterator[None]:
+            manual_span_attributes.append(copy.deepcopy(attributes))
+            yield
+
+        trace_manager = MagicMock()
+        trace_manager.span.side_effect = capture_manual_span
+        trace_manager.get_baggage.return_value = None
+        monkeypatch.setattr(
+            http_client_mod,
+            "get_tracing_manager",
+            lambda: trace_manager,
+        )
 
         class CaptureHandler(logging.Handler):
             def emit(self, record: logging.LogRecord) -> None:
                 stdlib_messages.append(record.getMessage())
 
-        class LoggingHTTPClient(_ProviderValidationHTTPClient):
-            def post(
-                self,
-                url: str,
-                *,
-                headers: dict[str, str],
-                json: dict[str, Any],
-            ) -> _ProviderValidationHTTPResponse:
-                suppression = otel_context.get_value(
-                    http_client_mod._OTEL_HTTP_SUPPRESSION_KEY
-                )
-                suppression_states.append(suppression)
-                if suppression is not True:
-                    auto_instrumented_urls.append(url)
-                logging.getLogger("httpx").info(
-                    "HTTP Request: POST %s headers=%r json=%r",
-                    url,
-                    headers,
-                    json,
-                )
-                logging.getLogger("httpcore.connection").debug(
-                    "request url=%s body=%r",
-                    url,
-                    json,
-                )
-                return super().post(url, headers=headers, json=json)
+        def logging_httpx_request_io(
+            **kwargs: Any,
+        ) -> _ProviderValidationHTTPResponse:
+            url = str(kwargs["url"])
+            headers = copy.deepcopy(kwargs.get("headers") or {})
+            payload = copy.deepcopy(kwargs.get("json") or {})
+            suppression = otel_context.get_value(
+                http_client_mod._OTEL_HTTP_SUPPRESSION_KEY
+            )
+            suppression_states.append(suppression)
+            if suppression is not True:
+                auto_instrumented_urls.append(url)
+            logging.getLogger("httpx").info(
+                "HTTP Request: POST %s headers=%r json=%r",
+                url,
+                headers,
+                payload,
+            )
+            logging.getLogger("httpcore.connection").debug(
+                "request url=%s body=%r",
+                url,
+                payload,
+            )
+            http_calls.append(
+                {
+                    "url": url,
+                    "headers": headers,
+                    "json": payload,
+                }
+            )
+            return _ProviderValidationHTTPResponse(url)
 
         _install_real_http_validation_boundary(
             monkeypatch,
@@ -1487,11 +1529,10 @@ class TestValidateProviderKey:
             endpoint=endpoint,
             calls=http_calls,
         )
-        client = LoggingHTTPClient(http_calls)
         monkeypatch.setattr(
-            custom_openai_adapter,
-            "http_client_factory",
-            lambda **_kwargs: client,
+            http_client_mod,
+            "_httpx_request_io",
+            logging_httpx_request_io,
         )
 
         capture_handler = CaptureHandler()
@@ -1536,6 +1577,13 @@ class TestValidateProviderKey:
         ]
         assert suppression_states == [True]
         assert auto_instrumented_urls == []
+        assert manual_span_attributes == [
+            {
+                "http.method": "POST",
+                "net.host.name": "sensitive-endpoint.invalid",
+                "url.full": http_client_mod._SENSITIVE_OBSERVABILITY_URL,
+            }
+        ]
         assert otel_context.get_value(http_client_mod._OTEL_HTTP_SUPPRESSION_KEY) is None
 
         observability = repr(
@@ -1543,6 +1591,7 @@ class TestValidateProviderKey:
                 "stdlib": stdlib_messages,
                 "provider": provider_logs,
                 "auto_instrumented": auto_instrumented_urls,
+                "manual_spans": manual_span_attributes,
             }
         )
         for sensitive_fragment in (

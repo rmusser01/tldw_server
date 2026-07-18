@@ -1,7 +1,7 @@
 ---
 id: TASK-12963
 title: Consolidate provider credential runtime for Chat and Knowledge QA
-status: In Progress
+status: Done
 assignee: []
 created_date: ''
 updated_date: 2026-07-14 03:30
@@ -33,11 +33,11 @@ Design and implement a shared execution-scoped provider credential runtime used 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [x] #1 Approved design specification is written, reviewed, and linked from this task.
-- [ ] #2 Invalid credentials, credential-store failures, and revoked background scope fail closed.
+- [x] #2 Invalid credentials, credential-store failures, and revoked background scope fail closed.
 - [x] #3 RAG semantic cache reuses documents but never cached generated answers.
 - [x] #4 Streaming credential errors use sanitized structured codes and do not trigger non-stream fallback.
-- [ ] #5 Focused backend/frontend tests and Bandit pass for touched scope.
-- [ ] #6 Chat and all provider-backed RAG call paths, including query-time hosted embeddings, use the shared credential runtime with explicit no-fallback semantics.
+- [x] #5 Focused backend/frontend tests and Bandit pass for touched scope.
+- [x] #6 Chat and all provider-backed RAG call paths, including query-time hosted embeddings, use the shared credential runtime with explicit no-fallback semantics.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -105,17 +105,17 @@ Docs/superpowers/plans/2026-07-13-provider-credential-runtime-production-hardeni
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Consolidated Chat, Knowledge QA/RAG, embeddings, secondary provider surfaces, Prompt Studio, and durable Jobs onto server-owned execution-scoped provider credentials with user/team/org/server precedence and explicit fail-closed behavior. Credentials remain non-serializable and server-side; semantic caching is retrieval-only; streaming errors are bounded, ordered, and non-replayed; provider/model/endpoint provenance is authoritative; and credential/runtime cleanup is cancellation- and concurrency-safe across SQLite/PostgreSQL operations. Final high-risk backend/frontend, adapter-boundary, concurrency, static, compatibility, and security gates pass. PR #2727 remains draft solely for the mandatory requester-authored Change summary.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
 
 ## Implementation Notes
@@ -136,4 +136,5 @@ Docs/superpowers/plans/2026-07-13-provider-credential-runtime-production-hardeni
 2026-07-16: Chat provider-override test-isolation root correction completed without a commit. Removed the package-wide Chat autouse cache reset and its fixture-isolation regression because they leaked TTL/task state and masked the resolver dependency. Added a stateless regression proving an exact test-module API key never calls get_llm_provider_override; RED at seed 663999404 failed 1/1 exactly at chat_service.py:2058 on the forced override lookup. The minimal production fix skips that lookup only when the exact test-module key is present. Seeded GREEN matrix passed 3/3 (new regression, pytest module-key precedence, and TLDW test-mode module-key precedence), with 5 existing warnings. Fatal Ruff subset E9/F63/F7/F82 passed; full-file Ruff reported 15 unrelated existing style findings and none on the changed lines. Bandit scanned chat_service.py (6,214 LOC) with 0 findings and 0 errors. Scoped git diff --check passed. Touched: tldw_Server_API/app/core/Chat/chat_service.py and tldw_Server_API/tests/Chat/unit/test_api_key_resolution.py.
 2026-07-17: Provider credential alias-snapshot and OAuth CAS hardening completed without a commit. User and org credential reads now fetch canonical plus legacy spellings in one set-based SQLite/PostgreSQL statement and fold canonical authority from that one snapshot, preventing revoke/rotation interleavings from falling through to lower credentials. User OAuth payload CAS now canonicalizes legacy aliases under the existing identity transaction lock before comparing/updating, so raw legacy `oai` OAuth-v2 rows refresh once, persist canonically, remove the legacy spelling, and cannot resurrect after a concurrent revoke. The PostgreSQL advisory-lock connection-bound repo now supports set reads. Added exact event-gated SQLite/real-PG user/team revocation races through the real OpenAI adapter, raw legacy OAuth adapter-boundary migration tests, explicit bound-repo coverage, and concurrent revoke/no-resurrection checks; updated the existing bounded-pool unit fake for the set-read/transaction repository contract. RED: SQLite 3 failed/1 passed and PG 3 failed/2 passed for the intended defects. Final verification: focused SQLite 4 passed; focused PG 5 passed; full SQLite repo/runtime 53 passed; full BYOK unit runtime 137 passed/1 skipped; full PG file 9 passed; compileall and Ruff passed; Bandit 0 findings across the three touched production files; diff check clean. Touched: user_provider_secrets_repo.py, org_provider_secrets_repo.py, byok_runtime.py, test_byok_runtime_sqlite.py, test_byok_oauth_endpoints_pg.py, and AuthNZ_Unit/test_byok_runtime.py.
 2026-07-17: Final production-safety review remains in progress; prior completion/merge-ready claims are withdrawn. Fresh full Prompt Studio verification passed 1001 with 17 expected skips and two separately documented WebSocket deselections; full Chat_NEW/Character unit+integration verification passed 785 with 11 expected external/performance skips after fixing a real OpenAI-compatible stream regression so semantic output plus `[DONE]` succeeds while silent exhaustion still fails closed. Independent reviews identified unresolved merge blockers that must be corrected after a semantic rebase onto current origin/dev: preserve dev's checked egress transports and exact-origin scope; replace forgeable `credentials_resolved=True` with authentic immutable server-issued key+endpoint provenance; apply placeholder filtering in the actual runtime snapshot path; sanitize every native adapter error override; close Prompt Studio secret/config/provider/rate/idempotency/ownership/contract gaps; and reconcile Jobs terminal/lease/cancellation state without starving heartbeats. PR remains draft. Deployment and rollback require coordinated API/worker drain; mixed-version rolling deployment is unsafe. Durable exactly-once WebSocket delivery remains a documented follow-up unless an outbox is implemented.
+2026-07-18: Final completion gate for PR #2727 passed after adversarial re-review. The last review cycle fixed terminal HTTP status masking by transport cleanup, restricted suppression to known transport cleanup exceptions, strengthened adapter-dispatch/SSE regressions, and removed a race-prone out-of-band Chat error synthesis that could reorder an error before an already-produced chunk. Final affected suites: HTTP 207 passed; Config 226 passed; LLM Calls/Adapters 1,110 passed and 2 skipped; Chat endpoint integration 195 passed and 1 skipped; Prompt Studio 1,087 passed, 17 skipped, and 2 intentional stale unauthenticated-WebSocket deselections; Jobs SQLite 482 passed and 2 skipped; strict real-PostgreSQL Jobs 261 passed and 1 stress-only skip. Ruff, compileall, Python 3.10 py_compile, git diff checks, and Bandit (0 findings/0 errors on the final production delta) passed. Independent re-review found no remaining issue. The two unrelated untracked watchlist templates remain untouched. PR #2727 stays draft until the requester supplies the policy-required human-written Change summary.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->

@@ -43,16 +43,25 @@ class _TraceRecorder:
         self.span_attributes: list[dict[str, Any]] = []
         self.updated_attributes: list[dict[str, Any]] = []
         self.events: list[tuple[str, dict[str, Any]]] = []
+        self.recorded_exceptions: list[str] = []
 
     @contextmanager
     def span(self, _name: str, *, attributes: dict[str, Any]):
         self.span_attributes.append(dict(attributes))
-        yield None
+        try:
+            yield None
+        except BaseException as exc:
+            self.recorded_exceptions.append(str(exc))
+            raise
 
     @asynccontextmanager
     async def async_span(self, _name: str, *, attributes: dict[str, Any]):
         self.span_attributes.append(dict(attributes))
-        yield None
+        try:
+            yield None
+        except BaseException as exc:
+            self.recorded_exceptions.append(str(exc))
+            raise
 
     def set_attributes(self, attributes: dict[str, Any]) -> None:
         self.updated_attributes.append(dict(attributes))
@@ -118,6 +127,189 @@ def test_sensitive_sync_request_uses_real_url_without_observability_disclosure(
         "93.184.216.34",
         "runtime-secret-path",
         "tenant=private",
+        endpoint,
+    ):
+        assert sensitive_fragment not in observability
+
+
+def test_sensitive_context_promotes_sync_request_observability_without_callsite_flag(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    endpoint = "http://93.184.216.34/context-secret?credential=private"
+    observed_requests: list[str] = []
+    traces = _TraceRecorder()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed_requests.append(str(request.url))
+        return httpx.Response(200, request=request, json={"ok": True})
+
+    monkeypatch.setattr(http_client, "get_metrics_registry", _MetricRecorder)
+    monkeypatch.setattr(http_client, "get_tracing_manager", lambda: traces)
+    client = http_client.create_client(transport=httpx.MockTransport(handler))
+    try:
+        with http_client.sensitive_http_observability_context():
+            response = http_client.fetch(
+                method="GET",
+                url=endpoint,
+                client=client,
+            )
+    finally:
+        client.close()
+
+    assert response.status_code == 200
+    assert observed_requests == [endpoint]
+    assert traces.span_attributes[0]["url.full"] == (
+        http_client._SENSITIVE_OBSERVABILITY_URL
+    )
+    assert endpoint not in repr(traces.span_attributes)
+
+
+def test_sensitive_context_span_redaction_isolated_from_concurrent_public_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sensitive_endpoint = "http://93.184.216.34/context-secret"
+    public_endpoint = "http://8.8.8.8/public-health"
+    request_barrier = Barrier(2)
+    traces = _TraceRecorder()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        request_barrier.wait(timeout=2)
+        return httpx.Response(200, request=request, json={"ok": True})
+
+    monkeypatch.setattr(http_client, "get_metrics_registry", _MetricRecorder)
+    monkeypatch.setattr(http_client, "get_tracing_manager", lambda: traces)
+    client = http_client.create_client(transport=httpx.MockTransport(handler))
+
+    def send(url: str, *, sensitive: bool) -> int:
+        if sensitive:
+            with http_client.sensitive_http_observability_context():
+                return http_client.fetch(
+                    method="GET",
+                    url=url,
+                    client=client,
+                ).status_code
+        return http_client.fetch(
+            method="GET",
+            url=url,
+            client=client,
+        ).status_code
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            sensitive_future = executor.submit(send, sensitive_endpoint, sensitive=True)
+            public_future = executor.submit(send, public_endpoint, sensitive=False)
+            assert sensitive_future.result(timeout=3) == 200
+            assert public_future.result(timeout=3) == 200
+    finally:
+        client.close()
+
+    span_urls = {attributes["url.full"] for attributes in traces.span_attributes}
+    assert span_urls == {
+        http_client._SENSITIVE_OBSERVABILITY_URL,
+        public_endpoint,
+    }
+    assert sensitive_endpoint not in repr(traces.span_attributes)
+
+
+def test_sensitive_context_redacts_cross_origin_redirect_log(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    start_url = "http://93.184.216.34/redirect-context-secret"
+    final_url = "http://8.8.8.8/redirect-target-secret"
+    observed_requests: list[str] = []
+    log_records: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed_requests.append(str(request.url))
+        if str(request.url) == start_url:
+            return httpx.Response(
+                302,
+                request=request,
+                headers={"location": final_url},
+            )
+        return httpx.Response(200, request=request, json={"ok": True})
+
+    monkeypatch.setattr(http_client, "get_metrics_registry", _MetricRecorder)
+    monkeypatch.setattr(http_client, "get_tracing_manager", _TraceRecorder)
+    sink_id = logger.add(
+        lambda message: log_records.append(dict(message.record)),
+        level="DEBUG",
+    )
+    client = http_client.create_client(transport=httpx.MockTransport(handler))
+    try:
+        with http_client.sensitive_http_observability_context():
+            response = http_client.fetch(
+                method="GET",
+                url=start_url,
+                client=client,
+                headers={"Authorization": "Bearer redirect-secret"},
+            )
+    finally:
+        client.close()
+        logger.remove(sink_id)
+
+    assert response.status_code == 200
+    assert observed_requests == [start_url, final_url]
+    redirect_records = [
+        record
+        for record in log_records
+        if "Stripped sensitive headers" in str(record["message"])
+    ]
+    assert redirect_records
+    assert redirect_records[0]["extra"]["target_host"] == (
+        "sensitive-endpoint.invalid"
+    )
+    observability = repr(log_records)
+    for sensitive_fragment in (
+        "93.184.216.34",
+        "8.8.8.8",
+        "redirect-context-secret",
+        "redirect-target-secret",
+        "redirect-secret",
+    ):
+        assert sensitive_fragment not in observability
+
+
+def test_sensitive_context_redacts_download_retry_log(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Any,
+) -> None:
+    endpoint = "http://93.184.216.34/download-context-secret?credential=private"
+    observed_requests: list[str] = []
+    log_records: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed_requests.append(str(request.url))
+        status = 500 if len(observed_requests) == 1 else 200
+        return httpx.Response(status, request=request, content=b"ok")
+
+    monkeypatch.setattr(http_client.time, "sleep", lambda _delay: None)
+    sink_id = logger.add(
+        lambda message: log_records.append(dict(message.record)),
+        level="DEBUG",
+    )
+    client = http_client.create_client(transport=httpx.MockTransport(handler))
+    destination = tmp_path / "download.bin"
+    try:
+        with http_client.sensitive_http_observability_context():
+            result = http_client.download(
+                url=endpoint,
+                dest=destination,
+                client=client,
+                retry=http_client.RetryPolicy(attempts=2, backoff_base_ms=1),
+            )
+    finally:
+        client.close()
+        logger.remove(sink_id)
+
+    assert result == destination
+    assert destination.read_bytes() == b"ok"
+    assert observed_requests == [endpoint, endpoint]
+    observability = repr(log_records)
+    for sensitive_fragment in (
+        "93.184.216.34",
+        "download-context-secret",
+        "credential=private",
         endpoint,
     ):
         assert sensitive_fragment not in observability
@@ -208,6 +400,31 @@ def test_sensitive_egress_dns_failure_redacts_full_loguru_record_and_resets_cont
         endpoint,
     ):
         assert sensitive_fragment not in rendered_records
+
+
+def test_sensitive_context_promotes_simple_fetch_egress_observability(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.Security import egress
+
+    endpoint = "https://credential-derived.private.example/secret/path"
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    class Denied:
+        allowed = False
+
+    def evaluate_url_policy(url: str, **kwargs: Any) -> Denied:
+        calls.append((url, kwargs))
+        return Denied()
+
+    monkeypatch.setattr(egress, "evaluate_url_policy", evaluate_url_policy)
+
+    with http_client.sensitive_http_observability_context():
+        with pytest.raises(ValueError, match="Egress denied for URL"):
+            http_client.fetch(endpoint)
+
+    assert calls == [(endpoint, {"sensitive_observability": True})]
+    assert http_client._SENSITIVE_HTTP_LOG_CONTEXT.get() is False
 
 
 def test_sensitive_log_filter_does_not_hide_concurrent_public_request(
@@ -337,6 +554,39 @@ async def test_sensitive_async_httpx_request_uses_real_url_without_observability
 
 
 @pytest.mark.asyncio
+async def test_sensitive_context_promotes_async_httpx_observability_without_callsite_flag(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    endpoint = "http://93.184.216.34/async-context-secret"
+    observed_requests: list[str] = []
+    traces = _TraceRecorder()
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        observed_requests.append(str(request.url))
+        return httpx.Response(200, request=request, json={"ok": True})
+
+    monkeypatch.setattr(http_client, "get_metrics_registry", _MetricRecorder)
+    monkeypatch.setattr(http_client, "get_tracing_manager", lambda: traces)
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    try:
+        with http_client.sensitive_http_observability_context():
+            response = await http_client.afetch(
+                method="GET",
+                url=endpoint,
+                client=client,
+            )
+    finally:
+        await client.aclose()
+
+    assert response.status_code == 200
+    assert observed_requests == [endpoint]
+    assert traces.span_attributes[0]["url.full"] == (
+        http_client._SENSITIVE_OBSERVABILITY_URL
+    )
+    assert endpoint not in repr(traces.span_attributes)
+
+
+@pytest.mark.asyncio
 async def test_sensitive_async_aiohttp_path_redacts_retry_metrics_traces_and_logs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -410,6 +660,170 @@ async def test_sensitive_async_aiohttp_path_redacts_retry_metrics_traces_and_log
         endpoint,
     ):
         assert sensitive_fragment not in observability
+
+
+@pytest.mark.asyncio
+async def test_sensitive_context_promotes_async_aiohttp_observability_without_callsite_flag(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    endpoint = "http://93.184.216.34/aiohttp-context-secret"
+    observed_requests: list[str] = []
+    traces = _TraceRecorder()
+
+    class RawResponse:
+        status = 200
+        headers = {"content-type": "application/json"}
+        charset = "utf-8"
+
+        def __init__(self, url: str) -> None:
+            self.url = url
+
+        def release(self) -> None:
+            return None
+
+    async def fake_io(**kwargs: Any) -> Any:
+        observed_requests.append(kwargs["url"])
+        return http_client._AiohttpResponse(
+            RawResponse(kwargs["url"]),
+            b'{"ok": true}',
+        )
+
+    monkeypatch.setattr(http_client, "_is_aiohttp_client", lambda _client: True)
+    monkeypatch.setattr(http_client, "_aiohttp_request_io", fake_io)
+    monkeypatch.setattr(http_client, "get_metrics_registry", _MetricRecorder)
+    monkeypatch.setattr(http_client, "get_tracing_manager", lambda: traces)
+
+    with http_client.sensitive_http_observability_context():
+        response = await http_client.afetch(
+            method="GET",
+            url=endpoint,
+            client=object(),
+        )
+
+    assert response.status_code == 200
+    assert observed_requests == [endpoint]
+    assert traces.span_attributes[0]["url.full"] == (
+        http_client._SENSITIVE_OBSERVABILITY_URL
+    )
+    assert endpoint not in repr(traces.span_attributes)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("sensitive_observability", [False, True])
+async def test_byte_stream_closes_adapter_delegate_once_on_early_close(
+    monkeypatch: pytest.MonkeyPatch,
+    sensitive_observability: bool,
+) -> None:
+    finalized: list[str] = []
+
+    class Adapter:
+        async def stream_bytes(self, **_kwargs: Any):
+            try:
+                yield b"one"
+                yield b"two"
+            finally:
+                finalized.append("closed")
+
+    monkeypatch.setattr(
+        http_client,
+        "_get_transport_adapter",
+        lambda _name: Adapter(),
+    )
+    traces = _TraceRecorder()
+    monkeypatch.setattr(http_client, "get_tracing_manager", lambda: traces)
+
+    stream = http_client.astream_bytes(
+        method="GET",
+        url="http://93.184.216.34/early-close-secret",
+        client=object(),
+        sensitive_observability=sensitive_observability,
+    )
+    assert await stream.__anext__() == b"one"
+    await stream.aclose()
+
+    assert finalized == ["closed"]
+    assert traces.span_attributes == []
+    assert http_client._SENSITIVE_HTTP_LOG_CONTEXT.get() is False
+
+
+@pytest.mark.asyncio
+async def test_public_byte_stream_does_not_hold_trace_context_across_yield(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    span_entries = 0
+
+    class TaskBoundTrace:
+        @asynccontextmanager
+        async def async_span(self, _name: str, *, attributes: dict[str, Any]):
+            nonlocal span_entries
+            span_entries += 1
+            entered_task = asyncio.current_task()
+            try:
+                yield None
+            finally:
+                if asyncio.current_task() is not entered_task:
+                    raise RuntimeError("trace context crossed task boundary")
+
+    class Adapter:
+        async def stream_bytes(self, **_kwargs: Any):
+            yield b"one"
+            yield b"two"
+
+    monkeypatch.setattr(http_client, "get_tracing_manager", TaskBoundTrace)
+    monkeypatch.setattr(
+        http_client,
+        "_get_transport_adapter",
+        lambda _name: Adapter(),
+    )
+
+    stream = http_client.astream_bytes(
+        method="GET",
+        url="http://8.8.8.8/public-stream",
+        client=object(),
+    )
+    assert await stream.__anext__() == b"one"
+    await asyncio.create_task(stream.aclose())
+
+    assert span_entries == 0
+
+
+@pytest.mark.asyncio
+async def test_sensitive_byte_stream_installs_log_filter_once_per_stream(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_calls = 0
+
+    def install_filter() -> None:
+        nonlocal install_calls
+        install_calls += 1
+
+    async def fake_stream_bytes_httpx(**_kwargs: Any):
+        for index in range(5):
+            yield str(index).encode()
+
+    monkeypatch.setattr(
+        http_client,
+        "_install_sensitive_http_log_filter",
+        install_filter,
+    )
+    monkeypatch.setattr(
+        http_client,
+        "_astream_bytes_httpx",
+        fake_stream_bytes_httpx,
+    )
+
+    chunks = [
+        chunk
+        async for chunk in http_client.HttpxAdapter().stream_bytes(
+            method="GET",
+            url="http://93.184.216.34/filter-secret",
+            client=object(),
+            sensitive_observability=True,
+        )
+    ]
+
+    assert chunks == [b"0", b"1", b"2", b"3", b"4"]
+    assert install_calls == 1
 
 
 @pytest.mark.asyncio
@@ -711,7 +1125,7 @@ async def test_sensitive_async_byte_stream_redacts_retry_metrics_traces_logs_and
     assert chunks == [b"audio"]
     assert observed_requests == [endpoint, endpoint]
     assert suppression_states == [True, True]
-    assert traces.span_attributes[0]["url.full"] == http_client._SENSITIVE_OBSERVABILITY_URL
+    assert traces.span_attributes == []
     assert http_client._SENSITIVE_HTTP_LOG_CONTEXT.get() is False
     assert otel_context.get_value(otel_context._SUPPRESS_HTTP_INSTRUMENTATION_KEY) is None
     observability = repr(
@@ -730,6 +1144,208 @@ async def test_sensitive_async_byte_stream_redacts_retry_metrics_traces_logs_and
         endpoint,
     ):
         assert sensitive_fragment not in observability
+
+
+@pytest.mark.asyncio
+async def test_sensitive_context_promotes_byte_stream_observability_without_callsite_flag(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    endpoint = "http://93.184.216.34/stream-context-secret"
+    observed_requests: list[str] = []
+    traces = _TraceRecorder()
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        observed_requests.append(str(request.url))
+        return httpx.Response(200, request=request, content=b"audio")
+
+    monkeypatch.setattr(http_client, "get_metrics_registry", _MetricRecorder)
+    monkeypatch.setattr(http_client, "get_tracing_manager", lambda: traces)
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    chunks: list[bytes] = []
+    try:
+        with http_client.sensitive_http_observability_context():
+            async for chunk in http_client.astream_bytes(
+                method="GET",
+                url=endpoint,
+                client=client,
+            ):
+                chunks.append(chunk)
+    finally:
+        await client.aclose()
+
+    assert chunks == [b"audio"]
+    assert observed_requests == [endpoint]
+    assert traces.span_attributes == []
+
+
+@pytest.mark.asyncio
+async def test_sensitive_context_promotes_aiohttp_byte_stream_observability(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    endpoint = "http://93.184.216.34/aiohttp-stream-context-secret"
+    observed_requests: list[str] = []
+    traces = _TraceRecorder()
+
+    class RawResponse:
+        status = 200
+        headers: dict[str, str] = {}
+
+        def __init__(self, url: str) -> None:
+            self.url = url
+
+    @asynccontextmanager
+    async def fake_stream_io(**kwargs: Any):
+        observed_requests.append(kwargs["url"])
+
+        async def chunks():
+            yield b"audio"
+
+        yield RawResponse(kwargs["url"]), chunks()
+
+    monkeypatch.setattr(http_client, "_is_aiohttp_client", lambda _client: True)
+    monkeypatch.setattr(http_client, "_aiohttp_stream_io", fake_stream_io)
+    monkeypatch.setattr(http_client, "get_metrics_registry", _MetricRecorder)
+    monkeypatch.setattr(http_client, "get_tracing_manager", lambda: traces)
+    chunks: list[bytes] = []
+    with http_client.sensitive_http_observability_context():
+        async for chunk in http_client.astream_bytes(
+            method="GET",
+            url=endpoint,
+            client=object(),
+        ):
+            chunks.append(chunk)
+
+    assert chunks == [b"audio"]
+    assert observed_requests == [endpoint]
+    assert traces.span_attributes == []
+
+
+@pytest.mark.asyncio
+async def test_sensitive_stream_scope_exits_before_yield_and_cross_task_close(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scope_active = False
+    scope_tasks: list[asyncio.Task[Any] | None] = []
+
+    @asynccontextmanager
+    async def tracking_scope(_enabled: bool):
+        nonlocal scope_active
+        entered_task = asyncio.current_task()
+        scope_tasks.append(entered_task)
+        scope_active = True
+        try:
+            yield
+        finally:
+            scope_active = False
+            if asyncio.current_task() is not entered_task:
+                raise RuntimeError("sensitive scope crossed task boundary")
+
+    async def fake_stream_bytes_httpx(**_kwargs: Any):
+        yield b"one"
+        yield b"two"
+
+    monkeypatch.setattr(
+        http_client,
+        "_sensitive_http_stream_context",
+        tracking_scope,
+    )
+    monkeypatch.setattr(
+        http_client,
+        "_astream_bytes_httpx",
+        fake_stream_bytes_httpx,
+    )
+    monkeypatch.setattr(http_client, "get_tracing_manager", _TraceRecorder)
+
+    stream = http_client.astream_bytes(
+        method="GET",
+        url="http://93.184.216.34/scoped-stream-secret",
+        client=object(),
+        sensitive_observability=True,
+    )
+    assert await stream.__anext__() == b"one"
+    assert scope_active is False
+    await asyncio.create_task(stream.aclose())
+    assert scope_active is False
+    assert len(scope_tasks) >= 2
+
+
+@pytest.mark.asyncio
+async def test_sensitive_httpx_sse_redacts_transport_observability(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    endpoint = "http://93.184.216.34/sse-secret?credential=private"
+    observed_requests: list[str] = []
+    suppression_states: list[object] = []
+    log_records: list[dict[str, Any]] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        observed_requests.append(str(request.url))
+        suppression_states.append(
+            otel_context.get_value(otel_context._SUPPRESS_HTTP_INSTRUMENTATION_KEY)
+        )
+        return httpx.Response(
+            200,
+            request=request,
+            content=b"data: hello\n\n",
+            headers={"content-type": "text/event-stream"},
+        )
+
+    monkeypatch.setattr(http_client, "get_metrics_registry", _MetricRecorder)
+    sink_id = logger.add(
+        lambda message: log_records.append(dict(message.record)),
+        level="DEBUG",
+    )
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    try:
+        events = [
+            event
+            async for event in http_client.astream_sse(
+                url=endpoint,
+                client=client,
+                sensitive_observability=True,
+            )
+        ]
+    finally:
+        await client.aclose()
+        logger.remove(sink_id)
+
+    assert [event.data for event in events] == ["hello"]
+    assert observed_requests == [endpoint]
+    assert suppression_states == [True]
+    assert endpoint not in repr(log_records)
+    assert "sse-secret" not in repr(log_records)
+    assert http_client._SENSITIVE_HTTP_LOG_CONTEXT.get() is False
+
+
+@pytest.mark.asyncio
+async def test_sensitive_stream_error_is_not_recorded_with_real_endpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    endpoint = "http://93.184.216.34/stream-error-context-secret?token=private"
+    traces = _TraceRecorder()
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(403, request=request, content=b"denied")
+
+    monkeypatch.setattr(http_client, "get_metrics_registry", _MetricRecorder)
+    monkeypatch.setattr(http_client, "get_tracing_manager", lambda: traces)
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    try:
+        with pytest.raises(http_client.NetworkError, match=r"^HTTP 403$") as exc_info:
+            with http_client.sensitive_http_observability_context():
+                async for _chunk in http_client.astream_bytes(
+                    method="GET",
+                    url=endpoint,
+                    client=client,
+                ):
+                    pass
+    finally:
+        await client.aclose()
+
+    assert endpoint not in str(exc_info.value)
+    assert "private" not in str(exc_info.value)
+    assert traces.recorded_exceptions == []
+    assert endpoint not in repr(traces.span_attributes)
 
 
 @pytest.mark.asyncio
