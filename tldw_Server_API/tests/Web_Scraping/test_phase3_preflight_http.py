@@ -321,11 +321,40 @@ async def test_equivalent_redirect_variants_loop_before_second_dispatch(
     assert len(transport.calls) == 1
 
 
-def test_redirect_key_preserves_reserved_path_query_and_dot_segment_semantics() -> None:
+def test_redirect_key_preserves_reserved_path_query_and_repeated_slash_semantics() -> None:
     canonical_key = _required("_canonical_redirect_key")
 
-    assert canonical_key("https://example.com/a%2fb?b=2&a=1") != canonical_key("https://example.com/a/b?a=1&b=2")
-    assert canonical_key("https://example.com/a/../b") != canonical_key("https://example.com/b")
+    assert canonical_key("https://example.com/a%2fb") != canonical_key("https://example.com/a/b")
+    assert canonical_key("https://example.com/a?b=2&a=1") != canonical_key("https://example.com/a?a=1&b=2")
+    assert canonical_key("https://example.com/a//b") != canonical_key("https://example.com/a/b")
+    assert canonical_key("https://example.com/a/../b") == canonical_key("https://example.com/b")
+    assert canonical_key("https://example.com/a/%2e%2E/b") == canonical_key("https://example.com/b")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "location",
+    [
+        "https://example.com/a/../b",
+        "//example.com/a/%2e%2E/b",
+    ],
+    ids=["absolute", "scheme-relative-percent-encoded"],
+)
+async def test_dot_segment_redirect_loop_precedes_second_dispatch(
+    location: str,
+) -> None:
+    controls = _controls()
+    guard = FakeProbeEgressGuard([True])
+    transport = FakeHttpTransport([FakeRawResponse(302, headers={"Location": location})])
+    probe = _probe(controls=controls, guard=guard, transport=transport)
+
+    with pytest.raises(ProbeError) as raised:
+        await probe.get(ProbeHttpRequest(url="https://example.com/b"))
+
+    assert raised.value.error_code == "redirect_loop"
+    assert controls.consumed.requests == 1
+    assert guard.urls == ["https://example.com/b"]
+    assert len(transport.calls) == 1
 
 
 @pytest.mark.asyncio
@@ -401,6 +430,79 @@ async def test_strict_redirect_validation_rejects_malformed_targets(
     assert controls.consumed.requests == 1
     assert len(guard.urls) == 1
     assert len(transport.calls) == 1
+
+
+_LEGACY_NUMERIC_HOSTS = (
+    "2130706433",
+    "2130706433.",
+    "017700000001",
+    "127.1",
+    "0177.0.0.1",
+    "0x7f000001",
+    "0x7f.0.0.1",
+)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("host", _LEGACY_NUMERIC_HOSTS)
+async def test_legacy_numeric_initial_target_fails_before_reservation(
+    host: str,
+) -> None:
+    controls = _controls()
+    guard = FakeProbeEgressGuard([])
+    transport = FakeHttpTransport([])
+    probe = _probe(controls=controls, guard=guard, transport=transport)
+
+    with pytest.raises(ProbeError) as raised:
+        await probe.get(ProbeHttpRequest(url=f"https://{host}/start"))
+
+    assert raised.value.error_code == "invalid_redirect"
+    assert controls.consumed.requests == 0
+    assert guard.urls == []
+    assert transport.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("host", _LEGACY_NUMERIC_HOSTS)
+async def test_legacy_numeric_redirect_target_fails_before_target_reservation(
+    host: str,
+) -> None:
+    controls = _controls()
+    guard = FakeProbeEgressGuard([True])
+    transport = FakeHttpTransport([FakeRawResponse(302, headers={"Location": f"https://{host}/next"})])
+    probe = _probe(controls=controls, guard=guard, transport=transport)
+
+    with pytest.raises(ProbeError) as raised:
+        await probe.get(ProbeHttpRequest(url="https://example.com/start"))
+
+    assert raised.value.error_code == "invalid_redirect"
+    assert controls.consumed.requests == 1
+    assert guard.urls == ["https://example.com/start"]
+    assert len(transport.calls) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://127.0.0.1/",
+        "https://[2001:db8::1]/",
+        "https://example.com/",
+        "https://b\u00fccher.example/",
+    ],
+    ids=["ipv4", "ipv6", "dns", "idna"],
+)
+async def test_canonical_ip_and_dns_hosts_still_reach_governed_dispatch(
+    url: str,
+) -> None:
+    guard = FakeProbeEgressGuard([True])
+    transport = FakeHttpTransport([FakeRawResponse(200)])
+    probe = _probe(controls=_controls(), guard=guard, transport=transport)
+
+    await probe.get(ProbeHttpRequest(url=url))
+
+    assert guard.urls == [url]
+    assert [call.url for call in transport.calls] == [url]
 
 
 @pytest.mark.asyncio
@@ -669,6 +771,110 @@ async def test_central_afetch_timeout_classification_reaches_probe_boundary(
         await probe.get(ProbeHttpRequest(url="https://example.com/timeout"))
 
     assert controls.consumed.requests == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("timeout_seam", ["modern", "legacy"])
+@pytest.mark.parametrize("deadline_expires", [False, True])
+async def test_curl_native_timeout_classification_reaches_probe_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+    timeout_seam: str,
+    deadline_expires: bool,
+) -> None:
+    module = _adapter_module()
+    assert module is not None
+    clock = FakeClock(0.0)
+    controls = _controls(
+        deadline=1.0 if deadline_expires else 10.0,
+        clock=clock,
+    )
+
+    class ModernCurlTimeout(Exception):
+        pass
+
+    class LegacyRequestsError(Exception):
+        __module__ = "curl_cffi.requests.exceptions"
+
+        def __init__(self) -> None:
+            super().__init__("legacy-curl-timeout-secret")
+            self.code = 28
+
+    if timeout_seam == "modern":
+        monkeypatch.setattr(module, "_CurlTimeout", ModernCurlTimeout, raising=False)
+        timeout_error: Exception = ModernCurlTimeout("modern-curl-timeout-secret")
+    else:
+        monkeypatch.setattr(module, "_CurlTimeout", None, raising=False)
+        timeout_error = LegacyRequestsError()
+
+    class DeadlineSession(_FakeSession):
+        async def get(self, url: str, **kwargs: Any) -> Any:
+            if deadline_expires:
+                clock.advance(2.0)
+            return await super().get(url, **kwargs)
+
+    session = DeadlineSession([timeout_error])
+    guard = FakeProbeEgressGuard([True, True])
+    curl = _required("CurlCffiProbeTransport")(
+        egress_guard=guard,
+        request_context=controls.request_context,
+        session_factory=_SessionFactory([session]),
+    )
+    probe = _probe(
+        controls=controls,
+        guard=guard,
+        transport=FakeHttpTransport([]),
+        curl_transport=curl,
+    )
+
+    expected_error = PreflightDeadlineExceeded if deadline_expires else ProbeTimeout
+    with pytest.raises(expected_error) as raised:
+        await probe.get(
+            ProbeHttpRequest(
+                url="https://example.com/curl-timeout",
+                impersonate="chrome120",
+            )
+        )
+
+    assert "secret" not in str(raised.value)
+    assert controls.consumed.requests == 1
+    assert guard.urls == ["https://example.com/curl-timeout"] * 2
+    assert len(session.get_calls) == 1
+    assert session.closed is True
+
+
+@pytest.mark.asyncio
+async def test_non_curl_code_28_error_remains_sanitized_probe_error() -> None:
+    class ThirdPartyError(Exception):
+        def __init__(self) -> None:
+            super().__init__("third-party-timeout-secret")
+            self.code = 28
+
+    controls = _controls(deadline=10.0, clock=FakeClock(0.0))
+    session = _FakeSession([ThirdPartyError()])
+    guard = FakeProbeEgressGuard([True, True])
+    curl = _required("CurlCffiProbeTransport")(
+        egress_guard=guard,
+        request_context=controls.request_context,
+        session_factory=_SessionFactory([session]),
+    )
+    probe = _probe(
+        controls=controls,
+        guard=guard,
+        transport=FakeHttpTransport([]),
+        curl_transport=curl,
+    )
+
+    with pytest.raises(ProbeError) as raised:
+        await probe.get(
+            ProbeHttpRequest(
+                url="https://example.com/not-curl-timeout",
+                impersonate="chrome120",
+            )
+        )
+
+    assert raised.value.error_code == "probe_error"
+    assert raised.value.public_message == "HTTP probe failed."
+    assert "secret" not in str(raised.value)
 
 
 @pytest.mark.asyncio

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import ipaddress
+import re
 import unicodedata
 from collections.abc import Mapping
 from dataclasses import replace
@@ -36,8 +37,14 @@ from tldw_Server_API.app.core.Web_Scraping.runtime.requests import (
 
 try:
     from curl_cffi.requests import AsyncSession as _CurlAsyncSession
+
+    try:
+        from curl_cffi.requests.exceptions import Timeout as _CurlTimeout
+    except ImportError:  # pragma: no cover - legacy optional dependency
+        _CurlTimeout = None
 except ImportError:  # pragma: no cover - optional dependency
     _CurlAsyncSession = None
+    _CurlTimeout = None
 
 
 _DEFAULT_SESSION_FACTORY = object()
@@ -45,6 +52,7 @@ _REDIRECT_STATUS_CODES = frozenset({301, 302, 303, 307, 308})
 _ALLOWED_SCHEMES = frozenset({"http", "https"})
 _HEX_DIGITS = frozenset("0123456789abcdefABCDEF")
 _UNRESERVED_CHARACTERS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
+_LEGACY_NUMERIC_HOST_PATTERN = re.compile(r"(?:0x[0-9a-f]+|[0-9]+)(?:\.(?:0x[0-9a-f]+|[0-9]+)){0,3}\Z")
 _CLEANUP_GRACE_SECONDS = 2.0
 _CLEANUP_TASKS: set[asyncio.Task[Any]] = set()
 
@@ -244,6 +252,41 @@ def _normalize_percent_encoding(component: str) -> str | None:
     return "".join(normalized)
 
 
+def _remove_last_path_segment(path: str) -> str:
+    separator = path.rfind("/")
+    return "" if separator < 0 else path[:separator]
+
+
+def _remove_dot_segments(path: str) -> str:
+    """Apply RFC 3986 section 5.2.4 without collapsing other slashes."""
+    input_buffer = path
+    output_buffer = ""
+    while input_buffer:
+        if input_buffer.startswith("../"):
+            input_buffer = input_buffer[3:]
+        elif input_buffer.startswith(("./", "/./")):
+            input_buffer = input_buffer[2:]
+        elif input_buffer == "/.":
+            input_buffer = "/"
+        elif input_buffer.startswith("/../"):
+            input_buffer = input_buffer[3:]
+            output_buffer = _remove_last_path_segment(output_buffer)
+        elif input_buffer == "/..":
+            input_buffer = "/"
+            output_buffer = _remove_last_path_segment(output_buffer)
+        elif input_buffer in {".", ".."}:
+            input_buffer = ""
+        else:
+            segment_end = input_buffer.find("/", 1 if input_buffer.startswith("/") else 0)
+            if segment_end < 0:
+                output_buffer += input_buffer
+                input_buffer = ""
+            else:
+                output_buffer += input_buffer[:segment_end]
+                input_buffer = input_buffer[segment_end:]
+    return output_buffer
+
+
 def _canonical_host(host: str) -> str | None:
     if not host or "%" in host:
         return None
@@ -252,9 +295,7 @@ def _canonical_host(host: str) -> str | None:
         return ipaddress.ip_address(normalized).compressed
     except ValueError:
         pass
-    if ":" in normalized or (
-        "." in normalized and all(character.isdigit() or character == "." for character in normalized)
-    ):
+    if ":" in normalized or _LEGACY_NUMERIC_HOST_PATTERN.fullmatch(normalized):
         return None
     if normalized.endswith("."):
         normalized = normalized[:-1]
@@ -263,6 +304,8 @@ def _canonical_host(host: str) -> str | None:
     try:
         normalized = normalized.encode("idna").decode("ascii").lower()
     except UnicodeError:
+        return None
+    if _LEGACY_NUMERIC_HOST_PATTERN.fullmatch(normalized):
         return None
     if len(normalized) > 253:
         return None
@@ -335,6 +378,7 @@ def _canonical_redirect_key(url: str) -> str:
     query = _normalize_percent_encoding(parsed.query)
     if path is None or query is None:
         raise ProbeError("invalid_redirect", "Redirect target is invalid.")
+    path = _remove_dot_segments(path)
     authority = f"[{host}]" if ":" in host else host
     default_port = 443 if scheme == "https" else 80
     if port != default_port:
@@ -408,7 +452,18 @@ def _is_timeout_error(exc: Exception) -> bool:
         return exc.classification == "timeout"
     httpx_module = getattr(http_client, "httpx", None)
     httpx_timeout = getattr(httpx_module, "TimeoutException", None)
-    return isinstance(httpx_timeout, type) and isinstance(exc, httpx_timeout)
+    if isinstance(httpx_timeout, type) and isinstance(exc, httpx_timeout):
+        return True
+    if isinstance(_CurlTimeout, type) and isinstance(exc, _CurlTimeout):
+        return True
+    exception_module = type(exc).__module__
+    if exception_module != "curl_cffi.requests" and not exception_module.startswith("curl_cffi.requests."):
+        return False
+    try:
+        code = getattr(exc, "code", None)
+    except Exception:  # noqa: BLE001 - structural legacy compatibility only
+        return False
+    return isinstance(code, int) and not isinstance(code, bool) and code == 28
 
 
 class HttpxProbeTransport:
