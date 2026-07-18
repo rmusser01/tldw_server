@@ -37,7 +37,8 @@ class _CredentialRuntime:
         self.resolved: list[str] = []
         self.marked: list[Any] = []
 
-    async def resolve(self, provider: str):
+    async def resolve(self, provider: str, *, model: str | None = None):
+        del model
         self.resolved.append(provider)
         return self.handle
 
@@ -964,6 +965,72 @@ async def test_optional_planner_uses_runtime_and_degrades_without_fallback(
     assert content == "alpha"
     assert len(citations) == 1
     assert metadata == {
-        "embedding_coverage": "degraded",
-        "failure_code": "credential_store_unavailable",
+        "planner": {
+            "failure_code": "credential_store_unavailable",
+            "verification_available": False,
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_concurrent_planner_failures_keep_bounded_metadata_request_local(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
+
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    entered_count = 0
+
+    class Runtime:
+        def __init__(self, failure_code: str) -> None:
+            self.failure_code = failure_code
+
+    class Planner:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            self.runtime = kwargs["credential_runtime"]
+
+        async def generate(self, **_kwargs: object) -> dict[str, str]:
+            nonlocal entered_count
+            entered_count += 1
+            if entered_count == 2:
+                entered.set()
+            await release.wait()
+            raise ByokResolutionError(self.runtime.failure_code, "openai")
+
+    monkeypatch.setattr(agentic_execution, "AnswerGenerator", Planner)
+    metadata_a: dict[str, Any] = {}
+    metadata_b: dict[str, Any] = {}
+
+    async def run(runtime: Runtime, metadata: dict[str, Any]) -> None:
+        await agentic_execution.tool_loop(
+            [Document(id="planner", content="alpha", source=DataSource.MEDIA_DB, metadata={})],
+            "alpha",
+            AgenticConfig(
+                top_k_docs=1,
+                max_tool_calls=1,
+                enable_metrics=False,
+                use_llm_planner=True,
+            ),
+            credential_runtime=runtime,
+            stage_metadata=metadata,
+        )
+
+    task_a = asyncio.create_task(run(Runtime("credential_store_unavailable"), metadata_a))
+    task_b = asyncio.create_task(run(Runtime("credential_scope_revoked"), metadata_b))
+    await asyncio.wait_for(entered.wait(), timeout=1.0)
+    release.set()
+    await asyncio.gather(task_a, task_b)
+
+    assert metadata_a == {
+        "planner": {
+            "failure_code": "credential_store_unavailable",
+            "verification_available": False,
+        }
+    }
+    assert metadata_b == {
+        "planner": {
+            "failure_code": "credential_scope_revoked",
+            "verification_available": False,
+        }
     }

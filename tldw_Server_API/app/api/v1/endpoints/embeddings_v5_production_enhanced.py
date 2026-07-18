@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import atexit
 import base64
+import copy
 import hashlib
 import json
 import os
@@ -22,14 +23,15 @@ import threading
 import time
 import uuid
 from asyncio import Lock
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager, suppress
+from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from fnmatch import fnmatch
 from functools import lru_cache
+from typing import Any, NoReturn
 from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
-from typing import Any
 
 import numpy as np
 import redis.asyncio as aioredis
@@ -47,9 +49,15 @@ from prometheus_client import REGISTRY, Counter, Gauge, Histogram
 from pydantic import BaseModel, Field
 
 from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import get_audit_service_for_user
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, rbac_rate_limit, RequirePermission, RequireRole, resolve_user_id_for_request, User
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    RequirePermission,
+    RequireRole,
+    User,
+    get_request_user,
+    rbac_rate_limit,
+    resolve_user_id_for_request,
+)
 from tldw_Server_API.app.api.v1.API_Deps.billing_deps import require_within_limit
-from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
 
 # Schemas
 from tldw_Server_API.app.api.v1.schemas.embeddings_models import (
@@ -59,33 +67,66 @@ from tldw_Server_API.app.api.v1.schemas.embeddings_models import (
     EmbeddingUsage,
 )
 from tldw_Server_API.app.core.Audit.unified_audit_service import AuditContext, AuditEventCategory, AuditEventType
+from tldw_Server_API.app.core.AuthNZ.byok_config import (
+    PROVIDER_APP_CONFIG_KEYS,
+    runtime_base_url_override_provenance,
+)
+from tldw_Server_API.app.core.AuthNZ.byok_helpers import load_server_config_snapshot
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
+    ByokResolutionError,
     ResolvedByokCredentials,
     record_byok_missing_credentials,
     resolve_byok_credentials,
+    resolve_static_server_fallback_from_snapshot,
 )
-from tldw_Server_API.app.core.AuthNZ.byok_config import PROVIDER_APP_CONFIG_KEYS
 from tldw_Server_API.app.core.AuthNZ.crypto_utils import derive_hmac_key
+from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
+    capture_provider_override_call_snapshot,
+)
 from tldw_Server_API.app.core.AuthNZ.permissions import EMBEDDINGS_ADMIN, SYSTEM_CONFIGURE
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal, is_single_user_principal
 from tldw_Server_API.app.core.AuthNZ.settings import is_single_user_profile_mode
+from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
+from tldw_Server_API.app.core.Chat.bounded_daemon import (
+    SYNC_ADAPTER_CALL_POOL,
+    DaemonCapacityError,
+    await_bounded_sync_call,
+    await_owned_worker,
+)
+from tldw_Server_API.app.core.Chat.Chat_Deps import (
+    ChatAPIError,
+    ChatAuthenticationError,
+    ChatBadRequestError,
+    ChatConfigurationError,
+    ChatProviderError,
+)
 
 # Authentication
-
 # Configuration
 from tldw_Server_API.app.core.config import settings
+from tldw_Server_API.app.core.Embeddings import embedding_policy as embedding_policy_core
+from tldw_Server_API.app.core.Embeddings.async_embeddings import (
+    EmbeddingProviderError as RuntimeEmbeddingProviderError,
+)
 
 # Audit logging: unify later via unified audit DI; legacy import removed (unused here)
 from tldw_Server_API.app.core.Embeddings.ChromaDB_Library import ChromaDBManager
-from tldw_Server_API.app.core.Embeddings import embedding_policy as embedding_policy_core
-from tldw_Server_API.app.core.Embeddings.provider_resolution import (
-    resolve_provider_model,
-    split_provider_model,
-)
+from tldw_Server_API.app.core.Embeddings.dlq_crypto import decrypt_payload_if_present
+from tldw_Server_API.app.core.Embeddings.messages import validate_schema
 from tldw_Server_API.app.core.Embeddings.orchestrator import (
     EmbeddingExecutorOutput,
     EmbeddingRequestOrchestrator,
     PreparedEmbeddingRequest,
+)
+from tldw_Server_API.app.core.Embeddings.provider_resolution import (
+    resolve_provider_model,
+    split_provider_model,
+)
+from tldw_Server_API.app.core.Embeddings.request_batching import (
+    EmbeddingsRateLimitError,
+)
+from tldw_Server_API.app.core.Embeddings.request_batching import (
+    create_embeddings_batch_async as batching_create_embeddings_batch_async,
 )
 from tldw_Server_API.app.core.Embeddings.request_types import (
     EmbeddingDomainError,
@@ -99,24 +140,19 @@ from tldw_Server_API.app.core.Embeddings.request_types import (
     EmbeddingRequestContext,
     ProviderModelIntent,
 )
+from tldw_Server_API.app.core.Embeddings.vector_validation import (
+    validated_embedding_vectors,
+    validated_indexed_embedding_data,
+)
 from tldw_Server_API.app.core.Embeddings.workflow_runner import (
     EmbeddingInlineWorkflowRunner,
     PreExecuteHook,
 )
-
-# Circuit Breaker
-from tldw_Server_API.app.core.Infrastructure.circuit_breaker import CircuitBreaker
-from tldw_Server_API.app.core.Infrastructure.circuit_breaker import CircuitBreakerOpenError as CircuitBreakerError
-from tldw_Server_API.app.core.Infrastructure.circuit_breaker import registry as circuit_breaker_registry
-from tldw_Server_API.app.core.Embeddings.dlq_crypto import decrypt_payload_if_present
-from tldw_Server_API.app.core.Embeddings.messages import validate_schema
-from tldw_Server_API.app.core.Embeddings.request_batching import (
-    EmbeddingsRateLimitError,
+from tldw_Server_API.app.core.exceptions import (
+    NetworkError,
+    RetryExhaustedError,
+    raise_detached_error,
 )
-from tldw_Server_API.app.core.Embeddings.request_batching import (
-    create_embeddings_batch_async as batching_create_embeddings_batch_async,
-)
-from tldw_Server_API.app.core.exceptions import NetworkError, RetryExhaustedError
 from tldw_Server_API.app.core.http_client import (
     RetryPolicy as _RetryPolicy,
 )
@@ -126,11 +162,23 @@ from tldw_Server_API.app.core.http_client import (
 from tldw_Server_API.app.core.http_client import (
     create_async_client as _create_async_client,
 )
+
+# Circuit Breaker
+from tldw_Server_API.app.core.Infrastructure.circuit_breaker import CircuitBreaker
+from tldw_Server_API.app.core.Infrastructure.circuit_breaker import CircuitBreakerOpenError as CircuitBreakerError
+from tldw_Server_API.app.core.Infrastructure.circuit_breaker import registry as circuit_breaker_registry
 from tldw_Server_API.app.core.Infrastructure.redis_factory import (
     create_async_redis_client,
     ensure_async_client_closed,
 )
 from tldw_Server_API.app.core.LLM_Calls.embeddings_adapter_registry import get_embeddings_registry
+from tldw_Server_API.app.core.LLM_Calls.payload_utils import (
+    encode_huggingface_model_path,
+    encode_provider_model_path,
+)
+from tldw_Server_API.app.core.LLM_Calls.providers.base import (
+    EmbeddingsAdapterUnavailableError,
+)
 from tldw_Server_API.app.core.Logging.log_context import ensure_request_id, ensure_traceparent, get_ps_logger
 from tldw_Server_API.app.core.Resource_Governance.deps import derive_entity_key
 from tldw_Server_API.app.core.Resource_Governance.governor import RGRequest
@@ -183,6 +231,10 @@ try:
         OpenAIModelCfg,
         resolve_model_storage_base_dir,
     )
+    from tldw_Server_API.app.core.Embeddings.Embeddings_Server.Embeddings_Create import (
+        create_embeddings_batch_async as create_explicit_embeddings_batch_async,
+    )
+
     EMBEDDINGS_AVAILABLE = True
 except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as e:
     # Do not raise here; allow the API to import and mark the embeddings service as unavailable.
@@ -399,6 +451,7 @@ DEFAULT_MAX_RETRIES = 3
 EMBEDDING_SERVICE_FAILED_DETAIL = "Embedding service error"
 EMBEDDING_MODEL_WARMUP_FAILED_DETAIL = "Warmup failed"
 EMBEDDING_MODEL_DOWNLOAD_FAILED_DETAIL = "Download failed"
+_AUTHORITATIVE_SYNC_EMBEDDING_PROVIDERS = frozenset({"openai", "local_api"})
 
 # Allow overriding via settings/env
 def _cfg_int(name: str, default_val: int) -> int:
@@ -671,13 +724,90 @@ EMBEDDINGS_PROVIDERS_REQUIRE_KEY = {
     "mistral",
 }
 
+_EMBEDDINGS_CREDENTIAL_ERROR_MESSAGES = {
+    "invalid_provider_credentials": "The selected provider credentials are invalid.",
+    "credential_store_unavailable": "Provider credential storage is temporarily unavailable.",
+    "credential_scope_revoked": "The selected provider credential scope is no longer available.",
+    "provider_disabled": "The selected provider is disabled by administrator policy.",
+    "model_not_allowed": "The selected model is not allowed for this provider.",
+}
+_EMBEDDINGS_CREDENTIAL_ERROR_CODES = frozenset(
+    {"missing_provider_credentials", *_EMBEDDINGS_CREDENTIAL_ERROR_MESSAGES}
+)
+
+
+class _EmbeddingProviderAuthenticationHTTPException(HTTPException):
+    """Bounded upstream-auth marker that preserves retry semantics internally."""
+
+    def __init__(self, upstream_status_code: int | None) -> None:
+        self.upstream_status_code = (
+            status.HTTP_403_FORBIDDEN
+            if upstream_status_code == status.HTTP_403_FORBIDDEN
+            else status.HTTP_401_UNAUTHORIZED
+        )
+        super().__init__(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Embedding provider authentication failed",
+        )
+
+
+def _provider_auth_status_code(exc: BaseException) -> int | None:
+    """Return a downstream provider auth status without inspecting its message."""
+    if isinstance(exc, _EmbeddingProviderAuthenticationHTTPException):
+        return exc.upstream_status_code
+    try:
+        status_code = int(getattr(exc, "status_code", 0) or 0)
+    except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
+        return None
+    return status_code if status_code in {401, 403} else None
+
+
+def _raise_provider_auth_http_exception(
+    upstream_status_code: int | None,
+) -> NoReturn:
+    """Raise a detached 502 while retaining only the status needed for OAuth retry."""
+    raise_detached_error(
+        _EmbeddingProviderAuthenticationHTTPException(upstream_status_code)
+    )
+
+
+def _is_embeddings_credential_http_exception(exc: HTTPException) -> bool:
+    """Return whether a bounded HTTP error represents credential or policy state."""
+    try:
+        detail = exc.detail
+    except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
+        return False
+    return (
+        isinstance(detail, dict)
+        and detail.get("error_code") in _EMBEDDINGS_CREDENTIAL_ERROR_CODES
+    )
+
+
+def _embeddings_credential_http_exception(exc: ByokResolutionError) -> HTTPException:
+    """Map a typed credential-resolution failure to a bounded public response."""
+    code = getattr(exc, "policy_code", exc.code)
+    message = _EMBEDDINGS_CREDENTIAL_ERROR_MESSAGES.get(code)
+    if message is None:
+        code = "invalid_provider_credentials"
+        message = _EMBEDDINGS_CREDENTIAL_ERROR_MESSAGES[code]
+    return HTTPException(
+        status_code=(
+            status.HTTP_403_FORBIDDEN
+            if code in {"provider_disabled", "model_not_allowed"}
+            else status.HTTP_503_SERVICE_UNAVAILABLE
+        ),
+        detail={"error_code": code, "message": message},
+    )
+
 
 async def _resolve_embeddings_byok(
     provider: str,
     current_user: User | None,
     request: Request | None,
     *,
+    model: str | None = None,
     force_oauth_refresh: bool = False,
+    rejected_credentials: ResolvedByokCredentials | None = None,
 ) -> ResolvedByokCredentials:
     user_id_int = getattr(current_user, "id_int", None) if current_user else None
     if user_id_int is None and current_user is not None:
@@ -685,12 +815,71 @@ async def _resolve_embeddings_byok(
             user_id_int = int(getattr(current_user, "id", None))
         except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
             user_id_int = None
-    return await resolve_byok_credentials(
-        provider,
-        user_id=user_id_int,
-        request=request,
-        force_oauth_refresh=force_oauth_refresh,
-    )
+    try:
+        override_snapshot = capture_provider_override_call_snapshot(provider)
+        override_snapshot.enforce(model)
+
+        rejected_credential_generation = None
+        if force_oauth_refresh and rejected_credentials is not None:
+            if not isinstance(rejected_credentials, ResolvedByokCredentials):
+                raise ByokResolutionError("invalid_provider_credentials", provider)
+            try:
+                rejected_credential_generation = getattr(
+                    rejected_credentials,
+                    "_credential_generation",
+                    None,
+                )
+            except Exception:  # noqa: BLE001 - credential metadata fails closed
+                raise ByokResolutionError(
+                    "invalid_provider_credentials",
+                    provider,
+                ) from None
+            if (
+                rejected_credential_generation is not None
+                and (
+                    not isinstance(rejected_credential_generation, str)
+                    or not rejected_credential_generation.strip()
+                )
+            ):
+                raise ByokResolutionError("invalid_provider_credentials", provider)
+
+        try:
+            server_config_snapshot = load_server_config_snapshot()
+            static_fallback = resolve_static_server_fallback_from_snapshot(
+                provider,
+                server_config_snapshot,
+            )
+            fallback_override = (
+                override_snapshot.server_fallback(static_fallback)
+                or static_fallback
+            )
+        except ByokResolutionError:
+            raise
+        except Exception:  # noqa: BLE001 - config capture failures must fail closed
+            raise ByokResolutionError(
+                "invalid_provider_credentials",
+                provider,
+            ) from None
+
+        resolver_kwargs: dict[str, Any] = {
+            "user_id": user_id_int,
+            "request": request,
+            "force_oauth_refresh": force_oauth_refresh,
+            "fallback_override": fallback_override,
+            "server_config_snapshot": server_config_snapshot,
+        }
+        if force_oauth_refresh and rejected_credential_generation is not None:
+            resolver_kwargs["rejected_credential_generation"] = (
+                rejected_credential_generation
+            )
+        resolution = await resolve_byok_credentials(
+            provider,
+            **resolver_kwargs,
+        )
+        override_snapshot.ensure_healthy()
+        return resolution
+    except ByokResolutionError as exc:
+        raise _embeddings_credential_http_exception(exc) from None
 
 
 def _raise_missing_embeddings_key(provider: str) -> None:
@@ -705,10 +894,7 @@ def _raise_missing_embeddings_key(provider: str) -> None:
 
 
 def _is_http_401_error(exc: BaseException) -> bool:
-    try:
-        return int(getattr(exc, "status_code", 0) or 0) == status.HTTP_401_UNAUTHORIZED
-    except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
-        return False
+    return _provider_auth_status_code(exc) == status.HTTP_401_UNAUTHORIZED
 
 
 def _record_oauth_401_retry(provider: str, outcome: str) -> None:
@@ -1347,6 +1533,12 @@ _BYOK_API_URL_FIELD_CANDIDATES = (
     "endpoint",
 )
 
+_EMBEDDINGS_ADAPTER_DEFAULT_ENDPOINTS: dict[str, str] = {
+    "openai": "https://api.openai.com/v1",
+    "google": "https://generativelanguage.googleapis.com/v1",
+    "huggingface": "https://api-inference.huggingface.co/models",
+}
+
 
 def _first_config_url_value(values: Mapping[str, object] | None) -> str | None:
     """Return the first supported endpoint URL value from a config mapping."""
@@ -1400,6 +1592,322 @@ def _resolve_credentials_api_url(
         if api_url:
             return api_url
     return None
+
+
+def _resolve_embeddings_adapter_base_url(
+    provider: str,
+    credentials: ResolvedByokCredentials,
+) -> str | None:
+    """Resolve one request-local endpoint before an embedding adapter dispatches."""
+    selected = _resolve_credentials_api_url(provider, credentials)
+    if selected:
+        return selected.rstrip("/")
+
+    provider_key = (provider or "").strip().lower()
+    default_endpoint = _EMBEDDINGS_ADAPTER_DEFAULT_ENDPOINTS.get(provider_key)
+    if default_endpoint is None:
+        return None
+    if provider_key == "huggingface" and not (
+        isinstance(getattr(credentials, "api_key", None), str)
+        and credentials.api_key.strip()
+    ):
+        return None
+    return default_endpoint
+
+
+def _credentials_require_cache_isolation(
+    credentials: ResolvedByokCredentials | None,
+) -> bool:
+    """Return whether private BYOK state must bypass provider-global state."""
+    if credentials is None:
+        return False
+    uses_byok = getattr(credentials, "uses_byok", None)
+    if isinstance(uses_byok, bool):
+        return uses_byok
+    source = getattr(credentials, "source", None)
+    return isinstance(source, str) and source.strip().lower() in {"user", "team", "org"}
+
+
+def _build_embeddings_adapter_request(
+    texts: list[str],
+    *,
+    provider: str,
+    model: str,
+    dimensions: int | None,
+    credentials: ResolvedByokCredentials,
+) -> dict[str, Any]:
+    """Build an isolated adapter request from one resolved credential snapshot."""
+    app_config = getattr(credentials, "app_config", None)
+    request: dict[str, Any] = {
+        "input": texts if len(texts) > 1 else texts[0],
+        "model": model,
+        "api_key": getattr(credentials, "api_key", None),
+        "app_config": copy.deepcopy(app_config) if isinstance(app_config, dict) else {},
+        "credentials_resolved": True,
+    }
+    base_url = _resolve_embeddings_adapter_base_url(provider, credentials)
+    if base_url:
+        request["base_url"] = base_url
+        request["_runtime_base_url_override"] = runtime_base_url_override_provenance()
+    if (
+        dimensions is not None
+        and (provider or "").strip().lower() == "openai"
+        and _supports_openai_dimensions(model)
+    ):
+        request["dimensions"] = dimensions
+    return request
+
+
+def _extract_validated_adapter_vectors(
+    result: object,
+    *,
+    expected: int,
+) -> list[list[float]] | None:
+    """Validate indexed adapter data and reconstruct vectors in input order."""
+    if not isinstance(result, dict) or not isinstance(result.get("data"), list):
+        return None
+    return validated_indexed_embedding_data(result["data"], expected=expected)
+
+
+async def _await_explicit_sync_embeddings(
+    awaitable: Awaitable[Any],
+    *,
+    provider: str,
+    expected: int,
+    on_valid_late_result: Callable[[], Awaitable[None] | None],
+) -> Any:
+    """Own explicit sync fallback work and mark only a strict-valid late result."""
+
+    if (provider or "").strip().lower() not in _AUTHORITATIVE_SYNC_EMBEDDING_PROVIDERS:
+        return await awaitable
+
+    async def _mark_valid_result(result: Any) -> None:
+        if validated_embedding_vectors(result, expected=expected) is None:
+            return
+        callback_result = on_valid_late_result()
+        if callback_result is not None:
+            await callback_result
+
+    return await await_owned_worker(
+        awaitable,
+        on_cancel_result=_mark_valid_result,
+    )
+
+
+async def _create_owned_provider_batches(
+    texts: list[str],
+    *,
+    provider: str,
+    model: str,
+    dimensions: int | None,
+    credentials: ResolvedByokCredentials,
+    metadata: dict[str, Any] | None,
+) -> list[list[float]]:
+    """Create public provider batches and mark this exact attempt at most once."""
+
+    usage_marked = False
+
+    async def _mark_usage_once() -> None:
+        nonlocal usage_marked
+        if usage_marked:
+            return
+        usage_marked = True
+        touch_last_used = getattr(credentials, "touch_last_used", None)
+        if not callable(touch_last_used):
+            return
+        result = touch_last_used()
+        if asyncio.iscoroutine(result):
+            await await_owned_worker(result)
+
+    all_vectors: list[list[float]] = []
+    for batch_start in range(0, len(texts), MAX_BATCH_SIZE):
+        batch_texts = texts[batch_start:batch_start + MAX_BATCH_SIZE]
+        batch_vectors = await _await_explicit_sync_embeddings(
+            create_embeddings_batch_async(
+                texts=batch_texts,
+                provider=provider,
+                model_id=model,
+                dimensions=dimensions,
+                api_key=credentials.api_key,
+                api_url=_resolve_embeddings_adapter_base_url(
+                    provider,
+                    credentials,
+                ),
+                metadata=metadata,
+                cache_scope_sensitive=_credentials_require_cache_isolation(
+                    credentials
+                ),
+            ),
+            provider=provider,
+            expected=len(batch_texts),
+            on_valid_late_result=_mark_usage_once,
+        )
+        validated = validated_embedding_vectors(
+            batch_vectors,
+            expected=len(batch_texts),
+        )
+        if validated is None:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Embedding provider returned invalid embedding vectors",
+            )
+        await _mark_usage_once()
+        all_vectors.extend(validated)
+    return all_vectors
+
+
+@dataclass(frozen=True, slots=True)
+class _EmbeddingAdapterFailure:
+    """Non-sensitive adapter failure metadata returned across the dispatch boundary."""
+
+    kind: str
+    error_type: str
+    status_code: int | None = None
+
+
+async def _invoke_embeddings_adapter(
+    adapter: object,
+    adapter_request: dict[str, Any],
+    *,
+    on_cancel_result: Callable[[Any], Awaitable[None] | None] | None = None,
+) -> tuple[object | None, _EmbeddingAdapterFailure | None]:
+    """Invoke a sync adapter without retaining raw provider exception objects."""
+    result: object | None = None
+    failure: _EmbeddingAdapterFailure | None = None
+    try:
+        result = await await_bounded_sync_call(
+            lambda: adapter.embed(adapter_request),
+            pool=SYNC_ADAPTER_CALL_POOL,
+            exhaustion_message="Embeddings adapter capacity is exhausted",
+            on_cancel_result=on_cancel_result,
+        )
+    except EmbeddingsAdapterUnavailableError as exc:
+        failure = _EmbeddingAdapterFailure("unavailable", type(exc).__name__)
+    except ChatAuthenticationError as exc:
+        status_code = 403 if exc.status_code == 403 else 401
+        failure = _EmbeddingAdapterFailure(
+            "authentication",
+            type(exc).__name__,
+            status_code,
+        )
+    except ChatBadRequestError as exc:
+        failure = _EmbeddingAdapterFailure("bad_request", type(exc).__name__, 400)
+    except ChatConfigurationError as exc:
+        failure = _EmbeddingAdapterFailure("configuration", type(exc).__name__)
+    except ChatProviderError as exc:
+        failure = _EmbeddingAdapterFailure("provider", type(exc).__name__)
+    except ChatAPIError as exc:
+        status_code = getattr(exc, "status_code", None)
+        try:
+            status_code = int(status_code) if status_code is not None else None
+        except (TypeError, ValueError):
+            status_code = None
+        failure = _EmbeddingAdapterFailure(
+            "authentication" if status_code in {401, 403} else "http",
+            type(exc).__name__,
+            status_code,
+        )
+    except HTTPException as exc:
+        failure = _EmbeddingAdapterFailure(
+            "authentication" if exc.status_code in {401, 403} else "http",
+            type(exc).__name__,
+            exc.status_code,
+        )
+    except EmbeddingDomainError as exc:
+        failure = _EmbeddingAdapterFailure("provider", type(exc).__name__)
+    except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as exc:
+        failure = _EmbeddingAdapterFailure("execution", type(exc).__name__)
+    return result, failure
+
+
+async def _execute_embeddings_adapter_with_oauth_retry(
+    adapter: object,
+    texts: list[str],
+    *,
+    provider: str,
+    model: str,
+    dimensions: int | None,
+    credentials: ResolvedByokCredentials,
+    refresh_credentials: Callable[[], Awaitable[ResolvedByokCredentials]] | None,
+) -> tuple[object | None, _EmbeddingAdapterFailure | None, ResolvedByokCredentials]:
+    """Execute an adapter and retry one OpenAI OAuth 401 with a fresh snapshot."""
+
+    def _touch_valid_late_result(
+        snapshot: ResolvedByokCredentials,
+    ) -> Callable[[Any], Awaitable[None]]:
+        async def _touch(result: Any) -> None:
+            if _extract_validated_adapter_vectors(result, expected=len(texts)) is not None:
+                await snapshot.touch_last_used()
+
+        return _touch
+
+    try:
+        request = _build_embeddings_adapter_request(
+            texts,
+            provider=provider,
+            model=model,
+            dimensions=dimensions,
+            credentials=credentials,
+        )
+    except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as exc:
+        return None, _EmbeddingAdapterFailure("execution", type(exc).__name__), credentials
+
+    result, failure = await _invoke_embeddings_adapter(
+        adapter,
+        request,
+        on_cancel_result=_touch_valid_late_result(credentials),
+    )
+    should_refresh = (
+        failure is not None
+        and failure.kind == "authentication"
+        and failure.status_code == 401
+        and provider == "openai"
+        and getattr(credentials, "auth_source", None) == "oauth"
+        and refresh_credentials is not None
+    )
+    if not should_refresh:
+        return result, failure, credentials
+
+    try:
+        refreshed = await refresh_credentials()
+    except HTTPException as exc:
+        _record_oauth_401_retry(provider, "refresh_failed")
+        raise exc from None
+    except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as exc:
+        _record_oauth_401_retry(provider, "refresh_failed")
+        return (
+            None,
+            _EmbeddingAdapterFailure("authentication", type(exc).__name__, 401),
+            credentials,
+        )
+    if not getattr(refreshed, "api_key", None):
+        _record_oauth_401_retry(provider, "refresh_missing_api_key")
+        return None, failure, credentials
+
+    try:
+        retry_request = _build_embeddings_adapter_request(
+            texts,
+            provider=provider,
+            model=model,
+            dimensions=dimensions,
+            credentials=refreshed,
+        )
+    except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as exc:
+        _record_oauth_401_retry(provider, "retry_failed")
+        return None, _EmbeddingAdapterFailure("execution", type(exc).__name__), refreshed
+    retry_result, retry_failure = await _invoke_embeddings_adapter(
+        adapter,
+        retry_request,
+        on_cancel_result=_touch_valid_late_result(refreshed),
+    )
+    if retry_failure is None:
+        _record_oauth_401_retry(provider, "success")
+    elif retry_failure.kind == "authentication" and retry_failure.status_code == 401:
+        _record_oauth_401_retry(provider, "retry_auth_failed")
+        retry_failure = failure
+    else:
+        _record_oauth_401_retry(provider, "retry_failed")
+    return retry_result, retry_failure, refreshed
 
 
 # ---------------------------------------------------------------------------
@@ -1889,8 +2397,13 @@ def build_provider_config(
             "trust_remote_code": _hf_trusts_remote_code(model),
             "hf_cache_dir_subpath": "huggingface_cache",
         }
-        if api_url:
-            config["api_url"] = api_url
+        if api_key:
+            config["api_key"] = api_key
+        resolved_api_url = api_url or (
+            _EMBEDDINGS_ADAPTER_DEFAULT_ENDPOINTS["huggingface"] if api_key else None
+        )
+        if resolved_api_url:
+            config["api_url"] = resolved_api_url
         return config
     elif provider == EmbeddingProvider.COHERE:
         config = {
@@ -1911,13 +2424,17 @@ def build_provider_config(
             config["api_url"] = api_url
         return config
     elif provider == EmbeddingProvider.GOOGLE:
+        configured_key = api_key or settings.get("GOOGLE_API_KEY")
         config = {
             "provider": "google",
             "model_name_or_path": model,
-            "api_key": api_key or settings.get("GOOGLE_API_KEY"),
+            "api_key": configured_key,
         }
-        if api_url:
-            config["api_url"] = api_url
+        resolved_api_url = api_url or (
+            _EMBEDDINGS_ADAPTER_DEFAULT_ENDPOINTS["google"] if configured_key else None
+        )
+        if resolved_api_url:
+            config["api_url"] = resolved_api_url
         return config
     elif provider == EmbeddingProvider.MISTRAL:
         config = {
@@ -1934,11 +2451,14 @@ def build_provider_config(
             "model_name_or_path": model,
         }
     elif provider == EmbeddingProvider.LOCAL_API:
-        return {
+        config = {
             "provider": "local_api",
             "model_name_or_path": model,
             "api_url": api_url or settings.get("LOCAL_API_URL"),
         }
+        if api_key:
+            config["api_key"] = api_key
+        return config
     elif provider == EmbeddingProvider.MLX:
         return {
             "provider": "mlx",
@@ -1960,13 +2480,85 @@ async def create_embeddings_with_circuit_breaker(
     dimensions: int | None = None,
 ) -> list[list[float]]:
     """Create embeddings with circuit breaker protection"""
-    breaker = get_or_create_circuit_breaker(provider)
+    private_runtime_credentials = config.get("_runtime_credentials_private") is True
+    breaker = None if private_runtime_credentials else get_or_create_circuit_breaker(provider)
 
     try:
         # Use circuit breaker to protect the call
         async def _create():
             # Build proper typed ModelCfg based on provider
-            if provider == "huggingface":
+            if provider == "huggingface" and config.get("api_url"):
+                api_key = config.get("api_key")
+                if not isinstance(api_key, str) or not api_key.strip():
+                    raise HTTPException(
+                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                        detail="Hugging Face API key not configured",
+                    )
+                raw_model = str(config.get("model_name_or_path", model_id) or "").strip()
+                try:
+                    encoded_model = encode_huggingface_model_path(raw_model)
+                except ValueError as exc:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Invalid Hugging Face embedding model identifier",
+                    ) from exc
+                base = str(config["api_url"]).rstrip("/")
+                client = await connection_manager.get_session(provider)
+                resp = await _http_afetch(
+                    method="POST",
+                    url=f"{base}/{encoded_model}",
+                    client=client,
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={"inputs": texts, "options": {"wait_for_model": True}},
+                    timeout=REQUEST_TIMEOUT,
+                    retry=_RetryPolicy(attempts=1),
+                )
+                try:
+                    status_code = int(getattr(resp, "status_code", 0))
+                    if status_code >= 400:
+                        raise HTTPException(
+                            status_code=status_code,
+                            detail="Hugging Face embeddings error",
+                        )
+                    data = resp.json()
+                finally:
+                    close = getattr(resp, "aclose", None)
+                    if callable(close):
+                        await close()
+                    else:
+                        close = getattr(resp, "close", None)
+                        if callable(close):
+                            close()
+
+                if isinstance(data, dict):
+                    if isinstance(data.get("data"), list):
+                        data = [
+                            item.get("embedding") if isinstance(item, dict) else None
+                            for item in data["data"]
+                        ]
+                    else:
+                        data = data.get("embeddings")
+                if (
+                    len(texts) == 1
+                    and isinstance(data, list)
+                    and data
+                    and not isinstance(data[0], list)
+                ):
+                    data = [data]
+                if (
+                    not isinstance(data, list)
+                    or len(data) != len(texts)
+                    or any(not isinstance(vector, list) or not vector for vector in data)
+                ):
+                    raise HTTPException(
+                        status_code=status.HTTP_502_BAD_GATEWAY,
+                        detail="Invalid Hugging Face embeddings response format",
+                    )
+                return data
+            elif provider == "huggingface":
                 model_cfg = HFModelCfg(
                     provider="huggingface",
                     model_name_or_path=config.get("model_name_or_path", model_id),
@@ -2042,17 +2634,36 @@ async def create_embeddings_with_circuit_breaker(
                 api_key = config.get("api_key") or settings.get("GOOGLE_API_KEY")
                 if not api_key:
                     raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Google API key not configured")
-                raw_model = config.get("model_name_or_path", model_id) or "models/text-embedding-004"
-                model_name = raw_model if raw_model.startswith("models/") else f"models/{raw_model}"
+                raw_model = str(
+                    config.get("model_name_or_path", model_id) or "models/text-embedding-004"
+                ).strip()
+                if raw_model.startswith("models/"):
+                    raw_model = raw_model[len("models/") :]
+                try:
+                    encoded_model = encode_provider_model_path(raw_model)
+                except ValueError as exc:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Invalid Google embedding model identifier",
+                    ) from exc
+                model_name = f"models/{raw_model}"
                 client = await connection_manager.get_session(provider)
-                base = "https://generativelanguage.googleapis.com/v1beta"
-                url = f"{base}/{model_name}:batchEmbedContents?key={api_key}"
+                base = str(
+                    config.get("api_url")
+                    or "https://generativelanguage.googleapis.com/v1beta"
+                ).rstrip("/")
+                url = f"{base}/models/{encoded_model}:batchEmbedContents"
+                headers = {
+                    "Content-Type": "application/json",
+                    "x-goog-api-key": str(api_key),
+                }
                 reqs = [{"model": model_name, "content": {"parts": [{"text": t}]}} for t in texts]
                 payload = {"requests": reqs}
                 resp = await _http_afetch(
                     method="POST",
                     url=url,
                     client=client,
+                    headers=headers,
                     json=payload,
                     timeout=REQUEST_TIMEOUT,
                     retry=_RetryPolicy(attempts=1),
@@ -2129,6 +2740,21 @@ async def create_embeddings_with_circuit_breaker(
                     openai_section["api_base_url"] = str(api_base_url)
                 app_config["openai_api"] = openai_section
 
+            if config.get("_runtime_credentials_resolved") is True and provider in {
+                "openai",
+                "local_api",
+            }:
+                return await create_explicit_embeddings_batch_async(
+                    texts,
+                    app_config,
+                    model_id_override=provider_qualified_id,
+                    api_key_override=config.get("api_key"),
+                    base_url_override=(
+                        config.get("api_base_url") or config.get("api_url")
+                    ),
+                    credentials_resolved=True,
+                )
+
             # Pass provider-qualified override to avoid implicit defaults inside the batcher
             return await batching_create_embeddings_batch_async(
                 texts=texts,
@@ -2137,16 +2763,60 @@ async def create_embeddings_with_circuit_breaker(
                 metadata=metadata,
             )
 
-        return await breaker.call_async(_create)
+        vectors = await _create() if breaker is None else await breaker.call_async(_create)
+        validated = validated_embedding_vectors(vectors, expected=len(texts))
+        if validated is None:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Embedding provider returned invalid embedding vectors",
+            )
+        return validated
 
+    except RuntimeEmbeddingProviderError as e:
+        logger.warning(
+            "Embedding runtime provider failure provider={} code={} error_type={}",
+            provider,
+            e.code,
+            type(e).__name__,
+        )
+        if e.code == "malformed_response":
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Embedding provider returned invalid embedding vectors",
+            ) from None
+        if e.code == "authentication":
+            _raise_provider_auth_http_exception(e.status_code)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=EMBEDDING_SERVICE_FAILED_DETAIL,
+        ) from None
+    except HTTPException as e:
+        provider_auth_status = _provider_auth_status_code(e)
+        if provider_auth_status is not None:
+            _raise_provider_auth_http_exception(provider_auth_status)
+        raise
     except CircuitBreakerError as e:
-        logger.warning(f"Circuit breaker open for {provider}: {e}")
+        logger.warning(
+            "Embedding circuit breaker open provider={} error_type={}",
+            provider,
+            type(e).__name__,
+        )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"Service temporarily unavailable for provider {provider}. Please try again later."
         ) from e
+    except DaemonCapacityError:
+        logger.warning("Embedding provider capacity exhausted provider={}", provider)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=EMBEDDING_SERVICE_FAILED_DETAIL,
+        ) from None
     except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Failed to create embeddings with {provider}: {e}")
+        logger.error(
+            "Failed to create embeddings provider={} error_type={}",
+            provider,
+            type(e).__name__,
+        )
         raise
 
 async def create_embeddings_batch_async(
@@ -2157,6 +2827,7 @@ async def create_embeddings_batch_async(
     api_key: str | None = None,
     api_url: str | None = None,
     metadata: dict[str, Any] | None = None,
+    cache_scope_sensitive: bool = False,
 ) -> list[list[float]]:
     """Async wrapper for embeddings with caching and circuit breaker"""
     # Compatibility shim: orchestrator owns request execution after legacy path removal.
@@ -2196,12 +2867,16 @@ async def create_embeddings_batch_async(
             api_url,
             dimensions,
         )
+        if cache_scope_sensitive:
+            config["_runtime_credentials_resolved"] = True
+            config["_runtime_credentials_private"] = True
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid embedding provider configuration",
         ) from exc
 
+    cache_enabled = cache_scope_sensitive is not True
     backend_identity = _normalize_cache_backend_identity(config, provider)
 
     # Check cache
@@ -2213,10 +2888,15 @@ async def create_embeddings_batch_async(
             dimensions,
             backend_identity=backend_identity,
         )
-        cached = await embedding_cache.get(cache_key)
+        cached = await embedding_cache.get(cache_key) if cache_enabled else None
+        validated_cached = (
+            validated_embedding_vectors([cached], expected=1)
+            if cached is not None
+            else None
+        )
 
-        if cached:
-            embeddings.append(cached)
+        if validated_cached is not None:
+            embeddings.append(validated_cached[0])
             # Ensure Prometheus labels are always strings
             embedding_cache_hits.labels(provider=provider, model=(model_id or "default")).inc()
         else:
@@ -2260,7 +2940,11 @@ async def create_embeddings_batch_async(
                         metadata=metadata,
                         dimensions=dimensions,
                     )
-                    if not isinstance(batch_embeddings, list) or len(batch_embeddings) != len(batch_texts):
+                    validated_batch = validated_embedding_vectors(
+                        batch_embeddings,
+                        expected=len(batch_texts),
+                    )
+                    if validated_batch is None:
                         batch_count = len(batch_embeddings) if isinstance(batch_embeddings, list) else "invalid"
                         raise HTTPException(
                             status_code=status.HTTP_502_BAD_GATEWAY,
@@ -2269,7 +2953,7 @@ async def create_embeddings_batch_async(
                                 f"expected {len(batch_texts)} for batch"
                             ),
                         )
-                    all_new_embeddings.extend(batch_embeddings)
+                    all_new_embeddings.extend(validated_batch)
                 except EmbeddingsRateLimitError as e:
                     headers = {"Retry-After": str(e.retry_after)} if e.retry_after else None
                     raise HTTPException(
@@ -2280,7 +2964,11 @@ async def create_embeddings_batch_async(
                 except HTTPException:
                     raise
                 except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as e:
-                    logger.error(f"Failed to create embeddings for batch: {e}")
+                    logger.error(
+                        "Failed to create embeddings batch provider={} error_type={}",
+                        provider,
+                        type(e).__name__,
+                    )
 
                     # Try to close and recreate connection for this provider
                     await connection_manager.remove_provider(provider)
@@ -2311,16 +2999,30 @@ async def create_embeddings_batch_async(
                 dimensions,
                 backend_identity=backend_identity,
             )
-            await embedding_cache.set(cache_key, embedding)
+            if cache_enabled:
+                await embedding_cache.set(cache_key, embedding)
 
-    return embeddings
+    validated = validated_embedding_vectors(embeddings, expected=len(texts))
+    if validated is None:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Embedding provider returned invalid embedding vectors",
+        )
+    return validated
 
 
 class _EndpointEmbeddingCache:
+    def __init__(self, should_bypass: Callable[[], bool] | None = None) -> None:
+        self._should_bypass = should_bypass or (lambda: False)
+
     async def get(self, key: str) -> list[float] | None:
+        if self._should_bypass():
+            return None
         return await embedding_cache.get(key)
 
     async def set(self, key: str, value: list[float]) -> object:
+        if self._should_bypass():
+            return None
         return await embedding_cache.set(key, value)
 
 
@@ -2335,8 +3037,8 @@ class _EndpointEmbeddingExecutor:
         self._request = request
         self._current_user = current_user
         self._user_metadata = user_metadata
-        self._credential_cache: dict[str, ResolvedByokCredentials] = {}
-        self._touched_providers: set[str] = set()
+        self._credential_cache: dict[tuple[str, str], ResolvedByokCredentials] = {}
+        self._touched_credentials: set[tuple[str, object]] = set()
 
     async def create(
         self,
@@ -2357,7 +3059,7 @@ class _EndpointEmbeddingExecutor:
                 model=model,
             ) from exc
 
-        credentials = await self._resolve_provider_credentials(provider)
+        credentials = await self._resolve_provider_credentials(provider, model)
         self._ensure_provider_key(provider, model, credentials)
 
         try:
@@ -2375,20 +3077,31 @@ class _EndpointEmbeddingExecutor:
                 and getattr(credentials, "auth_source", None) == "oauth"
                 and _is_http_401_error(exc)
             ):
+                provider_auth_status = _provider_auth_status_code(exc)
+                if provider_auth_status is not None:
+                    _raise_provider_auth_http_exception(provider_auth_status)
                 if _is_nonretryable_provider_http_error(exc):
                     raise
                 raise _http_exception_to_embedding_domain_error(exc, provider, model) from exc
             try:
                 refreshed_credentials = await self._resolve_provider_credentials(
                     provider,
+                    model,
                     force_oauth_refresh=True,
                 )
-            except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as refresh_exc:
+            except HTTPException:
                 _record_oauth_401_retry(provider, "refresh_failed")
-                raise exc from refresh_exc
+                raise
+            except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
+                _record_oauth_401_retry(provider, "refresh_failed")
+                _raise_provider_auth_http_exception(
+                    _provider_auth_status_code(exc)
+                )
             if not getattr(refreshed_credentials, "api_key", None):
                 _record_oauth_401_retry(provider, "refresh_missing_api_key")
-                raise exc
+                _raise_provider_auth_http_exception(
+                    _provider_auth_status_code(exc)
+                )
             try:
                 vectors = await self._create_provider_batches(
                     texts,
@@ -2399,9 +3112,13 @@ class _EndpointEmbeddingExecutor:
                     credentials=refreshed_credentials,
                 )
             except HTTPException as retry_exc:
-                if _is_http_401_error(retry_exc):
-                    _record_oauth_401_retry(provider, "retry_auth_failed")
-                    raise exc from retry_exc
+                retry_auth_status = _provider_auth_status_code(retry_exc)
+                if retry_auth_status is not None:
+                    if retry_auth_status == status.HTTP_401_UNAUTHORIZED:
+                        _record_oauth_401_retry(provider, "retry_auth_failed")
+                    else:
+                        _record_oauth_401_retry(provider, "retry_failed")
+                    _raise_provider_auth_http_exception(retry_auth_status)
                 _record_oauth_401_retry(provider, "retry_failed")
                 if _is_nonretryable_provider_http_error(retry_exc):
                     raise
@@ -2447,7 +3164,12 @@ class _EndpointEmbeddingExecutor:
                 cause_class=type(exc).__name__,
             ) from exc
 
-        self._validate_vector_count(vectors, expected=len(texts), provider=provider, model=model)
+        vectors = self._validate_vector_count(
+            vectors,
+            expected=len(texts),
+            provider=provider,
+            model=model,
+        )
         await self._touch_credentials(credentials, provider)
         return vectors
 
@@ -2470,7 +3192,7 @@ class _EndpointEmbeddingExecutor:
                 model=model,
             ) from exc
 
-        credentials = await self._resolve_provider_credentials(provider)
+        credentials = await self._resolve_provider_credentials(provider, model)
         self._ensure_provider_key(provider, model, credentials)
         adapter_vectors = await self._try_adapter_execution(
             texts,
@@ -2480,6 +3202,10 @@ class _EndpointEmbeddingExecutor:
             credentials=credentials,
         )
         if adapter_vectors is not None:
+            credentials = self._credential_cache.get(
+                self._credential_cache_key(provider, model),
+                credentials,
+            )
             await self._touch_credentials(credentials, provider)
             return EmbeddingExecutorOutput(
                 adapter_vectors,
@@ -2490,38 +3216,57 @@ class _EndpointEmbeddingExecutor:
     async def _resolve_provider_credentials(
         self,
         provider: str,
+        model: str,
         *,
         force_oauth_refresh: bool = False,
     ) -> ResolvedByokCredentials:
-        cache_key = (provider or "").strip().lower()
-        if cache_key and not force_oauth_refresh and cache_key in self._credential_cache:
-            return self._credential_cache[cache_key]
+        cache_key = self._credential_cache_key(provider, model)
+        cached = self._credential_cache.get(cache_key)
+        if cached is not None and not force_oauth_refresh:
+            return cached
         credentials = await _resolve_embeddings_byok(
             provider,
             self._current_user,
             self._request,
+            model=model,
             force_oauth_refresh=force_oauth_refresh,
+            rejected_credentials=(cached if force_oauth_refresh else None),
         )
-        if cache_key:
-            self._credential_cache[cache_key] = credentials
+        self._credential_cache[cache_key] = credentials
         return credentials
 
+    @staticmethod
+    def _credential_cache_key(provider: str, model: str) -> tuple[str, str]:
+        """Return the normalized provider and exact dispatched-model identity."""
+        return (provider or "").strip().lower(), model or ""
+
     async def preflight_provider(self, provider: str, model: str) -> None:
-        credentials = await self._resolve_provider_credentials(provider)
+        credentials = await self._resolve_provider_credentials(provider, model)
         self._ensure_provider_key(provider, model, credentials)
 
-    async def touch_resolved_credentials(self, provider: str) -> None:
+    async def touch_resolved_credentials(self, provider: str, model: str) -> None:
         provider_key = (provider or "").strip().lower()
-        if not provider_key or provider_key in self._touched_providers:
+        if not provider_key:
             return
-        credentials = self._credential_cache.get(provider_key)
+        credentials = self._credential_cache.get(
+            self._credential_cache_key(provider_key, model)
+        )
         if credentials is not None:
             await self._touch_credentials(credentials, provider_key)
+
+    def has_cache_sensitive_credentials(self) -> bool:
+        """Return whether this request has credentials unsafe for shared caching."""
+        return any(
+            _credentials_require_cache_isolation(credentials)
+            for credentials in self._credential_cache.values()
+        )
 
     def backend_identity(self, provider: str, model: str) -> str | None:
         """Return a cache backend identity using any resolved BYOK endpoint config."""
         provider_key = (provider or "").strip().lower()
-        credentials = self._credential_cache.get(provider_key)
+        credentials = self._credential_cache.get(
+            self._credential_cache_key(provider_key, model)
+        )
         try:
             return _orchestrator_backend_identity(provider_key, model, credentials)
         except TypeError:
@@ -2558,58 +3303,62 @@ class _EndpointEmbeddingExecutor:
         if not adapters_enabled:
             return None
 
+        adapter = None
+        lookup_failure: _EmbeddingAdapterFailure | None = None
         try:
             registry = get_embeddings_registry()
             adapter = registry.get_adapter(provider)
-            if adapter is None:
-                return None
-            adapter_request: dict[str, Any] = {
-                "input": texts if len(texts) > 1 else texts[0],
-                "model": model,
-                "api_key": credentials.api_key,
-            }
-            if (
-                dimensions is not None
-                and provider == "openai"
-                and _supports_openai_dimensions(model)
-            ):
-                adapter_request["dimensions"] = dimensions
-            result = await asyncio.to_thread(adapter.embed, adapter_request)
-            vectors = self._extract_adapter_vectors(result, expected=len(texts))
-            if vectors is not None:
-                return vectors
-        except EmbeddingDomainError:
-            raise
-        except HTTPException as exc:
-            if (
-                exc.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
-                and isinstance(getattr(exc, "detail", None), dict)
-                and exc.detail.get("error_code") == "missing_provider_credentials"
-            ):
-                raise _http_exception_to_embedding_domain_error(exc, provider, model) from exc
-            logger.debug(
-                "Embeddings adapter path failed; falling back to legacy",
-                extra=_safe_adapter_error_metadata(exc),
-            )
         except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as exc:
+            lookup_failure = _EmbeddingAdapterFailure("execution", type(exc).__name__)
+        if lookup_failure is not None:
             logger.debug(
-                "Embeddings adapter path failed; falling back to legacy",
-                extra=_safe_adapter_error_metadata(exc),
+                "Embeddings adapter lookup failed",
+                extra=_safe_adapter_failure_metadata(lookup_failure),
             )
-        return None
+            raise _adapter_failure_to_domain_error(lookup_failure, provider, model)
+        if adapter is None:
+            return None
+
+        async def _refresh_credentials() -> ResolvedByokCredentials:
+            return await self._resolve_provider_credentials(
+                provider,
+                model,
+                force_oauth_refresh=True,
+            )
+
+        result, failure, _used_credentials = await _execute_embeddings_adapter_with_oauth_retry(
+            adapter,
+            texts,
+            provider=provider,
+            model=model,
+            dimensions=dimensions,
+            credentials=credentials,
+            refresh_credentials=_refresh_credentials,
+        )
+        if failure is not None:
+            logger.debug(
+                "Embeddings adapter execution failed",
+                extra=_safe_adapter_failure_metadata(failure),
+            )
+            if failure.kind == "unavailable":
+                return None
+            if failure.kind == "authentication":
+                _raise_provider_auth_http_exception(failure.status_code)
+            raise _adapter_failure_to_domain_error(failure, provider, model)
+
+        vectors = self._extract_adapter_vectors(result, expected=len(texts))
+        if vectors is not None:
+            return vectors
+        raise EmbeddingProviderError(
+            "provider_malformed_response",
+            "Embedding provider returned an invalid response",
+            provider=provider,
+            model=model,
+        )
 
     @staticmethod
     def _extract_adapter_vectors(result: object, *, expected: int) -> list[list[float]] | None:
-        if not isinstance(result, dict) or not isinstance(result.get("data"), list):
-            return None
-        vectors: list[list[float]] = []
-        for item in result["data"]:
-            vector = item.get("embedding") if isinstance(item, dict) else None
-            if isinstance(vector, list):
-                vectors.append(vector)
-        if len(vectors) != expected:
-            return None
-        return vectors
+        return _extract_validated_adapter_vectors(result, expected=expected)
 
     async def _create_provider_batches(
         self,
@@ -2632,26 +3381,39 @@ class _EndpointEmbeddingExecutor:
             provider_enum,
             model,
             credentials.api_key,
-            _resolve_credentials_api_url(provider, credentials),
+            _resolve_embeddings_adapter_base_url(provider, credentials),
             dimensions,
+        )
+        config["_runtime_credentials_resolved"] = True
+        config["_runtime_credentials_private"] = _credentials_require_cache_isolation(
+            credentials
         )
         all_vectors: list[list[float]] = []
         for batch_start in range(0, len(texts), MAX_BATCH_SIZE):
             batch_texts = texts[batch_start:batch_start + MAX_BATCH_SIZE]
-            batch_vectors = await create_embeddings_with_circuit_breaker(
-                batch_texts,
-                provider,
-                model,
-                config,
-                metadata=self._user_metadata,
-                dimensions=dimensions,
+            batch_vectors = await _await_explicit_sync_embeddings(
+                create_embeddings_with_circuit_breaker(
+                    batch_texts,
+                    provider,
+                    model,
+                    config,
+                    metadata=self._user_metadata,
+                    dimensions=dimensions,
+                ),
+                provider=provider,
+                expected=len(batch_texts),
+                on_valid_late_result=lambda: self._touch_credentials(
+                    credentials,
+                    provider,
+                ),
             )
-            self._validate_vector_count(
+            batch_vectors = self._validate_vector_count(
                 batch_vectors,
                 expected=len(batch_texts),
                 provider=provider,
                 model=model,
             )
+            await self._touch_credentials(credentials, provider)
             all_vectors.extend(batch_vectors)
         return all_vectors
 
@@ -2662,8 +3424,9 @@ class _EndpointEmbeddingExecutor:
         expected: int,
         provider: str,
         model: str,
-    ) -> None:
-        if not isinstance(vectors, list) or len(vectors) != expected:
+    ) -> list[list[float]]:
+        validated = validated_embedding_vectors(vectors, expected=expected)
+        if validated is None:
             count: int | str = len(vectors) if isinstance(vectors, list) else "invalid"
             raise EmbeddingProviderError(
                 "provider_malformed_response",
@@ -2671,20 +3434,33 @@ class _EndpointEmbeddingExecutor:
                 provider=provider,
                 model=model,
             )
+        return validated
 
     async def _touch_credentials(self, credentials: ResolvedByokCredentials, provider: str) -> None:
         provider_key = (provider or "").strip().lower()
+        generation = getattr(credentials, "_credential_generation", None)
+        snapshot_key: object = (
+            generation
+            if isinstance(generation, str) and generation.strip()
+            else id(credentials)
+        )
+        usage_key = (provider_key, snapshot_key)
+        if usage_key in self._touched_credentials:
+            return
+        self._touched_credentials.add(usage_key)
         touch_last_used = getattr(credentials, "touch_last_used", None)
         if not callable(touch_last_used):
             return
         try:
             result = touch_last_used()
             if asyncio.iscoroutine(result):
-                await result
-            if provider_key:
-                self._touched_providers.add(provider_key)
+                await await_owned_worker(result)
         except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug(f"BYOK touch_last_used failed for {provider}: {exc}")
+            logger.debug(
+                "BYOK touch_last_used failed provider={} error_type={}",
+                provider_key or "unknown",
+                type(exc).__name__,
+            )
 
 
 def _synthesize_openai_embeddings(texts: list[str], model: str) -> list[list[float]]:
@@ -2764,16 +3540,66 @@ def _http_exception_to_embedding_domain_error(
     )
 
 
-def _safe_adapter_error_metadata(exc: BaseException) -> dict[str, Any]:
-    """Return non-sensitive adapter failure metadata for debug logging."""
-    metadata: dict[str, Any] = {"error_type": type(exc).__name__}
-    status_code = getattr(exc, "status_code", None)
-    if status_code is not None:
-        try:
-            metadata["status_code"] = int(status_code)
-        except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
-            metadata["status_code"] = str(status_code)
+def _safe_adapter_failure_metadata(
+    failure: _EmbeddingAdapterFailure,
+) -> dict[str, Any]:
+    """Return the already-bounded metadata from an adapter invocation failure."""
+    metadata: dict[str, Any] = {
+        "failure_kind": failure.kind,
+        "error_type": failure.error_type,
+    }
+    if failure.status_code is not None:
+        metadata["status_code"] = failure.status_code
     return metadata
+
+
+def _adapter_failure_to_domain_error(
+    failure: _EmbeddingAdapterFailure,
+    provider: str,
+    model: str,
+) -> EmbeddingDomainError:
+    """Convert non-sensitive adapter failure metadata into a public domain error."""
+    if failure.kind == "bad_request" or failure.status_code == 400:
+        return EmbeddingInputError(
+            "invalid_input_type",
+            "Invalid embedding provider request",
+            provider=provider,
+            model=model,
+            cause_class=failure.error_type,
+        )
+    if failure.kind == "configuration":
+        return EmbeddingProviderError(
+            "provider_unavailable",
+            "Embedding provider configuration invalid",
+            provider=provider,
+            model=model,
+            cause_class=failure.error_type,
+        )
+    if failure.status_code == 429:
+        return EmbeddingRateLimitError(
+            "provider_rate_limited",
+            "Embedding provider rate limited the request",
+            retryable=True,
+            provider=provider,
+            model=model,
+            cause_class=failure.error_type,
+        )
+    if failure.status_code == 502:
+        return EmbeddingProviderError(
+            "provider_malformed_response",
+            "Embedding provider returned an invalid response",
+            provider=provider,
+            model=model,
+            cause_class=failure.error_type,
+        )
+    return EmbeddingProviderError(
+        "provider_unavailable",
+        "Embedding provider request failed",
+        retryable=True,
+        provider=provider,
+        model=model,
+        cause_class=failure.error_type,
+    )
 
 
 def _is_nonretryable_provider_http_error(exc: HTTPException) -> bool:
@@ -2846,7 +3672,7 @@ def _build_embedding_request_orchestrator(
         count_tokens=count_tokens,
         tokens_to_texts=tokens_to_texts,
         cache_key_fn=get_cache_key,
-        cache=_EndpointEmbeddingCache(),
+        cache=_EndpointEmbeddingCache(endpoint_executor.has_cache_sensitive_credentials),
         executor=endpoint_executor,
         settings_config=settings_config,
         max_tokens=max_tokens,
@@ -3201,6 +4027,7 @@ async def _create_embedding_with_orchestrator(
             executor=endpoint_executor,
         )
 
+        mapped_domain_error: HTTPException | None = None
         try:
             async def _reserve_before_execute(prepared: PreparedEmbeddingRequest) -> None:
                 """Reserve RG units after planning and before cache/provider execution."""
@@ -3221,9 +4048,11 @@ async def _create_embedding_with_orchestrator(
             mapped = _embedding_domain_error_to_http(domain_exc)
             if isinstance(mapped, JSONResponse):
                 return mapped
-            raise mapped from domain_exc
+            mapped_domain_error = mapped
+        if mapped_domain_error is not None:
+            raise mapped_domain_error
 
-        await endpoint_executor.touch_resolved_credentials(result.provider)
+        await endpoint_executor.touch_resolved_credentials(result.provider, result.model)
         _record_orchestrator_cache_hits(result)
         rg_actual_units = int(result.total_tokens or result.prompt_tokens or 0)
         for header_name, header_value in result.response_headers.items():
@@ -3481,22 +4310,27 @@ async def _create_embedding_legacy(
             allowed_models=allowed_models,
         )
 
-        byok_cache: dict[str, ResolvedByokCredentials] = {}
+        byok_cache: dict[tuple[str, str], ResolvedByokCredentials] = {}
 
         async def _resolve_provider_credentials(
             name: str,
+            dispatched_model: str,
             *,
             force_oauth_refresh: bool = False,
         ) -> ResolvedByokCredentials:
-            key = (name or "").strip().lower()
+            """Resolve credentials and policy for the exact model to dispatch."""
+            provider_key = (name or "").strip().lower()
+            key = provider_key, dispatched_model or ""
             cached = byok_cache.get(key)
             if cached and not force_oauth_refresh:
                 return cached
             resolved = await _resolve_embeddings_byok(
-                key,
+                provider_key,
                 current_user,
                 request,
+                model=dispatched_model,
                 force_oauth_refresh=force_oauth_refresh,
+                rejected_credentials=(cached if force_oauth_refresh else None),
             )
             byok_cache[key] = resolved
             return resolved
@@ -3599,6 +4433,7 @@ async def _create_embedding_legacy(
 
         embeddings: list[list[float]] = []
         embeddings_from_adapter = False
+        fallback_provider_usage_marked = False
 
         original_provider = provider
         original_model = model
@@ -3613,67 +4448,98 @@ async def _create_embedding_legacy(
         except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
             adapters_enabled = False
         if adapters_enabled:
+            adapter = None
+            lookup_failure: _EmbeddingAdapterFailure | None = None
             try:
-                # Currently wire OpenAI/HF/Google adapters via registry
-                from tldw_Server_API.app.core.LLM_Calls.embeddings_adapter_registry import get_embeddings_registry
                 registry = get_embeddings_registry()
                 adapter = registry.get_adapter(provider)
-                # Prepare adapter request (provider-specific key if available)
-                byok_resolution = await _resolve_provider_credentials(provider)
+            except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as exc:
+                lookup_failure = _EmbeddingAdapterFailure("execution", type(exc).__name__)
+
+            adapter_failure = lookup_failure
+            adapter_fallback_allowed = adapter is None and lookup_failure is None
+            result: object | None = None
+            if adapter is not None and adapter_failure is None:
+                byok_resolution = await _resolve_provider_credentials(provider, model)
                 if provider in EMBEDDINGS_PROVIDERS_REQUIRE_KEY and not byok_resolution.api_key:
                     if not _should_skip_missing_key(provider, byok_resolution):
                         _raise_missing_embeddings_key(provider)
-                _api_key: str | None = byok_resolution.api_key
 
-                adapter_request: dict[str, Any] = {
-                    "input": texts_to_embed if len(texts_to_embed) > 1 else texts_to_embed[0],
-                    "model": model,
-                    "api_key": _api_key,
-                }
-                if (
-                    embedding_request.dimensions is not None
-                    and provider.lower() == "openai"
-                    and _supports_openai_dimensions(model)
-                ):
-                    adapter_request["dimensions"] = embedding_request.dimensions
-                result = await asyncio.to_thread(adapter.embed, adapter_request) if adapter else None
-                if isinstance(result, dict) and isinstance(result.get("data"), list):
-                    embs: list[list[float]] = []
-                    for item in result["data"]:
-                        vec = item.get("embedding") if isinstance(item, dict) else None
-                        if isinstance(vec, list):
-                            embs.append(vec)
-                    if embs and len(embs) == len(texts_to_embed):
-                        # Adapter-provided vectors may already be normalized. Preserve them as-is
-                        # unless LLM_EMBEDDINGS_L2_NORMALIZE explicitly requests normalization.
-                        processed: list[list[float]] = []
-                        for v in embs:
-                            arr, did_l2 = decide_and_apply_l2(
-                                v,
-                                embedding_request.encoding_format,
-                                embeddings_from_adapter=True,
-                            )
-                            processed.append(arr.tolist() if did_l2 else v)
-                        embeddings = processed
-                        embeddings_from_adapter = True
-                # If adapter failed to produce vectors, fall through to legacy/synthetic path
-            except HTTPException as he:
-                if (
-                    he.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
-                    and isinstance(getattr(he, "detail", None), dict)
-                    and he.detail.get("error_code") == "missing_provider_credentials"
-                ):
-                    raise
-                logger.debug(
-                    "Embeddings adapter path failed; falling back to legacy",
-                    extra=_safe_adapter_error_metadata(he),
+                async def _refresh_adapter_credentials() -> ResolvedByokCredentials:
+                    return await _resolve_provider_credentials(
+                        provider,
+                        model,
+                        force_oauth_refresh=True,
+                    )
+
+                result, adapter_failure, byok_resolution = (
+                    await _execute_embeddings_adapter_with_oauth_retry(
+                        adapter,
+                        texts_to_embed,
+                        provider=provider,
+                        model=model,
+                        dimensions=embedding_request.dimensions,
+                        credentials=byok_resolution,
+                        refresh_credentials=_refresh_adapter_credentials,
+                    )
                 )
-            except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as _e:
-                # Log and fall back silently; adapter path is optional
+                byok_cache[(provider.strip().lower(), model)] = byok_resolution
+
+            if adapter_failure is not None:
                 logger.debug(
-                    "Embeddings adapter path failed; falling back to legacy",
-                    extra=_safe_adapter_error_metadata(_e),
+                    "Embeddings adapter execution failed",
+                    extra=_safe_adapter_failure_metadata(adapter_failure),
                 )
+                if adapter_failure.kind == "unavailable":
+                    adapter_fallback_allowed = True
+                    adapter_failure = None
+                elif adapter_failure.kind == "authentication":
+                    _raise_provider_auth_http_exception(
+                        adapter_failure.status_code
+                    )
+                else:
+                    domain_error = _adapter_failure_to_domain_error(
+                        adapter_failure,
+                        provider,
+                        model,
+                    )
+                    mapped_error = _embedding_domain_error_to_http(domain_error)
+                    if isinstance(mapped_error, JSONResponse):
+                        return mapped_error
+                    raise mapped_error
+
+            if (
+                adapter is not None
+                and adapter_failure is None
+                and result is None
+                and not adapter_fallback_allowed
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail="Embedding provider returned an invalid response",
+                )
+
+            if adapter is not None and adapter_failure is None and result is not None:
+                embs = _extract_validated_adapter_vectors(
+                    result,
+                    expected=len(texts_to_embed),
+                )
+                if embs is not None:
+                    processed: list[list[float]] = []
+                    for vector in embs:
+                        arr, did_l2 = decide_and_apply_l2(
+                            vector,
+                            embedding_request.encoding_format,
+                            embeddings_from_adapter=True,
+                        )
+                        processed.append(arr.tolist() if did_l2 else vector)
+                    embeddings = processed
+                    embeddings_from_adapter = True
+                else:
+                    raise HTTPException(
+                        status_code=status.HTTP_502_BAD_GATEWAY,
+                        detail="Embedding provider returned an invalid response",
+                    )
 
         if use_synthetic_openai and not embeddings:
             dim = 1536
@@ -3702,7 +4568,7 @@ async def _create_embedding_legacy(
                         fallback_from = provider
                     # Map model id to destination provider if needed
                     target_model_id = map_model_for_provider(original_provider, p, original_model)
-                    credentials = await _resolve_provider_credentials(p)
+                    credentials = await _resolve_provider_credentials(p, target_model_id)
                     if p in EMBEDDINGS_PROVIDERS_REQUIRE_KEY and not credentials.api_key:
                         if _should_skip_missing_key(p, credentials):
                             pass
@@ -3711,14 +4577,15 @@ async def _create_embedding_legacy(
                         else:
                             continue
                     try:
-                        embeddings = await create_embeddings_batch_async(
-                            texts=texts_to_embed,
+                        embeddings = await _create_owned_provider_batches(
+                            texts_to_embed,
                             provider=p,
-                            model_id=target_model_id,
+                            model=target_model_id,
                             dimensions=embedding_request.dimensions,
-                            api_key=credentials.api_key,
+                            credentials=credentials,
                             metadata=user_metadata,
                         )
+                        fallback_provider_usage_marked = True
                     except HTTPException as auth_exc:
                         if not (
                             p == "openai"
@@ -3729,23 +4596,30 @@ async def _create_embedding_legacy(
                         try:
                             refreshed_credentials = await _resolve_provider_credentials(
                                 p,
+                                target_model_id,
                                 force_oauth_refresh=True,
                             )
+                        except HTTPException:
+                            _record_oauth_401_retry(p, "refresh_failed")
+                            raise
                         except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as refresh_exc:
                             _record_oauth_401_retry(p, "refresh_failed")
                             raise auth_exc from refresh_exc
                         if not refreshed_credentials.api_key:
                             _record_oauth_401_retry(p, "refresh_missing_api_key")
-                            raise auth_exc
+                            _raise_provider_auth_http_exception(
+                                _provider_auth_status_code(auth_exc)
+                            )
                         try:
-                            embeddings = await create_embeddings_batch_async(
-                                texts=texts_to_embed,
+                            embeddings = await _create_owned_provider_batches(
+                                texts_to_embed,
                                 provider=p,
-                                model_id=target_model_id,
+                                model=target_model_id,
                                 dimensions=embedding_request.dimensions,
-                                api_key=refreshed_credentials.api_key,
+                                credentials=refreshed_credentials,
                                 metadata=user_metadata,
                             )
+                            fallback_provider_usage_marked = True
                         except HTTPException as retry_exc:
                             if _is_http_401_error(retry_exc):
                                 _record_oauth_401_retry(p, "retry_auth_failed")
@@ -3766,12 +4640,11 @@ async def _create_embedding_legacy(
                         pass
                     break
                 except HTTPException as he:
-                    if (
-                        he.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
-                        and isinstance(getattr(he, "detail", None), dict)
-                        and he.detail.get("error_code") == "missing_provider_credentials"
-                    ):
+                    if _is_embeddings_credential_http_exception(he):
                         raise
+                    provider_auth_status = _provider_auth_status_code(he)
+                    if provider_auth_status is not None:
+                        _raise_provider_auth_http_exception(provider_auth_status)
                     if he.status_code and 400 <= he.status_code < 500 and he.status_code != 429:
                         embedding_provider_failures.labels(provider=p, model=model, reason=f"http_{he.status_code}").inc()
                         last_error = he
@@ -3784,7 +4657,11 @@ async def _create_embedding_legacy(
                     last_error = e
                     continue
             if not embeddings:
-                logger.error(f"Embedding creation failed across providers {chain}: {last_error}")
+                logger.error(
+                    "Embedding creation failed providers={} error_type={}",
+                    chain,
+                    type(last_error).__name__ if last_error is not None else "None",
+                )
                 if isinstance(last_error, HTTPException):
                     raise last_error
                 raise HTTPException(
@@ -3793,11 +4670,17 @@ async def _create_embedding_legacy(
                 ) from last_error
 
         try:
-            final_credentials = byok_cache.get(provider.lower())
-            if final_credentials:
-                await final_credentials.touch_last_used()
+            final_credentials = byok_cache.get(
+                (provider.strip().lower(), model)
+            )
+            if final_credentials and not fallback_provider_usage_marked:
+                await await_owned_worker(final_credentials.touch_last_used())
         except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug(f"BYOK touch_last_used failed for {provider}: {exc}")
+            logger.debug(
+                "BYOK touch_last_used failed provider={} error_type={}",
+                (provider or "").strip().lower() or "unknown",
+                type(exc).__name__,
+            )
 
         # Optional dimension adjustment (post-process)
         dims_policy_used = None
@@ -4034,18 +4917,23 @@ async def create_embeddings_batch_endpoint(
 
     user_metadata = _build_user_metadata(current_user)
 
-    credentials = await _resolve_embeddings_byok(provider, current_user, request)
+    credentials = await _resolve_embeddings_byok(
+        provider,
+        current_user,
+        request,
+        model=model,
+    )
     if provider in EMBEDDINGS_PROVIDERS_REQUIRE_KEY and not credentials.api_key:
         if not _should_skip_missing_key(provider, credentials):
             _raise_missing_embeddings_key(provider)
     active_credentials = credentials
     try:
-        embeddings = await create_embeddings_batch_async(
-            texts=texts,
+        embeddings = await _create_owned_provider_batches(
+            texts,
             provider=provider,
-            model_id=model,
+            model=model,
             dimensions=payload.dimensions,
-            api_key=active_credentials.api_key,
+            credentials=active_credentials,
             metadata=user_metadata,
         )
     except HTTPException as auth_exc:
@@ -4054,37 +4942,52 @@ async def create_embeddings_batch_endpoint(
             and getattr(active_credentials, "auth_source", None) == "oauth"
             and _is_http_401_error(auth_exc)
         ):
+            provider_auth_status = _provider_auth_status_code(auth_exc)
+            if provider_auth_status is not None:
+                _raise_provider_auth_http_exception(provider_auth_status)
             raise
         try:
             active_credentials = await _resolve_embeddings_byok(
                 provider,
                 current_user,
                 request,
+                model=model,
                 force_oauth_refresh=True,
+                rejected_credentials=active_credentials,
             )
-        except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as refresh_exc:
+        except HTTPException:
             _record_oauth_401_retry(provider, "refresh_failed")
-            raise auth_exc from refresh_exc
+            raise
+        except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
+            _record_oauth_401_retry(provider, "refresh_failed")
+            _raise_provider_auth_http_exception(
+                _provider_auth_status_code(auth_exc)
+            )
         if not active_credentials.api_key:
             _record_oauth_401_retry(provider, "refresh_missing_api_key")
-            raise auth_exc
+            _raise_provider_auth_http_exception(
+                _provider_auth_status_code(auth_exc)
+            )
         try:
-            embeddings = await create_embeddings_batch_async(
-                texts=texts,
+            embeddings = await _create_owned_provider_batches(
+                texts,
                 provider=provider,
-                model_id=model,
+                model=model,
                 dimensions=payload.dimensions,
-                api_key=active_credentials.api_key,
+                credentials=active_credentials,
                 metadata=user_metadata,
             )
         except HTTPException as retry_exc:
-            if _is_http_401_error(retry_exc):
-                _record_oauth_401_retry(provider, "retry_auth_failed")
-                raise auth_exc from retry_exc
+            retry_auth_status = _provider_auth_status_code(retry_exc)
+            if retry_auth_status is not None:
+                if retry_auth_status == status.HTTP_401_UNAUTHORIZED:
+                    _record_oauth_401_retry(provider, "retry_auth_failed")
+                else:
+                    _record_oauth_401_retry(provider, "retry_failed")
+                _raise_provider_auth_http_exception(retry_auth_status)
             _record_oauth_401_retry(provider, "retry_failed")
             raise
         _record_oauth_401_retry(provider, "success")
-    await active_credentials.touch_last_used()
 
     if payload.dimensions is not None:
         embeddings = adjust_dimensions(embeddings, payload.dimensions, provider, model)
@@ -4163,16 +5066,22 @@ async def get_embedding_model_info(
     user_metadata = _build_user_metadata(current_user)
 
     try:
-        credentials = await _resolve_embeddings_byok(resolved_provider, current_user, request)
+        credentials = await _resolve_embeddings_byok(
+            resolved_provider,
+            current_user,
+            request,
+            model=model,
+        )
         if resolved_provider in EMBEDDINGS_PROVIDERS_REQUIRE_KEY and not credentials.api_key:
             _raise_missing_embeddings_key(resolved_provider)
         active_credentials = credentials
         try:
-            vectors = await create_embeddings_batch_async(
-                texts=["model probe"],
+            vectors = await _create_owned_provider_batches(
+                ["model probe"],
                 provider=resolved_provider,
-                model_id=model,
-                api_key=active_credentials.api_key,
+                model=model,
+                dimensions=None,
+                credentials=active_credentials,
                 metadata=user_metadata,
             )
         except HTTPException as auth_exc:
@@ -4181,40 +5090,63 @@ async def get_embedding_model_info(
                 and getattr(active_credentials, "auth_source", None) == "oauth"
                 and _is_http_401_error(auth_exc)
             ):
+                provider_auth_status = _provider_auth_status_code(auth_exc)
+                if provider_auth_status is not None:
+                    _raise_provider_auth_http_exception(provider_auth_status)
                 raise
             try:
                 active_credentials = await _resolve_embeddings_byok(
                     resolved_provider,
                     current_user,
                     request,
+                    model=model,
                     force_oauth_refresh=True,
+                    rejected_credentials=active_credentials,
                 )
-            except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as refresh_exc:
+            except HTTPException:
                 _record_oauth_401_retry(resolved_provider, "refresh_failed")
-                raise auth_exc from refresh_exc
+                raise
+            except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
+                _record_oauth_401_retry(resolved_provider, "refresh_failed")
+                _raise_provider_auth_http_exception(
+                    _provider_auth_status_code(auth_exc)
+                )
             if not active_credentials.api_key:
                 _record_oauth_401_retry(resolved_provider, "refresh_missing_api_key")
-                raise auth_exc
+                _raise_provider_auth_http_exception(
+                    _provider_auth_status_code(auth_exc)
+                )
             try:
-                vectors = await create_embeddings_batch_async(
-                    texts=["model probe"],
+                vectors = await _create_owned_provider_batches(
+                    ["model probe"],
                     provider=resolved_provider,
-                    model_id=model,
-                    api_key=active_credentials.api_key,
+                    model=model,
+                    dimensions=None,
+                    credentials=active_credentials,
                     metadata=user_metadata,
                 )
             except HTTPException as retry_exc:
-                if _is_http_401_error(retry_exc):
-                    _record_oauth_401_retry(resolved_provider, "retry_auth_failed")
-                    raise auth_exc from retry_exc
+                retry_auth_status = _provider_auth_status_code(retry_exc)
+                if retry_auth_status is not None:
+                    if retry_auth_status == status.HTTP_401_UNAUTHORIZED:
+                        _record_oauth_401_retry(
+                            resolved_provider,
+                            "retry_auth_failed",
+                        )
+                    else:
+                        _record_oauth_401_retry(resolved_provider, "retry_failed")
+                    _raise_provider_auth_http_exception(retry_auth_status)
                 _record_oauth_401_retry(resolved_provider, "retry_failed")
                 raise
             _record_oauth_401_retry(resolved_provider, "success")
-        await active_credentials.touch_last_used()
     except HTTPException:
         raise
     except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"Model info probe failed for {resolved_provider}:{model}: {exc}")
+        logger.error(
+            "Embedding model info probe failed provider={} error_type={}",
+            resolved_provider,
+            type(exc).__name__,
+        )
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Embedding service unavailable") from exc
 
     dimension = None

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict
 
 import pytest
@@ -133,10 +134,111 @@ def test_openai_app_config_auth_headers_nonstream_and_stream(monkeypatch):
     assert sum(chunk.strip() == "data: [DONE]" for chunk in chunks) == 1
 
 
+@pytest.mark.parametrize("streaming", [False, True], ids=("nonstream", "stream"))
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"org_id": "org-safe\r\nInjected: yes"},
+        {"project_id": 123},
+    ],
+)
+def test_openai_adapter_rejects_unsafe_credential_headers_before_http(
+    monkeypatch,
+    streaming,
+    fields,
+):
+    import tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter as mod
+    from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
+    from tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter import OpenAIAdapter
+
+    captured: dict[str, Any] = {}
+    monkeypatch.setattr(
+        mod,
+        "http_client_factory",
+        lambda **_kwargs: _FakeClient(captured),
+        raising=True,
+    )
+    request = {
+        "messages": [{"role": "user", "content": "hi"}],
+        "model": "gpt-4o-mini",
+        "api_key": "runtime-key",
+        "app_config": {"openai_api": fields},
+    }
+
+    adapter = OpenAIAdapter()
+    with pytest.raises(ChatConfigurationError):
+        if streaming:
+            list(adapter.stream(request))
+        else:
+            adapter.chat(request)
+
+    assert captured.get("calls", []) == []
+
+
+@pytest.mark.concurrent
+@pytest.mark.parametrize("streaming", [False, True], ids=("nonstream", "stream"))
+def test_concurrent_invalid_credential_headers_fail_before_valid_adapter_dispatch(
+    monkeypatch,
+    streaming,
+):
+    """An invalid credential header cannot disrupt a concurrent valid adapter call."""
+    import tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter as mod
+    from tldw_Server_API.app.core.AuthNZ.byok_config import build_app_config_overrides
+    from tldw_Server_API.app.core.AuthNZ.byok_helpers import validate_credential_fields
+    from tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter import OpenAIAdapter
+
+    captured: dict[str, Any] = {}
+    start = threading.Barrier(2)
+    monkeypatch.setattr(
+        mod,
+        "http_client_factory",
+        lambda **_kwargs: _FakeClient(captured),
+        raising=True,
+    )
+
+    def invoke(fields: dict[str, Any]):
+        start.wait(timeout=5)
+        cleaned = validate_credential_fields("openai", fields)
+        request = {
+            "messages": [{"role": "user", "content": "hi"}],
+            "model": "gpt-4o-mini",
+            "api_key": "runtime-key",
+            "app_config": build_app_config_overrides("openai", cleaned),
+        }
+        adapter = OpenAIAdapter()
+        return list(adapter.stream(request)) if streaming else adapter.chat(request)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        invalid_future = executor.submit(
+            invoke,
+            {"org_id": "org-safe\r\nInjected: yes", "project_id": 123},
+        )
+        valid_future = executor.submit(
+            invoke,
+            {"org_id": "org-valid", "project_id": "project-valid"},
+        )
+        with pytest.raises(ValueError):
+            invalid_future.result(timeout=5)
+        valid_result = valid_future.result(timeout=5)
+
+    assert len(captured["calls"]) == 1
+    assert captured["calls"][0]["kind"] == ("stream" if streaming else "post")
+    assert captured["calls"][0]["headers"]["OpenAI-Organization"] == "org-valid"
+    assert captured["calls"][0]["headers"]["OpenAI-Project"] == "project-valid"
+    if streaming:
+        assert sum(chunk.strip() == "data: [DONE]" for chunk in valid_result) == 1
+    else:
+        assert valid_result["choices"][0]["message"]["content"] == "ok"
+
+
 @pytest.mark.asyncio
 async def test_rag_runtime_openai_fallback_reaches_real_adapter_without_unrelated_secrets(monkeypatch):
     import tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter as mod
     from tldw_Server_API.app.core.AuthNZ import byok_runtime
+    from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
+        LLMProviderOverride,
+        ProviderOverrideCallSnapshot,
+    )
     from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import ProviderCredentialRuntime
     from tldw_Server_API.app.core.RAG.rag_service.generation import GenerationConfig, LLMGenerator
 
@@ -164,14 +266,18 @@ async def test_rag_runtime_openai_fallback_reaches_real_adapter_without_unrelate
         team_ids=None,
         org_ids=None,
         trusted_base_url_override=False,
-        fallback_resolver=lambda _provider: byok_runtime.ServerFallbackCredentials(
-            api_key="runtime-key",
-            credential_fields={
-                "base_url": "https://runtime.openai.example/v1",
-                "org_id": "runtime-org",
-                "project_id": "runtime-project",
-            },
-            auth_source="api_key",
+        server_config_snapshot=byok_runtime.loaded_config_data,
+        override_snapshot_resolver=lambda _provider: ProviderOverrideCallSnapshot(
+            provider="openai",
+            _override=LLMProviderOverride(
+                provider="openai",
+                api_key="runtime-key",
+                credential_fields={
+                    "base_url": "https://runtime.openai.example/v1",
+                    "org_id": "runtime-org",
+                    "project_id": "runtime-project",
+                },
+            ),
         ),
     )
     generator = LLMGenerator(GenerationConfig(provider="openai", model="gpt-4o-mini"))
@@ -208,6 +314,10 @@ async def test_rag_runtime_openai_fallback_reaches_real_adapter_without_unrelate
 async def test_concurrent_rag_openai_fallbacks_keep_key_base_and_headers_paired(monkeypatch):
     import tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter as mod
     from tldw_Server_API.app.core.AuthNZ import byok_runtime
+    from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
+        LLMProviderOverride,
+        ProviderOverrideCallSnapshot,
+    )
     from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import ProviderCredentialRuntime
     from tldw_Server_API.app.core.RAG.rag_service.generation import GenerationConfig, LLMGenerator
 
@@ -245,14 +355,18 @@ async def test_concurrent_rag_openai_fallbacks_keep_key_base_and_headers_paired(
             team_ids=None,
             org_ids=None,
             trusted_base_url_override=False,
-            fallback_resolver=lambda _provider: byok_runtime.ServerFallbackCredentials(
-                api_key=f"key-{label}",
-                credential_fields={
-                    "base_url": f"https://{label}.openai.example/v1",
-                    "org_id": f"org-{label}",
-                    "project_id": f"project-{label}",
-                },
-                auth_source="api_key",
+            server_config_snapshot={},
+            override_snapshot_resolver=lambda _provider: ProviderOverrideCallSnapshot(
+                provider="openai",
+                _override=LLMProviderOverride(
+                    provider="openai",
+                    api_key=f"key-{label}",
+                    credential_fields={
+                        "base_url": f"https://{label}.openai.example/v1",
+                        "org_id": f"org-{label}",
+                        "project_id": f"project-{label}",
+                    },
+                ),
             ),
         )
 

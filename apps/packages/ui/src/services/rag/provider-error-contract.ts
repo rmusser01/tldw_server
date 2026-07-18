@@ -11,6 +11,9 @@ export const PUBLIC_RAG_PROVIDER_ERROR_MESSAGES = {
     "Provider credential storage is temporarily unavailable.",
   credential_scope_revoked:
     "The selected provider credential scope is no longer available.",
+  provider_disabled:
+    "The selected provider is disabled by administrator policy.",
+  model_not_allowed: "The selected model is not allowed for this provider.",
   provider_configuration_invalid:
     "The selected provider configuration is invalid.",
   provider_unavailable: "The selected provider is currently unavailable.",
@@ -103,10 +106,13 @@ const getStructuredProviderErrorFromFailure = (
 ): PublicRagProviderError | null => {
   const direct = getStructuredPublicRagProviderError(error)
   if (direct || !isRecord(error)) return direct
+  const response = isRecord(error.response) ? error.response : null
 
   return (
     getStructuredPublicRagProviderError(error.data) ??
-    getStructuredPublicRagProviderError({ details: error.data })
+    getStructuredPublicRagProviderError({ details: error.data }) ??
+    getStructuredPublicRagProviderError(response?.data) ??
+    getStructuredPublicRagProviderError({ details: response?.data })
   )
 }
 

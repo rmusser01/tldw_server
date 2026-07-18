@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+from collections.abc import AsyncIterator
+from contextvars import ContextVar
 from functools import wraps
 from types import SimpleNamespace
 from typing import Any
@@ -16,6 +18,7 @@ from starlette.requests import Request
 
 import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_endpoint
 import tldw_Server_API.app.core.RAG.rag_service.unified_pipeline as unified_pipeline_module
+from tldw_Server_API.app.core.AuthNZ import byok_runtime, provider_credential_runtime
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
 from tldw_Server_API.app.core.Chat.Chat_Deps import (
@@ -26,6 +29,7 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import (
 from tldw_Server_API.app.core.RAG.rag_service.agentic_chunker import (
     agentic_rag_pipeline as production_agentic_rag_pipeline,
 )
+from tldw_Server_API.app.core.RAG.rag_service.generation import AnswerGenerator
 from tldw_Server_API.app.core.RAG.rag_service.request_bundle import ResolvedRequestBundle
 from tldw_Server_API.app.core.RAG.rag_service.request_resolution import ResolvedRAGRequest
 from tldw_Server_API.app.core.RAG.rag_service.retrieval_plan import RetrievalPlan
@@ -38,6 +42,7 @@ from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import (
 
 pytestmark = pytest.mark.unit
 _SENTINEL_SECRET = "rag-runtime-secret-must-not-leak"
+_BROWSER_PROVIDER_SECRET = "browser-provider-secret-must-not-reach-adapter"
 
 
 class _RecordingRuntime:
@@ -198,7 +203,8 @@ def _assert_trusted_scope(runtime: _RecordingRuntime) -> None:
     assert runtime.scope["team_ids"] == [8]  # nosec B101
     assert runtime.scope["org_ids"] == [11]  # nosec B101
     assert runtime.scope["trusted_base_url_override"] is False  # nosec B101
-    assert callable(runtime.scope["fallback_resolver"])  # nosec B101
+    assert "fallback_resolver" not in runtime.scope  # nosec B101
+    assert callable(runtime.scope["override_snapshot_resolver"])  # nosec B101
 
 
 @pytest.mark.asyncio
@@ -240,6 +246,233 @@ async def test_standard_search_passes_ephemeral_runtime_and_closes_it(
     assert _SENTINEL_SECRET not in json.dumps(response)  # nosec B101
     assert _SENTINEL_SECRET not in "".join(logs)  # nosec B101
     assert runtime.close_calls == 1  # nosec B101
+
+
+@pytest.mark.asyncio
+@pytest.mark.concurrent
+@pytest.mark.parametrize("streaming", [False, True], ids=["non-stream", "stream"])
+async def test_knowledge_qa_routes_isolate_configured_server_credentials_at_adapter_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+    streaming: bool,
+) -> None:
+    """Knowledge QA keeps each configured server key/model pair request-owned."""
+    from tldw_Server_API.app.core.Chat import chat_service
+
+    request_label: ContextVar[str] = ContextVar("rag_acceptance_request_label")
+    snapshots = {
+        "alpha": {
+            "openai_api": {
+                "api_key": "configured-server-key-alpha",
+                "model": "configured-model-alpha",
+            }
+        },
+        "beta": {
+            "openai_api": {
+                "api_key": "configured-server-key-beta",
+                "model": "configured-model-beta",
+            }
+        },
+    }
+    models = {
+        "alpha": "configured-model-alpha",
+        "beta": "configured-model-beta",
+    }
+    adapter_calls: list[dict[str, Any]] = []
+    adapter_providers: list[str] = []
+    both_adapter_calls_entered = asyncio.Event()
+    release_adapter_calls = asyncio.Event()
+
+    class HealthyAbsentOverrideSnapshot:
+        def enforce(self, _model: str | None) -> None:
+            return None
+
+        def ensure_healthy(self) -> None:
+            return None
+
+        def server_fallback(self, base_fallback: Any = None) -> Any:
+            return base_fallback
+
+    class GatedOpenAIAdapter:
+        async_chat_is_native = True
+
+        async def _capture(self, request: dict[str, Any]) -> None:
+            adapter_calls.append(
+                {
+                    "api_key": request.get("api_key"),
+                    "model": request.get("model"),
+                    "stream": request.get("stream") is True,
+                    "credentials_resolved": request.get("credentials_resolved"),
+                }
+            )
+            if len(adapter_calls) == 2:
+                both_adapter_calls_entered.set()
+            await release_adapter_calls.wait()
+
+        async def achat(self, request: dict[str, Any]) -> dict[str, Any]:
+            await self._capture(request)
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": f"answer from {request.get('model')}",
+                        }
+                    }
+                ]
+            }
+
+        async def astream(
+            self,
+            request: dict[str, Any],
+        ) -> AsyncIterator[dict[str, Any]]:
+            await self._capture(request)
+            yield {
+                "choices": [
+                    {
+                        "delta": {
+                            "content": f"answer from {request.get('model')}",
+                        }
+                    }
+                ]
+            }
+
+    adapter = GatedOpenAIAdapter()
+
+    class Registry:
+        def get_adapter(self, provider: str) -> GatedOpenAIAdapter:
+            adapter_providers.append(provider)
+            return adapter
+
+    def load_server_snapshot() -> dict[str, Any]:
+        return snapshots[request_label.get()]
+
+    async def no_usage_log(*_args: Any, **_kwargs: Any) -> None:
+        return None
+
+    async def acceptance_pipeline(**kwargs: Any) -> UnifiedSearchResult:
+        query = str(kwargs.get("query") or "")
+        documents = [
+            {
+                "id": f"document-{query}",
+                "content": "Configured server credentials stay request-owned.",
+                "metadata": {"title": "Credential isolation evidence"},
+                "score": 1.0,
+            }
+        ]
+        if kwargs.get("enable_generation") is False:
+            return UnifiedSearchResult(documents=documents, query=query)
+
+        generated = await AnswerGenerator(
+            provider=kwargs.get("generation_provider"),
+            model=kwargs.get("generation_model"),
+            credential_runtime=kwargs["credential_runtime"],
+        ).generate(
+            query=query,
+            context="Configured server credentials stay request-owned.",
+        )
+        return UnifiedSearchResult(
+            documents=documents,
+            query=query,
+            generated_answer=str(generated["answer"]),
+        )
+
+    monkeypatch.setattr(byok_runtime, "is_byok_enabled", lambda: False)
+    monkeypatch.setattr(
+        provider_credential_runtime,
+        "load_server_config_snapshot",
+        load_server_snapshot,
+    )
+    monkeypatch.setattr(
+        rag_endpoint,
+        "capture_provider_override_call_snapshot",
+        lambda _provider: HealthyAbsentOverrideSnapshot(),
+    )
+    monkeypatch.setattr(rag_endpoint, "_resolve_kanban_db_path", lambda *_args: "kanban.db")
+    monkeypatch.setattr(rag_endpoint, "_log_rag_queries_for_org", no_usage_log)
+    monkeypatch.setattr(rag_endpoint, "unified_rag_pipeline", acceptance_pipeline)
+    monkeypatch.setattr(chat_service, "_get_llm_registry", lambda: Registry())
+
+    async def invoke(label: str) -> Any:
+        token = request_label.set(label)
+        try:
+            request = rag_endpoint.UnifiedRAGRequest(
+                query=f"credential isolation {label}",
+                sources=["media_db"],
+                enable_generation=True,
+                enable_cache=False,
+                enable_reranking=False,
+                enable_pre_retrieval_clarification=False,
+                generation_provider="openai",
+                generation_model=models[label],
+                api_key=_BROWSER_PROVIDER_SECRET,
+            )
+            if not streaming:
+                return await rag_endpoint.unified_search_endpoint(
+                    request_raw=_request(),
+                    request=request,
+                    background_tasks=BackgroundTasks(),
+                    current_user=_user(),
+                    media_db=_db(f"media-{label}.db"),
+                    chacha_db=_db(f"notes-{label}.db"),
+                    prompts_db=_db(f"prompts-{label}.db"),
+                    collections_db=SimpleNamespace(),
+                )
+
+            response = await rag_endpoint.unified_search_stream_endpoint(
+                request_raw=_request("/api/v1/rag/search/stream"),
+                request=request,
+                current_user=_user(),
+                media_db=_db(f"media-{label}.db"),
+                chacha_db=_db(f"notes-{label}.db"),
+                prompts_db=_db(f"prompts-{label}.db"),
+                collections_db=SimpleNamespace(),
+            )
+            return [chunk async for chunk in response.body_iterator]
+        finally:
+            request_label.reset(token)
+
+    tasks = [
+        asyncio.create_task(invoke("alpha")),
+        asyncio.create_task(invoke("beta")),
+    ]
+    results: list[Any] = []
+    try:
+        await asyncio.wait_for(both_adapter_calls_entered.wait(), timeout=5)
+        release_adapter_calls.set()
+        results = list(await asyncio.gather(*tasks))
+    finally:
+        release_adapter_calls.set()
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+    assert adapter_providers == ["openai", "openai"]  # nosec B101
+    assert {
+        (
+            call["api_key"],
+            call["model"],
+            call["stream"],
+            call["credentials_resolved"],
+        )
+        for call in adapter_calls
+    } == {
+        (
+            "configured-server-key-alpha",
+            "configured-model-alpha",
+            streaming,
+            True,
+        ),
+        (
+            "configured-server-key-beta",
+            "configured-model-beta",
+            streaming,
+            True,
+        ),
+    }
+    serialized_results = repr(results)
+    assert _BROWSER_PROVIDER_SECRET not in serialized_results  # nosec B101
+    assert "configured-server-key-alpha" not in serialized_results  # nosec B101
+    assert "configured-server-key-beta" not in serialized_results  # nosec B101
 
 
 @pytest.mark.asyncio
@@ -495,7 +728,11 @@ async def test_resume_batch_passes_ephemeral_runtime_without_checkpoint_storage(
         response=Response(),
         background_tasks=BackgroundTasks(),
         current_user=_user(),
-        principal=AuthPrincipal(kind="user", user_id=42),
+        principal=AuthPrincipal(
+            kind="user",
+            user_id=42,
+            permissions=["media.read", "system.configure"],
+        ),
         media_db=_db("media.db"),
         chacha_db=_db("notes.db"),
         prompts_db=_db("prompts.db"),
@@ -504,6 +741,10 @@ async def test_resume_batch_passes_ephemeral_runtime_without_checkpoint_storage(
     runtime = _RecordingRuntime.created[0]
     assert captured["credential_runtime"] is runtime  # nosec B101
     assert "credential_runtime" not in checkpoint.config  # nosec B101
+    assert runtime.scope["user_id"] is None  # nosec B101
+    assert runtime.scope["team_ids"] == []  # nosec B101
+    assert runtime.scope["org_ids"] == []  # nosec B101
+    assert runtime.scope["trusted_base_url_override"] is False  # nosec B101
     assert runtime.close_calls == 1  # nosec B101
 
 
@@ -536,6 +777,61 @@ async def test_stream_runtime_closes_when_body_iterator_is_closed_early(
     await iterator.aclose()
 
     assert _RecordingRuntime.created[0].close_calls == 1  # nosec B101
+
+
+@pytest.mark.asyncio
+@pytest.mark.concurrent
+async def test_stream_endpoint_closes_each_rag_stream_before_its_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle = _bundle("standard")
+    lifecycle: dict[str, list[str]] = {"a": [], "b": []}
+
+    class OrderedRuntime:
+        created = 0
+
+        def __init__(self, **_scope: Any) -> None:
+            self.label = ("a", "b")[type(self).created]
+            type(self).created += 1
+
+        async def close(self) -> None:
+            lifecycle[self.label].append("runtime_close")
+
+    async def fake_stream_rag_events(**kwargs: Any):
+        runtime = kwargs["extra_context"]["credential_runtime"]
+        try:
+            yield {"type": "delta", "text": runtime.label}
+            await asyncio.Event().wait()
+        finally:
+            lifecycle[runtime.label].append("rag_stream_close")
+
+    monkeypatch.setattr(rag_endpoint, "ProviderCredentialRuntime", OrderedRuntime)
+    _install_common_endpoint_fakes(monkeypatch, bundle=bundle)
+    monkeypatch.setattr(rag_endpoint, "stream_rag_events", fake_stream_rag_events)
+
+    async def build_and_close() -> None:
+        response = await rag_endpoint.unified_search_stream_endpoint(
+            request_raw=_request("/api/v1/rag/search/stream"),
+            request=rag_endpoint.UnifiedRAGRequest(
+                query="credential runtime",
+                enable_generation=True,
+            ),
+            current_user=_user(),
+            media_db=_db("media.db"),
+            chacha_db=_db("notes.db"),
+            prompts_db=_db("prompts.db"),
+            collections_db=SimpleNamespace(),
+        )
+        iterator = response.body_iterator
+        await iterator.__anext__()
+        await iterator.aclose()
+
+    await asyncio.gather(build_and_close(), build_and_close())
+
+    assert lifecycle == {
+        "a": ["rag_stream_close", "runtime_close"],
+        "b": ["rag_stream_close", "runtime_close"],
+    }
 
 
 def test_checkpoint_sanitizer_excludes_runtime() -> None:
@@ -691,6 +987,157 @@ async def test_agentic_typed_failure_bypasses_raw_fallback(
     assert exc_info.value.status_code == 502  # nosec B101
     assert exc_info.value.detail["error_code"] == "provider_authentication_failed"  # nosec B101
     assert _SENTINEL_SECRET not in json.dumps(exc_info.value.detail)  # nosec B101
+    assert exc_info.value.__cause__ is None  # nosec B101
+    assert exc_info.value.__context__ is None  # nosec B101
+    assert _RecordingRuntime.created[0].close_calls == 1  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_runtime_construction_typed_failure_is_detached(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Credential-runtime construction never retains private provider details."""
+
+    def failing_runtime(*_args: Any, **_kwargs: Any) -> _RecordingRuntime:
+        raise ChatAuthenticationError(_SENTINEL_SECRET, provider="openai")
+
+    monkeypatch.setattr(rag_endpoint, "_build_credential_runtime", failing_runtime)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await rag_endpoint.unified_search_endpoint(
+            request_raw=_request(),
+            request=rag_endpoint.UnifiedRAGRequest(query="credential runtime"),
+            background_tasks=BackgroundTasks(),
+            current_user=_user(),
+            media_db=_db("media.db"),
+            chacha_db=_db("notes.db"),
+            prompts_db=_db("prompts.db"),
+            collections_db=SimpleNamespace(),
+        )
+
+    assert exc_info.value.status_code == 502  # nosec B101
+    assert exc_info.value.detail["error_code"] == "provider_authentication_failed"  # nosec B101
+    assert _SENTINEL_SECRET not in json.dumps(exc_info.value.detail)  # nosec B101
+    assert exc_info.value.__cause__ is None  # nosec B101
+    assert exc_info.value.__context__ is None  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_agentic_untyped_failure_fails_closed_without_fabricated_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle = _bundle("agentic")
+    _install_runtime(monkeypatch)
+    _install_common_endpoint_fakes(monkeypatch, bundle=bundle)
+
+    raw_failure = (
+        "provider request failed at https://upstream.invalid/v1/chat "
+        "body=credential-runtime-secret-response"
+    )
+
+    async def failing_agentic_pipeline(**_kwargs: Any) -> UnifiedSearchResult:
+        raise RuntimeError(raw_failure)
+
+    log_records: list[Any] = []
+    sink_id = logger.add(log_records.append)
+    monkeypatch.setattr(rag_endpoint, "agentic_rag_pipeline", failing_agentic_pipeline)
+    try:
+        with pytest.raises(HTTPException) as exc_info:
+            await rag_endpoint.unified_search_endpoint(
+                request_raw=_request(),
+                request=rag_endpoint.UnifiedRAGRequest(
+                    query="credential runtime",
+                    strategy="agentic",
+                    debug_mode=True,
+                ),
+                background_tasks=BackgroundTasks(),
+                current_user=_user(),
+                media_db=_db("media.db"),
+                chacha_db=_db("notes.db"),
+                prompts_db=_db("prompts.db"),
+                collections_db=SimpleNamespace(),
+            )
+    finally:
+        logger.remove(sink_id)
+
+    serialized = json.dumps(exc_info.value.detail)
+    rendered_logs = "\n".join(str(message) for message in log_records)
+    for fragment in (
+        raw_failure,
+        "upstream.invalid",
+        "credential-runtime-secret-response",
+    ):
+        assert fragment not in serialized  # nosec B101
+        assert fragment not in rendered_logs  # nosec B101
+    assert exc_info.value.status_code == 500  # nosec B101
+    assert exc_info.value.detail == "Search failed due to an internal error."  # nosec B101
+    assert exc_info.value.__cause__ is None  # nosec B101
+    assert exc_info.value.__context__ is None  # nosec B101
+
+    fallback_logs = [
+        message.record
+        for message in log_records
+        if message.record["message"]
+        == "Agentic RAG pipeline failed"
+    ]
+    assert len(fallback_logs) == 1  # nosec B101
+    assert fallback_logs[0]["exception"] is None  # nosec B101
+    assert _RecordingRuntime.created[0].close_calls == 1  # nosec B101
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("debug_mode", [False, True], ids=["normal", "debug"])
+async def test_standard_untyped_failure_has_bounded_http_error_and_logs(
+    monkeypatch: pytest.MonkeyPatch,
+    debug_mode: bool,
+) -> None:
+    bundle = _bundle("standard")
+    _install_runtime(monkeypatch)
+    _install_common_endpoint_fakes(monkeypatch, bundle=bundle)
+    raw_failure = (
+        "provider request failed at https://upstream.invalid/v1/chat "
+        "body=credential-runtime-secret-response"
+    )
+
+    async def failing_standard_pipeline(**_kwargs: Any) -> UnifiedSearchResult:
+        raise RuntimeError(raw_failure)
+
+    monkeypatch.setattr(rag_endpoint, "unified_rag_pipeline", failing_standard_pipeline)
+    log_records: list[Any] = []
+    sink_id = logger.add(log_records.append)
+    try:
+        with pytest.raises(HTTPException) as exc_info:
+            await rag_endpoint.unified_search_endpoint(
+                request_raw=_request(),
+                request=rag_endpoint.UnifiedRAGRequest(
+                    query="credential runtime",
+                    strategy="standard",
+                    debug_mode=debug_mode,
+                ),
+                background_tasks=BackgroundTasks(),
+                current_user=_user(),
+                media_db=_db("media.db"),
+                chacha_db=_db("notes.db"),
+                prompts_db=_db("prompts.db"),
+                collections_db=SimpleNamespace(),
+            )
+    finally:
+        logger.remove(sink_id)
+
+    rendered = json.dumps(exc_info.value.detail) + "\n" + "\n".join(
+        str(message) for message in log_records
+    )
+    for fragment in (
+        raw_failure,
+        "upstream.invalid",
+        "credential-runtime-secret-response",
+    ):
+        assert fragment not in rendered  # nosec B101
+    assert exc_info.value.status_code == 500  # nosec B101
+    assert exc_info.value.detail == "Search failed due to an internal error."  # nosec B101
+    assert exc_info.value.__cause__ is None  # nosec B101
+    assert exc_info.value.__context__ is None  # nosec B101
+    assert all(record.record["exception"] is None for record in log_records)  # nosec B101
     assert _RecordingRuntime.created[0].close_calls == 1  # nosec B101
 
 

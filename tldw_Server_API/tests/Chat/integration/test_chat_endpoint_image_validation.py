@@ -350,12 +350,50 @@ def test_chat_endpoint_streaming_large_data_image_placeholder_in_db(monkeypatch)
             }
 
             # Upstream mock stream (OpenAI-like SSE) with two chunks and DONE
-            chunk1 = {"choices": [{"delta": {"content": "Hello"}}]}
-            chunk2 = {"choices": [{"delta": {"content": " world"}}]}
+            chunk1 = {
+                "id": "chatcmpl-image-stream",
+                "object": "chat.completion.chunk",
+                "created": 1,
+                "model": "gpt-4o-mini",
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {"role": "assistant", "content": "Hello"},
+                        "finish_reason": None,
+                    }
+                ],
+            }
+            chunk2 = {
+                "id": "chatcmpl-image-stream",
+                "object": "chat.completion.chunk",
+                "created": 1,
+                "model": "gpt-4o-mini",
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {"content": " world"},
+                        "finish_reason": None,
+                    }
+                ],
+            }
+            finish_chunk = {
+                "id": "chatcmpl-image-stream",
+                "object": "chat.completion.chunk",
+                "created": 1,
+                "model": "gpt-4o-mini",
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {},
+                        "finish_reason": "stop",
+                    }
+                ],
+            }
 
             def upstream_stream():
                 yield f"data: {json.dumps(chunk1)}\n\n"
                 yield f"data: {json.dumps(chunk2)}\n\n"
+                yield f"data: {json.dumps(finish_chunk)}\n\n"
                 yield "data: [DONE]\n\n"
 
             with patch(

@@ -5,13 +5,14 @@
 import asyncio
 import os
 from collections.abc import AsyncGenerator
+from contextlib import aclosing
 from typing import Any, Optional
 
 #
 from loguru import logger
 
 from tldw_Server_API.app.core.exceptions import NetworkError as CoreNetworkError
-from tldw_Server_API.app.core.exceptions import RetryExhaustedError
+from tldw_Server_API.app.core.exceptions import RetryExhaustedError, raise_detached_error
 
 #
 # Local Imports
@@ -19,16 +20,18 @@ from tldw_Server_API.app.core.http_client import apost, astream_bytes
 
 from ..tts_exceptions import (
     TTSAuthenticationError,
+    TTSConfigurationError,
+    TTSError,
     TTSGenerationError,
     TTSNetworkError,
     TTSProviderError,
     TTSProviderInitializationError,
     TTSProviderNotConfiguredError,
+    TTSQuotaExceededError,
     TTSRateLimitError,
     TTSTimeoutError,
     TTSValidationError,
     auth_error,
-    network_error,
     rate_limit_error,
     timeout_error,
 )
@@ -62,6 +65,38 @@ def _is_timeout_error(exc: Exception) -> bool:
 def _safe_exception_label(exc: BaseException) -> str:
     """Return a non-sensitive exception identifier for logs."""
     return type(exc).__name__
+
+
+def _bounded_network_error(provider: str, exc: Exception) -> TTSNetworkError:
+    """Map transport failures without retaining credential-derived URLs."""
+    return TTSNetworkError(
+        f"Network request to {provider} failed",
+        provider=provider,
+        error_code="NETWORK_ERROR",
+        details={"error_type": type(exc).__name__},
+    )
+
+
+def _bounded_existing_tts_error(provider: str, exc: TTSError) -> TTSProviderError:
+    """Replace an already-typed error without retaining untrusted content."""
+    if isinstance(exc, TTSAuthenticationError):
+        return auth_error(provider, "Authentication failed")
+    if isinstance(exc, TTSRateLimitError):
+        return rate_limit_error(provider)
+    if isinstance(exc, TTSQuotaExceededError):
+        return TTSQuotaExceededError(
+            f"Quota exceeded for {provider}",
+            provider=provider,
+        )
+    if isinstance(exc, TTSTimeoutError):
+        return timeout_error(provider, timeout_seconds=60.0)
+    if isinstance(exc, TTSNetworkError):
+        return _bounded_network_error(provider, exc)
+    return TTSProviderError(
+        f"{provider} request failed",
+        provider=provider,
+        details={"error_type": type(exc).__name__},
+    )
 
 
 class OpenAIAdapter(TTSAdapter):
@@ -112,7 +147,10 @@ class OpenAIAdapter(TTSAdapter):
 
     def __init__(self, config: Optional[dict[str, Any]] = None):
         super().__init__(config)
-        self.api_key = self.config.get("openai_api_key") or os.getenv("OPENAI_API_KEY")
+        credentials_resolved = self.config.get("credentials_resolved") is True
+        self.api_key = self.config.get("openai_api_key")
+        if not credentials_resolved:
+            self.api_key = self.api_key or os.getenv("OPENAI_API_KEY")
         # Normalize placeholder/empty keys often present in test envs to None
         if isinstance(self.api_key, str):
             _raw = self.api_key.strip()
@@ -128,6 +166,14 @@ class OpenAIAdapter(TTSAdapter):
             if _raw.lower() in placeholder_tokens:
                 self.api_key = None
         self.base_url = self.config.get("openai_base_url", "https://api.openai.com/v1/audio/speech")
+        self.organization = self._credential_header_value(
+            self.config.get("organization")
+            or self.config.get("organization_id")
+            or self.config.get("org_id")
+        )
+        self.project = self._credential_header_value(
+            self.config.get("project") or self.config.get("project_id")
+        )
         # Support both legacy and new config keys for model selection
         self.model = (
             self.config.get("openai_tts_model")
@@ -145,6 +191,7 @@ class OpenAIAdapter(TTSAdapter):
 
     async def initialize(self) -> bool:
         """Initialize the OpenAI adapter"""
+        initialization_error: Optional[TTSProviderInitializationError] = None
         try:
             if not self.api_key:
                 error_msg = f"{self.provider_name}: Cannot initialize without API key"
@@ -164,10 +211,7 @@ class OpenAIAdapter(TTSAdapter):
             )
 
             # Prepare auth headers for subsequent requests (and optional verify).
-            headers = {
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json"
-            }
+            headers = self._request_headers()
 
             # Optional: best-effort API key verification on init.
             # This is disabled by default to keep startup fast and resilient
@@ -203,7 +247,7 @@ class OpenAIAdapter(TTSAdapter):
                     raise TTSProviderInitializationError(
                         f"Failed to initialize {self.provider_name}: authentication failed",
                         provider=self.provider_name,
-                        details={"error": str(auth_exc), "error_type": type(auth_exc).__name__},
+                        details={"error_type": type(auth_exc).__name__},
                     ) from auth_exc
                 except (TTSRateLimitError, TTSNetworkError, TTSTimeoutError, TTSProviderError) as non_fatal:
                     logger.warning(
@@ -233,11 +277,13 @@ class OpenAIAdapter(TTSAdapter):
                 f"exception_type={_safe_exception_label(e)}"
             )
             self._status = ProviderStatus.ERROR
-            raise TTSProviderInitializationError(
+            initialization_error = TTSProviderInitializationError(
                 f"Failed to initialize {self.provider_name}",
                 provider=self.provider_name,
-                details={"error": str(e)}
-            ) from e
+                details={"error_type": type(e).__name__},
+            )
+        if initialization_error is not None:
+            raise_detached_error(initialization_error)
 
     async def get_capabilities(self) -> TTSCapabilities:
         """Get OpenAI TTS capabilities"""
@@ -278,6 +324,7 @@ class OpenAIAdapter(TTSAdapter):
             )
 
         # Validate request using new validation system
+        request_error: Optional[Exception] = None
         try:
             validate_tts_request(request, provider=self.provider_key)
         except Exception as e:
@@ -291,10 +338,7 @@ class OpenAIAdapter(TTSAdapter):
         voice = self.map_voice(request.voice or "alloy")
 
         # Prepare request payload
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
+        headers = self._request_headers()
 
         payload = {
             "model": self.model,
@@ -333,23 +377,15 @@ class OpenAIAdapter(TTSAdapter):
                 )
 
         except Exception as e:
-            await self._raise_normalized_request_error(e)
+            request_error = self._normalized_request_error(e)
+        if request_error is not None:
+            raise_detached_error(request_error)
 
-    async def _handle_http_status_error(self, e: Exception) -> None:
-        """Normalize HTTP status errors into TTS-specific exceptions."""
+    def _normalized_http_status_error(self, e: Exception) -> Exception:
+        """Build a bounded TTS exception for one upstream HTTP status."""
         response = getattr(e, "response", None)
         status_code = getattr(response, "status_code", None)
         headers = getattr(response, "headers", {}) if response is not None else {}
-        error_msg = ""
-        if response is not None:
-            try:
-                if hasattr(response, "aread"):
-                    error_content = await response.aread()
-                else:
-                    error_content = response.read()
-                error_msg = error_content.decode()
-            except Exception:
-                error_msg = ""
         logger.error(
             f"{self.provider_name} API error: {status_code}; "
             f"exception_type={_safe_exception_label(e)}; response body redacted"
@@ -357,30 +393,40 @@ class OpenAIAdapter(TTSAdapter):
 
         if status_code == 401:
             # Standardize message and provider fields
-            raise auth_error(self.provider_name, "Invalid API key")
+            return auth_error(self.provider_name, "Invalid API key")
         elif status_code == 429:
             # Try to extract retry-after header
             retry_after = headers.get("retry-after") if isinstance(headers, dict) else None
-            raise rate_limit_error(
+            return rate_limit_error(
                 self.provider_name,
                 retry_after=int(retry_after) if retry_after else None,
             )
         elif status_code == 400:
-            raise TTSProviderError(
-                f"Invalid request to OpenAI: {error_msg}",
+            return TTSProviderError(
+                "Invalid request to OpenAI",
                 provider=self.provider_name,
                 error_code="BAD_REQUEST",
+                details={"status": status_code},
             )
-        else:
-            raise TTSProviderError(
-                f"OpenAI API error: {error_msg}",
-                provider=self.provider_name,
-                error_code=str(status_code),
-            )
+        return TTSProviderError(
+            "OpenAI API request failed",
+            provider=self.provider_name,
+            error_code=str(status_code),
+            details={"status": status_code},
+        )
 
-    async def _raise_normalized_request_error(self, e: Exception) -> None:
+    async def _handle_http_status_error(self, e: Exception) -> None:
+        """Raise a bounded HTTP error without retaining the upstream object."""
+        normalized = self._normalized_http_status_error(e)
+        e = None  # type: ignore[assignment]
+        raise_detached_error(normalized)
+
+    def _normalized_request_error(self, e: Exception) -> Exception:
+        """Build a bounded request error without retaining transport details."""
         if _is_http_status_error(e):
-            await self._handle_http_status_error(e)
+            return self._normalized_http_status_error(e)
+        if isinstance(e, TTSError):
+            return _bounded_existing_tts_error(self.provider_name, e)
         if isinstance(e, (CoreNetworkError, RetryExhaustedError)) or _is_httpx_exception(e):
             logger.error(
                 f"{self.provider_name} network/timeout error; "
@@ -388,28 +434,23 @@ class OpenAIAdapter(TTSAdapter):
             )
             reason = str(e) or e.__class__.__name__
             if _is_timeout_error(e) or "timeout" in reason.lower():
-                raise timeout_error(self.provider_name, timeout_seconds=60.0) from e
-            raise network_error(self.provider_name, e) from e
-        if not isinstance(
-            e,
-            (
-                TTSProviderError,
-                TTSAuthenticationError,
-                TTSRateLimitError,
-                TTSNetworkError,
-                TTSTimeoutError,
-            ),
-        ):
-            logger.error(
-                f"{self.provider_name} unexpected error; "
-                f"exception_type={_safe_exception_label(e)}"
-            )
-            raise TTSProviderError(
-                f"Unexpected error in {self.provider_name}",
-                provider=self.provider_name,
-                details={"error": str(e), "error_type": type(e).__name__}
-            ) from e
-        raise e
+                return timeout_error(self.provider_name, timeout_seconds=60.0)
+            return _bounded_network_error(self.provider_name, e)
+        logger.error(
+            f"{self.provider_name} unexpected error; "
+            f"exception_type={_safe_exception_label(e)}"
+        )
+        return TTSProviderError(
+            f"Unexpected error in {self.provider_name}",
+            provider=self.provider_name,
+            details={"error_type": type(e).__name__},
+        )
+
+    async def _raise_normalized_request_error(self, e: Exception) -> None:
+        """Raise a normalized request error for compatibility callers."""
+        normalized = self._normalized_request_error(e)
+        e = None  # type: ignore[assignment]
+        raise_detached_error(normalized)
 
     async def _stream_audio(
         self,
@@ -417,13 +458,15 @@ class OpenAIAdapter(TTSAdapter):
         payload: dict[str, Any]
     ) -> AsyncGenerator[bytes, None]:
         """Stream audio from OpenAI API with egress policy enforcement."""
+        request_error: Optional[Exception] = None
         try:
-            logger.debug(f"{self.provider_name}: _stream_audio calling apost url={self.base_url}")
+            logger.debug(f"{self.provider_name}: _stream_audio calling provider endpoint")
             response = await apost(
                 url=self.base_url,
                 client=self.client,
                 headers=headers,
                 json=payload,
+                sensitive_observability=True,
             )
             response.raise_for_status()
             total_bytes = 0
@@ -448,7 +491,9 @@ class OpenAIAdapter(TTSAdapter):
                 f"{self.provider_name} streaming error; "
                 f"exception_type={_safe_exception_label(e)}"
             )
-            await self._raise_normalized_request_error(e)
+            request_error = self._normalized_request_error(e)
+        if request_error is not None:
+            raise_detached_error(request_error)
 
     async def _generate_complete(
         self,
@@ -456,12 +501,13 @@ class OpenAIAdapter(TTSAdapter):
         payload: dict[str, Any]
     ) -> bytes:
         """Generate complete audio from OpenAI API"""
-        logger.debug(f"{self.provider_name}: _generate_complete calling apost url={self.base_url}")
+        logger.debug(f"{self.provider_name}: _generate_complete calling provider endpoint")
         response = await apost(
             url=self.base_url,
             client=self.client,
             headers=headers,
             json=payload,
+            sensitive_observability=True,
         )
         logger.debug(f"{self.provider_name}: _generate_complete received response status={getattr(response, 'status_code', 'n/a')}")
         response.raise_for_status()
@@ -480,6 +526,32 @@ class OpenAIAdapter(TTSAdapter):
                 f"{self.provider_name}: Error during cleanup; "
                 f"exception_type={_safe_exception_label(e)}"
             )
+
+    @staticmethod
+    def _credential_header_value(value: Any) -> Optional[str]:
+        """Validate one optional credential-derived OpenAI header value."""
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise TTSConfigurationError("Invalid OpenAI credential header configuration")
+        cleaned = value.strip()
+        if not cleaned:
+            return None
+        if len(cleaned) > 512 or "\r" in cleaned or "\n" in cleaned:
+            raise TTSConfigurationError("Invalid OpenAI credential header configuration")
+        return cleaned
+
+    def _request_headers(self) -> dict[str, str]:
+        """Build bounded request headers from the frozen credential snapshot."""
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        if self.organization is not None:
+            headers["OpenAI-Organization"] = self.organization
+        if self.project is not None:
+            headers["OpenAI-Project"] = self.project
+        return headers
 
     def map_voice(self, voice_id: str) -> str:
         """Map generic voice ID to OpenAI voice"""
@@ -510,28 +582,40 @@ class OpenAITTSAdapter(OpenAIAdapter):
     """
 
     PROVIDER_KEY = "openai"
-    SUPPORTED_MODELS = ["tts-1", "tts-1-hd"]
+    SUPPORTED_MODELS = ["tts-1", "tts-1-hd", "gpt-4o-mini-tts"]
 
     def __init__(self, config: Optional[dict[str, Any]] = None):
         cfg = config.copy() if isinstance(config, dict) else {}
         mapped_cfg: dict[str, Any] = {}
-        if "api_key" in cfg:
-            mapped_cfg["openai_api_key"] = cfg.get("api_key")
-        if "openai_api_key" in cfg and "openai_api_key" not in mapped_cfg:
+        if "openai_api_key" in cfg:
             mapped_cfg["openai_api_key"] = cfg.get("openai_api_key")
-        if "base_url" in cfg:
+        elif "api_key" in cfg:
+            mapped_cfg["openai_api_key"] = cfg.get("api_key")
+        if "openai_base_url" in cfg:
+            mapped_cfg["openai_base_url"] = cfg.get("openai_base_url")
+        elif "base_url" in cfg:
             # The base class expects the speech endpoint URL
             base = cfg.get("base_url")
             if base and base.endswith("/v1"):
                 base = base + "/audio/speech"
-            mapped_cfg["openai_base_url"] = base or cfg.get("openai_base_url")
-        elif "openai_base_url" in cfg:
-            mapped_cfg["openai_base_url"] = cfg.get("openai_base_url")
+            mapped_cfg["openai_base_url"] = base
         if "timeout" in cfg:
             mapped_cfg["timeout"] = cfg.get("timeout")
+        for key in (
+            "credentials_resolved",
+            "org_id",
+            "organization",
+            "organization_id",
+            "project",
+            "project_id",
+        ):
+            if key in cfg:
+                mapped_cfg[key] = cfg.get(key)
 
         # If API key not present, tests expect construction to fail
-        temp_key = mapped_cfg.get("openai_api_key") or os.getenv("OPENAI_API_KEY")
+        temp_key = mapped_cfg.get("openai_api_key")
+        if cfg.get("credentials_resolved") is not True:
+            temp_key = temp_key or os.getenv("OPENAI_API_KEY")
         if not temp_key:
             raise TTSProviderNotConfiguredError("OpenAI API key not configured", provider="openai")
 
@@ -593,6 +677,8 @@ class OpenAITTSAdapter(OpenAIAdapter):
         else:
             old_model = None
 
+        wrapper_error: Optional[Exception] = None
+        resp: Optional[TTSResponse] = None
         try:
             resp = await super().generate(request)
         except (TTSAuthenticationError, TTSRateLimitError, TTSNetworkError, TTSTimeoutError):
@@ -601,14 +687,37 @@ class OpenAITTSAdapter(OpenAIAdapter):
             raise
         except TTSProviderError as e:
             # Normalize to generation error for tests
-            raise TTSGenerationError(str(e), provider=self._provider_simple, details={"error_type": type(e).__name__}) from e
+            wrapper_error = TTSGenerationError(
+                "OpenAI TTS request failed",
+                provider=self._provider_simple,
+                details={"error_type": type(e).__name__},
+            )
         except Exception as e:
             if _is_httpx_exception(e):
-                raise TTSGenerationError(str(e), provider=self._provider_simple, details={"error_type": type(e).__name__}) from e
-            raise
+                wrapper_error = TTSGenerationError(
+                    "OpenAI TTS request failed",
+                    provider=self._provider_simple,
+                    details={"error_type": type(e).__name__},
+                )
+            else:
+                wrapper_error = TTSGenerationError(
+                    "OpenAI TTS request failed",
+                    provider=self._provider_simple,
+                    details={"error_type": type(e).__name__},
+                )
         finally:
             if old_model is not None:
                 self.model = old_model
+
+        if wrapper_error is not None:
+            raise_detached_error(wrapper_error)
+        if resp is None:
+            raise_detached_error(
+                TTSGenerationError(
+                    "OpenAI TTS request failed",
+                    provider=self._provider_simple,
+                )
+            )
 
         # Ensure test-expected fields/metadata
         resp.provider = self._provider_simple
@@ -623,10 +732,7 @@ class OpenAITTSAdapter(OpenAIAdapter):
         await self.validate_request(request)
         model = request.model or getattr(self, "model", "tts-1")
         voice = self.map_voice(request.voice or "alloy")
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
+        headers = self._request_headers()
         payload = {
             "model": model,
             "input": self.preprocess_text(request.text),
@@ -636,21 +742,25 @@ class OpenAITTSAdapter(OpenAIAdapter):
         }
 
         client = self.client
+        request_error: Optional[Exception] = None
         try:
-            async for chunk in astream_bytes(
-                method="POST",
-                url=self.base_url,
-                headers=headers,
-                json=payload,
-                client=client,
-            ):
-                if chunk:
-                    yield chunk
+            async with aclosing(
+                astream_bytes(
+                    method="POST",
+                    url=self.base_url,
+                    headers=headers,
+                    json=payload,
+                    client=client,
+                    sensitive_observability=True,
+                )
+            ) as stream:
+                async for chunk in stream:
+                    if chunk:
+                        yield chunk
         except Exception as e:
-            if isinstance(e, (CoreNetworkError, RetryExhaustedError)) or _is_httpx_exception(e):
-                # Wrap network/API issues as generation errors per tests
-                raise TTSGenerationError(str(e), provider=self._provider_simple) from e
-            raise
+            request_error = self._normalized_request_error(e)
+        if request_error is not None:
+            raise_detached_error(request_error)
 
     def get_info(self) -> dict[str, Any]:
         return {

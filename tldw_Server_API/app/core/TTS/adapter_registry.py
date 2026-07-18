@@ -48,6 +48,28 @@ _TTS_REGISTRY_ADAPTER_EXCEPTIONS: tuple[type[BaseException], ...] = (
     TTSError,
 ) + _TTS_REGISTRY_NONCRITICAL_EXCEPTIONS
 
+_AUTHORITATIVE_TTS_CREDENTIAL_KEYS = frozenset(
+    {
+        "api_key",
+        "openai_api_key",
+        "elevenlabs_api_key",
+        "base_url",
+        "openai_base_url",
+        "elevenlabs_base_url",
+        "api_base",
+        "api_base_url",
+        "api_ip",
+        "api_url",
+        "endpoint",
+        "runtime_endpoint",
+        "org_id",
+        "organization",
+        "organization_id",
+        "project",
+        "project_id",
+    }
+)
+
 
 def _safe_exception_label(exc: BaseException) -> str:
     """Return a non-sensitive exception identifier for logs."""
@@ -599,6 +621,13 @@ class TTSAdapterRegistry:
                 elif base_cfg is not None:
                     provider_cfg = model_dump_compat(base_cfg)
 
+        if isinstance(overrides, dict) and overrides.get("credentials_resolved") is True:
+            provider_cfg = {
+                key: value
+                for key, value in provider_cfg.items()
+                if key not in _AUTHORITATIVE_TTS_CREDENTIAL_KEYS
+            }
+
         if overrides:
             provider_cfg.update(overrides)
 
@@ -1146,6 +1175,7 @@ class TTSAdapterFactory:
         # OpenAI models
         "tts-1": TTSProvider.OPENAI,
         "tts-1-hd": TTSProvider.OPENAI,
+        "gpt-4o-mini-tts": TTSProvider.OPENAI,
 
         # Kokoro models
         "kokoro": TTSProvider.KOKORO,

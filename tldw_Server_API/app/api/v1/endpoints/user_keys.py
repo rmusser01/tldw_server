@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import copy
+import functools
 import hashlib
 import json
 import secrets
 import time
+from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, NoReturn
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -48,9 +51,16 @@ from tldw_Server_API.app.core.AuthNZ.byok_helpers import (
     validate_base_url_override,
     validate_credential_fields,
 )
-from tldw_Server_API.app.core.AuthNZ.byok_testing import test_provider_credentials
+from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
+    ByokResolutionError,
+    openai_credential_mutation_lock,
+    openai_oauth_refresh_state_generation,
+)
+from tldw_Server_API.app.core.AuthNZ.byok_testing import (
+    provider_validation_public_error,
+    test_provider_credentials,
+)
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
-from tldw_Server_API.app.core.AuthNZ.orgs_teams import list_memberships_for_user
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.repos.byok_oauth_state_repo import AuthnzByokOAuthStateRepo
 from tldw_Server_API.app.core.AuthNZ.repos.org_provider_secrets_repo import (
@@ -69,10 +79,11 @@ from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
     key_hint_for_api_key,
     loads_envelope,
 )
-from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
+from tldw_Server_API.app.core.exceptions import raise_detached_error
 from tldw_Server_API.app.core.http_client import RetryPolicy as _RetryPolicy
 from tldw_Server_API.app.core.http_client import afetch as _http_afetch
+from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
 from tldw_Server_API.app.core.Metrics import increment_counter, observe_histogram
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -85,11 +96,70 @@ _OPENAI_CREDENTIAL_VERSION = 2
 _OPENAI_DEFAULT_OAUTH_STATE_TTL_MINUTES = 10
 
 
+def _raise_provider_validation_http_error(exc: ChatAPIError) -> NoReturn:
+    """Raise one detached, bounded credential-validation HTTP error."""
+    public_error = provider_validation_public_error(exc)
+    raise_detached_error(
+        HTTPException(
+            status_code=public_error.status_code,
+            detail=public_error.message,
+        )
+    )
+
+
+def _raise_provider_alias_conflict_http_error(
+    exc: ProviderCredentialAliasConflictError,
+) -> NoReturn:
+    """Raise the detached public contract for legacy provider alias conflicts."""
+    del exc
+    raise_detached_error(
+        HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Conflicting provider credential aliases",
+        )
+    )
+
+
+def _provider_alias_conflict_boundary(
+    endpoint: Callable[..., Awaitable[Any]],
+) -> Callable[..., Awaitable[Any]]:
+    """Map repository alias conflicts at every user-credential endpoint."""
+
+    @functools.wraps(endpoint)
+    async def wrapped(*args: Any, **kwargs: Any) -> Any:
+        try:
+            return await endpoint(*args, **kwargs)
+        except ProviderCredentialAliasConflictError as exc:
+            _raise_provider_alias_conflict_http_error(exc)
+
+    return wrapped
+
+
 async def _get_user_repo() -> AuthnzUserProviderSecretsRepo:
     pool = await get_db_pool()
     repo = AuthnzUserProviderSecretsRepo(pool)
     await repo.ensure_tables()
     return repo
+
+
+@contextlib.asynccontextmanager
+async def _openai_mutation_repo(
+    *,
+    user_id: int,
+    user_repo: AuthnzUserProviderSecretsRepo,
+) -> AsyncIterator[AuthnzUserProviderSecretsRepo]:
+    """Yield the repository bound to the shared OpenAI row-mutation lock."""
+    try:
+        async with openai_credential_mutation_lock(
+            user_id=user_id,
+            provider=_OPENAI_PROVIDER,
+        ) as locked_repo:
+            yield locked_repo or user_repo
+    except ByokResolutionError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="OpenAI credential storage is temporarily unavailable",
+        ) from None
 
 
 async def _get_org_repo() -> AuthnzOrgProviderSecretsRepo:
@@ -716,6 +786,7 @@ def _user_row_openai_auth_source(user_row: dict[str, Any] | None) -> str | None:
     response_model=UserProviderKeyResponse,
     status_code=status.HTTP_200_OK,
 )
+@_provider_alias_conflict_boundary
 async def upsert_user_provider_key(
     payload: UserProviderKeyUpsertRequest,
     request: Request,
@@ -753,10 +824,13 @@ async def upsert_user_provider_key(
         if "base_url" in credential_fields:
             credential_fields["base_url"] = validate_base_url_override(credential_fields["base_url"])
     except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid provider credential fields",
-        ) from exc
+        del exc
+        raise_detached_error(
+            HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid provider credential fields",
+            )
+        )
 
     try:
         await test_provider_credentials(
@@ -766,65 +840,98 @@ async def upsert_user_provider_key(
             model=None,
         )
     except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Provider credential validation failed",
-        ) from exc
+        del exc
+        raise_detached_error(
+            HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Provider credential validation failed",
+            )
+        )
     except ChatAPIError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+        _raise_provider_validation_http_error(exc)
     except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Provider test call failed",
-        ) from exc
+        del exc
+        raise_detached_error(
+            HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Provider test call failed",
+            )
+        )
 
     user_id = _principal_user_id(principal)
     repo = await _get_user_repo()
-    now = datetime.now(timezone.utc)
-    existing_row = await repo.fetch_secret_for_user(user_id, provider_norm)
-    existing_payload = _extract_payload_from_row(existing_row)
-    metadata_to_store = payload.metadata
-    if metadata_to_store is None:
-        metadata_to_store = _row_metadata(existing_row)
-
     if provider_norm == _OPENAI_PROVIDER:
-        secret_payload = _coerce_openai_payload_v2(existing_payload)
-        credentials = _openai_credentials_map(secret_payload)
-        existing_api_blob = credentials.get(_OPENAI_SOURCE_API_KEY)
-        api_blob = dict(existing_api_blob) if isinstance(existing_api_blob, dict) else {}
-        api_blob["api_key"] = api_key
-        api_blob["stored_at"] = now.isoformat()
-        credentials[_OPENAI_SOURCE_API_KEY] = api_blob
-        secret_payload["credentials"] = credentials
-        if payload.credential_fields is not None:
-            if credential_fields:
-                secret_payload["credential_fields"] = credential_fields
-            else:
-                secret_payload.pop("credential_fields", None)
-        secret_payload["active_auth_source"] = _OPENAI_SOURCE_API_KEY
-        key_hint = key_hint_for_api_key(api_key)
+        async with _openai_mutation_repo(user_id=user_id, user_repo=repo) as mutation_repo:
+            now = datetime.now(timezone.utc)
+            existing_row = await mutation_repo.fetch_secret_for_user(user_id, provider_norm)
+            existing_payload = _extract_payload_from_row(existing_row)
+            metadata_to_store = payload.metadata
+            if metadata_to_store is None:
+                metadata_to_store = _row_metadata(existing_row)
+
+            secret_payload = _coerce_openai_payload_v2(existing_payload)
+            credentials = _openai_credentials_map(secret_payload)
+            existing_api_blob = credentials.get(_OPENAI_SOURCE_API_KEY)
+            api_blob = dict(existing_api_blob) if isinstance(existing_api_blob, dict) else {}
+            api_blob["api_key"] = api_key
+            api_blob["stored_at"] = now.isoformat()
+            credentials[_OPENAI_SOURCE_API_KEY] = api_blob
+            secret_payload["credentials"] = credentials
+            if payload.credential_fields is not None:
+                if credential_fields:
+                    secret_payload["credential_fields"] = credential_fields
+                else:
+                    secret_payload.pop("credential_fields", None)
+            secret_payload["active_auth_source"] = _OPENAI_SOURCE_API_KEY
+            key_hint = key_hint_for_api_key(api_key)
+            try:
+                envelope = encrypt_byok_payload(secret_payload)
+            except ValueError as exc:
+                del exc
+                raise_detached_error(
+                    HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail="BYOK encryption is not configured",
+                    )
+                )
+            row = await mutation_repo.upsert_secret(
+                user_id=user_id,
+                provider=provider_norm,
+                encrypted_blob=dumps_envelope(envelope),
+                key_hint=key_hint,
+                metadata=metadata_to_store,
+                updated_at=now,
+                created_by=user_id,
+                updated_by=user_id,
+            )
     else:
+        now = datetime.now(timezone.utc)
+        existing_row = await repo.fetch_secret_for_user(user_id, provider_norm)
+        metadata_to_store = payload.metadata
+        if metadata_to_store is None:
+            metadata_to_store = _row_metadata(existing_row)
         secret_payload = build_secret_payload(api_key, credential_fields or None)
         key_hint = key_hint_for_api_key(api_key)
-
-    try:
-        envelope = encrypt_byok_payload(secret_payload)
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="BYOK encryption is not configured",
-        ) from exc
-
-    row = await repo.upsert_secret(
-        user_id=user_id,
-        provider=provider_norm,
-        encrypted_blob=dumps_envelope(envelope),
-        key_hint=key_hint,
-        metadata=metadata_to_store,
-        updated_at=now,
-        created_by=user_id,
-        updated_by=user_id,
-    )
+        try:
+            envelope = encrypt_byok_payload(secret_payload)
+        except ValueError as exc:
+            del exc
+            raise_detached_error(
+                HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="BYOK encryption is not configured",
+                )
+            )
+        row = await repo.upsert_secret(
+            user_id=user_id,
+            provider=provider_norm,
+            encrypted_blob=dumps_envelope(envelope),
+            key_hint=key_hint,
+            metadata=metadata_to_store,
+            updated_at=now,
+            created_by=user_id,
+            updated_by=user_id,
+        )
     return UserProviderKeyResponse(
         provider=provider_norm,
         key_hint=row.get("key_hint") or key_hint,
@@ -833,6 +940,7 @@ async def upsert_user_provider_key(
 
 
 @router.get("/keys", response_model=UserProviderKeysResponse)
+@_provider_alias_conflict_boundary
 async def list_user_provider_keys(
     request: Request,
     principal: AuthPrincipal = Depends(get_auth_principal),
@@ -850,10 +958,7 @@ async def list_user_provider_keys(
             include_revoked=True,
         )
     except ProviderCredentialAliasConflictError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Conflicting provider credential aliases",
-        ) from exc
+        _raise_provider_alias_conflict_http_error(exc)
     user_keys = {row.get("provider"): row for row in user_rows}
     openai_user_full_row: dict[str, Any] | None = None
     if (
@@ -866,10 +971,7 @@ async def list_user_provider_keys(
                 _OPENAI_PROVIDER,
             )
         except ProviderCredentialAliasConflictError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Conflicting provider credential aliases",
-            ) from exc
+            _raise_provider_alias_conflict_http_error(exc)
 
     _, team_scope_ids, org_scope_ids, _ = derive_trusted_credential_scope(
         request,
@@ -902,10 +1004,7 @@ async def list_user_provider_keys(
                     shared_keys[provider] = row
                     shared_sources[provider] = "org"
     except ProviderCredentialAliasConflictError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Conflicting provider credential aliases",
-        ) from exc
+        _raise_provider_alias_conflict_http_error(exc)
 
     providers = sorted(set(allowlist) | set(user_keys.keys()) | set(shared_keys.keys()))
     items: list[UserProviderKeyStatusItem] = []
@@ -990,6 +1089,7 @@ async def list_user_provider_keys(
 
 
 @router.post("/keys/test", response_model=ProviderKeyTestResponse)
+@_provider_alias_conflict_boundary
 async def test_user_provider_key(
     payload: ProviderKeyTestRequest,
     request: Request,
@@ -1032,10 +1132,13 @@ async def test_user_provider_key(
         if "base_url" in credential_fields:
             credential_fields["base_url"] = validate_base_url_override(credential_fields["base_url"])
     except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid provider credential fields",
-        ) from exc
+        del exc
+        raise_detached_error(
+            HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid provider credential fields",
+            )
+        )
 
     try:
         model_used = await test_provider_credentials(
@@ -1045,17 +1148,23 @@ async def test_user_provider_key(
             model=payload.model,
         )
     except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Provider credential validation failed",
-        ) from exc
+        del exc
+        raise_detached_error(
+            HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Provider credential validation failed",
+            )
+        )
     except ChatAPIError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+        _raise_provider_validation_http_error(exc)
     except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Provider test call failed",
-        ) from exc
+        del exc
+        raise_detached_error(
+            HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Provider test call failed",
+            )
+        )
 
     await _touch_user_last_used_if_match(
         repo,
@@ -1092,10 +1201,13 @@ async def authorize_openai_oauth(
             allow_base_url=False,
         )
     except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid OpenAI OAuth credential fields",
-        ) from exc
+        del exc
+        raise_detached_error(
+            HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid OpenAI OAuth credential fields",
+            )
+        )
 
     allowed_prefixes = _normalize_openai_return_path_prefixes(
         getattr(settings, "OPENAI_OAUTH_ALLOWED_RETURN_PATH_PREFIXES", ["/"])
@@ -1128,10 +1240,13 @@ async def authorize_openai_oauth(
     try:
         encrypted_state_blob = dumps_envelope(encrypt_byok_payload(state_blob))
     except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="BYOK encryption is not configured",
-        ) from exc
+        del exc
+        raise_detached_error(
+            HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="BYOK encryption is not configured",
+            )
+        )
 
     state_repo = await _get_oauth_state_repo()
     await state_repo.enforce_outstanding_cap(
@@ -1200,6 +1315,7 @@ async def authorize_openai_oauth(
         },
     },
 )
+@_provider_alias_conflict_boundary
 async def callback_openai_oauth(
     request: Request,
     code: str,
@@ -1268,10 +1384,13 @@ async def callback_openai_oauth(
             state_secret = decrypt_byok_payload(loads_envelope(encrypted_pkce_blob))
         except Exception as exc:
             failure_reason = "state_verifier_decrypt_failed"
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="OAuth state verifier could not be decrypted",
-            ) from exc
+            del exc
+            raise_detached_error(
+                HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="OAuth state verifier could not be decrypted",
+                )
+            )
 
         if not isinstance(state_secret, dict):
             failure_reason = "invalid_state_verifier_payload"
@@ -1296,10 +1415,13 @@ async def callback_openai_oauth(
                 allow_base_url=False,
             )
         except ValueError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid OpenAI OAuth credential fields",
-            ) from exc
+            del exc
+            raise_detached_error(
+                HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid OpenAI OAuth credential fields",
+                )
+            )
         failure_reason = None
 
         token_url = _coerce_nonempty_string(getattr(settings, "OPENAI_OAUTH_TOKEN_URL", None))
@@ -1351,72 +1473,82 @@ async def callback_openai_oauth(
                 model=None,
             )
         except ValueError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Provider credential validation failed",
-            ) from exc
+            del exc
+            raise_detached_error(
+                HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Provider credential validation failed",
+                )
+            )
         except ChatAPIError as exc:
-            raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+            _raise_provider_validation_http_error(exc)
         except Exception as exc:
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail="Provider test call failed",
-            ) from exc
+            del exc
+            raise_detached_error(
+                HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail="Provider test call failed",
+                )
+            )
         failure_reason = None
 
         user_repo = await _get_user_repo()
-        existing_row = await user_repo.fetch_secret_for_user(user_id, _OPENAI_PROVIDER)
-        existing_payload = _extract_payload_from_row(existing_row)
-        merged_payload = _coerce_openai_payload_v2(existing_payload)
-        credentials = _openai_credentials_map(merged_payload)
+        async with _openai_mutation_repo(user_id=user_id, user_repo=user_repo) as mutation_repo:
+            existing_row = await mutation_repo.fetch_secret_for_user(user_id, _OPENAI_PROVIDER)
+            existing_payload = _extract_payload_from_row(existing_row)
+            merged_payload = _coerce_openai_payload_v2(existing_payload)
+            credentials = _openai_credentials_map(merged_payload)
 
-        oauth_payload = {
-            "access_token": access_token,
-            "token_type": token_type,
-            "issued_at": now.isoformat(),
-        }
-        if refresh_token:
-            oauth_payload["refresh_token"] = refresh_token
-        if scope:
-            oauth_payload["scope"] = scope
-        if expires_at is not None:
-            oauth_payload["expires_at"] = expires_at.isoformat()
-        if subject:
-            oauth_payload["subject"] = subject
-        credentials[_OPENAI_SOURCE_OAUTH] = oauth_payload
-        merged_payload["credentials"] = credentials
-        merged_payload["active_auth_source"] = _OPENAI_SOURCE_OAUTH
+            oauth_payload = {
+                "access_token": access_token,
+                "token_type": token_type,
+                "issued_at": now.isoformat(),
+            }
+            if refresh_token:
+                oauth_payload["refresh_token"] = refresh_token
+            if scope:
+                oauth_payload["scope"] = scope
+            if expires_at is not None:
+                oauth_payload["expires_at"] = expires_at.isoformat()
+            if subject:
+                oauth_payload["subject"] = subject
+            credentials[_OPENAI_SOURCE_OAUTH] = oauth_payload
+            merged_payload["credentials"] = credentials
+            merged_payload["active_auth_source"] = _OPENAI_SOURCE_OAUTH
 
-        existing_credential_fields = _openai_payload_credential_fields(merged_payload)
-        if state_credential_fields:
-            merged_fields = dict(existing_credential_fields)
-            merged_fields.update(state_credential_fields)
-            merged_payload["credential_fields"] = merged_fields
-        elif existing_credential_fields:
-            merged_payload["credential_fields"] = existing_credential_fields
+            existing_credential_fields = _openai_payload_credential_fields(merged_payload)
+            if state_credential_fields:
+                merged_fields = dict(existing_credential_fields)
+                merged_fields.update(state_credential_fields)
+                merged_payload["credential_fields"] = merged_fields
+            elif existing_credential_fields:
+                merged_payload["credential_fields"] = existing_credential_fields
 
-        metadata_to_store = _row_metadata(existing_row)
-        try:
-            failure_reason = "payload_encrypt_failed"
-            envelope = encrypt_byok_payload(merged_payload)
-        except ValueError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="BYOK encryption is not configured",
-            ) from exc
-        failure_reason = None
+            metadata_to_store = _row_metadata(existing_row)
+            try:
+                failure_reason = "payload_encrypt_failed"
+                envelope = encrypt_byok_payload(merged_payload)
+            except ValueError as exc:
+                del exc
+                raise_detached_error(
+                    HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail="BYOK encryption is not configured",
+                    )
+                )
+            failure_reason = None
 
-        failure_reason = "payload_persist_failed"
-        row = await user_repo.upsert_secret(
-            user_id=user_id,
-            provider=_OPENAI_PROVIDER,
-            encrypted_blob=dumps_envelope(envelope),
-            key_hint=_OPENAI_OAUTH_HINT,
-            metadata=metadata_to_store,
-            updated_at=now,
-            created_by=user_id,
-            updated_by=user_id,
-        )
+            failure_reason = "payload_persist_failed"
+            row = await mutation_repo.upsert_secret(
+                user_id=user_id,
+                provider=_OPENAI_PROVIDER,
+                encrypted_blob=dumps_envelope(envelope),
+                key_hint=_OPENAI_OAUTH_HINT,
+                metadata=metadata_to_store,
+                updated_at=now,
+                created_by=user_id,
+                updated_by=user_id,
+            )
         failure_reason = None
 
         _record_openai_oauth_counter(
@@ -1469,6 +1601,7 @@ async def callback_openai_oauth(
     "/keys/openai/oauth/status",
     response_model=OpenAIOAuthStatusResponse,
 )
+@_provider_alias_conflict_boundary
 async def openai_oauth_status(
     principal: AuthPrincipal = Depends(get_auth_principal),
 ) -> OpenAIOAuthStatusResponse:
@@ -1515,6 +1648,7 @@ async def openai_oauth_status(
     response_model=OpenAIOAuthRefreshResponse,
     status_code=status.HTTP_200_OK,
 )
+@_provider_alias_conflict_boundary
 async def refresh_openai_oauth(
     request: Request,
     principal: AuthPrincipal = Depends(get_auth_principal),
@@ -1526,19 +1660,17 @@ async def refresh_openai_oauth(
         settings = _require_openai_oauth_settings()
         user_id = _principal_user_id(principal)
         user_repo = await _get_user_repo()
-        row = await user_repo.fetch_secret_for_user(user_id, _OPENAI_PROVIDER)
-        if not row:
+        initial_row = await user_repo.fetch_secret_for_user(user_id, _OPENAI_PROVIDER)
+        if not initial_row:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Key not found")
 
-        existing_payload = _extract_payload_from_row(row)
-        if not existing_payload:
+        initial_payload = _extract_payload_from_row(initial_row)
+        if not initial_payload:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="OAuth credential not found")
-
-        merged_payload = _coerce_openai_payload_v2(existing_payload)
-        oauth_payload = _openai_source_payload(merged_payload, _OPENAI_SOURCE_OAUTH)
-        refresh_token = _coerce_nonempty_string(oauth_payload.get("refresh_token"))
-        if not refresh_token:
+        initial_payload = _coerce_openai_payload_v2(initial_payload)
+        if not _v2_payload_oauth_refresh_token(initial_payload):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="OAuth credential not found")
+        initial_generation = openai_oauth_refresh_state_generation(initial_payload)
 
         token_url = _coerce_nonempty_string(getattr(settings, "OPENAI_OAUTH_TOKEN_URL", None))
         client_id = _coerce_nonempty_string(getattr(settings, "OPENAI_OAUTH_CLIENT_ID", None))
@@ -1549,90 +1681,119 @@ async def refresh_openai_oauth(
                 detail="OpenAI OAuth is not fully configured",
             )
 
-        token_payload = await _openai_oauth_token_exchange(
-            token_url=token_url,
-            form_data={
-                "grant_type": "refresh_token",
-                "refresh_token": refresh_token,
-                "client_id": client_id,
-                "client_secret": client_secret,
-            },
-        )
-
-        access_token = _coerce_nonempty_string(token_payload.get("access_token"))
-        if not access_token:
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail="OpenAI OAuth token response is missing access_token",
-            )
-
-        next_refresh_token = _coerce_nonempty_string(token_payload.get("refresh_token")) or refresh_token
-        token_type = (
-            _coerce_nonempty_string(token_payload.get("token_type")) or oauth_payload.get("token_type") or "Bearer"
-        )
-        scope = _coerce_nonempty_string(token_payload.get("scope")) or _coerce_nonempty_string(
-            oauth_payload.get("scope")
-        )
-        expires_in = _extract_positive_int(token_payload.get("expires_in"))
-        now = datetime.now(timezone.utc)
-        expires_at = now + timedelta(seconds=expires_in) if expires_in else None
-
-        updated_oauth_payload = dict(oauth_payload)
-        updated_oauth_payload["access_token"] = access_token
-        updated_oauth_payload["refresh_token"] = next_refresh_token
-        updated_oauth_payload["token_type"] = token_type
-        updated_oauth_payload["issued_at"] = now.isoformat()
-        if scope:
-            updated_oauth_payload["scope"] = scope
-        if expires_at is not None:
-            updated_oauth_payload["expires_at"] = expires_at.isoformat()
-        else:
-            updated_oauth_payload.pop("expires_at", None)
-
-        credentials = _openai_credentials_map(merged_payload)
-        credentials[_OPENAI_SOURCE_OAUTH] = updated_oauth_payload
-        merged_payload["credentials"] = credentials
-
-        active_source = _payload_active_auth_source(merged_payload)
-        if active_source not in {_OPENAI_SOURCE_API_KEY, _OPENAI_SOURCE_OAUTH}:
-            active_source = (
-                _OPENAI_SOURCE_API_KEY
-                if _v2_source_available(merged_payload, _OPENAI_SOURCE_API_KEY)
-                else _OPENAI_SOURCE_OAUTH
-            )
-        merged_payload["active_auth_source"] = active_source
-
-        metadata_to_store = _row_metadata(row)
-        key_hint = _payload_key_hint(merged_payload) or row.get("key_hint") or _OPENAI_OAUTH_HINT
-        try:
-            envelope = encrypt_byok_payload(merged_payload)
-        except ValueError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="BYOK encryption is not configured",
-            ) from exc
-
-        updated = await user_repo.update_secret_if_active_and_unchanged(
+        async with _openai_mutation_repo(
             user_id=user_id,
-            provider=_OPENAI_PROVIDER,
-            encrypted_blob=dumps_envelope(envelope),
-            expected_encrypted_blob=str(row.get("encrypted_blob") or ""),
-            key_hint=key_hint,
-            metadata=metadata_to_store,
-            updated_at=now,
-            updated_by=user_id,
-        )
-        if not updated:
-            latest_row = await user_repo.fetch_secret_for_user(user_id, _OPENAI_PROVIDER)
-            if not latest_row or not _v2_payload_oauth_refresh_token(_extract_payload_from_row(latest_row)):
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="OAuth credential not found",
+            user_repo=user_repo,
+        ) as mutation_repo:
+            row = await mutation_repo.fetch_secret_for_user(user_id, _OPENAI_PROVIDER)
+            if not row:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Key not found")
+
+            existing_payload = _extract_payload_from_row(row)
+            if not existing_payload:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="OAuth credential not found")
+
+            merged_payload = _coerce_openai_payload_v2(existing_payload)
+            oauth_payload = _openai_source_payload(merged_payload, _OPENAI_SOURCE_OAUTH)
+            refresh_token = _coerce_nonempty_string(oauth_payload.get("refresh_token"))
+            if not refresh_token:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="OAuth credential not found")
+
+            if openai_oauth_refresh_state_generation(merged_payload) != initial_generation:
+                now = _parse_iso_datetime(row.get("updated_at")) or datetime.now(timezone.utc)
+                scope = _coerce_nonempty_string(oauth_payload.get("scope"))
+                expires_at = _parse_iso_datetime(oauth_payload.get("expires_at"))
+                active_source = _payload_active_auth_source(merged_payload) or _OPENAI_SOURCE_OAUTH
+            else:
+                token_payload = await _openai_oauth_token_exchange(
+                    token_url=token_url,
+                    form_data={
+                        "grant_type": "refresh_token",
+                        "refresh_token": refresh_token,
+                        "client_id": client_id,
+                        "client_secret": client_secret,
+                    },
                 )
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="OAuth credential changed during refresh",
-            )
+
+                access_token = _coerce_nonempty_string(token_payload.get("access_token"))
+                if not access_token:
+                    raise HTTPException(
+                        status_code=status.HTTP_502_BAD_GATEWAY,
+                        detail="OpenAI OAuth token response is missing access_token",
+                    )
+
+                next_refresh_token = _coerce_nonempty_string(token_payload.get("refresh_token")) or refresh_token
+                token_type = (
+                    _coerce_nonempty_string(token_payload.get("token_type"))
+                    or oauth_payload.get("token_type")
+                    or "Bearer"
+                )
+                scope = _coerce_nonempty_string(token_payload.get("scope")) or _coerce_nonempty_string(
+                    oauth_payload.get("scope")
+                )
+                expires_in = _extract_positive_int(token_payload.get("expires_in"))
+                now = datetime.now(timezone.utc)
+                expires_at = now + timedelta(seconds=expires_in) if expires_in else None
+
+                updated_oauth_payload = dict(oauth_payload)
+                updated_oauth_payload["access_token"] = access_token
+                updated_oauth_payload["refresh_token"] = next_refresh_token
+                updated_oauth_payload["token_type"] = token_type
+                updated_oauth_payload["issued_at"] = now.isoformat()
+                if scope:
+                    updated_oauth_payload["scope"] = scope
+                if expires_at is not None:
+                    updated_oauth_payload["expires_at"] = expires_at.isoformat()
+                else:
+                    updated_oauth_payload.pop("expires_at", None)
+
+                credentials = _openai_credentials_map(merged_payload)
+                credentials[_OPENAI_SOURCE_OAUTH] = updated_oauth_payload
+                merged_payload["credentials"] = credentials
+
+                active_source = _payload_active_auth_source(merged_payload)
+                if active_source not in {_OPENAI_SOURCE_API_KEY, _OPENAI_SOURCE_OAUTH}:
+                    active_source = (
+                        _OPENAI_SOURCE_API_KEY
+                        if _v2_source_available(merged_payload, _OPENAI_SOURCE_API_KEY)
+                        else _OPENAI_SOURCE_OAUTH
+                    )
+                merged_payload["active_auth_source"] = active_source
+
+                metadata_to_store = _row_metadata(row)
+                key_hint = _payload_key_hint(merged_payload) or row.get("key_hint") or _OPENAI_OAUTH_HINT
+                try:
+                    envelope = encrypt_byok_payload(merged_payload)
+                except ValueError as exc:
+                    del exc
+                    raise_detached_error(
+                        HTTPException(
+                            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail="BYOK encryption is not configured",
+                        )
+                    )
+
+                updated = await mutation_repo.update_secret_if_active_and_unchanged(
+                    user_id=user_id,
+                    provider=_OPENAI_PROVIDER,
+                    encrypted_blob=dumps_envelope(envelope),
+                    expected_encrypted_blob=str(row.get("encrypted_blob") or ""),
+                    key_hint=key_hint,
+                    metadata=metadata_to_store,
+                    updated_at=now,
+                    updated_by=user_id,
+                )
+                if not updated:
+                    latest_row = await mutation_repo.fetch_secret_for_user(user_id, _OPENAI_PROVIDER)
+                    if not latest_row or not _v2_payload_oauth_refresh_token(_extract_payload_from_row(latest_row)):
+                        raise HTTPException(
+                            status_code=status.HTTP_404_NOT_FOUND,
+                            detail="OAuth credential not found",
+                        )
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="OAuth credential changed during refresh",
+                    )
         refresh_outcome = "success"
         await _emit_openai_oauth_audit_event(
             user_id=user_id,
@@ -1689,6 +1850,7 @@ async def refresh_openai_oauth(
     status_code=status.HTTP_204_NO_CONTENT,
     response_class=Response,
 )
+@_provider_alias_conflict_boundary
 async def disconnect_openai_oauth(
     request: Request,
     principal: AuthPrincipal = Depends(get_auth_principal),
@@ -1696,68 +1858,64 @@ async def disconnect_openai_oauth(
     _require_openai_oauth_settings()
     user_id = _principal_user_id(principal)
     user_repo = await _get_user_repo()
-    row = await user_repo.fetch_secret_for_user(user_id, _OPENAI_PROVIDER)
-    if not row:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="OAuth credential not found")
+    async with _openai_mutation_repo(user_id=user_id, user_repo=user_repo) as mutation_repo:
+        row = await mutation_repo.fetch_secret_for_user(user_id, _OPENAI_PROVIDER)
+        if not row:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="OAuth credential not found")
 
-    existing_payload = _extract_payload_from_row(row)
-    if not existing_payload:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="OAuth credential not found")
+        existing_payload = _extract_payload_from_row(row)
+        if not existing_payload:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="OAuth credential not found")
 
-    merged_payload = _coerce_openai_payload_v2(existing_payload)
-    credentials = _openai_credentials_map(merged_payload)
-    if _OPENAI_SOURCE_OAUTH not in credentials:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="OAuth credential not found")
+        merged_payload = _coerce_openai_payload_v2(existing_payload)
+        credentials = _openai_credentials_map(merged_payload)
+        if _OPENAI_SOURCE_OAUTH not in credentials:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="OAuth credential not found")
 
-    credentials.pop(_OPENAI_SOURCE_OAUTH, None)
-    merged_payload["credentials"] = credentials
-    now = datetime.now(timezone.utc)
+        credentials.pop(_OPENAI_SOURCE_OAUTH, None)
+        merged_payload["credentials"] = credentials
+        now = datetime.now(timezone.utc)
 
-    if _v2_source_available(merged_payload, _OPENAI_SOURCE_API_KEY):
-        merged_payload["active_auth_source"] = _OPENAI_SOURCE_API_KEY
-        metadata_to_store = _row_metadata(row)
-        key_hint = _payload_key_hint(merged_payload) or row.get("key_hint") or ""
-        try:
-            envelope = encrypt_byok_payload(merged_payload)
-        except ValueError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="BYOK encryption is not configured",
-            ) from exc
-        await user_repo.upsert_secret(
-            user_id=user_id,
-            provider=_OPENAI_PROVIDER,
-            encrypted_blob=dumps_envelope(envelope),
-            key_hint=key_hint,
-            metadata=metadata_to_store,
-            updated_at=now,
-            created_by=user_id,
-            updated_by=user_id,
-        )
-        await _emit_openai_oauth_audit_event(
-            user_id=user_id,
-            action="provider_oauth_disconnected",
-            request=request,
-            metadata={
-                "fallback_auth_source": _OPENAI_SOURCE_API_KEY,
-                "credential_removed": _OPENAI_SOURCE_OAUTH,
-            },
-        )
-        return Response(status_code=status.HTTP_204_NO_CONTENT)
-
-    deleted = await user_repo.delete_secret(
-        user_id,
-        _OPENAI_PROVIDER,
-        revoked_by=user_id,
-    )
-    if not deleted:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="OAuth credential not found")
+        if _v2_source_available(merged_payload, _OPENAI_SOURCE_API_KEY):
+            merged_payload["active_auth_source"] = _OPENAI_SOURCE_API_KEY
+            metadata_to_store = _row_metadata(row)
+            key_hint = _payload_key_hint(merged_payload) or row.get("key_hint") or ""
+            try:
+                envelope = encrypt_byok_payload(merged_payload)
+            except ValueError as exc:
+                del exc
+                raise_detached_error(
+                    HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail="BYOK encryption is not configured",
+                    )
+                )
+            await mutation_repo.upsert_secret(
+                user_id=user_id,
+                provider=_OPENAI_PROVIDER,
+                encrypted_blob=dumps_envelope(envelope),
+                key_hint=key_hint,
+                metadata=metadata_to_store,
+                updated_at=now,
+                created_by=user_id,
+                updated_by=user_id,
+            )
+            fallback_source = _OPENAI_SOURCE_API_KEY
+        else:
+            deleted = await mutation_repo.delete_secret(
+                user_id,
+                _OPENAI_PROVIDER,
+                revoked_by=user_id,
+            )
+            if not deleted:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="OAuth credential not found")
+            fallback_source = "none"
     await _emit_openai_oauth_audit_event(
         user_id=user_id,
         action="provider_oauth_disconnected",
         request=request,
         metadata={
-            "fallback_auth_source": "none",
+            "fallback_auth_source": fallback_source,
             "credential_removed": _OPENAI_SOURCE_OAUTH,
         },
     )
@@ -1769,6 +1927,7 @@ async def disconnect_openai_oauth(
     response_model=OpenAICredentialSourceSwitchResponse,
     status_code=status.HTTP_200_OK,
 )
+@_provider_alias_conflict_boundary
 async def switch_openai_credential_source(
     payload: OpenAICredentialSourceSwitchRequest,
     request: Request,
@@ -1777,58 +1936,62 @@ async def switch_openai_credential_source(
     _require_openai_oauth_settings()
     user_id = _principal_user_id(principal)
     user_repo = await _get_user_repo()
-    row = await user_repo.fetch_secret_for_user(user_id, _OPENAI_PROVIDER)
-    if not row:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Key not found")
+    async with _openai_mutation_repo(user_id=user_id, user_repo=user_repo) as mutation_repo:
+        row = await mutation_repo.fetch_secret_for_user(user_id, _OPENAI_PROVIDER)
+        if not row:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Key not found")
 
-    existing_payload = _extract_payload_from_row(row)
-    if not existing_payload:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Key not found")
+        existing_payload = _extract_payload_from_row(row)
+        if not existing_payload:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Key not found")
 
-    merged_payload = _coerce_openai_payload_v2(existing_payload)
-    requested_source = payload.auth_source
-    if requested_source == _OPENAI_SOURCE_OAUTH:
-        available = _v2_source_available(
-            merged_payload,
-            _OPENAI_SOURCE_OAUTH,
-            require_access_for_oauth=True,
+        merged_payload = _coerce_openai_payload_v2(existing_payload)
+        requested_source = payload.auth_source
+        if requested_source == _OPENAI_SOURCE_OAUTH:
+            available = _v2_source_available(
+                merged_payload,
+                _OPENAI_SOURCE_OAUTH,
+                require_access_for_oauth=True,
+            )
+            if not available:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Requested auth source is unavailable",
+                )
+        elif requested_source == _OPENAI_SOURCE_API_KEY:
+            available = _v2_source_available(merged_payload, _OPENAI_SOURCE_API_KEY)
+            if not available:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Requested auth source is unavailable",
+                )
+
+        merged_payload["active_auth_source"] = requested_source
+        key_hint = _payload_key_hint(merged_payload) or row.get("key_hint") or ""
+        metadata_to_store = _row_metadata(row)
+        now = datetime.now(timezone.utc)
+
+        try:
+            envelope = encrypt_byok_payload(merged_payload)
+        except ValueError as exc:
+            del exc
+            raise_detached_error(
+                HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="BYOK encryption is not configured",
+                )
+            )
+
+        updated_row = await mutation_repo.upsert_secret(
+            user_id=user_id,
+            provider=_OPENAI_PROVIDER,
+            encrypted_blob=dumps_envelope(envelope),
+            key_hint=key_hint,
+            metadata=metadata_to_store,
+            updated_at=now,
+            created_by=user_id,
+            updated_by=user_id,
         )
-        if not available:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Requested auth source is unavailable",
-            )
-    elif requested_source == _OPENAI_SOURCE_API_KEY:
-        available = _v2_source_available(merged_payload, _OPENAI_SOURCE_API_KEY)
-        if not available:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Requested auth source is unavailable",
-            )
-
-    merged_payload["active_auth_source"] = requested_source
-    key_hint = _payload_key_hint(merged_payload) or row.get("key_hint") or ""
-    metadata_to_store = _row_metadata(row)
-    now = datetime.now(timezone.utc)
-
-    try:
-        envelope = encrypt_byok_payload(merged_payload)
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="BYOK encryption is not configured",
-        ) from exc
-
-    updated_row = await user_repo.upsert_secret(
-        user_id=user_id,
-        provider=_OPENAI_PROVIDER,
-        encrypted_blob=dumps_envelope(envelope),
-        key_hint=key_hint,
-        metadata=metadata_to_store,
-        updated_at=now,
-        created_by=user_id,
-        updated_by=user_id,
-    )
     await _emit_openai_oauth_audit_event(
         user_id=user_id,
         action="provider_oauth_source_switched",
@@ -1847,6 +2010,7 @@ async def switch_openai_credential_source(
     status_code=status.HTTP_204_NO_CONTENT,
     response_class=Response,
 )
+@_provider_alias_conflict_boundary
 async def delete_user_provider_key(
     provider: str,
     principal: AuthPrincipal = Depends(get_auth_principal),
@@ -1855,11 +2019,19 @@ async def delete_user_provider_key(
     user_id = _principal_user_id(principal)
     provider_norm = canonical_provider_name(provider)
     repo = await _get_user_repo()
-    deleted = await repo.delete_secret(
-        user_id,
-        provider_norm,
-        revoked_by=user_id,
-    )
+    if provider_norm == _OPENAI_PROVIDER:
+        async with _openai_mutation_repo(user_id=user_id, user_repo=repo) as mutation_repo:
+            deleted = await mutation_repo.delete_secret(
+                user_id,
+                provider_norm,
+                revoked_by=user_id,
+            )
+    else:
+        deleted = await repo.delete_secret(
+            user_id,
+            provider_norm,
+            revoked_by=user_id,
+        )
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Key not found")
     return Response(status_code=status.HTTP_204_NO_CONTENT)

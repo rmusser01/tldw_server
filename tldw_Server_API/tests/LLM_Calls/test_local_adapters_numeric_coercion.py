@@ -85,6 +85,7 @@ def test_kobold_coerces_numeric_types():
     }
 
     captured_payload = {}
+    captured_timeout = None
     lifecycle = {"status_checked": False, "closed": False}
 
     class Dummy:
@@ -100,9 +101,11 @@ def test_kobold_coerces_numeric_types():
             lifecycle["closed"] = True
 
     def fake_fetch(method, url, headers=None, json=None, retry=None, **_kwargs):
+        nonlocal captured_timeout
         captured_payload.clear()
         if json:
             captured_payload.update(json)
+        captured_timeout = _kwargs.get("timeout")
         return Dummy()
 
     endpoint = fake_settings["kobold_api"]["api_ip"]
@@ -113,10 +116,12 @@ def test_kobold_coerces_numeric_types():
         http_fetcher=fake_fetch,
         configured_endpoint_base_url=endpoint,
         configured_endpoint_scope=ConfiguredEndpointScope.from_url(endpoint),
+        credentials_resolved=True,
     )
 
     assert isinstance(captured_payload.get("top_p"), float)
     assert captured_payload.get("top_p") == 0.92
     assert isinstance(captured_payload.get("top_k"), int)
     assert captured_payload.get("top_k") == 80
+    assert captured_timeout == 180
     assert lifecycle == {"status_checked": True, "closed": True}

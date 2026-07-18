@@ -588,7 +588,7 @@ async def test_sensitive_async_aiohttp_suppresses_auto_instrumentation_and_logs_
 
 
 @pytest.mark.asyncio
-async def test_sensitive_async_otel_suppression_resets_after_transport_failure_and_cancellation(
+async def test_sensitive_async_otel_suppression_resets_after_transport_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     endpoint = "http://93.184.216.34/runtime-secret-path/embeddings"
@@ -618,9 +618,131 @@ async def test_sensitive_async_otel_suppression_resets_after_transport_failure_a
     assert failure_states == [True]
     assert otel_context.get_value(otel_context._SUPPRESS_HTTP_INSTRUMENTATION_KEY) is None
 
+
+@pytest.mark.asyncio
+async def test_sensitive_apost_suppresses_transport_url_logs_and_resets_context() -> None:
+    endpoint = "http://93.184.216.34:8443/tts-secret/audio?credential=private"
+    observed_requests: list[str] = []
+    suppression_states: list[object] = []
+    stdlib_messages: list[str] = []
+    transport_logger = logging.getLogger("httpx")
+
+    class CaptureHandler(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            stdlib_messages.append(record.getMessage())
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        observed_requests.append(str(request.url))
+        suppression_states.append(
+            otel_context.get_value(otel_context._SUPPRESS_HTTP_INSTRUMENTATION_KEY)
+        )
+        transport_logger.debug("httpx request %s", request.url)
+        return httpx.Response(200, request=request, content=b"audio")
+
+    capture_handler = CaptureHandler()
+    transport_logger.addHandler(capture_handler)
+    transport_logger.setLevel(logging.DEBUG)
+    transport_logger.propagate = False
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    try:
+        response = await http_client.apost(
+            url=endpoint,
+            client=client,
+            sensitive_observability=True,
+        )
+    finally:
+        await client.aclose()
+        transport_logger.removeHandler(capture_handler)
+
+    assert response.status_code == 200
+    assert observed_requests == [endpoint]
+    assert suppression_states == [True]
+    assert endpoint not in "\n".join(stdlib_messages)
+    assert http_client._SENSITIVE_HTTP_LOG_CONTEXT.get() is False
+    assert otel_context.get_value(otel_context._SUPPRESS_HTTP_INSTRUMENTATION_KEY) is None
+
+
+@pytest.mark.asyncio
+async def test_sensitive_async_byte_stream_redacts_retry_metrics_traces_logs_and_auto_instrumentation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    endpoint = "http://93.184.216.34:8443/tts-secret/audio?credential=private"
+    observed_requests: list[str] = []
+    suppression_states: list[object] = []
+    metrics = _MetricRecorder()
+    traces = _TraceRecorder()
+    log_records: list[dict[str, Any]] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        observed_requests.append(str(request.url))
+        suppression_states.append(
+            otel_context.get_value(otel_context._SUPPRESS_HTTP_INSTRUMENTATION_KEY)
+        )
+        status = 500 if len(observed_requests) == 1 else 200
+        return httpx.Response(status, request=request, content=b"audio" if status == 200 else b"")
+
+    async def no_sleep(_delay: float) -> None:
+        return None
+
+    monkeypatch.setattr(http_client, "get_metrics_registry", lambda: metrics)
+    monkeypatch.setattr(http_client, "get_tracing_manager", lambda: traces)
+    monkeypatch.setattr(http_client.asyncio, "sleep", no_sleep)
+    sink_id = logger.add(lambda message: log_records.append(dict(message.record)), level="DEBUG")
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+    chunks: list[bytes] = []
+    try:
+        async for chunk in http_client.astream_bytes(
+            method="POST",
+            url=endpoint,
+            client=client,
+            retry=http_client.RetryPolicy(
+                attempts=2,
+                backoff_base_ms=1,
+                retry_on_unsafe=True,
+            ),
+            sensitive_observability=True,
+        ):
+            chunks.append(chunk)
+    finally:
+        await client.aclose()
+        logger.remove(sink_id)
+
+    assert chunks == [b"audio"]
+    assert observed_requests == [endpoint, endpoint]
+    assert suppression_states == [True, True]
+    assert traces.span_attributes[0]["url.full"] == http_client._SENSITIVE_OBSERVABILITY_URL
+    assert http_client._SENSITIVE_HTTP_LOG_CONTEXT.get() is False
+    assert otel_context.get_value(otel_context._SUPPRESS_HTTP_INSTRUMENTATION_KEY) is None
+    observability = repr(
+        {
+            "logs": log_records,
+            "metrics": metrics.calls,
+            "spans": traces.span_attributes,
+            "updated": traces.updated_attributes,
+            "events": traces.events,
+        }
+    )
+    for sensitive_fragment in (
+        "93.184.216.34",
+        "tts-secret",
+        "credential=private",
+        endpoint,
+    ):
+        assert sensitive_fragment not in observability
+
+
+@pytest.mark.asyncio
+async def test_sensitive_async_otel_suppression_resets_after_transport_cancellation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    endpoint = "http://93.184.216.34/runtime-secret-path/embeddings"
     transport_started = asyncio.Event()
     cancellation_states: list[object] = []
     reset_states: list[object] = []
+
+    monkeypatch.setattr(http_client, "get_metrics_registry", _MetricRecorder)
+    monkeypatch.setattr(http_client, "get_tracing_manager", _TraceRecorder)
 
     async def blocking_handler(request: httpx.Request) -> httpx.Response:
         cancellation_states.append(

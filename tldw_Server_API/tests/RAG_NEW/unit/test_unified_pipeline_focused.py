@@ -171,6 +171,161 @@ class TestUnifiedPipelineCore:
             assert len(getattr(result, 'errors', []) or []) > 0 or (result.generated_answer is not None)
 
     @pytest.mark.asyncio
+    async def test_retrieval_failure_metadata_and_logs_do_not_reflect_exception(self):
+        """Retrieval degradation exposes a stable code, never raw internal detail."""
+        sentinel = "retrieval-secret https://upstream.invalid/private?token=secret"
+
+        class FailingRetriever:
+            def __init__(self, *_args, **_kwargs):
+                return None
+
+            async def retrieve(self, *_args, **_kwargs):
+                raise RuntimeError(sentinel)
+
+        logs: list[str] = []
+        sink_id = logger.add(logs.append, format="{message}")
+        try:
+            with patch(
+                "tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.MultiDatabaseRetriever",
+                FailingRetriever,
+            ):
+                result = await unified_rag_pipeline(
+                    query="bounded retrieval failure",
+                    enable_cache=False,
+                    enable_generation=False,
+                )
+        finally:
+            logger.remove(sink_id)
+
+        rendered = json.dumps(result.model_dump(mode="json")) + "\n" + "\n".join(logs)
+        assert sentinel not in rendered
+        assert "upstream.invalid" not in rendered
+        assert result.errors == ["document_retrieval_failed"]
+
+    @pytest.mark.asyncio
+    async def test_primary_and_media_fallback_failures_do_not_reflect_exceptions(self):
+        """Nested Media DB fallback failure exposes only stable error codes."""
+        from tldw_Server_API.app.core.RAG.rag_service import database_retrievers
+
+        primary_sentinel = "primary-secret https://upstream.invalid/primary?token=secret"
+        fallback_sentinel = "fallback-secret https://upstream.invalid/fallback?token=secret"
+
+        class FailingRetriever:
+            def __init__(self, *_args, **_kwargs):
+                return None
+
+            async def retrieve(self, *_args, **_kwargs):
+                raise RuntimeError(primary_sentinel)
+
+        class FailingMediaRetriever:
+            def __init__(self, *_args, **_kwargs):
+                return None
+
+            async def retrieve(self, *_args, **_kwargs):
+                raise RuntimeError(fallback_sentinel)
+
+        logs: list[str] = []
+        sink_id = logger.add(logs.append, format="{message}")
+        try:
+            with patch(
+                "tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.MultiDatabaseRetriever",
+                FailingRetriever,
+            ), patch.object(
+                database_retrievers,
+                "MediaDBRetriever",
+                FailingMediaRetriever,
+            ):
+                result = await unified_rag_pipeline(
+                    query="bounded nested retrieval failure",
+                    sources=["media_db"],
+                    media_db_path="media.db",
+                    search_mode="hybrid",
+                    enable_cache=False,
+                    enable_generation=False,
+                )
+        finally:
+            logger.remove(sink_id)
+
+        rendered = json.dumps(result.model_dump(mode="json")) + "\n" + "\n".join(logs)
+        for fragment in (primary_sentinel, fallback_sentinel, "upstream.invalid"):
+            assert fragment not in rendered
+        assert result.errors == [
+            "document_retrieval_failed",
+            "media_db_fallback_failed",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_generation_failure_metadata_and_logs_do_not_reflect_exception(self):
+        """Generation degradation exposes a stable code, never raw provider detail."""
+        sentinel = "generation-secret https://upstream.invalid/private?token=secret"
+
+        class FailingGenerator:
+            def __init__(self, *_args, **_kwargs):
+                return None
+
+            async def generate(self, *_args, **_kwargs):
+                raise RuntimeError(sentinel)
+
+        retriever = MagicMock()
+        retriever.retrieve = AsyncMock(
+            return_value=[
+                Document(
+                    id="1",
+                    content="bounded context",
+                    metadata={},
+                    source=DataSource.MEDIA_DB,
+                    score=0.9,
+                )
+            ]
+        )
+        logs: list[str] = []
+        sink_id = logger.add(logs.append, format="{message}")
+        try:
+            with patch(
+                "tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.MultiDatabaseRetriever",
+                return_value=retriever,
+            ), patch(
+                "tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.AnswerGenerator",
+                FailingGenerator,
+            ):
+                result = await unified_rag_pipeline(
+                    query="bounded generation failure",
+                    enable_cache=False,
+                    enable_reranking=False,
+                )
+        finally:
+            logger.remove(sink_id)
+
+        rendered = json.dumps(result.model_dump(mode="json")) + "\n" + "\n".join(logs)
+        assert sentinel not in rendered
+        assert "upstream.invalid" not in rendered
+        assert "answer_generation_failed" in result.errors
+
+    @pytest.mark.asyncio
+    async def test_outer_pipeline_fallback_does_not_reflect_exception(self, monkeypatch):
+        """The legacy fallback dictionary also carries only a stable error code."""
+        sentinel = "pipeline-secret https://upstream.invalid/private?token=secret"
+
+        def fail_source_normalization(_sources):
+            raise RuntimeError(sentinel)
+
+        monkeypatch.setattr(up, "_normalize_pipeline_sources", fail_source_normalization)
+        logs: list[str] = []
+        sink_id = logger.add(logs.append, format="{message}")
+        try:
+            result = await unified_rag_pipeline(
+                query="bounded outer failure",
+                fallback_on_error=True,
+            )
+        finally:
+            logger.remove(sink_id)
+
+        rendered = json.dumps(result) + "\n" + "\n".join(logs)
+        assert sentinel not in rendered
+        assert "upstream.invalid" not in rendered
+        assert result["error"] == "pipeline_failed"
+
+    @pytest.mark.asyncio
     async def test_empty_retrieval_results(self):
         """Test behavior when no documents are retrieved."""
         with patch('tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.MultiDatabaseRetriever') as mock_retriever:
@@ -1098,7 +1253,7 @@ class TestUnifiedPipelineFeatures:
         cache.set.assert_not_called()
         assert result.documents[0]["id"] == "fallback-doc"
         assert result.metadata["fallbacks"]["media_db_fts_on_error"] is True
-        assert any("base retrieval failed" in error for error in result.errors)
+        assert "document_retrieval_failed" in result.errors
 
     @pytest.mark.asyncio
     async def test_cache_namespace_uses_post_routing_retrieval_values(self):

@@ -87,9 +87,13 @@ async def test_test_runner_uses_structured_assembly_for_execution(isolated_db):
         max_tokens: int,
         app_config=None,
         api_key_override=None,
+        credentials_resolved: bool = False,
+        timeout_seconds: float | None = None,
     ) -> str:
         captured["messages_payload"] = messages_payload
         captured["system_message"] = system_message
+        captured["credentials_resolved"] = credentials_resolved
+        captured["timeout_seconds"] = timeout_seconds
         return "ok"
 
     runner = TestRunner(isolated_db)
@@ -109,6 +113,8 @@ async def test_test_runner_uses_structured_assembly_for_execution(isolated_db):
         "user",
     ]
     assert captured["system_message"] is None
+    assert captured["credentials_resolved"] is False
+    assert captured["timeout_seconds"] is None
     assert result["actual"]["response"] == "ok"
     assert result["scores"]["aggregate_score"] == 1.0
 

@@ -29,6 +29,7 @@ from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
 )
 from tldw_Server_API.app.core.DB_Management.backends.factory import reset_managed_sqlite_backends
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
+from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
 from tldw_Server_API.app.core.RAG.rag_service.database_retrievers import MultiDatabaseRetriever, RetrievalConfig
 from tldw_Server_API.app.core.RAG.rag_service.semantic_cache import SemanticCache
 from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
@@ -198,16 +199,24 @@ async def test_rag_cache_hit_regenerates_with_current_distinct_provider_credenti
     first_runtime = make_runtime("first")
     second_runtime = make_runtime("second")
     try:
-        first = await unified_rag_pipeline(
-            **common_kwargs,
-            credential_runtime=first_runtime,
-        )
-        await first_runtime.close()
-        second = await unified_rag_pipeline(
-            **common_kwargs,
-            credential_runtime=second_runtime,
-        )
-        await second_runtime.close()
+        with scoped_context(
+            user_id=42,
+            org_ids=[],
+            team_ids=[],
+            active_org_id=None,
+            active_team_id=None,
+            is_admin=False,
+        ):
+            first = await unified_rag_pipeline(
+                **common_kwargs,
+                credential_runtime=first_runtime,
+            )
+            await first_runtime.close()
+            second = await unified_rag_pipeline(
+                **common_kwargs,
+                credential_runtime=second_runtime,
+            )
+            await second_runtime.close()
         registered_cache = advanced_cache.get_registered_semantic_cache()
         assert registered_cache is not None
         registered_cache.save()
@@ -683,7 +692,7 @@ class TestErrorRecoveryIntegration:
             )
             from tldw_Server_API.app.api.v1.schemas.rag_schemas_unified import UnifiedRAGResponse
             assert isinstance(result, UnifiedRAGResponse)
-            assert isinstance(result.errors, list) and any('Simulated DB failure' in e for e in result.errors)
+            assert isinstance(result.errors, list) and 'document_retrieval_failed' in result.errors
 
     @pytest.mark.asyncio
     async def test_partial_retrieval_failure(self, populated_media_db):
@@ -752,7 +761,7 @@ class TestErrorRecoveryIntegration:
             )
             from tldw_Server_API.app.api.v1.schemas.rag_schemas_unified import UnifiedRAGResponse
             assert isinstance(r1, UnifiedRAGResponse)
-            assert isinstance(r1.errors, list) and any('Transient error' in e for e in r1.errors)
+            assert isinstance(r1.errors, list) and 'document_retrieval_failed' in r1.errors
 
             # Second call: still failing
             r2 = await unified_rag_pipeline(
@@ -763,7 +772,7 @@ class TestErrorRecoveryIntegration:
                 fallback_on_error=True
             )
             assert isinstance(r2, UnifiedRAGResponse)
-            assert isinstance(r2.errors, list) and any('Transient error' in e for e in r2.errors)
+            assert isinstance(r2.errors, list) and 'document_retrieval_failed' in r2.errors
 
             # Third call: should succeed and return a pydantic response
             r3 = await unified_rag_pipeline(

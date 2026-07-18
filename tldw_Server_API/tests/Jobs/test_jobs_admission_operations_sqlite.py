@@ -25,7 +25,7 @@ class _FailJobEventsInsertConnection:
     def __init__(self, inner: sqlite3.Connection):
         self._inner = inner
 
-    def __enter__(self) -> "_FailJobEventsInsertConnection":
+    def __enter__(self) -> _FailJobEventsInsertConnection:
         self._inner.__enter__()
         return self
 
@@ -42,12 +42,12 @@ class _FailJobEventsInsertConnection:
 
 
 class _FailJobCountersConnection:
-    """Connection wrapper that fails non-critical job_counters upserts."""
+    """Connection wrapper that fails transactional job_counters upserts."""
 
     def __init__(self, inner: sqlite3.Connection):
         self._inner = inner
 
-    def __enter__(self) -> "_FailJobCountersConnection":
+    def __enter__(self) -> _FailJobCountersConnection:
         self._inner.__enter__()
         return self
 
@@ -137,29 +137,33 @@ def test_sqlite_admission_inserts_job_event_and_counter(tmp_path: Path) -> None:
     assert dict(counter) == {"ready_count": 1, "scheduled_count": 0}
 
 
-def test_sqlite_admission_counter_failure_does_not_abort_job_creation(tmp_path: Path) -> None:
+@pytest.mark.parametrize("idempotency_key", [None, "same"], ids=["plain", "idempotent"])
+def test_sqlite_admission_counter_failure_rolls_back_job_and_event(
+    tmp_path: Path,
+    idempotency_key: str | None,
+) -> None:
     _db_path, inner = _open_jobs_db(tmp_path)
     wrapped = _FailJobCountersConnection(inner)
 
-    result = create_job_admission(
-        wrapped,
-        command=_command(job_type="counter-fail"),
-        uuid_value="uuid-counter-fail",
-        now=datetime(2026, 1, 1, tzinfo=timezone.utc),
-        max_queued_quota=0,
-        submits_per_minute_quota=0,
-        counters_enabled=True,
-    )
+    with pytest.raises(sqlite3.OperationalError, match="forced job_counters upsert failure"):
+        create_job_admission(
+            wrapped,
+            command=_command(job_type="counter-fail", idempotency_key=idempotency_key),
+            uuid_value="uuid-counter-fail",
+            now=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            max_queued_quota=0,
+            submits_per_minute_quota=0,
+            counters_enabled=True,
+        )
 
-    assert result.outcome is OperationOutcome.APPLIED
-    assert result.inserted is True
-    assert result.row is not None
-    assert result.row["job_type"] == "counter-fail"
-
-    events = _created_events(inner, "counter-fail")
-    assert len(events) == 1
-    assert events[0]["request_id"] == "req-1"
-    assert events[0]["trace_id"] == "trace-1"
+    job_count = inner.execute("SELECT COUNT(*) FROM jobs WHERE job_type = ?", ("counter-fail",)).fetchone()[0]
+    assert job_count == 0
+    assert _created_events(inner, "counter-fail") == []
+    counter_count = inner.execute(
+        "SELECT COUNT(*) FROM job_counters WHERE domain = ? AND queue = ? AND job_type = ?",
+        ("admission", "default", "counter-fail"),
+    ).fetchone()[0]
+    assert counter_count == 0
 
 
 def test_sqlite_admission_idempotent_existing_writes_replay_event_with_current_context(tmp_path: Path) -> None:
@@ -293,4 +297,9 @@ def test_sqlite_admission_rolls_back_job_when_created_event_insert_fails(tmp_pat
             "SELECT COUNT(*) FROM jobs WHERE domain = ? AND queue = ? AND job_type = ?",
             ("admission", "default", "event-fail"),
         ).fetchone()[0]
+        counter_count = conn.execute(
+            "SELECT COUNT(*) FROM job_counters WHERE domain = ? AND queue = ? AND job_type = ?",
+            ("admission", "default", "event-fail"),
+        ).fetchone()[0]
     assert count == 0
+    assert counter_count == 0

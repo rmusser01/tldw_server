@@ -5,17 +5,22 @@
 import json
 import os
 import re
+from collections.abc import Mapping
 from typing import Any, Literal, Optional, Union
 
 #
 # 3rd-party imports
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, model_validator
-
-from tldw_Server_API.app.core.testing import is_test_mode
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, ValidationError, field_validator, model_validator
+from pydantic_core import InitErrorDetails, PydanticCustomError
 
 #
 # Local Imports
 from tldw_Server_API.app.core.LLM_Calls.routing.models import RoutingOverride
+from tldw_Server_API.app.core.LLM_Calls.payload_utils import (
+    is_safe_extra_header_value,
+    is_server_managed_extra_header,
+)
+from tldw_Server_API.app.core.testing import is_test_mode
 
 #
 #######################################################################################################################
@@ -27,6 +32,92 @@ from tldw_Server_API.app.core.LLM_Calls.routing.models import RoutingOverride
 
 DEFAULT_LLM_PROVIDER = "openai"
 model_config = ConfigDict(extra="allow", from_attributes=True)
+
+_SERVER_MANAGED_CHAT_REQUEST_FIELDS = frozenset(
+    {
+        "api_endpoint",
+        "api_key",
+        "app_config",
+        "aws_access_key_id",
+        "aws_secret_access_key",
+        "aws_session_token",
+        "auth_source",
+        "auth_user",
+        "bedrock_aws_access_key_id",
+        "bedrock_aws_secret_access_key",
+        "bedrock_aws_session_token",
+        "bedrock_region",
+        "caller_request",
+        "credentials_resolved",
+        "http_client_factory",
+        "http_fetcher",
+        "messages_payload",
+        "principal",
+        "provider",
+        "provider_api_key",
+        "request",
+        "region",
+        "streaming",
+        "system_message",
+        "target_api_provider",
+        "trusted_base_url_override",
+    }
+)
+_SERVER_MANAGED_CHAT_REQUEST_COMPACT_FIELDS = frozenset(
+    re.sub(r"[^a-z0-9]", "", field_name.casefold())
+    for field_name in _SERVER_MANAGED_CHAT_REQUEST_FIELDS
+)
+
+
+def _is_server_managed_chat_request_field(field_name: str) -> bool:
+    """Return whether a public field name belongs to the server trust boundary."""
+    normalized = field_name.casefold()
+    compact = re.sub(r"[^a-z0-9]", "", normalized)
+    if normalized.startswith("_"):
+        return True
+    if compact in _SERVER_MANAGED_CHAT_REQUEST_COMPACT_FIELDS:
+        return True
+    if compact.endswith(
+        (
+            "apikey",
+            "apiurl",
+            "baseurl",
+            "endpoint",
+            "endpointurl",
+            "accesskeyid",
+            "secretaccesskey",
+            "sessiontoken",
+            "credential",
+            "credentials",
+        )
+    ):
+        return True
+    if normalized == "api_url" or normalized.endswith("_api_url"):
+        return True
+    if normalized == "base_url" or normalized.endswith("_base_url"):
+        return True
+    if normalized in {"endpoint", "endpoint_url"} or normalized.endswith(
+        ("_endpoint", "_endpoint_url")
+    ):
+        return True
+    if normalized in {
+        "access_key_id",
+        "secret_access_key",
+        "session_token",
+        "credential",
+        "credentials",
+    } or normalized.endswith(
+        (
+            "_api_key",
+            "_access_key_id",
+            "_secret_access_key",
+            "_session_token",
+            "_credential",
+            "_credentials",
+        )
+    ):
+        return True
+    return normalized in _SERVER_MANAGED_CHAT_REQUEST_FIELDS
 
 # Use load_and_log_configs which returns a proper dict
 from tldw_Server_API.app.core.config import load_and_log_configs
@@ -809,6 +900,75 @@ class ChatCompletionRequest(BaseModel):
             "mode, objective, provider boundary, and failure handling."
         ),
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_server_managed_fields(cls, values: Any) -> Any:
+        """Reject public attempts to supply routing, credentials, or internal controls."""
+        if not isinstance(values, Mapping):
+            return values
+
+        forbidden_fields = sorted(
+            field_name
+            for field_name in values
+            if isinstance(field_name, str)
+            and _is_server_managed_chat_request_field(field_name)
+        )
+        extra_headers = values.get("extra_headers")
+        forbidden_headers = sorted(
+            header_name
+            for header_name in extra_headers
+            if isinstance(header_name, str)
+            and is_server_managed_extra_header(header_name)
+        ) if isinstance(extra_headers, Mapping) else []
+        invalid_header_values = sorted(
+            header_name
+            for header_name, header_value in extra_headers.items()
+            if isinstance(header_name, str)
+            and not is_safe_extra_header_value(header_value)
+        ) if isinstance(extra_headers, Mapping) else []
+        if not forbidden_fields and not forbidden_headers and not invalid_header_values:
+            return values
+
+        field_error = PydanticCustomError(
+            "server_managed_chat_field",
+            "Server-managed chat request fields are not allowed; use declared extra_body for provider extensions",
+        )
+        header_error = PydanticCustomError(
+            "server_managed_chat_header",
+            "Server-managed chat request headers are not allowed",
+        )
+        header_value_error = PydanticCustomError(
+            "invalid_chat_header_value",
+            "Chat request header values must not contain control characters",
+        )
+        raise ValidationError.from_exception_data(
+            cls.__name__,
+            [
+                InitErrorDetails(
+                    type=field_error,
+                    loc=(field_name,),
+                    input=field_name,
+                )
+                for field_name in forbidden_fields
+            ]
+            + [
+                InitErrorDetails(
+                    type=header_error,
+                    loc=("extra_headers", header_name),
+                    input=header_name,
+                )
+                for header_name in forbidden_headers
+            ]
+            + [
+                InitErrorDetails(
+                    type=header_value_error,
+                    loc=("extra_headers", header_name),
+                    input=header_name,
+                )
+                for header_name in invalid_header_values
+            ],
+        )
 
     @field_validator("api_provider")
     @classmethod

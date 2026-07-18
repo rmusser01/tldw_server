@@ -9,6 +9,7 @@ import { toChatScopeParams } from '@/types/chat-scope'
 import { normalizeChatRole } from '@/utils/normalize-chat-role'
 import { parseRagStreamLine } from '@/services/rag/stream-contract'
 import { sanitizeRagProviderFailure } from '@/services/rag/provider-error-contract'
+import { DEFAULT_RAG_SETTINGS } from '@/services/rag/unified-rag'
 import type {
   ChatCompletionRequestOptions,
   ChatCompletionStreamOptions,
@@ -70,6 +71,191 @@ const buildSanitizedRagSearchError = (
     sanitizedError.code = sanitized.code
   }
   return sanitizedError
+}
+
+const RAG_REQUEST_ONLY_OPTION_KEYS = [
+  "chat_history",
+  "clarification_timeout_sec",
+  "classifier_model",
+  "classifier_provider",
+  "discussion_platforms",
+  "enable_discussion_search",
+  "enable_image_search",
+  "enable_pre_retrieval_clarification",
+  "enable_query_classification",
+  "enable_query_reformulation",
+  "enable_research_action_dedup",
+  "enable_research_loop",
+  "enable_research_progress",
+  "enable_structured_response",
+  "enable_suggestions",
+  "enable_video_search",
+  "include_rerank_debug_documents",
+  "min_relevance_score",
+  "num_suggestions",
+  "research_max_iterations",
+  "research_max_iterations_balanced",
+  "research_max_iterations_quality",
+  "research_max_iterations_speed",
+  "search_depth_mode",
+  "search_url_scraping",
+  "sql_target_id",
+  "workspace_id",
+]
+
+const RAG_SEARCH_OPTION_KEYS = new Set([
+  ...Object.keys(DEFAULT_RAG_SETTINGS).filter((key) => key !== "query"),
+  ...RAG_REQUEST_ONLY_OPTION_KEYS,
+])
+
+const RAG_SIMPLE_OPTION_KEYS = new Set(["sources", "top_k"])
+
+const RAG_PROVIDER_CREDENTIAL_SUFFIXES = [
+  "accesskey",
+  "accesskeyid",
+  "apikey",
+  "apiurl",
+  "appconfig",
+  "authorization",
+  "authorizationheader",
+  "authsource",
+  "baseurl",
+  "clientsecret",
+  "cookie",
+  "credential",
+  "credentialfields",
+  "credentials",
+  "endpoint",
+  "endpointurl",
+  "password",
+  "privatekey",
+  "providerurl",
+  "bearer",
+  "secret",
+  "secretkey",
+  "secretaccesskey",
+  "token",
+]
+
+const UNSAFE_OBJECT_PROPERTY_KEYS = new Set([
+  "__proto__",
+  "constructor",
+  "prototype",
+])
+
+const isRagProviderCredentialKey = (key: string): boolean => {
+  const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, "")
+  return RAG_PROVIDER_CREDENTIAL_SUFFIXES.some((suffix) =>
+    normalized.endsWith(suffix)
+  )
+}
+
+const stripBrowserProviderCredentials = (value: unknown): unknown => {
+  if (Array.isArray(value)) {
+    const sanitized: unknown[] = []
+    for (const entry of value) {
+      const cleanEntry = stripBrowserProviderCredentials(entry)
+      if (cleanEntry !== undefined) sanitized.push(cleanEntry)
+    }
+    return sanitized
+  }
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return value
+  }
+  if (typeof value !== "object") return undefined
+
+  try {
+    const prototype = Object.getPrototypeOf(value)
+    if (prototype !== Object.prototype && prototype !== null) {
+      return undefined
+    }
+
+    const sanitized = Object.create(null) as Record<string, unknown>
+    for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+      if (UNSAFE_OBJECT_PROPERTY_KEYS.has(key.toLowerCase())) continue
+      if (isRagProviderCredentialKey(key)) continue
+      const cleanEntry = stripBrowserProviderCredentials(entry)
+      if (cleanEntry !== undefined) sanitized[key] = cleanEntry
+    }
+    return sanitized
+  } catch {
+    return undefined
+  }
+}
+
+const sanitizeRagChatHistory = (value: unknown): Array<{
+  role: string
+  content: string
+}> | undefined => {
+  if (!Array.isArray(value)) return undefined
+
+  const sanitized: Array<{ role: string; content: string }> = []
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue
+    try {
+      const prototype = Object.getPrototypeOf(entry)
+      if (prototype !== Object.prototype && prototype !== null) continue
+      const role = Object.getOwnPropertyDescriptor(entry, "role")?.value
+      const content = Object.getOwnPropertyDescriptor(entry, "content")?.value
+      if (typeof role !== "string" || typeof content !== "string") continue
+      sanitized.push({ role, content })
+    } catch {
+      // Fail closed for hostile or revoked proxy objects.
+    }
+  }
+  return sanitized
+}
+
+const sanitizeRagOptions = (
+  options: Record<string, unknown>,
+  allowedKeys: ReadonlySet<string>
+): Record<string, unknown> => {
+  const sanitized: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(options)) {
+    if (!allowedKeys.has(key)) continue
+    if (key === "chat_history") {
+      const chatHistory = sanitizeRagChatHistory(value)
+      if (chatHistory !== undefined) sanitized.chat_history = chatHistory
+      continue
+    }
+    const cleanValue = stripBrowserProviderCredentials(value)
+    if (cleanValue !== undefined) sanitized[key] = cleanValue
+  }
+  return sanitized
+}
+
+export const buildSanitizedRagRequestBody = (
+  query: string,
+  options: Record<string, unknown>,
+  kind: "search" | "simple" = "search"
+): Record<string, unknown> => ({
+  query,
+  ...sanitizeRagOptions(
+    options,
+    kind === "simple" ? RAG_SIMPLE_OPTION_KEYS : RAG_SEARCH_OPTION_KEYS
+  ),
+})
+
+/** Conservative compatibility ceiling for browser/proxy HTTP request targets. */
+export const RAG_SIMPLE_MAX_PATH_LENGTH = 8000
+
+export const buildSanitizedRagSimplePath = (
+  query: string,
+  options: Record<string, unknown>
+) => {
+  const params = buildSanitizedRagRequestBody(query, options, "simple")
+  const path = appendPathQuery("/api/v1/rag/simple", buildQuery(params))
+  if (path.length > RAG_SIMPLE_MAX_PATH_LENGTH) {
+    throw new RangeError(
+      "RAG simple request URL exceeds the 8,000-character transport limit."
+    )
+  }
+  return path
 }
 
 // NOTE: the chat-completion "sanitizer" that used to live here corrupted successful
@@ -262,12 +448,13 @@ export const chatRagMethods = {
   async ragSearch(this: TldwApiClientCore, query: string, options?: any): Promise<any> {
     const { timeoutMs, signal, ...rest } = options || {}
     const normalizedQuery = this.normalizeRagQuery(query)
+    const body = buildSanitizedRagRequestBody(normalizedQuery, rest)
     try {
       return await this.requestWithCurrentConfig<any>({
         path: '/api/v1/rag/search',
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: { query: normalizedQuery, ...rest },
+        body,
         timeoutMs,
         abortSignal: signal,
         sanitizeRagProviderError: true
@@ -291,11 +478,12 @@ export const chatRagMethods = {
   ): AsyncGenerator<any, void, unknown> {
     const { timeoutMs, signal, ...rest } = options || {}
     const normalizedQuery = this.normalizeRagQuery(query)
+    const body = buildSanitizedRagRequestBody(normalizedQuery, rest)
     for await (const line of bgStream({
       path: '/api/v1/rag/search/stream',
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: { query: normalizedQuery, ...rest },
+      body,
       abortSignal: signal,
       streamIdleTimeoutMs: timeoutMs,
       sanitizeRagProviderStreamError: true
@@ -307,7 +495,8 @@ export const chatRagMethods = {
   async ragSimple(this: TldwApiClientCore, query: string, options?: any): Promise<any> {
     const { timeoutMs, ...rest } = options || {}
     const normalizedQuery = this.normalizeRagQuery(query)
-    return await bgRequest<any>({ path: '/api/v1/rag/simple', method: 'POST', headers: { 'Content-Type': 'application/json' }, body: { query: normalizedQuery, ...rest }, timeoutMs })
+    const path = buildSanitizedRagSimplePath(normalizedQuery, rest)
+    return await bgRequest<any>({ path, method: 'GET', timeoutMs })
   },
 
   // Research / Web search

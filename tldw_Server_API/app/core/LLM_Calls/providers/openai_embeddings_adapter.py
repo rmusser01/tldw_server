@@ -3,6 +3,9 @@ from __future__ import annotations
 from typing import Any
 
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import ensure_app_config
+from tldw_Server_API.app.core.LLM_Calls.payload_utils import (
+    resolve_runtime_embedding_base_url,
+)
 from tldw_Server_API.app.core.testing import is_truthy
 
 from .base import EmbeddingsProvider
@@ -56,8 +59,19 @@ class OpenAIEmbeddingsAdapter(EmbeddingsProvider):
 
         raw_config = request.get("app_config")
         app_config = raw_config if isinstance(raw_config, dict) else None
-        app_config = ensure_app_config(app_config)
+        if request.get("credentials_resolved") is True:
+            app_config = app_config or {}
+        else:
+            app_config = ensure_app_config(app_config)
         openai_cfg = dict((app_config.get("openai_api") or {}) if app_config else {})
+        runtime_base_url = resolve_runtime_embedding_base_url(
+            request,
+            provider=self.name,
+        )
+        if runtime_base_url is not None:
+            openai_cfg["api_base_url"] = runtime_base_url
+            app_config = dict(app_config or {})
+            app_config["openai_api"] = openai_cfg
         api_key = request.get("api_key") or openai_cfg.get("api_key")
         if not api_key and app_config:
             try:
@@ -78,7 +92,8 @@ class OpenAIEmbeddingsAdapter(EmbeddingsProvider):
         # Native HTTP path (opt-in)
         if self._use_native_http():
             from tldw_Server_API.app.core.http_client import fetch as _fetch
-            url = f"{self._base_url(openai_cfg).rstrip('/')}/embeddings"
+            base_url = runtime_base_url or self._base_url(openai_cfg).rstrip("/")
+            url = f"{base_url}/embeddings"
             payload = {"input": inputs, "model": model}
             if dimensions is not None:
                 try:
@@ -88,29 +103,82 @@ class OpenAIEmbeddingsAdapter(EmbeddingsProvider):
                 if dim and dim > 0:
                     payload["dimensions"] = dim
             headers = self._headers(api_key)
+            provider_error: Exception | None = None
             try:
                 resp = _fetch(method="POST", url=url, headers=headers, json=payload, timeout=timeout or 60.0)
                 if resp.status_code >= 400:
                     resp.raise_for_status()
                 return resp.json()
-            except Exception as e:
-                from tldw_Server_API.app.core.Chat.Chat_Deps import ChatProviderError
-                raise ChatProviderError(provider=self.name, message=str(e)) from e
+            except Exception as exc:
+                from tldw_Server_API.app.core.Chat.Chat_Deps import (
+                    ChatAuthenticationError,
+                    ChatProviderError,
+                )
+                from tldw_Server_API.app.core.LLM_Calls.error_utils import (
+                    get_http_status_from_exception,
+                )
+
+                upstream_status = get_http_status_from_exception(exc)
+                if upstream_status in {401, 403}:
+                    provider_error = ChatAuthenticationError(
+                        provider=self.name,
+                        message="Embedding provider authentication failed.",
+                        status_code=upstream_status,
+                    )
+                else:
+                    provider_error = ChatProviderError(
+                        provider=self.name,
+                        message="Embedding provider request failed.",
+                    )
+            if provider_error is not None:
+                raise provider_error
 
         # Delegate-first fallback using legacy helper(s)
         from tldw_Server_API.app.core.LLM_Calls import chat_calls as legacy
-        if isinstance(inputs, list):
-            embeddings = legacy.get_openai_embeddings_batch(
-                inputs,
-                model,
-                app_config=app_config,
-                dimensions=dimensions,
+        legacy_error: Exception | None = None
+        raw_result: Any = None
+        multi = isinstance(inputs, list)
+        try:
+            if multi:
+                raw_result = legacy.get_openai_embeddings_batch(
+                    inputs,
+                    model,
+                    app_config=app_config,
+                    dimensions=dimensions,
+                )
+            else:
+                raw_result = legacy.get_openai_embeddings(
+                    inputs,
+                    model,
+                    app_config=app_config,
+                    dimensions=dimensions,
+                )
+        except Exception as exc:
+            from tldw_Server_API.app.core.Chat.Chat_Deps import (
+                ChatAuthenticationError,
+                ChatProviderError,
             )
-            return self._normalize_response(embeddings, multi=True)
-        vec = legacy.get_openai_embeddings(
-            inputs,
-            model,
-            app_config=app_config,
-            dimensions=dimensions,
-        )
-        return self._normalize_response(vec, multi=False)
+            from tldw_Server_API.app.core.LLM_Calls.error_utils import (
+                get_http_status_from_exception,
+            )
+
+            upstream_status = get_http_status_from_exception(exc)
+            if upstream_status in {401, 403}:
+                legacy_error = ChatAuthenticationError(
+                    provider=self.name,
+                    message="Embedding provider authentication failed.",
+                    status_code=upstream_status,
+                )
+            else:
+                legacy_error = ChatProviderError(
+                    provider=self.name,
+                    message="Embedding provider request failed.",
+                    status_code=(
+                        upstream_status
+                        if isinstance(upstream_status, int) and upstream_status >= 400
+                        else 502
+                    ),
+                )
+        if legacy_error is not None:
+            raise legacy_error
+        return self._normalize_response(raw_result, multi=multi)

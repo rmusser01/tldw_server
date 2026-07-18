@@ -1,17 +1,19 @@
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
+from tldw_Server_API.app.core.Embeddings.orchestrator import (
+    EmbeddingExecutionResult,
+    EmbeddingExecutorOutput,
+    EmbeddingRequestOrchestrator,
+)
 from tldw_Server_API.app.core.Embeddings.request_types import (
     EmbeddingExecutionError,
     EmbeddingProviderError,
     EmbeddingRateLimitError,
     EmbeddingRequestContext,
-)
-from tldw_Server_API.app.core.Embeddings.orchestrator import (
-    EmbeddingExecutorOutput,
-    EmbeddingExecutionResult,
-    EmbeddingRequestOrchestrator,
 )
 
 
@@ -232,6 +234,91 @@ async def test_execute_full_cache_hit_skips_executor_and_preserves_order():
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_execute_rejects_mixed_width_full_cache_result():
+    cache = RecordingCache(
+        {
+            "hit one|huggingface|sentence-transformers/all-MiniLM-L6-v2|huggingface:sentence-transformers/all-MiniLM-L6-v2:backend": [
+                1.0,
+                0.0,
+            ],
+            "hit two|huggingface|sentence-transformers/all-MiniLM-L6-v2|huggingface:sentence-transformers/all-MiniLM-L6-v2:backend": [
+                1.0,
+                0.0,
+                0.5,
+            ],
+        }
+    )
+    executor = RecordingExecutor(vectors=[[9.0, 9.0]])
+    orchestrator = _orchestrator(cache=cache, executor=executor)
+    prepared = orchestrator.prepare(["hit one", "hit two"], _context())
+
+    with pytest.raises(EmbeddingProviderError) as exc_info:
+        await orchestrator.execute(prepared)
+
+    assert exc_info.value.code == "provider_malformed_response"
+    assert executor.calls == []
+    assert cache.set_calls == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.concurrent
+async def test_concurrent_cache_assembly_keeps_malformed_and_valid_results_isolated():
+    class GatedCache(RecordingCache):
+        def __init__(self, values):
+            super().__init__(values)
+            self.arrivals = 0
+            self.both_arrived = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def get(self, key: str) -> list[float] | None:
+            value = await super().get(key)
+            if key.startswith(("malformed one|", "valid one|")):
+                self.arrivals += 1
+                if self.arrivals == 2:
+                    self.both_arrived.set()
+                await asyncio.wait_for(self.release.wait(), timeout=10)
+            return value
+
+    suffix = (
+        "huggingface|sentence-transformers/all-MiniLM-L6-v2|"
+        "huggingface:sentence-transformers/all-MiniLM-L6-v2:backend"
+    )
+    cache = GatedCache(
+        {
+            f"malformed one|{suffix}": [1.0, 0.0],
+            f"malformed two|{suffix}": [1.0, 0.0, 0.5],
+            f"valid one|{suffix}": [0.0, 1.0],
+            f"valid two|{suffix}": [1.0, 0.0],
+        }
+    )
+    executor = RecordingExecutor(vectors=[[9.0, 9.0]])
+    orchestrator = _orchestrator(cache=cache, executor=executor)
+    malformed = orchestrator.prepare(
+        ["malformed one", "malformed two"],
+        _context(),
+    )
+    valid = orchestrator.prepare(["valid one", "valid two"], _context())
+    tasks = [
+        asyncio.create_task(orchestrator.execute(prepared))
+        for prepared in (malformed, valid)
+    ]
+    try:
+        await asyncio.wait_for(cache.both_arrived.wait(), timeout=10)
+    finally:
+        cache.release.set()
+    malformed_result, valid_result = await asyncio.gather(*tasks, return_exceptions=True)
+
+    assert isinstance(malformed_result, EmbeddingProviderError)
+    assert malformed_result.code == "provider_malformed_response"
+    assert isinstance(valid_result, EmbeddingExecutionResult)
+    assert valid_result.vectors == [[0.0, 1.0], [1.0, 0.0]]
+    assert executor.calls == []
+    assert cache.set_calls == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_execute_partial_cache_hit_executes_only_misses_and_writes_provider_native_vectors():
     cache = RecordingCache(
         {
@@ -266,6 +353,36 @@ async def test_execute_partial_cache_hit_executes_only_misses_and_writes_provide
     assert cached_value == [0.25, 0.75, 0.5]
     assert all(isinstance(item, float) for item in cached_value)
     assert result.response_headers["X-Embeddings-Dimensions-Policy"] == "reduce"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_execute_rejects_mixed_width_partial_cache_and_provider_result_without_writeback():
+    cache = RecordingCache(
+        {
+            "hit|huggingface|sentence-transformers/all-MiniLM-L6-v2|huggingface:sentence-transformers/all-MiniLM-L6-v2:backend": [
+                1.0,
+                0.0,
+            ],
+        }
+    )
+    executor = RecordingExecutor(vectors=[[0.25, 0.75, 0.5]])
+    orchestrator = _orchestrator(cache=cache, executor=executor)
+    prepared = orchestrator.prepare(["hit", "miss"], _context())
+
+    with pytest.raises(EmbeddingProviderError) as exc_info:
+        await orchestrator.execute(prepared)
+
+    assert exc_info.value.code == "provider_malformed_response"
+    assert executor.calls == [
+        {
+            "texts": ["miss"],
+            "provider": "huggingface",
+            "model": "sentence-transformers/all-MiniLM-L6-v2",
+            "dimensions": None,
+        }
+    ]
+    assert cache.set_calls == []
 
 
 @pytest.mark.unit

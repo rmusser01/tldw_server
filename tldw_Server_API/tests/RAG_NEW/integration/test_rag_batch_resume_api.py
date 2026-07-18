@@ -1,8 +1,9 @@
+import asyncio
 from contextlib import contextmanager
 from types import SimpleNamespace
 
 import pytest
-from fastapi import Request
+from fastapi import HTTPException, Request
 from fastapi.testclient import TestClient
 from loguru import logger
 
@@ -383,6 +384,7 @@ def test_rag_batch_resume_rejects_revoked_checkpoint_membership(
     _install_recording_runtime(monkeypatch)
 
     import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
+    from tldw_Server_API.app.core.AuthNZ import provider_credential_runtime
 
     server_fallback_calls: list[str] = []
     provider_calls: list[str] = []
@@ -395,7 +397,11 @@ def test_rag_batch_resume_rejects_revoked_checkpoint_membership(
         provider_calls.append("unified_batch_pipeline")
         raise AssertionError("provider dispatch reached")
 
-    monkeypatch.setattr(rag_ep, "resolve_provider_api_key", fail_server_fallback)
+    monkeypatch.setattr(
+        provider_credential_runtime,
+        "resolve_static_server_fallback_from_snapshot",
+        lambda provider, _snapshot: fail_server_fallback(provider),
+    )
     monkeypatch.setattr(rag_ep, "unified_batch_pipeline", fail_provider_dispatch)
 
     logs: list[str] = []
@@ -826,3 +832,108 @@ def test_rag_batch_legacy_checkpoint_uses_server_runtime_scope(
     assert runtime.scope["team_ids"] == []
     assert runtime.scope["org_ids"] == []
     assert runtime.scope["trusted_base_url_override"] is False
+
+
+@pytest.mark.parametrize("request_user_id", [42, 99])
+def test_rag_batch_legacy_checkpoint_denies_ordinary_principal_before_runtime(
+    client_with_overrides,
+    monkeypatch,
+    tmp_path,
+    request_user_id,
+):
+    cp_mod = _set_checkpoint_dir(monkeypatch, tmp_path)
+    manager = cp_mod.CheckpointManager()
+    checkpoint = manager.create(
+        "rag_batch",
+        total_items=1,
+        config={
+            "queries": ["legacy checkpoint must stay server-authorized"],
+            "max_concurrent": 1,
+            "user_id": "42",
+        },
+    )
+    checkpoint_path = manager.get_checkpoint_path(checkpoint.checkpoint_id)
+    checkpoint_before = checkpoint_path.read_bytes()
+    credential_sentinel = "sk-legacy-checkpoint-must-not-resolve-or-persist"
+    assert credential_sentinel.encode() not in checkpoint_before
+
+    _override_principal(_user_principal(request_user_id))
+    _override_user(request_user_id)
+    _install_recording_runtime(monkeypatch)
+
+    import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
+    from tldw_Server_API.app.core.AuthNZ import provider_credential_runtime
+
+    server_fallback_calls: list[str] = []
+    provider_calls: list[str] = []
+
+    def fail_server_fallback(provider: str):
+        server_fallback_calls.append(provider)
+        return credential_sentinel
+
+    async def fail_provider_dispatch(*_args, **_kwargs):
+        provider_calls.append("unified_batch_pipeline")
+        raise AssertionError("provider dispatch reached")
+
+    monkeypatch.setattr(
+        provider_credential_runtime,
+        "resolve_static_server_fallback_from_snapshot",
+        lambda provider, _snapshot: fail_server_fallback(provider),
+    )
+    monkeypatch.setattr(rag_ep, "unified_batch_pipeline", fail_provider_dispatch)
+
+    logs: list[str] = []
+    sink_id = logger.add(logs.append, format="{message}")
+    try:
+        response = client_with_overrides.post(
+            f"/api/v1/rag/batch/resume/{checkpoint.checkpoint_id}"
+        )
+    finally:
+        logger.remove(sink_id)
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "checkpoint_owner_forbidden"
+    assert _RecordingRuntime.instances == []
+    assert server_fallback_calls == []
+    assert provider_calls == []
+    assert credential_sentinel not in response.text
+    assert credential_sentinel not in "".join(logs)
+    assert checkpoint_path.read_bytes() == checkpoint_before
+    assert credential_sentinel.encode() not in checkpoint_path.read_bytes()
+
+
+def test_rag_batch_legacy_checkpoint_concurrently_denies_ordinary_principals(
+    monkeypatch,
+    tmp_path,
+):
+    cp_mod = _set_checkpoint_dir(monkeypatch, tmp_path)
+    checkpoint = cp_mod.CheckpointManager().create(
+        "rag_batch",
+        total_items=0,
+        config={"queries": [], "user_id": "42"},
+    )
+
+    import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
+
+    async def exercise():
+        return await asyncio.gather(
+            *(
+                rag_ep._checkpoint_resume_credential_scope(
+                    checkpoint,
+                    _user_principal(user_id),
+                )
+                for user_id in (42, 99, 42, 99)
+            ),
+            return_exceptions=True,
+        )
+
+    outcomes = asyncio.run(exercise())
+
+    assert all(isinstance(outcome, HTTPException) for outcome in outcomes)
+    assert [outcome.status_code for outcome in outcomes] == [403, 403, 403, 403]
+    assert [outcome.detail for outcome in outcomes] == [
+        "checkpoint_owner_forbidden",
+        "checkpoint_owner_forbidden",
+        "checkpoint_owner_forbidden",
+        "checkpoint_owner_forbidden",
+    ]

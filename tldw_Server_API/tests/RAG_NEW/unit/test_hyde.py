@@ -1,5 +1,6 @@
 import asyncio
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, Mock, patch
@@ -7,6 +8,10 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 
 import tldw_Server_API.app.core.LLM_Calls as llm_calls
+from tldw_Server_API.app.core.Chat.bounded_daemon import (
+    BoundedDaemonPool,
+    DaemonCapacityError,
+)
 from tldw_Server_API.app.core.RAG.rag_service import hyde
 from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
 from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import (
@@ -25,10 +30,12 @@ class _CredentialRuntime:
             credentials_resolved=True,
         )
         self.resolved: list[str] = []
+        self.resolved_models: list[str | None] = []
         self.marked: list[Any] = []
 
-    async def resolve(self, provider: str):
+    async def resolve(self, provider: str, *, model: str | None = None):
         self.resolved.append(provider)
+        self.resolved_models.append(model)
         return self.handle
 
     async def mark_used(self, handle: Any) -> None:
@@ -180,11 +187,13 @@ async def test_runtime_hyde_generation_uses_scoped_credentials_then_marks_used(m
 
     assert result == "A complete runtime hypothetical answer with facts."
     assert runtime.resolved == ["openai"]
+    assert runtime.resolved_models == ["runtime-model"]
     assert runtime.marked == [handle]
     assert captured["api_name"] == "openai"
     assert captured["api_key"] == "runtime-hyde-key"
     assert captured["app_config"] is app_config
     assert captured["credentials_resolved"] is True
+    assert captured["provider_credentials"] is handle
     assert captured["raise_on_error"] is True
     assert captured["model_override"] == "runtime-model"
     assert captured["input_data"] == "runtime question"
@@ -229,6 +238,7 @@ async def test_runtime_hyde_without_model_uses_scoped_provider_default(monkeypat
     assert captured["input_data"] == "anthropic runtime question"
     assert captured["model_override"] is None
     assert captured["app_config"] is app_config
+    assert captured["provider_credentials"] is handle
     assert runtime.marked == [handle]
 
 
@@ -239,7 +249,7 @@ async def test_runtime_hyde_credential_failure_uses_bounded_heuristic(monkeypatc
     from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
 
     class FailingRuntime:
-        async def resolve(self, provider: str):
+        async def resolve(self, provider: str, *, model: str | None = None):
             raise ByokResolutionError("credential_store_unavailable", provider)
 
     monkeypatch.setattr(
@@ -359,7 +369,7 @@ async def test_runtime_hyde_generation_propagates_cancellation(monkeypatch):
     import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as sgl
 
     class CancelledRuntime:
-        async def resolve(self, _provider: str):
+        async def resolve(self, _provider: str, *, model: str | None = None):
             raise asyncio.CancelledError
 
     monkeypatch.setattr(
@@ -458,6 +468,7 @@ async def test_embed_text_uses_runtime_credentials_for_hosted_openai(monkeypatch
 
     assert await hyde.embed_text("hosted", credential_runtime=runtime) == [0.1, 0.2]
     assert runtime.resolved == ["openai"]
+    assert runtime.resolved_models == ["text-embedding-3-small"]
     assert runtime.marked == [runtime.handle]
     assert captured["kwargs"] == {
         "api_key_override": "runtime-embedding-key",
@@ -608,7 +619,7 @@ async def test_embed_text_runtime_failure_degrades_with_bounded_metadata(monkeyp
     from tldw_Server_API.app.core.Embeddings.Embeddings_Server import Embeddings_Create
 
     class _FailingRuntime:
-        async def resolve(self, provider: str):
+        async def resolve(self, provider: str, *, model: str | None = None):
             raise ByokResolutionError("credential_store_unavailable", provider)
 
     config = {
@@ -1361,7 +1372,7 @@ async def test_per_claim_provider_failure_is_not_swallowed_by_nested_fallback(mo
             return {"claims": [], "summary": {}, "verifications": []}
 
     class _Runtime:
-        async def resolve(self, provider):
+        async def resolve(self, provider, *, model=None):
             return SimpleNamespace(
                 provider=provider,
                 api_key="runtime-key",
@@ -1499,3 +1510,230 @@ async def test_batch_clustering_runtime_remote_local_uses_selected_deployment(
         "base_url_override": "https://batch-local.example/embeddings",
         "credentials_resolved": True,
     }
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_sync_embedding_call_bypasses_saturated_default_executor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    call_started = threading.Event()
+    blocker_started = threading.Event()
+    release_blocker = threading.Event()
+    marked: list[Any] = []
+    release_count = 0
+
+    class TrackingPool(BoundedDaemonPool):
+        def _release_capacity(self) -> None:
+            nonlocal release_count
+            release_count += 1
+            super()._release_capacity()
+
+    def block_default_executor() -> None:
+        blocker_started.set()
+        release_blocker.wait(timeout=2.0)
+
+    def embedding_call() -> list[list[float]]:
+        call_started.set()
+        return [[1.0, 0.0]]
+
+    async def record_success(result: Any) -> None:
+        marked.append(result)
+
+    pool = TrackingPool(capacity=1)
+    monkeypatch.setattr(hyde, "SYNC_ADAPTER_CALL_POOL", pool, raising=False)
+    loop = asyncio.get_running_loop()
+    previous_executor = getattr(loop, "_default_executor", None)
+    saturated_executor = ThreadPoolExecutor(max_workers=1)
+    loop.set_default_executor(saturated_executor)
+    blocker = loop.run_in_executor(None, block_default_executor)
+    while not blocker_started.is_set():
+        await asyncio.sleep(0)
+
+    task = asyncio.create_task(
+        hyde._run_sync_embedding_call(
+            embedding_call,
+            on_success=record_success,
+        )
+    )
+    try:
+        for _attempt in range(100):
+            if call_started.is_set():
+                break
+            await asyncio.sleep(0.001)
+        started_before_executor_release = call_started.is_set()
+    finally:
+        release_blocker.set()
+        await blocker
+        loop.set_default_executor(previous_executor or ThreadPoolExecutor())
+        saturated_executor.shutdown(wait=True, cancel_futures=True)
+
+    result = await asyncio.wait_for(task, timeout=1.0)
+    assert started_before_executor_release is True  # nosec B101
+    assert result == [[1.0, 0.0]]  # nosec B101
+    assert marked == [result]  # nosec B101 - normal success is marked once
+    assert pool.active_count == 0  # nosec B101
+    assert release_count == 1  # nosec B101 - one admitted call, one release
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_sync_embedding_call_capacity_rejects_without_late_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    holder_started = threading.Event()
+    holder_released = threading.Event()
+    release_holder = threading.Event()
+    marked: list[Any] = []
+    call_count = 0
+    release_count = 0
+    private_secret = "private-hyde-capacity-secret"
+
+    class TrackingPool(BoundedDaemonPool):
+        def _release_capacity(self) -> None:
+            nonlocal release_count
+            release_count += 1
+            super()._release_capacity()
+
+    def hold_capacity() -> None:
+        holder_started.set()
+        release_holder.wait(timeout=2.0)
+
+    def embedding_call() -> list[list[float]]:
+        nonlocal call_count
+        call_count += 1
+        raise RuntimeError(private_secret)
+
+    async def record_success(result: Any) -> None:
+        marked.append(result)
+
+    pool = TrackingPool(capacity=1)
+    pool.start(
+        hold_capacity,
+        name="hyde-capacity-holder",
+        released_event=holder_released,
+    )
+    assert holder_started.wait(timeout=1.0)  # nosec B101
+    monkeypatch.setattr(hyde, "SYNC_ADAPTER_CALL_POOL", pool, raising=False)
+
+    try:
+        with pytest.raises(DaemonCapacityError) as exc_info:
+            await hyde._run_sync_embedding_call(
+                embedding_call,
+                on_success=record_success,
+            )
+        await asyncio.sleep(0.03)
+        assert call_count == 0  # nosec B101 - rejected work never dispatches
+        assert marked == []  # nosec B101
+        assert pool.active_count == 1  # nosec B101 - only the holder owns capacity
+        assert release_count == 0  # nosec B101
+        assert private_secret not in str(exc_info.value)  # nosec B101
+        assert private_secret not in repr(exc_info.value.__cause__)  # nosec B101
+        assert private_secret not in repr(exc_info.value.__context__)  # nosec B101
+    finally:
+        release_holder.set()
+        assert holder_released.wait(timeout=1.0)  # nosec B101
+
+    await asyncio.sleep(0.03)
+    assert call_count == 0  # nosec B101 - capacity release cannot start rejected work
+    assert pool.active_count == 0  # nosec B101
+    assert release_count == 1  # nosec B101 - only the holder was released
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("termination", ["cancellation", "timeout"])
+@pytest.mark.parametrize("vector_state", ["valid", "invalid"])
+@pytest.mark.asyncio
+async def test_sync_embedding_call_owns_worker_and_marks_only_valid_late_result(
+    monkeypatch: pytest.MonkeyPatch,
+    termination: str,
+    vector_state: str,
+) -> None:
+    lifecycle: list[str] = []
+    entered = threading.Event()
+    release = threading.Event()
+
+    class OrderedRuntime(_CredentialRuntime):
+        async def mark_used(self, handle: Any) -> None:
+            lifecycle.append("mark-used")
+            await super().mark_used(handle)
+
+    class TrackingPool(BoundedDaemonPool):
+        def _release_capacity(self) -> None:
+            lifecycle.append("capacity-release")
+            super()._release_capacity()
+
+    def embedding_call() -> list[list[Any]]:
+        lifecycle.append("provider-start")
+        entered.set()
+        release.wait(timeout=2.0)
+        lifecycle.append("provider-exit")
+        return [[1.0, 0.0]] if vector_state == "valid" else [["invalid"]]
+
+    runtime = OrderedRuntime("openai")
+    pool = TrackingPool(capacity=1)
+
+    async def mark_valid_result(result: Any) -> None:
+        await hyde._mark_runtime_used_for_embeddings(
+            result,
+            credential_runtime=runtime,
+            handle=runtime.handle,
+        )
+
+    async def invoke_with_runtime() -> Any:
+        try:
+            return await hyde._run_sync_embedding_call(
+                embedding_call,
+                on_success=mark_valid_result,
+            )
+        finally:
+            lifecycle.append("runtime-close")
+
+    monkeypatch.setattr(hyde, "SYNC_ADAPTER_CALL_POOL", pool, raising=False)
+    worker_task = asyncio.create_task(invoke_with_runtime())
+    for _attempt in range(100):
+        if entered.is_set():
+            break
+        await asyncio.sleep(0.001)
+    assert entered.is_set()  # nosec B101
+
+    if termination == "cancellation":
+        terminal_task = worker_task
+        terminal_task.cancel()
+    else:
+        terminal_task = asyncio.create_task(
+            asyncio.wait_for(worker_task, timeout=0.01)
+        )
+
+    try:
+        await asyncio.sleep(0.03)
+        assert terminal_task.done() is False
+        assert runtime.marked == []  # nosec B101
+        assert pool.active_count == 1  # nosec B101
+        assert lifecycle == ["provider-start"]  # nosec B101
+        release.set()
+        expected_error = (
+            asyncio.CancelledError
+            if termination == "cancellation"
+            else asyncio.TimeoutError
+        )
+        with pytest.raises(expected_error):
+            await asyncio.wait_for(terminal_task, timeout=1.0)
+    finally:
+        release.set()
+        if not terminal_task.done():
+            terminal_task.cancel()
+        await asyncio.gather(terminal_task, worker_task, return_exceptions=True)
+
+    expected_marked = [runtime.handle] if vector_state == "valid" else []
+    assert runtime.marked == expected_marked  # nosec B101
+    assert pool.active_count == 0  # nosec B101
+    expected_lifecycle = [
+        "provider-start",
+        "provider-exit",
+        "capacity-release",
+    ]
+    if vector_state == "valid":
+        expected_lifecycle.append("mark-used")
+    expected_lifecycle.append("runtime-close")
+    assert lifecycle == expected_lifecycle  # nosec B101

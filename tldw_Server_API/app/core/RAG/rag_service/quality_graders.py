@@ -17,13 +17,18 @@ from typing import Any, Callable, Optional
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
-from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import (
-    SummaryProviderError,
+from tldw_Server_API.app.core.Chat.bounded_daemon import (
+    SYNC_ADAPTER_CALL_POOL,
+    await_bounded_sync_call,
+    await_owned_worker,
 )
 from tldw_Server_API.app.core.LLM_Calls.structured_output import (
     StructuredOutputOptions,
     StructuredOutputParseError,
     parse_structured_output,
+)
+from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import (
+    SummaryProviderError,
 )
 
 
@@ -231,47 +236,59 @@ class FastGroundednessGrader:
             use_model = self.model or cfg_model
             credential_handle = None
             if self.credential_runtime is not None:
-                credential_handle = await self.credential_runtime.resolve(use_provider)
+                credential_handle = await self.credential_runtime.resolve(
+                    use_provider,
+                    model=use_model,
+                )
 
             api_key = credential_handle.api_key if credential_handle is not None else None
             runtime_kwargs = (
                 {
                     "app_config": credential_handle.app_config,
                     "credentials_resolved": True,
+                    "provider_credentials": credential_handle,
                     "raise_on_error": True,
                 }
                 if credential_handle is not None
                 else {}
             )
 
-            # Make LLM call with timeout
+            async def _analyze_and_record_use() -> Any:
+                """Keep credential ownership until the sync analyzer really exits."""
+
+                response = await await_bounded_sync_call(
+                    lambda: self._analyze(
+                        use_provider,
+                        prompt,
+                        None,
+                        api_key,
+                        "You are a groundedness checker. Output valid JSON only.",
+                        cfg_temp,
+                        model_override=use_model,
+                        **runtime_kwargs,
+                    ),
+                    pool=SYNC_ADAPTER_CALL_POOL,
+                    exhaustion_message="RAG grader adapter capacity is exhausted",
+                )
+                if (
+                    credential_handle is not None
+                    and isinstance(response, str)
+                    and response.startswith("Error:")
+                ):
+                    raise SummaryProviderError(
+                        code="provider_failure",
+                        provider=use_provider,
+                    )
+                if credential_handle is not None:
+                    await self.credential_runtime.mark_used(credential_handle)
+                return response
+
+            # Timeout cancellation drains the non-cooperative worker before the
+            # request-scoped credential runtime is allowed to close.
             raw_response = await asyncio.wait_for(
-                asyncio.to_thread(
-                    self._analyze,
-                    use_provider,
-                    prompt,
-                    None,
-                    api_key,
-                    "You are a groundedness checker. Output valid JSON only.",
-                    cfg_temp,
-                    model_override=use_model,
-                    **runtime_kwargs,
-                ),
+                await_owned_worker(_analyze_and_record_use()),
                 timeout=self.timeout_sec,
             )
-
-            if (
-                credential_handle is not None
-                and isinstance(raw_response, str)
-                and raw_response.startswith("Error:")
-            ):
-                raise SummaryProviderError(
-                    code="provider_failure",
-                    provider=use_provider,
-                )
-
-            if credential_handle is not None:
-                await self.credential_runtime.mark_used(credential_handle)
 
             latency_ms = int((time.time() - start_time) * 1000)
 
@@ -524,47 +541,59 @@ class UtilityGrader:
             use_model = self.model or cfg_model
             credential_handle = None
             if self.credential_runtime is not None:
-                credential_handle = await self.credential_runtime.resolve(use_provider)
+                credential_handle = await self.credential_runtime.resolve(
+                    use_provider,
+                    model=use_model,
+                )
 
             api_key = credential_handle.api_key if credential_handle is not None else None
             runtime_kwargs = (
                 {
                     "app_config": credential_handle.app_config,
                     "credentials_resolved": True,
+                    "provider_credentials": credential_handle,
                     "raise_on_error": True,
                 }
                 if credential_handle is not None
                 else {}
             )
 
-            # Make LLM call with timeout
+            async def _analyze_and_record_use() -> Any:
+                """Keep credential ownership until the sync analyzer really exits."""
+
+                response = await await_bounded_sync_call(
+                    lambda: self._analyze(
+                        use_provider,
+                        prompt,
+                        None,
+                        api_key,
+                        "You are a response quality evaluator. Output valid JSON only.",
+                        cfg_temp,
+                        model_override=use_model,
+                        **runtime_kwargs,
+                    ),
+                    pool=SYNC_ADAPTER_CALL_POOL,
+                    exhaustion_message="RAG grader adapter capacity is exhausted",
+                )
+                if (
+                    credential_handle is not None
+                    and isinstance(response, str)
+                    and response.startswith("Error:")
+                ):
+                    raise SummaryProviderError(
+                        code="provider_failure",
+                        provider=use_provider,
+                    )
+                if credential_handle is not None:
+                    await self.credential_runtime.mark_used(credential_handle)
+                return response
+
+            # Timeout cancellation drains the non-cooperative worker before the
+            # request-scoped credential runtime is allowed to close.
             raw_response = await asyncio.wait_for(
-                asyncio.to_thread(
-                    self._analyze,
-                    use_provider,
-                    prompt,
-                    None,
-                    api_key,
-                    "You are a response quality evaluator. Output valid JSON only.",
-                    cfg_temp,
-                    model_override=use_model,
-                    **runtime_kwargs,
-                ),
+                await_owned_worker(_analyze_and_record_use()),
                 timeout=self.timeout_sec,
             )
-
-            if (
-                credential_handle is not None
-                and isinstance(raw_response, str)
-                and raw_response.startswith("Error:")
-            ):
-                raise SummaryProviderError(
-                    code="provider_failure",
-                    provider=use_provider,
-                )
-
-            if credential_handle is not None:
-                await self.credential_runtime.mark_used(credential_handle)
 
             latency_ms = int((time.time() - start_time) * 1000)
 

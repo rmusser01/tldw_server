@@ -6,7 +6,7 @@ from fastapi import HTTPException
 
 
 @pytest.mark.integration
-def test_chat_command_replace_mode(monkeypatch, test_client, auth_headers):
+def test_chat_command_replace_mode(monkeypatch, credentialed_test_client, auth_headers):
      # Enable commands and set injection to replace
     monkeypatch.setenv("CHAT_COMMANDS_ENABLED", "1")
     monkeypatch.setenv("CHAT_COMMAND_INJECTION_MODE", "replace")
@@ -24,7 +24,12 @@ def test_chat_command_replace_mode(monkeypatch, test_client, auth_headers):
 
     # Submit a slash command
     payload = {"model": "openai/gpt-4o-mini", "messages": [{"role": "user", "content": "/time"}], "stream": False}
-    _ = test_client.post("/api/v1/chat/completions", json=payload, headers=auth_headers)
+    response = credentialed_test_client.post(
+        "/api/v1/chat/completions",
+        json=payload,
+        headers=auth_headers,
+    )
+    assert response.status_code == 200, response.text
 
     # Assert the last user message content is replaced with the command result prefix
     msgs = captured["messages"] or []
@@ -85,7 +90,11 @@ def test_chat_command_revalidates_after_injection(monkeypatch, test_client, auth
 
 
 @pytest.mark.integration
-def test_chat_command_replace_mode_truncates_injected_text(monkeypatch, test_client, auth_headers):
+def test_chat_command_replace_mode_truncates_injected_text(
+    monkeypatch,
+    credentialed_test_client,
+    auth_headers,
+):
     monkeypatch.setenv("CHAT_COMMANDS_ENABLED", "1")
     monkeypatch.setenv("CHAT_COMMAND_INJECTION_MODE", "replace")
     monkeypatch.setenv("CHAT_COMMANDS_MAX_CHARS", "24")
@@ -112,7 +121,12 @@ def test_chat_command_replace_mode_truncates_injected_text(monkeypatch, test_cli
     monkeypatch.setattr(chat_endpoint, "perform_chat_api_call", fake_call)
 
     payload = {"model": "openai/gpt-4o-mini", "messages": [{"role": "user", "content": "/time"}], "stream": False}
-    _ = test_client.post("/api/v1/chat/completions", json=payload, headers=auth_headers)
+    response = credentialed_test_client.post(
+        "/api/v1/chat/completions",
+        json=payload,
+        headers=auth_headers,
+    )
+    assert response.status_code == 200, response.text
 
     msgs = captured["messages"] or []
     last_user = None
@@ -134,7 +148,11 @@ def test_chat_command_replace_mode_truncates_injected_text(monkeypatch, test_cli
 
 
 @pytest.mark.integration
-def test_chat_command_non_audit_503_does_not_abort_request(monkeypatch, test_client, auth_headers):
+def test_chat_command_non_audit_503_does_not_abort_request(
+    monkeypatch,
+    credentialed_test_client,
+    auth_headers,
+):
     monkeypatch.setenv("CHAT_COMMANDS_ENABLED", "1")
     monkeypatch.setenv("CHAT_COMMAND_INJECTION_MODE", "system")
 
@@ -155,7 +173,11 @@ def test_chat_command_non_audit_503_does_not_abort_request(monkeypatch, test_cli
     monkeypatch.setattr(chat_endpoint, "perform_chat_api_call", fake_call)
 
     payload = {"model": "openai/gpt-4o-mini", "messages": [{"role": "user", "content": "/time"}], "stream": False}
-    resp = test_client.post("/api/v1/chat/completions", json=payload, headers=auth_headers)
+    resp = credentialed_test_client.post(
+        "/api/v1/chat/completions",
+        json=payload,
+        headers=auth_headers,
+    )
 
     assert resp.status_code == 200
     assert resp.json()["choices"][0]["message"]["content"] == "ok"

@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import ast
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Mapping, cast
+from typing import cast
 
 import pytest
 
 from tldw_Server_API.app.core.Jobs.settings import JobsSettingMode, JobsSettings
-
 
 pytestmark = pytest.mark.unit
 
@@ -202,6 +202,7 @@ def test_jobs_settings_classifies_known_keys() -> None:
     assert JobsSettings.setting_mode("JOBS_ALLOWED_QUEUES") is JobsSettingMode.SNAPSHOT_REFRESHABLE
     assert JobsSettings.setting_mode("JOBS_ALLOWED_QUEUES_CHATBOOKS") is JobsSettingMode.SNAPSHOT_REFRESHABLE
     assert JobsSettings.setting_mode("JOBS_ALLOWED_JOB_TYPES_CHATBOOKS") is JobsSettingMode.OPERATION_TIME
+    assert JobsSettings.setting_mode("JOBS_EXPIRED_RECOVERY_BATCH_SIZE") is JobsSettingMode.OPERATION_TIME
     assert JobsSettings.setting_mode("JOBS_QUOTA_MAX_INFLIGHT") is JobsSettingMode.OPERATION_TIME
     assert JobsSettings.setting_mode("JOBS_QUOTA_MAX_INFLIGHT_CHATBOOKS_USER_1") is JobsSettingMode.OPERATION_TIME
     assert JobsSettings.setting_mode("JOBS_PG_ACQUIRE_PRIORITY_DESC_DOMAINS") is JobsSettingMode.OPERATION_TIME

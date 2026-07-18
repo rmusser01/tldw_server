@@ -1,13 +1,22 @@
+import base64
 import json
-import os
 import sqlite3
-import tempfile
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from datetime import datetime, timedelta
 
 import pytest
 
-from tldw_Server_API.app.core.Jobs.migrations import ensure_jobs_tables
-from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.Jobs import migrations as jobs_migrations
+from tldw_Server_API.app.core.Jobs.manager import (
+    JobManager,
+    JobPayloadDecryptionError,
+)
+from tldw_Server_API.app.core.Jobs.migrations import (
+    _ensure_sqlite_archive_locators,
+    ensure_jobs_tables,
+)
 
 
 @pytest.fixture()
@@ -15,6 +24,38 @@ def jobs_db(tmp_path):
     db_path = tmp_path / "jobs.db"
     ensure_jobs_tables(db_path)
     yield db_path
+
+
+def _capture_sqlite_archive_query_plan(
+    manager: JobManager,
+    monkeypatch,
+    **list_kwargs,
+):
+    connection = manager._connect()
+    plan: list[str] = []
+
+    class _PlanCapturingConnection:
+        def execute(self, query, params=()):
+            if query.lstrip().upper().startswith("SELECT"):
+                plan.extend(
+                    str(row[3])
+                    for row in connection.execute(
+                        "EXPLAIN QUERY PLAN " + query,
+                        params,
+                    ).fetchall()
+                )
+            return connection.execute(query, params)
+
+        def close(self):
+            connection.close()
+
+    monkeypatch.setattr(
+        manager,
+        "_connect",
+        lambda: _PlanCapturingConnection(),
+    )
+    rows = manager.list_archived_jobs(**list_kwargs)
+    return rows, plan
 
 
 def test_create_and_acquire_and_complete(jobs_db):
@@ -39,6 +80,29 @@ def test_create_and_acquire_and_complete(jobs_db):
     assert ok2
     got = jm.get_job(int(nextj["id"]))
     assert got["status"] == "completed"
+
+
+def test_sqlite_create_job_rejects_secret_payload_without_persisting(jobs_db, monkeypatch):
+    monkeypatch.setenv("JOBS_SECRET_REJECT", "1")
+    monkeypatch.setenv("JOBS_SECRET_REDACT", "0")
+    jm = JobManager(jobs_db)
+    sentinel = "sk-sqlite-secret-rejection-sentinel"
+
+    with pytest.raises(ValueError, match="Payload appears to contain secrets") as exc_info:
+        jm.create_job(
+            domain="secret-reject-regression",
+            queue="default",
+            job_type="sentinel",
+            payload={"api_key": sentinel},
+            owner_user_id="secret-owner",
+        )
+
+    assert sentinel not in str(exc_info.value)
+    assert jm.list_jobs(
+        domain="secret-reject-regression",
+        job_type="sentinel",
+        owner_user_id="secret-owner",
+    ) == []
 
 
 def test_update_job_result_merges(jobs_db):
@@ -87,6 +151,1342 @@ def test_acquire_decrypts_payload(jobs_db, monkeypatch):
     assert acq["payload"] == payload
 
 
+def test_replace_job_payload_rejects_mismatched_uuid_sqlite(jobs_db):
+    jm = JobManager(jobs_db)
+    original = {"version": "original"}
+    job = jm.create_job(
+        domain="prompt_studio",
+        queue="default",
+        job_type="optimization",
+        payload=original,
+        owner_user_id="1",
+    )
+
+    replaced = jm.replace_job_payload(
+        int(job["id"]),
+        payload={"version": "replacement"},
+        expected_uuid="stale-job-uuid",
+        expected_domain="prompt_studio",
+    )
+
+    assert replaced is False
+    assert jm.get_job(int(job["id"]))["payload"] == original
+
+
+def test_replace_job_payload_rejects_mismatched_domain_sqlite(jobs_db):
+    jm = JobManager(jobs_db)
+    original = {"version": "original"}
+    job = jm.create_job(
+        domain="prompt_studio",
+        queue="default",
+        job_type="optimization",
+        payload=original,
+        owner_user_id="1",
+    )
+
+    replaced = jm.replace_job_payload(
+        int(job["id"]),
+        payload={"version": "replacement"},
+        expected_uuid=str(job["uuid"]),
+        expected_domain="other",
+    )
+
+    assert replaced is False
+    assert jm.get_job(int(job["id"]))["payload"] == original
+
+
+def test_replace_job_payload_rejects_stale_uuid_after_sqlite_id_reuse(
+    jobs_db,
+):
+    jm = JobManager(jobs_db)
+    stale_job = jm.create_job(
+        domain="prompt_studio",
+        queue="default",
+        job_type="optimization",
+        payload={"version": "stale"},
+        owner_user_id="1",
+    )
+    acquired = jm.acquire_next_job(
+        domain="prompt_studio",
+        queue="default",
+        lease_seconds=30,
+        worker_id="worker-a",
+    )
+    assert acquired is not None
+    assert jm.complete_job(int(acquired["id"]), enforce=False)
+    assert jm.prune_jobs(
+        statuses=["completed"],
+        older_than_days=0,
+        domain="prompt_studio",
+    ) == 1
+
+    replacement_job = jm.create_job(
+        domain="prompt_studio",
+        queue="default",
+        job_type="optimization",
+        payload={"version": "new-owner"},
+        owner_user_id="2",
+    )
+    assert int(replacement_job["id"]) == int(stale_job["id"])
+
+    replaced = jm.replace_job_payload(
+        int(stale_job["id"]),
+        payload={"version": "stale-worker-overwrite"},
+        expected_uuid=str(stale_job["uuid"]),
+        expected_domain="prompt_studio",
+    )
+
+    assert replaced is False
+    assert jm.get_job(int(replacement_job["id"]))["payload"] == {
+        "version": "new-owner"
+    }
+
+
+def test_replace_job_payload_preserves_encryption_at_rest_and_decrypts_on_read(
+    jobs_db,
+    monkeypatch,
+):
+    from tldw_Server_API.app.core.Security.crypto import encrypt_json_blob
+
+    monkeypatch.setenv("JOBS_ENCRYPT_SECURE", "true")
+    monkeypatch.setenv(
+        "WORKFLOWS_ARTIFACT_ENC_KEY",
+        base64.b64encode(b"2" * 32).decode("ascii"),
+    )
+    if encrypt_json_blob({"probe": True}) is None:
+        pytest.skip("Crypto backend unavailable; skipping encryption test")
+
+    jm = JobManager(jobs_db)
+    job = jm.create_job(
+        domain="secure",
+        queue="default",
+        job_type="optimization",
+        payload={"version": "original"},
+        owner_user_id="1",
+    )
+    replacement = {"version": "replacement"}
+
+    assert jm.replace_job_payload(
+        int(job["id"]),
+        payload=replacement,
+        expected_uuid=str(job["uuid"]),
+        expected_domain="secure",
+    )
+
+    conn = sqlite3.connect(jobs_db)
+    try:
+        raw = conn.execute(
+            "SELECT payload FROM jobs WHERE id = ?",
+            (int(job["id"]),),
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    raw_payload = json.loads(raw)
+    assert isinstance(raw_payload.get("_encrypted"), dict)
+    assert jm.get_job(int(job["id"]))["payload"] == replacement
+
+
+def test_replace_archived_job_payload_is_guarded_and_clears_stale_compressed_copy(
+    jobs_db,
+    monkeypatch,
+):
+    monkeypatch.setenv("JOBS_ARCHIVE_BEFORE_DELETE", "1")
+    monkeypatch.setenv("JOBS_ARCHIVE_COMPRESS", "0")
+    jm = JobManager(jobs_db)
+    original = {"authorization": "legacy-secret", "version": "legacy"}
+    job = jm.create_job(
+        domain="prompt_studio",
+        queue="default",
+        job_type="optimization",
+        payload=original,
+        owner_user_id="1",
+    )
+    job_id = int(job["id"])
+    assert jm.cancel_job(job_id, reason="archive regression")
+    assert jm.prune_jobs(
+        statuses=["cancelled"],
+        older_than_days=0,
+        domain="prompt_studio",
+    ) == 1
+
+    conn = sqlite3.connect(jobs_db)
+    try:
+        conn.execute(
+            "UPDATE jobs_archive SET payload = ?, payload_compressed = ? "
+            "WHERE id = ?",
+            (json.dumps(original), "stale-compressed-secret", job_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    assert jm.replace_archived_job_payload(
+        job_id,
+        payload={"version": "wrong-uuid"},
+        expected_uuid="stale-job-uuid",
+        expected_domain="prompt_studio",
+    ) is False
+    assert jm.replace_archived_job_payload(
+        job_id,
+        payload={"version": "wrong-domain"},
+        expected_uuid=str(job["uuid"]),
+        expected_domain="other",
+    ) is False
+    assert jm.get_job_or_archived(job_id, domain="prompt_studio")["payload"] == original
+
+    replacement = {"version": "secured"}
+    assert jm.replace_archived_job_payload(
+        job_id,
+        payload=replacement,
+        expected_uuid=str(job["uuid"]),
+        expected_domain="prompt_studio",
+    ) is True
+    archived = jm.list_archived_jobs(
+        domain="prompt_studio",
+        status="cancelled",
+        job_type="optimization",
+        limit=10,
+    )
+    assert [row["uuid"] for row in archived] == [job["uuid"]]
+    assert archived[0]["payload"] == replacement
+
+    conn = sqlite3.connect(jobs_db)
+    try:
+        raw = conn.execute(
+            "SELECT payload_compressed FROM jobs_archive WHERE id = ? AND uuid = ?",
+            (job_id, str(job["uuid"])),
+        ).fetchone()
+    finally:
+        conn.close()
+    assert raw == (None,)
+
+
+def test_prune_archive_normalizes_terminal_lease_identity_only(
+    jobs_db,
+    monkeypatch,
+):
+    monkeypatch.setenv("JOBS_ARCHIVE_BEFORE_DELETE", "1")
+    jm = JobManager(jobs_db)
+    terminal = jm.create_job(
+        domain="archive-lease-convergence",
+        queue="default",
+        job_type="work",
+        payload={},
+        owner_user_id="1",
+    )
+    processing = jm.create_job(
+        domain="archive-lease-convergence",
+        queue="default",
+        job_type="work",
+        payload={},
+        owner_user_id="1",
+    )
+    conn = sqlite3.connect(jobs_db)
+    try:
+        with conn:
+            conn.execute(
+                "UPDATE jobs SET status='completed', completed_at=DATETIME('now','-1 day'), "
+                "leased_until=DATETIME('now','+1 hour'), worker_id='legacy-worker', "
+                "lease_id='legacy-lease' WHERE id=?",
+                (int(terminal["id"]),),
+            )
+            conn.execute(
+                "UPDATE jobs SET status='processing', created_at=DATETIME('now','-1 day'), "
+                "leased_until=DATETIME('now','+1 hour'), worker_id='active-worker', "
+                "lease_id='active-lease' WHERE id=?",
+                (int(processing["id"]),),
+            )
+    finally:
+        conn.close()
+
+    assert jm.prune_jobs(
+        statuses=["completed", "processing"],
+        older_than_days=0,
+        domain="archive-lease-convergence",
+    ) == 2
+
+    conn = sqlite3.connect(jobs_db)
+    try:
+        rows = conn.execute(
+            "SELECT uuid, status, leased_until, worker_id, lease_id FROM jobs_archive "
+            "WHERE domain='archive-lease-convergence'"
+        ).fetchall()
+    finally:
+        conn.close()
+    archived = {row[0]: row[1:] for row in rows}
+    assert archived[str(terminal["uuid"])] == ("completed", None, None, None)
+    assert archived[str(processing["uuid"])][0] == "processing"
+    assert archived[str(processing["uuid"])][2:] == ("active-worker", "active-lease")
+    assert archived[str(processing["uuid"])][1] is not None
+
+
+def test_list_archived_jobs_paginates_reused_ids_with_same_created_at(
+    jobs_db,
+    monkeypatch,
+):
+    monkeypatch.setenv("JOBS_ARCHIVE_BEFORE_DELETE", "1")
+    jm = JobManager(jobs_db)
+    archived_jobs = []
+    for version in ("first", "second"):
+        job = jm.create_job(
+            domain="prompt_studio",
+            queue="default",
+            job_type="optimization",
+            payload={"version": version},
+            owner_user_id="1",
+        )
+        assert jm.cancel_job(int(job["id"]), reason="pagination regression")
+        assert jm.prune_jobs(
+            statuses=["cancelled"],
+            older_than_days=0,
+            domain="prompt_studio",
+        ) == 1
+        archived_jobs.append(job)
+
+    assert archived_jobs[0]["id"] == archived_jobs[1]["id"]
+    shared_created_at = "2026-01-01 00:00:00"
+    conn = sqlite3.connect(jobs_db)
+    try:
+        conn.execute(
+            "UPDATE jobs_archive SET created_at = ?",
+            (shared_created_at,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    first_page = jm.list_archived_jobs(
+        domain="prompt_studio",
+        status="cancelled",
+        job_type="optimization",
+        limit=1,
+    )
+    assert len(first_page) == 1
+    second_page = jm.list_archived_jobs(
+        domain="prompt_studio",
+        status="cancelled",
+        job_type="optimization",
+        created_before=datetime.fromisoformat(shared_created_at),
+        before_id=int(first_page[0]["id"]),
+        before_uuid=str(first_page[0]["uuid"]),
+        before_archive_locator=first_page[0]["_archive_locator"],
+        limit=1,
+    )
+
+    assert {
+        str(first_page[0]["uuid"]),
+        str(second_page[0]["uuid"]),
+    } == {str(job["uuid"]) for job in archived_jobs}
+
+
+def test_list_archived_jobs_paginates_same_second_microsecond_timestamps(
+    jobs_db,
+):
+    jm = JobManager(jobs_db)
+    archived_id = 17
+    archived_uuid = "reused-archive-uuid"
+    timestamp_versions = (
+        ("2026-01-01 00:00:00.900000", "newest"),
+        ("2026-01-01T00:00:00.500000", "middle"),
+        ("2026-01-01 00:00:00.100000+00:00", "oldest"),
+    )
+    conn = sqlite3.connect(jobs_db)
+    try:
+        conn.executemany(
+            "INSERT INTO jobs_archive "
+            "(id, uuid, domain, queue, job_type, payload, status, created_at) "
+            "VALUES (?, ?, 'prompt_studio', 'default', 'optimization', ?, "
+            "'cancelled', ?)",
+            [
+                (
+                    archived_id,
+                    archived_uuid,
+                    json.dumps({"version": version}),
+                    timestamp,
+                )
+                for timestamp, version in timestamp_versions
+            ],
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    rows = []
+    cursor = {}
+    for _ in timestamp_versions:
+        page = jm.list_archived_jobs(
+            domain="prompt_studio",
+            status="cancelled",
+            job_type="optimization",
+            limit=1,
+            **cursor,
+        )
+        assert len(page) == 1
+        row = page[0]
+        rows.append(row)
+        cursor = {
+            "created_before": datetime.fromisoformat(
+                str(row["_archive_cursor_created_at"])
+            ),
+            "before_id": archived_id,
+            "before_uuid": archived_uuid,
+            "before_archive_locator": row["_archive_locator"],
+        }
+
+    assert [row["payload"]["version"] for row in rows] == [
+        "newest",
+        "middle",
+        "oldest",
+    ]
+    assert len({row["_archive_locator"] for row in rows}) == len(rows)
+    assert jm.list_archived_jobs(
+        domain="prompt_studio",
+        status="cancelled",
+        job_type="optimization",
+        limit=1,
+        **cursor,
+    ) == []
+
+
+def test_list_archived_jobs_paginates_submillisecond_ties_by_locator(
+    jobs_db,
+):
+    jm = JobManager(jobs_db)
+    conn = sqlite3.connect(jobs_db)
+    try:
+        conn.executemany(
+            "INSERT INTO jobs_archive "
+            "(id, uuid, domain, queue, job_type, payload, status, created_at) "
+            "VALUES (23, 'submillisecond-tie', 'prompt_studio', 'default', "
+            "'optimization', ?, 'cancelled', ?)",
+            (
+                (json.dumps({"version": "first"}), "2026-01-01 00:00:00.100900"),
+                (json.dumps({"version": "second"}), "2026-01-01 00:00:00.100800"),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    rows = []
+    cursor = {}
+    for _ in range(2):
+        page = jm.list_archived_jobs(
+            domain="prompt_studio",
+            job_type="optimization",
+            limit=1,
+            **cursor,
+        )
+        assert len(page) == 1
+        row = page[0]
+        rows.append(row)
+        cursor = {
+            "created_before": datetime.fromisoformat(
+                str(row["_archive_cursor_created_at"])
+            ),
+            "before_id": int(row["id"]),
+            "before_uuid": str(row["_archive_cursor_uuid"]),
+            "before_archive_locator": row["_archive_locator"],
+        }
+
+    assert {row["payload"]["version"] for row in rows} == {"first", "second"}
+    assert len({row["_archive_locator"] for row in rows}) == 2
+    assert jm.list_archived_jobs(
+        domain="prompt_studio",
+        job_type="optimization",
+        limit=1,
+        **cursor,
+    ) == []
+
+
+def test_list_archived_jobs_rejects_partial_pagination_cursor(jobs_db):
+    jm = JobManager(jobs_db)
+
+    with pytest.raises(
+        ValueError,
+        match="complete archive cursor",
+    ):
+        jm.list_archived_jobs(
+            created_before=datetime(2026, 1, 1),
+            before_id=1,
+            before_uuid="legacy-job",
+        )
+
+
+def test_get_job_or_archived_selects_newest_reused_id_and_supports_stable_identity(
+    jobs_db,
+    monkeypatch,
+):
+    monkeypatch.setenv("JOBS_ARCHIVE_BEFORE_DELETE", "1")
+    jm = JobManager(jobs_db)
+    archived_jobs = []
+    for version in ("older", "newer"):
+        job = jm.create_job(
+            domain="prompt_studio",
+            queue="default",
+            job_type="optimization",
+            payload={"version": version},
+            owner_user_id="1",
+        )
+        assert jm.cancel_job(int(job["id"]), reason="identity regression")
+        assert jm.prune_jobs(
+            statuses=["cancelled"],
+            older_than_days=0,
+            domain="prompt_studio",
+        ) == 1
+        archived_jobs.append(job)
+
+    older, newer = archived_jobs
+    assert int(older["id"]) == int(newer["id"])
+
+    newest_row = jm.get_job_or_archived(
+        int(newer["id"]),
+        domain="prompt_studio",
+    )
+    older_row = jm.get_job_or_archived(
+        int(older["id"]),
+        domain="prompt_studio",
+        job_uuid=str(older["uuid"]),
+    )
+
+    assert newest_row is not None
+    assert newest_row["uuid"] == newer["uuid"]
+    assert newest_row["payload"] == {"version": "newer"}
+    assert newest_row["_archive_locator"] is not None
+    assert older_row is not None
+    assert older_row["uuid"] == older["uuid"]
+    assert older_row["payload"] == {"version": "older"}
+    assert jm.get_job_or_archived(
+        int(older["id"]),
+        domain="prompt_studio",
+        archive_locator=older_row["_archive_locator"],
+    )["uuid"] == older["uuid"]
+
+
+def test_sqlite_prune_locks_scan_through_archive_and_rejects_stale_replacement(
+    jobs_db,
+    monkeypatch,
+):
+    monkeypatch.setenv("JOBS_ARCHIVE_BEFORE_DELETE", "1")
+    monkeypatch.setenv("JOBS_SECRET_REDACT", "0")
+    monkeypatch.setenv("JOBS_SECRET_REJECT", "0")
+    prune_manager = JobManager(jobs_db)
+    replace_manager = JobManager(jobs_db)
+    job = prune_manager.create_job(
+        domain="prompt_studio",
+        queue="default",
+        job_type="optimization",
+        payload={
+            "version": "legacy",
+            "authorization": "legacy-secret",
+        },
+        owner_user_id="1",
+    )
+    assert prune_manager.cancel_job(int(job["id"]), reason="archive race")
+
+    scan_started = threading.Event()
+    release_scan = threading.Event()
+    original_secure = prune_manager._secured_prompt_archive_payload
+
+    def _blocking_secure(payload, *, queue):
+        scan_started.set()
+        assert release_scan.wait(timeout=5)
+        return original_secure(payload, queue=queue)
+
+    monkeypatch.setattr(
+        prune_manager,
+        "_secured_prompt_archive_payload",
+        _blocking_secure,
+    )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        prune_future = executor.submit(
+            prune_manager.prune_jobs,
+            statuses=["cancelled"],
+            older_than_days=0,
+            domain="prompt_studio",
+        )
+        assert scan_started.wait(timeout=5)
+        replace_future = executor.submit(
+            replace_manager.replace_job_payload,
+            int(job["id"]),
+            payload={"version": "concurrent-replacement"},
+            expected_uuid=str(job["uuid"]),
+            expected_domain="prompt_studio",
+        )
+        try:
+            with pytest.raises(FutureTimeoutError):
+                replace_future.result(timeout=0.1)
+        finally:
+            release_scan.set()
+
+        assert prune_future.result(timeout=5) == 1
+        assert replace_future.result(timeout=5) is False
+
+    archived = prune_manager.get_job_or_archived(
+        int(job["id"]),
+        domain="prompt_studio",
+    )
+    assert archived is not None
+    assert archived["payload"] == {"version": "legacy"}
+
+
+def test_prune_scrubs_prompt_optimization_payload_before_archiving(
+    jobs_db,
+    monkeypatch,
+):
+    monkeypatch.setenv("JOBS_ARCHIVE_BEFORE_DELETE", "1")
+    monkeypatch.setenv("JOBS_SECRET_REDACT", "0")
+    monkeypatch.setenv("JOBS_SECRET_REJECT", "0")
+    jm = JobManager(jobs_db)
+    sentinel = "legacy-provider-secret"
+    job = jm.create_job(
+        domain="prompt_studio",
+        queue="default",
+        job_type="optimization",
+        payload={
+            "optimization_id": 17,
+            "authorization": sentinel,
+            "optimization_config": {
+                "model_config": {
+                    "provider": "openai",
+                    "model": "gpt-4o-mini",
+                    "api_key": sentinel,
+                }
+            },
+        },
+        owner_user_id="1",
+    )
+    assert jm.cancel_job(int(job["id"]), reason="archive security regression")
+
+    assert jm.prune_jobs(
+        statuses=["cancelled"],
+        older_than_days=0,
+        domain="prompt_studio",
+        job_type="optimization",
+    ) == 1
+
+    archived = jm.get_job_or_archived(
+        int(job["id"]),
+        domain="prompt_studio",
+    )
+    assert archived is not None
+    serialized = json.dumps(archived["payload"], sort_keys=True)
+    assert sentinel not in serialized
+    assert "authorization" not in archived["payload"]
+
+
+def test_jobs_archive_has_migration_scan_index(jobs_db):
+    conn = sqlite3.connect(jobs_db)
+    try:
+        indexes = {
+            str(row[1])
+            for row in conn.execute("PRAGMA index_list(jobs_archive)").fetchall()
+        }
+    finally:
+        conn.close()
+
+    assert "idx_jobs_archive_migration" in indexes
+
+
+def test_sqlite_archive_cursor_index_handles_invalid_legacy_timestamps(
+    tmp_path,
+):
+    db_path = tmp_path / "legacy-invalid-archive-timestamps.sqlite"
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "CREATE TABLE jobs_archive ("
+            "id INTEGER, uuid TEXT, domain TEXT NOT NULL, queue TEXT NOT NULL, "
+            "job_type TEXT NOT NULL, payload TEXT, result TEXT, "
+            "payload_compressed TEXT, result_compressed TEXT, "
+            "status TEXT NOT NULL, created_at TEXT, archived_at TEXT)"
+        )
+        conn.executemany(
+            "INSERT INTO jobs_archive "
+            "(id, uuid, domain, queue, job_type, payload, status, "
+            "created_at, archived_at) VALUES (?, NULL, 'prompt_studio', "
+            "'default', 'optimization', '{}', 'cancelled', ?, ?)",
+            (
+                (1, "now", "not-a-timestamp"),
+                (2, "invalid-created-at", "invalid-archived-at"),
+                (3, "2461041.5", "invalid-archived-at"),
+                (4, "12:34:56", "invalid-archived-at"),
+                (5, "2026-02-30 12:00:00", "invalid-archived-at"),
+                (6, "2026-01-01 24:00:00", "invalid-archived-at"),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    ensure_jobs_tables(db_path)
+
+    conn = sqlite3.connect(db_path)
+    try:
+        indexes = {
+            str(row[1])
+            for row in conn.execute("PRAGMA index_list(jobs_archive)").fetchall()
+        }
+    finally:
+        conn.close()
+    rows = JobManager(db_path).list_archived_jobs(
+        domain="prompt_studio",
+        job_type="optimization",
+        limit=10,
+    )
+
+    assert "idx_jobs_archive_cursor_v2" in indexes
+    assert len(rows) == 6
+    assert {
+        row["_archive_cursor_created_at"]
+        for row in rows
+    } == {
+        "0001-01-01 00:00:00",
+        "2026-01-02 00:00:00.000",
+        "2026-03-02 12:00:00.000",
+    }
+    assert all(
+        datetime.fromisoformat(str(row["_archive_cursor_created_at"]))
+        for row in rows
+    )
+
+
+def test_sqlite_archive_first_page_uses_cursor_index_without_temp_sort(
+    jobs_db,
+    monkeypatch,
+):
+    conn = sqlite3.connect(jobs_db)
+    try:
+        conn.execute(
+            "INSERT INTO jobs_archive "
+            "(id, uuid, domain, queue, job_type, payload, status, created_at) "
+            "VALUES (1, 'first-page-plan', 'prompt_studio', 'default', "
+            "'optimization', '{}', 'cancelled', "
+            "'2026-01-01 00:00:00.123456')"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    rows, plan = _capture_sqlite_archive_query_plan(
+        JobManager(jobs_db),
+        monkeypatch,
+        domain="prompt_studio",
+        status=None,
+        job_type="optimization",
+        limit=1,
+    )
+
+    assert len(rows) == 1
+    assert any("idx_jobs_archive_cursor_v2" in detail for detail in plan)
+    assert not any("TEMP B-TREE" in detail for detail in plan)
+
+
+def test_sqlite_archive_full_cursor_uses_cursor_index_without_temp_sort(
+    jobs_db,
+    monkeypatch,
+):
+    conn = sqlite3.connect(jobs_db)
+    try:
+        conn.executemany(
+            "INSERT INTO jobs_archive "
+            "(id, uuid, domain, queue, job_type, payload, status, created_at) "
+            "VALUES (3, 'full-cursor-plan', 'prompt_studio', 'default', "
+            "'optimization', '{}', 'cancelled', ?)",
+            (
+                ("2026-01-01 00:00:00.900000",),
+                ("2026-01-01 00:00:00.100000",),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    manager = JobManager(jobs_db)
+    first = manager.list_archived_jobs(
+        domain="prompt_studio",
+        status=None,
+        job_type="optimization",
+        limit=1,
+    )[0]
+    rows, plan = _capture_sqlite_archive_query_plan(
+        manager,
+        monkeypatch,
+        domain="prompt_studio",
+        status=None,
+        job_type="optimization",
+        created_before=datetime.fromisoformat(
+            str(first["_archive_cursor_created_at"])
+        ),
+        before_id=int(first["id"]),
+        before_uuid=str(first["_archive_cursor_uuid"]),
+        before_archive_locator=first["_archive_locator"],
+        limit=1,
+    )
+
+    assert len(rows) == 1
+    assert any("idx_jobs_archive_cursor_v2" in detail for detail in plan)
+    assert not any("TEMP B-TREE" in detail for detail in plan)
+
+
+def test_sqlite_archive_id_forward_migration_backfills_and_assigns_new_rows(
+    tmp_path,
+):
+    db_path = tmp_path / "legacy-jobs-archive.sqlite"
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "CREATE TABLE jobs_archive ("
+            "id INTEGER, uuid TEXT, domain TEXT NOT NULL, queue TEXT NOT NULL, "
+            "job_type TEXT NOT NULL, payload TEXT, result TEXT, "
+            "payload_compressed TEXT, result_compressed TEXT, "
+            "status TEXT NOT NULL, created_at TEXT, archived_at TEXT)"
+        )
+        conn.execute(
+            "INSERT INTO jobs_archive "
+            "(id, uuid, domain, queue, job_type, payload, status) "
+            "VALUES (1, NULL, 'prompt_studio', 'default', "
+            "'optimization', '{}', 'cancelled')"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    ensure_jobs_tables(db_path)
+
+    conn = sqlite3.connect(db_path)
+    try:
+        first_archive_id = conn.execute(
+            "SELECT archive_id FROM jobs_archive WHERE id = 1"
+        ).fetchone()[0]
+        conn.execute(
+            "INSERT INTO jobs_archive "
+            "(id, uuid, domain, queue, job_type, payload, status) "
+            "VALUES (2, NULL, 'prompt_studio', 'default', "
+            "'optimization', '{}', 'cancelled')"
+        )
+        conn.commit()
+        second_archive_id = conn.execute(
+            "SELECT archive_id FROM jobs_archive WHERE id = 2"
+        ).fetchone()[0]
+    finally:
+        conn.close()
+
+    assert first_archive_id is not None
+    assert second_archive_id is not None
+    assert second_archive_id != first_archive_id
+
+
+def test_sqlite_legacy_archive_locator_survives_delete_gap_vacuum_and_paginates(
+    tmp_path,
+):
+    db_path = tmp_path / "legacy-jobs-archive-vacuum.sqlite"
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "CREATE TABLE jobs_archive ("
+            "archive_id INTEGER, id INTEGER, uuid TEXT, "
+            "domain TEXT NOT NULL, queue TEXT NOT NULL, "
+            "job_type TEXT NOT NULL, payload TEXT, result TEXT, "
+            "payload_compressed TEXT, result_compressed TEXT, "
+            "status TEXT NOT NULL, created_at TEXT, archived_at TEXT)"
+        )
+        conn.executemany(
+            "INSERT INTO jobs_archive "
+            "(archive_id, id, uuid, domain, queue, job_type, payload, status, "
+            "created_at) VALUES (?, ?, ?, 'prompt_studio', 'default', "
+            "'optimization', ?, 'cancelled', '2026-01-01 00:00:00')",
+            (
+                (50, 1, "legacy-explicit", json.dumps({"version": "first"})),
+                (None, 2, "legacy-gap", json.dumps({"version": "second"})),
+                (None, 3, "legacy-tail", json.dumps({"version": "third"})),
+            ),
+        )
+        conn.execute(
+            "CREATE TRIGGER trg_jobs_archive_id "
+            "AFTER INSERT ON jobs_archive FOR EACH ROW "
+            "WHEN NEW.archive_id IS NULL BEGIN "
+            "UPDATE jobs_archive SET archive_id = NEW.rowid "
+            "WHERE rowid = NEW.rowid; END"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    ensure_jobs_tables(db_path)
+
+    conn = sqlite3.connect(db_path)
+    try:
+        migrated = dict(
+            conn.execute(
+                "SELECT id, archive_id FROM jobs_archive ORDER BY id"
+            ).fetchall()
+        )
+        conn.execute("DELETE FROM jobs_archive WHERE id = 2")
+        conn.commit()
+        conn.execute("VACUUM")
+        conn.execute(
+            "INSERT INTO jobs_archive "
+            "(id, uuid, domain, queue, job_type, payload, status, created_at) "
+            "VALUES (4, 'post-vacuum', 'prompt_studio', 'default', "
+            "'optimization', ?, 'cancelled', '2026-01-01 00:00:00')",
+            (json.dumps({"version": "fourth"}),),
+        )
+        conn.commit()
+        inserted_locator = int(
+            conn.execute(
+                "SELECT archive_id FROM jobs_archive WHERE id = 4"
+            ).fetchone()[0]
+        )
+        archive_id_indexes = {
+            str(row[1]): bool(row[2])
+            for row in conn.execute("PRAGMA index_list(jobs_archive)").fetchall()
+        }
+    finally:
+        conn.close()
+
+    assert int(migrated[2]) > 50
+    assert int(migrated[3]) > int(migrated[2])
+    assert inserted_locator > int(migrated[3])
+    assert archive_id_indexes.get("idx_jobs_archive_id") is True
+
+    manager = JobManager(db_path)
+    seen: list[int] = []
+    cursor: dict[str, object] = {}
+    while True:
+        page = manager.list_archived_jobs(
+            domain="prompt_studio",
+            job_type="optimization",
+            status="cancelled",
+            limit=1,
+            **cursor,
+        )
+        if not page:
+            break
+        row = page[0]
+        seen.append(int(row["_archive_locator"]))
+        cursor = {
+            "created_before": datetime.fromisoformat(
+                str(row["_archive_cursor_created_at"])
+            ),
+            "before_id": int(row["id"]),
+            "before_uuid": str(row["_archive_cursor_uuid"]),
+            "before_archive_locator": row["_archive_locator"],
+        }
+
+    assert len(seen) == len(set(seen)) == 3
+    assert set(seen) == {50, int(migrated[3]), inserted_locator}
+
+
+def test_sqlite_archive_locator_migration_rolls_back_on_uniqueness_failure(
+    tmp_path,
+):
+    db_path = tmp_path / "corrupt-legacy-jobs-archive.sqlite"
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "CREATE TABLE jobs_archive ("
+            "archive_id INTEGER, id INTEGER, uuid TEXT, "
+            "domain TEXT NOT NULL, queue TEXT NOT NULL, "
+            "job_type TEXT NOT NULL, payload TEXT, result TEXT, "
+            "payload_compressed TEXT, result_compressed TEXT, "
+            "status TEXT NOT NULL, created_at TEXT, archived_at TEXT)"
+        )
+        conn.executemany(
+            "INSERT INTO jobs_archive "
+            "(archive_id, id, uuid, domain, queue, job_type, payload, status) "
+            "VALUES (?, ?, ?, 'prompt_studio', 'default', "
+            "'optimization', '{}', 'cancelled')",
+            (
+                (7, 1, "duplicate-one"),
+                (7, 2, "duplicate-two"),
+                (None, 3, "unmigrated"),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    with pytest.raises(sqlite3.IntegrityError):
+        ensure_jobs_tables(db_path)
+
+    conn = sqlite3.connect(db_path)
+    try:
+        unmigrated_locator = conn.execute(
+            "SELECT archive_id FROM jobs_archive WHERE id = 3"
+        ).fetchone()[0]
+        indexes = {
+            str(row[1])
+            for row in conn.execute("PRAGMA index_list(jobs_archive)").fetchall()
+        }
+        triggers = {
+            str(row[0])
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master "
+                "WHERE type = 'trigger' AND tbl_name = 'jobs_archive'"
+            ).fetchall()
+        }
+    finally:
+        conn.close()
+
+    assert unmigrated_locator is None
+    assert "idx_jobs_archive_id" not in indexes
+    assert "trg_jobs_archive_id" not in triggers
+
+
+def test_sqlite_archive_locator_migration_rejects_text_affinity(tmp_path):
+    db_path = tmp_path / "text-legacy-jobs-archive.sqlite"
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "CREATE TABLE jobs_archive ("
+            "archive_id TEXT, id INTEGER, uuid TEXT, "
+            "domain TEXT NOT NULL, queue TEXT NOT NULL, "
+            "job_type TEXT NOT NULL, payload TEXT, result TEXT, "
+            "payload_compressed TEXT, result_compressed TEXT, "
+            "status TEXT NOT NULL, created_at TEXT, archived_at TEXT)"
+        )
+        conn.execute(
+            "INSERT INTO jobs_archive "
+            "(archive_id, id, domain, queue, job_type, payload, status) "
+            "VALUES ('10', 1, 'prompt_studio', 'default', 'optimization', "
+            "'{}', 'cancelled')"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    with pytest.raises(RuntimeError, match="INTEGER affinity"):
+        ensure_jobs_tables(db_path)
+
+    conn = sqlite3.connect(db_path)
+    try:
+        column_type = next(
+            str(row[2])
+            for row in conn.execute("PRAGMA table_info(jobs_archive)").fetchall()
+            if str(row[1]) == "archive_id"
+        )
+        stored_locator = conn.execute(
+            "SELECT archive_id, typeof(archive_id) FROM jobs_archive"
+        ).fetchone()
+    finally:
+        conn.close()
+
+    assert column_type == "TEXT"
+    assert stored_locator == ("10", "text")
+
+
+@pytest.mark.parametrize(
+    ("object_type", "object_name", "object_ddl"),
+    (
+        (
+            "index",
+            "idx_jobs_archive_id",
+            "CREATE INDEX idx_jobs_archive_id ON unrelated_archive_owner(id)",
+        ),
+        (
+            "trigger",
+            "trg_jobs_archive_id",
+            "CREATE TRIGGER trg_jobs_archive_id "
+            "AFTER INSERT ON unrelated_archive_owner BEGIN SELECT 1; END",
+        ),
+    ),
+)
+def test_sqlite_archive_locator_migration_preserves_cross_table_object_name(
+    tmp_path,
+    object_type,
+    object_name,
+    object_ddl,
+):
+    db_path = tmp_path / f"cross-table-{object_type}.sqlite"
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute("CREATE TABLE unrelated_archive_owner (id INTEGER)")
+        conn.execute(object_ddl)
+        conn.execute(
+            "CREATE TABLE jobs_archive ("
+            "id INTEGER, uuid TEXT, domain TEXT NOT NULL, "
+            "queue TEXT NOT NULL, job_type TEXT NOT NULL, payload TEXT, "
+            "result TEXT, payload_compressed TEXT, result_compressed TEXT, "
+            "status TEXT NOT NULL, created_at TEXT, archived_at TEXT)"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    with pytest.raises(RuntimeError, match="belongs to another table"):
+        ensure_jobs_tables(db_path)
+
+    conn = sqlite3.connect(db_path)
+    try:
+        owner = conn.execute(
+            "SELECT tbl_name FROM sqlite_master WHERE type = ? AND name = ?",
+            (object_type, object_name),
+        ).fetchone()[0]
+    finally:
+        conn.close()
+
+    assert owner == "unrelated_archive_owner"
+
+
+def test_sqlite_archive_migration_uses_scoped_busy_timeout(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv(
+        "JOBS_SQLITE_ARCHIVE_MIGRATION_BUSY_TIMEOUT_MS",
+        "4321",
+    )
+    db_path = tmp_path / "legacy-busy-timeout.sqlite"
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "CREATE TABLE jobs_archive ("
+            "id INTEGER, archive_id INTEGER, uuid TEXT, "
+            "domain TEXT NOT NULL, queue TEXT NOT NULL, "
+            "job_type TEXT NOT NULL, status TEXT NOT NULL)"
+        )
+
+        _ensure_sqlite_archive_locators(conn)
+
+        busy_timeout_ms = int(
+            conn.execute("PRAGMA busy_timeout").fetchone()[0]
+        )
+    finally:
+        conn.close()
+
+    assert busy_timeout_ms == 4321
+
+
+def test_sqlite_ensure_applies_archive_timeout_before_schema_ddl(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv(
+        "JOBS_SQLITE_ARCHIVE_MIGRATION_BUSY_TIMEOUT_MS",
+        "4321",
+    )
+    raw_connect = sqlite3.connect
+    observed_timeouts: list[int] = []
+
+    class _ConnectionProxy:
+        def __init__(self, connection):
+            self._connection = connection
+
+        def __enter__(self):
+            self._connection.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            return self._connection.__exit__(*args)
+
+        def executescript(self, script):
+            observed_timeouts.append(
+                int(
+                    self._connection.execute(
+                        "PRAGMA busy_timeout"
+                    ).fetchone()[0]
+                )
+            )
+            return self._connection.executescript(script)
+
+        def __getattr__(self, name):
+            return getattr(self._connection, name)
+
+    def _connect(*args, **kwargs):
+        return _ConnectionProxy(raw_connect(*args, **kwargs))
+
+    monkeypatch.setattr(jobs_migrations.sqlite3, "connect", _connect)
+    jobs_migrations.ensure_jobs_tables(tmp_path / "pre-ddl-timeout.sqlite")
+
+    assert observed_timeouts == [4321]
+
+
+def test_sqlite_ensure_fails_closed_before_archive_locator_verification(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        jobs_migrations,
+        "JOBS_SQLITE_DDL",
+        "CREATE TABLE broken jobs schema",
+    )
+
+    with pytest.raises(sqlite3.OperationalError):
+        jobs_migrations.ensure_jobs_tables(tmp_path / "invalid-schema.sqlite")
+
+
+def test_sqlite_archive_compression_updates_only_new_duplicate_identity(
+    jobs_db,
+    monkeypatch,
+):
+    monkeypatch.setenv("JOBS_ARCHIVE_BEFORE_DELETE", "1")
+    monkeypatch.setenv("JOBS_ARCHIVE_COMPRESS", "1")
+    monkeypatch.setenv("JOBS_ARCHIVE_COMPRESS_DROP_JSON", "1")
+    conn = sqlite3.connect(jobs_db)
+    try:
+        conn.execute(
+            "INSERT INTO jobs_archive "
+            "(id, uuid, domain, queue, job_type, payload, result, status, "
+            "created_at) VALUES (77, NULL, 'archive-regression', 'default', "
+            "'export', ?, ?, 'cancelled', '2020-01-01 00:00:00')",
+            (
+                json.dumps({"version": "old"}),
+                json.dumps({"result": "old"}),
+            ),
+        )
+        conn.execute(
+            "INSERT INTO jobs "
+            "(id, uuid, domain, queue, job_type, payload, result, status, "
+            "created_at, completed_at) VALUES "
+            "(77, NULL, 'archive-regression', 'default', 'export', ?, ?, "
+            "'cancelled', '2020-01-02 00:00:00', '2020-01-02 00:00:00')",
+            (
+                json.dumps({"version": "new"}),
+                json.dumps({"result": "new"}),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    manager = JobManager(jobs_db)
+    assert manager.prune_jobs(
+        statuses=["cancelled"],
+        older_than_days=0,
+        domain="archive-regression",
+        job_type="export",
+    ) == 1
+
+    archived = manager.list_archived_jobs(
+        domain="archive-regression",
+        status="cancelled",
+        job_type="export",
+        limit=10,
+    )
+    conn = sqlite3.connect(jobs_db)
+    try:
+        compression_state = conn.execute(
+            "SELECT payload IS NULL, payload_compressed IS NOT NULL "
+            "FROM jobs_archive ORDER BY archive_id"
+        ).fetchall()
+    finally:
+        conn.close()
+    assert len(archived) == 2
+    assert len({row["_archive_locator"] for row in archived}) == 2
+    assert {row["payload"]["version"] for row in archived} == {"old", "new"}
+    assert compression_state == [(0, 0), (1, 1)]
+
+
+def test_sqlite_archive_without_compression_does_not_materialize_returning_rows(
+    jobs_db,
+    monkeypatch,
+):
+    monkeypatch.setenv("JOBS_ARCHIVE_BEFORE_DELETE", "1")
+    monkeypatch.setenv("JOBS_ARCHIVE_COMPRESS", "0")
+    manager = JobManager(jobs_db)
+    job = manager.create_job(
+        domain="archive-regression",
+        queue="default",
+        job_type="export",
+        payload={"large": "payload"},
+        owner_user_id="1",
+    )
+    assert manager.cancel_job(int(job["id"]))
+
+    raw_connection = manager._connect()
+    archive_insert_sql: list[str] = []
+
+    class _CursorProxy:
+        def __init__(self, cursor, *, archive_insert):
+            self._cursor = cursor
+            self._archive_insert = archive_insert
+
+        def fetchall(self):
+            if self._archive_insert:
+                raise AssertionError("archive INSERT rows were materialized")
+            return self._cursor.fetchall()
+
+        def __getattr__(self, name):
+            return getattr(self._cursor, name)
+
+    class _ConnectionProxy:
+        def __enter__(self):
+            raw_connection.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            return raw_connection.__exit__(*args)
+
+        def execute(self, query, params=()):
+            is_archive_insert = "INSERT INTO jobs_archive" in str(query)
+            if is_archive_insert:
+                archive_insert_sql.append(str(query))
+            return _CursorProxy(
+                raw_connection.execute(query, params),
+                archive_insert=is_archive_insert,
+            )
+
+        def __getattr__(self, name):
+            return getattr(raw_connection, name)
+
+    monkeypatch.setattr(manager, "_connect", lambda: _ConnectionProxy())
+
+    assert manager.prune_jobs(
+        statuses=["cancelled"],
+        older_than_days=0,
+        domain="archive-regression",
+        job_type="export",
+    ) == 1
+    assert len(archive_insert_sql) == 1
+    assert "RETURNING" not in archive_insert_sql[0]
+
+
+def test_archive_list_raises_typed_decryption_error(jobs_db, monkeypatch):
+    from tldw_Server_API.app.core.Security.crypto import encrypt_json_blob
+
+    monkeypatch.setenv(
+        "WORKFLOWS_ARTIFACT_ENC_KEY",
+        base64.b64encode(b"A" * 32).decode("ascii"),
+    )
+    envelope = encrypt_json_blob({"authorization": "legacy-secret"})
+    if envelope is None:
+        pytest.skip("Crypto backend unavailable; skipping encryption test")
+
+    conn = sqlite3.connect(jobs_db)
+    try:
+        conn.execute(
+            "INSERT INTO jobs_archive "
+            "(id, uuid, domain, queue, job_type, payload, status) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                1,
+                "encrypted-history",
+                "prompt_studio",
+                "default",
+                "optimization",
+                json.dumps({"_encrypted": envelope}),
+                "cancelled",
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    monkeypatch.setenv(
+        "WORKFLOWS_ARTIFACT_ENC_KEY",
+        base64.b64encode(b"B" * 32).decode("ascii"),
+    )
+
+    with pytest.raises(JobPayloadDecryptionError, match="could not be decrypted"):
+        JobManager(jobs_db).list_archived_jobs(
+            domain="prompt_studio",
+            status="cancelled",
+            job_type="optimization",
+            fail_on_decryption_error=True,
+        )
+
+
 def test_rotate_encryption_keys_respects_filters_sqlite(jobs_db, monkeypatch):
 
 
@@ -127,6 +1527,7 @@ def test_retryable_fail_and_backoff(jobs_db):
     )
     j = jm.acquire_next_job(domain="chatbooks", queue="default", lease_seconds=5, worker_id="w2")
     assert j is not None
+    assert int(j["id"]) == int(job["id"])
     # Retryable fail schedules back to queued
     ok = jm.fail_job(int(j["id"]), error="boom", retryable=True, backoff_seconds=1)
     assert ok
@@ -151,6 +1552,7 @@ def test_cancel_paths(jobs_db):
     j2 = jm.create_job(domain="chatbooks", queue="default", job_type="export", payload={}, owner_user_id="1")
     acq = jm.acquire_next_job(domain="chatbooks", queue="default", lease_seconds=5, worker_id="w3")
     assert acq is not None
+    assert int(acq["id"]) == int(j2["id"])
     ok2 = jm.cancel_job(int(acq["id"]))
     assert ok2
     j2r = jm.get_job(int(acq["id"]))

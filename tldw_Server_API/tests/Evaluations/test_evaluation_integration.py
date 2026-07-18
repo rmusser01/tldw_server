@@ -10,16 +10,17 @@ Tests the complete evaluation pipeline including:
 """
 
 import pytest
+
 pytestmark = pytest.mark.unit
 import asyncio
 import os
-from pathlib import Path
-from unittest.mock import Mock, patch
 import sqlite3
+from pathlib import Path
+from unittest.mock import AsyncMock, Mock, patch
 
-from tldw_Server_API.app.core.Evaluations.rag_evaluator import RAGEvaluator
-from tldw_Server_API.app.core.Evaluations.evaluation_manager import EvaluationManager
 from tldw_Server_API.app.core.DB_Management.migrations import migrate_evaluations_database
+from tldw_Server_API.app.core.Evaluations.evaluation_manager import EvaluationManager
+from tldw_Server_API.app.core.Evaluations.rag_evaluator import RAGEvaluator
 
 
 class TestEvaluationIntegration:
@@ -48,8 +49,11 @@ class TestEvaluationIntegration:
         evaluator.embedding_available = False  # Force LLM path for deterministic testing
 
         # Mock LLM call for predictable results
-        with patch('tldw_Server_API.app.core.Evaluations.rag_evaluator.asyncio.to_thread') as mock_thread:
-            mock_thread.return_value = "4"  # Good score
+        with patch(
+            "tldw_Server_API.app.core.Evaluations.rag_evaluator._run_bounded_rag_analyze",
+            new_callable=AsyncMock,
+        ) as mock_analyze:
+            mock_analyze.return_value = "4"  # Good score
 
             # Run evaluation
             results = await evaluator.evaluate(
@@ -96,8 +100,11 @@ class TestEvaluationIntegration:
         evaluator.embedding_available = False  # Force LLM path
 
         # Mock LLM to fail
-        with patch('tldw_Server_API.app.core.Evaluations.rag_evaluator.asyncio.to_thread') as mock_thread:
-            mock_thread.side_effect = RuntimeError("LLM error")
+        with patch(
+            "tldw_Server_API.app.core.Evaluations.rag_evaluator._run_bounded_rag_analyze",
+            new_callable=AsyncMock,
+        ) as mock_analyze:
+            mock_analyze.side_effect = RuntimeError("LLM error")
 
             # Should raise error instead of returning 0.0
             with pytest.raises(ValueError) as exc_info:
@@ -177,8 +184,11 @@ class TestEvaluationIntegration:
             assert evaluator.embedding_available is False
 
             # Mock LLM response
-            with patch('tldw_Server_API.app.core.Evaluations.rag_evaluator.asyncio.to_thread') as mock_thread:
-                mock_thread.return_value = "4"
+            with patch(
+                "tldw_Server_API.app.core.Evaluations.rag_evaluator._run_bounded_rag_analyze",
+                new_callable=AsyncMock,
+            ) as mock_analyze:
+                mock_analyze.return_value = "4"
 
                 _, result = await evaluator._evaluate_answer_similarity(
                     "response", "ground_truth"
@@ -291,10 +301,11 @@ class TestAuthentication:
     @pytest.mark.asyncio
     async def test_single_user_auth(self, mock_settings, setup_auth_db):
         """Test single-user authentication without hardcoded keys."""
-        from tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_unified import verify_api_key
         from fastapi import HTTPException
         from fastapi.security import HTTPAuthorizationCredentials
         from starlette.requests import Request
+
+        from tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_unified import verify_api_key
 
         with patch('tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_auth.get_settings') as mock_get_settings:
             mock_get_settings.return_value = mock_settings
@@ -317,10 +328,11 @@ class TestAuthentication:
     @pytest.mark.asyncio
     async def test_multi_user_jwt_auth(self, mock_settings, setup_auth_db):
         """Test multi-user JWT authentication."""
-        from tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_unified import verify_api_key
         from fastapi.security import HTTPAuthorizationCredentials
-        from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
         from starlette.requests import Request
+
+        from tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_unified import verify_api_key
+        from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 
         mock_settings.AUTH_MODE = "multi_user"
 
@@ -347,11 +359,12 @@ class TestAuthentication:
     @pytest.mark.asyncio
     async def test_multi_user_jwt_expired_token_maps_error(self, mock_settings, setup_auth_db):
         """Expired JWTs should map to token_expired in evals auth."""
-        from tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_unified import verify_api_key
-        from fastapi.security import HTTPAuthorizationCredentials
         from fastapi import HTTPException
-        from tldw_Server_API.app.core.AuthNZ.exceptions import TokenExpiredError
+        from fastapi.security import HTTPAuthorizationCredentials
         from starlette.requests import Request
+
+        from tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_unified import verify_api_key
+        from tldw_Server_API.app.core.AuthNZ.exceptions import TokenExpiredError
 
         mock_settings.AUTH_MODE = "multi_user"
 
@@ -374,11 +387,12 @@ class TestAuthentication:
     @pytest.mark.asyncio
     async def test_multi_user_jwt_invalid_token_maps_error(self, mock_settings, setup_auth_db):
         """Invalid JWTs should map to invalid_token in evals auth."""
-        from tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_unified import verify_api_key
-        from fastapi.security import HTTPAuthorizationCredentials
         from fastapi import HTTPException
-        from tldw_Server_API.app.core.AuthNZ.exceptions import InvalidTokenError
+        from fastapi.security import HTTPAuthorizationCredentials
         from starlette.requests import Request
+
+        from tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_unified import verify_api_key
+        from tldw_Server_API.app.core.AuthNZ.exceptions import InvalidTokenError
 
         mock_settings.AUTH_MODE = "multi_user"
 
@@ -401,10 +415,11 @@ class TestAuthentication:
     @pytest.mark.asyncio
     async def test_multi_user_jwt_inactive_user_maps_error(self, mock_settings, setup_auth_db):
         """Inactive users should map to inactive_user in evals auth."""
-        from tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_unified import verify_api_key
-        from fastapi.security import HTTPAuthorizationCredentials
         from fastapi import HTTPException
+        from fastapi.security import HTTPAuthorizationCredentials
         from starlette.requests import Request
+
+        from tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_unified import verify_api_key
         from tldw_Server_API.app.core.exceptions import InactiveUserError
 
         mock_settings.AUTH_MODE = "multi_user"
@@ -432,9 +447,10 @@ class TestAuthentication:
     @pytest.mark.asyncio
     async def test_single_user_auth_respects_ip_allowlist(self, mock_settings, setup_auth_db):
         """Single-user auth should enforce SINGLE_USER_ALLOWED_IPS."""
-        from tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_unified import verify_api_key
-        from starlette.requests import Request
         from fastapi import HTTPException
+        from starlette.requests import Request
+
+        from tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_unified import verify_api_key
 
         mock_settings.AUTH_MODE = "single_user"
         mock_settings.SINGLE_USER_API_KEY = "test-api-key-abcdefghijklmnopqrstuvwxyz"

@@ -24,10 +24,17 @@ from typing import TYPE_CHECKING, Any, Callable, Optional, cast
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
+from tldw_Server_API.app.core.Chat.bounded_daemon import await_owned_worker
 from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatAPIError,
     ChatAuthenticationError,
     ChatConfigurationError,
+)
+from tldw_Server_API.app.core.Claims_Extraction.output_parser import (
+    ClaimsOutputParseError,
+    coerce_llm_response_text,
+    extract_claim_texts,
+    parse_claims_llm_output,
 )
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import (
     SummaryProviderError,
@@ -77,6 +84,25 @@ try:
     ClaimsEngine = cast(Optional[type[ClaimsEngineType]], getattr(_claims_mod, "ClaimsEngine", None))
 except ImportError:
     ClaimsEngine = None
+
+
+def _resolve_claims_engine() -> type[ClaimsEngineType] | None:
+    """Recover the real claims engine after an import-order cycle completes."""
+    global ClaimsEngine
+    if ClaimsEngine is not None:
+        return ClaimsEngine
+    try:
+        from tldw_Server_API.app.core.Claims_Extraction.claims_engine import (
+            ClaimsEngine as _RealClaimsEngine,
+        )
+
+        from .claims import ClaimsEngine as _CandidateClaimsEngine
+    except ImportError:
+        return None
+    if _CandidateClaimsEngine is _RealClaimsEngine:
+        ClaimsEngine = _RealClaimsEngine
+    return _CandidateClaimsEngine
+
 
 try:
     from . import database_retrievers as _db_mod
@@ -196,20 +222,27 @@ class PostGenerationVerifier:
 
     async def _build_claims_engine(self) -> tuple[Any, Any, dict[str, bool]]:
         """Bind the synchronous claims callback to request-scoped credentials."""
-        if ClaimsEngine is None:
+        claims_engine_type = _resolve_claims_engine()
+        if claims_engine_type is None:
             raise RuntimeError("Claims engine unavailable")
 
         import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as sgl
 
         credential_handle = None
         claims_provider = None
+        claims_parse_mode = "lenient"
         if self._credential_runtime is not None:
             from tldw_Server_API.app.core.Claims_Extraction.claims_engine import (
+                _resolve_claims_json_parse_mode,
                 _resolve_claims_llm_config,
             )
 
-            claims_provider, _, _ = _resolve_claims_llm_config()
-            credential_handle = await self._credential_runtime.resolve(claims_provider)
+            claims_provider, claims_model, _ = _resolve_claims_llm_config()
+            claims_parse_mode = _resolve_claims_json_parse_mode()
+            credential_handle = await self._credential_runtime.resolve(
+                claims_provider,
+                model=claims_model,
+            )
 
         state = {"used": False}
 
@@ -233,6 +266,14 @@ class PostGenerationVerifier:
                     **kwargs,
                 )
 
+            for key in (
+                "app_config",
+                "credentials_resolved",
+                "provider_credentials",
+                "_provider_call_credentials",
+                "raise_on_error",
+            ):
+                kwargs.pop(key, None)
             response = sgl.analyze(
                 claims_provider or credential_handle.provider,
                 input_data,
@@ -242,6 +283,7 @@ class PostGenerationVerifier:
                 temp,
                 app_config=credential_handle.app_config,
                 credentials_resolved=True,
+                provider_credentials=credential_handle,
                 raise_on_error=True,
                 **kwargs,
             )
@@ -254,11 +296,9 @@ class PostGenerationVerifier:
                 chunks = []
                 for chunk in response:
                     chunks.append(str(chunk))
-                    has_content, has_error = _classify_stream_content(
+                    _has_content, has_error = _classify_stream_content(
                         _extract_stream_text(chunk)
                     )
-                    if has_content:
-                        state["used"] = True
                     if has_error:
                         raise SummaryProviderError(
                             code="provider_failure",
@@ -270,10 +310,33 @@ class PostGenerationVerifier:
                     code="provider_failure",
                     provider=claims_provider or credential_handle.provider,
                 )
-            state["used"] = True
+            try:
+                parsed = parse_claims_llm_output(
+                    coerce_llm_response_text(response),
+                    parse_mode=claims_parse_mode,
+                    strip_think_tags=True,
+                )
+                if "fact-checking judge" in str(system_message or "").lower():
+                    label = parsed.get("label") if isinstance(parsed, dict) else None
+                    completed_valid = (
+                        isinstance(label, str)
+                        and label.strip().lower() in {"supported", "refuted", "nei"}
+                    )
+                else:
+                    completed_valid = bool(
+                        extract_claim_texts(
+                            parsed,
+                            wrapper_key="claims",
+                            parse_mode=claims_parse_mode,
+                        )
+                    )
+            except (ClaimsOutputParseError, TypeError, ValueError):
+                completed_valid = False
+            if completed_valid:
+                state["used"] = True
             return response
 
-        return ClaimsEngine(_analyze), credential_handle, state
+        return claims_engine_type(_analyze), credential_handle, state
 
     async def _mark_claims_used(
         self,
@@ -282,6 +345,26 @@ class PostGenerationVerifier:
     ) -> None:
         if credential_handle is not None and state["used"]:
             await self._credential_runtime.mark_used(credential_handle)
+
+    async def _run_claims_engine_owned(
+        self,
+        engine: Any,
+        credential_handle: Any,
+        state: dict[str, bool],
+        **run_kwargs: Any,
+    ) -> dict[str, Any]:
+        """Run claims and usage marking inside one credential-owned operation."""
+
+        async def _run_and_mark() -> dict[str, Any]:
+            try:
+                return await engine.run(**run_kwargs)
+            finally:
+                await self._mark_claims_used(credential_handle, state)
+
+        operation = _run_and_mark()
+        if credential_handle is not None:
+            return await await_owned_worker(operation)
+        return await operation
 
     async def verify_and_maybe_fix(
         self,
@@ -338,7 +421,7 @@ class PostGenerationVerifier:
                     ))
                     claims_payload = (run or {}).get("claims")
                     summary_payload = (run or {}).get("summary")
-                elif ClaimsEngine is not None:
+                elif _resolve_claims_engine() is not None:
                     engine, claims_handle, claims_state = await self._build_claims_engine()
 
                     # Build a claim-level retrieval function
@@ -380,22 +463,23 @@ class PostGenerationVerifier:
                             _record_embedding_degradation(outcome, exc)
                             return base_documents[:top]
 
-                    try:
-                        run = await engine.run(
-                            answer=answer,
-                            query=query,
-                            documents=base_documents,
-                            claim_extractor="auto",
-                            claim_verifier="hybrid",
-                            claims_top_k=5,
-                            claims_conf_threshold=0.7,
-                            claims_max=self._max_claims,
-                            retrieve_fn=_retrieve_for_claim,
-                            nli_model=os.getenv("RAG_NLI_MODEL") or os.getenv("RAG_NLI_MODEL_PATH"),
-                            claims_concurrency=8,
-                        )
-                    finally:
-                        await self._mark_claims_used(claims_handle, claims_state)
+                    run = await self._run_claims_engine_owned(
+                        engine,
+                        claims_handle,
+                        claims_state,
+                        answer=answer,
+                        query=query,
+                        documents=base_documents,
+                        claim_extractor="auto",
+                        claim_verifier="hybrid",
+                        claims_top_k=5,
+                        claims_conf_threshold=0.7,
+                        claims_max=self._max_claims,
+                        retrieve_fn=_retrieve_for_claim,
+                        nli_model=os.getenv("RAG_NLI_MODEL")
+                        or os.getenv("RAG_NLI_MODEL_PATH"),
+                        claims_concurrency=8,
+                    )
                     claims_payload = (run or {}).get("claims")
                     summary_payload = (run or {}).get("summary")
         except (ByokResolutionError, SummaryProviderError) as exc:
@@ -616,24 +700,25 @@ class PostGenerationVerifier:
                         claims_max=max(5, min(10, self._max_claims)),
                     ))
                     sum2 = (run2 or {}).get("summary") or {}
-                elif ClaimsEngine is not None:
+                elif _resolve_claims_engine() is not None:
                     eng2, claims_handle, claims_state = await self._build_claims_engine()
-                    try:
-                        run2 = await eng2.run(
-                            answer=new_answer,
-                            query=query,
-                            documents=new_docs,
-                            claim_extractor="auto",
-                            claim_verifier="hybrid",
-                            claims_top_k=5,
-                            claims_conf_threshold=0.7,
-                            claims_max=max(5, min(10, self._max_claims)),
-                            retrieve_fn=None,
-                            nli_model=os.getenv("RAG_NLI_MODEL") or os.getenv("RAG_NLI_MODEL_PATH"),
-                            claims_concurrency=4,
-                        )
-                    finally:
-                        await self._mark_claims_used(claims_handle, claims_state)
+                    run2 = await self._run_claims_engine_owned(
+                        eng2,
+                        claims_handle,
+                        claims_state,
+                        answer=new_answer,
+                        query=query,
+                        documents=new_docs,
+                        claim_extractor="auto",
+                        claim_verifier="hybrid",
+                        claims_top_k=5,
+                        claims_conf_threshold=0.7,
+                        claims_max=max(5, min(10, self._max_claims)),
+                        retrieve_fn=None,
+                        nli_model=os.getenv("RAG_NLI_MODEL")
+                        or os.getenv("RAG_NLI_MODEL_PATH"),
+                        claims_concurrency=4,
+                    )
                     sum2 = (run2 or {}).get("summary") or {}
                 else:
                     sum2 = {}

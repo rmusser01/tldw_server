@@ -1,21 +1,21 @@
-import os
 import json
+import os
 import re
 import tempfile
-import pytest
-from typing import Any
-from fastapi.testclient import TestClient
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import patch
 
+import pytest
 from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import get_audit_service_for_user
+from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import DEFAULT_CHARACTER_NAME, get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.endpoints.chat import router as chat_router
 from tldw_Server_API.app.api.v1.endpoints.health import router as health_router
-from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import get_audit_service_for_user
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
-from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user, DEFAULT_CHARACTER_NAME
 from tldw_Server_API.app.core.Audit.unified_audit_service import MandatoryAuditWriteError
-
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 # Minimal app with only health and chat routers to avoid unrelated imports
 app = FastAPI()
@@ -291,7 +291,7 @@ def test_input_block_fails_closed_when_audit_service_missing():
 
 
 @pytest.mark.unit
-def test_output_redaction_non_streaming(monkeypatch):
+def test_output_redaction_non_streaming(monkeypatch, credentialed_test_client_factory):
     db, db_path = _make_test_db()
     try:
         app.dependency_overrides[get_chacha_db_for_user] = lambda: db
@@ -310,7 +310,7 @@ def test_output_redaction_non_streaming(monkeypatch):
 
         with patch("tldw_Server_API.app.api.v1.endpoints.chat.get_moderation_service", return_value=_StubModerationService(policy)), \
              patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call", return_value=reply):
-            with TestClient(app) as client:
+            with credentialed_test_client_factory(app) as client:
                 resp = client.get("/api/v1/health")
                 client.csrf_token = resp.cookies.get("csrf_token", "")
                 body = {
@@ -333,7 +333,9 @@ def test_output_redaction_non_streaming(monkeypatch):
 
 
 @pytest.mark.unit
-def test_output_redaction_non_streaming_fails_closed_when_mandatory_audit_fails():
+def test_output_redaction_non_streaming_fails_closed_when_mandatory_audit_fails(
+    credentialed_test_client_factory,
+):
     db, db_path = _make_test_db()
     try:
         app.dependency_overrides[get_chacha_db_for_user] = lambda: db
@@ -352,7 +354,7 @@ def test_output_redaction_non_streaming_fails_closed_when_mandatory_audit_fails(
 
         with patch("tldw_Server_API.app.api.v1.endpoints.chat.get_moderation_service", return_value=_StubModerationService(policy)), \
              patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call", return_value=reply):
-            with TestClient(app) as client:
+            with credentialed_test_client_factory(app) as client:
                 resp = client.get("/api/v1/health")
                 client.csrf_token = resp.cookies.get("csrf_token", "")
                 body = {
@@ -374,7 +376,9 @@ def test_output_redaction_non_streaming_fails_closed_when_mandatory_audit_fails(
 
 
 @pytest.mark.unit
-def test_output_block_non_streaming_fails_closed_when_mandatory_audit_fails():
+def test_output_block_non_streaming_fails_closed_when_mandatory_audit_fails(
+    credentialed_test_client_factory,
+):
     db, db_path = _make_test_db()
     try:
         app.dependency_overrides[get_chacha_db_for_user] = lambda: db
@@ -393,7 +397,7 @@ def test_output_block_non_streaming_fails_closed_when_mandatory_audit_fails():
 
         with patch("tldw_Server_API.app.api.v1.endpoints.chat.get_moderation_service", return_value=_StubModerationService(policy)), \
              patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call", return_value=reply):
-            with TestClient(app) as client:
+            with credentialed_test_client_factory(app) as client:
                 resp = client.get("/api/v1/health")
                 client.csrf_token = resp.cookies.get("csrf_token", "")
                 body = {
@@ -415,7 +419,7 @@ def test_output_block_non_streaming_fails_closed_when_mandatory_audit_fails():
 
 
 @pytest.mark.unit
-def test_streaming_redaction_applied():
+def test_streaming_redaction_applied(credentialed_test_client_factory):
     db, db_path = _make_test_db()
     try:
         app.dependency_overrides[get_chacha_db_for_user] = lambda: db
@@ -435,7 +439,7 @@ def test_streaming_redaction_applied():
             patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call",
                   return_value=upstream_stream()),
         ):
-            with TestClient(app) as client:
+            with credentialed_test_client_factory(app) as client:
                 resp = client.get("/api/v1/health")
                 client.csrf_token = resp.cookies.get("csrf_token", "")
                 body = {
@@ -465,7 +469,7 @@ def test_streaming_redaction_applied():
                             chunks.append(text)
                 full = "".join(chunks)
                 assert "secret" not in full
-                assert "[REDACTED]" in full
+                assert "[REDACTED]" in full, r.text
     finally:
         try:
             _cleanup_db_artifacts(db_path)
@@ -475,7 +479,10 @@ def test_streaming_redaction_applied():
 
 
 @pytest.mark.unit
-def test_streaming_cross_chunk_redaction_output(monkeypatch):
+def test_streaming_cross_chunk_redaction_output(
+    monkeypatch,
+    credentialed_test_client_factory,
+):
     db, db_path = _make_test_db()
     try:
         monkeypatch.setenv("STREAMS_UNIFIED", "0")
@@ -501,7 +508,7 @@ def test_streaming_cross_chunk_redaction_output(monkeypatch):
             patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call",
                   return_value=upstream_stream()),
         ):
-            with TestClient(app) as client:
+            with credentialed_test_client_factory(app) as client:
                 resp = client.get("/api/v1/health")
                 client.csrf_token = resp.cookies.get("csrf_token", "")
                 body = {
@@ -542,9 +549,13 @@ def test_streaming_cross_chunk_redaction_output(monkeypatch):
 
 
 @pytest.mark.unit
-def test_streaming_block_emits_sse_error_and_finishes():
+def test_streaming_block_emits_sse_error_and_finishes(
+    monkeypatch,
+    credentialed_test_client_factory,
+):
     db, db_path = _make_test_db()
     try:
+        monkeypatch.setenv("STREAMS_UNIFIED", "1")
         app.dependency_overrides[get_chacha_db_for_user] = lambda: db
         # Block on output
         policy = _StubPolicy(enabled=True, input_action='warn', output_action='block', redact='[REDACTED]')
@@ -559,7 +570,7 @@ def test_streaming_block_emits_sse_error_and_finishes():
 
         with patch("tldw_Server_API.app.api.v1.endpoints.chat.get_moderation_service", return_value=_StubModerationService(policy)), \
              patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call", return_value=upstream_stream()):
-            with TestClient(app) as client:
+            with credentialed_test_client_factory(app) as client:
                 resp = client.get("/api/v1/health")
                 client.csrf_token = resp.cookies.get("csrf_token", "")
                 body = {
@@ -572,9 +583,10 @@ def test_streaming_block_emits_sse_error_and_finishes():
                 assert r.status_code == 200
                 lines = r.text.splitlines()
                 saw_error = any((ln.startswith("data:") and '"error":' in ln) for ln in lines)
-                saw_done = any((ln.strip() == 'data: [DONE]') for ln in lines)
+                done_count = sum(ln.strip() == 'data: [DONE]' for ln in lines)
                 assert saw_error, f"Expected SSE error in stream, got: {r.text[:200]}"
-                assert saw_done, "Expected [DONE] marker for graceful finish"
+                assert "output_moderation_block" in r.text
+                assert done_count == 1, "Expected exactly one [DONE] marker for graceful finish"
     finally:
         try:
             _cleanup_db_artifacts(db_path)
@@ -584,7 +596,10 @@ def test_streaming_block_emits_sse_error_and_finishes():
 
 
 @pytest.mark.unit
-def test_streaming_block_emits_audit_failure_when_mandatory_audit_fails(monkeypatch):
+def test_streaming_block_emits_audit_failure_when_mandatory_audit_fails(
+    monkeypatch,
+    credentialed_test_client_factory,
+):
     db, db_path = _make_test_db()
     try:
         monkeypatch.setenv("STREAMS_UNIFIED", "0")
@@ -601,7 +616,7 @@ def test_streaming_block_emits_audit_failure_when_mandatory_audit_fails(monkeypa
 
         with patch("tldw_Server_API.app.api.v1.endpoints.chat.get_moderation_service", return_value=_StubModerationService(policy)), \
              patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call", return_value=upstream_stream()):
-            with TestClient(app) as client:
+            with credentialed_test_client_factory(app) as client:
                 resp = client.get("/api/v1/health")
                 client.csrf_token = resp.cookies.get("csrf_token", "")
                 body = {
@@ -624,7 +639,10 @@ def test_streaming_block_emits_audit_failure_when_mandatory_audit_fails(monkeypa
 
 
 @pytest.mark.unit
-def test_streaming_redaction_emits_audit_failure_and_fails_closed(monkeypatch):
+def test_streaming_redaction_emits_audit_failure_and_fails_closed(
+    monkeypatch,
+    credentialed_test_client_factory,
+):
     db, db_path = _make_test_db()
     try:
         monkeypatch.setenv("STREAMS_UNIFIED", "0")
@@ -645,7 +663,7 @@ def test_streaming_redaction_emits_audit_failure_and_fails_closed(monkeypatch):
             patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call",
                   return_value=upstream_stream()),
         ):
-            with TestClient(app) as client:
+            with credentialed_test_client_factory(app) as client:
                 resp = client.get("/api/v1/health")
                 client.csrf_token = resp.cookies.get("csrf_token", "")
                 body = {
@@ -680,7 +698,10 @@ def test_streaming_redaction_emits_audit_failure_and_fails_closed(monkeypatch):
 
 
 @pytest.mark.unit
-def test_streaming_cross_chunk_redaction_persisted(monkeypatch):
+def test_streaming_cross_chunk_redaction_persisted(
+    monkeypatch,
+    credentialed_test_client_factory,
+):
     db, db_path = _make_test_db()
     try:
         monkeypatch.setenv("STREAMS_UNIFIED", "0")
@@ -703,7 +724,7 @@ def test_streaming_cross_chunk_redaction_persisted(monkeypatch):
 
         with patch("tldw_Server_API.app.api.v1.endpoints.chat.get_moderation_service", return_value=_EvalModerationService(policy)), \
              patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call", return_value=upstream_stream()):
-            with TestClient(app) as client:
+            with credentialed_test_client_factory(app) as client:
                 resp = client.get("/api/v1/health")
                 client.csrf_token = resp.cookies.get("csrf_token", "")
                 body = {
@@ -887,7 +908,9 @@ def test_continued_character_conversation_input_guardian_overlay_uses_saved_conv
 
 
 @pytest.mark.unit
-def test_continued_ordinary_conversation_input_guardian_overlay_stays_regular_for_default_assistant():
+def test_continued_ordinary_conversation_input_guardian_overlay_stays_regular_for_default_assistant(
+    credentialed_test_client_factory,
+):
     db, db_path = _make_test_db()
     try:
         app.dependency_overrides[get_chacha_db_for_user] = lambda: db
@@ -936,7 +959,7 @@ def test_continued_ordinary_conversation_input_guardian_overlay_stays_regular_fo
                 },
             ),
         ):
-            with TestClient(app) as client:
+            with credentialed_test_client_factory(app) as client:
                 resp = client.get("/api/v1/health")
                 client.csrf_token = resp.cookies.get("csrf_token", "")
                 body = {

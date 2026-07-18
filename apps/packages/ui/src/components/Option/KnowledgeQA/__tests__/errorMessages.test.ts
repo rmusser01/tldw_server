@@ -28,6 +28,38 @@ describe("Knowledge QA error message mapping", () => {
   })
 
   it.each([
+    [
+      "provider_disabled",
+      "The selected provider is disabled by administrator policy.",
+    ],
+    [
+      "model_not_allowed",
+      "The selected model is not allowed for this provider.",
+    ],
+  ])(
+    "preserves policy code %s for stream and non-stream failures",
+    (code, expected) => {
+      const sentinel = "sk-policy-secret-/Users/private/provider.log"
+      const terminalMessage = mapKnowledgeQaSearchErrorMessage({
+        event: {
+          type: "error",
+          code,
+          status_code: 403,
+          message: sentinel,
+        },
+      })
+      const nonStreamMessage = mapKnowledgeQaSearchErrorMessage(
+        Object.assign(new Error(sentinel), { code, status: 403 })
+      )
+
+      expect(terminalMessage).toBe(expected)
+      expect(nonStreamMessage).toBe(expected)
+      expect(terminalMessage).not.toContain(sentinel)
+      expect(nonStreamMessage).not.toContain(sentinel)
+    }
+  )
+
+  it.each([
     [502, "RAG search failed due to a server error."],
     [503, "RAG search failed due to a server error."],
     [429, "RAG search is rate limited. Please wait and try again."],

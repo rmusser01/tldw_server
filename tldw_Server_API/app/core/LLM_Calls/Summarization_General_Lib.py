@@ -21,6 +21,10 @@ import os
 from collections.abc import Generator
 from typing import Any, Callable, Optional, Union
 
+from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+    ProviderCallCredentials,
+)
 from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatAPIError,
     ChatAuthenticationError,
@@ -40,6 +44,7 @@ from tldw_Server_API.app.core.custom_openai_providers import (
 )
 from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
+    bind_provider_call_credentials,
     ensure_app_config,
     normalize_provider,
     resolve_provider_api_key_from_config,
@@ -202,6 +207,7 @@ def _summarize_via_adapter(
     app_config: Optional[dict[str, Any]],
     credentials_resolved: bool,
     raise_on_error: bool,
+    provider_credentials: Optional[ProviderCallCredentials] = None,
 ) -> Union[str, Generator[str, None, None], None]:
     provider = _adapter_provider_name(api_name)
     if not provider:
@@ -211,15 +217,44 @@ def _summarize_via_adapter(
             raise_on_error=raise_on_error,
             legacy_message=f"Error: Invalid API Name '{api_name}'",
         )
-    explicit_credentials = credentials_resolved is True
+    credential_envelope = {
+        "api_key": api_key,
+        "app_config": app_config,
+        "credentials_resolved": credentials_resolved,
+    }
+    if provider_credentials is not None:
+        credential_envelope[PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY] = provider_credentials
+    try:
+        credential_envelope, provider_credentials = bind_provider_call_credentials(
+            provider,
+            credential_envelope,
+            consume=False,
+        )
+    except ChatConfigurationError:
+        return _summary_failure(
+            code="configuration",
+            provider=provider,
+            raise_on_error=raise_on_error,
+            legacy_message="Error: Provider credential context is invalid.",
+        )
+
+    api_key = credential_envelope.get("api_key")
+    app_config = credential_envelope.get("app_config")
+    explicit_credentials = provider_credentials is not None
+    explicit_app_config = (
+        provider_credentials.app_config
+        if provider_credentials is not None
+        else app_config
+    )
     if explicit_credentials:
-        effective_app_config = copy.deepcopy(app_config or {})
+        effective_app_config = copy.deepcopy(explicit_app_config or {})
         provider_section = resolve_provider_section(provider)
         if provider_section:
             effective_app_config.setdefault(provider_section, {})
     else:
         effective_app_config = ensure_app_config(app_config if app_config is not None else loaded_config_data)
-    adapter = get_registry().get_adapter(provider)
+    registry = get_registry()
+    adapter = registry.get_adapter(provider)
     if adapter is None:
         return _summary_failure(
             code="adapter_unavailable",
@@ -244,9 +279,13 @@ def _summarize_via_adapter(
             legacy_message=f"Error: Model is required for provider '{provider}'",
         )
     resolved_api_key = (
-        api_key
-        if explicit_credentials
-        else api_key or resolve_provider_api_key_from_config(provider, effective_app_config)
+        provider_credentials.api_key
+        if provider_credentials is not None
+        else (
+            api_key
+            if explicit_credentials
+            else api_key or resolve_provider_api_key_from_config(provider, effective_app_config)
+        )
     )
     if (
         explicit_credentials
@@ -269,6 +308,10 @@ def _summarize_via_adapter(
         "stream": streaming,
         "app_config": effective_app_config,
     }
+    if explicit_credentials:
+        request["credentials_resolved"] = True
+    if provider_credentials is not None:
+        request[PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY] = provider_credentials
     timeout = _resolve_adapter_timeout(provider, effective_app_config)
     if streaming:
 
@@ -494,6 +537,7 @@ def _dispatch_to_api(
     *,
     app_config: Optional[dict[str, Any]] = None,
     credentials_resolved: bool = False,
+    provider_credentials: Optional[ProviderCallCredentials] = None,
     raise_on_error: bool = False,
 ) -> Union[str, Generator[str, None, None], None]:
     """
@@ -515,6 +559,7 @@ def _dispatch_to_api(
             model_override=model_override,
             app_config=app_config,
             credentials_resolved=credentials_resolved,
+            provider_credentials=provider_credentials,
             raise_on_error=raise_on_error,
         )
         if adapter_result is None:
@@ -551,6 +596,7 @@ def analyze(
     *,
     app_config: Optional[dict[str, Any]] = None,
     credentials_resolved: bool = False,
+    provider_credentials: Optional[ProviderCallCredentials] = None,
     raise_on_error: bool = False,
 ) -> Union[str, Generator[str, None, None]]:
     """
@@ -668,6 +714,7 @@ def analyze(
                     streaming=False,  # IMPORTANT: Force non-streaming for internal recursive steps
                     app_config=app_config,
                     credentials_resolved=credentials_resolved,
+                    provider_credentials=provider_credentials,
                     raise_on_error=raise_on_error,
                 )
                 # consume_generator handles both strings and generators, returning a string
@@ -709,6 +756,7 @@ def analyze(
                     model_override=model_override,
                     app_config=app_config,
                     credentials_resolved=credentials_resolved,
+                    provider_credentials=provider_credentials,
                     raise_on_error=raise_on_error,
                 )
                 # Consume generator immediately
@@ -735,6 +783,7 @@ def analyze(
                  model_override=model_override,
                  app_config=app_config,
                  credentials_resolved=credentials_resolved,
+                 provider_credentials=provider_credentials,
                  raise_on_error=raise_on_error,
             )
 

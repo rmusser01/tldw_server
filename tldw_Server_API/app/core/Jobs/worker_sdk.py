@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import os
 import secrets
+import sqlite3
 from collections.abc import Awaitable
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -14,8 +15,22 @@ from tldw_Server_API.app.core.testing import is_test_mode, is_truthy
 
 from .manager import JobManager
 
+try:
+    import psycopg  # type: ignore
+
+    _WORKER_SDK_BACKEND_EXCEPTIONS: tuple[type[BaseException], ...] = (
+        sqlite3.Error,
+        psycopg.Error,
+    )
+except ImportError:
+    _WORKER_SDK_BACKEND_EXCEPTIONS = (sqlite3.Error,)
+
 CancelCheck = Callable[[dict[str, Any]], Awaitable[bool]]
 JobHandler = Callable[[dict[str, Any]], Awaitable[dict[str, Any] | None]]
+CompletionCallback = Callable[
+    [dict[str, Any], dict[str, Any]],
+    Awaitable[None],
+]
 
 _WORKER_SDK_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -29,6 +44,7 @@ _WORKER_SDK_NONCRITICAL_EXCEPTIONS = (
     TimeoutError,
     TypeError,
     ValueError,
+    *_WORKER_SDK_BACKEND_EXCEPTIONS,
 )
 
 
@@ -45,6 +61,8 @@ class WorkerConfig:
     # Retry on handler exception
     retry_on_exception: bool = True
     retry_backoff_seconds: int = 10
+    completion_callback_timeout_seconds: float = 30.0
+    completion_callback_max_detached_tasks: int = 32
 
 
 class WorkerSDK:
@@ -62,6 +80,7 @@ class WorkerSDK:
         # Allow test overrides without monkeypatching global asyncio.sleep
         # (keeps event loop behavior stable under tests)
         self._sleep = asyncio.sleep
+        self._detached_completion_callbacks: set[asyncio.Task[None]] = set()
         # Detect test mode for more responsive sleeps and optional iteration caps
         try:
             self._test_mode = is_test_mode()
@@ -71,6 +90,97 @@ class WorkerSDK:
             self._max_iters = int(os.getenv("JOBS_WORKER_MAX_ITERATIONS", "0") or "0")
         except (TypeError, ValueError):
             self._max_iters = 0
+
+    def _observe_detached_completion_callback(
+        self,
+        task: asyncio.Task[None],
+    ) -> None:
+        """Release and consume a detached callback task's eventual outcome."""
+
+        self._detached_completion_callbacks.discard(task)
+        if not task.cancelled():
+            task.exception()
+
+    def _detach_completion_callback(self, task: asyncio.Task[None]) -> None:
+        """Track a cancellation-resistant callback without awaiting it."""
+
+        if task.done():
+            self._observe_detached_completion_callback(task)
+            return
+        self._detached_completion_callbacks.add(task)
+        task.add_done_callback(self._observe_detached_completion_callback)
+
+    async def _invoke_completion_callback(
+        self,
+        callback: CompletionCallback,
+        job: dict[str, Any],
+        result: dict[str, Any],
+        *,
+        callback_name: str,
+    ) -> None:
+        """Run bounded post-finalization work without re-finalizing the job.
+
+        The deadline cannot preempt callback code that blocks the event loop
+        before reaching an await point.
+        """
+
+        try:
+            max_detached = max(
+                0,
+                int(self.cfg.completion_callback_max_detached_tasks),
+            )
+        except (TypeError, ValueError):
+            max_detached = 0
+        if len(self._detached_completion_callbacks) >= max_detached:
+            logger.warning(
+                "Jobs worker {} callback skipped: detached callback capacity reached",
+                callback_name,
+            )
+            return
+
+        async def invoke() -> None:
+            await callback(job, result)
+
+        callback_task = asyncio.create_task(invoke())
+        try:
+            done, _pending = await asyncio.wait(
+                {callback_task},
+                timeout=max(
+                    0.01,
+                    float(self.cfg.completion_callback_timeout_seconds),
+                ),
+            )
+        except asyncio.CancelledError:
+            callback_task.cancel()
+            self._detach_completion_callback(callback_task)
+            raise
+        except Exception as exc:  # noqa: BLE001 - callback is an isolation boundary
+            callback_task.cancel()
+            self._detach_completion_callback(callback_task)
+            logger.bind(error_type=type(exc).__name__).warning(
+                "Jobs worker {} callback failed",
+                callback_name,
+            )
+            return
+
+        if callback_task not in done:
+            callback_task.cancel()
+            self._detach_completion_callback(callback_task)
+            logger.bind(error_type=TimeoutError.__name__).warning(
+                "Jobs worker {} callback failed",
+                callback_name,
+            )
+            return
+
+        try:
+            callback_task.result()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - callback is an isolation boundary
+            logger.bind(error_type=type(exc).__name__).warning(
+                "Jobs worker {} callback failed",
+                callback_name,
+            )
 
     async def _sleep_chunked(self, total_seconds: float) -> None:
         """Sleep until the delay elapses or stop() is requested.
@@ -110,12 +220,10 @@ class WorkerSDK:
         job_id = int(job.get('id'))
         lease_id = job.get('lease_id')
         iters = 0
-        while not self._stop.is_set():
+        while True:
             # Sleep for lease - threshold, plus small jitter
             sleep_for = max(1, lease - threshold) + (secrets.randbelow(jitter + 1) if jitter else 0)
-            await self._sleep_chunked(float(sleep_for))
-            if self._stop.is_set():
-                return
+            await self._sleep(float(sleep_for))
             kwargs = {"job_id": job_id, "seconds": lease, "worker_id": self.cfg.worker_id, "lease_id": lease_id}
             if progress_cb:
                 try:
@@ -148,10 +256,14 @@ class WorkerSDK:
         acquire_guard: Callable[[dict[str, Any]], Awaitable[bool]] | None = None,
         owner_user_id: str | None = None,
         job_type: str | None = None,
+        on_completed: CompletionCallback | None = None,
+        on_completion_rejected: CompletionCallback | None = None,
     ) -> None:
         """Run the worker loop until stop() is called.
 
         handler should accept a job dict and return a result dict (or None) to finalize.
+        Completion callbacks run after the durable completion attempt and receive
+        the acquired job plus the normalized result.
         """
         backoff = max(1, int(self.cfg.backoff_base_seconds))
         backoff_max = max(backoff, int(self.cfg.backoff_max_seconds))
@@ -184,7 +296,11 @@ class WorkerSDK:
             # Only start auto-renew after we know we will actually handle the job
             renew_task = None
 
-            def _finalize_failure(exc: Exception) -> None:
+            def _finalize_failure(
+                exc: Exception,
+                job_id: int = job_id,
+                lease_id_str: str | None = lease_id_str,
+            ) -> None:
                 retryable = self.cfg.retry_on_exception and bool(getattr(exc, "retryable", True))
                 backoff_s = int(getattr(exc, "backoff_seconds", self.cfg.retry_backoff_seconds))
                 error_code = str(getattr(exc, "failure_code", "worker_exception") or "worker_exception")
@@ -227,15 +343,27 @@ class WorkerSDK:
                         continue
                 # Cancellation check (optional)
                 if cancel_check is not None:
+                    should_cancel = False
                     try:
-                        if await cancel_check(job):
-                            # Respect cancellation request; finalize and yield once to avoid tight spin
-                            self.jm.cancel_job(job_id, reason="requested")
-                            with contextlib.suppress(_WORKER_SDK_NONCRITICAL_EXCEPTIONS):
-                                await self._sleep(0)
-                            continue
+                        should_cancel = await cancel_check(job)
                     except _WORKER_SDK_NONCRITICAL_EXCEPTIONS:
                         pass
+                    if should_cancel:
+                        # The acquired UUID and lease form a compare-and-set boundary:
+                        # a stale worker must not cancel a reassigned or reused row.
+                        try:
+                            self.jm.finalize_cancelled(
+                                job_id,
+                                reason="requested",
+                                expected_uuid=str(job.get("uuid") or ""),
+                                worker_id=self.cfg.worker_id,
+                                lease_id=lease_id_str,
+                            )
+                        except _WORKER_SDK_NONCRITICAL_EXCEPTIONS as exc:
+                            logger.debug("Cancel finalize error for job {}: {}", job_id, exc)
+                        with contextlib.suppress(_WORKER_SDK_NONCRITICAL_EXCEPTIONS):
+                            await self._sleep(0)
+                        continue
                 # Start auto-renew task only if not cancelled
                 renew_task = asyncio.create_task(self._auto_renew(job, progress_cb=progress_cb))
                 # Handle job
@@ -260,13 +388,30 @@ class WorkerSDK:
                 )
                 if not ok:
                     logger.debug(f"Complete returned False for job {job_id}")
+                    if on_completion_rejected is not None:
+                        await self._invoke_completion_callback(
+                            on_completion_rejected,
+                            job,
+                            result,
+                            callback_name="completion-rejected",
+                        )
+                elif on_completed is not None:
+                    await self._invoke_completion_callback(
+                        on_completed,
+                        job,
+                        result,
+                        callback_name="completed",
+                    )
             except asyncio.CancelledError:
                 raise
             except _WORKER_SDK_NONCRITICAL_EXCEPTIONS as e:
                 _finalize_failure(e)
             finally:
-                try:
-                    if renew_task is not None:
-                        renew_task.cancel()
-                except _WORKER_SDK_NONCRITICAL_EXCEPTIONS:
-                    pass
+                if renew_task is not None:
+                    renew_task.cancel()
+                    try:
+                        await renew_task
+                    except asyncio.CancelledError:
+                        pass
+                    except Exception as exc:  # noqa: BLE001 - renewal is an isolation boundary
+                        logger.debug("Auto-renew task failed for job {}: {}", job_id, exc)

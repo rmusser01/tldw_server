@@ -3,25 +3,25 @@
 
 import gc
 import os
-from pathlib import Path
+import tempfile
 import time
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi import status
 from fastapi.testclient import TestClient
-import tempfile
-from unittest.mock import patch
 
 # Disable CSRF for testing
 os.environ["AUTH_MODE"] = "single_user"
 os.environ["CSRF_ENABLED"] = "false"
 
-from tldw_Server_API.app.main import app
-from tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps import get_security_config
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_current_active_user
+from tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps import get_prompt_studio_db, get_security_config
 from tldw_Server_API.app.api.v1.schemas.prompt_studio_base import SecurityConfig
 from tldw_Server_API.app.core.DB_Management.PromptStudioDatabase import PromptStudioDatabase
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_current_active_user
-from tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps import get_prompt_studio_db
+from tldw_Server_API.app.main import app
 
 ########################################################################################################################
 # Test Client Setup
@@ -241,6 +241,42 @@ def mock_user():
     }
 
 
+@pytest.fixture
+def prompt_resources(test_db, mock_user):
+    """Create an owned project and prompt for resource-bound endpoint tests."""
+    project = test_db.create_project(
+        name="Resource Binding Project",
+        status="active",
+        user_id=mock_user["id"],
+    )
+    prompt = test_db.create_prompt(
+        project_id=project["id"],
+        name="Resource Binding Prompt",
+        system_prompt="You are helpful.",
+        user_prompt="Answer {task}",
+        version_number=1,
+    )
+    return SimpleNamespace(project_id=project["id"], prompt_id=prompt["id"])
+
+
+@pytest.fixture
+def prompt_test_case_resources(test_db, prompt_resources):
+    """Create a test case belonging to the shared prompt project."""
+    test_case = test_db.create_test_case(
+        project_id=prompt_resources.project_id,
+        name="Resource Binding Test Case",
+        inputs={"task": "Write a test"},
+        expected_outputs={"output": "result"},
+        tags=[],
+        is_golden=False,
+    )
+    return SimpleNamespace(
+        project_id=prompt_resources.project_id,
+        prompt_id=prompt_resources.prompt_id,
+        test_case_id=test_case["id"],
+    )
+
+
 @pytest.mark.asyncio
 async def test_list_prompts_safely_defaults_missing_pagination() -> None:
     """Prompt listing does not 500 when storage omits pagination metadata."""
@@ -395,7 +431,7 @@ class TestProjectEndpoints:
 
         assert response.status_code == 201
         data = response.json()
-        assert data["success"] == True
+        assert data["success"] is True
         assert data["data"]["name"] == "Test Project"
         assert data["data"]["status"] == "draft"
         assert "id" in data["data"]
@@ -416,7 +452,7 @@ class TestProjectEndpoints:
 
         assert response.status_code == 200
         data = response.json()
-        assert data["success"] == True
+        assert data["success"] is True
         assert "data" in data
         assert "metadata" in data
         assert isinstance(data["data"], list)
@@ -454,7 +490,7 @@ class TestProjectEndpoints:
 
         assert response.status_code == 200
         data = response.json()
-        assert data["success"] == True
+        assert data["success"] is True
         assert data["data"]["id"] == project_id
         assert data["data"]["name"] == "Get Test"
 
@@ -483,7 +519,7 @@ class TestProjectEndpoints:
 
         assert response.status_code == 200
         data = response.json()
-        assert data["success"] == True
+        assert data["success"] is True
         assert data["data"]["description"] == "Updated description"
         assert data["data"]["status"] == "active"
 
@@ -504,7 +540,7 @@ class TestProjectEndpoints:
 
         assert archive_response.status_code == 200
         archive_data = archive_response.json()
-        assert archive_data["success"] == True
+        assert archive_data["success"] is True
         assert archive_data["data"]["status"] == "archived"
 
         get_archived_response = client.get(
@@ -520,7 +556,7 @@ class TestProjectEndpoints:
 
         assert unarchive_response.status_code == 200
         unarchive_data = unarchive_response.json()
-        assert unarchive_data["success"] == True
+        assert unarchive_data["success"] is True
         assert unarchive_data["data"]["status"] == "active"
 
         get_unarchived_response = client.get(
@@ -626,34 +662,54 @@ class TestPromptEndpoints:
                 data["pagination"]["page"] < data["pagination"]["total_pages"]
             )
 
-    def test_execute_prompt(self, client, auth_headers, mock_user):
+    def test_execute_prompt(self, client, auth_headers, mock_user, prompt_resources):
 
         """Test executing a prompt."""
+        credential_runtime = AsyncMock()
+        credentials = SimpleNamespace(
+            api_key="test-provider-key",
+            app_config={},
+            credentials_resolved=True,
+        )
+        credential_runtime.resolve.return_value = credentials
+
+        async def _execute(*_args, **kwargs):
+            await kwargs["on_provider_success"]()
+            return {
+                "output": "Test response",
+                "tokens_used": 100,
+                "execution_time_ms": 1500,
+            }
+
         with patch('tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.get_current_active_user', return_value=mock_user):
-            with patch('tldw_Server_API.app.core.Prompt_Management.prompt_studio.prompt_executor.PromptExecutor.execute') as mock_execute:
-                mock_execute.return_value = {
-                    "output": "Test response",
-                    "tokens_used": 100,
-                    "execution_time": 1.5
-                }
+            with patch(
+                'tldw_Server_API.app.api.v1.endpoints.prompt_studio.prompt_studio_prompts.ProviderCredentialRuntime',
+                return_value=credential_runtime,
+            ):
+                with patch('tldw_Server_API.app.core.Prompt_Management.prompt_studio.prompt_executor.PromptExecutor.execute') as mock_execute:
+                    mock_execute.side_effect = _execute
 
-                execution_data = {
-                    "prompt_id": 1,
-                    "inputs": {"task": "Write a test"},
-                    "provider": "openai",
-                    "model": "gpt-4"
-                }
+                    execution_data = {
+                        "prompt_id": prompt_resources.prompt_id,
+                        "inputs": {"task": "Write a test"},
+                        "provider": "openai",
+                        "model": "gpt-4"
+                    }
 
-                response = client.post(
-                    "/api/v1/prompt-studio/prompts/execute",
-                    json=execution_data,
-                    headers=auth_headers
-                )
+                    response = client.post(
+                        "/api/v1/prompt-studio/prompts/execute",
+                        json=execution_data,
+                        headers=auth_headers
+                    )
 
-                assert response.status_code in [200, 201]
-                data = response.json()
-                assert "output" in data
-                assert data["tokens_used"] == 100
+                    assert response.status_code in [200, 201]
+                    data = response.json()
+                    assert data["output"] == "Test response"
+                    assert data["tokens_used"] == 100
+                    assert data["execution_time"] == 1.5
+
+        credential_runtime.mark_used.assert_awaited_once_with(credentials)
+        credential_runtime.close.assert_awaited_once_with()
 
     def test_preview_prompt_renders_structured_messages(self, client, test_db, project_id, auth_headers):
 
@@ -1227,24 +1283,50 @@ class TestTestCaseEndpoints:
                 "has_more": False,
             }
 
-    def test_run_test_cases(self, client, auth_headers, mock_user):
+    def test_run_test_cases(self, client, auth_headers, mock_user, prompt_test_case_resources):
 
         """Test running test cases."""
+        credentials = SimpleNamespace(
+            api_key="test-case-runtime-key",
+            app_config={"openai_api": {"model": "gpt-3.5-turbo"}},
+            credentials_resolved=True,
+        )
+        credential_runtime = AsyncMock()
+        credential_runtime.resolve.return_value = credentials
+        credential_runtime.mark_used.return_value = True
+
+        async def _run_batch(*_args, **kwargs):
+            await kwargs["on_provider_success"]()
+            return [
+                {
+                    "test_case_id": "test-1",
+                    "passed": True,
+                    "actual_outputs": {"output": "result"},
+                    "execution_time": 0.5,
+                }
+            ]
+
         with patch('tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.get_current_active_user', return_value=mock_user):
-            with patch('tldw_Server_API.app.core.Prompt_Management.prompt_studio.test_case_manager.TestCaseManager.run_batch_tests') as mock_run:
-                mock_run.return_value = [
-                    {
-                        "test_case_id": "test-1",
-                        "passed": True,
-                        "actual_outputs": {"output": "result"},
-                        "execution_time": 0.5
-                    }
-                ]
+            with (
+                patch(
+                    'tldw_Server_API.app.core.Prompt_Management.prompt_studio.test_case_manager.TestCaseManager.run_batch_tests',
+                    new_callable=AsyncMock,
+                    side_effect=_run_batch,
+                ),
+                patch(
+                    'tldw_Server_API.app.api.v1.endpoints.prompt_studio.prompt_studio_test_cases.derive_trusted_credential_scope',
+                    return_value=(7, [71], [72], False),
+                ),
+                patch(
+                    'tldw_Server_API.app.api.v1.endpoints.prompt_studio.prompt_studio_test_cases.ProviderCredentialRuntime',
+                    return_value=credential_runtime,
+                ),
+            ):
 
                 run_data = {
-                    "project_id": 1,
-                    "test_case_ids": [1],
-                    "prompt_id": 1
+                    "project_id": prompt_test_case_resources.project_id,
+                    "test_case_ids": [prompt_test_case_resources.test_case_id],
+                    "prompt_id": prompt_test_case_resources.prompt_id,
                 }
 
                 response = client.post(
@@ -1258,6 +1340,12 @@ class TestTestCaseEndpoints:
                 assert "results" in data
                 assert len(data["results"]) == 1
                 assert data["results"][0]["passed"] is True
+                credential_runtime.resolve.assert_awaited_once_with(
+                    "openai",
+                    model=None,
+                )
+                credential_runtime.mark_used.assert_awaited_once_with(credentials)
+                credential_runtime.close.assert_awaited_once_with()
 
 ########################################################################################################################
 # Evaluation Endpoints Tests
@@ -1266,13 +1354,13 @@ class TestTestCaseEndpoints:
 class TestEvaluationEndpoints:
     """Test evaluation-related API endpoints."""
 
-    def test_create_evaluation(self, client, auth_headers, mock_user):
+    def test_create_evaluation(self, client, auth_headers, mock_user, prompt_resources):
 
         """Test creating an evaluation."""
         with patch('tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.get_current_active_user', return_value=mock_user):
             evaluation_data = {
-                "project_id": 1,
-                "prompt_id": 1,
+                "project_id": prompt_resources.project_id,
+                "prompt_id": prompt_resources.prompt_id,
                 "test_run_id": "run-123",
                 "metrics": {
                     "accuracy": 0.95,
@@ -1296,36 +1384,43 @@ class TestEvaluationEndpoints:
             assert "metrics" in data
             assert data["metrics"]["accuracy"] == 0.95
 
-    def test_missing_provider_credentials_returns_503(self, client, auth_headers, mock_user, monkeypatch):
+    def test_missing_provider_credentials_returns_503(
+        self,
+        client,
+        auth_headers,
+        mock_user,
+        monkeypatch,
+        prompt_resources,
+    ):
 
         """Missing provider credentials should return 503 with error code."""
         from tldw_Server_API.app.api.v1.endpoints.prompt_studio import prompt_studio_evaluations as ps_eval
-        from tldw_Server_API.app.core.AuthNZ.byok_runtime import ResolvedByokCredentials
 
-        async def _missing(provider, *args, **kwargs):
-            return ResolvedByokCredentials(
-                provider=provider,
-                api_key=None,
-                app_config=None,
-                credential_fields={},
-                source="server",
-                allowlisted=True,
-            )
+        class _MissingRuntime:
+            async def resolve(self, *_args, **_kwargs):
+                return type(
+                    "Credentials",
+                    (),
+                    {
+                        "api_key": None,
+                        "app_config": None,
+                        "credentials_resolved": True,
+                    },
+                )()
+
+            async def close(self):
+                return None
 
         monkeypatch.setattr(ps_eval, "_is_prompt_studio_test_mode", lambda: False)
-        monkeypatch.setattr(ps_eval, "resolve_byok_credentials", _missing)
+        monkeypatch.setattr(ps_eval, "ProviderCredentialRuntime", lambda **_kwargs: _MissingRuntime())
 
         with patch('tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.get_current_active_user', return_value=mock_user):
             evaluation_data = {
-                "project_id": 1,
-                "prompt_id": 1,
+                "project_id": prompt_resources.project_id,
+                "prompt_id": prompt_resources.prompt_id,
                 "test_run_id": "run-123",
-                "metrics": {
-                    "accuracy": 0.95,
-                    "f1_score": 0.92,
-                    "latency": 1.5
-                },
                 "config": {
+                    "provider": "openai",
                     "model": "gpt-4",
                     "temperature": 0.7
                 }
@@ -1399,8 +1494,20 @@ class TestEvaluationEndpoints:
 
             calls = {"n": 0}
 
-            async def fake_run_single_test(self, *, prompt_id: int, test_case_id: int, model_config, metrics=None):
+            async def fake_run_single_test(
+                self,
+                *,
+                prompt_id: int,
+                test_case_id: int,
+                model_config,
+                metrics=None,
+                provider_credentials=None,
+                on_provider_success=None,
+            ):
+                assert provider_credentials is not None
                 calls["n"] += 1
+                if on_provider_success is not None:
+                    await on_provider_success()
                 return {
                     "id": 999,
                     "prompt_id": prompt_id,
@@ -1442,7 +1549,7 @@ class TestEvaluationEndpoints:
 class TestOptimizationEndpoints:
     """Test optimization-related API endpoints."""
 
-    def test_start_optimization(self, client, auth_headers, mock_user):
+    def test_start_optimization(self, client, auth_headers, mock_user, test_db):
 
         """Test starting an optimization job."""
         with patch('tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.get_current_active_user', return_value=mock_user):
@@ -1473,6 +1580,12 @@ class TestOptimizationEndpoints:
                 )
                 assert prompt_resp.status_code in (200, 201), prompt_resp.text
                 prompt_id = (prompt_resp.json().get("data") or {}).get("id") or prompt_resp.json().get("id")
+                test_case = test_db.create_test_case(
+                    project_id=project_id,
+                    name="Opt Test Case",
+                    inputs={"text": "hello"},
+                    expected_outputs={"response": "hello"},
+                )
 
                 optimization_data = {
                     "project_id": project_id,
@@ -1482,7 +1595,8 @@ class TestOptimizationEndpoints:
                         "max_iterations": 10,
                         "target_metric": "accuracy",
                         "threshold": 0.9
-                    }
+                    },
+                    "test_case_ids": [test_case["id"]],
                 }
 
                 response = client.post(

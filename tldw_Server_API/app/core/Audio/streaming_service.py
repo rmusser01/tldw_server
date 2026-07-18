@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import inspect
 import json
 import os
 from collections.abc import Awaitable
@@ -157,6 +158,9 @@ async def _stream_tts_to_websocket(
     speech_req: Any,
     tts_service: Any,
     provider: Optional[str],
+    provider_overrides: Optional[dict[str, Any]] = None,
+    user_id: Optional[int] = None,
+    on_first_output: Optional[Callable[[], Awaitable[None] | None]] = None,
     outer_stream: Optional[Any],
     reg: Any,
     route: str,
@@ -185,21 +189,32 @@ async def _stream_tts_to_websocket(
 
     async def _producer() -> None:
         nonlocal sentinel_enqueued
+        speech_stream: Any = None
+        first_output_marked = False
         try:
             generate_kwargs: dict[str, Any] = {
                 "provider": provider,
-                "fallback": True,
+                "fallback": provider_overrides is None,
                 "voice_to_voice_route": route,
+                "user_id": user_id,
             }
+            if provider_overrides is not None:
+                generate_kwargs["provider_overrides"] = provider_overrides
             if voice_to_voice_start is not None:
                 generate_kwargs["voice_to_voice_start"] = voice_to_voice_start
 
-            async for chunk in tts_service.generate_speech(
+            speech_stream = tts_service.generate_speech(
                 speech_req,
                 **generate_kwargs,
-            ):
+            )
+            async for chunk in speech_stream:
                 if not chunk:
                     continue
+                if not first_output_marked and on_first_output is not None:
+                    mark_result = on_first_output()
+                    if inspect.isawaitable(mark_result):
+                        await mark_result
+                    first_output_marked = True
                 try:
                     queue.put_nowait(chunk)
                 except QueueFull:
@@ -235,6 +250,16 @@ async def _stream_tts_to_websocket(
                 except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as send_exc:
                     logger.debug(f"{route} error handler failed: error={send_exc}")
         finally:
+            close_stream = getattr(speech_stream, "aclose", None)
+            if callable(close_stream):
+                try:
+                    await close_stream()
+                except asyncio.CancelledError:
+                    raise
+                except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as close_exc:
+                    logger.debug(
+                        f"{route} TTS iterator close failed: error={close_exc}"
+                    )
             try:
                 await queue.put(None)
                 sentinel_enqueued = True

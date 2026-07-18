@@ -3,13 +3,17 @@ import asyncio
 import pytest
 
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
+from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+)
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAuthenticationError
 from tldw_Server_API.app.core.RAG.rag_service import research_agent as ra
 from tldw_Server_API.app.core.RAG.rag_service.query_classifier import QueryClassification
 from tldw_Server_API.app.core.RAG.rag_service.research_agent import create_default_registry
 from tldw_Server_API.tests.RAG_NEW.unit.test_generation_executor import (
-    _install_explicit_chat_capture,
     _RecordingCredentialRuntime,
+    _install_blocking_sync_chat_adapter,
+    _install_explicit_chat_capture,
 )
 
 pytestmark = pytest.mark.unit
@@ -339,10 +343,54 @@ async def test_research_loop_uses_explicit_runtime_credentials(monkeypatch):
 
     assert output.completed is True
     assert runtime.resolved == ["anthropic"]
+    assert runtime.resolved_models == ["claude-test"]
     assert runtime.marked == [runtime.handle]
     assert captured["kwargs"]["api_key"] == "runtime-only-key"
     assert captured["kwargs"]["app_config"] == runtime.handle.app_config
     assert captured["kwargs"]["credentials_resolved"] is True
+    assert captured["kwargs"][PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY] is runtime.handle
+
+
+@pytest.mark.asyncio
+async def test_research_loop_cancellation_marks_completed_sync_adapter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = _RecordingCredentialRuntime()
+    entered, release = _install_blocking_sync_chat_adapter(
+        monkeypatch,
+        '{"reasoning":"done","action":"done","params":{"reason":"done"}}',
+    )
+    classification = QueryClassification(
+        skip_search=False,
+        search_local_db=True,
+        standalone_query="runtime research",
+    )
+    task = asyncio.create_task(
+        ra.research_loop(
+            query="runtime research",
+            classification=classification,
+            mode="speed",
+            llm_provider="anthropic",
+            llm_model="claude-test",
+            max_iterations=1,
+            credential_runtime=runtime,
+        )
+    )
+    try:
+        assert await asyncio.to_thread(entered.wait, 1.0)
+        task.cancel()
+        await asyncio.sleep(0.03)
+        assert not task.done()
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=1.0)
+    finally:
+        release.set()
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+    assert runtime.marked == [runtime.handle]
 
 
 @pytest.mark.asyncio

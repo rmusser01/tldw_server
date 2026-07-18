@@ -1,22 +1,40 @@
 import asyncio
+import gc
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from loguru import logger
 
+import tldw_Server_API.app.core.RAG.rag_service.advanced_reranking as advanced_reranking_module
 import tldw_Server_API.app.core.RAG.rag_service.agentic_chunker as agentic_chunker
+import tldw_Server_API.app.core.RAG.rag_service.document_grader as document_grader_module
 import tldw_Server_API.app.core.RAG.rag_service.generation as generation_module
 import tldw_Server_API.app.core.RAG.rag_service.post_generation_verifier as verifier_module
+import tldw_Server_API.app.core.RAG.rag_service.quality_graders as quality_graders_module
 import tldw_Server_API.app.core.RAG.rag_service.unified_pipeline as unified_pipeline_module
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
+from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
+    ByokResolutionError,
+    ByokResolutionStatus,
+    ResolvedByokCredentials,
+)
+from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+    ProviderCallCredentials,
+    ProviderCredentialRuntime,
+)
+from tldw_Server_API.app.core.Chat.bounded_daemon import BoundedDaemonPool
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAuthenticationError
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import SummaryProviderError
 from tldw_Server_API.app.core.RAG.rag_service.advanced_reranking import (
     LLMReranker,
     RerankingConfig,
     RerankingStrategy,
+    ScoredDocument,
+    TwoTierReranker,
 )
 from tldw_Server_API.app.core.RAG.rag_service.agentic_chunker import AgenticConfig
 from tldw_Server_API.app.core.RAG.rag_service.document_grader import (
@@ -24,43 +42,121 @@ from tldw_Server_API.app.core.RAG.rag_service.document_grader import (
     GradingConfig,
 )
 from tldw_Server_API.app.core.RAG.rag_service.evidence_models import DerivedEvidence, RetrievedEvidence
+from tldw_Server_API.app.core.RAG.rag_service.faithfulness import FaithfulnessEvaluator
 from tldw_Server_API.app.core.RAG.rag_service.generation import AnswerGenerator
 from tldw_Server_API.app.core.RAG.rag_service.generation_executor import execute_generation_phase
-from tldw_Server_API.app.core.RAG.rag_service.faithfulness import FaithfulnessEvaluator
 from tldw_Server_API.app.core.RAG.rag_service.post_generation_verifier import (
     PostGenerationVerifier,
 )
-from tldw_Server_API.app.core.RAG.rag_service.query_classifier import QueryClassification
-from tldw_Server_API.app.core.RAG.rag_service.request_resolution import ResolvedRAGRequest
-from tldw_Server_API.app.core.RAG.rag_service.retrieval_plan import RetrievalPlan
-from tldw_Server_API.app.core.RAG.rag_service.result_model import RAGResult
 from tldw_Server_API.app.core.RAG.rag_service.quality_graders import (
     FastGroundednessGrader,
     UtilityGrader,
 )
+from tldw_Server_API.app.core.RAG.rag_service.query_classifier import QueryClassification
+from tldw_Server_API.app.core.RAG.rag_service.request_resolution import ResolvedRAGRequest
+from tldw_Server_API.app.core.RAG.rag_service.result_model import RAGResult
+from tldw_Server_API.app.core.RAG.rag_service.retrieval_plan import RetrievalPlan
 from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
-
 
 pytestmark = pytest.mark.unit
 
 
 class _RecordingCredentialRuntime:
     def __init__(self) -> None:
-        self.handle = SimpleNamespace(
-            provider="anthropic",
-            api_key="runtime-only-key",
-            app_config={"Anthropic": {"api_timeout": 12}},
-            credentials_resolved=True,
-        )
+        self.handle: ProviderCallCredentials | None = None
         self.resolved: list[str] = []
+        self.resolved_models: list[str | None] = []
         self.marked: list[Any] = []
 
-    async def resolve(self, provider: str) -> Any:
+    async def resolve(self, provider: str, *, model: str | None = None) -> Any:
         self.resolved.append(provider)
+        self.resolved_models.append(model)
+        if self.handle is None or self.handle.provider != provider:
+            async def resolver(
+                normalized_provider: str,
+                **_kwargs: Any,
+            ) -> ResolvedByokCredentials:
+                return ResolvedByokCredentials(
+                    provider=normalized_provider,
+                    api_key="runtime-only-key",
+                    app_config={"Anthropic": {"api_timeout": 12}},
+                    credential_fields={},
+                    source="user",
+                    allowlisted=True,
+                    status=ByokResolutionStatus.RESOLVED,
+                    auth_source="api_key",
+                )
+
+            issuer = ProviderCredentialRuntime(
+                user_id=41,
+                team_ids=(),
+                org_ids=(),
+                trusted_base_url_override=True,
+                server_config_snapshot={},
+                resolver=resolver,
+            )
+            try:
+                self.handle = await issuer.resolve(provider, model=model)
+            finally:
+                await issuer.close()
         return self.handle
 
     async def mark_used(self, handle: Any) -> None:
         self.marked.append(handle)
+
+
+def _grader_module(stage: str) -> Any:
+    return (
+        document_grader_module
+        if stage == "document"
+        else quality_graders_module
+    )
+
+
+def _valid_grader_response(stage: str) -> str:
+    return {
+        "document": (
+            '{"is_relevant": true, "relevance_score": 0.9, '
+            '"reasoning": "yes"}'
+        ),
+        "groundedness": (
+            '{"is_grounded": true, "confidence": 0.9, '
+            '"rationale": "yes"}'
+        ),
+        "utility": '{"utility_score": 5, "explanation": "yes"}',
+    }[stage]
+
+
+async def _run_runtime_bound_grader(
+    stage: str,
+    *,
+    analyze: Any,
+    runtime: Any,
+    document: Document,
+    timeout_seconds: float = 1.0,
+) -> Any:
+    if stage == "document":
+        return await DocumentGrader(
+            analyze_fn=analyze,
+            config=GradingConfig(
+                provider="anthropic",
+                timeout_seconds=timeout_seconds,
+            ),
+            credential_runtime=runtime,
+        ).grade_document("query", document)
+    if stage == "groundedness":
+        return await FastGroundednessGrader(
+            analyze_fn=analyze,
+            provider="anthropic",
+            timeout_sec=timeout_seconds,
+            credential_runtime=runtime,
+        ).grade("query", "answer", [document])
+    return await UtilityGrader(
+        analyze_fn=analyze,
+        provider="anthropic",
+        timeout_sec=timeout_seconds,
+        credential_runtime=runtime,
+    ).grade("query", "answer")
 
 
 def _install_explicit_chat_capture(
@@ -93,6 +189,34 @@ def _install_explicit_chat_capture(
 
     monkeypatch.setattr(chat_service, "perform_chat_api_call_async", fake_chat_call)
     return captured
+
+
+def _install_blocking_sync_chat_adapter(
+    monkeypatch: pytest.MonkeyPatch,
+    response: Any,
+) -> tuple[threading.Event, threading.Event]:
+    """Install a real sync-only adapter whose completion is event-gated."""
+
+    from tldw_Server_API.app.core.Chat import chat_service
+
+    entered = threading.Event()
+    release = threading.Event()
+
+    class BlockingSyncAdapter:
+        async def achat(self, _request: dict[str, Any]) -> None:
+            raise NotImplementedError
+
+        def chat(self, _request: dict[str, Any]) -> Any:
+            entered.set()
+            assert release.wait(timeout=1.0)  # nosec B101
+            return response
+
+    monkeypatch.setattr(
+        chat_service,
+        "_get_llm_registry",
+        lambda: SimpleNamespace(get_adapter=lambda _provider: BlockingSyncAdapter()),
+    )
+    return entered, release
 
 
 def _stub_real_sgl_dispatch(
@@ -720,6 +844,7 @@ async def test_bound_grader_real_sgl_dispatches_nonempty_input_and_marks_once(
     assert args[3] == "runtime-only-key"  # nosec B101
     assert kwargs["app_config"] == runtime.handle.app_config  # nosec B101
     assert kwargs["credentials_resolved"] is True  # nosec B101
+    assert kwargs["provider_credentials"] is runtime.handle  # nosec B101
     assert kwargs["raise_on_error"] is True  # nosec B101
     assert runtime.marked == [runtime.handle]  # nosec B101
 
@@ -730,8 +855,24 @@ async def test_bound_grader_real_sgl_dispatches_nonempty_input_and_marks_once(
 async def test_grader_error_result_preserves_runtime_trust_state(
     stage: str,
     runtime_bound: bool,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     runtime = _RecordingCredentialRuntime() if runtime_bound else None
+    release_count = 0
+
+    class TrackingPool(BoundedDaemonPool):
+        def _release_capacity(self) -> None:
+            nonlocal release_count
+            release_count += 1
+            super()._release_capacity()
+
+    pool = TrackingPool(capacity=1)
+    monkeypatch.setattr(
+        _grader_module(stage),
+        "SYNC_ADAPTER_CALL_POOL",
+        pool,
+        raising=False,
+    )
 
     def error_result(*args: Any, **kwargs: Any) -> str:
         return "Error: Could not extract text content. private-provider-detail"
@@ -778,6 +919,8 @@ async def test_grader_error_result_preserves_runtime_trust_state(
         assert result.method == "error_fallback"  # nosec B101
         assert result.metadata == {"parse_error": True}  # nosec B101
     assert "private-provider-detail" not in str(result)  # nosec B101
+    assert pool.active_count == 0  # nosec B101
+    assert release_count == 1  # nosec B101 - one admitted call, one release
 
 
 @pytest.mark.parametrize(
@@ -807,10 +950,100 @@ async def test_unified_bound_real_sgl_stage_dispatches_nonempty_input_and_marks_
     assert args[3] == "runtime-only-key"  # nosec B101
     assert kwargs["app_config"] == runtime.handle.app_config  # nosec B101
     assert kwargs["credentials_resolved"] is True  # nosec B101
+    assert kwargs["provider_credentials"] is runtime.handle  # nosec B101
     assert kwargs["raise_on_error"] is True  # nosec B101
     assert runtime.resolved == [resolved_provider]  # nosec B101
     assert runtime.marked == [runtime.handle]  # nosec B101
     assert "verification_available" not in result.metadata.get(stage, {})  # nosec B101
+
+
+@pytest.mark.parametrize(
+    ("stage", "dispatch_response", "metadata_key"),
+    [
+        ("gap", '["follow up safely"]', "gap_analysis"),
+        ("critique", "- no unsupported claims", "synthesis"),
+        ("faithfulness", "[]", "faithfulness"),
+    ],
+)
+@pytest.mark.asyncio
+@pytest.mark.concurrent
+async def test_unified_bound_sgl_cancellation_drains_and_marks_completed_call(
+    monkeypatch: pytest.MonkeyPatch,
+    stage: str,
+    dispatch_response: str,
+    metadata_key: str,
+) -> None:
+    runtime = _RecordingCredentialRuntime()
+    entered = threading.Event()
+    release = threading.Event()
+
+    def blocking_analyze(*_args: Any, **_kwargs: Any) -> str:
+        entered.set()
+        assert release.wait(timeout=1.0)  # nosec B101
+        return dispatch_response
+
+    import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as sgl
+
+    monkeypatch.setattr(sgl, "analyze", blocking_analyze)
+    task = asyncio.create_task(
+        _run_unified_bound_sgl_stage(monkeypatch, stage, runtime)
+    )
+    try:
+        assert await asyncio.to_thread(entered.wait, 1.0)  # nosec B101
+        task.cancel()
+        await asyncio.sleep(0.03)
+        assert not task.done()  # nosec B101
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=1.0)
+    finally:
+        release.set()
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+    assert runtime.marked == [runtime.handle]  # nosec B101
+
+
+@pytest.mark.asyncio
+@pytest.mark.concurrent
+async def test_unified_bound_reranker_cancellation_drains_and_marks_before_return(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = _RecordingCredentialRuntime()
+    pool = BoundedDaemonPool(capacity=1)
+    entered = threading.Event()
+    release = threading.Event()
+
+    def blocking_analyze(*_args: Any, **_kwargs: Any) -> str:
+        entered.set()
+        assert release.wait(timeout=1.0)  # nosec B101
+        return "0.8"
+
+    import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as sgl
+
+    monkeypatch.setattr(sgl, "analyze", blocking_analyze)
+    monkeypatch.setattr(advanced_reranking_module, "SYNC_ADAPTER_CALL_POOL", pool)
+    task = asyncio.create_task(
+        _run_unified_bound_sgl_stage(monkeypatch, "reranker", runtime)
+    )
+    try:
+        assert await asyncio.to_thread(entered.wait, 1.0)  # nosec B101
+        task.cancel()
+        await asyncio.sleep(0.03)
+        assert task.done() is False
+        assert pool.active_count == 1  # nosec B101
+        assert runtime.marked == []  # nosec B101
+
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=1.0)
+    finally:
+        release.set()
+        await asyncio.gather(task, return_exceptions=True)
+
+    assert pool.active_count == 0  # nosec B101
+    assert runtime.marked == [runtime.handle]  # nosec B101
 
 
 @pytest.mark.parametrize(
@@ -1073,6 +1306,7 @@ async def test_answer_generator_runtime_uses_effective_provider_handle(
     assert captured["api_key"] == "runtime-only-key"  # nosec B101
     assert captured["app_config"] == {"Anthropic": {"api_timeout": 12}}  # nosec B101
     assert captured["credentials_resolved"] is True  # nosec B101
+    assert captured[PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY] is runtime.handle  # nosec B101
 
 
 @pytest.mark.asyncio
@@ -1146,7 +1380,7 @@ async def test_agentic_generation_consumes_task_runtime(
 @pytest.mark.asyncio
 async def test_document_grader_runtime_failure_uses_bounded_degraded_metadata() -> None:
     class FailingRuntime:
-        async def resolve(self, provider: str) -> Any:
+        async def resolve(self, provider: str, *, model: str | None = None) -> Any:
             raise ByokResolutionError("invalid_provider_credentials", provider)
 
     def unexpected_analyze(*args: Any, **kwargs: Any) -> str:
@@ -1176,7 +1410,7 @@ async def test_document_grader_runtime_failure_uses_bounded_degraded_metadata() 
 @pytest.mark.asyncio
 async def test_quality_graders_runtime_failure_lowers_verification_trust() -> None:
     class FailingRuntime:
-        async def resolve(self, provider: str) -> Any:
+        async def resolve(self, provider: str, *, model: str | None = None) -> Any:
             raise ByokResolutionError("credential_store_unavailable", provider)
 
     def unexpected_analyze(*args: Any, **kwargs: Any) -> str:
@@ -1242,18 +1476,37 @@ async def test_llm_reranker_provider_failure_skips_with_reduced_trust() -> None:
     }
 
 
-@pytest.mark.parametrize(
-    ("strategy_name", "strategy_enum"),
-    [
-        ("llm_scoring", RerankingStrategy.LLM_SCORING),
-        ("two_tier", RerankingStrategy.TWO_TIER),
-    ],
-)
+@pytest.mark.asyncio
+async def test_llm_reranker_missing_client_is_explicitly_degraded() -> None:
+    document = Document(
+        id="doc-rerank-missing-client",
+        content="evidence",
+        metadata={},
+        source=DataSource.MEDIA_DB,
+        score=0.8,
+    )
+    reranker = LLMReranker(
+        RerankingConfig(
+            strategy=RerankingStrategy.LLM_SCORING,
+            top_k=1,
+            batch_size=1,
+        ),
+        llm_client=None,
+    )
+
+    reranked = await reranker.rerank("query", [document])
+
+    assert reranked[0].rerank_score == document.score  # nosec B101
+    assert reranker.last_metadata == {  # nosec B101
+        "degraded": True,
+        "failure_code": "provider_unavailable",
+        "verification_available": False,
+    }
+
+
 @pytest.mark.asyncio
 async def test_unified_llm_reranker_runtime_failure_does_not_fail_over_provider(
     monkeypatch: pytest.MonkeyPatch,
-    strategy_name: str,
-    strategy_enum: RerankingStrategy,
 ) -> None:
     captured: dict[str, Any] = {}
     document = Document(
@@ -1272,8 +1525,9 @@ async def test_unified_llm_reranker_runtime_failure_does_not_fail_over_provider(
             return [document]
 
     class FailingRuntime:
-        async def resolve(self, provider: str) -> Any:
+        async def resolve(self, provider: str, *, model: str | None = None) -> Any:
             captured.setdefault("resolved", []).append(provider)
+            captured.setdefault("models", []).append(model)
             raise ByokResolutionError("invalid_provider_credentials", provider)
 
     class OriginalScoreReranker:
@@ -1307,19 +1561,186 @@ async def test_unified_llm_reranker_runtime_failure_does_not_fail_over_provider(
         sources=["media_db"],
         enable_cache=False,
         enable_reranking=True,
-        reranking_strategy=strategy_name,
+        reranking_strategy="llm_scoring",
         enable_generation=False,
         credential_runtime=FailingRuntime(),
     )
 
     assert captured["resolved"] == ["anthropic"]  # nosec B101
-    assert captured["strategy"] is strategy_enum  # nosec B101
+    assert captured["models"] == ["rerank-model"]  # nosec B101
+    assert captured["strategy"] is RerankingStrategy.LLM_SCORING  # nosec B101
     assert captured["llm_client"] is None  # nosec B101
     assert [item["id"] for item in result.documents] == [document.id]  # nosec B101
     assert result.metadata["reranking"] == {  # nosec B101
+        "degraded": True,
         "failure_code": "invalid_provider_credentials",
         "verification_available": False,
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.concurrent
+async def test_two_tier_credential_failures_concurrently_degrade_without_gating(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    generation_calls: list[str] = []
+    analyze_calls: list[str] = []
+    resolving_failure_codes: set[str] = set()
+    all_resolving = asyncio.Event()
+
+    class FakeRetriever:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        async def retrieve(self, *args: Any, **kwargs: Any) -> list[Document]:
+            query = str(args[0] if args else kwargs.get("query", "query"))
+            return [
+                Document(
+                    id=f"doc-{query}",
+                    content="pipeline evidence",
+                    metadata={},
+                    source=DataSource.MEDIA_DB,
+                    score=0.2,
+                )
+            ]
+
+    class FailingRuntime:
+        def __init__(self, failure_code: str) -> None:
+            self.failure_code = failure_code
+            self.resolved: list[tuple[str, str | None]] = []
+            self.marked_used: list[Any] = []
+
+        async def resolve(self, provider: str, *, model: str | None = None) -> Any:
+            self.resolved.append((provider, model))
+            resolving_failure_codes.add(self.failure_code)
+            if len(resolving_failure_codes) == 3:
+                all_resolving.set()
+            await asyncio.wait_for(all_resolving.wait(), timeout=1)
+            raise ByokResolutionError(self.failure_code, provider)
+
+        async def mark_used(self, handle: Any) -> None:
+            self.marked_used.append(handle)
+
+    class StaticCrossReranker:
+        def __init__(self, config: RerankingConfig) -> None:
+            self.config = config
+
+        async def rerank(
+            self,
+            query: str,
+            documents: list[Document],
+            original_scores: list[float] | None = None,
+        ) -> list[ScoredDocument]:
+            return [
+                ScoredDocument(
+                    document=document,
+                    original_score=document.score,
+                    rerank_score=(0.05 if document.id == "sentinel:irrelevant" else 0.2),
+                )
+                for document in documents
+            ]
+
+    class FakeAnswerGenerator:
+        def __init__(self, **_kwargs: Any) -> None:
+            pass
+
+        async def generate(self, **kwargs: Any) -> dict[str, str]:
+            query = str(kwargs.get("query", "query"))
+            generation_calls.append(query)
+            return {"answer": f"generated:{query}"}
+
+    def create_real_two_tier(
+        strategy: RerankingStrategy,
+        config: RerankingConfig,
+        llm_client: Any = None,
+    ) -> TwoTierReranker:
+        assert strategy is RerankingStrategy.TWO_TIER  # nosec B101
+        assert llm_client is None  # nosec B101
+        return TwoTierReranker(
+            config,
+            llm_client=llm_client,
+            cross_reranker=StaticCrossReranker(config),
+        )
+
+    def fail_analyze(*_args: Any, **_kwargs: Any) -> str:
+        analyze_calls.append("analyze")
+        raise AssertionError("provider dispatch reached after credential failure")
+
+    import tldw_Server_API.app.core.config as core_config
+    import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as sgl
+
+    monkeypatch.setenv("RAG_MIN_RELEVANCE_PROB", "0.99")
+    monkeypatch.setenv("RAG_SENTINEL_MARGIN", "0.50")
+    monkeypatch.setattr(unified_pipeline_module, "MultiDatabaseRetriever", FakeRetriever)
+    monkeypatch.setattr(unified_pipeline_module, "create_reranker", create_real_two_tier)
+    monkeypatch.setattr(unified_pipeline_module, "AnswerGenerator", FakeAnswerGenerator)
+    monkeypatch.setattr(sgl, "analyze", fail_analyze)
+    monkeypatch.setattr(
+        core_config,
+        "load_and_log_configs",
+        lambda: {
+            "RAG_LLM_RERANKER_PROVIDER": "anthropic",
+            "RAG_LLM_RERANKER_MODEL": "rerank-model",
+        },
+    )
+
+    runtimes = [
+        FailingRuntime("invalid_provider_credentials"),
+        FailingRuntime("credential_store_unavailable"),
+        FailingRuntime("credential_scope_revoked"),
+    ]
+
+    async def run(index: int) -> Any:
+        return await unified_pipeline_module.unified_rag_pipeline(
+            query=f"rank-{index}",
+            sources=["media_db"],
+            metadata={
+                "reranking_calibration": {
+                    "gated": True,
+                    "fused_score": 0.01,
+                    "source": "untrusted_inbound",
+                }
+            },
+            enable_cache=False,
+            enable_reranking=True,
+            reranking_strategy="two_tier",
+            enable_learned_fusion=True,
+            enable_generation=True,
+            enable_pre_retrieval_clarification=False,
+            credential_runtime=runtimes[index],
+        )
+
+    results = await asyncio.gather(run(0), run(1), run(2))
+
+    assert resolving_failure_codes == {  # nosec B101
+        "invalid_provider_credentials",
+        "credential_store_unavailable",
+        "credential_scope_revoked",
+    }
+    for index, (failure_code, result) in enumerate(
+        zip(
+            (
+                "invalid_provider_credentials",
+                "credential_store_unavailable",
+                "credential_scope_revoked",
+            ),
+            results,
+            strict=True,
+        )
+    ):
+        assert runtimes[index].resolved == [("anthropic", "rerank-model")]  # nosec B101
+        assert result.metadata["reranking"] == {  # nosec B101
+            "degraded": True,
+            "failure_code": failure_code,
+            "verification_available": False,
+        }
+        assert runtimes[index].marked_used == []  # nosec B101
+        assert "reranking_calibration" not in result.metadata  # nosec B101
+        assert "generation_gate" not in result.metadata  # nosec B101
+        assert result.generated_answer == f"generated:rank-{index}"  # nosec B101
+
+    assert set(generation_calls) == {"rank-0", "rank-1", "rank-2"}  # nosec B101
+    assert analyze_calls == []  # nosec B101
 
 
 @pytest.mark.asyncio
@@ -1370,8 +1791,8 @@ async def test_unified_llm_reranker_partial_stream_failure_is_bounded_and_marked
         reranker.rerank = capture_scores
         return reranker
 
-    import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as sgl
     import tldw_Server_API.app.core.config as core_config
+    import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as sgl
 
     monkeypatch.setattr(unified_pipeline_module, "MultiDatabaseRetriever", FakeRetriever)
     monkeypatch.setattr(
@@ -1404,7 +1825,11 @@ async def test_unified_llm_reranker_partial_stream_failure_is_bounded_and_marked
     assert captured["rerank_scores"] == [document.score]  # nosec B101
     assert captured["analyze_kwargs"]["api_key"] == "runtime-only-key"  # nosec B101
     assert captured["analyze_kwargs"]["credentials_resolved"] is True  # nosec B101
+    assert (  # nosec B101
+        captured["analyze_kwargs"]["provider_credentials"] is runtime.handle
+    )
     assert result.metadata["reranking"] == {  # nosec B101
+        "degraded": True,
         "failure_code": "provider_unavailable",
         "verification_available": False,
     }
@@ -1459,8 +1884,8 @@ async def test_unified_llm_reranker_marks_prior_success_before_cancellation(
             return "0.8"
         raise asyncio.CancelledError
 
-    import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as sgl
     import tldw_Server_API.app.core.config as core_config
+    import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as sgl
 
     monkeypatch.setattr(unified_pipeline_module, "MultiDatabaseRetriever", FakeRetriever)
     monkeypatch.setattr(unified_pipeline_module, "create_reranker", fake_create_reranker)
@@ -1580,7 +2005,7 @@ async def test_post_verifier_repair_consumes_task_runtime(
 
 
 @pytest.mark.asyncio
-async def test_post_verifier_partial_provider_stream_is_unavailable_and_marked(
+async def test_post_verifier_partial_provider_stream_is_unavailable_and_unmarked(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     runtime = _RecordingCredentialRuntime()
@@ -1629,12 +2054,13 @@ async def test_post_verifier_partial_provider_stream_is_unavailable_and_marked(
     )
 
     assert runtime.resolved == ["anthropic"]  # nosec B101
-    assert runtime.marked == [runtime.handle]  # nosec B101
+    assert runtime.marked == []  # nosec B101
     assert captured["args"][3] == "runtime-only-key"  # nosec B101
     assert captured["kwargs"]["app_config"] == {  # nosec B101
         "Anthropic": {"api_timeout": 12}
     }
     assert captured["kwargs"]["credentials_resolved"] is True  # nosec B101
+    assert captured["kwargs"]["provider_credentials"] is runtime.handle  # nosec B101
     assert captured["kwargs"]["raise_on_error"] is True  # nosec B101
     assert outcome.reason == "verification_unavailable"  # nosec B101
     assert outcome.verification_available is False  # nosec B101
@@ -1650,6 +2076,7 @@ async def test_claims_multicall_failure_marks_prior_completed_call(
 ) -> None:
     runtime = _RecordingCredentialRuntime()
     analyze_calls = 0
+    analyze_handles: list[Any] = []
     document = Document(
         id=f"doc-claims-{pipeline_kind}",
         content="Claims evidence.",
@@ -1684,6 +2111,7 @@ async def test_claims_multicall_failure_marks_prior_completed_call(
     def fake_analyze(*args: Any, **kwargs: Any) -> str:
         nonlocal analyze_calls
         analyze_calls += 1
+        analyze_handles.append(kwargs["provider_credentials"])
         if analyze_calls == 1:
             return "clean completed response"
         raise SummaryProviderError(code="authentication", provider="anthropic")
@@ -1728,10 +2156,193 @@ async def test_claims_multicall_failure_marks_prior_completed_call(
         )
 
     assert runtime.marked == [runtime.handle]  # nosec B101
+    assert analyze_handles == [runtime.handle, runtime.handle]  # nosec B101
     assert result.metadata["claims"] == {  # nosec B101
         "failure_code": "provider_unavailable",
         "verification_available": False,
     }
+    if pipeline_kind == "agentic":
+        assert result.metadata["post_verification"] == {  # nosec B101
+            "unsupported_ratio": 0.0,
+            "total_claims": 0,
+            "unsupported_count": 0,
+            "fixed": False,
+            "reason": "verification_unavailable",
+            "verification_available": False,
+            "failure_code": "provider_unavailable",
+        }
+
+
+@pytest.mark.asyncio
+async def test_agentic_claims_creates_only_the_awaited_operation(
+    monkeypatch: pytest.MonkeyPatch,
+    recwarn: pytest.WarningsRecorder,
+) -> None:
+    """Agentic claims must not abandon a duplicate coroutine object."""
+
+    runtime = _RecordingCredentialRuntime()
+    document = Document(
+        id="doc-agentic-claims-operation",
+        content="Claims evidence.",
+        metadata={},
+        source=DataSource.MEDIA_DB,
+        score=0.8,
+    )
+
+    class FakeRetriever:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        async def retrieve(self, *args: Any, **kwargs: Any) -> list[Document]:
+            return [document]
+
+    class FakeAnswerGenerator:
+        def __init__(self, **kwargs: Any) -> None:
+            pass
+
+        async def generate(self, **kwargs: Any) -> dict[str, str]:
+            return {"answer": "A claim-bearing answer."}
+
+    class FakeClaimsEngine:
+        def __init__(self, analyze_fn: Any) -> None:
+            self.analyze_fn = analyze_fn
+
+        async def run(self, **kwargs: Any) -> dict[str, Any]:
+            return {"claims": [], "summary": {}}
+
+    import tldw_Server_API.app.core.RAG.rag_service.claims as rag_claims_module
+
+    monkeypatch.setattr(agentic_chunker, "MultiDatabaseRetriever", FakeRetriever)
+    monkeypatch.setattr(generation_module, "AnswerGenerator", FakeAnswerGenerator)
+    monkeypatch.setattr(rag_claims_module, "ClaimsEngine", FakeClaimsEngine)
+
+    await agentic_chunker.agentic_rag_pipeline(
+        query="verify claims",
+        sources=["media_db"],
+        search_mode="fts",
+        agentic=AgenticConfig(top_k_docs=1, enable_tools=False),
+        enable_generation=True,
+        enable_claims=True,
+        credential_runtime=runtime,
+    )
+    gc.collect()
+
+    assert not [
+        warning
+        for warning in recwarn
+        if issubclass(warning.category, RuntimeWarning)
+        and "was never awaited" in str(warning.message)
+    ]
+
+
+@pytest.mark.parametrize("pipeline_kind", ["unified", "agentic"])
+@pytest.mark.asyncio
+@pytest.mark.concurrent
+async def test_pipeline_cancellation_drains_claims_and_marks_completed_call(
+    monkeypatch: pytest.MonkeyPatch,
+    pipeline_kind: str,
+) -> None:
+    runtime = _RecordingCredentialRuntime()
+    entered = threading.Event()
+    release = threading.Event()
+    document = Document(
+        id=f"doc-cancel-claims-{pipeline_kind}",
+        content="Claims evidence.",
+        metadata={},
+        source=DataSource.MEDIA_DB,
+        score=0.8,
+    )
+
+    class FakeRetriever:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        async def retrieve(self, *args: Any, **kwargs: Any) -> list[Document]:
+            return [document]
+
+    class FakeAnswerGenerator:
+        def __init__(self, **_kwargs: Any) -> None:
+            pass
+
+        async def generate(self, **_kwargs: Any) -> dict[str, str]:
+            return {"answer": "A claim-bearing answer."}
+
+    class BlockingClaimsEngine:
+        def __init__(self, analyze_fn: Any) -> None:
+            self.analyze_fn = analyze_fn
+
+        async def run(self, **_kwargs: Any) -> dict[str, Any]:
+            def call_analyzer() -> dict[str, Any]:
+                self.analyze_fn("anthropic", "claim prompt", None)
+                return {"claims": [], "summary": {}}
+
+            return await asyncio.to_thread(call_analyzer)
+
+    def blocking_analyze(*_args: Any, **_kwargs: Any) -> str:
+        entered.set()
+        assert release.wait(timeout=1.0)  # nosec B101
+        return "completed claims response"
+
+    import tldw_Server_API.app.core.Claims_Extraction.claims_engine as claims_engine_module
+    import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as sgl
+    import tldw_Server_API.app.core.RAG.rag_service.claims as rag_claims_module
+
+    monkeypatch.setattr(
+        claims_engine_module,
+        "_resolve_claims_llm_config",
+        lambda: ("anthropic", None, 0.1),
+    )
+    monkeypatch.setattr(sgl, "analyze", blocking_analyze)
+    monkeypatch.setattr(
+        rag_claims_module,
+        "ClaimsEngine",
+        BlockingClaimsEngine,
+        raising=False,
+    )
+
+    if pipeline_kind == "unified":
+        monkeypatch.setattr(unified_pipeline_module, "MultiDatabaseRetriever", FakeRetriever)
+        monkeypatch.setattr(unified_pipeline_module, "AnswerGenerator", FakeAnswerGenerator)
+        monkeypatch.setattr(unified_pipeline_module, "ClaimsEngine", BlockingClaimsEngine)
+        operation = unified_pipeline_module.unified_rag_pipeline(
+            query="verify claims",
+            sources=["media_db"],
+            enable_cache=False,
+            enable_reranking=False,
+            enable_generation=True,
+            enable_claims=True,
+            enable_pre_retrieval_clarification=False,
+            credential_runtime=runtime,
+        )
+    else:
+        monkeypatch.setattr(agentic_chunker, "MultiDatabaseRetriever", FakeRetriever)
+        monkeypatch.setattr(generation_module, "AnswerGenerator", FakeAnswerGenerator)
+        operation = agentic_chunker.agentic_rag_pipeline(
+            query="verify claims",
+            sources=["media_db"],
+            search_mode="fts",
+            agentic=AgenticConfig(top_k_docs=1, enable_tools=False),
+            enable_generation=True,
+            enable_claims=True,
+            credential_runtime=runtime,
+        )
+
+    task = asyncio.create_task(operation)
+    try:
+        assert await asyncio.to_thread(entered.wait, 1.0)  # nosec B101
+        task.cancel()
+        await asyncio.sleep(0.03)
+        assert not task.done()  # nosec B101
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=1.0)
+    finally:
+        release.set()
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+    assert runtime.marked == [runtime.handle]  # nosec B101
 
 
 @pytest.mark.parametrize("failure_kind", ["provider", "cancel", "partial"])
@@ -2098,8 +2709,8 @@ async def test_claims_provider_failure_is_unavailable_with_accurate_use(
     }
     expected_marks = (
         [runtime.handle]
-        if response_kind
-        in {
+        if pipeline_kind != "post"
+        and response_kind in {
             "content_then_error_string",
             "same_chunk_content_then_error_string",
             "partial_stream",
@@ -2341,7 +2952,7 @@ async def test_post_verifier_initial_multicall_failure_marks_prior_completed_cal
         nonlocal analyze_calls
         analyze_calls += 1
         if analyze_calls == 1:
-            return "clean completed response"
+            return '{"claims": [{"text": "completed first claim"}]}'
         raise SummaryProviderError(code="authentication", provider="anthropic")
 
     import tldw_Server_API.app.core.Claims_Extraction.claims_engine as claims_engine_module
@@ -2436,7 +3047,7 @@ async def test_post_verifier_recheck_multicall_failure_marks_prior_completed_cal
         nonlocal analyze_calls
         analyze_calls += 1
         if analyze_calls < 3:
-            return "clean completed response"
+            return '{"claims": [{"text": "completed claim"}]}'
         raise SummaryProviderError(code="authentication", provider="anthropic")
 
     import tldw_Server_API.app.core.Claims_Extraction.claims_engine as claims_engine_module
@@ -2515,6 +3126,93 @@ async def test_post_verifier_recheck_generic_failure_is_not_successful_repair(
     assert sensitive not in str(outcome)  # nosec B101
 
 
+@pytest.mark.parametrize("phase", ["initial", "recheck"])
+@pytest.mark.asyncio
+@pytest.mark.concurrent
+async def test_post_verifier_cancellation_drains_claims_and_marks_completed_call(
+    monkeypatch: pytest.MonkeyPatch,
+    phase: str,
+) -> None:
+    runtime = _RecordingCredentialRuntime()
+    entered = threading.Event()
+    release = threading.Event()
+    engine_instances = 0
+
+    class BlockingClaimsEngine:
+        def __init__(self, analyze_fn: Any) -> None:
+            nonlocal engine_instances
+            engine_instances += 1
+            self.instance = engine_instances
+            self.analyze_fn = analyze_fn
+
+        async def run(self, **_kwargs: Any) -> dict[str, Any]:
+            if phase == "recheck" and self.instance == 1:
+                return {
+                    "claims": [],
+                    "summary": {"supported": 0, "refuted": 1, "nei": 0},
+                }
+
+            def call_analyzer() -> dict[str, Any]:
+                self.analyze_fn("anthropic", "claim prompt", None)
+                return {
+                    "claims": [],
+                    "summary": {"supported": 1, "refuted": 0, "nei": 0},
+                }
+
+            return await asyncio.to_thread(call_analyzer)
+
+    class FakeAnswerGenerator:
+        def __init__(self, **_kwargs: Any) -> None:
+            pass
+
+        async def generate(self, **_kwargs: Any) -> dict[str, str]:
+            return {"answer": "repaired answer"}
+
+    def blocking_analyze(*_args: Any, **_kwargs: Any) -> str:
+        entered.set()
+        assert release.wait(timeout=1.0)  # nosec B101
+        return '{"claims": [{"text": "completed claim"}]}'
+
+    import tldw_Server_API.app.core.Claims_Extraction.claims_engine as claims_engine_module
+    import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as sgl
+
+    monkeypatch.setattr(
+        claims_engine_module,
+        "_resolve_claims_llm_config",
+        lambda: ("anthropic", None, 0.1),
+    )
+    monkeypatch.setattr(sgl, "analyze", blocking_analyze)
+    monkeypatch.setattr(verifier_module, "ClaimsEngine", BlockingClaimsEngine)
+    monkeypatch.setattr(verifier_module, "AnswerGenerator", FakeAnswerGenerator)
+
+    task = asyncio.create_task(
+        PostGenerationVerifier(
+            max_retries=1 if phase == "recheck" else 0,
+            unsupported_threshold=0.1,
+            credential_runtime=runtime,
+        ).verify_and_maybe_fix(
+            query="question",
+            answer="answer",
+            base_documents=[],
+        )
+    )
+    try:
+        assert await asyncio.to_thread(entered.wait, 1.0)  # nosec B101
+        task.cancel()
+        await asyncio.sleep(0.03)
+        assert not task.done()  # nosec B101
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=1.0)
+    finally:
+        release.set()
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+    assert runtime.marked == [runtime.handle]  # nosec B101
+
+
 @pytest.mark.asyncio
 async def test_real_claims_engine_propagates_extraction_cancellation(
     monkeypatch: pytest.MonkeyPatch,
@@ -2538,16 +3236,226 @@ async def test_real_claims_engine_propagates_extraction_cancellation(
         )
 
 
+@pytest.mark.asyncio
+async def test_runtime_generation_cancellation_marks_completed_sync_adapter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = _RecordingCredentialRuntime()
+    entered, release = _install_blocking_sync_chat_adapter(
+        monkeypatch,
+        {"choices": [{"message": {"content": "completed answer"}}]},
+    )
+    generator = generation_module.LLMGenerator(
+        generation_module.GenerationConfig(
+            provider="anthropic",
+            model="claude-test",
+            streaming=False,
+        )
+    )
+    task = asyncio.create_task(
+        generator._call_llm("runtime-bound prompt", credential_runtime=runtime)
+    )
+    try:
+        assert await asyncio.to_thread(entered.wait, 1.0)  # nosec B101
+        task.cancel()
+        await asyncio.sleep(0.03)
+        assert not task.done()  # nosec B101
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=1.0)
+    finally:
+        release.set()
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+    assert runtime.marked == [runtime.handle]  # nosec B101
+
+
+@pytest.mark.parametrize("stage", ["document", "groundedness", "utility"])
+@pytest.mark.asyncio
+async def test_runtime_bound_grader_bypasses_saturated_default_executor(
+    stage: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = _RecordingCredentialRuntime()
+    pool = BoundedDaemonPool(capacity=1)
+    analyzer_started = threading.Event()
+    blocker_started = threading.Event()
+    release_blocker = threading.Event()
+    document = Document(
+        id=f"doc-direct-{stage}",
+        content="Direct adapter evidence.",
+        metadata={},
+        source=DataSource.MEDIA_DB,
+        score=0.8,
+    )
+
+    def block_default_executor() -> None:
+        blocker_started.set()
+        release_blocker.wait(timeout=2.0)
+
+    def analyze(*_args: Any, **_kwargs: Any) -> str:
+        analyzer_started.set()
+        return _valid_grader_response(stage)
+
+    monkeypatch.setattr(
+        _grader_module(stage),
+        "SYNC_ADAPTER_CALL_POOL",
+        pool,
+        raising=False,
+    )
+    loop = asyncio.get_running_loop()
+    previous_executor = getattr(loop, "_default_executor", None)
+    saturated_executor = ThreadPoolExecutor(max_workers=1)
+    loop.set_default_executor(saturated_executor)
+    blocker = loop.run_in_executor(None, block_default_executor)
+    while not blocker_started.is_set():
+        await asyncio.sleep(0)
+
+    task = asyncio.create_task(
+        _run_runtime_bound_grader(
+            stage,
+            analyze=analyze,
+            runtime=runtime,
+            document=document,
+        )
+    )
+    try:
+        for _attempt in range(100):
+            if analyzer_started.is_set():
+                break
+            await asyncio.sleep(0.001)
+        started_before_release = analyzer_started.is_set()
+    finally:
+        release_blocker.set()
+        await blocker
+        replacement_executor = previous_executor or ThreadPoolExecutor()
+        loop.set_default_executor(replacement_executor)
+        saturated_executor.shutdown(wait=True, cancel_futures=True)
+
+    result = await asyncio.wait_for(task, timeout=1.0)
+    assert started_before_release is True  # nosec B101
+    assert result.method == "llm"  # nosec B101
+    assert runtime.marked == [runtime.handle]  # nosec B101
+    assert pool.active_count == 0  # nosec B101
+
+
+@pytest.mark.parametrize("stage", ["document", "groundedness", "utility"])
+@pytest.mark.asyncio
+async def test_runtime_bound_grader_capacity_rejects_before_dispatch(
+    stage: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = _RecordingCredentialRuntime()
+    release_holder = threading.Event()
+    holder_started = threading.Event()
+    holder_released = threading.Event()
+    call_count = 0
+    release_count = 0
+    private_secret = "grader-capacity-private-secret"
+
+    class TrackingPool(BoundedDaemonPool):
+        def _release_capacity(self) -> None:
+            nonlocal release_count
+            release_count += 1
+            super()._release_capacity()
+
+    def hold_capacity() -> None:
+        holder_started.set()
+        release_holder.wait(timeout=2.0)
+
+    def analyze(*_args: Any, **_kwargs: Any) -> str:
+        nonlocal call_count
+        call_count += 1
+        raise RuntimeError(private_secret)
+
+    pool = TrackingPool(capacity=1)
+    pool.start(
+        hold_capacity,
+        name="grader-capacity-holder",
+        released_event=holder_released,
+    )
+    assert holder_started.wait(timeout=1.0)  # nosec B101
+    monkeypatch.setattr(
+        _grader_module(stage),
+        "SYNC_ADAPTER_CALL_POOL",
+        pool,
+        raising=False,
+    )
+    document = Document(
+        id=f"doc-capacity-{stage}",
+        content="Capacity evidence.",
+        metadata={},
+        source=DataSource.MEDIA_DB,
+        score=0.8,
+    )
+
+    try:
+        result = await _run_runtime_bound_grader(
+            stage,
+            analyze=analyze,
+            runtime=runtime,
+            document=document,
+        )
+        await asyncio.sleep(0.03)
+        assert call_count == 0  # nosec B101 - rejected calls never dispatch late
+        assert runtime.marked == []  # nosec B101
+        assert pool.active_count == 1  # nosec B101
+        assert release_count == 0  # nosec B101
+        assert result.method == (  # nosec B101
+            "score_fallback" if stage == "document" else "heuristic"
+        )
+        assert result.metadata == {  # nosec B101
+            "error": "provider_unavailable",
+            "verification_available": False,
+        }
+        assert private_secret not in str(result)  # nosec B101
+    finally:
+        release_holder.set()
+        assert holder_released.wait(timeout=1.0)  # nosec B101
+
+    await asyncio.sleep(0.03)
+    assert call_count == 0  # nosec B101
+    assert pool.active_count == 0  # nosec B101
+    assert release_count == 1  # nosec B101 - only the holder was released
+
+
 @pytest.mark.parametrize("stage", ["document", "groundedness", "utility"])
 @pytest.mark.asyncio
 async def test_runtime_bound_grader_timeout_uses_unavailable_native_fallback(
     stage: str,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    runtime = _RecordingCredentialRuntime()
+    lifecycle: list[str] = []
+    entered = threading.Event()
+    release = threading.Event()
 
-    def slow_analyze(*args: Any, **kwargs: Any) -> str:
-        time.sleep(0.05)
-        return "{}"
+    class OrderedRuntime(_RecordingCredentialRuntime):
+        async def mark_used(self, handle: Any) -> None:
+            lifecycle.append("mark-used")
+            await super().mark_used(handle)
+
+    class TrackingPool(BoundedDaemonPool):
+        def _release_capacity(self) -> None:
+            lifecycle.append("capacity-release")
+            super()._release_capacity()
+
+    runtime = OrderedRuntime()
+    pool = TrackingPool(capacity=1)
+    monkeypatch.setattr(
+        _grader_module(stage),
+        "SYNC_ADAPTER_CALL_POOL",
+        pool,
+        raising=False,
+    )
+
+    def slow_analyze(*_args: Any, **_kwargs: Any) -> str:
+        lifecycle.append("provider-start")
+        entered.set()
+        release.wait(timeout=2.0)
+        lifecycle.append("provider-exit")
+        return _valid_grader_response(stage)
 
     document = Document(
         id=f"doc-timeout-{stage}",
@@ -2556,35 +3464,134 @@ async def test_runtime_bound_grader_timeout_uses_unavailable_native_fallback(
         source=DataSource.MEDIA_DB,
         score=0.8,
     )
-    if stage == "document":
-        result = await DocumentGrader(
-            analyze_fn=slow_analyze,
-            config=GradingConfig(provider="anthropic", timeout_seconds=0.01),
-            credential_runtime=runtime,
-        ).grade_document("query", document)
-        assert result.method == "score_fallback"  # nosec B101
-    elif stage == "groundedness":
-        result = await FastGroundednessGrader(
-            analyze_fn=slow_analyze,
-            provider="anthropic",
-            timeout_sec=0.01,
-            credential_runtime=runtime,
-        ).grade("query", "answer", [document])
-        assert result.method == "error_fallback"  # nosec B101
-    else:
-        result = await UtilityGrader(
-            analyze_fn=slow_analyze,
-            provider="anthropic",
-            timeout_sec=0.01,
-            credential_runtime=runtime,
-        ).grade("query", "answer")
-        assert result.method == "error_fallback"  # nosec B101
+    async def invoke_with_runtime() -> Any:
+        try:
+            return await _run_runtime_bound_grader(
+                stage,
+                analyze=slow_analyze,
+                runtime=runtime,
+                document=document,
+                timeout_seconds=0.01,
+            )
+        finally:
+            lifecycle.append("runtime-close")
 
-    assert runtime.marked == []  # nosec B101
+    task = asyncio.create_task(invoke_with_runtime())
+    try:
+        assert await asyncio.to_thread(entered.wait, 1.0)  # nosec B101
+        await asyncio.sleep(0.03)
+        assert not task.done()  # nosec B101
+        assert runtime.marked == []  # nosec B101
+        assert pool.active_count == 1  # nosec B101
+        assert lifecycle == ["provider-start"]  # nosec B101
+        release.set()
+        result = await asyncio.wait_for(task, timeout=1.0)
+    finally:
+        release.set()
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+    assert result.method == (  # nosec B101
+        "score_fallback" if stage == "document" else "error_fallback"
+    )
+    assert runtime.marked == [runtime.handle]  # nosec B101
+    assert pool.active_count == 0  # nosec B101
     assert result.metadata == {  # nosec B101
         "error": "provider_unavailable",
         "verification_available": False,
     }
+    assert lifecycle == [  # nosec B101
+        "provider-start",
+        "provider-exit",
+        "capacity-release",
+        "mark-used",
+        "runtime-close",
+    ]
+
+
+@pytest.mark.parametrize("stage", ["document", "groundedness", "utility"])
+@pytest.mark.asyncio
+async def test_runtime_bound_grader_cancellation_drains_before_runtime_close(
+    stage: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lifecycle: list[str] = []
+    entered = threading.Event()
+    release = threading.Event()
+
+    class OrderedRuntime(_RecordingCredentialRuntime):
+        async def mark_used(self, handle: Any) -> None:
+            lifecycle.append("mark-used")
+            await super().mark_used(handle)
+
+    class TrackingPool(BoundedDaemonPool):
+        def _release_capacity(self) -> None:
+            lifecycle.append("capacity-release")
+            super()._release_capacity()
+
+    runtime = OrderedRuntime()
+    pool = TrackingPool(capacity=1)
+    monkeypatch.setattr(
+        _grader_module(stage),
+        "SYNC_ADAPTER_CALL_POOL",
+        pool,
+        raising=False,
+    )
+    document = Document(
+        id=f"doc-cancel-{stage}",
+        content="Cancellation evidence.",
+        metadata={},
+        source=DataSource.MEDIA_DB,
+        score=0.8,
+    )
+
+    def blocking_analyze(*_args: Any, **_kwargs: Any) -> str:
+        lifecycle.append("provider-start")
+        entered.set()
+        release.wait(timeout=2.0)
+        lifecycle.append("provider-exit")
+        return _valid_grader_response(stage)
+
+    async def invoke_with_runtime() -> Any:
+        try:
+            return await _run_runtime_bound_grader(
+                stage,
+                analyze=blocking_analyze,
+                runtime=runtime,
+                document=document,
+            )
+        finally:
+            lifecycle.append("runtime-close")
+
+    task = asyncio.create_task(invoke_with_runtime())
+    try:
+        assert await asyncio.to_thread(entered.wait, 1.0)  # nosec B101
+        task.cancel()
+        await asyncio.sleep(0.03)
+        assert task.done() is False
+        assert runtime.marked == []  # nosec B101
+        assert pool.active_count == 1  # nosec B101
+        assert lifecycle == ["provider-start"]  # nosec B101
+
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=1.0)
+    finally:
+        release.set()
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+    assert runtime.marked == [runtime.handle]  # nosec B101
+    assert pool.active_count == 0  # nosec B101
+    assert lifecycle == [  # nosec B101
+        "provider-start",
+        "provider-exit",
+        "capacity-release",
+        "mark-used",
+        "runtime-close",
+    ]
 
 
 @pytest.mark.parametrize("runtime_bound", [False, True])
@@ -2737,6 +3744,274 @@ async def test_runtime_bound_reranker_timeout_preserves_scores_with_reduced_trus
 
 
 @pytest.mark.asyncio
+async def test_runtime_bound_reranker_timeout_drains_then_marks_before_runtime_close(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lifecycle: list[str] = []
+
+    class OrderedRuntime(_RecordingCredentialRuntime):
+        async def mark_used(self, handle: Any) -> None:
+            lifecycle.append("mark-used")
+            await super().mark_used(handle)
+
+    class TrackingPool(BoundedDaemonPool):
+        def _release_capacity(self) -> None:
+            lifecycle.append("capacity-release")
+            super()._release_capacity()
+
+    runtime = OrderedRuntime()
+    rejected_runtime = OrderedRuntime()
+    pool = TrackingPool(capacity=1)
+    entered = threading.Event()
+    release = threading.Event()
+    call_count = 0
+    document = Document(
+        id="doc-rerank-deadline",
+        content="Deadline evidence.",
+        metadata={},
+        source=DataSource.MEDIA_DB,
+        score=0.8,
+    )
+
+    class FakeRetriever:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        async def retrieve(self, *args: Any, **kwargs: Any) -> list[Document]:
+            return [document]
+
+    def slow_analyze(*_args: Any, **_kwargs: Any) -> str:
+        nonlocal call_count
+        call_count += 1
+        lifecycle.append("provider-start")
+        entered.set()
+        assert release.wait(timeout=2.0)  # nosec B101
+        lifecycle.append("provider-exit")
+        return "0.9"
+
+    async def invoke_pipeline(
+        selected_runtime: _RecordingCredentialRuntime,
+        query: str,
+    ) -> Any:
+        try:
+            return await unified_pipeline_module.unified_rag_pipeline(
+                query=query,
+                sources=["media_db"],
+                enable_cache=False,
+                enable_reranking=True,
+                reranking_strategy="llm_scoring",
+                enable_generation=False,
+                enable_pre_retrieval_clarification=False,
+                credential_runtime=selected_runtime,
+            )
+        finally:
+            lifecycle.append(f"runtime-close:{query}")
+
+    import tldw_Server_API.app.core.config as core_config
+    import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as sgl
+
+    monkeypatch.setenv("RAG_LLM_RERANK_TIMEOUT_SEC", "0.02")
+    monkeypatch.setenv("RAG_LLM_RERANK_TOTAL_BUDGET_SEC", "0.04")
+    monkeypatch.setattr(unified_pipeline_module, "MultiDatabaseRetriever", FakeRetriever)
+    monkeypatch.setattr(sgl, "analyze", slow_analyze)
+    monkeypatch.setattr(
+        core_config,
+        "load_and_log_configs",
+        lambda: {
+            "RAG_LLM_RERANKER_PROVIDER": "anthropic",
+            "RAG_LLM_RERANKER_MODEL": "rerank-model",
+        },
+    )
+    monkeypatch.setattr(
+        advanced_reranking_module,
+        "SYNC_ADAPTER_CALL_POOL",
+        pool,
+        raising=False,
+    )
+
+    task = asyncio.create_task(invoke_pipeline(runtime, "deadline rerank"))
+    result: Any = None
+    try:
+        assert await asyncio.to_thread(entered.wait, 1.0)  # nosec B101
+        await asyncio.sleep(0.05)
+        done, _pending = await asyncio.wait({task}, timeout=0.25)
+        assert task not in done  # nosec B101 - runtime ownership drains the late worker
+        assert pool.active_count == 1  # nosec B101
+        assert runtime.marked == []  # nosec B101
+
+        rejected = await asyncio.wait_for(
+            invoke_pipeline(rejected_runtime, "capacity rejected"),
+            timeout=1.0,
+        )
+        assert rejected.metadata["reranking"] == {  # nosec B101
+            "degraded": True,
+            "failure_code": "provider_unavailable",
+            "verification_available": False,
+        }
+        assert call_count == 1  # nosec B101 - rejected work was never dispatched
+        assert rejected_runtime.marked == []  # nosec B101
+
+        release.set()
+        result = await asyncio.wait_for(task, timeout=1.0)
+    finally:
+        release.set()
+        await asyncio.gather(task, return_exceptions=True)
+
+    assert pool.active_count == 0  # nosec B101
+    assert runtime.marked == [runtime.handle]  # nosec B101
+    assert result.metadata["reranking"] == {  # nosec B101
+        "degraded": True,
+        "failure_code": "provider_unavailable",
+        "verification_available": False,
+    }
+    assert lifecycle == [  # nosec B101
+        "provider-start",
+        "runtime-close:capacity rejected",
+        "provider-exit",
+        "capacity-release",
+        "mark-used",
+        "runtime-close:deadline rerank",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_runtime_bound_reranker_cancellation_drains_success_before_close(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lifecycle: list[str] = []
+    entered = threading.Event()
+    release = threading.Event()
+
+    class TrackingPool(BoundedDaemonPool):
+        def _release_capacity(self) -> None:
+            lifecycle.append("capacity-release")
+            super()._release_capacity()
+
+    class Client:
+        credentials_resolved = True
+        used = False
+
+        def analyze(self, _prompt: str) -> str:
+            lifecycle.append("provider-start")
+            entered.set()
+            assert release.wait(timeout=2.0)  # nosec B101
+            lifecycle.append("provider-exit")
+            return "0.9"
+
+    client = Client()
+    pool = TrackingPool(capacity=1)
+    monkeypatch.setenv("RAG_LLM_RERANK_TIMEOUT_SEC", "1")
+    monkeypatch.setattr(advanced_reranking_module, "SYNC_ADAPTER_CALL_POOL", pool)
+    reranker = LLMReranker(
+        RerankingConfig(
+            strategy=RerankingStrategy.LLM_SCORING,
+            top_k=1,
+        ),
+        llm_client=client,
+    )
+    document = Document(
+        id="cancelled-rerank",
+        content="Cancellation evidence.",
+        metadata={},
+        source=DataSource.MEDIA_DB,
+        score=0.8,
+    )
+
+    async def invoke_with_runtime() -> Any:
+        try:
+            return await reranker.rerank("query", [document])
+        finally:
+            if client.used:
+                lifecycle.append("mark-used")
+            lifecycle.append("runtime-close")
+
+    task = asyncio.create_task(invoke_with_runtime())
+    try:
+        assert await asyncio.to_thread(entered.wait, 1.0)  # nosec B101
+        task.cancel()
+        await asyncio.sleep(0.03)
+        assert task.done() is False
+        assert client.used is False  # nosec B101
+        assert pool.active_count == 1  # nosec B101
+
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=1.0)
+    finally:
+        release.set()
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+    assert client.used is True  # nosec B101
+    assert pool.active_count == 0  # nosec B101
+    assert lifecycle == [  # nosec B101
+        "provider-start",
+        "provider-exit",
+        "capacity-release",
+        "mark-used",
+        "runtime-close",
+    ]
+
+
+@pytest.mark.parametrize("late_outcome", ["empty", "error"])
+@pytest.mark.asyncio
+async def test_runtime_bound_reranker_late_failure_does_not_mark_used(
+    monkeypatch: pytest.MonkeyPatch,
+    late_outcome: str,
+) -> None:
+    entered = threading.Event()
+    release = threading.Event()
+
+    class Client:
+        credentials_resolved = True
+        used = False
+
+        def analyze(self, _prompt: str) -> str:
+            entered.set()
+            assert release.wait(timeout=2.0)  # nosec B101
+            if late_outcome == "error":
+                raise RuntimeError("private late reranker failure")
+            return ""
+
+    client = Client()
+    pool = BoundedDaemonPool(capacity=1)
+    monkeypatch.setenv("RAG_LLM_RERANK_TIMEOUT_SEC", "0.01")
+    monkeypatch.setattr(advanced_reranking_module, "SYNC_ADAPTER_CALL_POOL", pool)
+    reranker = LLMReranker(
+        RerankingConfig(
+            strategy=RerankingStrategy.LLM_SCORING,
+            top_k=1,
+        ),
+        llm_client=client,
+    )
+    document = Document(
+        id=f"late-{late_outcome}",
+        content="Late failure evidence.",
+        metadata={},
+        source=DataSource.MEDIA_DB,
+        score=0.8,
+    )
+
+    task = asyncio.create_task(reranker.rerank("query", [document]))
+    try:
+        assert await asyncio.to_thread(entered.wait, 1.0)  # nosec B101
+        await asyncio.sleep(0.03)
+        assert task.done() is False
+        release.set()
+        reranked = await asyncio.wait_for(task, timeout=1.0)
+    finally:
+        release.set()
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+    assert reranked[0].rerank_score == document.score  # nosec B101
+    assert client.used is False  # nosec B101
+    assert pool.active_count == 0  # nosec B101
+
+
+@pytest.mark.asyncio
 async def test_faithfulness_propagate_errors_flag_preserves_legacy_default() -> None:
     class FailingLLM:
         async def generate(self, prompt: str) -> str:
@@ -2784,3 +4059,264 @@ async def test_unified_runtime_bound_faithfulness_generic_failure_is_bounded(
     }
     assert sensitive not in str(result.metadata)  # nosec B101
     assert sensitive not in str(result.errors)  # nosec B101
+
+
+@pytest.mark.parametrize(
+    ("stage", "dispatch_response", "metadata_key"),
+    [
+        ("gap", '["follow up safely"]', "gap_analysis"),
+        ("critique", "- no unsupported claims", "synthesis"),
+        ("faithfulness", "[]", "faithfulness"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_unified_optional_sync_stage_bypasses_saturated_default_executor(
+    monkeypatch: pytest.MonkeyPatch,
+    stage: str,
+    dispatch_response: str,
+    metadata_key: str,
+) -> None:
+    runtime = _RecordingCredentialRuntime()
+    analyzer_started = threading.Event()
+    blocker_started = threading.Event()
+    release_blocker = threading.Event()
+    release_count = 0
+
+    class TrackingPool(BoundedDaemonPool):
+        def _release_capacity(self) -> None:
+            nonlocal release_count
+            release_count += 1
+            super()._release_capacity()
+
+    def block_default_executor() -> None:
+        blocker_started.set()
+        release_blocker.wait(timeout=2.0)
+
+    def analyze(*_args: Any, **_kwargs: Any) -> str:
+        analyzer_started.set()
+        return dispatch_response
+
+    import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as sgl
+
+    pool = TrackingPool(capacity=1)
+    monkeypatch.setattr(sgl, "analyze", analyze)
+    monkeypatch.setattr(
+        unified_pipeline_module,
+        "SYNC_ADAPTER_CALL_POOL",
+        pool,
+        raising=False,
+    )
+    loop = asyncio.get_running_loop()
+    previous_executor = getattr(loop, "_default_executor", None)
+    saturated_executor = ThreadPoolExecutor(max_workers=1)
+    loop.set_default_executor(saturated_executor)
+    blocker = loop.run_in_executor(None, block_default_executor)
+    while not blocker_started.is_set():
+        await asyncio.sleep(0)
+
+    task = asyncio.create_task(
+        _run_unified_bound_sgl_stage(monkeypatch, stage, runtime)
+    )
+    try:
+        for _attempt in range(100):
+            if analyzer_started.is_set():
+                break
+            await asyncio.sleep(0.001)
+        started_before_executor_release = analyzer_started.is_set()
+    finally:
+        release_blocker.set()
+        await blocker
+        loop.set_default_executor(previous_executor or ThreadPoolExecutor())
+        saturated_executor.shutdown(wait=True, cancel_futures=True)
+
+    result = await asyncio.wait_for(task, timeout=1.0)
+    assert started_before_executor_release is True  # nosec B101
+    assert runtime.marked == [runtime.handle]  # nosec B101
+    assert pool.active_count == 0  # nosec B101
+    assert release_count == 1  # nosec B101 - one admitted call, one release
+    stage_metadata = result.metadata.get(metadata_key, {})
+    assert "failure_code" not in stage_metadata  # nosec B101
+    assert stage_metadata.get("verification_available") is not False  # nosec B101
+    if stage == "gap":
+        assert result.metadata["followups"] == ["follow up safely"]  # nosec B101
+    elif stage == "critique":
+        assert stage_metadata["enabled"] is True  # nosec B101
+        assert result.generated_answer == "A grounded generated answer."  # nosec B101
+    else:
+        assert "faithfulness_score" in stage_metadata  # nosec B101
+
+
+@pytest.mark.parametrize(
+    ("stage", "metadata_key"),
+    [
+        ("gap", "gap_analysis"),
+        ("critique", "synthesis"),
+        ("faithfulness", "faithfulness"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_unified_optional_sync_stage_capacity_rejects_without_late_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+    stage: str,
+    metadata_key: str,
+) -> None:
+    runtime = _RecordingCredentialRuntime()
+    holder_started = threading.Event()
+    holder_released = threading.Event()
+    release_holder = threading.Event()
+    call_count = 0
+    release_count = 0
+    private_secret = f"private-{stage}-capacity-secret"
+
+    class TrackingPool(BoundedDaemonPool):
+        def _release_capacity(self) -> None:
+            nonlocal release_count
+            release_count += 1
+            super()._release_capacity()
+
+    def hold_capacity() -> None:
+        holder_started.set()
+        release_holder.wait(timeout=2.0)
+
+    def analyze(*_args: Any, **_kwargs: Any) -> str:
+        nonlocal call_count
+        call_count += 1
+        raise RuntimeError(private_secret)
+
+    import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as sgl
+
+    pool = TrackingPool(capacity=1)
+    pool.start(
+        hold_capacity,
+        name=f"{stage}-capacity-holder",
+        released_event=holder_released,
+    )
+    assert holder_started.wait(timeout=1.0)  # nosec B101
+    monkeypatch.setattr(sgl, "analyze", analyze)
+    monkeypatch.setattr(
+        unified_pipeline_module,
+        "SYNC_ADAPTER_CALL_POOL",
+        pool,
+        raising=False,
+    )
+
+    try:
+        result = await _run_unified_bound_sgl_stage(monkeypatch, stage, runtime)
+        await asyncio.sleep(0.03)
+        assert call_count == 0  # nosec B101 - rejected work never dispatches
+        assert runtime.marked == []  # nosec B101
+        assert pool.active_count == 1  # nosec B101 - only the holder owns capacity
+        assert release_count == 0  # nosec B101
+        stage_metadata = result.metadata[metadata_key]
+        assert stage_metadata["failure_code"] == "provider_unavailable"  # nosec B101
+        assert stage_metadata["verification_available"] is False  # nosec B101
+        assert private_secret not in str(result.metadata)  # nosec B101
+        assert private_secret not in str(result.errors)  # nosec B101
+    finally:
+        release_holder.set()
+        assert holder_released.wait(timeout=1.0)  # nosec B101
+
+    await asyncio.sleep(0.03)
+    assert call_count == 0  # nosec B101 - capacity release cannot start rejected work
+    assert pool.active_count == 0  # nosec B101
+    assert release_count == 1  # nosec B101 - only the holder was released
+
+
+@pytest.mark.parametrize(
+    ("stage", "dispatch_response"),
+    [
+        ("gap", '["follow up safely"]'),
+        ("critique", "- no unsupported claims"),
+        ("faithfulness", "[]"),
+    ],
+)
+@pytest.mark.parametrize("termination", ["cancellation", "timeout"])
+@pytest.mark.asyncio
+async def test_unified_optional_sync_stage_owns_worker_until_actual_exit(
+    monkeypatch: pytest.MonkeyPatch,
+    stage: str,
+    dispatch_response: str,
+    termination: str,
+) -> None:
+    lifecycle: list[str] = []
+    entered = threading.Event()
+    release = threading.Event()
+
+    class OrderedRuntime(_RecordingCredentialRuntime):
+        async def mark_used(self, handle: Any) -> None:
+            lifecycle.append("mark-used")
+            await super().mark_used(handle)
+
+    class TrackingPool(BoundedDaemonPool):
+        def _release_capacity(self) -> None:
+            lifecycle.append("capacity-release")
+            super()._release_capacity()
+
+    def blocking_analyze(*_args: Any, **_kwargs: Any) -> str:
+        lifecycle.append("provider-start")
+        entered.set()
+        release.wait(timeout=2.0)
+        lifecycle.append("provider-exit")
+        return dispatch_response
+
+    async def invoke_with_runtime() -> Any:
+        try:
+            return await _run_unified_bound_sgl_stage(monkeypatch, stage, runtime)
+        finally:
+            lifecycle.append("runtime-close")
+
+    import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as sgl
+
+    runtime = OrderedRuntime()
+    pool = TrackingPool(capacity=1)
+    monkeypatch.setattr(sgl, "analyze", blocking_analyze)
+    monkeypatch.setattr(
+        unified_pipeline_module,
+        "SYNC_ADAPTER_CALL_POOL",
+        pool,
+        raising=False,
+    )
+    pipeline_task = asyncio.create_task(invoke_with_runtime())
+    for _attempt in range(100):
+        if entered.is_set():
+            break
+        await asyncio.sleep(0.001)
+    assert entered.is_set()  # nosec B101
+
+    if termination == "cancellation":
+        terminal_task = pipeline_task
+        terminal_task.cancel()
+    else:
+        terminal_task = asyncio.create_task(
+            asyncio.wait_for(pipeline_task, timeout=0.01)
+        )
+
+    try:
+        await asyncio.sleep(0.03)
+        assert terminal_task.done() is False
+        assert runtime.marked == []  # nosec B101
+        assert pool.active_count == 1  # nosec B101
+        assert lifecycle == ["provider-start"]  # nosec B101
+        release.set()
+        expected_error = (
+            asyncio.CancelledError
+            if termination == "cancellation"
+            else asyncio.TimeoutError
+        )
+        with pytest.raises(expected_error):
+            await asyncio.wait_for(terminal_task, timeout=1.0)
+    finally:
+        release.set()
+        if not terminal_task.done():
+            terminal_task.cancel()
+        await asyncio.gather(terminal_task, pipeline_task, return_exceptions=True)
+
+    assert runtime.marked == [runtime.handle]  # nosec B101
+    assert pool.active_count == 0  # nosec B101
+    assert lifecycle == [  # nosec B101
+        "provider-start",
+        "provider-exit",
+        "capacity-release",
+        "mark-used",
+        "runtime-close",
+    ]

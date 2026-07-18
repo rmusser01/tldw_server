@@ -16,11 +16,14 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import copy
 import io
 import json
 import os
+import threading
 import time
 import uuid
+from collections.abc import Callable
 from typing import Any
 
 import numpy as np
@@ -37,13 +40,30 @@ from tldw_Server_API.app.api.v1.schemas.audio_schemas import (
 )
 from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
     DEFAULT_LLM_PROVIDER,
-    get_api_keys,
+)
+from tldw_Server_API.app.core.Audio.tts_service import (
+    tts_provider_credential_scope,
+)
+from tldw_Server_API.app.core.AuthNZ.byok_helpers import (
+    derive_trusted_credential_scope,
 )
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
+    ByokResolutionError,
     record_byok_missing_credentials,
-    resolve_byok_credentials,
+)
+from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
+    capture_provider_override_call_snapshot,
+)
+from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+    ProviderCredentialRuntime,
 )
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+from tldw_Server_API.app.core.Chat.bounded_daemon import (
+    SYNC_ADAPTER_CALL_POOL,
+    await_bounded_sync_call,
+    await_owned_worker,
+)
 from tldw_Server_API.app.core.Chat.chat_helpers import (
     extract_response_content,
     get_or_create_character_context,
@@ -53,6 +73,9 @@ from tldw_Server_API.app.core.Chat.chat_helpers import (
 from tldw_Server_API.app.core.Chat.chat_service import (
     perform_chat_api_call_async as chat_api_call_async,
 )
+from tldw_Server_API.app.core.Chat.streaming_utils import (
+    await_bounded_owned_operation,
+)
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib import (
     is_transcription_error_message,
@@ -60,9 +83,8 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcripti
 )
 from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
-    ensure_app_config,
     normalize_provider,
-    resolve_provider_api_key_from_config,
+    provider_auth_is_resolved,
     resolve_provider_model,
     split_system_message,
 )
@@ -86,6 +108,7 @@ from tldw_Server_API.app.core.TTS.tts_request_resolution import (
 from tldw_Server_API.app.core.TTS.tts_service_v2 import TTSServiceV2
 
 _ALLOWED_AUDIO_FORMATS = {"wav", "mp3", "ogg", "opus", "aac", "flac", "webm", "m4a"}
+SPEECH_CHAT_LLM_TIMEOUT_SECONDS = 300.0
 _STT_EXTRA_PARAM_KEYS = {"whisper_model"}
 _LLM_EXTRA_PARAM_RESERVED_KEYS = {
     "action",
@@ -98,6 +121,7 @@ _LLM_EXTRA_PARAM_RESERVED_KEYS = {
     "auth_user",
     "base_url",
     "caller_request",
+    "credentials_resolved",
     "extra_body",
     "extra_headers",
     "frequency_penalty",
@@ -119,6 +143,7 @@ _LLM_EXTRA_PARAM_RESERVED_KEYS = {
     "streaming",
     "system_message",
     "temp",
+    "timeout",
     "temperature",
     "tool_choice",
     "tools",
@@ -287,6 +312,28 @@ def _provider_llm_extra_params(extra_params: dict[str, Any] | None) -> dict[str,
             continue
         safe_params[key] = value
     return safe_params
+
+
+async def _run_bounded_speech_sync_call(
+    call: Callable[[], Any],
+    *,
+    on_abandoned: Callable[[], Any],
+    cleanup_claimed: threading.Event,
+    on_abandoned_success: Callable[[], Any] | None = None,
+) -> Any:
+    """Run one sync speech adapter call with bounded late-work ownership."""
+    return await await_bounded_owned_operation(
+        await_bounded_sync_call(
+            call,
+            pool=SYNC_ADAPTER_CALL_POOL,
+            exhaustion_message="Provider adapter capacity is exhausted",
+        ),
+        timeout_seconds=SPEECH_CHAT_LLM_TIMEOUT_SECONDS,
+        timeout_message="speech-chat-provider-call timed out",
+        on_abandoned=on_abandoned,
+        cleanup_claimed=cleanup_claimed,
+        on_abandoned_success=on_abandoned_success,
+    )
 
 
 def _stt_extra_params(stt_extra_params: dict[str, Any] | None) -> dict[str, Any]:
@@ -627,38 +674,42 @@ async def run_speech_chat_turn(
     messages_payload = list(history_messages)
     messages_payload.append({"role": "user", "content": transcript})
 
-    def _fallback_resolver(name: str) -> str | None:
-        try:
-            return get_api_keys().get(name)
-        except Exception:
-            return None
-
-    user_id_int = getattr(current_user, "id_int", None)
-    if user_id_int is None:
-        try:
-            user_id_int = int(getattr(current_user, "id", None))
-        except Exception:
-            user_id_int = None
-    byok_resolution = await resolve_byok_credentials(
-        llm_provider,
-        user_id=user_id_int,
-        request=request,
-        fallback_resolver=_fallback_resolver,
-    )
-    provider_api_key = byok_resolution.api_key
-
     llm_start = time.time()
+    llm_public_failure: HTTPException | None = None
+    credential_runtime: ProviderCredentialRuntime | None = None
+    runtime_cleanup_claimed = threading.Event()
     try:
+        user_id_int, team_ids, org_ids, trusted_base_url_override = (
+            derive_trusted_credential_scope(request, current_user)
+        )
+        credential_runtime = ProviderCredentialRuntime(
+            user_id=user_id_int,
+            team_ids=team_ids,
+            org_ids=org_ids,
+            trusted_base_url_override=trusted_base_url_override,
+            override_snapshot_resolver=capture_provider_override_call_snapshot,
+        )
+        provider_credentials = await await_owned_worker(
+            credential_runtime.resolve(
+                llm_provider,
+                model=llm_model,
+            )
+        )
         adapter = get_registry().get_adapter(normalize_provider(llm_provider))
         system_message = (character_card or {}).get("system_prompt")
         request_messages = messages_payload
         if system_message is None:
             system_message, request_messages = split_system_message(messages_payload)
 
-        app_config = ensure_app_config(byok_resolution.app_config)
-        api_key = provider_api_key or resolve_provider_api_key_from_config(llm_provider, app_config)
+        app_config = copy.deepcopy(provider_credentials.app_config or {})
+        api_key = provider_credentials.api_key
         provider_key = (llm_provider or "").strip().lower()
-        if provider_requires_api_key(provider_key) and not api_key:
+        if provider_requires_api_key(provider_key) and not provider_auth_is_resolved(
+            provider_key,
+            api_key=api_key,
+            app_config=app_config,
+            credentials_resolved=provider_credentials.credentials_resolved,
+        ):
             record_byok_missing_credentials(provider_key, operation="speech_chat")
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -668,67 +719,171 @@ async def run_speech_chat_turn(
                 },
             )
 
-        if adapter is not None:
-            resolved_model = llm_model or resolve_provider_model(llm_provider, app_config)
-            if not resolved_model:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="llm_config.model is required for speech chat v1",
-                )
-            request_payload = {
-                "messages": request_messages,
-                "system_message": system_message,
-                "model": resolved_model,
-                "api_key": api_key,
-                "temperature": request_data.llm_config.temperature,
-                "max_tokens": request_data.llm_config.max_tokens,
-                "response_format": {"type": "text"},
-                "user": str(getattr(current_user, "id", client_id)),
-                "app_config": app_config,
-            }
-            request_payload.update(llm_extra_params)
-            try:
-                llm_response = await adapter.achat(request_payload)
-            except NotImplementedError:
-                llm_response = await asyncio.to_thread(adapter.chat, request_payload)
-        else:
-            llm_response = await chat_api_call_async(
-                api_endpoint=llm_provider,
-                messages_payload=request_messages,
-                api_key=api_key,
-                temp=request_data.llm_config.temperature,
-                maxp=None,
-                model=llm_model,
-                topk=None,
-                topp=None,
-                max_tokens=request_data.llm_config.max_tokens,
-                response_format={"type": "text"},
-                streaming=False,
-                user_identifier=str(getattr(current_user, "id", client_id)),
-                system_message=system_message,
-                app_config=app_config,
-                **llm_extra_params,
+        late_cleanup_lock = asyncio.Lock()
+        late_cleanup_done = False
+        late_success_state = {"valid": False}
+
+        async def _cleanup_abandoned_dispatch() -> None:
+            nonlocal late_cleanup_done
+            async with late_cleanup_lock:
+                if late_cleanup_done:
+                    return
+                await credential_runtime.close()
+                late_cleanup_done = True
+
+        async def _mark_late_provider_success() -> None:
+            if late_success_state["valid"]:
+                await credential_runtime.mark_used(provider_credentials)
+
+        def _classify_provider_response(response: Any) -> Any:
+            late_success_state["valid"] = bool(
+                (extract_response_content(response) or "").strip()
             )
+            return response
+
+        async def _await_and_classify_provider_response(candidate: Any) -> Any:
+            return _classify_provider_response(await candidate)
+
+        async def _dispatch_validate_and_mark() -> tuple[Any, str]:
+            if adapter is not None:
+                resolved_model = llm_model or resolve_provider_model(llm_provider, app_config)
+                if not resolved_model:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="llm_config.model is required for speech chat v1",
+                    )
+                request_payload = {
+                    "messages": request_messages,
+                    "system_message": system_message,
+                    "model": resolved_model,
+                    "api_key": api_key,
+                    "temperature": request_data.llm_config.temperature,
+                    "max_tokens": request_data.llm_config.max_tokens,
+                    "response_format": {"type": "text"},
+                    "user": str(getattr(current_user, "id", client_id)),
+                    "app_config": app_config,
+                    "credentials_resolved": True,
+                    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY: provider_credentials,
+                    "timeout": SPEECH_CHAT_LLM_TIMEOUT_SECONDS,
+                }
+                request_payload.update(llm_extra_params)
+                try:
+                    if getattr(adapter, "async_chat_is_native", False) is True:
+                        try:
+                            response = await await_bounded_owned_operation(
+                                _await_and_classify_provider_response(
+                                    adapter.achat(request_payload)
+                                ),
+                                timeout_seconds=SPEECH_CHAT_LLM_TIMEOUT_SECONDS,
+                                timeout_message="speech-chat-provider-call timed out",
+                                on_abandoned=_cleanup_abandoned_dispatch,
+                                cleanup_claimed=runtime_cleanup_claimed,
+                                on_abandoned_success=_mark_late_provider_success,
+                            )
+                        except NotImplementedError:
+                            response = await _run_bounded_speech_sync_call(
+                                lambda: _classify_provider_response(
+                                    adapter.chat(request_payload)
+                                ),
+                                on_abandoned=_cleanup_abandoned_dispatch,
+                                cleanup_claimed=runtime_cleanup_claimed,
+                                on_abandoned_success=_mark_late_provider_success,
+                            )
+                    else:
+                        response = await _run_bounded_speech_sync_call(
+                            lambda: _classify_provider_response(
+                                adapter.chat(request_payload)
+                            ),
+                            on_abandoned=_cleanup_abandoned_dispatch,
+                            cleanup_claimed=runtime_cleanup_claimed,
+                            on_abandoned_success=_mark_late_provider_success,
+                        )
+                except HTTPException:
+                    raise RuntimeError("Speech chat provider request failed") from None
+            else:
+                try:
+                    response = await await_bounded_owned_operation(
+                        _await_and_classify_provider_response(
+                            chat_api_call_async(
+                                api_endpoint=llm_provider,
+                                messages_payload=request_messages,
+                                api_key=api_key,
+                                temp=request_data.llm_config.temperature,
+                                maxp=None,
+                                model=llm_model,
+                                topk=None,
+                                topp=None,
+                                max_tokens=request_data.llm_config.max_tokens,
+                                response_format={"type": "text"},
+                                streaming=False,
+                                user_identifier=str(
+                                    getattr(current_user, "id", client_id)
+                                ),
+                                system_message=system_message,
+                                app_config=app_config,
+                                credentials_resolved=True,
+                                **{
+                                    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY: provider_credentials,
+                                },
+                                timeout=SPEECH_CHAT_LLM_TIMEOUT_SECONDS,
+                                **llm_extra_params,
+                            )
+                        ),
+                        timeout_seconds=SPEECH_CHAT_LLM_TIMEOUT_SECONDS,
+                        timeout_message="speech-chat-provider-call timed out",
+                        on_abandoned=_cleanup_abandoned_dispatch,
+                        cleanup_claimed=runtime_cleanup_claimed,
+                        on_abandoned_success=_mark_late_provider_success,
+                    )
+                except HTTPException:
+                    raise RuntimeError("Speech chat provider request failed") from None
+            response_text = (extract_response_content(response) or "").strip()
+            if not response_text:
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail="LLM returned empty completion for speech chat",
+                )
+            await credential_runtime.mark_used(provider_credentials)
+            return response, response_text
+
+        llm_response, assistant_text = await _dispatch_validate_and_mark()
     except HTTPException:
         raise
-    except Exception as e:  # noqa: BLE001
-        logger.error("Speech chat LLM call failed")
+    except ByokResolutionError as exc:
+        code = getattr(exc, "policy_code", exc.code)
+        if code in {
+            "provider_disabled",
+            "model_not_allowed",
+            "credential_scope_revoked",
+        }:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "error_code": code,
+                    "message": "The selected provider or model is disabled by administrator policy.",
+                },
+            ) from None
         raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "error_code": code,
+                "message": "Provider credentials are temporarily unavailable.",
+            },
+        ) from None
+    except Exception:  # noqa: BLE001 - provider failures must be detached
+        logger.error("Speech chat LLM call failed")
+        llm_public_failure = HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="LLM provider error during speech chat",
-        ) from e
+        )
+    finally:
+        if credential_runtime is not None and not runtime_cleanup_claimed.is_set():
+            await await_owned_worker(credential_runtime.close())
+
+    if llm_public_failure is not None:
+        raise llm_public_failure
 
     llm_ms = (time.time() - llm_start) * 1000.0
-
-    await byok_resolution.touch_last_used()
-
-    assistant_text = extract_response_content(llm_response) or ""
-    assistant_text = assistant_text.strip()
-    if not assistant_text:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="LLM returned empty completion for speech chat",
-        )
 
     # Extract token usage if available
     token_usage: SpeechChatTokenUsage | None = None
@@ -805,17 +960,58 @@ async def run_speech_chat_turn(
     )
 
     try:
-        audio_chunks = []
-        async for chunk in tts_service.generate_speech(
-            tts_request,
+        audio_chunks: list[bytes] = []
+        async with tts_provider_credential_scope(
             provider=resolved_tts.provider,
-            fallback=True,
-        ):
-            if chunk:
-                audio_chunks.append(chunk)
+            model=resolved_tts.model,
+            request=request,
+            current_user=current_user,
+        ) as (tts_user_id, tts_overrides, tts_runtime, tts_credentials):
+            speech_stream = tts_service.generate_speech(
+                tts_request,
+                provider=resolved_tts.provider,
+                fallback=False,
+                provider_overrides=tts_overrides,
+                user_id=tts_user_id,
+            )
+            marked_used = False
+            try:
+                async for chunk in speech_stream:
+                    if not chunk:
+                        continue
+                    if not marked_used:
+                        await await_owned_worker(
+                            tts_runtime.mark_used(tts_credentials)
+                        )
+                        marked_used = True
+                    audio_chunks.append(chunk)
+            finally:
+                close_stream = getattr(speech_stream, "aclose", None)
+                if callable(close_stream):
+                    await await_owned_worker(close_stream())
         audio_bytes = b"".join(audio_chunks)
-    except Exception as e:  # noqa: BLE001
-        raise _map_tts_exception(e) from e
+    except HTTPException:
+        raise
+    except ByokResolutionError as exc:
+        code = getattr(exc, "policy_code", exc.code)
+        status_code = (
+            status.HTTP_403_FORBIDDEN
+            if code in {
+                "provider_disabled",
+                "model_not_allowed",
+                "credential_scope_revoked",
+            }
+            else status.HTTP_503_SERVICE_UNAVAILABLE
+        )
+        raise HTTPException(
+            status_code=status_code,
+            detail={
+                "error_code": code,
+                "message": "TTS provider credentials are unavailable.",
+            },
+        ) from None
+    except Exception as exc:  # noqa: BLE001
+        raise _map_tts_exception(exc) from exc
 
     if not audio_bytes:
         raise HTTPException(

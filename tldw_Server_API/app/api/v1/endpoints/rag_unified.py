@@ -12,7 +12,6 @@ import os
 import time
 from contextlib import ExitStack
 from typing import Any, Optional
-from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
 from fastapi.concurrency import run_in_threadpool
@@ -58,10 +57,9 @@ from tldw_Server_API.app.core.AuthNZ.byok_helpers import (
 )
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
     ByokResolutionError,
-    ServerFallbackCredentials,
 )
 from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
-    get_override_server_fallback,
+    capture_provider_override_call_snapshot,
 )
 from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_READ
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
@@ -70,13 +68,13 @@ from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     reject_provider_call_credentials,
 )
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
-from tldw_Server_API.app.core.Chat.chat_service import resolve_provider_api_key
 from tldw_Server_API.app.core.config import get_config_value
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.Prompts_DB import PromptsDatabase
 from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
+from tldw_Server_API.app.core.exceptions import raise_detached_error
 from tldw_Server_API.app.core.RAG.rag_service import transport as rag_transport
 from tldw_Server_API.app.core.RAG.rag_service.agentic_chunker import (
     AgenticConfig,
@@ -106,6 +104,9 @@ from tldw_Server_API.app.core.RAG.rag_service.retrieval_plan import (
     RetrievalPlan,
     build_retrieval_plan,
 )
+from tldw_Server_API.app.core.RAG.rag_service.runtime_provider_call import (
+    close_provider_stream,
+)
 from tldw_Server_API.app.core.RAG.rag_service.source_health import build_source_health_entries
 from tldw_Server_API.app.core.RAG.rag_service.streaming_executor import (
     classify_rag_provider_error,
@@ -116,7 +117,6 @@ from tldw_Server_API.app.core.RAG.rag_service.streaming_executor import (
 
 # Unified Pipeline
 from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import (
-    UnifiedSearchResult,
     advanced_search,
     simple_search,
     unified_batch_pipeline,
@@ -164,22 +164,12 @@ def _build_credential_runtime_for_scope(
 ) -> ProviderCredentialRuntime:
     """Create a provider runtime from an already trusted execution scope."""
 
-    def fallback_resolver(provider: str) -> str | ServerFallbackCredentials | None:
-        override_fallback = get_override_server_fallback(provider)
-        if override_fallback is not None:
-            return override_fallback
-        api_key, _ = resolve_provider_api_key(
-            provider,
-            prefer_module_keys_in_tests=True,
-        )
-        return api_key
-
     return ProviderCredentialRuntime(
         user_id=user_id,
         team_ids=team_ids,
         org_ids=org_ids,
         trusted_base_url_override=trusted_base_url_override,
-        fallback_resolver=fallback_resolver,
+        override_snapshot_resolver=capture_provider_override_call_snapshot,
     )
 
 
@@ -519,6 +509,11 @@ async def _checkpoint_resume_credential_scope(
     """Authorize and revalidate a checkpoint's persisted credential identity."""
     metadata = getattr(checkpoint, "metadata", None) or {}
     if _CHECKPOINT_CREDENTIAL_SCOPE_KEY not in metadata:
+        if not _checkpoint_admin_authorized(principal):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="checkpoint_owner_forbidden",
+            )
         return None, [], [], False
 
     scope = metadata[_CHECKPOINT_CREDENTIAL_SCOPE_KEY]
@@ -805,7 +800,7 @@ async def rag_ablate(
     try:
         credential_runtime = _build_credential_runtime(request_raw, current_user)
     except _RAG_PROVIDER_FAILURES as exc:
-        raise _rag_provider_http_exception(exc) from exc
+        raise_detached_error(_rag_provider_http_exception(exc))
 
     try:
         kanban_db_path = _resolve_kanban_db_path(current_user)
@@ -911,7 +906,7 @@ async def rag_ablate(
 
         return {"summary": out, "runs": runs}
     except _RAG_PROVIDER_FAILURES as exc:
-        raise _rag_provider_http_exception(exc) from exc
+        raise_detached_error(_rag_provider_http_exception(exc))
     except Exception as exc:  # noqa: BLE001 - convert unexpected endpoint failures
         logger.error("RAG ablation failed")
         raise HTTPException(
@@ -1394,7 +1389,7 @@ async def unified_search_endpoint(
     try:
         credential_runtime = _build_credential_runtime(request_raw, current_user)
     except _RAG_PROVIDER_FAILURES as exc:
-        raise _rag_provider_http_exception(exc) from exc
+        raise_detached_error(_rag_provider_http_exception(exc))
 
     try:
         request = _apply_media_collection_scope(request, collections_db)
@@ -1502,28 +1497,9 @@ async def unified_search_endpoint(
                 )
             except _RAG_PROVIDER_FAILURES:
                 raise
-            except Exception as exc:  # noqa: BLE001 - agentic pipeline fallback must be resilient
-                logger.exception("Agentic RAG pipeline failed: {}", exc)
-                fallback_doc = {
-                    "id": f"agentic-error:{uuid4().hex[:8]}",
-                    "content": "Agentic pipeline error fallback content.",
-                    "metadata": {"strategy": "agentic", "error": str(exc)},
-                    "score": 1.0,
-                }
-                result = UnifiedSearchResult(
-                    documents=[fallback_doc],
-                    query=request.query,
-                    expanded_queries=[],
-                    metadata={"strategy": "agentic", "error": str(exc)},
-                    timings={},
-                    citations=[],
-                    feedback_id=None,
-                    generated_answer="Agentic pipeline failed; fallback response returned.",
-                    cache_hit=False,
-                    errors=[str(exc)],
-                    security_report=None,
-                    total_time=0.0,
-                )
+            except Exception:  # noqa: BLE001 - unexpected failures must fail closed
+                logger.warning("Agentic RAG pipeline failed")
+                raise
         else:
             # Execute unified pipeline with all parameters from request
             kwargs = dict(standard_bundle.pipeline_kwargs)
@@ -1549,19 +1525,17 @@ async def unified_search_endpoint(
             logger.warning(f"Errors during processing: {result.errors}")
 
     except _RAG_PROVIDER_FAILURES as exc:
-        raise _rag_provider_http_exception(exc) from exc
+        raise_detached_error(_rag_provider_http_exception(exc))
     except HTTPException:
         raise
-    except Exception as e:  # noqa: BLE001 - surface as HTTP 500 with context
-        logger.exception("Unified search error: {}", e)
-        detail = "Search failed due to an internal error."
-        # Expose root cause only when explicitly requested by caller.
-        if bool(getattr(request, "debug_mode", False)):
-            detail = f"{type(e).__name__}: {e}"
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=detail,
-        ) from e
+    except Exception:  # noqa: BLE001 - expose only a detached, bounded failure
+        logger.error("Unified search failed due to an internal error")
+        raise_detached_error(
+            HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Search failed due to an internal error.",
+            )
+        )
     else:
         return response
     finally:
@@ -1646,7 +1620,7 @@ async def unified_batch_endpoint(
             trusted_base_url_override=credential_scope[3],
         )
     except _RAG_PROVIDER_FAILURES as exc:
-        raise _rag_provider_http_exception(exc) from exc
+        raise_detached_error(_rag_provider_http_exception(exc))
 
     try:
         requested_units = len(request.queries or [])
@@ -1803,7 +1777,7 @@ async def unified_batch_endpoint(
         )
 
     except _RAG_PROVIDER_FAILURES as exc:
-        raise _rag_provider_http_exception(exc) from exc
+        raise_detached_error(_rag_provider_http_exception(exc))
     except Exception as e:  # noqa: BLE001 - surface as HTTP 500 with context
         logger.error(f"Batch search error: {e}")
         raise HTTPException(
@@ -1847,7 +1821,7 @@ async def simple_search_endpoint(
     try:
         credential_runtime = _build_credential_runtime(request, current_user)
     except _RAG_PROVIDER_FAILURES as exc:
-        raise _rag_provider_http_exception(exc) from exc
+        raise_detached_error(_rag_provider_http_exception(exc))
 
     try:
         try:
@@ -1913,7 +1887,7 @@ async def simple_search_endpoint(
         }
 
     except _RAG_PROVIDER_FAILURES as exc:
-        raise _rag_provider_http_exception(exc) from exc
+        raise_detached_error(_rag_provider_http_exception(exc))
     except Exception as e:  # noqa: BLE001 - surface as HTTP 500 with context
         logger.error("Simple search failed")
         raise HTTPException(
@@ -2167,7 +2141,7 @@ async def resume_batch_endpoint(
             total_time=total_time,
         )
     except _RAG_PROVIDER_FAILURES as exc:
-        raise _rag_provider_http_exception(exc) from exc
+        raise_detached_error(_rag_provider_http_exception(exc))
     except HTTPException:
         raise
     except FileNotFoundError:
@@ -2278,10 +2252,11 @@ async def unified_search_stream_endpoint(
 
     async def event_generator():
         credential_runtime: ProviderCredentialRuntime | None = None
+        rag_stream: Any = None
         output_emitted = False
         try:
             credential_runtime = _build_credential_runtime(request_raw, current_user)
-            async for event in stream_rag_events(
+            rag_stream = stream_rag_events(
                 resolved_request=resolved_request,
                 retrieval_plan=stream_bundle.retrieval_plan,
                 standard_pipeline=unified_rag_pipeline,
@@ -2290,7 +2265,8 @@ async def unified_search_stream_endpoint(
                     **base_stream_context,
                     "credential_runtime": credential_runtime,
                 },
-            ):
+            )
+            async for event in rag_stream:
                 if event.get("type") == "delta" and bool(event.get("text")):
                     output_emitted = True
                 yield json.dumps(_sanitize_rag_stream_event(event)) + "\n"
@@ -2315,8 +2291,12 @@ async def unified_search_stream_endpoint(
                 )
             ) + "\n"
         finally:
-            if credential_runtime is not None:
-                await credential_runtime.close()
+            try:
+                if rag_stream is not None:
+                    await close_provider_stream(rag_stream)
+            finally:
+                if credential_runtime is not None:
+                    await credential_runtime.close()
 
     # lgtm[py/stack-trace-exposure]: stream events are sanitized before serialization.
     return StreamingResponse(event_generator(), media_type="application/x-ndjson")
@@ -2353,7 +2333,7 @@ async def advanced_search_endpoint(
     try:
         credential_runtime = _build_credential_runtime(request, current_user)
     except _RAG_PROVIDER_FAILURES as exc:
-        raise _rag_provider_http_exception(exc) from exc
+        raise_detached_error(_rag_provider_http_exception(exc))
 
     try:
         logger.info(f"Advanced search: query='{query}'")
@@ -2393,7 +2373,7 @@ async def advanced_search_endpoint(
         return rag_result_to_response(rag_result_from_unified_search_result(result))
 
     except _RAG_PROVIDER_FAILURES as exc:
-        raise _rag_provider_http_exception(exc) from exc
+        raise_detached_error(_rag_provider_http_exception(exc))
     except Exception as e:  # noqa: BLE001 - surface as HTTP 500 with context
         logger.error("Advanced search failed")
         raise HTTPException(

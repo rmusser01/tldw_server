@@ -4,6 +4,8 @@ Auth services initialization extracted from the application lifespan startup.
 
 from __future__ import annotations
 
+from importlib import import_module
+
 from loguru import logger
 
 _STARTUP_GUARD_EXCEPTIONS = (
@@ -61,15 +63,23 @@ async def init_auth_services() -> object:
     except _IMPORT_EXCEPTIONS as exc:
         logger.debug(f"App Startup: RBAC single-user seed ensure skipped: {exc}")
 
+    override_store = None
     try:
-        from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
-            refresh_llm_provider_overrides,
+        override_store = import_module(
+            "tldw_Server_API.app.core.AuthNZ.llm_provider_overrides"
         )
 
-        await refresh_llm_provider_overrides(db_pool)
+        await override_store.refresh_llm_provider_overrides(db_pool)
         logger.info("App Startup: Loaded LLM provider overrides")
-    except _IMPORT_EXCEPTIONS as exc:
-        logger.debug(f"App Startup: LLM provider overrides load skipped: {exc}")
+    except _IMPORT_EXCEPTIONS:
+        logger.warning(
+            "App Startup: LLM provider overrides unavailable; server fallback disabled"
+        )
+    if override_store is not None:
+        try:
+            override_store.start_llm_provider_override_refresh_service()
+        except _IMPORT_EXCEPTIONS:
+            logger.warning("App Startup: LLM provider override refresh service unavailable")
 
     return db_pool
 

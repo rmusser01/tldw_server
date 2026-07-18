@@ -49,8 +49,7 @@ const RAG_NULLABLE_STRING_KEYS = new Set([
   "session_id"
 ])
 const RAG_ALLOWED_KEYS = new Set([
-  ...Object.keys(DEFAULT_RAG_SETTINGS).filter((key) => key !== "query"),
-  "filters"
+  ...Object.keys(DEFAULT_RAG_SETTINGS).filter((key) => key !== "query")
 ])
 
 const normalizeStringArray = (values: unknown[]) => {
@@ -84,12 +83,6 @@ const sanitizeRagAdvancedOptions = (options?: Record<string, unknown>) => {
     if (value === undefined || value === null) continue
     if (typeof value === "string" && value.trim() === "") continue
     if (!RAG_ALLOWED_KEYS.has(key)) continue
-
-    if (key === "filters") {
-      if (typeof value !== "object" || Array.isArray(value)) continue
-      sanitized[key] = value
-      continue
-    }
 
     if (RAG_STRING_ARRAY_KEYS.has(key)) {
       if (!Array.isArray(value)) continue

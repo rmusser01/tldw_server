@@ -12,7 +12,7 @@ import shutil
 import time
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -20,10 +20,38 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from tldw_Server_API.app.core import config as config_mod
+from tldw_Server_API.app.core.AuthNZ.byok_config import (
+    PROVIDER_APP_CONFIG_KEYS,
+    is_runtime_base_url_override,
+)
+from tldw_Server_API.app.core.AuthNZ.byok_helpers import (
+    load_server_config_snapshot,
+)
+from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
+    merge_server_fallback_snapshot,
+    resolve_static_server_fallback_from_snapshot,
+)
+from tldw_Server_API.app.core.AuthNZ.byok_testing import (
+    provider_validation_public_error,
+    test_provider_credentials,
+)
+from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+    configured_provider_model_from_snapshot,
+)
+from tldw_Server_API.app.core.Chat.streaming_utils import (
+    PROVIDER_STREAM_ERROR_MESSAGES,
+)
 from tldw_Server_API.app.core.custom_openai_providers import (
     custom_openai_api_key_env_keys,
     custom_openai_provider_number,
+    custom_openai_section_name,
     iter_custom_openai_provider_names,
+)
+from tldw_Server_API.app.core.LLM_Calls.adapter_registry import (
+    canonical_builtin_llm_provider_name,
+)
+from tldw_Server_API.app.core.LLM_Calls.provider_metadata import (
+    provider_requires_api_key,
 )
 from tldw_Server_API.app.core.testing import env_flag_enabled, is_truthy
 from tldw_Server_API.app.services.worker_startup_policy import should_start_inprocess_worker
@@ -485,68 +513,74 @@ _PROVIDER_ENV_KEY_MAP: dict[str, str] = {
     "bedrock": "AWS_ACCESS_KEY_ID",
 }
 
-# Provider validation URLs and strategies.
-_PROVIDER_VALIDATION_INFO: dict[str, dict[str, Any]] = {
-    "openai": {
-        "url": "https://api.openai.com/v1/models",
-        "method": "GET",
-        "auth_header": "Authorization",
-        "auth_prefix": "Bearer ",
-    },
-    "anthropic": {
-        "url": "https://api.anthropic.com/v1/messages",
-        "method": "POST",
-        "auth_header": "x-api-key",
-        "auth_prefix": "",
-        "extra_headers": {
-            "anthropic-version": "2023-06-01",
-            "Content-Type": "application/json",
-        },
-        "body": {
-            "model": "claude-haiku-4.5",
-            "max_tokens": 1,
-            "messages": [{"role": "user", "content": "hi"}],
-        },
-    },
-    "google": {
-        "url": "https://generativelanguage.googleapis.com/v1beta/models",
-        "method": "GET",
-        "auth_header": "x-goog-api-key",
-        "auth_prefix": "",
-    },
-    "cohere": {
-        "url": "https://api.cohere.ai/v1/models",
-        "method": "GET",
-        "auth_header": "Authorization",
-        "auth_prefix": "Bearer ",
-    },
-    "groq": {
-        "url": "https://api.groq.com/openai/v1/models",
-        "method": "GET",
-        "auth_header": "Authorization",
-        "auth_prefix": "Bearer ",
-    },
-    "mistral": {
-        "url": "https://api.mistral.ai/v1/models",
-        "method": "GET",
-        "auth_header": "Authorization",
-        "auth_prefix": "Bearer ",
-    },
-    "deepseek": {
-        "url": "https://api.deepseek.com/v1/models",
-        "method": "GET",
-        "auth_header": "Authorization",
-        "auth_prefix": "Bearer ",
-    },
-    "openrouter": {
-        "url": "https://openrouter.ai/api/v1/models",
-        "method": "GET",
-        "auth_header": "Authorization",
-        "auth_prefix": "Bearer ",
-    },
-}
-
 _VALIDATION_TIMEOUT_SECONDS = 5.0
+
+
+def _configured_validation_endpoint(
+    provider: str,
+    app_config: dict[str, object] | None,
+) -> str | None:
+    """Return the explicit endpoint the runtime adapter will prefer."""
+    if not isinstance(app_config, dict):
+        return None
+    custom_number = custom_openai_provider_number(provider)
+    section = (
+        custom_openai_section_name(custom_number)
+        if custom_number is not None
+        else PROVIDER_APP_CONFIG_KEYS.get(provider)
+    )
+    if section is None:
+        return None
+    provider_config = app_config.get(section)
+    if not isinstance(provider_config, dict):
+        return None
+
+    if custom_number is not None or provider in {"novita", "poe", "together"}:
+        endpoint_fields = ("api_ip", "api_base_url")
+    elif provider == "openai":
+        endpoint_fields = ("api_base_url", "api_base", "base_url")
+    elif provider == "bedrock":
+        endpoint_fields = (
+            "runtime_endpoint",
+            "api_base_url",
+            "base_url",
+            "api_url",
+            "endpoint",
+        )
+    elif provider == "google":
+        endpoint_fields = ("api_base_url", "api_base")
+    elif provider == "huggingface":
+        use_router_value = provider_config.get("use_router_url_format")
+        if use_router_value is None:
+            use_router_value = provider_config.get(
+                "huggingface_use_router_url_format"
+            )
+        use_router = str(use_router_value or "false").casefold() == "true"
+        if use_router:
+            runtime_override = is_runtime_base_url_override(
+                provider_config.get("_runtime_base_url_override")
+            )
+            api_base_url = provider_config.get("api_base_url")
+            if (
+                runtime_override
+                and isinstance(api_base_url, str)
+                and api_base_url.strip()
+            ):
+                return api_base_url.strip()
+            endpoint_fields = (
+                "router_base_url",
+                "huggingface_router_base_url",
+            )
+        else:
+            endpoint_fields = ("api_base_url",)
+    else:
+        endpoint_fields = ("api_base_url",)
+
+    for field in endpoint_fields:
+        value = provider_config.get(field)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
 
 # ---------------------------------------------------------------------------
 # Simple in-memory rate limiter for provider validation (5 calls/min per IP)
@@ -703,7 +737,7 @@ async def list_configured_providers() -> ProvidersStatusResponse:
 
 @router.post("/config/validate-provider", response_model=ProviderValidateResponse)
 async def validate_provider_key(body: ProviderValidateRequest, request: Request) -> ProviderValidateResponse:
-    """Validate a provider API key by making a lightweight test call.
+    """Validate a caller-supplied provider key through the runtime adapter.
 
     The caller **must** supply ``api_key`` in the request body. The endpoint
     never falls back to server-configured keys to prevent unauthenticated
@@ -718,107 +752,95 @@ async def validate_provider_key(body: ProviderValidateRequest, request: Request)
     client_ip = request.client.host if request.client else "unknown"
     _check_validate_rate_limit(client_ip)
 
-    provider = body.provider.strip().lower()
+    provider_input = body.provider.strip().lower()
 
     # Always require the caller to provide the key -- never fall back to
     # server-configured keys (prevents unauthenticated provider probing).
     api_key = (body.api_key or "").strip()
     if not api_key:
         return ProviderValidateResponse(
-            provider=provider,
+            provider=provider_input,
             valid=False,
             error="api_key is required. Provide the key you want to validate.",
         )
 
-    info = _PROVIDER_VALIDATION_INFO.get(provider)
-    if not info:
-        # For providers without a known validation endpoint, we just confirm
-        # a key is present (since we can't actually test it).
+    try:
+        provider = canonical_builtin_llm_provider_name(provider_input)
+    except ValueError:
         return ProviderValidateResponse(
-            provider=provider,
-            valid=True,
-            error=None,
+            provider=provider_input,
+            valid=False,
+            error=PROVIDER_STREAM_ERROR_MESSAGES["provider_configuration_invalid"],
         )
 
-    try:
-        valid, error = await asyncio.wait_for(
-            _validate_provider_http(provider, api_key, info),
-            timeout=_VALIDATION_TIMEOUT_SECONDS,
-        )
-        return ProviderValidateResponse(provider=provider, valid=valid, error=error)
-    except asyncio.TimeoutError:
+    custom_number = custom_openai_provider_number(provider)
+    if not provider_requires_api_key(provider) and custom_number is None:
         return ProviderValidateResponse(
             provider=provider,
             valid=False,
-            error=f"Validation timed out after {_VALIDATION_TIMEOUT_SECONDS}s",
+            error=PROVIDER_STREAM_ERROR_MESSAGES["provider_configuration_invalid"],
         )
+
+    try:
+        server_config_snapshot = load_server_config_snapshot()
+        server_fallback = resolve_static_server_fallback_from_snapshot(
+            provider,
+            server_config_snapshot,
+        )
+        caller_fallback = merge_server_fallback_snapshot(
+            provider,
+            server_fallback,
+            api_key=api_key,
+            credential_fields={},
+            auth_source=None,
+            provider_config={},
+        )
+        model = configured_provider_model_from_snapshot(
+            provider,
+            caller_fallback.app_config,
+        )
+        if not model:
+            return ProviderValidateResponse(
+                provider=provider,
+                valid=False,
+                error=PROVIDER_STREAM_ERROR_MESSAGES[
+                    "provider_configuration_invalid"
+                ],
+            )
+
+        authoritative_endpoint = _configured_validation_endpoint(
+            provider,
+            caller_fallback.app_config,
+        )
+        if custom_number is not None:
+            if authoritative_endpoint is None:
+                return ProviderValidateResponse(
+                    provider=provider,
+                    valid=False,
+                    error=PROVIDER_STREAM_ERROR_MESSAGES[
+                        "provider_configuration_invalid"
+                    ],
+                )
+
+        await test_provider_credentials(
+            provider=provider,
+            api_key=caller_fallback.api_key,
+            app_config=caller_fallback.app_config,
+            model=model,
+            include_override_model=False,
+            timeout_seconds=_VALIDATION_TIMEOUT_SECONDS,
+            enforce_egress_policy=authoritative_endpoint is not None,
+            authoritative_endpoint=authoritative_endpoint,
+        )
+    except asyncio.CancelledError:
+        raise
     except Exception as exc:
+        public_error = provider_validation_public_error(exc)
+        del exc
         logger.warning("Provider validation failed")
         return ProviderValidateResponse(
             provider=provider,
             valid=False,
-            error="Validation failed. The provider may be unreachable or the key may be invalid.",
+            error=public_error.message,
         )
-
-
-async def _validate_provider_http(
-    provider: str,
-    api_key: str,
-    info: dict[str, Any],
-) -> tuple[bool, Optional[str]]:
-    """Make a lightweight HTTP call to validate a provider key.
-
-    Returns (valid, error_message).
-    """
-    try:
-        import httpx
-    except ImportError:
-        return False, "httpx not installed; cannot validate provider keys"
-
-    url = info["url"]
-    method = info.get("method", "GET").upper()
-
-    # Build headers -- always use headers for auth, never query strings
-    headers: dict[str, str] = {}
-    extra_headers = info.get("extra_headers", {})
-    headers.update(extra_headers)
-
-    auth_header = info.get("auth_header", "Authorization")
-    auth_prefix = info.get("auth_prefix", "Bearer ")
-    headers[auth_header] = f"{auth_prefix}{api_key}"
-
-    body_data = info.get("body")
-
-    async with httpx.AsyncClient(timeout=_VALIDATION_TIMEOUT_SECONDS) as client:
-        if method == "POST" and body_data is not None:
-            resp = await client.post(url, headers=headers, json=body_data)
-        else:
-            resp = await client.get(url, headers=headers)
-
-    # For Anthropic, a 400 (bad request / validation error) with a valid auth
-    # header still means the key authenticated. 401/403 means bad key.
-    if resp.status_code in (200, 201):
-        return True, None
-    if provider == "anthropic" and resp.status_code == 400:
-        # 400 from Anthropic means auth succeeded but request was malformed
-        # (which is expected for our minimal payload). Check the error type.
-        try:
-            err_body = resp.json()
-            err_type = err_body.get("error", {}).get("type", "")
-            if err_type in ("invalid_request_error", "overloaded_error"):
-                return True, None
-        except Exception:
-            return True, None
-        return True, None
-    if resp.status_code in (401, 403):
-        return False, f"Authentication failed (HTTP {resp.status_code})"
-    if resp.status_code == 429:
-        # Rate limited but key is valid
-        return True, None
-
-    # Any other status -- report it
-    from contextlib import suppress
-    detail = ""
-    with suppress(Exception):
-        detail = resp.text[:200]
-    return False, f"Unexpected HTTP {resp.status_code}: {detail}"
+    return ProviderValidateResponse(provider=provider, valid=True, error=None)

@@ -22,7 +22,7 @@ from tldw_Server_API.app.core.custom_openai_providers import (
 )
 from tldw_Server_API.app.core.Infrastructure.provider_registry import ProviderRegistryBase
 
-from .provider_identity import PROVIDER_ALIASES
+from .provider_identity import PROVIDER_ALIASES, canonical_provider_name
 from .providers.base import ChatProvider
 from .providers.custom_openai_adapter import make_custom_openai_adapter_class
 
@@ -204,6 +204,14 @@ class ChatProviderRegistry:
     def list_providers(self) -> list[str]:
         """Return a sorted list of registered provider names."""
         return self._base.list_providers(include_disabled=True)
+
+
+def canonical_builtin_llm_provider_name(name: str | None) -> str:
+    """Return a built-in LLM adapter identity or reject unsupported input."""
+    canonical = canonical_provider_name(str(name or ""))
+    if not canonical or canonical not in ChatProviderRegistry.DEFAULT_ADAPTERS:
+        raise ValueError("Unsupported LLM provider")
+    return canonical
 
 
 _registry: ChatProviderRegistry | None = None

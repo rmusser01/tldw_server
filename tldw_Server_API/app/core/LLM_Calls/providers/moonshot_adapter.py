@@ -4,18 +4,19 @@ import contextlib
 from collections.abc import Iterable
 from typing import Any
 
-from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError, ChatProviderError
+from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
 from tldw_Server_API.app.core.config import load_and_log_configs
+from tldw_Server_API.app.core.exceptions import raise_detached_error
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
     _parse_data_url_for_multimodal,
     _safe_cast,
 )
 from tldw_Server_API.app.core.LLM_Calls.capability_registry import validate_payload
 from tldw_Server_API.app.core.LLM_Calls.error_utils import (
-    get_http_error_text,
-    get_http_status_from_exception,
+    build_sanitized_chat_error,
     is_http_status_error,
     is_network_error,
+    log_provider_failure,
     raise_chat_error_from_http,
 )
 from tldw_Server_API.app.core.LLM_Calls.payload_utils import (
@@ -27,7 +28,7 @@ from tldw_Server_API.app.core.LLM_Calls.sse import finalize_stream
 from tldw_Server_API.app.core.LLM_Calls.streaming import iter_sse_lines_requests
 from tldw_Server_API.app.core.Utils.Utils import logging
 
-from .base import ChatProvider, apply_tool_choice
+from .base import ChatProvider, apply_tool_choice, raise_if_in_band_provider_error
 
 
 def _moonshot_request(
@@ -54,8 +55,12 @@ def _moonshot_request(
     extra_body: dict[str, Any] | None = None,
     base_url: str | None = None,
     timeout: float | None = None,
+    credentials_resolved: bool = False,
 ):
-    loaded_config_data = app_config or load_and_log_configs() or {}
+    if credentials_resolved:
+        loaded_config_data = app_config if isinstance(app_config, dict) else {}
+    else:
+        loaded_config_data = app_config or load_and_log_configs() or {}
     if not isinstance(loaded_config_data, dict):
         loaded_config_data = {}
     moonshot_config = loaded_config_data.get("moonshot_api", {})
@@ -197,17 +202,17 @@ def _moonshot_request(
         if final_streaming:
             logging.debug("Moonshot: Posting request (streaming)")
             from tldw_Server_API.app.core.LLM_Calls import chat_calls as _chat_calls
-            session = _chat_calls.create_session_with_retries(
-                total=_safe_cast(moonshot_config.get("api_retries"), int, 3),
-                backoff_factor=_safe_cast(moonshot_config.get("api_retry_delay"), float, 1.0),
-                status_forcelist=[429, 500, 502, 503, 504],
-                allowed_methods=["POST"],
-            )
+            session = _chat_calls.create_session_with_retries(total=1)
+            response = None
             try:
                 response = session.post(api_url, headers=headers, json=payload, stream=True, timeout=effective_timeout)
                 response.raise_for_status()
             except Exception:
-                session.close()
+                if response is not None:
+                    with contextlib.suppress(Exception):
+                        response.close()
+                with contextlib.suppress(Exception):
+                    session.close()
                 raise
 
             def stream_generator():
@@ -222,18 +227,18 @@ def _moonshot_request(
 
         logging.debug("Moonshot: Posting request (non-streaming)")
         from tldw_Server_API.app.core.LLM_Calls import chat_calls as _chat_calls
-        session = _chat_calls.create_session_with_retries(
-            total=_safe_cast(moonshot_config.get("api_retries"), int, 3),
-            backoff_factor=_safe_cast(moonshot_config.get("api_retry_delay"), float, 1.0),
-            status_forcelist=[429, 500, 502, 503, 504],
-            allowed_methods=["POST"],
-        )
+        session = _chat_calls.create_session_with_retries(total=1)
         try:
             response = session.post(api_url, headers=headers, json=payload, timeout=effective_timeout)
             logging.debug(f"Moonshot: Full API response status: {response.status_code}")
             response.raise_for_status()
             try:
                 response_data = response.json()
+                raise_if_in_band_provider_error(
+                    "moonshot",
+                    response_data,
+                    phase="chat_response",
+                )
             finally:
                 with contextlib.suppress(Exception):
                     response.close()
@@ -243,19 +248,16 @@ def _moonshot_request(
             with contextlib.suppress(Exception):
                 session.close()
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - sanitize arbitrary provider failures
         if is_http_status_error(e):
-            status = get_http_status_from_exception(e)
-            if getattr(e, "response", None) is not None:
-                logging.error(f"Moonshot Full Error Response (status {status}): {get_http_error_text(e)}")
-            else:
-                logging.error(f"Moonshot HTTP error with no response object: {e}")
             raise_chat_error_from_http("moonshot", e)
         if is_network_error(e):
-            logging.error(f"Moonshot RequestException: {e}", exc_info=True)
-            raise ChatProviderError(provider="moonshot", message=f"Network error: {e}", status_code=504) from e
-        logging.error(f"Moonshot: Unexpected error in chat_with_moonshot: {e}", exc_info=True)
-        raise ChatProviderError(provider="moonshot", message=f"Unexpected error: {e}") from e
+            log_provider_failure("moonshot", e, phase="network_request")
+            raise_detached_error(
+                build_sanitized_chat_error("moonshot", status_code=504)
+            )
+        log_provider_failure("moonshot", e, phase="request")
+        raise_detached_error(build_sanitized_chat_error("moonshot"))
 
 
 class MoonshotAdapter(ChatProvider):
@@ -293,18 +295,21 @@ class MoonshotAdapter(ChatProvider):
             "user": request.get("user"),
             "custom_prompt_arg": request.get("custom_prompt_arg"),
             "app_config": request.get("app_config"),
+            "credentials_resolved": request.get("credentials_resolved") is True,
             "extra_headers": request.get("extra_headers"),
             "extra_body": request.get("extra_body"),
             "base_url": request.get("base_url"),
         }
 
     def chat(self, request: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
+        request = self._bind_request_credentials(request)
         sanitized = validate_payload(self.name, request or {})
         handler_args = self._to_handler_args(sanitized, streaming=False)
         handler_args["timeout"] = timeout
         return _moonshot_request(**handler_args)
 
     def stream(self, request: dict[str, Any], *, timeout: float | None = None) -> Iterable[str]:
+        request = self._bind_request_credentials(request)
         sanitized = validate_payload(self.name, request or {})
         handler_args = self._to_handler_args(sanitized, streaming=True)
         handler_args["timeout"] = timeout

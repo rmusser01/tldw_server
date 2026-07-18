@@ -4,13 +4,20 @@
 import asyncio
 import os
 import time
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Any, Optional
 
 from loguru import logger
 
+from ....core.AuthNZ.provider_credential_runtime import (
+    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+    ProviderCallCredentials,
+    is_runtime_issued_provider_call_credentials,
+)
 from ....core.Chat.Chat_Deps import ChatConfigurationError
-from ....core.Chat.chat_helpers import extract_response_content
+from ....core.Chat.streaming_utils import sanitized_provider_stream_exception
+from ....core.LLM_Calls.adapter_registry import get_registry
 from ....core.LLM_Calls.adapter_utils import (
     ensure_app_config,
     get_adapter_or_raise,
@@ -45,6 +52,8 @@ class EvaluationManager:
         api_key: Optional[str],
         model: Optional[str],
         app_config: Optional[dict[str, Any]] = None,
+        credentials_resolved: bool = False,
+        provider_credentials: ProviderCallCredentials | None = None,
         timeout: Optional[float] = None,
     ) -> str:
         if is_test_mode() or os.getenv("PYTEST_CURRENT_TEST") is not None:
@@ -56,7 +65,31 @@ class EvaluationManager:
         provider_name = normalize_provider(provider)
         if not provider_name:
             raise ChatConfigurationError(provider=provider, message="LLM provider is required.")
-        cfg = ensure_app_config(app_config)
+        if provider_credentials is not None:
+            if not is_runtime_issued_provider_call_credentials(
+                provider_credentials,
+                provider=provider_name,
+            ):
+                raise ChatConfigurationError(
+                    provider=provider_name,
+                    message="Provider credential context is invalid.",
+                )
+            cfg = provider_credentials.app_config or {}
+            resolved_api_key = provider_credentials.api_key
+            resolved_credentials = True
+        else:
+            cfg = (
+                (app_config or {})
+                if credentials_resolved
+                else ensure_app_config(app_config)
+            )
+            resolved_api_key = (
+                api_key
+                if credentials_resolved
+                else api_key
+                or resolve_provider_api_key_from_config(provider_name, cfg)
+            )
+            resolved_credentials = credentials_resolved
         resolved_model = model or resolve_provider_model(provider_name, cfg)
         if not resolved_model:
             raise ChatConfigurationError(provider=provider_name, message="Model is required for provider.")
@@ -65,13 +98,19 @@ class EvaluationManager:
             "messages": cleaned_messages,
             "system_message": system_message,
             "model": resolved_model,
-            "api_key": api_key or resolve_provider_api_key_from_config(provider_name, cfg),
+            "api_key": resolved_api_key,
             "temperature": temperature,
             "max_tokens": max_tokens,
             "app_config": cfg,
+            "credentials_resolved": resolved_credentials,
         }
+        if provider_credentials is not None and (
+            get_registry().is_local_provider_name(provider_name)
+            or provider_name.startswith("custom-openai-api")
+        ):
+            request[PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY] = provider_credentials
         response = get_adapter_or_raise(provider_name).chat(request, timeout=timeout)
-        return extract_response_content(response) or str(response)
+        return TestRunner._extract_response_text(response)
 
     async def run_evaluation_with_existing_record(
         self,
@@ -85,6 +124,10 @@ class EvaluationManager:
         provider: str = "openai",
         api_key: Optional[str] = None,
         app_config: Optional[dict[str, Any]] = None,
+        credentials_resolved: bool = False,
+        provider_credentials: ProviderCallCredentials | None = None,
+        timeout_seconds: Optional[float] = None,
+        on_provider_success: Callable[[], Awaitable[None]] | None = None,
     ) -> dict[str, Any]:
         """Execute an evaluation against an existing DB record.
 
@@ -137,18 +180,30 @@ class EvaluationManager:
             max_tokens: int,
             app_config: Optional[dict[str, Any]] = None,
             api_key_override: Optional[str] = None,
+            credentials_resolved: bool = False,
+            provider_credentials: ProviderCallCredentials | None = None,
+            timeout_seconds: Optional[float] = None,
         ) -> str:
             payload = list(messages_payload or [])
             if system_message:
                 payload = [{"role": "system", "content": system_message}] + payload
+            adapter_kwargs: dict[str, Any] = {
+                "provider": provider,
+                "model": model,
+                "messages_payload": payload,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "api_key": api_key_override,
+                "app_config": app_config,
+            }
+            if credentials_resolved:
+                adapter_kwargs["credentials_resolved"] = True
+            if provider_credentials is not None:
+                adapter_kwargs["provider_credentials"] = provider_credentials
+            if timeout_seconds is not None:
+                adapter_kwargs["timeout"] = timeout_seconds
             return self._call_adapter_text(
-                provider=provider,
-                model=model,
-                messages_payload=payload,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                api_key=api_key_override,
-                app_config=app_config,
+                **adapter_kwargs,
             )
 
         runner._call_adapter = _runner_adapter_bridge  # type: ignore[method-assign]
@@ -158,6 +213,8 @@ class EvaluationManager:
             "model": model,
             "api_key": api_key,
             "app_config": app_config,
+            "credentials_resolved": credentials_resolved,
+            "timeout_seconds": timeout_seconds,
             "parameters": {
                 "temperature": temperature,
                 "max_tokens": max_tokens,
@@ -175,6 +232,8 @@ class EvaluationManager:
                     prompt_id=prompt_id,
                     test_case_id=test_id,
                     model_config=model_config,
+                    provider_credentials=provider_credentials,
+                    on_provider_success=on_provider_success,
                 )
                 score = float((run_result.get("scores") or {}).get("aggregate_score", 0.0))
                 passed = score >= 0.5
@@ -200,13 +259,21 @@ class EvaluationManager:
                     passed,
                 )
             except Exception as e:
-                _log.error("PS evaluation.exec.test_error test_case_id={} error={}", test_id, e)
+                safe_error = sanitized_provider_stream_exception(e)
+                _log.error(
+                    "PS evaluation.exec.test_error test_case_id={} error_code={}",
+                    test_id,
+                    safe_error.code,
+                )
                 results.append(
                     {
                         "test_case_id": test_id,
                         "inputs": test_case.get("inputs") or {},
                         "expected": test_case.get("expected_outputs") or {},
-                        "actual": {"error": str(e)},
+                        "actual": {
+                            "error": str(safe_error),
+                            "error_code": safe_error.code,
+                        },
                         "score": 0.0,
                         "passed": False,
                     }
@@ -265,6 +332,10 @@ class EvaluationManager:
         provider: str = "openai",
         api_key: Optional[str] = None,
         app_config: Optional[dict[str, Any]] = None,
+        credentials_resolved: bool = False,
+        provider_credentials: ProviderCallCredentials | None = None,
+        timeout_seconds: Optional[float] = None,
+        on_provider_success: Callable[[], Awaitable[None]] | None = None,
     ) -> dict[str, Any]:
         """Create and run an evaluation asynchronously."""
         prompt = self.db.get_prompt(prompt_id)
@@ -279,6 +350,7 @@ class EvaluationManager:
                 "model": model,
                 "temperature": temperature,
                 "max_tokens": max_tokens,
+                "timeout_seconds": timeout_seconds,
             },
             test_case_ids=test_case_ids,
             client_id=self.db.client_id,
@@ -294,6 +366,10 @@ class EvaluationManager:
             provider=provider,
             api_key=api_key,
             app_config=app_config,
+            credentials_resolved=credentials_resolved,
+            provider_credentials=provider_credentials,
+            timeout_seconds=timeout_seconds,
+            on_provider_success=on_provider_success,
         )
 
     def run_evaluation(
@@ -306,6 +382,10 @@ class EvaluationManager:
         provider: str = "openai",
         api_key: Optional[str] = None,
         app_config: Optional[dict[str, Any]] = None,
+        credentials_resolved: bool = False,
+        provider_credentials: ProviderCallCredentials | None = None,
+        timeout_seconds: Optional[float] = None,
+        on_provider_success: Callable[[], Awaitable[None]] | None = None,
     ) -> dict[str, Any]:
         """Run evaluation for a prompt against test cases.
 
@@ -330,44 +410,16 @@ class EvaluationManager:
                 provider=provider,
                 api_key=api_key,
                 app_config=app_config,
+                credentials_resolved=credentials_resolved,
+                provider_credentials=provider_credentials,
+                timeout_seconds=timeout_seconds,
+                on_provider_success=on_provider_success,
             )
         )
 
     @staticmethod
     def _extract_response_text(response: Any) -> str:
-        if response is None:
-            return ""
-        if isinstance(response, str):
-            return response
-        if isinstance(response, list) and response:
-            if isinstance(response[0], str):
-                return response[0]
-            if isinstance(response[0], dict):
-                return EvaluationManager._extract_response_text(response[0])
-        if isinstance(response, dict):
-            choices = response.get("choices")
-            if isinstance(choices, list):
-                for choice in choices:
-                    if not isinstance(choice, dict):
-                        continue
-                    message = choice.get("message") or {}
-                    content = message.get("content")
-                    if isinstance(content, list):
-                        parts = [part.get("text", "") for part in content if isinstance(part, dict)]
-                        content = "".join(parts)
-                    if isinstance(content, str):
-                        return content
-                    delta = choice.get("delta") or {}
-                    delta_content = delta.get("content")
-                    if isinstance(delta_content, list):
-                        parts = [part.get("text", "") for part in delta_content if isinstance(part, dict)]
-                        delta_content = "".join(parts)
-                    if isinstance(delta_content, str):
-                        return delta_content
-            content = response.get("content")
-            if isinstance(content, str):
-                return content
-        return str(response)
+        return TestRunner._extract_response_text(response)
 
     def _calculate_score(self, expected: dict, actual: dict) -> float:
         """

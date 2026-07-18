@@ -144,6 +144,7 @@ async def apply_multi_vector_passages(
                 handle, runtime_kwargs = await _resolve_runtime_embedding_call(
                     credential_runtime,
                     provider,
+                    getattr(getattr(svc, "config", None), "default_model", None),
                 )
                 call_kwargs = {
                     "provider": provider,

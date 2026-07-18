@@ -5,6 +5,7 @@ import types
 from types import SimpleNamespace
 
 import pytest
+from loguru import logger
 
 from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatAuthenticationError,
@@ -109,6 +110,35 @@ async def test_coarse_retrieval_fallback_warning_omits_raw_exception(
     assert result.metadata["coarse_docs"] == []
     assert any("Agentic coarse retrieval failed" in msg for msg in logger_stub.warnings)
     _assert_no_sensitive_log_fragments(logger_stub.warnings)
+
+
+@pytest.mark.asyncio
+async def test_coarse_retrieval_fallback_does_not_attach_active_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(ac, "MultiDatabaseRetriever", _ExplodingRetriever)
+    log_records: list[object] = []
+    sink_id = logger.add(log_records.append)
+    try:
+        await ac.agentic_rag_pipeline(
+            query="coarse retrieval traceback sanitizer",
+            sources=["media_db"],
+            search_mode="fts",
+            agentic=ac.AgenticConfig(enable_metrics=False),
+            enable_generation=False,
+            enable_citations=False,
+        )
+    finally:
+        logger.remove(sink_id)
+
+    coarse_failure_logs = [
+        message.record
+        for message in log_records
+        if message.record["message"] == "Agentic coarse retrieval failed"
+    ]
+    assert len(coarse_failure_logs) == 1
+    assert coarse_failure_logs[0]["exception"] is None
+    _assert_no_sensitive_log_fragments([str(message) for message in log_records])
 
 
 @pytest.mark.asyncio
@@ -373,6 +403,51 @@ async def test_agentic_pipeline_threads_runtime_to_retrieval_and_tool_loop(
 
 
 @pytest.mark.asyncio
+async def test_agentic_pipeline_separates_planner_and_embedding_degradation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _DocRetriever:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        async def retrieve(self, *args: object, **kwargs: object) -> list[Document]:
+            return [_doc()]
+
+    async def fake_tool_loop(*args: object, **kwargs: object):
+        kwargs["stage_metadata"].update(
+            embedding_coverage="degraded",
+            failure_code="provider_configuration_invalid",
+            planner={
+                "failure_code": "credential_store_unavailable",
+                "verification_available": False,
+            },
+        )
+        return "grounded chunk", [{"document_id": _doc().id, "start": 0, "end": 8}], []
+
+    monkeypatch.setattr(ac, "MultiDatabaseRetriever", _DocRetriever)
+    monkeypatch.setattr(ac, "_tool_loop", fake_tool_loop)
+
+    result = await ac.agentic_rag_pipeline(
+        query="stage metadata isolation",
+        sources=["media_db"],
+        search_mode="fts",
+        agentic=ac.AgenticConfig(enable_tools=True, enable_metrics=False),
+        credential_runtime=object(),
+        enable_generation=False,
+        enable_citations=False,
+    )
+
+    assert result.metadata["agentic_embeddings"] == {
+        "embedding_coverage": "degraded",
+        "failure_code": "provider_configuration_invalid",
+    }
+    assert result.metadata["agentic_planner"] == {
+        "failure_code": "credential_store_unavailable",
+        "verification_available": False,
+    }
+
+
+@pytest.mark.asyncio
 async def test_agentic_hosted_embedding_failure_uses_hash_fallback_and_bounded_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -387,7 +462,7 @@ async def test_agentic_hosted_embedding_failure_uses_hash_fallback_and_bounded_m
             return [_doc()]
 
     class _FailingRuntime:
-        async def resolve(self, provider: str):
+        async def resolve(self, provider: str, *, model: str | None = None):
             raise ByokResolutionError("credential_store_unavailable", provider)
 
     monkeypatch.setattr(ac, "MultiDatabaseRetriever", _DocRetriever)
@@ -450,14 +525,14 @@ async def test_agentic_outer_cache_cannot_hide_later_runtime_resolution_failure(
                 credentials_resolved=True,
             )
 
-        async def resolve(self, provider: str):
+        async def resolve(self, provider: str, *, model: str | None = None):
             return self.handle
 
         async def mark_used(self, handle: object) -> None:
             pass
 
     class _FailingRuntime:
-        async def resolve(self, provider: str):
+        async def resolve(self, provider: str, *, model: str | None = None):
             raise ByokResolutionError("credential_store_unavailable", provider)
 
     embedding_settings = {

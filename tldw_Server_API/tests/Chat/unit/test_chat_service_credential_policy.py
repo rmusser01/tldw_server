@@ -1,7 +1,18 @@
 from __future__ import annotations
 
+import asyncio
+from typing import Any
+
 import pytest
 
+from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
+    ByokResolutionStatus,
+    ResolvedByokCredentials,
+)
+from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+    ProviderCredentialRuntime,
+)
 from tldw_Server_API.app.core.Chat import chat_service
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
 from tldw_Server_API.app.core.LLM_Calls import adapter_utils, chat_calls
@@ -18,6 +29,56 @@ def _args(**overrides):
     return args
 
 
+def _resolved_fields(
+    provider: str,
+    *,
+    api_key: str | None,
+    app_config: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Build test call fields backed by an authentic runtime capability."""
+
+    async def issue():
+        async def resolver(
+            normalized_provider: str,
+            **_kwargs: Any,
+        ) -> ResolvedByokCredentials:
+            return ResolvedByokCredentials(
+                provider=normalized_provider,
+                api_key=api_key,
+                app_config=app_config,
+                credential_fields={},
+                source="user",
+                allowlisted=True,
+                status=ByokResolutionStatus.RESOLVED,
+                auth_source=(
+                    "aws_default_chain"
+                    if provider == "bedrock" and api_key is None
+                    else "api_key"
+                ),
+            )
+
+        runtime = ProviderCredentialRuntime(
+            user_id=17,
+            team_ids=(),
+            org_ids=(),
+            trusted_base_url_override=True,
+            server_config_snapshot={},
+            resolver=resolver,
+        )
+        try:
+            return await runtime.resolve(provider)
+        finally:
+            await runtime.close()
+
+    handle = asyncio.run(issue())
+    return {
+        "api_key": api_key,
+        "app_config": app_config,
+        "credentials_resolved": True,
+        PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY: handle,
+    }
+
+
 def test_explicit_credentials_bypass_resolvers_and_copy_config(monkeypatch):
     def fail(*_args, **_kwargs):
         raise AssertionError("server credential resolver must not run")
@@ -28,9 +89,11 @@ def test_explicit_credentials_bypass_resolvers_and_copy_config(monkeypatch):
 
     provider, request, _internal = chat_service._build_adapter_request_from_chat_args(
         _args(
-            api_key="explicit-key",
-            app_config=supplied_config,
-            credentials_resolved=True,
+            **_resolved_fields(
+                "openai",
+                api_key="explicit-key",
+                app_config=supplied_config,
+            ),
         )
     )
 
@@ -38,7 +101,7 @@ def test_explicit_credentials_bypass_resolvers_and_copy_config(monkeypatch):
     assert request["api_key"] == "explicit-key"
     assert request["app_config"] == supplied_config
     assert request["app_config"] is not supplied_config
-    assert "credentials_resolved" not in request
+    assert request["credentials_resolved"] is True
 
 
 def test_explicit_missing_hosted_key_fails_safely(monkeypatch):
@@ -50,7 +113,9 @@ def test_explicit_missing_hosted_key_fails_safely(monkeypatch):
 
     with pytest.raises(ChatConfigurationError) as exc_info:
         chat_service._build_adapter_request_from_chat_args(
-            _args(api_key="  ", app_config={}, credentials_resolved=True)
+            _args(
+                **_resolved_fields("openai", api_key="  ", app_config={})
+            )
         )
 
     assert exc_info.value.provider == "openai"
@@ -63,9 +128,13 @@ def test_explicit_local_provider_remains_keyless():
         _args(
             api_provider="ollama",
             model="llama3",
-            api_key=None,
-            app_config={"ollama_api": {"api_url": "http://127.0.0.1:11434"}},
-            credentials_resolved=True,
+            **_resolved_fields(
+                "ollama",
+                api_key=None,
+                app_config={
+                    "ollama_api": {"api_url": "http://127.0.0.1:11434"}
+                },
+            ),
         )
     )
 
@@ -124,9 +193,11 @@ def test_explicit_absent_config_cannot_trigger_adapter_config_reload(monkeypatch
     _provider, request, _internal = chat_service._build_adapter_request_from_chat_args(
         _args(
             api_provider="moonshot",
-            api_key="explicit-key",
-            app_config=None,
-            credentials_resolved=True,
+            **_resolved_fields(
+                "moonshot",
+                api_key="explicit-key",
+                app_config=None,
+            ),
         )
     )
     adapter_request = {**request, "app_config": dict(request["app_config"])}
@@ -137,7 +208,7 @@ def test_explicit_absent_config_cannot_trigger_adapter_config_reload(monkeypatch
     assert session.urls == ["https://api.moonshot.cn/v1/chat/completions"]
     assert type(request["app_config"]) is dict
     assert request["app_config"] == {"moonshot_api": {}}
-    assert "credentials_resolved" not in request
+    assert request["credentials_resolved"] is True
 
 
 def test_legacy_empty_config_still_allows_adapter_config_reload(monkeypatch):
@@ -171,15 +242,17 @@ def test_explicit_absent_config_is_plain_provider_scoped_mapping(provider, secti
     _provider, request, _internal = chat_service._build_adapter_request_from_chat_args(
         _args(
             api_provider=provider,
-            api_key=api_key,
-            app_config=None,
-            credentials_resolved=True,
+            **_resolved_fields(
+                provider,
+                api_key=api_key,
+                app_config=None,
+            ),
         )
     )
 
     assert type(request["app_config"]) is dict
     assert dict(request["app_config"]) == {section: {}}
-    assert "credentials_resolved" not in request
+    assert request["credentials_resolved"] is True
 
 
 def test_bedrock_runtime_default_chain_satisfies_shared_auth_contract():
@@ -187,9 +260,13 @@ def test_bedrock_runtime_default_chain_satisfies_shared_auth_contract():
         _args(
             api_provider="bedrock",
             model="meta.llama3-8b-instruct",
-            api_key=None,
-            app_config={"bedrock_api": {"_runtime_auth_source": "aws_default_chain"}},
-            credentials_resolved=True,
+            **_resolved_fields(
+                "bedrock",
+                api_key=None,
+                app_config={
+                    "bedrock_api": {"_runtime_auth_source": "aws_default_chain"}
+                },
+            ),
         )
     )
 
@@ -210,9 +287,11 @@ def test_bedrock_runtime_absent_auth_fails_before_server_key_resolution(monkeypa
             _args(
                 api_provider="bedrock",
                 model="meta.llama3-8b-instruct",
-                api_key=None,
-                app_config={"bedrock_api": {}},
-                credentials_resolved=True,
+                **_resolved_fields(
+                    "bedrock",
+                    api_key=None,
+                    app_config={"bedrock_api": {}},
+                ),
             )
         )
 
@@ -225,8 +304,10 @@ def test_explicit_missing_model_does_not_use_default_model_environment(monkeypat
             {
                 "api_provider": "moonshot",
                 "messages": [{"role": "user", "content": "hello"}],
-                "api_key": "explicit-key",
-                "app_config": None,
-                "credentials_resolved": True,
+                **_resolved_fields(
+                    "moonshot",
+                    api_key="explicit-key",
+                    app_config=None,
+                ),
             }
         )

@@ -13,7 +13,7 @@ This module retains:
 
 Notes
 - Avoid logging secrets; this module only logs high-level metadata.
-- Timeouts and retries are per-provider configurable via config.
+- Timeouts are provider-configurable; unsafe provider POSTs are single-attempt.
 - Use environment variables to override base URLs for testing/mocking.
 """
 #########################################
@@ -65,12 +65,10 @@ class _SessionShim:
         status_forcelist: Optional[list[int]] = None,
         allowed_methods: Optional[list[str]] = None,
     ) -> None:
-        attempts = max(1, int(total)) + 0
-        self._retry = RetryPolicy(
-            attempts=attempts,
-            backoff_base_ms=int(float(backoff_factor) * 1000),
-            retry_on_status=tuple(status_forcelist or (408, 429, 500, 502, 503, 504)),
-        )
+        # Compatibility arguments are intentionally ignored: this shim only
+        # exposes provider POSTs, which cannot be replayed without idempotency.
+        _ = total, backoff_factor, status_forcelist, allowed_methods
+        self._retry = RetryPolicy(attempts=1)
         self._delegate_session = None
 
     def post(self, url, *, headers=None, json=None, stream: bool = False, timeout=None, **kwargs):
@@ -84,10 +82,7 @@ class _SessionShim:
             )
             # For streaming, use legacy requests session to preserve iter_lines semantics
             self._delegate_session = _legacy_create_session_with_retries(
-                total=self._retry.attempts,
-                backoff_factor=self._retry.backoff_base_ms / 1000.0,
-                status_forcelist=list(self._retry.retry_on_status),
-                allowed_methods=["POST"],
+                total=1,
             )
             return self._delegate_session.post(url, headers=headers, json=json, stream=True, timeout=timeout)
         # Non-streaming via centralized http client (egress/pinning)
@@ -118,6 +113,7 @@ def create_session_with_retries(
 ):
     """Return a session object.
 
+    Provider POSTs are single-attempt until an idempotency contract exists.
     - Under pytest, return the legacy session facade so tests can patch
       `create_session_with_retries` directly.
     - In production, return a shim that routes non-streaming POSTs through
@@ -133,10 +129,7 @@ def create_session_with_retries(
             ),
         )
         return _legacy_create_session_with_retries(
-            total=total,
-            backoff_factor=backoff_factor,
-            status_forcelist=status_forcelist,
-            allowed_methods=allowed_methods,
+            total=1,
         )
     return _SessionShim(
         total=total,
@@ -144,13 +137,6 @@ def create_session_with_retries(
         status_forcelist=status_forcelist,
         allowed_methods=allowed_methods,
     )
-
-
-# ---------------------------------------------------------------------------
-# Embeddings helpers (internal constants)
-# ---------------------------------------------------------------------------
-
-_RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 
 
 def _resolve_openai_embeddings_api_key(
@@ -238,12 +224,7 @@ def get_openai_embeddings(
     api_url = api_base.rstrip('/') + '/embeddings'
     try:
         logging.debug(f"OpenAI Embeddings (single): Posting request to embeddings API at {api_url}")
-        session = create_session_with_retries(
-            total=_safe_cast(openai_cfg.get('api_retries'), int, 3),
-            backoff_factor=_safe_cast(openai_cfg.get('api_retry_delay'), float, 1.0),
-            status_forcelist=[429, 500, 502, 503, 504],
-            allowed_methods=["POST"],
-        )
+        session = create_session_with_retries(total=1)
         timeout = _safe_cast(openai_cfg.get('api_timeout'), float, 90.0)
         try:
             response = session.post(api_url, headers=headers, json=request_data, timeout=timeout)
@@ -339,12 +320,7 @@ def get_openai_embeddings_batch(
     api_url = api_base.rstrip('/') + '/embeddings'
     try:
         logging.debug(f"OpenAI Embeddings (batch): Posting batch request of {len(texts)} items to API: {api_url}")
-        session = create_session_with_retries(
-            total=_safe_cast(openai_cfg.get('api_retries'), int, 3),
-            backoff_factor=_safe_cast(openai_cfg.get('api_retry_delay'), float, 1.0),
-            status_forcelist=[429, 500, 502, 503, 504],
-            allowed_methods=["POST"],
-        )
+        session = create_session_with_retries(total=1)
         timeout = _safe_cast(openai_cfg.get('api_timeout'), float, 90.0)
         try:
             response = session.post(api_url, headers=headers, json=request_data, timeout=timeout)
@@ -362,8 +338,26 @@ def get_openai_embeddings_batch(
                     raise ValueError(
                         "OpenAI Embeddings (batch): API returned a different number of embeddings than texts provided.")
 
+                response_items = response_data['data']
+                indexed_items = [
+                    item.get('index')
+                    for item in response_items
+                    if isinstance(item, dict) and 'index' in item
+                ]
+                if indexed_items:
+                    expected_indices = set(range(len(texts)))
+                    if (
+                        len(indexed_items) != len(response_items)
+                        or any(isinstance(index, bool) or not isinstance(index, int) for index in indexed_items)
+                        or set(indexed_items) != expected_indices
+                    ):
+                        raise ValueError(
+                            "OpenAI Embeddings (batch): API response contained malformed embedding indices."
+                        )
+                    response_items = sorted(response_items, key=lambda item: item['index'])
+
                 embeddings_list = []
-                for item in response_data['data']:
+                for item in response_items:
                     if 'embedding' in item and isinstance(item['embedding'], list):
                         embeddings_list.append(item['embedding'])
                     else:

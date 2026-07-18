@@ -5,13 +5,29 @@ import asyncio
 import json
 import re
 import time
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Any, Optional
 
 from loguru import logger
 
+from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+    ProviderCallCredentials,
+    is_runtime_issued_provider_call_credentials,
+)
+from tldw_Server_API.app.core.Chat.bounded_daemon import (
+    SYNC_ADAPTER_CALL_POOL,
+    await_bounded_sync_call,
+    await_owned_worker,
+)
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
+from tldw_Server_API.app.core.Chat.streaming_utils import (
+    normalize_provider_stream_error,
+    provider_result_contains_error,
+)
 from tldw_Server_API.app.core.DB_Management.PromptStudioDatabase import PromptStudioDatabase
+from tldw_Server_API.app.core.exceptions import raise_detached_error
 from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
     ensure_app_config,
@@ -84,8 +100,19 @@ class PromptExecutor:
     ####################################################################################################################
     # Prompt Execution
 
-    async def execute_prompt(self, prompt_id: int, test_inputs: dict[str, Any],
-                             model_config: dict[str, Any]) -> dict[str, Any]:
+    async def execute_prompt(
+        self,
+        prompt_id: int,
+        test_inputs: dict[str, Any],
+        model_config: dict[str, Any],
+        *,
+        api_key_override: Optional[str] = None,
+        app_config: Optional[dict[str, Any]] = None,
+        credentials_resolved: bool = False,
+        provider_credentials: ProviderCallCredentials | None = None,
+        timeout_seconds: Optional[float] = None,
+        on_provider_success: Callable[[], Awaitable[None]] | None = None,
+    ) -> dict[str, Any]:
         """
         Execute a prompt with given inputs and model configuration.
 
@@ -123,7 +150,13 @@ class PromptExecutor:
                 prompt=prompt_request.get("prompt"),
                 messages=prompt_request.get("messages"),
                 system_prompt=prompt_request.get("system_prompt"),
-                parameters=model_config.get("parameters", {})
+                parameters=model_config.get("parameters", {}),
+                api_key_override=api_key_override,
+                app_config=app_config,
+                credentials_resolved=credentials_resolved,
+                provider_credentials=provider_credentials,
+                timeout_seconds=timeout_seconds,
+                on_provider_success=on_provider_success,
             )
 
             # Parse output based on signature
@@ -154,7 +187,10 @@ class PromptExecutor:
             }
 
         except Exception as e:
-            logger.error(f"Prompt execution failed: {e}")
+            logger.error(
+                "Prompt execution failed; error_type={}",
+                type(e).__name__,
+            )
             execution_time = (time.time() - start_time) * 1000
 
             return {
@@ -242,12 +278,40 @@ class PromptExecutor:
         temperature: float,
         max_tokens: int,
         params: dict[str, Any],
+        app_config: Optional[dict[str, Any]] = None,
+        api_key_override: Optional[str] = None,
+        credentials_resolved: bool = False,
+        provider_credentials: ProviderCallCredentials | None = None,
     ) -> dict[str, Any]:
         provider_name = normalize_provider(self._normalize_provider(provider))
         if not provider_name:
             raise ChatConfigurationError(provider=provider, message="LLM provider is required.")
-        app_config = ensure_app_config()
-        resolved_model = model or resolve_provider_model(provider_name, app_config)
+        if provider_credentials is not None:
+            if not is_runtime_issued_provider_call_credentials(
+                provider_credentials,
+                provider=provider_name,
+            ):
+                raise ChatConfigurationError(
+                    provider=provider_name,
+                    message="Provider credential context is invalid.",
+                )
+            cfg = provider_credentials.app_config or {}
+            resolved_api_key = provider_credentials.api_key
+            resolved_credentials = True
+        else:
+            cfg = (
+                (app_config or {})
+                if credentials_resolved
+                else ensure_app_config(app_config)
+            )
+            resolved_api_key = (
+                api_key_override
+                if credentials_resolved
+                else api_key_override
+                or resolve_provider_api_key_from_config(provider_name, cfg)
+            )
+            resolved_credentials = credentials_resolved
+        resolved_model = model or resolve_provider_model(provider_name, cfg)
         if not resolved_model:
             raise ChatConfigurationError(provider=provider_name, message="Model is required for provider.")
 
@@ -260,11 +324,18 @@ class PromptExecutor:
             "messages": request_messages,
             "system_message": system_message,
             "model": resolved_model,
-            "api_key": resolve_provider_api_key_from_config(provider_name, app_config),
+            "api_key": resolved_api_key,
             "temperature": temperature,
             "max_tokens": max_tokens,
-            "app_config": app_config,
+            "app_config": cfg,
+            "credentials_resolved": resolved_credentials,
         }
+
+        if provider_credentials is not None and (
+            get_registry().is_local_provider_name(provider_name)
+            or provider_name.startswith("custom-openai-api")
+        ):
+            request[PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY] = provider_credentials
 
         for canonical, aliases in self._PARAM_ALIASES.items():
             for key in aliases:
@@ -276,22 +347,29 @@ class PromptExecutor:
 
     @staticmethod
     def _coerce_llm_response(response: Any) -> tuple[str, int]:
+        if provider_result_contains_error(response, legacy_error_prefix=True):
+            raise RuntimeError("Provider returned an error response")
         if response is None:
-            return "", 0
-        if isinstance(response, tuple) and len(response) == 2:
+            raise RuntimeError("Provider returned an empty or malformed response")
+        if isinstance(response, tuple):
+            if len(response) != 2:
+                raise RuntimeError("Provider returned an empty or malformed response")
             content, tokens = response
+            content, _ = PromptExecutor._coerce_llm_response(content)
             try:
-                return str(content or ""), int(tokens or 0)
+                return content, int(tokens or 0)
             except Exception:
-                return str(content or ""), 0
+                return content, 0
         if isinstance(response, str):
+            if response.lstrip().lower().startswith("error:"):
+                raise RuntimeError("Provider returned an error response")
+            if not response.strip():
+                raise RuntimeError("Provider returned an empty or malformed response")
             return response, int(len(response.split()) * 1.3)
-        if isinstance(response, list) and response:
-            if isinstance(response[0], str):
-                content = response[0]
-                return content, int(len(content.split()) * 1.3)
-            if isinstance(response[0], dict):
+        if isinstance(response, list):
+            if response and isinstance(response[0], (str, dict)):
                 return PromptExecutor._coerce_llm_response(response[0])
+            raise RuntimeError("Provider returned an empty or malformed response")
         if isinstance(response, dict):
             content = None
             choices = response.get("choices")
@@ -299,28 +377,53 @@ class PromptExecutor:
                 for choice in choices:
                     if not isinstance(choice, dict):
                         continue
-                    message = choice.get("message") or {}
+                    message = choice.get("message")
+                    if not isinstance(message, dict):
+                        message = {}
+                    if normalize_provider_stream_error(message) is not None:
+                        raise RuntimeError("Provider returned an error response")
                     msg_content = message.get("content")
+                    if normalize_provider_stream_error(msg_content) is not None:
+                        raise RuntimeError("Provider returned an error response")
                     if isinstance(msg_content, list):
-                        parts = [part.get("text", "") for part in msg_content if isinstance(part, dict)]
+                        parts = [
+                            part["text"]
+                            for part in msg_content
+                            if isinstance(part, dict)
+                            and isinstance(part.get("text"), str)
+                        ]
                         msg_content = "".join(parts)
                     if isinstance(msg_content, str):
                         content = msg_content
                         break
-                    delta = choice.get("delta") or {}
+                    delta = choice.get("delta")
+                    if not isinstance(delta, dict):
+                        delta = {}
+                    if normalize_provider_stream_error(delta) is not None:
+                        raise RuntimeError("Provider returned an error response")
                     delta_content = delta.get("content")
+                    if normalize_provider_stream_error(delta_content) is not None:
+                        raise RuntimeError("Provider returned an error response")
                     if isinstance(delta_content, list):
-                        parts = [part.get("text", "") for part in delta_content if isinstance(part, dict)]
+                        parts = [
+                            part["text"]
+                            for part in delta_content
+                            if isinstance(part, dict)
+                            and isinstance(part.get("text"), str)
+                        ]
                         delta_content = "".join(parts)
                     if isinstance(delta_content, str):
                         content = delta_content
                         break
             if content is None:
                 raw_content = response.get("content")
+                if normalize_provider_stream_error(raw_content) is not None:
+                    raise RuntimeError("Provider returned an error response")
                 if isinstance(raw_content, str):
                     content = raw_content
             if content is None:
-                content = str(response)
+                raise RuntimeError("Provider returned an empty or malformed response")
+            content, _ = PromptExecutor._coerce_llm_response(content)
             tokens = 0
             usage = response.get("usage")
             if isinstance(usage, dict):
@@ -335,7 +438,7 @@ class PromptExecutor:
             if tokens == 0 and isinstance(content, str):
                 tokens = int(len(content.split()) * 1.3)
             return content, tokens
-        return str(response), 0
+        raise RuntimeError("Provider returned an empty or malformed response")
 
     async def _call_llm(
         self,
@@ -346,6 +449,12 @@ class PromptExecutor:
         messages: Optional[list[dict[str, Any]]] = None,
         system_prompt: Optional[str] = None,
         parameters: Optional[dict[str, Any]] = None,
+        api_key_override: Optional[str] = None,
+        app_config: Optional[dict[str, Any]] = None,
+        credentials_resolved: bool = False,
+        provider_credentials: ProviderCallCredentials | None = None,
+        timeout_seconds: Optional[float] = None,
+        on_provider_success: Callable[[], Awaitable[None]] | None = None,
     ) -> dict[str, Any]:
         """
         Call the appropriate LLM provider.
@@ -373,51 +482,90 @@ class PromptExecutor:
                 raise ValueError("Either prompt or messages must be provided")
             request_messages = [{"role": "user", "content": prompt}]
 
-        # Backoff + retry for transient/provider limit errors
-        last_exc = None
-        for attempt in range(3):
+        async def _mark_late_valid_response(response: Any) -> None:
+            if on_provider_success is None:
+                return
             try:
-                adapter = get_registry().get_adapter(normalize_provider(api_endpoint))
-                if adapter is None:
-                    from tldw_Server_API.app.core.Chat.chat_orchestrator import chat_api_call as _legacy_call
-                    response = await asyncio.to_thread(
-                        _legacy_call,
+                self._coerce_llm_response(response)
+            except Exception:
+                return
+            await on_provider_success()
+
+        provider_dispatched = False
+        try:
+            request = self._build_adapter_request(
+                provider=api_endpoint,
+                model=model,
+                messages=request_messages,
+                system_prompt=system_prompt,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                params=params,
+                app_config=app_config,
+                api_key_override=api_key_override,
+                credentials_resolved=credentials_resolved,
+                provider_credentials=provider_credentials,
+            )
+            adapter = get_registry().get_adapter(normalize_provider(api_endpoint))
+            if adapter is None:
+                if PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY in request:
+                    raise ChatConfigurationError(
+                        provider=api_endpoint,
+                        message="Configured provider adapter is unavailable.",
+                    )
+                from tldw_Server_API.app.core.Chat.chat_orchestrator import chat_api_call as _legacy_call
+                provider_dispatched = True
+                response = await await_bounded_sync_call(
+                    lambda: _legacy_call(
                         api_endpoint=api_endpoint,
-                        messages_payload=request_messages,
-                        system_message=system_prompt,
+                        messages_payload=request["messages"],
+                        api_key=request["api_key"],
+                        system_message=request["system_message"],
                         temp=temperature,
                         max_tokens=max_tokens,
                         model=model,
                         streaming=False,
-                    )
-                else:
-                    request = self._build_adapter_request(
-                        provider=api_endpoint,
-                        model=model,
-                        messages=request_messages,
-                        system_prompt=system_prompt,
-                        temperature=temperature,
-                        max_tokens=max_tokens,
-                        params=params,
-                    )
-                    response = await asyncio.to_thread(
-                        adapter.chat,
-                        request,
-                    )
-                content, tokens = self._coerce_llm_response(response)
-                return {"content": content, "tokens": tokens}
-            except Exception as e:
-                last_exc = e
-                # Basic 429/backoff detection
-                msg = str(e)
-                if "429" in msg or "rate limit" in msg.lower():
-                    await asyncio.sleep(0.5 * (attempt + 1))
-                    continue
-                logger.error(f"LLM call failed for {provider}/{model}: {e}")
-                raise
-        # If we exhausted retries
-        logger.error(f"LLM call failed after retries for {provider}/{model}: {last_exc}")
-        raise last_exc if last_exc else RuntimeError("LLM call failed")
+                        app_config=request["app_config"],
+                        credentials_resolved=request["credentials_resolved"],
+                    ),
+                    pool=SYNC_ADAPTER_CALL_POOL,
+                    exhaustion_message="Prompt Studio adapter capacity is exhausted",
+                    on_cancel_result=(
+                        _mark_late_valid_response
+                        if on_provider_success is not None
+                        else None
+                    ),
+                )
+            else:
+                provider_dispatched = True
+                response = await await_bounded_sync_call(
+                    lambda adapter=adapter, request=request: (
+                        adapter.chat(request, timeout=timeout_seconds)
+                        if timeout_seconds is not None
+                        else adapter.chat(request)
+                    ),
+                    pool=SYNC_ADAPTER_CALL_POOL,
+                    exhaustion_message="Prompt Studio adapter capacity is exhausted",
+                    on_cancel_result=(
+                        _mark_late_valid_response
+                        if on_provider_success is not None
+                        else None
+                    ),
+                )
+            content, tokens = self._coerce_llm_response(response)
+            if on_provider_success is not None:
+                await await_owned_worker(on_provider_success())
+            return {"content": content, "tokens": tokens}
+        except Exception as e:
+            logger.error(
+                "LLM call failed for {}/{}; error_type={}",
+                provider,
+                model,
+                type(e).__name__,
+            )
+            if provider_dispatched:
+                raise_detached_error(RuntimeError("Provider returned an error response"))
+            raise
 
     ####################################################################################################################
     # Helper Methods
@@ -682,8 +830,21 @@ class PromptExecutor:
         return rendered_messages
 
     # Compatibility alias used by tests
-    async def execute(self, prompt_id: int, inputs: dict[str, Any], provider: str = "openai", model: str = "gpt-3.5-turbo",
-                      parameters: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    async def execute(
+        self,
+        prompt_id: int,
+        inputs: dict[str, Any],
+        provider: str = "openai",
+        model: str = "gpt-3.5-turbo",
+        parameters: Optional[dict[str, Any]] = None,
+        *,
+        api_key_override: Optional[str] = None,
+        app_config: Optional[dict[str, Any]] = None,
+        credentials_resolved: bool = False,
+        provider_credentials: ProviderCallCredentials | None = None,
+        timeout_seconds: Optional[float] = None,
+        on_provider_success: Callable[[], Awaitable[None]] | None = None,
+    ) -> dict[str, Any]:
         """
         Execute prompt using simplified signature.
 
@@ -702,7 +863,17 @@ class PromptExecutor:
             "model": model,
             "parameters": parameters or {}
         }
-        return await self.execute_prompt(prompt_id, inputs, model_config)
+        return await self.execute_prompt(
+            prompt_id,
+            inputs,
+            model_config,
+            api_key_override=api_key_override,
+            app_config=app_config,
+            credentials_resolved=credentials_resolved,
+            provider_credentials=provider_credentials,
+            timeout_seconds=timeout_seconds,
+            on_provider_success=on_provider_success,
+        )
 
     def _parse_output(self, output: str, signature: Optional[dict[str, Any]]) -> dict[str, Any]:
         """

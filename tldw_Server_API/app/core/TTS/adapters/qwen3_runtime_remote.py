@@ -4,19 +4,25 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING, Any
 
+from tldw_Server_API.app.core.exceptions import (
+    NetworkError as CoreNetworkError,
+)
+from tldw_Server_API.app.core.exceptions import (
+    RetryExhaustedError,
+    raise_detached_error,
+)
 from tldw_Server_API.app.core.http_client import RetryPolicy, apost, astream_bytes
-from tldw_Server_API.app.core.exceptions import NetworkError as CoreNetworkError
-from tldw_Server_API.app.core.exceptions import RetryExhaustedError
 
 from ..tts_exceptions import (
     TTSError,
+    TTSNetworkError,
     TTSProviderError,
     TTSProviderInitializationError,
     auth_error,
-    network_error,
     rate_limit_error,
     timeout_error,
 )
@@ -27,12 +33,30 @@ if TYPE_CHECKING:
     from .qwen3_tts_adapter import Qwen3TTSAdapter
 
 
+def _rebuild_typed_tts_error(
+    exc: TTSError,
+    *,
+    provider: str,
+    message: str,
+) -> TTSError:
+    """Recreate a local TTS error category without copying provider-owned state."""
+
+    error_class: type[TTSError] = type(exc)
+    if error_class.__module__ != TTSError.__module__:
+        error_class = TTSError
+    return error_class(
+        message,
+        provider=provider,
+        details={"error_type": error_class.__name__},
+    )
+
+
 class RemoteQwenRuntime:
     """Execute Qwen3-TTS requests against a separately hosted backend."""
 
     runtime_name = "remote"
 
-    def __init__(self, adapter_or_config: "Qwen3TTSAdapter | dict[str, Any]") -> None:
+    def __init__(self, adapter_or_config: Qwen3TTSAdapter | dict[str, Any]) -> None:
         if hasattr(adapter_or_config, "config"):
             adapter = adapter_or_config
             self._adapter = adapter
@@ -126,59 +150,77 @@ class RemoteQwenRuntime:
         except (TypeError, ValueError):
             return None
 
-    async def _handle_http_status_error(self, exc: Exception) -> None:
+    def _normalize_http_status_error(self, exc: Exception) -> TTSError:
+        """Map an HTTP status failure without retaining its request or response."""
+
         response = getattr(exc, "response", None)
         status_code = getattr(response, "status_code", None)
         headers = getattr(response, "headers", {}) if response is not None else {}
-        error_msg = ""
-        if response is not None:
-            try:
-                error_msg = response.text
-            except Exception:
-                try:
-                    error_msg = response.content.decode()
-                except Exception:
-                    error_msg = ""
 
         if status_code == 401:
-            raise auth_error(self.provider_key, "Invalid API key")
+            return auth_error(self.provider_key, "Invalid API key")
         if status_code == 429:
             retry_after = None
             if hasattr(headers, "get"):
                 retry_after = self._parse_retry_after(headers.get("retry-after"))
-            raise rate_limit_error(
+            return rate_limit_error(
                 self.provider_key,
                 retry_after=retry_after,
             )
         if status_code == 400:
-            raise TTSProviderError(
-                f"Invalid request to remote Qwen backend: {error_msg}",
+            return TTSProviderError(
+                "Invalid request to remote Qwen backend",
                 provider=self.provider_key,
                 error_code="BAD_REQUEST",
+                details={"status": status_code},
             )
-        raise TTSProviderError(
-            f"Remote Qwen API error: {error_msg}",
+        return TTSProviderError(
+            "Remote Qwen API request failed",
             provider=self.provider_key,
             error_code=str(status_code),
+            details={"status": status_code},
         )
 
-    async def _raise_remote_error(self, exc: Exception) -> None:
+    def _normalize_remote_error(self, exc: Exception) -> TTSError:
+        """Create a sanitized domain error from a remote transport failure."""
+
         if self._is_http_status_error(exc):
-            await self._handle_http_status_error(exc)
+            return self._normalize_http_status_error(exc)
         if isinstance(exc, (CoreNetworkError, RetryExhaustedError)) or self._is_httpx_exception(exc):
             if self._is_timeout_error(exc):
-                raise timeout_error(
+                return timeout_error(
                     self.provider_key,
                     timeout_seconds=int(self.config.get("timeout") or 60),
-                ) from exc
-            raise network_error(self.provider_key, exc) from exc
-        if not isinstance(exc, TTSError):
-            raise TTSProviderError(
-                "Unexpected error in remote Qwen runtime",
+                )
+            return TTSNetworkError(
+                f"Network request to {self.provider_key} failed",
                 provider=self.provider_key,
-                details={"error": str(exc), "error_type": type(exc).__name__},
-            ) from exc
-        raise exc
+                error_code="NETWORK_ERROR",
+                details={"error_type": type(exc).__name__},
+            )
+        if isinstance(exc, TTSError):
+            return _rebuild_typed_tts_error(
+                exc,
+                provider=self.provider_key,
+                message="Remote Qwen request failed",
+            )
+        return TTSProviderError(
+            "Unexpected error in remote Qwen runtime",
+            provider=self.provider_key,
+            details={"error_type": type(exc).__name__},
+        )
+
+    async def _handle_http_status_error(self, exc: Exception) -> None:
+        """Raise the sanitized status error for compatibility with direct callers."""
+
+        safe_error = self._normalize_http_status_error(exc)
+        raise_detached_error(safe_error)
+
+    async def _raise_remote_error(self, exc: Exception) -> None:
+        """Raise the sanitized remote error for compatibility with direct callers."""
+
+        safe_error = self._normalize_remote_error(exc)
+        raise_detached_error(safe_error)
 
     async def initialize(self) -> bool:
         if not self.base_url:
@@ -278,27 +320,34 @@ class RemoteQwenRuntime:
         return headers
 
     def _build_stream_retry_policy(self) -> RetryPolicy:
-        return RetryPolicy(retry_on_unsafe=True)
+        return RetryPolicy(attempts=1)
 
     async def _stream_audio(
         self,
         headers: dict[str, str],
         payload: dict[str, Any],
     ) -> AsyncGenerator[bytes, None]:
+        safe_error: TTSError | None = None
         try:
-            async for chunk in astream_bytes(
-                method="POST",
-                url=self.base_url,
-                client=self.client,
-                headers=headers,
-                json=payload,
-                retry=self._build_stream_retry_policy(),
-                chunk_size=1024,
-            ):
-                if chunk:
-                    yield chunk
+            async with contextlib.aclosing(
+                astream_bytes(
+                    method="POST",
+                    url=self.base_url,
+                    client=self.client,
+                    headers=headers,
+                    json=payload,
+                    retry=self._build_stream_retry_policy(),
+                    chunk_size=1024,
+                    sensitive_observability=True,
+                )
+            ) as stream:
+                async for chunk in stream:
+                    if chunk:
+                        yield chunk
         except Exception as exc:
-            await self._raise_remote_error(exc)
+            safe_error = self._normalize_remote_error(exc)
+        if safe_error is not None:
+            raise_detached_error(safe_error)
 
     async def _generate_complete(self, headers: dict[str, str], payload: dict[str, Any]) -> bytes:
         response = await apost(
@@ -306,6 +355,7 @@ class RemoteQwenRuntime:
             client=self.client,
             headers=headers,
             json=payload,
+            sensitive_observability=True,
         )
         response.raise_for_status()
         return response.content
@@ -335,4 +385,5 @@ class RemoteQwenRuntime:
                 metadata={"runtime": self.runtime_name},
             )
         except Exception as exc:
-            await self._raise_remote_error(exc)
+            safe_error = self._normalize_remote_error(exc)
+        raise_detached_error(safe_error)

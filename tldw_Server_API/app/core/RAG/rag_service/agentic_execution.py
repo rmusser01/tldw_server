@@ -32,6 +32,7 @@ from tldw_Server_API.app.core.LLM_Calls.structured_output import (
 from .agentic_tools import make_default_registry
 from .evidence_models import DerivedEvidence, RetrievedEvidence
 from .hyde import (
+    _embedding_model_from_config,
     _embedding_model_spec_from_config,
     _embedding_provider_from_config,
     _record_embedding_degraded,
@@ -60,6 +61,35 @@ _EMBEDDING_SECRET_FIELD_MARKERS = (
     "secret",
     "token",
 )
+
+
+def _bounded_provider_failure_code(exc: BaseException) -> str:
+    """Map a provider failure to a stable, non-sensitive metadata code."""
+    code = str(getattr(exc, "code", "") or getattr(exc, "error_code", "") or "")
+    if code in {
+        "invalid_provider_credentials",
+        "missing_provider_credentials",
+        "provider_configuration_invalid",
+        "credential_store_unavailable",
+        "credential_scope_revoked",
+    }:
+        return code
+    if getattr(exc, "status_code", None) in {401, 403}:
+        return "invalid_provider_credentials"
+    return "provider_unavailable"
+
+
+def _record_planner_degraded(
+    stage_metadata: dict[str, Any] | None,
+    exc: BaseException,
+) -> None:
+    """Record planner trust independently from embedding-stage metadata."""
+    if stage_metadata is None:
+        return
+    stage_metadata["planner"] = {
+        "failure_code": _bounded_provider_failure_code(exc),
+        "verification_available": False,
+    }
 
 
 def _scrub_embedding_secrets(value: Any) -> Any:
@@ -732,6 +762,10 @@ async def tool_loop(
                     handle, embedding_call_kwargs = await _resolve_runtime_embedding_call(
                         credential_runtime,
                         embedding_provider,
+                        _embedding_model_from_config(
+                            loaded_config,
+                            getattr(cfg, "agentic_provider_embedding_model_id", None),
+                        ),
                     )
                 elif embedding_provider not in {"local", "local_api"}:
                     embedding_call_kwargs = _runtime_local_embedding_call_kwargs(
@@ -809,7 +843,7 @@ async def tool_loop(
                 if isinstance(obj.get("keywords"), list):
                     planned_terms = [str(item)[:40] for item in obj["keywords"]][:8]
         except (ByokResolutionError, ChatAPIError) as exc:
-            _record_embedding_degraded(stage_metadata, exc)
+            _record_planner_degraded(stage_metadata, exc)
             planned_headings = []
             planned_terms = []
         except (ImportError, AttributeError, ConnectionError, RuntimeError, TypeError, ValueError, TimeoutError):

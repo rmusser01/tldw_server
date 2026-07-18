@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from contextlib import AbstractContextManager
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from loguru import logger
@@ -26,15 +26,6 @@ try:
 except ImportError:  # pragma: no cover - optional dependency path
     _PG_ERRORS = ()
 
-_COUNTER_NONCRITICAL_ERRORS: tuple[type[BaseException], ...] = (
-    AttributeError,
-    RuntimeError,
-    TypeError,
-    ValueError,
-    *_PG_ERRORS,
-)
-
-
 def _count_from_row(row: Any) -> int:
     if row is None:
         return 0
@@ -45,6 +36,16 @@ def _count_from_row(row: Any) -> int:
 
 def _row_to_dict(row: Any) -> dict[str, Any]:
     return dict(row) if row is not None else {}
+
+
+def _future_available_at(value: datetime | None, *, now: datetime) -> datetime | None:
+    """Keep only future schedule times; immediate jobs use a NULL ready marker."""
+
+    if value is None:
+        return None
+    normalized_value = value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+    normalized_now = now.replace(tzinfo=timezone.utc) if now.tzinfo is None else now.astimezone(timezone.utc)
+    return normalized_value if normalized_value > normalized_now else None
 
 
 def _created_event_fact(
@@ -124,24 +125,6 @@ def _bump_counters(
     )
 
 
-def _bump_counters_best_effort(
-    cur: Any,
-    *,
-    command: CreateJobCommand,
-    available_at: datetime | None,
-) -> None:
-    try:
-        _bump_counters(cur, command=command, available_at=available_at)
-    except _COUNTER_NONCRITICAL_ERRORS as exc:
-        logger.warning(
-            "Non-critical Postgres jobs counter update failed for {}:{}:{}: {}",
-            command.domain,
-            command.queue,
-            command.job_type,
-            exc,
-        )
-
-
 def _quota_rejection(
     cur: Any,
     *,
@@ -194,6 +177,7 @@ def _insert_job(
     command: CreateJobCommand,
     uuid_value: str,
     payload_json: str,
+    available_at: datetime | None,
     idempotent_insert: bool,
 ) -> dict[str, Any] | None:
     if idempotent_insert:
@@ -221,7 +205,7 @@ def _insert_job(
             payload_json,
             command.priority,
             command.max_retries,
-            command.available_at if command.available_at else None,
+            available_at,
             command.request_id,
             command.trace_id,
         ),
@@ -244,6 +228,7 @@ def create_job_admission(
     """Create or replay a queued job admission inside a Postgres transaction."""
 
     payload_json = json.dumps(command.payload)
+    available_at = _future_available_at(command.available_at, now=now)
 
     with conn:
         with cursor_factory(conn) as cur:
@@ -263,6 +248,7 @@ def create_job_admission(
                     command=command,
                     uuid_value=uuid_value,
                     payload_json=payload_json,
+                    available_at=available_at,
                     idempotent_insert=True,
                 )
                 inserted = row is not None
@@ -281,7 +267,7 @@ def create_job_admission(
                         "job_type": command.job_type,
                     }
                 if inserted and counters_enabled:
-                    _bump_counters_best_effort(cur, command=command, available_at=command.available_at)
+                    _bump_counters(cur, command=command, available_at=available_at)
                 event = _insert_created_event(
                     cur,
                     row=row,
@@ -298,6 +284,7 @@ def create_job_admission(
                 command=command,
                 uuid_value=uuid_value,
                 payload_json=payload_json,
+                available_at=available_at,
                 idempotent_insert=False,
             )
             if not row:
@@ -309,7 +296,7 @@ def create_job_admission(
                     "job_type": command.job_type,
                 }
             if counters_enabled:
-                _bump_counters_best_effort(cur, command=command, available_at=command.available_at)
+                _bump_counters(cur, command=command, available_at=available_at)
             event = _insert_created_event(
                 cur,
                 row=row,

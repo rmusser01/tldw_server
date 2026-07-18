@@ -25,6 +25,9 @@ from tldw_Server_API.app.core.RAG.rag_service.agentic_execution import (
 from tldw_Server_API.app.core.RAG.rag_service.generation import generate_streaming_response
 from tldw_Server_API.app.core.RAG.rag_service.request_resolution import ResolvedRAGRequest
 from tldw_Server_API.app.core.RAG.rag_service.retrieval_plan import RetrievalPlan
+from tldw_Server_API.app.core.RAG.rag_service.runtime_provider_call import (
+    close_provider_stream,
+)
 from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import (
     normalize_documents_for_generation,
     unified_rag_pipeline,
@@ -64,6 +67,8 @@ _RAG_PROVIDER_ERROR_MESSAGES = {
     "missing_provider_credentials": "The selected provider credentials are not configured.",
     "credential_store_unavailable": "Provider credential storage is temporarily unavailable.",
     "credential_scope_revoked": "The selected provider credential scope is no longer available.",
+    "provider_disabled": "The selected provider is disabled by administrator policy.",
+    "model_not_allowed": "The selected model is not allowed for this provider.",
     "provider_configuration_invalid": "The selected provider configuration is invalid.",
     "provider_unavailable": "The selected provider is currently unavailable.",
 }
@@ -87,8 +92,10 @@ def _pipeline_context(extra_context: dict[str, Any]) -> dict[str, Any]:
 def classify_rag_provider_error(exc: BaseException) -> tuple[str, int, str] | None:
     """Return a bounded public code, status, and message for typed provider failures."""
     if isinstance(exc, ByokResolutionError):
-        code = exc.code if exc.code in _RAG_PROVIDER_ERROR_MESSAGES else "provider_configuration_invalid"
-        return code, 503, _RAG_PROVIDER_ERROR_MESSAGES[code]
+        code = getattr(exc, "policy_code", exc.code)
+        code = code if code in _RAG_PROVIDER_ERROR_MESSAGES else "provider_configuration_invalid"
+        status_code = 403 if code in {"provider_disabled", "model_not_allowed"} else 503
+        return code, status_code, _RAG_PROVIDER_ERROR_MESSAGES[code]
     if isinstance(exc, ChatBadRequestError):
         code = "provider_request_invalid"
         return code, 400, _RAG_PROVIDER_ERROR_MESSAGES[code]
@@ -614,12 +621,16 @@ async def _stream_generation_events(
     )
 
     last_overlay = None
-    async for chunk in context.stream_generator:
-        yield {"type": "delta", "text": chunk}
-        overlay = context.metadata.get("claims_overlay")
-        if overlay and overlay != last_overlay:
-            yield {"type": "claims_overlay", **overlay}
-            last_overlay = overlay
+    generation_stream = context.stream_generator
+    try:
+        async for chunk in generation_stream:
+            yield {"type": "delta", "text": chunk}
+            overlay = context.metadata.get("claims_overlay")
+            if overlay and overlay != last_overlay:
+                yield {"type": "claims_overlay", **overlay}
+                last_overlay = overlay
+    finally:
+        await close_provider_stream(generation_stream)
 
     final_overlay = context.metadata.get("claims_overlay")
     if final_overlay:
@@ -709,17 +720,21 @@ async def stream_rag_events(
         ):
             yield event
 
-        async for event in _stream_generation_events(
+        generation_events = _stream_generation_events(
             resolved_request=resolved_request,
             docs=docs,
             payload=payload,
             request_defaults=request_defaults,
             generation_streamer=generation_streamer,
             credential_runtime=context.get("credential_runtime"),
-        ):
-            if event.get("type") == "delta" and bool(event.get("text")):
-                output_emitted = True
-            yield event
+        )
+        try:
+            async for event in generation_events:
+                if event.get("type") == "delta" and bool(event.get("text")):
+                    output_emitted = True
+                yield event
+        finally:
+            await close_provider_stream(generation_events)
         yield rag_complete_event(output_emitted=output_emitted)
     except asyncio.CancelledError:
         raise

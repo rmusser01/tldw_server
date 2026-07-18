@@ -2,6 +2,16 @@ import configparser
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _healthy_provider_override_snapshot():
+    """Keep this lightweight router test independent of app-startup refresh."""
+    from tldw_Server_API.app.core.AuthNZ import llm_provider_overrides
+
+    llm_provider_overrides.set_llm_provider_overrides_cache_for_tests({})
+    yield
+    llm_provider_overrides.set_llm_provider_overrides_cache_for_tests({})
+
+
 def _fake_config():
     cfg = configparser.ConfigParser()
     cfg.add_section("API")
@@ -77,6 +87,61 @@ def test_llm_providers_merges_adapter_capabilities_from_envelope(monkeypatch, ll
         "availability": "enabled",
         "capabilities": {"json_mode": True, "supports_tools": True, "extra_cap": "adapter"},
     }
+
+
+def test_public_llm_providers_never_exposes_private_override_envelope(
+    monkeypatch,
+    llm_client,
+):
+    import tldw_Server_API.app.api.v1.endpoints.llm_providers as llm_endpoints
+    import tldw_Server_API.app.core.config as core_config
+    import tldw_Server_API.app.core.LLM_Calls.adapter_registry as reg_mod
+    from tldw_Server_API.app.core.AuthNZ import llm_provider_overrides
+
+    class _DummyReg:
+        def list_capabilities(self, include_disabled=True):
+            assert include_disabled is True
+            return []
+
+    original = llm_provider_overrides.get_llm_provider_overrides_snapshot()
+    monkeypatch.setattr(core_config, "load_comprehensive_config", _fake_config)
+    monkeypatch.setattr(llm_endpoints, "load_comprehensive_config", _fake_config)
+    monkeypatch.setattr(reg_mod, "get_registry", lambda: _DummyReg())
+    llm_provider_overrides.set_llm_provider_overrides_cache_for_tests(
+        {
+            "openai": llm_provider_overrides.LLMProviderOverride(
+                provider="openai",
+                is_enabled=False,
+                allowed_models=["gpt-4o-mini"],
+                config={"private_canary": "public-hidden-config"},
+                api_key="public-hidden-key",
+                api_key_hint="public-hidden-hint",
+                credential_fields={"org_id": "public-hidden-org"},
+            )
+        }
+    )
+
+    try:
+        response = llm_client.get("/api/v1/llm/providers")
+    finally:
+        llm_provider_overrides.set_llm_provider_overrides_cache_for_tests(original)
+
+    assert response.status_code == 200, response.text
+    openai = next(
+        provider
+        for provider in response.json()["providers"]
+        if provider["name"] == "openai"
+    )
+    assert openai["enabled"] is False
+    assert openai["models"] == ["gpt-4o-mini"]
+    assert "override" not in openai
+    for hidden in (
+        "public-hidden-config",
+        "public-hidden-key",
+        "public-hidden-hint",
+        "public-hidden-org",
+    ):
+        assert hidden not in response.text
 
 
 def test_llm_providers_legacy_capabilities_fallback(monkeypatch, llm_client):
@@ -271,3 +336,31 @@ def test_llm_providers_exposes_reserved_key_when_mapping_configured(monkeypatch,
     controls = _provider_by_display_name(response.json(), "Llama.cpp")["llama_cpp_controls"]
     assert controls["thinking_budget"]["request_key"] == "reasoning_budget"
     assert "reasoning_budget" in controls["reserved_extra_body_keys"]
+
+
+def test_public_llm_providers_applies_override_merge_once(monkeypatch, llm_client):
+    import tldw_Server_API.app.api.v1.endpoints.llm_providers as llm_endpoints
+
+    merge_calls = 0
+    payload = {
+        "providers": [{"name": "openai", "models": ["gpt-4o-mini"]}],
+        "default_provider": "openai",
+        "total_configured": 1,
+    }
+
+    async def configured_providers(**_kwargs):
+        return payload
+
+    def merge_once(value):
+        nonlocal merge_calls
+        merge_calls += 1
+        return value
+
+    monkeypatch.setattr(llm_endpoints, "get_configured_providers_async", configured_providers)
+    monkeypatch.setattr(llm_endpoints, "load_comprehensive_config", configparser.ConfigParser)
+    monkeypatch.setattr(llm_endpoints, "apply_llm_provider_overrides_to_listing", merge_once)
+
+    response = llm_client.get("/api/v1/llm/providers")
+
+    assert response.status_code == 200, response.text
+    assert merge_calls == 1

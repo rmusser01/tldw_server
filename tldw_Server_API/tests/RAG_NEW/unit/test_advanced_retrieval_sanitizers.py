@@ -44,10 +44,12 @@ class _CredentialRuntime:
             credentials_resolved=True,
         )
         self.resolved: list[str] = []
+        self.resolved_models: list[str | None] = []
         self.marked: list[Any] = []
 
-    async def resolve(self, provider: str):
+    async def resolve(self, provider: str, *, model: str | None = None):
         self.resolved.append(provider)
+        self.resolved_models.append(model)
         return self.handle
 
     async def mark_used(self, handle: Any) -> None:
@@ -170,6 +172,7 @@ async def test_multi_vector_uses_runtime_credentials_for_hosted_huggingface(monk
 
     assert result
     assert runtime.resolved == ["huggingface"]
+    assert runtime.resolved_models == ["sentence-transformers/runtime-model"]
     assert runtime.marked == [runtime.handle]
     expected = {
         "provider": "huggingface",
@@ -181,6 +184,81 @@ async def test_multi_vector_uses_runtime_credentials_for_hosted_huggingface(monk
     assert captured[0] == {"text": "alpha", "user_id": None, **expected}
     assert captured[1]["user_id"] is None
     assert {key: captured[1][key] for key in expected} == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.concurrent
+async def test_concurrent_multi_vector_resolves_each_effective_hosted_model(monkeypatch):
+    """Overlapping hosted stages must not authorize a sibling stage's model."""
+    both_resolved = asyncio.Event()
+    release = asyncio.Event()
+    resolve_count = 0
+
+    class _BlockingRuntime(_CredentialRuntime):
+        async def resolve(self, provider: str, *, model: str | None = None):
+            nonlocal resolve_count
+            handle = await super().resolve(provider, model=model)
+            resolve_count += 1
+            if resolve_count == 2:
+                both_resolved.set()
+            await asyncio.wait_for(release.wait(), timeout=5)
+            return handle
+
+    class _HostedService:
+        def __init__(self, provider: str, model: str):
+            self.config = SimpleNamespace(
+                default_provider=provider,
+                default_model=model,
+            )
+
+        def _resolve_provider_alias(self, provider: str) -> str:
+            return provider
+
+        async def create_embedding(self, **kwargs):
+            callback = kwargs.get("on_provider_success")
+            if callback is not None:
+                await callback()
+            return [1.0, 0.0]
+
+        async def create_embeddings_batch(self, texts, **kwargs):
+            callback = kwargs.get("on_provider_success")
+            if callback is not None:
+                await callback()
+            return [[1.0, 0.0] for _ in texts]
+
+    services = iter(
+        [
+            _HostedService("openai", "text-embedding-alpha"),
+            _HostedService("huggingface", "org/embedding-beta"),
+        ]
+    )
+    monkeypatch.setattr(ar, "get_async_embedding_service", lambda: next(services))
+    alpha_runtime = _BlockingRuntime("openai")
+    beta_runtime = _BlockingRuntime("huggingface")
+
+    alpha = asyncio.create_task(
+        ar.apply_multi_vector_passages(
+            "alpha",
+            _docs(),
+            credential_runtime=alpha_runtime,
+        )
+    )
+    beta = asyncio.create_task(
+        ar.apply_multi_vector_passages(
+            "beta",
+            _docs(),
+            credential_runtime=beta_runtime,
+        )
+    )
+    try:
+        await asyncio.wait_for(both_resolved.wait(), timeout=5)
+    finally:
+        release.set()
+
+    assert await alpha
+    assert await beta
+    assert alpha_runtime.resolved_models == ["text-embedding-alpha"]
+    assert beta_runtime.resolved_models == ["org/embedding-beta"]
 
 
 @pytest.mark.asyncio
@@ -302,7 +380,7 @@ async def test_concurrent_multi_vector_remote_local_aliases_keep_deployments_iso
 @pytest.mark.asyncio
 async def test_multi_vector_missing_hosted_key_degrades_with_bounded_metadata(monkeypatch):
     class _MissingKeyRuntime:
-        async def resolve(self, provider: str):
+        async def resolve(self, provider: str, *, model: str | None = None):
             return SimpleNamespace(provider=provider, api_key=None, app_config={})
 
     class _HostedService:
@@ -334,7 +412,7 @@ async def test_multi_vector_runtime_failure_sets_bounded_coverage_metadata(monke
     from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
 
     class _FailingRuntime:
-        async def resolve(self, provider: str):
+        async def resolve(self, provider: str, *, model: str | None = None):
             raise ByokResolutionError("invalid_provider_credentials", provider)
 
     class _HostedService:
@@ -463,7 +541,7 @@ async def test_multi_vector_span_dispatch_marks_after_query_cache_hit(monkeypatc
 @pytest.mark.asyncio
 async def test_multi_vector_credential_resolution_cancellation_propagates(monkeypatch):
     class _CancelledRuntime:
-        async def resolve(self, provider: str):
+        async def resolve(self, provider: str, *, model: str | None = None):
             raise asyncio.CancelledError
 
     class _HostedService:
@@ -524,12 +602,101 @@ async def test_media_retriever_hosted_query_embedding_uses_runtime_credentials(m
 
     assert [document.id for document in documents] == ["doc"]
     assert runtime.resolved == ["openai"]
+    assert runtime.resolved_models == ["text-embedding-3-small"]
     assert runtime.marked == [runtime.handle]
     assert captured["kwargs"] == {
         "api_key_override": "runtime-embedding-key",
         "base_url_override": "https://user-embeddings.example/v1",
         "credentials_resolved": True,
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.concurrent
+async def test_concurrent_media_retrievers_resolve_each_selected_embedding_model(
+    monkeypatch,
+):
+    """Concurrent vector queries preserve each selected config generation."""
+    from tldw_Server_API.app.core.Embeddings.Embeddings_Server import Embeddings_Create
+
+    both_resolved = asyncio.Event()
+    release = asyncio.Event()
+    resolve_count = 0
+
+    class _BlockingRuntime(_CredentialRuntime):
+        async def resolve(self, provider: str, *, model: str | None = None):
+            nonlocal resolve_count
+            handle = await super().resolve(provider, model=model)
+            resolve_count += 1
+            if resolve_count == 2:
+                both_resolved.set()
+            await asyncio.wait_for(release.wait(), timeout=5)
+            return handle
+
+    class _VectorStore:
+        _initialized = True
+
+        async def search(self, **_kwargs):
+            return []
+
+    configs = iter(
+        [
+            {
+                "embedding_config": {
+                    "default_model_id": "openai:text-embedding-alpha",
+                    "models": {
+                        "openai:text-embedding-alpha": SimpleNamespace(provider="openai")
+                    },
+                }
+            },
+            {
+                "embedding_config": {
+                    "default_model_id": "openai:text-embedding-beta",
+                    "models": {
+                        "openai:text-embedding-beta": SimpleNamespace(provider="openai")
+                    },
+                }
+            },
+        ]
+    )
+    monkeypatch.setattr(Embeddings_Create, "get_embedding_config", lambda: next(configs))
+    monkeypatch.setattr(
+        Embeddings_Create,
+        "create_embeddings_batch",
+        lambda *_args, **_kwargs: [[1.0, 0.0]],
+    )
+
+    def build_retriever(runtime):
+        retriever = object.__new__(dr.MediaDBRetriever)
+        retriever.vector_store = _VectorStore()
+        retriever.user_id = "42"
+        retriever.config = dr.RetrievalConfig(max_results=3, use_vector=True, use_fts=False)
+        retriever.credential_runtime = runtime
+        return retriever
+
+    alpha_runtime = _BlockingRuntime("openai")
+    beta_runtime = _BlockingRuntime("openai")
+    alpha = asyncio.create_task(
+        build_retriever(alpha_runtime)._retrieve_vector(
+            "alpha",
+            index_namespace="alpha-index",
+        )
+    )
+    beta = asyncio.create_task(
+        build_retriever(beta_runtime)._retrieve_vector(
+            "beta",
+            index_namespace="beta-index",
+        )
+    )
+    try:
+        await asyncio.wait_for(both_resolved.wait(), timeout=5)
+    finally:
+        release.set()
+
+    await alpha
+    await beta
+    assert alpha_runtime.resolved_models == ["text-embedding-alpha"]
+    assert beta_runtime.resolved_models == ["text-embedding-beta"]
 
 
 @pytest.mark.asyncio
@@ -602,7 +769,7 @@ async def test_required_media_missing_hosted_key_raises_bounded_configuration_er
     from tldw_Server_API.app.core.Embeddings.Embeddings_Server import Embeddings_Create
 
     class _MissingKeyRuntime:
-        async def resolve(self, provider: str):
+        async def resolve(self, provider: str, *, model: str | None = None):
             return SimpleNamespace(
                 provider=provider,
                 api_key=None,
@@ -798,6 +965,7 @@ async def test_media_scoped_model_override_resolves_its_actual_hosted_provider(m
     )
 
     assert runtime.resolved == ["openai"]
+    assert runtime.resolved_models == ["text-embedding-3-small"]
     assert captured["model_id_override"] == "openai:text-embedding-3-small"
     assert captured["kwargs"]["credentials_resolved"] is True
 

@@ -7,6 +7,9 @@ from typing import Any, Optional, Union
 
 from loguru import logger
 
+from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+    ProviderCallCredentials,
+)
 from tldw_Server_API.app.core.DB_Management.PromptStudioDatabase import (
     ConflictError,
     DatabaseError,
@@ -240,7 +243,16 @@ class TestCaseManager:
                               test_case_ids: list[int],
                               model: str = "gpt-3.5-turbo",
                               temperature: float = 0.7,
-                              max_tokens: int = 1000) -> list[dict[str, Any]]:
+                              max_tokens: int = 1000,
+                              provider: str = "openai",
+                              app_config: Optional[dict[str, Any]] = None,
+                              api_key_override: Optional[str] = None,
+                              credentials_resolved: bool = False,
+                              provider_credentials: ProviderCallCredentials | None = None,
+                              timeout_seconds: Optional[float] = None,
+                              strict_provider_errors: bool = False,
+                              on_provider_success: Any = None,
+                              ) -> list[dict[str, Any]]:
         """Run multiple test cases (async wrapper).
 
         Delegates to TestRunner.run_multiple_tests. Exists to match test patch targets.
@@ -254,10 +266,20 @@ class TestCaseManager:
                 model=model,
                 temperature=temperature,
                 max_tokens=max_tokens,
-                parallel=False
+                parallel=False,
+                provider=provider,
+                app_config=app_config,
+                api_key_override=api_key_override,
+                credentials_resolved=credentials_resolved,
+                provider_credentials=provider_credentials,
+                timeout_seconds=timeout_seconds,
+                strict_provider_errors=strict_provider_errors,
+                on_provider_success=on_provider_success,
             )
         except Exception as e:
-            logger.error(f"run_batch_tests failed: {e}")
+            if strict_provider_errors:
+                raise
+            logger.error("run_batch_tests failed; error_type={}", type(e).__name__)
             return []
 
     def get_golden_test_cases(self, project_id: int) -> list[dict[str, Any]]:

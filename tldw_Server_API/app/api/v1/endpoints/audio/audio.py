@@ -111,39 +111,43 @@ from tldw_Server_API.app.core.Audio.tts_service import (
     _tts_fallback_resolver,
 )
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
-    record_byok_missing_credentials,
+    ByokResolutionError,
+    ResolvedByokCredentials,
+)
+from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
     resolve_byok_credentials as _default_resolve_byok_credentials,
 )
 from tldw_Server_API.app.core.config import load_comprehensive_config as _load_comprehensive_config
+from tldw_Server_API.app.core.exceptions import TTSPublicHTTPException
 
 # Re-export config loader for tests to monkeypatch
 load_comprehensive_config = _load_comprehensive_config
 resolve_byok_credentials = _default_resolve_byok_credentials
 
-_TTS_API_KEY_REQUIRED_PROVIDERS = {"openai", "elevenlabs", "fish_s2"}
+
+_TTS_CREDENTIAL_ERROR_MESSAGES = {
+    "invalid_provider_credentials": "The selected provider credentials are invalid.",
+    "credential_store_unavailable": "Provider credential storage is temporarily unavailable.",
+    "credential_scope_revoked": "The selected provider credential scope is no longer available.",
+    "provider_disabled": "The selected provider is disabled by administrator policy.",
+    "model_not_allowed": "The selected model is not allowed for this provider.",
+}
 
 
-def _normalize_tts_provider_hint(provider_hint: Optional[str]) -> str:
-    """Normalize TTS provider hints for credential requirement checks."""
-    return str(provider_hint or "").strip().lower().replace("-", "_")
-
-
-def _resolved_api_key(value: object) -> Optional[str]:
-    """Return a non-empty API key string, or None for blank/missing values."""
-    if not isinstance(value, str):
-        return None
-    stripped = value.strip()
-    return stripped or None
-
-
-def _raise_missing_tts_credentials(provider_hint: str) -> None:
-    record_byok_missing_credentials(provider_hint, operation="audio_tts")
-    raise HTTPException(
-        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-        detail={
-            "error_code": "missing_provider_credentials",
-            "message": f"TTS provider '{provider_hint}' requires an API key.",
-        },
+def _tts_credential_http_exception(exc: ByokResolutionError) -> HTTPException:
+    """Map typed TTS credential failures to bounded public responses."""
+    code = getattr(exc, "policy_code", exc.code)
+    message = _TTS_CREDENTIAL_ERROR_MESSAGES.get(code)
+    if message is None:
+        code = "invalid_provider_credentials"
+        message = _TTS_CREDENTIAL_ERROR_MESSAGES[code]
+    return TTSPublicHTTPException(
+        status_code=(
+            status.HTTP_403_FORBIDDEN
+            if code in {"provider_disabled", "model_not_allowed", "credential_scope_revoked"}
+            else status.HTTP_503_SERVICE_UNAVAILABLE
+        ),
+        detail={"error_code": code, "message": message},
     )
 
 
@@ -176,56 +180,30 @@ async def _resolve_tts_byok(
     provider_hint: Optional[str],
     current_user,
     request,
+    model: Optional[str] = None,
     force_oauth_refresh: bool = False,
+    rejected_credentials: Optional[ResolvedByokCredentials] = None,
 ):
-    """Wrapper to preserve audio.py patch points for BYOK resolution."""
-    if not provider_hint:
-        from tldw_Server_API.app.core.Audio import tts_service as core_tts_service
+    """Delegate TTS credential resolution to the single core implementation."""
+    from tldw_Server_API.app.core.Audio import tts_service as core_tts_service
 
-        return await core_tts_service._resolve_tts_byok(
-            provider_hint=provider_hint,
-            current_user=current_user,
-            request=request,
-            force_oauth_refresh=force_oauth_refresh,
-        )
-
-    user_id_int = None
+    kwargs = {
+        "provider_hint": provider_hint,
+        "current_user": current_user,
+        "request": request,
+        "force_oauth_refresh": force_oauth_refresh,
+    }
+    if rejected_credentials is not None:
+        kwargs["rejected_credentials"] = rejected_credentials
+    if model is not None:
+        kwargs["model"] = model
+    resolver = _resolve_tts_byok_resolver()
+    if resolver is not _default_resolve_byok_credentials:
+        kwargs["credential_resolver"] = resolver
     try:
-        user_id_int = getattr(current_user, "id_int", None)
-        if user_id_int is None:
-            raw_id = getattr(current_user, "id", None)
-            if raw_id is not None:
-                user_id_int = int(raw_id)
-    except (AttributeError, TypeError, ValueError):
-        logger.debug("Failed to extract user_id from current_user")
-        user_id_int = None
-
-    tts_overrides = None
-    byok_tts_resolution = None
-    if provider_hint:
-        resolver = _resolve_tts_byok_resolver()
-        byok_tts_resolution = await resolver(
-            provider_hint,
-            user_id=user_id_int,
-            request=request,
-            fallback_resolver=_tts_fallback_resolver,
-            force_oauth_refresh=force_oauth_refresh,
-        )
-        provider_key = _normalize_tts_provider_hint(provider_hint)
-        resolved_api_key = _resolved_api_key(byok_tts_resolution.api_key)
-        requires_api_key = provider_key in _TTS_API_KEY_REQUIRED_PROVIDERS
-        if byok_tts_resolution.uses_byok:
-            if not resolved_api_key and requires_api_key:
-                _raise_missing_tts_credentials(provider_hint)
-            if resolved_api_key:
-                tts_overrides = {"api_key": resolved_api_key}
-            base_url = byok_tts_resolution.credential_fields.get("base_url")
-            if tts_overrides is not None and isinstance(base_url, str) and base_url.strip():
-                tts_overrides["base_url"] = base_url.strip()
-        elif not resolved_api_key and requires_api_key:
-            _raise_missing_tts_credentials(provider_hint)
-
-    return user_id_int, tts_overrides, byok_tts_resolution
+        return await core_tts_service._resolve_tts_byok(**kwargs)
+    except ByokResolutionError as exc:
+        raise _tts_credential_http_exception(exc) from None
 
 
 def _get_failopen_cap_minutes() -> float:

@@ -44,6 +44,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.errors import (
 )
 
 from .hyde import (
+    _embedding_model_from_config,
     _embedding_provider_from_config,
     _mark_runtime_used_for_embeddings,
     _resolve_runtime_embedding_call,
@@ -1794,6 +1795,10 @@ class MediaDBRetriever(BaseRetriever):
                             handle, call_kwargs = await _resolve_runtime_embedding_call(
                                 credential_runtime,
                                 provider,
+                                _embedding_model_from_config(
+                                    user_app_config,
+                                    model_id_override,
+                                ),
                             )
                         else:
                             call_kwargs = _runtime_local_embedding_call_kwargs(

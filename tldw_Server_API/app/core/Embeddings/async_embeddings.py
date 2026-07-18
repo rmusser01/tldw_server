@@ -22,7 +22,11 @@ from tldw_Server_API.app.core.Embeddings.multi_tier_cache import get_multi_tier_
 from tldw_Server_API.app.core.Embeddings.rate_limiter import get_async_rate_limiter
 from tldw_Server_API.app.core.Embeddings.request_batching import get_batcher
 from tldw_Server_API.app.core.Embeddings.simplified_config import get_config
+from tldw_Server_API.app.core.Embeddings.vector_validation import (
+    validated_embedding_vectors,
+)
 from tldw_Server_API.app.core.exceptions import NetworkError, RetryExhaustedError
+from tldw_Server_API.app.core.LLM_Calls.payload_utils import encode_huggingface_model_path
 from tldw_Server_API.app.core.Utils.tokenizer import count_tokens as _count_tokens
 
 _ASYNC_EMBEDDINGS_NONCRITICAL_EXCEPTIONS = (
@@ -73,7 +77,7 @@ class EmbeddingEndpointError(ValueError):
 class EmbeddingProviderError(RuntimeError):
     """Sanitized failure returned by an execution-scoped embedding provider."""
 
-    _CODES = frozenset({"authentication", "provider_failure"})
+    _CODES = frozenset({"authentication", "malformed_response", "provider_failure"})
 
     def __init__(self, provider: str, *, code: str, status_code: int | None = None) -> None:
         normalized = "".join(
@@ -88,19 +92,23 @@ class EmbeddingProviderError(RuntimeError):
 
 def _validate_runtime_embedding_vector(value: Any, provider: str) -> list[float]:
     """Return one finite numeric vector or raise a sanitized provider error."""
-    try:
-        array = np.asarray(value)
-        if (
-            array.ndim != 1
-            or array.size == 0
-            or not np.issubdtype(array.dtype, np.number)
-        ):
-            raise ValueError
-        if not np.isfinite(array).all():
-            raise ValueError
-        return value if isinstance(value, list) else array.tolist()
-    except _ASYNC_EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
-        raise EmbeddingProviderError(provider, code="provider_failure") from None
+    validated = validated_embedding_vectors([value], expected=1)
+    if validated is None:
+        raise EmbeddingProviderError(provider, code="malformed_response") from None
+    return validated[0]
+
+
+def _validate_runtime_embedding_batch(
+    values: object,
+    *,
+    expected: int,
+    provider: str,
+) -> list[list[float]]:
+    """Return a complete, finite, consistently sized embedding batch."""
+    validated = validated_embedding_vectors(values, expected=expected)
+    if validated is None:
+        raise EmbeddingProviderError(provider, code="malformed_response") from None
+    return validated
 
 
 def _embedding_error_status(value: Any) -> int | None:
@@ -340,6 +348,8 @@ class AsyncHuggingFaceProvider(AsyncEmbeddingProvider):
     ) -> list[float]:
         """Create embedding using HuggingFace API"""
 
+        model_path = encode_huggingface_model_path(model)
+
         # Check rate limit
         if user_id:
             try:
@@ -365,7 +375,7 @@ class AsyncHuggingFaceProvider(AsyncEmbeddingProvider):
                 raise Exception(f"Rate limit exceeded.{retry_after_msg}")
 
         base_url = base_url_override or (self.default_base_url if credentials_resolved is True else self.base_url)
-        url = f"{base_url.rstrip('/')}/{model}"
+        url = f"{base_url.rstrip('/')}/{model_path}"
 
         # Get connection pool for this provider
         pool = self.pool_manager.get_pool(self.provider_name)
@@ -821,8 +831,8 @@ class AsyncEmbeddingService:
                     text, model, provider, user_id, e
                 )
 
+        embedding = _validate_runtime_embedding_vector(embedding, actual_provider)
         if primary_provider_dispatched and on_provider_success is not None:
-            embedding = _validate_runtime_embedding_vector(embedding, provider)
             await on_provider_success()
 
         # Cache the result
@@ -886,6 +896,7 @@ class AsyncEmbeddingService:
         Returns:
             List of embedding vectors
         """
+        effective_provider = self._resolve_provider_alias(provider or self.config.default_provider)
         if parallel:
             # Process in parallel
             tasks = [
@@ -901,7 +912,7 @@ class AsyncEmbeddingService:
                 )
                 for text in texts
             ]
-            return await asyncio.gather(*tasks)
+            embeddings = await asyncio.gather(*tasks)
         else:
             # Process sequentially
             embeddings = []
@@ -917,7 +928,11 @@ class AsyncEmbeddingService:
                     on_provider_success=on_provider_success,
                 )
                 embeddings.append(embedding)
-            return embeddings
+        return _validate_runtime_embedding_batch(
+            embeddings,
+            expected=len(texts),
+            provider=effective_provider,
+        )
 
     async def _try_fallback_providers(
         self,

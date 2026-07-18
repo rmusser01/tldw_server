@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import base64
 import json
+import sqlite3
 import uuid
+from datetime import datetime, timezone
 
 import pytest
 
@@ -12,6 +13,107 @@ pytest_plugins = ("tldw_Server_API.tests._plugins.authnz_full_fixtures",)
 
 def _b64_key(byte_char: bytes) -> str:
     return base64.b64encode(byte_char * 32).decode("ascii")
+
+
+@pytest.mark.asyncio
+async def test_legacy_nullable_owner_fails_active_read_and_cas_sqlite(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    """Legacy NULL owner state is never treated as active credential ownership."""
+    from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
+    from tldw_Server_API.app.core.AuthNZ.repos.user_provider_secrets_repo import (
+        AuthnzUserProviderSecretsRepo,
+    )
+    from tldw_Server_API.app.core.AuthNZ.settings import Settings, reset_settings
+    from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
+        build_secret_payload,
+        encrypt_byok_payload,
+    )
+
+    monkeypatch.setenv("BYOK_ENCRYPTION_KEY", _b64_key(b"k"))
+    reset_settings()
+    db_path = tmp_path / "legacy-nullable-users.db"
+    now = datetime.now(timezone.utc)
+    original_blob = json.dumps(
+        encrypt_byok_payload(build_secret_payload("sk-original-legacy-key"))
+    )
+    replacement_blob = json.dumps(
+        encrypt_byok_payload(build_secret_payload("sk-replacement-must-not-persist"))
+    )
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE users (
+                id INTEGER PRIMARY KEY,
+                is_active INTEGER DEFAULT 1
+            );
+            CREATE TABLE user_provider_secrets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                provider TEXT NOT NULL,
+                encrypted_blob TEXT NOT NULL,
+                key_hint TEXT,
+                metadata TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                last_used_at TEXT,
+                created_by INTEGER,
+                updated_by INTEGER,
+                revoked_by INTEGER,
+                revoked_at TEXT,
+                UNIQUE(user_id, provider)
+            );
+            """
+        )
+        conn.execute("INSERT INTO users (id, is_active) VALUES (?, ?)", (1, None))
+        conn.execute(
+            """
+            INSERT INTO user_provider_secrets (
+                user_id, provider, encrypted_blob, key_hint, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (1, "openai", original_blob, "legacy", now.isoformat(), now.isoformat()),
+        )
+
+    settings = Settings(
+        AUTH_MODE="multi_user",
+        DATABASE_URL=f"sqlite:///{db_path}",
+        JWT_SECRET_KEY="legacy-nullable-test-key-32-characters!",
+    )
+    pool = DatabasePool(settings)
+    pool.db_path = str(db_path)
+    pool._sqlite_fs_path = str(db_path)
+    pool._sqlite_uri = False
+    pool._initialized = True
+    repo = AuthnzUserProviderSecretsRepo(pool)
+    try:
+        columns = await pool.fetchall("PRAGMA table_info(users)")
+        active_column = next(row for row in columns if row["name"] == "is_active")
+        assert active_column["notnull"] == 0
+
+        assert await repo.fetch_secret_for_active_user(
+            1,
+            "openai",
+            include_revoked=True,
+        ) is None
+        assert not await repo.update_secret_if_active_and_unchanged(
+            user_id=1,
+            provider="openai",
+            encrypted_blob=replacement_blob,
+            expected_encrypted_blob=original_blob,
+            key_hint="replacement",
+            metadata=None,
+            updated_at=now,
+            updated_by=1,
+        )
+
+        stored = await repo.fetch_secret_for_user(1, "openai", include_revoked=True)
+        assert stored is not None
+        assert stored["encrypted_blob"] == original_blob
+    finally:
+        await pool.close()
+        reset_settings()
 
 
 @pytest.mark.asyncio
@@ -83,6 +185,20 @@ async def test_user_provider_secrets_repo_sqlite(tmp_path, monkeypatch) -> None:
     assert row["key_hint"] == key_hint
     assert row["created_by"] == user_id
     assert row["updated_by"] == user_id
+
+    active_owner_row = await repo.fetch_secret_for_active_user(
+        user_id,
+        "openai",
+        include_revoked=True,
+    )
+    assert active_owner_row is not None
+    await pool.execute("UPDATE users SET is_active = 0 WHERE id = ?", (user_id,))
+    assert await repo.fetch_secret_for_active_user(
+        user_id,
+        "openai",
+        include_revoked=True,
+    ) is None
+    await pool.execute("UPDATE users SET is_active = 1 WHERE id = ?", (user_id,))
 
     items = await repo.list_secrets_for_user(user_id)
     assert len(items) == 1

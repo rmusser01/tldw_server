@@ -5,11 +5,11 @@ import os
 from collections.abc import AsyncIterator, Iterable
 from typing import Any
 
-from tldw_Server_API.app.core.LLM_Calls.capability_registry import validate_payload
 from tldw_Server_API.app.core.LLM_Calls.cache_intents import (
     apply_billing_prompt_cache_intent,
     attach_cache_intent_metadata,
 )
+from tldw_Server_API.app.core.LLM_Calls.capability_registry import validate_payload
 from tldw_Server_API.app.core.LLM_Calls.payload_utils import merge_extra_body, merge_extra_headers
 from tldw_Server_API.app.core.LLM_Calls.sse import (
     finalize_stream,
@@ -88,6 +88,8 @@ class OpenRouterAdapter(ChatProvider):
                 return base.strip()
         except _OPENROUTER_CONFIG_EXCEPTIONS:
             pass
+        if request.get("credentials_resolved") is True:
+            return "https://openrouter.ai/api/v1"
         return self._base_url()
 
     def _resolve_timeout(self, request: dict[str, Any], fallback: float | None) -> float:
@@ -110,16 +112,18 @@ class OpenRouterAdapter(ChatProvider):
         """Build headers including OpenRouter-specific metadata.
 
         - Authorization: Bearer <key>
-        - HTTP-Referer: site URL (from config or env), defaults to http://localhost
+        - HTTP-Referer: site URL (from config or env), defaults to OpenRouter
         - X-Title: site name (from config or env), defaults to TLDW-API
         """
         h = {"Content-Type": "application/json"}
         if api_key:
             h["Authorization"] = f"Bearer {api_key}"
 
-        # Preserve provider-specific header quirks used by OpenRouter
-        site_url = os.getenv("OPENROUTER_SITE_URL")
-        site_name = os.getenv("OPENROUTER_SITE_NAME")
+        # A resolved request owns an authoritative snapshot, including absence.
+        # Only legacy/unresolved calls may consult the live process environment.
+        credentials_resolved = (request or {}).get("credentials_resolved") is True
+        site_url = None if credentials_resolved else os.getenv("OPENROUTER_SITE_URL")
+        site_name = None if credentials_resolved else os.getenv("OPENROUTER_SITE_NAME")
         try:
             cfg = (request or {}).get("app_config") or {}
             or_cfg = cfg.get("openrouter_api") or {}
@@ -181,6 +185,7 @@ class OpenRouterAdapter(ChatProvider):
         return payload
 
     def chat(self, request: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
+        request = self._bind_request_credentials(request)
         request = validate_payload(self.name, request or {})
         if _prefer_httpx_in_tests() or os.getenv("PYTEST_CURRENT_TEST") or self._use_native_http():
             api_key = request.get("api_key")
@@ -196,14 +201,17 @@ class OpenRouterAdapter(ChatProvider):
                 with http_client_factory(timeout=resolved_timeout) as client:
                     resp = client.post(url, headers=headers, json=payload)
                     resp.raise_for_status()
-                    return attach_cache_intent_metadata(resp.json(), cache_intent_diagnostic)
+                    data = resp.json()
+                    self._raise_if_in_band_provider_error(data, phase="chat_response")
+                    return attach_cache_intent_metadata(data, cache_intent_diagnostic)
             except _OPENROUTER_CLIENT_EXCEPTIONS as e:
-                raise self.normalize_error(e) from e
+                self._raise_sanitized_provider_failure(e, phase="chat")
 
         # Native disabled -> error to avoid legacy recursion
         raise RuntimeError("OpenRouterAdapter native HTTP disabled by configuration")
 
     def stream(self, request: dict[str, Any], *, timeout: float | None = None) -> Iterable[str]:
+        request = self._bind_request_credentials(request)
         request = validate_payload(self.name, request or {})
         if _prefer_httpx_in_tests() or os.getenv("PYTEST_CURRENT_TEST") or self._use_native_http():
             api_key = request.get("api_key")
@@ -227,6 +235,10 @@ class OpenRouterAdapter(ChatProvider):
                                 line = raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else str(raw)
                             except _OPENROUTER_DECODE_EXCEPTIONS:
                                 line = str(raw)
+                            self._raise_if_in_band_provider_error(
+                                line,
+                                phase="stream_response",
+                            )
                             if is_done_line(line):
                                 if not seen_done:
                                     seen_done = True
@@ -238,7 +250,7 @@ class OpenRouterAdapter(ChatProvider):
                         yield from finalize_stream(response=resp, done_already=seen_done)
                 return
             except _OPENROUTER_CLIENT_EXCEPTIONS as e:
-                raise self.normalize_error(e) from e
+                self._raise_sanitized_provider_failure(e, phase="stream")
 
         # Native disabled -> error to avoid legacy recursion
         raise RuntimeError("OpenRouterAdapter native HTTP disabled by configuration")
@@ -251,47 +263,5 @@ class OpenRouterAdapter(ChatProvider):
             yield item
 
     def normalize_error(self, exc: Exception):  # type: ignore[override]
-        """Parse OpenRouter error payloads and map to Chat*Error types.
-
-        OpenRouter is OpenAI-compatible; error bodies often match {error: {message, type}}.
-        """
-        from tldw_Server_API.app.core.LLM_Calls.error_utils import (
-            get_http_error_text,
-            get_http_status_from_exception,
-            is_http_status_error,
-            log_http_400_body,
-        )
-        if is_http_status_error(exc):
-            from tldw_Server_API.app.core.Chat.Chat_Deps import (
-                ChatAPIError,
-                ChatAuthenticationError,
-                ChatBadRequestError,
-                ChatProviderError,
-                ChatRateLimitError,
-            )
-            resp = getattr(exc, "response", None)
-            status = get_http_status_from_exception(exc)
-            body = None
-            try:
-                body = resp.json()
-            except (AttributeError, TypeError, ValueError):
-                body = None
-            log_http_400_body(self.name, exc, body)
-            detail = None
-            if isinstance(body, dict) and isinstance(body.get("error"), dict):
-                eobj = body["error"]
-                msg = (eobj.get("message") or "").strip()
-                typ = (eobj.get("type") or "").strip()
-                detail = (f"{typ} {msg}" if typ else msg) or str(exc)
-            else:
-                detail = get_http_error_text(exc)
-            if status in (400, 404, 422):
-                return ChatBadRequestError(provider=self.name, message=str(detail))
-            if status in (401, 403):
-                return ChatAuthenticationError(provider=self.name, message=str(detail))
-            if status == 429:
-                return ChatRateLimitError(provider=self.name, message=str(detail))
-            if status and 500 <= status < 600:
-                return ChatProviderError(provider=self.name, message=str(detail), status_code=status)
-            return ChatAPIError(provider=self.name, message=str(detail), status_code=status or 500)
+        """Delegate to the shared bounded error policy."""
         return super().normalize_error(exc)

@@ -64,6 +64,17 @@ class SharedMemoryCache:
         return True
 
 
+def test_runtime_embedding_batch_boundary_rejects_incomplete_provider_results():
+    with pytest.raises(async_embeddings.EmbeddingProviderError) as exc_info:
+        async_embeddings._validate_runtime_embedding_batch(
+            [[0.1, 0.2]],
+            expected=2,
+            provider="local_api",
+        )
+
+    assert exc_info.value.code == "malformed_response"
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("provider", "response_payload"),
@@ -105,6 +116,187 @@ async def test_runtime_endpoint_marks_provider_pool_request_sensitive(
     assert result == pytest.approx([0.1])
     assert captured[0]["sensitive_observability"] is True
     assert captured[0]["bypass_circuit_breaker"] is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "model",
+    [
+        "../admin",
+        "org/../../api/whoami-v2#",
+        "org\\model",
+        "org/%2e%2e/admin",
+        "org/model?alt=admin",
+        "org/model#fragment",
+        "//org/model",
+    ],
+)
+async def test_async_huggingface_rejects_unsafe_model_path_before_pool_dispatch(
+    monkeypatch,
+    model,
+):
+    provider = async_embeddings.AsyncHuggingFaceProvider(api_key="trusted-key")
+    pool = provider.pool_manager.get_pool(provider.provider_name)
+
+    async def _unexpected_request(**_kwargs):
+        pytest.fail("unsafe model must fail before pool dispatch")
+
+    monkeypatch.setattr(pool, "request", _unexpected_request)
+
+    with pytest.raises(ValueError, match="model identifier") as exc_info:
+        await provider.create_embedding("hello", model=model)
+
+    assert model not in str(exc_info.value)
+    assert "trusted-key" not in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_async_huggingface_accepts_default_style_leading_model_slash(monkeypatch):
+    provider = async_embeddings.AsyncHuggingFaceProvider(api_key="trusted-key")
+    pool = provider.pool_manager.get_pool(provider.provider_name)
+    calls = []
+
+    async def _request(**kwargs):
+        calls.append(kwargs["url"])
+        return [[0.1, 0.2]]
+
+    monkeypatch.setattr(pool, "request", _request)
+
+    result = await provider.create_embedding(
+        "hello",
+        model="/Qwen/Qwen3-235B-A22B",
+    )
+
+    assert result == pytest.approx([0.1, 0.2])
+    assert calls == [
+        "https://api-inference.huggingface.co/models/Qwen/Qwen3-235B-A22B"
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.concurrent
+async def test_concurrent_async_huggingface_routes_keep_endpoint_key_and_model_paired(
+    monkeypatch,
+):
+    provider = async_embeddings.AsyncHuggingFaceProvider(api_key="configured-key")
+    pool = provider.pool_manager.get_pool(provider.provider_name)
+    calls = []
+    lock = asyncio.Lock()
+    both_arrived = asyncio.Event()
+    release = asyncio.Event()
+
+    async def _gated_request(**kwargs):
+        async with lock:
+            calls.append(
+                (
+                    kwargs["url"],
+                    kwargs["headers"]["Authorization"],
+                    kwargs["json_data"]["inputs"],
+                )
+            )
+            if len(calls) == 2:
+                both_arrived.set()
+        await asyncio.wait_for(release.wait(), timeout=10)
+        return [[0.1, 0.2]]
+
+    monkeypatch.setattr(pool, "request", _gated_request)
+    tasks = [
+        asyncio.create_task(
+            provider.create_embedding(
+                "alpha",
+                model="org/model-alpha",
+                base_url_override="https://runtime-alpha.example/models",
+                api_key_override="key-alpha",
+                credentials_resolved=True,
+            )
+        ),
+        asyncio.create_task(
+            provider.create_embedding(
+                "beta",
+                model="org/model-beta",
+                base_url_override="https://runtime-beta.example/models",
+                api_key_override="key-beta",
+                credentials_resolved=True,
+            )
+        ),
+    ]
+    try:
+        await asyncio.wait_for(both_arrived.wait(), timeout=10)
+    finally:
+        release.set()
+    results = await asyncio.gather(*tasks)
+    assert results[0] == pytest.approx([0.1, 0.2])
+    assert results[1] == pytest.approx([0.1, 0.2])
+
+    assert len(calls) == 2
+    assert set(calls) == {
+        (
+            "https://runtime-alpha.example/models/org/model-alpha",
+            "Bearer key-alpha",
+            "alpha",
+        ),
+        (
+            "https://runtime-beta.example/models/org/model-beta",
+            "Bearer key-beta",
+            "beta",
+        ),
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.concurrent
+async def test_concurrent_invalid_async_huggingface_request_cannot_affect_legitimate_dispatch(
+    monkeypatch,
+):
+    provider = async_embeddings.AsyncHuggingFaceProvider(api_key="configured-key")
+    pool = provider.pool_manager.get_pool(provider.provider_name)
+    calls = []
+    arrived = asyncio.Event()
+    release = asyncio.Event()
+
+    async def _gated_request(**kwargs):
+        calls.append(
+            (
+                kwargs["url"],
+                kwargs["headers"]["Authorization"],
+                kwargs["json_data"]["inputs"],
+            )
+        )
+        arrived.set()
+        await asyncio.wait_for(release.wait(), timeout=10)
+        return [[0.1, 0.2]]
+
+    monkeypatch.setattr(pool, "request", _gated_request)
+    legitimate = asyncio.create_task(
+        provider.create_embedding(
+            "legitimate",
+            model="/Qwen/Qwen3-235B-A22B",
+            base_url_override="https://legitimate-hf.example/models",
+            api_key_override="legitimate-key",
+            credentials_resolved=True,
+        )
+    )
+    try:
+        await asyncio.wait_for(arrived.wait(), timeout=10)
+        with pytest.raises(ValueError, match="model identifier"):
+            await provider.create_embedding(
+                "malicious",
+                model="//credential-admin",
+                base_url_override="https://malicious-hf.example/models",
+                api_key_override="must-not-dispatch",
+                credentials_resolved=True,
+            )
+    finally:
+        release.set()
+    assert await legitimate == pytest.approx([0.1, 0.2])
+
+    assert calls == [
+        (
+            "https://legitimate-hf.example/models/Qwen/Qwen3-235B-A22B",
+            "Bearer legitimate-key",
+            "legitimate",
+        )
+    ]
 
 
 @pytest.mark.asyncio
@@ -662,13 +854,13 @@ async def test_runtime_success_callback_rejects_malformed_vector_before_usage_or
             on_provider_success=record_success,
         )
 
-    assert exc_info.value.code == "provider_failure"
+    assert exc_info.value.code == "malformed_response"
     assert callback_calls == 0
     assert service.cache.set_keys == []
 
 
 @pytest.mark.asyncio
-async def test_legacy_call_without_success_callback_keeps_malformed_vector_compatibility(monkeypatch):
+async def test_provider_result_without_success_callback_rejects_malformed_vector(monkeypatch):
     service = AsyncEmbeddingService(config=_fallback_config())
     service.cache = DummyCache()
 
@@ -677,12 +869,196 @@ async def test_legacy_call_without_success_callback_keeps_malformed_vector_compa
 
     monkeypatch.setattr(service.providers["openai"], "create_embedding", malformed_success)
 
-    assert await service.create_embedding(
-        "hello",
-        provider="openai",
-        use_cache=False,
-        use_batching=False,
-    ) == []
+    with pytest.raises(async_embeddings.EmbeddingProviderError) as exc_info:
+        await service.create_embedding(
+            "hello",
+            provider="openai",
+            use_cache=False,
+            use_batching=False,
+        )
+
+    assert exc_info.value.code == "malformed_response"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "provider_payload",
+    [
+        {"embeddings": [[]]},
+        {"embeddings": [[float("nan"), 0.0]]},
+    ],
+    ids=("empty", "nonfinite"),
+)
+async def test_explicit_local_api_provider_boundary_rejects_malformed_vector_without_callback(
+    monkeypatch,
+    provider_payload,
+):
+    endpoint = "https://runtime-local.example/embeddings"
+    config = EmbeddingsConfig(
+        providers=[
+            ProviderConfig(
+                name="local_api",
+                api_key="configured-key",
+                api_url="https://configured-local.example/embeddings",
+                models=["local-model"],
+            )
+        ],
+        batching=BatchingConfig(enabled=False),
+        security=SecurityConfig(enable_rate_limiting=False),
+        default_provider="local_api",
+        default_model="local-model",
+    )
+    service = AsyncEmbeddingService(config=config)
+    service.cache = TrackingCache()
+    pool = get_pool_manager().get_pool("local_api")
+    calls = []
+
+    async def malformed_response(**kwargs):
+        calls.append(
+            (
+                kwargs["headers"].get("Authorization"),
+                kwargs["url"],
+                kwargs["json_data"]["texts"],
+            )
+        )
+        return provider_payload
+
+    monkeypatch.setattr(pool, "request", malformed_response)
+
+    with pytest.raises(async_embeddings.EmbeddingProviderError) as exc_info:
+        await service.create_embedding(
+            "malformed",
+            provider="local_api",
+            model="local-model",
+            api_key_override="runtime-key",
+            base_url_override=endpoint,
+            credentials_resolved=True,
+        )
+
+    assert exc_info.value.code == "malformed_response"
+    assert calls == [("Bearer runtime-key", endpoint, ["malformed"])]
+    assert service.cache.get_keys == []
+    assert service.cache.set_keys == []
+
+
+@pytest.mark.asyncio
+async def test_explicit_local_api_batch_rejects_mixed_provider_vector_widths(monkeypatch):
+    endpoint = "https://runtime-local.example/embeddings"
+    config = EmbeddingsConfig(
+        providers=[
+            ProviderConfig(
+                name="local_api",
+                api_url="https://configured-local.example/embeddings",
+                models=["local-model"],
+            )
+        ],
+        batching=BatchingConfig(enabled=False),
+        security=SecurityConfig(enable_rate_limiting=False),
+        default_provider="local_api",
+        default_model="local-model",
+    )
+    service = AsyncEmbeddingService(config=config)
+    service.cache = TrackingCache()
+    pool = get_pool_manager().get_pool("local_api")
+
+    async def width_by_text(**kwargs):
+        text = kwargs["json_data"]["texts"][0]
+        vector = [0.1] if text == "narrow" else [0.1, 0.2]
+        return {"embeddings": [vector]}
+
+    monkeypatch.setattr(pool, "request", width_by_text)
+
+    with pytest.raises(async_embeddings.EmbeddingProviderError) as exc_info:
+        await service.create_embeddings_batch(
+            ["narrow", "wide"],
+            provider="local_api",
+            model="local-model",
+            api_key_override="runtime-key",
+            base_url_override=endpoint,
+            credentials_resolved=True,
+        )
+
+    assert exc_info.value.code == "malformed_response"
+    assert service.cache.get_keys == []
+    assert service.cache.set_keys == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.concurrent
+async def test_concurrent_explicit_local_api_malformed_result_cannot_poison_valid_result(
+    monkeypatch,
+):
+    config = EmbeddingsConfig(
+        providers=[
+            ProviderConfig(
+                name="local_api",
+                api_url="https://configured-local.example/embeddings",
+                models=["local-model"],
+            )
+        ],
+        batching=BatchingConfig(enabled=False),
+        security=SecurityConfig(enable_rate_limiting=False),
+        default_provider="local_api",
+        default_model="local-model",
+    )
+    service = AsyncEmbeddingService(config=config)
+    service.cache = TrackingCache()
+    pool = get_pool_manager().get_pool("local_api")
+    calls = []
+    lock = asyncio.Lock()
+    both_arrived = asyncio.Event()
+    release = asyncio.Event()
+
+    async def gated_response(**kwargs):
+        text = kwargs["json_data"]["texts"][0]
+        async with lock:
+            calls.append(
+                (
+                    text,
+                    kwargs["headers"].get("Authorization"),
+                    kwargs["url"],
+                )
+            )
+            if len(calls) == 2:
+                both_arrived.set()
+        await asyncio.wait_for(release.wait(), timeout=10)
+        if text == "malformed":
+            return {"embeddings": [[float("inf"), 0.0]]}
+        return {"embeddings": [[0.0, 1.0]]}
+
+    monkeypatch.setattr(pool, "request", gated_response)
+    tasks = [
+        asyncio.create_task(
+            service.create_embedding(
+                label,
+                provider="local_api",
+                model="local-model",
+                api_key_override=f"key-{label}",
+                base_url_override=f"https://{label}.example/embeddings",
+                credentials_resolved=True,
+            )
+        )
+        for label in ("malformed", "valid")
+    ]
+    try:
+        await asyncio.wait_for(both_arrived.wait(), timeout=10)
+    finally:
+        release.set()
+    malformed_result, valid_result = await asyncio.gather(*tasks, return_exceptions=True)
+
+    assert isinstance(malformed_result, async_embeddings.EmbeddingProviderError)
+    assert malformed_result.code == "malformed_response"
+    assert valid_result == [0.0, 1.0]
+    assert set(calls) == {
+        (
+            "malformed",
+            "Bearer key-malformed",
+            "https://malformed.example/embeddings",
+        ),
+        ("valid", "Bearer key-valid", "https://valid.example/embeddings"),
+    }
+    assert service.cache.get_keys == []
+    assert service.cache.set_keys == []
 
 
 @pytest.mark.asyncio

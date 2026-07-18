@@ -3,6 +3,11 @@ import threading
 
 import pytest
 
+from tldw_Server_API.tests.provider_credential_test_helpers import (
+    resolved_request_fields,
+    resolved_request_fields_async,
+)
+
 
 class _FakeResp:
     def __init__(self, status_code=200, json_obj=None, text="", lines=None):
@@ -133,9 +138,13 @@ def test_runtime_bedrock_api_key_is_exact_bearer_and_ignores_ambient_aws(monkeyp
         api_provider="bedrock",
         messages=[{"role": "user", "content": "hi"}],
         model="meta.llama3-8b-instruct",
-        api_key="runtime-key",
-        app_config={"bedrock_api": {"_runtime_auth_source": "api_key"}},
-        credentials_resolved=True,
+        **resolved_request_fields(
+            "bedrock",
+            api_key="runtime-key",
+            app_config={"bedrock_api": {"_runtime_auth_source": "api_key"}},
+            model="meta.llama3-8b-instruct",
+            auth_source="api_key",
+        ),
         streaming=streaming,
     )
     if streaming:
@@ -169,9 +178,15 @@ def test_runtime_bedrock_certified_default_chain_uses_sigv4(monkeypatch, streami
         api_provider="bedrock",
         messages=[{"role": "user", "content": "hi"}],
         model="meta.llama3-8b-instruct",
-        api_key=None,
-        app_config={"bedrock_api": {"_runtime_auth_source": "aws_default_chain"}},
-        credentials_resolved=True,
+        **resolved_request_fields(
+            "bedrock",
+            api_key=None,
+            app_config={
+                "bedrock_api": {"_runtime_auth_source": "aws_default_chain"}
+            },
+            model="meta.llama3-8b-instruct",
+            auth_source="aws_default_chain",
+        ),
         streaming=streaming,
     )
     if streaming:
@@ -246,20 +261,39 @@ async def test_concurrent_runtime_bedrock_calls_keep_auth_mode_base_and_payload_
     monkeypatch.setenv("AWS_SESSION_TOKEN", "ambient-session")
     monkeypatch.setenv("BEDROCK_API_KEY", "ambient-bearer-must-not-cross")
     adapter = BedrockAdapter()
+    bearer_fields, sigv4_fields = await asyncio.gather(
+        resolved_request_fields_async(
+            "bedrock",
+            api_key="runtime-bearer-key",
+            app_config={
+                "bedrock_api": {
+                    "api_base_url": "https://bedrock-runtime.us-east-1.amazonaws.com/openai",
+                    "_runtime_auth_source": "api_key",
+                }
+            },
+            model="meta.llama3-8b-instruct",
+            auth_source="api_key",
+        ),
+        resolved_request_fields_async(
+            "bedrock",
+            api_key=None,
+            app_config={
+                "bedrock_api": {
+                    "api_base_url": "https://bedrock-runtime.us-west-2.amazonaws.com/openai",
+                    "_runtime_auth_source": "aws_default_chain",
+                }
+            },
+            model="meta.llama3-8b-instruct",
+            auth_source="aws_default_chain",
+        ),
+    )
     tasks = [
         asyncio.create_task(
             adapter.achat(
                 {
                     "messages": [{"role": "user", "content": "bearer"}],
                     "model": "meta.llama3-8b-instruct",
-                    "api_key": "runtime-bearer-key",
-                    "app_config": {
-                        "bedrock_api": {
-                            "api_base_url": "https://bedrock-runtime.us-east-1.amazonaws.com/openai",
-                            "_runtime_auth_source": "api_key",
-                        }
-                    },
-                    "credentials_resolved": True,
+                    **bearer_fields,
                 }
             )
         ),
@@ -268,14 +302,7 @@ async def test_concurrent_runtime_bedrock_calls_keep_auth_mode_base_and_payload_
                 {
                     "messages": [{"role": "user", "content": "sigv4"}],
                     "model": "meta.llama3-8b-instruct",
-                    "api_key": None,
-                    "app_config": {
-                        "bedrock_api": {
-                            "api_base_url": "https://bedrock-runtime.us-west-2.amazonaws.com/openai",
-                            "_runtime_auth_source": "aws_default_chain",
-                        }
-                    },
-                    "credentials_resolved": True,
+                    **sigv4_fields,
                 }
             )
         ),

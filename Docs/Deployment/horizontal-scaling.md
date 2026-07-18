@@ -20,6 +20,11 @@ Set these on every application instance:
 # Required for shared governance state
 REDIS_URL=redis://redis-host:6379/0
 
+# Supported high-scale backend for cross-process OpenAI credential mutations.
+# The db backend remains valid with direct/session-pooled PostgreSQL at modest
+# concurrency; Redis is mandatory with PgBouncer transaction pooling.
+OPENAI_OAUTH_REFRESH_LOCK_BACKEND=redis
+
 # AuthNZ — use PostgreSQL for multi-node (SQLite does not support concurrent writers)
 DATABASE_URL=postgresql+asyncpg://user:pass@pg-host:5432/tldw_auth
 
@@ -43,6 +48,53 @@ from tldw_Server_API.app.core.Resource_Governance.governor_factory import create
 governor = create_governor()  # auto-detects from REDIS_URL
 ```
 
+### OpenAI credential mutation locks
+
+`OPENAI_OAUTH_REFRESH_LOCK_BACKEND` retains its historical name but governs
+all whole-row OpenAI credential mutations. The default, `db`, uses a native
+file lock with SQLite or a dedicated PostgreSQL advisory-lock pool that starts
+with zero connections and is capped at four sessions per application process.
+Those sessions are isolated from the main AuthNZ pool. Direct PostgreSQL
+connections and PgBouncer session pooling provide correct cross-process
+serialization with this backend at modest mutation concurrency.
+
+Use `redis` on every replica for the supported high-scale multi-process profile
+or high credential-mutation concurrency. Redis selection is fail-closed:
+`REDIS_URL` must be nonempty and reachable; the lock never silently falls back
+to process memory or the database.
+
+PostgreSQL advisory locks are session-scoped. A direct PostgreSQL connection
+or PgBouncer session pooling preserves that session; PgBouncer transaction
+pooling does not. Deployments using PgBouncer transaction pooling must select
+the Redis lock backend.
+
+### Credential-runtime rollout and rollback
+
+Deploy the unified provider-credential runtime as a coordinated API-and-worker
+cutover, not as a mixed-version rolling update. Before starting the new
+version:
+
+1. Stop accepting new background work and drain or stop every old API, Prompt
+   Studio worker, TTS worker, and other provider-calling worker.
+2. Wait for leased jobs and in-flight provider calls to finish, then verify no
+   old process remains.
+3. Apply the normal database migrations and start the new API and worker
+   versions together. Do not send traffic until the initial provider-override
+   refresh has succeeded.
+
+Old processes do not participate in the new cross-process credential locks.
+They also cannot safely consume the new secret-free job payloads, which carry
+trusted credential scope instead of serialized provider secrets. Running old
+and new workers together can therefore race credential mutation or fail queued
+provider work.
+
+Rollback has the same drain requirement. Stop all new-version processes before
+starting the old version, and inspect jobs created after the cutover before
+releasing old workers. Jobs using the new secret-free payload contract must be
+completed by the new worker version, cancelled and resubmitted through the old
+API, or handled by a forward fix. Do not blindly restart old workers against
+that queue.
+
 ## What is shared via Redis
 
 | Data | Redis key pattern | Notes |
@@ -52,8 +104,11 @@ governor = create_governor()  # auto-detects from REDIS_URL
 | Concurrency leases | `rg:lease:{policy}:{category}:{scope}:{entity}` | ZSET with expiry scores |
 | Reservation handles | `rg:handle:{handle_id}` | JSON blob with TTL |
 | Idempotency records | `rg:op:{op_id}` | JSON blob with TTL |
+| OpenAI credential mutation locks | `tldw:openai-oauth-refresh:{digest}` | Ownership-token lease when `OPENAI_OAUTH_REFRESH_LOCK_BACKEND=redis` |
 
-All keys are namespaced (default `rg:`) and use automatic TTLs so stale data is cleaned up.
+Resource Governor keys use the configurable `rg:` namespace. OpenAI lock keys
+use the fixed `tldw:` namespace. Both Redis data sets use automatic TTLs so
+stale state is cleaned up.
 
 ## What remains per-instance
 
@@ -63,6 +118,25 @@ All keys are namespaced (default `rg:`) and use automatic TTLs so stale data is 
 | Event broadcaster (SSE/WebSocket) | Events are dispatched locally; no Redis pub/sub bridge |
 | Background task queues | FastAPI `BackgroundTasks` are process-local |
 | SQLite databases (Media DB, ChaChaNotes) | File-level locking; see limitations below |
+| Provider/RAG worker and task caps | `CHAT_SYNC_ADAPTER_MAX_WORKERS` and `CHAT_STREAM_*` are enforced independently by each process |
+
+Worker/task caps therefore multiply across application processes and replicas.
+For example, a limit of `32` across two processes on three replicas permits up
+to `192` workers in aggregate. Configure the same values on every replica and
+size the aggregate against provider, memory, thread, and file-descriptor limits.
+
+The process-local safety controls are:
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `CHAT_SYNC_ADAPTER_MAX_WORKERS` | `32` | Credential-bearing synchronous provider adapter calls; saturation fails closed before dispatch |
+| `CHAT_STREAM_DAEMON_MAX_WORKERS` | `32` | Synchronous Chat, Audio, Character, and provider stream work |
+| `CHAT_STREAM_CLEANUP_DAEMON_MAX_WORKERS` | `4` | Capacity reserved for synchronous late-work cleanup |
+| `CHAT_STREAM_ASYNC_MAX_TASKS` | `256` | Asynchronous provider stream work |
+| `CHAT_STREAM_ASYNC_CLEANUP_MAX_TASKS` | `32` | Capacity reserved for asynchronous late-work cleanup |
+
+Each value must be an integer from `1` through `256`. Invalid or out-of-range
+values use the listed default, and changes require an application restart.
 
 ## Limitations
 
@@ -119,6 +193,7 @@ services:
       replicas: 3
     environment:
       REDIS_URL: redis://redis:6379/0
+      OPENAI_OAUTH_REFRESH_LOCK_BACKEND: redis
       DATABASE_URL: postgresql+asyncpg://tldw:changeme@postgres:5432/tldw_auth
       AUTH_MODE: multi_user
       RG_REDIS_FAIL_MODE: allow
@@ -210,9 +285,11 @@ When running multiple instances, aggregate metrics across all nodes:
 
 - [ ] Redis is deployed and reachable from all app instances
 - [ ] `REDIS_URL` is set on every instance
+- [ ] `OPENAI_OAUTH_REFRESH_LOCK_BACKEND=redis` is set on every instance
 - [ ] AuthNZ database migrated to PostgreSQL
 - [ ] Load balancer configured with health checks
 - [ ] `RG_CLIENT_IP_HEADER` and `RG_TRUSTED_PROXIES` set for correct IP resolution
 - [ ] Sticky sessions enabled for WebSocket/SSE endpoints (if used)
+- [ ] Process-local stream/evaluation capacity caps are set consistently on every replica and their aggregate has been sized safely
 - [ ] Prometheus scraping configured for all instances
-- [ ] Tested failover: Redis goes down, instances fall back to in-memory governor
+- [ ] Tested failover: the Resource Governor follows its configured Redis fail mode, while OpenAI credential mutations fail closed until Redis recovers

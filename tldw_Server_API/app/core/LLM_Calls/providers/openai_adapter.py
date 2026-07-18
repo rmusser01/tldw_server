@@ -10,15 +10,16 @@ try:
 except ImportError:  # pragma: no cover - optional for static analysis
     httpx = None
 
+from tldw_Server_API.app.core.exceptions import ChatConfigurationError
 from tldw_Server_API.app.core.http_client import (
     create_client as _hc_create_client,
 )
-from tldw_Server_API.app.core.LLM_Calls.capability_registry import normalize_payload, validate_payload
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import _safe_cast
 from tldw_Server_API.app.core.LLM_Calls.cache_intents import (
     apply_billing_prompt_cache_intent,
     attach_cache_intent_metadata,
 )
+from tldw_Server_API.app.core.LLM_Calls.capability_registry import normalize_payload, validate_payload
 from tldw_Server_API.app.core.LLM_Calls.payload_utils import merge_extra_body, merge_extra_headers
 from tldw_Server_API.app.core.LLM_Calls.sse import (
     finalize_stream,
@@ -47,6 +48,8 @@ _OPENAI_ADAPTER_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     UnicodeError,
     ValueError,
 ) + _OPENAI_HTTP_EXCEPTIONS
+
+_MAX_CREDENTIAL_HEADER_VALUE_LENGTH = 512
 
 # Reuse the existing, stable implementation to ensure behavior parity during migration
 # Do not import legacy handler at module import time to keep tests patchable.
@@ -241,6 +244,8 @@ class OpenAIAdapter(ChatProvider):
                 return base.strip()
         except (AttributeError, LookupError, TypeError):
             pass
+        if request.get("credentials_resolved") is True:
+            return "https://api.openai.com/v1"
         return self._openai_base_url()
 
     def _resolve_timeout(self, request: dict[str, Any], fallback: float | None) -> float:
@@ -279,13 +284,38 @@ class OpenAIAdapter(ChatProvider):
             or provider_config.get("organization")
         )
         project = provider_config.get("project_id") or provider_config.get("project")
-        if isinstance(organization, str) and organization.strip():
-            headers["OpenAI-Organization"] = organization.strip()
-        if isinstance(project, str) and project.strip():
-            headers["OpenAI-Project"] = project.strip()
+        organization = self._credential_header_value(organization)
+        project = self._credential_header_value(project)
+        if organization is not None:
+            headers["OpenAI-Organization"] = organization
+        if project is not None:
+            headers["OpenAI-Project"] = project
         return headers
 
+    def _credential_header_value(self, value: Any) -> str | None:
+        """Validate an optional credential-derived HTTP header value."""
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ChatConfigurationError(
+                provider=self.name,
+                message="Invalid OpenAI credential header configuration.",
+            ) from None
+        cleaned = value.strip()
+        if (
+            not cleaned
+            or len(cleaned) > _MAX_CREDENTIAL_HEADER_VALUE_LENGTH
+            or not cleaned.isascii()
+            or any(ord(character) < 32 or ord(character) == 127 for character in cleaned)
+        ):
+            raise ChatConfigurationError(
+                provider=self.name,
+                message="Invalid OpenAI credential header configuration.",
+            ) from None
+        return cleaned
+
     def chat(self, request: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
+        request = self._bind_request_credentials(request)
         request = normalize_payload(self.name, request or {})
         request = self._apply_config_defaults(request)
         request = validate_payload(self.name, request)
@@ -302,14 +332,17 @@ class OpenAIAdapter(ChatProvider):
                 with http_client_factory(timeout=resolved_timeout) as client:
                     resp = client.post(url, headers=headers, json=payload)
                     resp.raise_for_status()
-                    return attach_cache_intent_metadata(resp.json(), cache_intent_diagnostic)
+                    data = resp.json()
+                    self._raise_if_in_band_provider_error(data, phase="chat_response")
+                    return attach_cache_intent_metadata(data, cache_intent_diagnostic)
             except _OPENAI_ADAPTER_NONCRITICAL_EXCEPTIONS as e:
-                raise self.normalize_error(e) from e
+                self._raise_sanitized_provider_failure(e, phase="chat")
 
         # If disabled explicitly, raise clear error rather than falling back
         raise RuntimeError("OpenAIAdapter native HTTP disabled by configuration")
 
     def stream(self, request: dict[str, Any], *, timeout: float | None = None) -> Iterable[str]:
+        request = self._bind_request_credentials(request)
         request = normalize_payload(self.name, request or {})
         request = self._apply_config_defaults(request)
         request = validate_payload(self.name, request)
@@ -334,6 +367,10 @@ class OpenAIAdapter(ChatProvider):
                                 line = raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else str(raw)
                             except (AttributeError, TypeError, UnicodeError):
                                 line = str(raw)
+                            self._raise_if_in_band_provider_error(
+                                line,
+                                phase="stream_response",
+                            )
                             # Canonicalize provider lines to OpenAI-style SSE
                             if is_done_line(line):
                                 if not seen_done:
@@ -347,7 +384,11 @@ class OpenAIAdapter(ChatProvider):
                         yield from finalize_stream(response=resp, done_already=seen_done)
                 return
             except _OPENAI_ADAPTER_NONCRITICAL_EXCEPTIONS as e:
-                raise self.normalize_error(e) from e
+                self._raise_sanitized_provider_failure(
+                    e,
+                    phase="stream",
+                    credential_refresh_retry_safe=True,
+                )
 
         # If disabled explicitly, raise clear error rather than falling back
         raise RuntimeError("OpenAIAdapter native HTTP disabled by configuration")
@@ -360,44 +401,5 @@ class OpenAIAdapter(ChatProvider):
             yield item
 
     def normalize_error(self, exc: Exception):  # type: ignore[override]
-        from tldw_Server_API.app.core.LLM_Calls.error_utils import (
-            get_http_error_text,
-            get_http_status_from_exception,
-            is_http_status_error,
-            log_http_400_body,
-        )
-        if is_http_status_error(exc):
-            from tldw_Server_API.app.core.Chat.Chat_Deps import (
-                ChatAPIError,
-                ChatAuthenticationError,
-                ChatBadRequestError,
-                ChatProviderError,
-                ChatRateLimitError,
-            )
-            resp = getattr(exc, "response", None)
-            status = get_http_status_from_exception(exc)
-            body = None
-            try:
-                body = resp.json()
-            except (AttributeError, TypeError, ValueError):
-                body = None
-            log_http_400_body(self.name, exc, body)
-            detail = None
-            if isinstance(body, dict) and isinstance(body.get("error"), dict):
-                eobj = body["error"]
-                msg = (eobj.get("message") or "").strip()
-                typ = (eobj.get("type") or "").strip()
-                eobj.get("code")
-                detail = (f"{typ} {msg}" if typ else msg) or str(exc)
-            else:
-                detail = get_http_error_text(exc)
-            if status in (400, 404, 422):
-                return ChatBadRequestError(provider=self.name, message=str(detail))
-            if status in (401, 403):
-                return ChatAuthenticationError(provider=self.name, message=str(detail))
-            if status == 429:
-                return ChatRateLimitError(provider=self.name, message=str(detail))
-            if status and 500 <= status < 600:
-                return ChatProviderError(provider=self.name, message=str(detail), status_code=status)
-            return ChatAPIError(provider=self.name, message=str(detail), status_code=status or 500)
+        """Delegate to the shared bounded error policy."""
         return super().normalize_error(exc)

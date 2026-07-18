@@ -10,7 +10,6 @@ import asyncio
 import configparser
 import hashlib
 import json
-import math
 import os
 import re
 import threading
@@ -18,7 +17,6 @@ import time
 import warnings
 import weakref
 from functools import partial, wraps
-from numbers import Real
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
@@ -110,6 +108,10 @@ def _import_onnxruntime():
 # Local Imports
 import contextlib
 
+from tldw_Server_API.app.core.Chat.bounded_daemon import (
+    SYNC_ADAPTER_CALL_POOL,
+    await_bounded_sync_call,
+)
 from tldw_Server_API.app.core.config import resolve_repo_relative_path, rg_policy_path
 from tldw_Server_API.app.core.Embeddings.async_embeddings import (
     EmbeddingEndpointError,
@@ -118,6 +120,10 @@ from tldw_Server_API.app.core.Embeddings.async_embeddings import (
 from tldw_Server_API.app.core.Embeddings.audit_adapter import (
     log_memory_limit_exceeded,
     log_model_evicted,
+)
+from tldw_Server_API.app.core.Embeddings.vector_validation import (
+    validated_embedding_vectors,
+    validated_indexed_embedding_data,
 )
 from tldw_Server_API.app.core.exceptions import InvalidStoragePathError, NetworkError, RetryExhaustedError
 from tldw_Server_API.app.core.LLM_Calls.chat_calls import get_openai_embeddings_batch
@@ -182,21 +188,6 @@ def _get_http_status_from_exception(exc: Exception) -> int | None:
         return None
 
 
-def _is_finite_numeric_embedding(vector: Any) -> bool:
-    """Return whether an API response contains a usable numeric vector."""
-    if not isinstance(vector, list) or not vector:
-        return False
-    try:
-        return all(
-            not isinstance(value, bool)
-            and isinstance(value, Real)
-            and math.isfinite(float(value))
-            for value in vector
-        )
-    except (OverflowError, TypeError, ValueError):
-        return False
-
-
 def _get_explicit_openai_embeddings_batch(
     texts: list[str],
     *,
@@ -213,6 +204,7 @@ def _get_explicit_openai_embeddings_batch(
     if dimensions is not None:
         payload["dimensions"] = dimensions
     response = None
+    provider_error: EmbeddingProviderError | None = None
     try:
         response = fetch(
             method="POST",
@@ -229,25 +221,26 @@ def _get_explicit_openai_embeddings_batch(
             raise EmbeddingProviderError("openai", code=code, status_code=status_code) from None
         data = response.json()
         rows = data.get("data") if isinstance(data, dict) else None
-        if not isinstance(rows, list) or len(rows) != len(texts):
-            raise EmbeddingProviderError("openai", code="provider_failure") from None
-        embeddings = []
-        for row in rows:
-            embedding = row.get("embedding") if isinstance(row, dict) else None
-            if not _is_finite_numeric_embedding(embedding):
-                raise EmbeddingProviderError("openai", code="provider_failure") from None
-            embeddings.append(embedding)
+        embeddings = validated_indexed_embedding_data(rows, expected=len(texts))
+        if embeddings is None:
+            raise EmbeddingProviderError("openai", code="malformed_response") from None
         return embeddings
     except EmbeddingProviderError:
         raise
     except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as exc:
         status_code = _get_http_status_from_exception(exc)
         code = "authentication" if status_code in {401, 403} else "provider_failure"
-        raise EmbeddingProviderError("openai", code=code, status_code=status_code) from None
+        provider_error = EmbeddingProviderError(
+            "openai",
+            code=code,
+            status_code=status_code,
+        )
     finally:
         if response is not None:
             with contextlib.suppress(_EMBEDDINGS_NONCRITICAL_EXCEPTIONS):
                 response.close()
+    if provider_error is not None:
+        raise provider_error
 
 
 def _get_explicit_local_api_embeddings_batch(
@@ -264,6 +257,7 @@ def _get_explicit_local_api_embeddings_batch(
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
     response = None
+    provider_error: EmbeddingProviderError | None = None
     try:
         response = fetch(
             method="POST",
@@ -279,22 +273,27 @@ def _get_explicit_local_api_embeddings_batch(
             code = "authentication" if status_code in {401, 403} else "provider_failure"
             raise EmbeddingProviderError("local_api", code=code, status_code=status_code) from None
         data = response.json()
-        embeddings = data.get("embeddings") if isinstance(data, dict) else None
-        if not isinstance(embeddings, list) or len(embeddings) != len(texts):
-            raise EmbeddingProviderError("local_api", code="provider_failure") from None
-        if not all(_is_finite_numeric_embedding(embedding) for embedding in embeddings):
-            raise EmbeddingProviderError("local_api", code="provider_failure") from None
+        raw_embeddings = data.get("embeddings") if isinstance(data, dict) else None
+        embeddings = validated_embedding_vectors(raw_embeddings, expected=len(texts))
+        if embeddings is None:
+            raise EmbeddingProviderError("local_api", code="malformed_response") from None
         return embeddings
     except EmbeddingProviderError:
         raise
     except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as exc:
         status_code = _get_http_status_from_exception(exc)
         code = "authentication" if status_code in {401, 403} else "provider_failure"
-        raise EmbeddingProviderError("local_api", code=code, status_code=status_code) from None
+        provider_error = EmbeddingProviderError(
+            "local_api",
+            code=code,
+            status_code=status_code,
+        )
     finally:
         if response is not None:
             with contextlib.suppress(_EMBEDDINGS_NONCRITICAL_EXCEPTIONS):
                 response.close()
+    if provider_error is not None:
+        raise provider_error
 
 
 def _is_probable_network_error(exc: Exception) -> bool:
@@ -689,6 +688,59 @@ class EmbeddingConfigSchema(BaseModel):
     rate_limiter: RateLimiterCfg = RateLimiterCfg()
     retry_config: RetryCfg = RetryCfg()
     models: dict[str, ModelCfg]
+
+
+def _resolve_model_key(models_map: dict[str, Any], model_id: str) -> tuple[str, Any]:
+    """Resolve the configured model entry used for embedding dispatch."""
+
+    if model_id in models_map:
+        return model_id, models_map[model_id]
+    if ":" in model_id:
+        suffix = model_id.split(":", 1)[1]
+        if suffix in models_map:
+            return suffix, models_map[suffix]
+
+    bare_model = model_id.split(":", 1)[1] if ":" in model_id else model_id
+    guessed_providers: list[str] = []
+    if "/" in bare_model:
+        guessed_providers.append("huggingface")
+    guessed_providers.extend(["openai", "local_api"])
+    for provider in guessed_providers:
+        candidate = f"{provider}:{bare_model}"
+        if candidate in models_map:
+            return candidate, models_map[candidate]
+
+    suffix_matches = [
+        key for key in models_map if key.endswith(f":{bare_model}")
+    ]
+    if len(suffix_matches) == 1:
+        resolved_key = suffix_matches[0]
+        return resolved_key, models_map[resolved_key]
+
+    logger.error(
+        "Configuration for `model_id` '{}' not found in `embedding_config.models`.",
+        model_id,
+    )
+    raise ValueError(f"Invalid `model_id` or configuration missing: {model_id}")
+
+
+def _resolve_effective_embedding_provider(
+    user_app_config: dict[str, Any],
+    model_id_override: str | None,
+) -> str:
+    """Resolve the provider through the same validated model lookup as sync dispatch."""
+
+    embedding_config = EmbeddingConfigSchema(
+        **user_app_config["embedding_config"]
+    )
+    model_id = model_id_override or embedding_config.default_model_id
+    if not model_id:
+        raise ValueError("Embedding model ID not specified or configured as default.")
+    _resolved_key, model_spec = _resolve_model_key(
+        embedding_config.models,
+        model_id,
+    )
+    return str(model_spec.provider).strip().lower()
 
 
 def _ensure_hf_revision(model_name_or_path: str, expected_sha: str | None) -> None:
@@ -1909,41 +1961,6 @@ def create_embeddings_batch(
         logger.error("No `model_id` specified and no `default_model_id` found in embedding_config.")
         raise ValueError("Embedding model ID not specified or configured as default.")
 
-    def _resolve_model_key(models_map: dict[str, Any], mid: str) -> tuple[str, Any]:
-        """Resolve a model key from models_map supporting bare or provider-prefixed IDs.
-
-        Tries exact match first, then:
-        - If mid contains ':', try its suffix as a bare key
-        - If bare, try common provider prefixes (heuristic) and any unique key ending with ":mid"
-        Returns (resolved_key, model_spec) on success or raises ValueError.
-        """
-        # 1) Exact key
-        if mid in models_map:
-            return mid, models_map[mid]
-        # 2) If provider-prefixed, try bare suffix
-        if ":" in mid:
-            suffix = mid.split(":", 1)[1]
-            if suffix in models_map:
-                return suffix, models_map[suffix]
-        # 3) If bare, try prefixed candidates based on simple heuristics
-        bare = mid.split(":", 1)[1] if ":" in mid else mid
-        guessed_providers = []
-        if "/" in bare:
-            guessed_providers.append("huggingface")
-        # Always consider openai and local_api as common options
-        guessed_providers.extend(["openai", "local_api"])  # order matters for tie-breaks
-        for prov in guessed_providers:
-            candidate = f"{prov}:{bare}"
-            if candidate in models_map:
-                return candidate, models_map[candidate]
-        # 4) Unique suffix match (any key that ends with ":<bare>")
-        suffix_matches = [k for k in models_map if k.endswith(f":{bare}")]
-        if len(suffix_matches) == 1:
-            k = suffix_matches[0]
-            return k, models_map[k]
-        logger.error(f"Configuration for `model_id` '{mid}' not found in `embedding_config.models`.")
-        raise ValueError(f"Invalid `model_id` or configuration missing: {mid}")
-
     resolved_key, model_spec = _resolve_model_key(embedding_service_config.models, model_id_to_use)
     model_id_to_use = resolved_key
 
@@ -2302,22 +2319,36 @@ async def create_embeddings_batch_async(
     Returns:
         List of embedding vectors (list of floats for each text)
     """
-    import asyncio
-
-    # Run the synchronous function in a thread pool to avoid blocking
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(
-        None,
-        partial(
-            create_embeddings_batch,
-            texts,
-            user_app_config,
-            model_id_override,
-            api_key_override=api_key_override,
-            base_url_override=base_url_override,
-            credentials_resolved=credentials_resolved,
-        ),
+    call = partial(
+        create_embeddings_batch,
+        texts,
+        user_app_config,
+        model_id_override,
+        api_key_override=api_key_override,
+        base_url_override=base_url_override,
+        credentials_resolved=credentials_resolved,
     )
+    effective_provider: str | None = None
+    if credentials_resolved is True:
+        try:
+            effective_provider = _resolve_effective_embedding_provider(
+                user_app_config,
+                model_id_override,
+            )
+        except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
+            # Preserve the synchronous function's established validation and
+            # sanitization behavior; invalid configuration cannot dispatch.
+            effective_provider = None
+
+    if effective_provider in {"openai", "local_api"}:
+        return await await_bounded_sync_call(
+            call,
+            pool=SYNC_ADAPTER_CALL_POOL,
+            exhaustion_message="Embeddings provider capacity is exhausted",
+        )
+
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, call)
 
 
 def create_embedding(

@@ -9,14 +9,24 @@ class _StubDB:
         self.client_id = "test-client"
 
     def get_prompt_with_project(self, prompt_id: int, include_deleted: bool = False):
-        return {"id": prompt_id, "project_id": 321}
+        return {"id": prompt_id, "project_id": 321, "project_user_id": "1"}
+
+    def get_test_cases_by_ids(self, test_case_ids: list[int]):
+        return [
+            {"id": test_case_id, "project_id": 321}
+            for test_case_id in test_case_ids
+        ]
 
     def create_optimization(self, **kwargs):
 
-        return {"id": 555, **kwargs}
+        return {"id": 555, "uuid": "optimization-555", **kwargs}
 
     def update_optimization(self, optimization_id: int, updates: dict):
-        return {"id": optimization_id, **updates}
+        return {
+            "id": optimization_id,
+            "uuid": f"optimization-{optimization_id}",
+            **updates,
+        }
 
 
 @pytest.fixture
@@ -87,3 +97,4 @@ def test_create_optimization_includes_request_id_in_job_payload(monkeypatch, ove
     )
     assert r.status_code in (200, 201), r.text
     assert captured.get("payload", {}).get("request_id") == "req-ps-create-001"
+    assert captured.get("payload", {}).get("optimization_uuid") == "optimization-555"

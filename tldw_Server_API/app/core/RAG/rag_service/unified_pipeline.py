@@ -36,6 +36,11 @@ from typing import Any, Callable, Literal, Optional, cast
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
+from tldw_Server_API.app.core.Chat.bounded_daemon import (
+    SYNC_ADAPTER_CALL_POOL,
+    await_bounded_sync_call,
+    await_owned_worker,
+)
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
 from tldw_Server_API.app.core.DB_Management.media_db.api import (
     managed_media_database,
@@ -62,6 +67,7 @@ from tldw_Server_API.app.core.testing import (
 
 from .generation_executor import execute_generation_phase
 from .hyde import (
+    _embedding_model_from_config,
     _embedding_provider_from_config,
     _mark_runtime_used_for_embeddings,
     _resolve_runtime_embedding_call,
@@ -1262,16 +1268,36 @@ try:
     from tldw_Server_API.app.core.Claims_Extraction.budget_guard import (
         resolve_claims_job_budget as _resolve_claims_job_budget,
     )
+except ImportError:
+    _ClaimsJobContext = None
+    _resolve_claims_job_budget = None
 
+try:
     from .claims import ClaimsEngine as _ClaimsEngine
 except ImportError:
     _ClaimsEngine = None
-    _ClaimsJobContext = None
-    _resolve_claims_job_budget = None
 
 ClaimsEngine = _ClaimsEngine
 ClaimsJobContext = _ClaimsJobContext
 resolve_claims_job_budget = _resolve_claims_job_budget
+
+
+def _resolve_claims_engine() -> Any:
+    """Recover the real claims engine after an import-order cycle completes."""
+    global ClaimsEngine
+    if ClaimsEngine is not None:
+        return ClaimsEngine
+    try:
+        from tldw_Server_API.app.core.Claims_Extraction.claims_engine import (
+            ClaimsEngine as _RealClaimsEngine,
+        )
+
+        from .claims import ClaimsEngine as _CandidateClaimsEngine
+    except ImportError:
+        return None
+    if _CandidateClaimsEngine is _RealClaimsEngine:
+        ClaimsEngine = _RealClaimsEngine
+    return _CandidateClaimsEngine
 
 
 @dataclass
@@ -4439,8 +4465,8 @@ async def unified_rag_pipeline(
             ) as e:
                 if credential_runtime is not None and isinstance(e, _RAG_PROVIDER_FAILURES):
                     raise
-                result.errors.append(f"Document retrieval failed: {str(e)}")
-                logger.error(f"Retrieval error: {e}")
+                result.errors.append("document_retrieval_failed")
+                logger.error("Document retrieval failed")
                 # Sample payload exemplar on retrieval failure
                 try:
                     from .payload_exemplars import maybe_record_exemplar
@@ -4501,8 +4527,9 @@ async def unified_rag_pipeline(
                         ValueError,
                         asyncio.TimeoutError,
                         sqlite3.Error,
-                    ) as _fb_err:
-                        result.errors.append(f"Media DB fallback retrieval on error failed: {str(_fb_err)}")
+                    ):
+                        result.errors.append("media_db_fallback_failed")
+                        logger.error("Media DB fallback retrieval failed")
             finally:
                 # Ensure OTEL span is closed
                 if _otel_cm is not None:
@@ -4674,7 +4701,10 @@ async def unified_rag_pipeline(
                     prompt += "\nJSON:"
                     gap_handle = None
                     if credential_runtime is not None:
-                        gap_handle = await credential_runtime.resolve(_prov)
+                        gap_handle = await credential_runtime.resolve(
+                            _prov,
+                            model=_model,
+                        )
                     gap_stream_state = {"content": False}
 
                     def _call_gap_analyzer() -> Any:
@@ -4686,6 +4716,7 @@ async def unified_rag_pipeline(
                             api_key=(gap_handle.api_key if gap_handle is not None else None),
                             app_config=(gap_handle.app_config if gap_handle is not None else None),
                             credentials_resolved=gap_handle is not None,
+                            provider_credentials=gap_handle,
                             raise_on_error=gap_handle is not None,
                         )
                         return _consume_bound_sgl_response(
@@ -4698,15 +4729,30 @@ async def unified_rag_pipeline(
                             fail_closed=gap_handle is not None,
                         )
 
-                    gap_completed = False
-                    try:
-                        llm_out = await asyncio.to_thread(_call_gap_analyzer)
-                        gap_completed = True
-                    finally:
-                        if gap_handle is not None and (
-                            gap_completed or gap_stream_state["content"]
-                        ):
-                            await credential_runtime.mark_used(gap_handle)
+                    async def _run_gap_analyzer() -> Any:
+                        gap_completed = False
+                        try:
+                            value = await await_bounded_sync_call(
+                                _call_gap_analyzer,
+                                pool=SYNC_ADAPTER_CALL_POOL,
+                                exhaustion_message=(
+                                    "RAG optional adapter capacity is exhausted"
+                                ),
+                            )
+                            gap_completed = True
+                            return value
+                        finally:
+                            if gap_handle is not None and (
+                                gap_completed or gap_stream_state["content"]
+                            ):
+                                await credential_runtime.mark_used(gap_handle)
+
+                    gap_operation = _run_gap_analyzer()
+                    llm_out = (
+                        await await_owned_worker(gap_operation)
+                        if gap_handle is not None
+                        else await gap_operation
+                    )
                     if isinstance(llm_out, str):
                         try:
                             parsed = parse_structured_output(
@@ -5665,13 +5711,19 @@ async def unified_rag_pipeline(
                                 if credential_runtime is not None:
                                     try:
                                         reranker_credential_handle = await credential_runtime.resolve(
-                                            prov or "openai"
+                                            prov or "openai",
+                                            model=model,
                                         )
                                     except ByokResolutionError as exc:
                                         result.metadata["reranking"] = {
+                                            "degraded": True,
                                             "failure_code": exc.code,
                                             "verification_available": False,
                                         }
+                                        result.metadata.pop(
+                                            "reranking_calibration",
+                                            None,
+                                        )
 
                                 class _LLMClient:
                                     def __init__(self, provider: str, model_name: str, handle: Any):
@@ -5701,6 +5753,7 @@ async def unified_rag_pipeline(
                                                 else None
                                             ),
                                             credentials_resolved=self.handle is not None,
+                                            provider_credentials=self.handle,
                                             raise_on_error=self.handle is not None,
                                         )
                                         response = _consume_bound_sgl_response(
@@ -5833,31 +5886,49 @@ async def unified_rag_pipeline(
                     # If reranker exposes calibration metadata (e.g., TwoTier), record it
                     try:
                         if hasattr(reranker, 'last_metadata') and isinstance(reranker.last_metadata, dict):
-                            result.metadata.setdefault("reranking_calibration", {})
-                            result.metadata["reranking_calibration"].update(reranker.last_metadata)
-                            if reranker.last_metadata.get("verification_available") is False:
-                                result.metadata.setdefault("reranking", {})
-                                result.metadata["reranking"].update(
+                            if reranker.last_metadata.get("degraded"):
+                                result.metadata.pop("reranking_calibration", None)
+                                reranking_metadata = result.metadata.setdefault(
+                                    "reranking",
+                                    {},
+                                )
+                                reranking_metadata.update(
                                     {
-                                        "failure_code": reranker.last_metadata.get(
+                                        "degraded": True,
+                                        "failure_code": reranking_metadata.get(
+                                            "failure_code"
+                                        )
+                                        or reranker.last_metadata.get(
                                             "failure_code",
                                             "provider_unavailable",
                                         ),
                                         "verification_available": False,
                                     }
                                 )
-                            # Attach learned-fusion specific decoration when applicable
-                            _decorate_calibration_metadata()
+                            else:
+                                result.metadata.setdefault("reranking_calibration", {})
+                                result.metadata["reranking_calibration"].update(reranker.last_metadata)
+                                # Attach learned-fusion specific decoration when applicable
+                                _decorate_calibration_metadata()
                     except (AttributeError, RuntimeError, TypeError, ValueError):
                         pass
 
-                    # For non Two-Tier strategies, if learned fusion is requested but no
-                    # calibrator metadata exists, compute a simple fused probability from
-                    # the top document score so that downstream gating can still use a
-                    # calibrated signal.
+                    # If learned fusion is requested but no calibrator metadata exists,
+                    # compute a simple fused probability from the top document score.
+                    # A credential-degraded reranker has no trustworthy verification
+                    # signal, so it must not synthesize calibration or gate generation.
                     if enable_learned_fusion:
                         try:
-                            if isinstance(result.metadata, dict) and "reranking_calibration" not in result.metadata:
+                            reranking_status = result.metadata.get("reranking", {})
+                            verification_unavailable = (
+                                isinstance(reranking_status, dict)
+                                and reranking_status.get("verification_available") is False
+                            )
+                            if (
+                                isinstance(result.metadata, dict)
+                                and "reranking_calibration" not in result.metadata
+                                and not verification_unavailable
+                            ):
                                 top_doc = result.documents[0] if result.documents else None
                                 if top_doc is not None:
                                     import math as _math_lf
@@ -6307,6 +6378,8 @@ async def unified_rag_pipeline(
                 if evidence_chain_result is None:
                     chain_builder = EvidenceChainBuilder(
                         enable_llm_extraction=True,
+                        llm_provider=generation_provider,
+                        llm_model=generation_model,
                         **(
                             {"credential_runtime": credential_runtime}
                             if credential_runtime is not None
@@ -6354,7 +6427,15 @@ async def unified_rag_pipeline(
         # ========== ANSWER GENERATION ==========
         # Honor reranking calibration gating if present (e.g., TwoTier strategy)
         try:
-            _cal = result.metadata.get("reranking_calibration") if isinstance(result.metadata, dict) else None
+            _reranking_status = result.metadata.get("reranking", {})
+            if (
+                isinstance(_reranking_status, dict)
+                and _reranking_status.get("verification_available") is False
+            ):
+                result.metadata.pop("reranking_calibration", None)
+                _cal = None
+            else:
+                _cal = result.metadata.get("reranking_calibration")
             gated_generation = bool(_cal.get("gated")) if isinstance(_cal, dict) else False
             # When calibration metadata is present, ensure fused_score/version/decision
             # are wired for observability.
@@ -6574,6 +6655,7 @@ async def unified_rag_pipeline(
                                         else None
                                     ),
                                     credentials_resolved=critique_handle is not None,
+                                    provider_credentials=critique_handle,
                                     raise_on_error=critique_handle is not None,
                                 )
                                 return _consume_bound_sgl_response(
@@ -6586,16 +6668,33 @@ async def unified_rag_pipeline(
                                     fail_closed=critique_handle is not None,
                                 )
 
-                            critique_completed = False
-                            try:
-                                c_text = await asyncio.to_thread(_call_critique)
-                                critique_completed = True
-                            finally:
-                                if critique_handle is not None and (
-                                    critique_completed
-                                    or critique_stream_state["content"]
-                                ):
-                                    await credential_runtime.mark_used(critique_handle)
+                            async def _run_critique() -> Any:
+                                critique_completed = False
+                                try:
+                                    value = await await_bounded_sync_call(
+                                        _call_critique,
+                                        pool=SYNC_ADAPTER_CALL_POOL,
+                                        exhaustion_message=(
+                                            "RAG optional adapter capacity is exhausted"
+                                        ),
+                                    )
+                                    critique_completed = True
+                                    return value
+                                finally:
+                                    if critique_handle is not None and (
+                                        critique_completed
+                                        or critique_stream_state["content"]
+                                    ):
+                                        await credential_runtime.mark_used(
+                                            critique_handle
+                                        )
+
+                            critique_operation = _run_critique()
+                            c_text = (
+                                await await_owned_worker(critique_operation)
+                                if critique_handle is not None
+                                else await critique_operation
+                            )
                             c_dt = time.time() - c_start
                         except (ByokResolutionError, SummaryProviderError) as exc:
                             result.metadata.setdefault("synthesis", {})
@@ -6780,9 +6879,9 @@ async def unified_rag_pipeline(
                 TypeError,
                 ValueError,
                 asyncio.TimeoutError,
-            ) as e:
-                result.errors.append(f"Answer generation failed: {str(e)}")
-                logger.error(f"Generation error: {e}")
+            ):
+                result.errors.append("answer_generation_failed")
+                logger.error("Answer generation failed")
                 try:
                     from .payload_exemplars import maybe_record_exemplar
                     maybe_record_exemplar(
@@ -6966,8 +7065,11 @@ async def unified_rag_pipeline(
                         _resolve_claims_llm_config,
                     )
 
-                    claims_provider, _, _ = _resolve_claims_llm_config()
-                    claims_handle = await credential_runtime.resolve(claims_provider)
+                    claims_provider, claims_model, _ = _resolve_claims_llm_config()
+                    claims_handle = await credential_runtime.resolve(
+                        claims_provider,
+                        model=claims_model,
+                    )
 
                 def _analyze(api_name: str, input_data: Any, custom_prompt_arg: Optional[str] = None,
                              api_key: Optional[str] = None, system_message: Optional[str] = None,
@@ -6982,6 +7084,14 @@ async def unified_rag_pipeline(
                             temp,
                             **kwargs,
                         )
+                    for key in (
+                        "app_config",
+                        "credentials_resolved",
+                        "provider_credentials",
+                        "_provider_call_credentials",
+                        "raise_on_error",
+                    ):
+                        kwargs.pop(key, None)
                     response = sgl.analyze(
                         claims_provider or claims_handle.provider,
                         input_data,
@@ -6991,6 +7101,7 @@ async def unified_rag_pipeline(
                         temp,
                         app_config=claims_handle.app_config,
                         credentials_resolved=True,
+                        provider_credentials=claims_handle,
                         raise_on_error=True,
                         **kwargs,
                     )
@@ -7022,8 +7133,9 @@ async def unified_rag_pipeline(
                     claims_state["used"] = True
                     return response
 
-                if ClaimsEngine:
-                    engine = ClaimsEngine(_analyze)
+                claims_engine_type = _resolve_claims_engine()
+                if claims_engine_type is not None:
+                    engine = claims_engine_type(_analyze)
 
                     async def _mark_claims_used() -> None:
                         if (
@@ -7035,10 +7147,16 @@ async def unified_rag_pipeline(
                             claims_state["marked"] = True
 
                     async def _run_claims_engine(**run_kwargs: Any) -> dict[str, Any]:
-                        try:
-                            return await engine.run(**run_kwargs)
-                        finally:
-                            await _mark_claims_used()
+                        async def _run_and_mark() -> dict[str, Any]:
+                            try:
+                                return await engine.run(**run_kwargs)
+                            finally:
+                                await _mark_claims_used()
+
+                        operation = _run_and_mark()
+                        if claims_handle is not None:
+                            return await await_owned_worker(operation)
+                        return await operation
 
                     # Default NLI model from environment if not provided
                     if not nli_model:
@@ -7809,6 +7927,8 @@ async def unified_rag_pipeline(
             try:
                 chain_builder = EvidenceChainBuilder(
                     enable_llm_extraction=True,
+                    llm_provider=generation_provider,
+                    llm_model=generation_model,
                     **(
                         {"credential_runtime": credential_runtime}
                         if credential_runtime is not None
@@ -8074,16 +8194,16 @@ async def unified_rag_pipeline(
         TypeError,
         ValueError,
         asyncio.TimeoutError,
-    ) as e:
-        result.errors.append(f"Pipeline error: {str(e)}")
-        logger.exception("Unified pipeline error: {}", e)
+    ):
+        result.errors.append("pipeline_failed")
+        logger.error("Unified pipeline failed")
         if fallback_on_error:
             return {
                 "query": query,
                 "documents": [],
                 "answer": "",
                 "cached": False,
-                "error": str(e),
+                "error": "pipeline_failed",
                 "metadata": result.metadata,
                 "timings": result.timings,
             }
@@ -8165,15 +8285,16 @@ async def unified_rag_pipeline(
                             _f_model = generation_model or _f_cfg.get("RAG_DEFAULT_LLM_MODEL")
                             _f_handle = None
                             if credential_runtime is not None:
-                                _f_handle = await credential_runtime.resolve(_f_prov)
+                                _f_handle = await credential_runtime.resolve(
+                                    _f_prov,
+                                    model=_f_model,
+                                )
                             _f_state = {"marked": False, "content": False}
 
                             class _FaithfulnessLLMAdapter:
                                 """Wraps analyze() to satisfy the LLMCallable protocol."""
 
                                 async def generate(self, prompt: str) -> str:
-                                    import asyncio as _aio
-
                                     def _call_faithfulness() -> Any:
                                         response = _sgl_analyze(
                                             api_name=_f_prov,
@@ -8191,6 +8312,7 @@ async def unified_rag_pipeline(
                                                 else None
                                             ),
                                             credentials_resolved=_f_handle is not None,
+                                            provider_credentials=_f_handle,
                                             raise_on_error=_f_handle is not None,
                                         )
                                         return _consume_bound_sgl_response(
@@ -8203,24 +8325,40 @@ async def unified_rag_pipeline(
                                             fail_closed=_f_handle is not None,
                                         )
 
-                                    faithfulness_completed = False
-                                    try:
-                                        result_text = await _aio.get_running_loop().run_in_executor(
-                                            None,
-                                            _call_faithfulness,
-                                        )
-                                        faithfulness_completed = True
-                                    finally:
-                                        if (
-                                            _f_handle is not None
-                                            and not _f_state["marked"]
-                                            and (
-                                                faithfulness_completed
-                                                or _f_state["content"]
+                                    async def _run_faithfulness() -> Any:
+                                        faithfulness_completed = False
+                                        try:
+                                            value = await await_bounded_sync_call(
+                                                _call_faithfulness,
+                                                pool=SYNC_ADAPTER_CALL_POOL,
+                                                exhaustion_message=(
+                                                    "RAG optional adapter capacity is exhausted"
+                                                ),
                                             )
-                                        ):
-                                            await credential_runtime.mark_used(_f_handle)
-                                            _f_state["marked"] = True
+                                            faithfulness_completed = True
+                                            return value
+                                        finally:
+                                            if (
+                                                _f_handle is not None
+                                                and not _f_state["marked"]
+                                                and (
+                                                    faithfulness_completed
+                                                    or _f_state["content"]
+                                                )
+                                            ):
+                                                await credential_runtime.mark_used(
+                                                    _f_handle
+                                                )
+                                                _f_state["marked"] = True
+
+                                    faithfulness_operation = _run_faithfulness()
+                                    result_text = (
+                                        await await_owned_worker(
+                                            faithfulness_operation
+                                        )
+                                        if _f_handle is not None
+                                        else await faithfulness_operation
+                                    )
                                     return str(result_text) if result_text else ""
 
                             _llm_obj = _FaithfulnessLLMAdapter()
@@ -8406,6 +8544,7 @@ async def unified_batch_pipeline(
             # Get embeddings for representative texts
             cfg = get_embedding_config()
             provider = _embedding_provider_from_config(cfg)
+            effective_model = _embedding_model_from_config(cfg)
             handle = None
             call_kwargs: dict[str, Any] = {}
             if credential_runtime is not None:
@@ -8413,6 +8552,7 @@ async def unified_batch_pipeline(
                     handle, call_kwargs = await _resolve_runtime_embedding_call(
                         credential_runtime,
                         provider,
+                        effective_model,
                     )
                 else:
                     call_kwargs = _runtime_local_embedding_call_kwargs(cfg, provider)

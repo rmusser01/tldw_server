@@ -13,6 +13,12 @@ from typing import Any, Callable, Optional
 
 from loguru import logger
 
+from tldw_Server_API.app.core.Chat.bounded_daemon import (
+    SYNC_ADAPTER_CALL_POOL,
+    await_bounded_sync_call,
+    await_owned_worker,
+)
+
 
 def _hyde_instruction_prompt() -> str:
     """Build retrieval-oriented HyDE instructions without duplicating input."""
@@ -125,7 +131,7 @@ async def generate_hypothetical_answer_async(
     try:
         import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as sgl
 
-        handle = await credential_runtime.resolve(effective_provider)
+        handle = await credential_runtime.resolve(effective_provider, model=effective_model)
         response = await _run_sync_embedding_call(
             partial(
                 sgl.analyze,
@@ -138,6 +144,7 @@ async def generate_hypothetical_answer_async(
                 model_override=effective_model,
                 app_config=handle.app_config,
                 credentials_resolved=True,
+                provider_credentials=handle,
                 raise_on_error=True,
             ),
             on_success=partial(
@@ -175,6 +182,16 @@ def _embedding_provider_from_config(
     if ":" in selected:
         return selected.split(":", 1)[0].strip().lower() or None
     return None
+
+
+def _embedding_model_from_config(
+    user_app_config: dict[str, Any],
+    model_id_override: str | None = None,
+) -> str | None:
+    """Return the user-facing model name selected by an embedding call."""
+    raw_config = user_app_config.get("embedding_config") or user_app_config.get("EMBEDDING_CONFIG") or {}
+    selected = str(model_id_override or raw_config.get("default_model_id") or "").strip()
+    return selected.split(":", 1)[-1] or None
 
 
 def _embedding_model_spec_from_config(
@@ -251,11 +268,12 @@ def _credential_base_url(handle: Any) -> str | None:
 async def _resolve_runtime_embedding_call(
     credential_runtime: Any,
     provider: str,
+    model: str | None,
 ) -> tuple[Any, dict[str, Any]]:
     """Resolve one hosted embedding call into explicit, fail-closed overrides."""
     from tldw_Server_API.app.core.Embeddings.async_embeddings import EmbeddingCredentialError
 
-    handle = await credential_runtime.resolve(provider)
+    handle = await credential_runtime.resolve(provider, model=model)
     api_key = getattr(handle, "api_key", None)
     if not isinstance(api_key, str) or not api_key.strip():
         raise EmbeddingCredentialError(provider)
@@ -304,47 +322,20 @@ def _record_embedding_degraded(stage_metadata: dict[str, Any] | None, exc: BaseE
     )
 
 
-async def _drain_embedding_task(
-    task: asyncio.Task[Any],
-) -> tuple[bool, Any]:
-    """Drain a shielded task despite repeated cancellation requests."""
-    while not task.done():
-        try:
-            await asyncio.shield(task)
-        except asyncio.CancelledError:
-            continue
-        except Exception:  # noqa: BLE001 - caller cancellation remains authoritative
-            break
-    if task.cancelled():
-        return False, None
-    try:
-        return True, task.result()
-    except Exception:  # noqa: BLE001 - caller cancellation remains authoritative
-        return False, None
-
-
 async def _run_sync_embedding_call(
     call: Callable[[], Any],
     *,
     on_success: Callable[[Any], Awaitable[None]] | None = None,
 ) -> Any:
     """Drain provider work and success bookkeeping before cancellation escapes."""
-    work_task = asyncio.create_task(asyncio.to_thread(call))
-    try:
-        result = await asyncio.shield(work_task)
-    except asyncio.CancelledError:
-        completed, result = await _drain_embedding_task(work_task)
-        if completed and on_success is not None:
-            mark_task = asyncio.create_task(on_success(result))
-            await _drain_embedding_task(mark_task)
-        raise
+    result = await await_bounded_sync_call(
+        call,
+        pool=SYNC_ADAPTER_CALL_POOL,
+        exhaustion_message="RAG embedding adapter capacity is exhausted",
+        on_cancel_result=on_success,
+    )
     if on_success is not None:
-        mark_task = asyncio.create_task(on_success(result))
-        try:
-            await asyncio.shield(mark_task)
-        except asyncio.CancelledError:
-            await _drain_embedding_task(mark_task)
-            raise
+        await await_owned_worker(on_success(result))
     return result
 
 
@@ -398,6 +389,7 @@ async def embed_text(
 
         cfg = get_embedding_config()
         provider = _embedding_provider_from_config(cfg)
+        effective_model = _embedding_model_from_config(cfg)
         handle = None
         call_kwargs: dict[str, Any] = {}
         # Hugging Face in this synchronous service is an in-process provider.
@@ -406,6 +398,7 @@ async def embed_text(
                 handle, call_kwargs = await _resolve_runtime_embedding_call(
                     credential_runtime,
                     provider,
+                    effective_model,
                 )
             else:
                 call_kwargs = _runtime_local_embedding_call_kwargs(cfg, provider)

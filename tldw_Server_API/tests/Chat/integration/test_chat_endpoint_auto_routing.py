@@ -1,6 +1,7 @@
+from unittest.mock import patch
+
 import pytest
 from fastapi import status
-from unittest.mock import patch
 
 from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
     ChatCompletionRequest,
@@ -9,12 +10,17 @@ from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
 from tldw_Server_API.app.core.LLM_Calls.routing.decision_store import InMemoryRoutingDecisionStore
 from tldw_Server_API.app.core.LLM_Calls.routing.models import RoutingDecision
 
+pytest_plugins = (
+    "tldw_Server_API.tests.Chat.credential_runtime_fixtures",
+)
+
 
 @pytest.mark.integration
 def test_chat_endpoint_routes_auto_before_provider_normalization(
     authenticated_client,
     mock_chacha_db,
     setup_dependencies,
+    execution_scoped_provider_credentials,
 ):
     request_data = ChatCompletionRequest(
         model="auto",
@@ -68,10 +74,6 @@ def test_chat_endpoint_routes_auto_before_provider_normalization(
             "tldw_Server_API.app.api.v1.endpoints.chat.execute_non_stream_call",
             side_effect=fake_execute_non_stream_call,
         ),
-        patch(
-            "tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS",
-            {"openrouter": "test-key"},
-        ),
     ):
         response = authenticated_client.post("/api/v1/chat/completions", json=request_data.model_dump())
 
@@ -86,6 +88,7 @@ def test_chat_endpoint_auto_routing_runs_llm_router_logs_usage_and_wires_sticky_
     authenticated_client,
     mock_chacha_db,
     setup_dependencies,
+    execution_scoped_provider_credentials,
 ):
     injected_store = InMemoryRoutingDecisionStore()
     authenticated_client.app.state.routing_decision_store = injected_store
@@ -194,10 +197,6 @@ def test_chat_endpoint_auto_routing_runs_llm_router_logs_usage_and_wires_sticky_
             "tldw_Server_API.app.api.v1.endpoints.chat.execute_non_stream_call",
             side_effect=fake_execute_non_stream_call,
         ),
-        patch(
-            "tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS",
-            {"openrouter": "test-key"},
-        ),
     ):
         response = authenticated_client.post("/api/v1/chat/completions", json=request_data.model_dump())
 
@@ -218,6 +217,7 @@ def test_chat_endpoint_disables_provider_fallback_for_pinned_provider_auto_routi
     authenticated_client,
     mock_chacha_db,
     setup_dependencies,
+    execution_scoped_provider_credentials,
 ):
     request_data = ChatCompletionRequest(
         model="auto",
@@ -270,10 +270,6 @@ def test_chat_endpoint_disables_provider_fallback_for_pinned_provider_auto_routi
             "tldw_Server_API.app.api.v1.endpoints.chat.execute_non_stream_call",
             side_effect=fake_execute_non_stream_call,
         ),
-        patch(
-            "tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS",
-            {"openai": "test-key"},
-        ),
     ):
         response = authenticated_client.post("/api/v1/chat/completions", json=request_data.model_dump())
 
@@ -286,6 +282,7 @@ def test_chat_endpoint_auto_routing_uses_post_validation_tool_capabilities(
     authenticated_client,
     mock_chacha_db,
     setup_dependencies,
+    execution_scoped_provider_credentials,
 ):
     request_data = ChatCompletionRequest(
         model="auto",
@@ -351,10 +348,6 @@ def test_chat_endpoint_auto_routing_uses_post_validation_tool_capabilities(
         patch(
             "tldw_Server_API.app.api.v1.endpoints.chat.execute_non_stream_call",
             side_effect=fake_execute_non_stream_call,
-        ),
-        patch(
-            "tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS",
-            {"openai": "test-key"},
         ),
     ):
         response = authenticated_client.post("/api/v1/chat/completions", json=request_data.model_dump())

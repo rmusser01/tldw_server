@@ -134,7 +134,8 @@ async def test_evidence_chains_runtime_failure_lowers_trust_without_failover() -
         def __init__(self) -> None:
             self.resolved: list[str] = []
 
-        async def resolve(self, provider):
+        async def resolve(self, provider, *, model=None):
+            del model
             self.resolved.append(provider)
             raise RuntimeError("secret-key /private/credential-store.db")
 

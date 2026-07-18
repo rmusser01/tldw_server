@@ -1,7 +1,18 @@
+import asyncio
 import inspect
+from typing import Any
 
 import pytest
 
+import tldw_Server_API.app.core.LLM_Calls.providers.moonshot_adapter as moonshot_mod
+import tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter as openai_mod
+from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
+    ByokResolutionStatus,
+    ResolvedByokCredentials,
+)
+from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+    ProviderCredentialRuntime,
+)
 from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatAuthenticationError,
     ChatConfigurationError,
@@ -10,8 +21,6 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import (
 )
 from tldw_Server_API.app.core.LLM_Calls import Summarization_General_Lib as sgl
 from tldw_Server_API.app.core.LLM_Calls import chat_calls
-import tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter as openai_mod
-import tldw_Server_API.app.core.LLM_Calls.providers.moonshot_adapter as moonshot_mod
 
 
 @pytest.mark.unit
@@ -67,6 +76,46 @@ def _disable_server_resolution(monkeypatch):
         "ensure_app_config",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("must not load config")),
     )
+
+
+def _provider_credentials(
+    provider: str,
+    *,
+    api_key: str | None,
+    app_config: dict[str, Any] | None,
+):
+    """Issue an authentic capability for explicit summarization tests."""
+
+    async def issue():
+        async def resolver(
+            normalized_provider: str,
+            **_kwargs: Any,
+        ) -> ResolvedByokCredentials:
+            return ResolvedByokCredentials(
+                provider=normalized_provider,
+                api_key=api_key,
+                app_config=app_config,
+                credential_fields={},
+                source="user",
+                allowlisted=True,
+                status=ByokResolutionStatus.RESOLVED,
+                auth_source="api_key",
+            )
+
+        runtime = ProviderCredentialRuntime(
+            user_id=29,
+            team_ids=(),
+            org_ids=(),
+            trusted_base_url_override=True,
+            server_config_snapshot={},
+            resolver=resolver,
+        )
+        try:
+            return await runtime.resolve(provider)
+        finally:
+            await runtime.close()
+
+    return asyncio.run(issue())
     monkeypatch.setattr(
         sgl,
         "resolve_provider_api_key_from_config",
@@ -183,6 +232,11 @@ def test_explicit_nonstream_uses_exact_credentials(monkeypatch):
         api_key="explicit-key",
         app_config=config,
         credentials_resolved=True,
+        provider_credentials=_provider_credentials(
+            "openai",
+            api_key="explicit-key",
+            app_config=config,
+        ),
         raise_on_error=True,
     )
 
@@ -214,6 +268,11 @@ def test_explicit_stream_uses_exact_credentials(monkeypatch):
         streaming=True,
         app_config={},
         credentials_resolved=True,
+        provider_credentials=_provider_credentials(
+            "openai",
+            api_key="stream-key",
+            app_config={},
+        ),
         raise_on_error=True,
     )
 
@@ -235,6 +294,11 @@ def test_explicit_missing_key_raises_typed_sanitized_error(monkeypatch):
             model_override="gpt-test",
             app_config={"openai_api": {"api_key": SECRET}},
             credentials_resolved=True,
+            provider_credentials=_provider_credentials(
+                "openai",
+                api_key=" ",
+                app_config={"openai_api": {"api_key": SECRET}},
+            ),
             raise_on_error=True,
         )
 
@@ -258,6 +322,11 @@ def test_adapter_error_raises_typed_error_without_upstream_body(monkeypatch):
             model_override="gpt-test",
             app_config={},
             credentials_resolved=True,
+            provider_credentials=_provider_credentials(
+                "openai",
+                api_key="key",
+                app_config={},
+            ),
             raise_on_error=True,
         )
 
@@ -280,6 +349,11 @@ def test_typed_chat_provider_error_is_sanitized(monkeypatch):
             model_override="gpt-test",
             app_config={},
             credentials_resolved=True,
+            provider_credentials=_provider_credentials(
+                "openai",
+                api_key="key",
+                app_config={},
+            ),
             raise_on_error=True,
         )
 
@@ -314,6 +388,11 @@ def test_chat_error_taxonomy_is_preserved_without_upstream_details(
             model_override="gpt-test",
             app_config={},
             credentials_resolved=True,
+            provider_credentials=_provider_credentials(
+                "openai",
+                api_key="key",
+                app_config={},
+            ),
             raise_on_error=True,
         )
 
@@ -340,6 +419,11 @@ def test_dispatch_failure_is_typed_for_runtime_callers(monkeypatch):
             model_override="gpt-test",
             app_config={},
             credentials_resolved=True,
+            provider_credentials=_provider_credentials(
+                "openai",
+                api_key="key",
+                app_config={},
+            ),
             raise_on_error=True,
         )
 
@@ -365,6 +449,11 @@ def test_partial_stream_then_failure_raises_typed_error(monkeypatch):
         streaming=True,
         app_config={},
         credentials_resolved=True,
+        provider_credentials=_provider_credentials(
+            "openai",
+            api_key="key",
+            app_config={},
+        ),
         raise_on_error=True,
     )
 
@@ -393,6 +482,11 @@ def test_partial_stream_authentication_failure_preserves_safe_taxonomy(monkeypat
         streaming=True,
         app_config={},
         credentials_resolved=True,
+        provider_credentials=_provider_credentials(
+            "openai",
+            api_key="key",
+            app_config={},
+        ),
         raise_on_error=True,
     )
 
@@ -452,6 +546,11 @@ def test_explicit_absent_config_cannot_trigger_summary_adapter_reload(monkeypatc
         model_override="moonshot-test",
         app_config=None,
         credentials_resolved=True,
+        provider_credentials=_provider_credentials(
+            "moonshot",
+            api_key="explicit-key",
+            app_config=None,
+        ),
         raise_on_error=True,
     )
 
@@ -493,6 +592,11 @@ def test_explicit_missing_summary_model_does_not_use_default_model_environment(m
             api_key="explicit-key",
             app_config=None,
             credentials_resolved=True,
+            provider_credentials=_provider_credentials(
+                "moonshot",
+                api_key="explicit-key",
+                app_config=None,
+            ),
             raise_on_error=True,
         )
 

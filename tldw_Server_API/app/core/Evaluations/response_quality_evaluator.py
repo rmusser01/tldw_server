@@ -12,12 +12,35 @@ Evaluates:
 """
 
 import asyncio
+from collections.abc import Awaitable, Callable
+from functools import partial
 from typing import Any, Optional
 
 from loguru import logger
 
+from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+    ProviderCallCredentials,
+)
+from tldw_Server_API.app.core.Chat.bounded_daemon import (
+    SYNC_ADAPTER_CALL_POOL,
+    DaemonCapacityError,
+    await_bounded_sync_call,
+    await_owned_worker,
+)
 from tldw_Server_API.app.core.Evaluations.circuit_breaker import llm_circuit_breaker
-from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
+from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import (
+    SummaryProviderError,
+    analyze,
+)
+
+
+async def _run_bounded_quality_analyze(*args: Any, **kwargs: Any) -> Any:
+    """Run a sync quality adapter inside the breaker's single deadline."""
+    return await await_bounded_sync_call(
+        partial(analyze, *args, **kwargs),
+        pool=SYNC_ADAPTER_CALL_POOL,
+        exhaustion_message="Response quality provider capacity is exhausted",
+    )
 
 
 class ResponseQualityEvaluator:
@@ -32,6 +55,9 @@ class ResponseQualityEvaluator:
         api_name: str = "openai",
         api_key: Optional[str] = None,
         model: Optional[str] = None,
+        app_config: Optional[dict[str, Any]] = None,
+        credentials_resolved: bool = False,
+        provider_credentials: ProviderCallCredentials | None = None,
     ) -> dict[str, Any]:
         """
         Evaluate the quality of a generated response.
@@ -42,6 +68,8 @@ class ResponseQualityEvaluator:
             expected_format: Expected response format/structure
             custom_criteria: Additional evaluation criteria
             api_name: LLM API to use
+            app_config: Provider configuration captured with the API key
+            credentials_resolved: Whether the key/config snapshot is authoritative
 
         Returns:
             Evaluation results with metrics and suggestions
@@ -55,26 +83,76 @@ class ResponseQualityEvaluator:
         }
 
         # Core quality metrics
-        tasks = [
-            self._evaluate_relevance(prompt, response, api_name, api_key, model),
-            self._evaluate_completeness(prompt, response, api_name, api_key, model),
-            self._evaluate_clarity(response, api_name, api_key, model),
-            self._evaluate_accuracy(prompt, response, api_name, api_key, model),
+        task_factories: list[Callable[[], Awaitable[tuple]]] = [
+            lambda: self._evaluate_relevance(
+                prompt, response, api_name, api_key, model, app_config,
+                credentials_resolved, provider_credentials
+            ),
+            lambda: self._evaluate_completeness(
+                prompt, response, api_name, api_key, model, app_config,
+                credentials_resolved, provider_credentials
+            ),
+            lambda: self._evaluate_clarity(
+                response, api_name, api_key, model, app_config,
+                credentials_resolved, provider_credentials
+            ),
+            lambda: self._evaluate_accuracy(
+                prompt, response, api_name, api_key, model, app_config,
+                credentials_resolved, provider_credentials
+            ),
         ]
 
         # Format compliance check
         if expected_format:
-            tasks.append(self._check_format_compliance(response, expected_format, api_name, api_key, model))
+            task_factories.append(
+                lambda: self._check_format_compliance(
+                    response,
+                    expected_format,
+                    api_name,
+                    api_key,
+                    model,
+                    app_config,
+                    credentials_resolved,
+                    provider_credentials,
+                )
+            )
 
         # Custom criteria evaluation
         if custom_criteria:
             for criterion_name, criterion_desc in custom_criteria.items():
-                tasks.append(self._evaluate_custom_criterion(
-                    prompt, response, criterion_name, criterion_desc, api_name, api_key, model
-                ))
+                task_factories.append(
+                    lambda criterion_name=criterion_name, criterion_desc=criterion_desc: (
+                        self._evaluate_custom_criterion(
+                            prompt,
+                            response,
+                            criterion_name,
+                            criterion_desc,
+                            api_name,
+                            api_key,
+                            model,
+                            app_config,
+                            credentials_resolved,
+                            provider_credentials,
+                        )
+                    )
+                )
 
-        # Run evaluations in parallel
-        evaluation_results = await asyncio.gather(*tasks)
+        # Authenticate with one metric before fanning out. A rejected key must
+        # cause exactly one provider request and no successful partial result.
+        first_result = await task_factories[0]()
+        remaining_results = await await_owned_worker(
+            asyncio.gather(
+                *(factory() for factory in task_factories[1:]),
+                return_exceptions=True,
+            )
+        )
+        for result in remaining_results:
+            if isinstance(result, BaseException):
+                raise result
+        evaluation_results = [
+            first_result,
+            *remaining_results,
+        ]
 
         # Process results
         format_scores = []
@@ -99,7 +177,17 @@ class ResponseQualityEvaluator:
 
         return results
 
-    async def _evaluate_relevance(self, prompt: str, response: str, api_name: str, api_key: Optional[str], model: Optional[str] = None) -> tuple:
+    async def _evaluate_relevance(
+        self,
+        prompt: str,
+        response: str,
+        api_name: str,
+        api_key: Optional[str],
+        model: Optional[str] = None,
+        app_config: Optional[dict[str, Any]] = None,
+        credentials_resolved: bool = False,
+        provider_credentials: ProviderCallCredentials | None = None,
+    ) -> tuple:
         """Evaluate how relevant the response is to the prompt"""
         evaluation_prompt = f"""
         Evaluate how relevant and appropriate the following response is to the given prompt.
@@ -121,7 +209,7 @@ class ResponseQualityEvaluator:
         try:
             score_str = await llm_circuit_breaker.call_with_breaker(
                 api_name,
-                analyze,
+                _run_bounded_quality_analyze,
                 api_name,  # First param
                 response,  # input_data
                 evaluation_prompt,  # custom_prompt_arg
@@ -129,6 +217,10 @@ class ResponseQualityEvaluator:
                 "You are an evaluation expert. Provide only numeric scores.",  # system_message
                 0.1,       # temp
                 model_override=model,
+                app_config=app_config,
+                credentials_resolved=credentials_resolved,
+                provider_credentials=provider_credentials,
+                raise_on_error=True,
             )
 
             score = float(score_str.strip()) / 5.0
@@ -140,15 +232,27 @@ class ResponseQualityEvaluator:
                 "explanation": "How well the response addresses the prompt"
             })
 
+        except (SummaryProviderError, DaemonCapacityError):
+            raise
         except Exception as e:
-            logger.error(f"Relevance evaluation failed: {e}")
+            logger.error("Relevance evaluation failed error_type={}", type(e).__name__)
             return ("relevance", {
                 "name": "relevance",
                 "score": 0.0,
-                "explanation": f"Evaluation failed: {str(e)}"
+                "explanation": "Provider evaluation failed."
             })
 
-    async def _evaluate_completeness(self, prompt: str, response: str, api_name: str, api_key: Optional[str], model: Optional[str] = None) -> tuple:
+    async def _evaluate_completeness(
+        self,
+        prompt: str,
+        response: str,
+        api_name: str,
+        api_key: Optional[str],
+        model: Optional[str] = None,
+        app_config: Optional[dict[str, Any]] = None,
+        credentials_resolved: bool = False,
+        provider_credentials: ProviderCallCredentials | None = None,
+    ) -> tuple:
         """Evaluate if the response is complete"""
         evaluation_prompt = f"""
         Evaluate the completeness of the following response to the given prompt.
@@ -170,7 +274,7 @@ class ResponseQualityEvaluator:
         try:
             score_str = await llm_circuit_breaker.call_with_breaker(
                 api_name,
-                analyze,
+                _run_bounded_quality_analyze,
                 api_name,  # First param
                 response,  # input_data
                 evaluation_prompt,  # custom_prompt_arg
@@ -178,6 +282,10 @@ class ResponseQualityEvaluator:
                 "You are an evaluation expert. Provide only numeric scores.",  # system_message
                 0.1,       # temp
                 model_override=model,
+                app_config=app_config,
+                credentials_resolved=credentials_resolved,
+                provider_credentials=provider_credentials,
+                raise_on_error=True,
             )
 
             score = float(score_str.strip()) / 5.0
@@ -189,15 +297,26 @@ class ResponseQualityEvaluator:
                 "explanation": "How complete and comprehensive the response is"
             })
 
+        except (SummaryProviderError, DaemonCapacityError):
+            raise
         except Exception as e:
-            logger.error(f"Completeness evaluation failed: {e}")
+            logger.error("Completeness evaluation failed error_type={}", type(e).__name__)
             return ("completeness", {
                 "name": "completeness",
                 "score": 0.0,
-                "explanation": f"Evaluation failed: {str(e)}"
+                "explanation": "Provider evaluation failed."
             })
 
-    async def _evaluate_clarity(self, response: str, api_name: str, api_key: Optional[str], model: Optional[str] = None) -> tuple:
+    async def _evaluate_clarity(
+        self,
+        response: str,
+        api_name: str,
+        api_key: Optional[str],
+        model: Optional[str] = None,
+        app_config: Optional[dict[str, Any]] = None,
+        credentials_resolved: bool = False,
+        provider_credentials: ProviderCallCredentials | None = None,
+    ) -> tuple:
         """Evaluate clarity and coherence of the response"""
         evaluation_prompt = f"""
         Evaluate the clarity, coherence, and readability of the following response.
@@ -217,7 +336,7 @@ class ResponseQualityEvaluator:
         try:
             score_str = await llm_circuit_breaker.call_with_breaker(
                 api_name,
-                analyze,
+                _run_bounded_quality_analyze,
                 api_name,  # First param
                 response,  # input_data
                 evaluation_prompt,  # custom_prompt_arg
@@ -225,6 +344,10 @@ class ResponseQualityEvaluator:
                 "You are an evaluation expert. Provide only numeric scores.",  # system_message
                 0.1,       # temp
                 model_override=model,
+                app_config=app_config,
+                credentials_resolved=credentials_resolved,
+                provider_credentials=provider_credentials,
+                raise_on_error=True,
             )
 
             score = float(score_str.strip()) / 5.0
@@ -236,15 +359,27 @@ class ResponseQualityEvaluator:
                 "explanation": "Clarity and coherence of the response"
             })
 
+        except (SummaryProviderError, DaemonCapacityError):
+            raise
         except Exception as e:
-            logger.error(f"Clarity evaluation failed: {e}")
+            logger.error("Clarity evaluation failed error_type={}", type(e).__name__)
             return ("clarity", {
                 "name": "clarity",
                 "score": 0.0,
-                "explanation": f"Evaluation failed: {str(e)}"
+                "explanation": "Provider evaluation failed."
             })
 
-    async def _evaluate_accuracy(self, prompt: str, response: str, api_name: str, api_key: Optional[str], model: Optional[str] = None) -> tuple:
+    async def _evaluate_accuracy(
+        self,
+        prompt: str,
+        response: str,
+        api_name: str,
+        api_key: Optional[str],
+        model: Optional[str] = None,
+        app_config: Optional[dict[str, Any]] = None,
+        credentials_resolved: bool = False,
+        provider_credentials: ProviderCallCredentials | None = None,
+    ) -> tuple:
         """Evaluate factual accuracy of the response"""
         evaluation_prompt = f"""
         Evaluate the factual accuracy and correctness of the following response.
@@ -266,7 +401,7 @@ class ResponseQualityEvaluator:
         try:
             score_str = await llm_circuit_breaker.call_with_breaker(
                 api_name,
-                analyze,
+                _run_bounded_quality_analyze,
                 api_name,  # First param
                 response,  # input_data
                 evaluation_prompt,  # custom_prompt_arg
@@ -274,6 +409,10 @@ class ResponseQualityEvaluator:
                 "You are an evaluation expert. Provide only numeric scores.",  # system_message
                 0.1,       # temp
                 model_override=model,
+                app_config=app_config,
+                credentials_resolved=credentials_resolved,
+                provider_credentials=provider_credentials,
+                raise_on_error=True,
             )
 
             score = float(score_str.strip()) / 5.0
@@ -285,15 +424,27 @@ class ResponseQualityEvaluator:
                 "explanation": "Factual accuracy of the response"
             })
 
+        except (SummaryProviderError, DaemonCapacityError):
+            raise
         except Exception as e:
-            logger.error(f"Accuracy evaluation failed: {e}")
+            logger.error("Accuracy evaluation failed error_type={}", type(e).__name__)
             return ("accuracy", {
                 "name": "accuracy",
                 "score": 0.0,
-                "explanation": f"Evaluation failed: {str(e)}"
+                "explanation": "Provider evaluation failed."
             })
 
-    async def _check_format_compliance(self, response: str, expected_format: str, api_name: str, api_key: Optional[str], model: Optional[str] = None) -> tuple:
+    async def _check_format_compliance(
+        self,
+        response: str,
+        expected_format: str,
+        api_name: str,
+        api_key: Optional[str],
+        model: Optional[str] = None,
+        app_config: Optional[dict[str, Any]] = None,
+        credentials_resolved: bool = False,
+        provider_credentials: ProviderCallCredentials | None = None,
+    ) -> tuple:
         """Check if response matches expected format"""
         evaluation_prompt = f"""
         Check if the following response matches the expected format.
@@ -314,7 +465,7 @@ class ResponseQualityEvaluator:
         try:
             result = await llm_circuit_breaker.call_with_breaker(
                 api_name,
-                analyze,
+                _run_bounded_quality_analyze,
                 api_name,  # First param
                 response,  # input_data
                 evaluation_prompt,  # custom_prompt_arg
@@ -322,6 +473,10 @@ class ResponseQualityEvaluator:
                 "You are a format compliance checker. Be precise and systematic.",  # system_message
                 0.1,       # temp
                 model_override=model,
+                app_config=app_config,
+                credentials_resolved=credentials_resolved,
+                provider_credentials=provider_credentials,
+                raise_on_error=True,
             )
 
             # Parse result
@@ -338,11 +493,13 @@ class ResponseQualityEvaluator:
                 "issues": issues
             })
 
+        except (SummaryProviderError, DaemonCapacityError):
+            raise
         except Exception as e:
-            logger.error(f"Format compliance check failed: {e}")
+            logger.error("Format compliance check failed error_type={}", type(e).__name__)
             return ("format_compliance", {
                 "compliant": False,
-                "issues": [f"Format check failed: {str(e)}"]
+                "issues": ["Provider format evaluation failed."]
             })
 
     async def _evaluate_custom_criterion(
@@ -354,6 +511,9 @@ class ResponseQualityEvaluator:
         api_name: str,
         api_key: Optional[str],
         model: Optional[str] = None,
+        app_config: Optional[dict[str, Any]] = None,
+        credentials_resolved: bool = False,
+        provider_credentials: ProviderCallCredentials | None = None,
     ) -> tuple:
         """Evaluate a custom criterion"""
         evaluation_prompt = f"""
@@ -373,7 +533,7 @@ class ResponseQualityEvaluator:
         try:
             score_str = await llm_circuit_breaker.call_with_breaker(
                 api_name,
-                analyze,
+                _run_bounded_quality_analyze,
                 api_name,  # First param
                 response,  # input_data
                 evaluation_prompt,  # custom_prompt_arg
@@ -381,6 +541,10 @@ class ResponseQualityEvaluator:
                 "You are an evaluation expert. Provide only numeric scores.",  # system_message
                 0.1,       # temp
                 model_override=model,
+                app_config=app_config,
+                credentials_resolved=credentials_resolved,
+                provider_credentials=provider_credentials,
+                raise_on_error=True,
             )
 
             score = float(score_str.strip()) / 5.0
@@ -392,12 +556,14 @@ class ResponseQualityEvaluator:
                 "explanation": criterion_desc
             })
 
+        except (SummaryProviderError, DaemonCapacityError):
+            raise
         except Exception as e:
-            logger.error(f"Custom criterion evaluation failed: {e}")
+            logger.error("Custom criterion evaluation failed error_type={}", type(e).__name__)
             return (f"custom_{criterion_name}", {
                 "name": criterion_name,
                 "score": 0.0,
-                "explanation": f"Evaluation failed: {str(e)}"
+                "explanation": "Provider evaluation failed."
             })
 
     def _generate_improvements(self, results: dict[str, Any]) -> list[str]:

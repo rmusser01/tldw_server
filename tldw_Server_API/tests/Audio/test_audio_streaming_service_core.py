@@ -418,3 +418,172 @@ async def test_stream_tts_to_websocket_cancels_consumer_when_completion_signal_f
     )
 
     assert consumer_cancelled.is_set()
+
+
+@pytest.mark.asyncio
+async def test_stream_tts_to_websocket_keeps_concurrent_credential_snapshots_isolated():
+    """Concurrent TTS producers dispatch and account against only their own snapshot."""
+
+    entered = {user_id: asyncio.Event() for user_id in (101, 202)}
+    release = {user_id: asyncio.Event() for user_id in (101, 202)}
+    calls: list[tuple[int, dict[str, object]]] = []
+    marked: list[int] = []
+
+    class RecordingTTSService:
+        async def generate_speech(self, _request, **kwargs):  # noqa: ANN001
+            user_id = int(kwargs["user_id"])
+            calls.append((user_id, dict(kwargs)))
+            entered[user_id].set()
+            await release[user_id].wait()
+            yield f"audio-{user_id}".encode()
+
+    class RecordingWebSocket:
+        def __init__(self) -> None:
+            self.sent: list[bytes] = []
+
+        async def send_bytes(self, data: bytes) -> None:
+            self.sent.append(data)
+
+    class DummyRegistry:
+        def increment(self, *_args, **_kwargs):  # noqa: ANN002, ANN003, ANN202
+            return None
+
+    async def run_one(user_id: int) -> RecordingWebSocket:
+        websocket = RecordingWebSocket()
+
+        async def mark_first_output() -> None:
+            marked.append(user_id)
+
+        await streaming_service._stream_tts_to_websocket(
+            websocket=websocket,
+            speech_req=SimpleNamespace(model="tts-1"),
+            tts_service=RecordingTTSService(),
+            provider="openai",
+            provider_overrides={
+                "credentials_resolved": True,
+                "openai_api_key": f"user-{user_id}-key",
+            },
+            user_id=user_id,
+            on_first_output=mark_first_output,
+            outer_stream=None,
+            reg=DummyRegistry(),
+            route="audio.stream.tts",
+            component_label="audio_tts_ws",
+        )
+        return websocket
+
+    first = asyncio.create_task(run_one(101))
+    second = asyncio.create_task(run_one(202))
+    try:
+        await asyncio.wait_for(
+            asyncio.gather(*(event.wait() for event in entered.values())),
+            timeout=1.0,
+        )
+        release[202].set()
+        second_ws = await asyncio.wait_for(second, timeout=1.0)
+        assert second_ws.sent == [b"audio-202"]
+        assert marked == [202]
+
+        release[101].set()
+        first_ws = await asyncio.wait_for(first, timeout=1.0)
+        assert first_ws.sent == [b"audio-101"]
+    finally:
+        for event in release.values():
+            event.set()
+        await asyncio.gather(first, second, return_exceptions=True)
+
+    assert sorted(
+        (user_id, kwargs["provider_overrides"]["openai_api_key"])
+        for user_id, kwargs in calls
+    ) == [(101, "user-101-key"), (202, "user-202-key")]
+    assert all(kwargs["fallback"] is False for _user_id, kwargs in calls)
+    assert sorted(marked) == [101, 202]
+
+
+@pytest.mark.asyncio
+async def test_stream_tts_to_websocket_closes_inner_iterator_before_scope_on_disconnect():
+    """A disconnected consumer cannot release credential scope before stream close."""
+
+    second_next_started = asyncio.Event()
+    close_started = asyncio.Event()
+    close_release = asyncio.Event()
+    send_attempted = asyncio.Event()
+    lifecycle: list[str] = []
+
+    class SpeechIterator:
+        def __init__(self) -> None:
+            self._first = True
+
+        def __aiter__(self):  # noqa: ANN204
+            return self
+
+        async def __anext__(self) -> bytes:
+            if self._first:
+                self._first = False
+                return b"first"
+            second_next_started.set()
+            await asyncio.Event().wait()
+            raise StopAsyncIteration
+
+        async def aclose(self) -> None:
+            close_started.set()
+            await close_release.wait()
+            lifecycle.append("iterator_close")
+
+    iterator = SpeechIterator()
+
+    class TTSService:
+        def generate_speech(self, *_args, **_kwargs):  # noqa: ANN002, ANN003, ANN202
+            return iterator
+
+    class DisconnectingWebSocket:
+        async def send_bytes(self, _data: bytes) -> None:
+            send_attempted.set()
+            raise RuntimeError("client disconnected")
+
+        async def close(self, **_kwargs) -> None:  # noqa: ANN003
+            return None
+
+    class DummyRegistry:
+        def increment(self, *_args, **_kwargs):  # noqa: ANN002, ANN003, ANN202
+            return None
+
+    async def run_stream() -> None:
+        try:
+            await streaming_service._stream_tts_to_websocket(
+                websocket=DisconnectingWebSocket(),
+                speech_req=SimpleNamespace(model="tts-1"),
+                tts_service=TTSService(),
+                provider="openai",
+                provider_overrides={
+                    "credentials_resolved": True,
+                    "openai_api_key": "disconnect-key",
+                },
+                user_id=101,
+                on_first_output=lambda: None,
+                outer_stream=None,
+                reg=DummyRegistry(),
+                route="audio.stream.tts",
+                component_label="audio_tts_ws",
+            )
+        finally:
+            lifecycle.append("scope_close")
+
+    task = asyncio.create_task(run_stream())
+    try:
+        await asyncio.wait_for(send_attempted.wait(), timeout=1.0)
+        await asyncio.wait_for(second_next_started.wait(), timeout=1.0)
+        close_waiter = asyncio.create_task(close_started.wait())
+        done, _pending = await asyncio.wait(
+            {task, close_waiter},
+            timeout=1.0,
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        assert close_waiter in done
+        assert task not in done
+        assert lifecycle == []
+    finally:
+        close_release.set()
+        await asyncio.gather(task, return_exceptions=True)
+
+    assert lifecycle == ["iterator_close", "scope_close"]

@@ -8,6 +8,7 @@ apply this DDL using their own connection or via a future Postgres JobManager.
 
 import contextlib
 import os
+from typing import Any
 
 from tldw_Server_API.app.core.testing import is_truthy as _is_truthy
 
@@ -28,6 +29,19 @@ _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS = (
     ValueError,
     UnicodeDecodeError,
 )
+
+POSTGRES_ARCHIVE_CURSOR_TIME_SQL = (
+    "COALESCE(created_at, archived_at, "
+    "TIMESTAMPTZ '0001-01-01 00:00:00+00')"
+)
+POSTGRES_ARCHIVE_CURSOR_INDEX_SQL = (
+    "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_jobs_archive_cursor_v2 "
+    "ON jobs_archive(domain, job_type, "
+    f"{POSTGRES_ARCHIVE_CURSOR_TIME_SQL}, "
+    "id, COALESCE(uuid, ''), archive_id)"
+)
+_POSTGRES_ARCHIVE_SEQUENCE = "jobs_archive_archive_id_seq"
+_POSTGRES_ARCHIVE_MIGRATION_LOCK = "tldw.jobs_archive.archive_id.v1"
 
 JOBS_POSTGRES_DDL = """
 CREATE TABLE IF NOT EXISTS jobs (
@@ -117,6 +131,7 @@ CREATE INDEX IF NOT EXISTS idx_job_events_job_id ON job_events(job_id);
 
 -- Optional archive table (used when JOBS_ARCHIVE_BEFORE_DELETE=true)
 CREATE TABLE IF NOT EXISTS jobs_archive (
+  archive_id BIGSERIAL CONSTRAINT idx_jobs_archive_id PRIMARY KEY,
   id INTEGER,
   uuid TEXT,
   domain TEXT NOT NULL,
@@ -160,11 +175,26 @@ CREATE TABLE IF NOT EXISTS jobs_archive (
   completed_at TIMESTAMPTZ,
   archived_at TIMESTAMPTZ DEFAULT NOW()
 );
+CREATE INDEX IF NOT EXISTS idx_jobs_archive_migration
+  ON jobs_archive(
+    domain,
+    job_type,
+    status,
+    COALESCE(
+      created_at,
+      archived_at,
+      TIMESTAMPTZ '0001-01-01 00:00:00+00'
+    ),
+    id,
+    COALESCE(uuid, '')
+  );
 
 -- Job dependencies (DAG edges)
 CREATE TABLE IF NOT EXISTS job_dependencies (
   job_uuid TEXT NOT NULL,
   depends_on_job_uuid TEXT NOT NULL,
+  depends_on_terminal_status TEXT,
+  depends_on_cancellation_reason TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   PRIMARY KEY (job_uuid, depends_on_job_uuid)
 );
@@ -178,6 +208,322 @@ CREATE INDEX IF NOT EXISTS idx_jobs_status_processing ON jobs(domain, queue, job
 -- Composite uniqueness for idempotency scoped by domain/queue/job_type (NULL key allowed)
 -- A unique index is created outside the DDL block using autocommit.
 """
+
+
+def _pg_archive_locator_index_state(cur: Any) -> tuple[Any, ...] | None:
+    """Return validity metadata for the canonical archive-locator index."""
+    cur.execute(
+        "SELECT i.indisunique, i.indisvalid, i.indpred IS NULL, "
+        "i.indnkeyatts, pg_get_indexdef(i.indexrelid, 1, true), "
+        "con.conname "
+        "FROM pg_class idx "
+        "JOIN pg_namespace ns ON ns.oid = idx.relnamespace "
+        "JOIN pg_index i ON i.indexrelid = idx.oid "
+        "LEFT JOIN pg_constraint con ON con.conindid = idx.oid "
+        "WHERE ns.nspname = current_schema() "
+        "AND idx.relname = 'idx_jobs_archive_id' "
+        "AND i.indrelid = 'jobs_archive'::regclass"
+    )
+    return cur.fetchone()
+
+
+def _pg_archive_locator_index_ready(archive_index: tuple[Any, ...] | None) -> bool:
+    """Return whether index metadata enforces one valid locator per row."""
+    return bool(
+        archive_index is not None
+        and archive_index[0]
+        and archive_index[1]
+        and archive_index[2]
+        and int(archive_index[3]) == 1
+        and str(archive_index[4]).strip() == "archive_id"
+    )
+
+
+def _pg_archive_column_default_uses_locator_sequence(cur: Any) -> bool:
+    """Return whether archive_id's default depends on the canonical sequence."""
+    cur.execute(
+        "SELECT dep.refobjid = %s::regclass "
+        "FROM pg_attrdef defaults "
+        "JOIN pg_attribute attr ON attr.attrelid = defaults.adrelid "
+        "AND attr.attnum = defaults.adnum "
+        "JOIN pg_depend dep ON dep.classid = 'pg_attrdef'::regclass "
+        "AND dep.objid = defaults.oid "
+        "JOIN pg_class referenced ON referenced.oid = dep.refobjid "
+        "WHERE defaults.adrelid = 'jobs_archive'::regclass "
+        "AND attr.attname = 'archive_id' "
+        "AND dep.refclassid = 'pg_class'::regclass "
+        "AND referenced.relkind = 'S'",
+        (_POSTGRES_ARCHIVE_SEQUENCE,),
+    )
+    sequence_dependencies = [bool(row[0]) for row in cur.fetchall() or []]
+    return bool(sequence_dependencies) and all(sequence_dependencies)
+
+
+def _pg_archive_locator_schema_ready(cur: Any) -> bool:
+    """Return whether archive locators are safe for concurrent allocation."""
+
+    cur.execute(
+        "SELECT column_default, is_nullable, data_type "
+        "FROM information_schema.columns "
+        "WHERE table_schema = current_schema() "
+        "AND table_name = 'jobs_archive' AND column_name = 'archive_id'"
+    )
+    column = cur.fetchone()
+    if not (
+        column is not None
+        and str(column[1]) == "NO"
+        and str(column[2]) == "bigint"
+    ):
+        return False
+
+    cur.execute(
+        "SELECT pg_get_serial_sequence("
+        "quote_ident(current_schema()) || '.jobs_archive', 'archive_id')"
+    )
+    owned_sequence = cur.fetchone()[0]
+    if not (
+        owned_sequence
+        and str(owned_sequence).split(".")[-1].strip('"')
+        == _POSTGRES_ARCHIVE_SEQUENCE
+    ):
+        return False
+    if not _pg_archive_column_default_uses_locator_sequence(cur):
+        return False
+    if _pg_archive_sequence_conflict(cur) is not None:
+        return False
+
+    if not _pg_archive_locator_index_ready(
+        _pg_archive_locator_index_state(cur)
+    ):
+        return False
+
+    cur.execute("SELECT to_regclass(%s)", (_POSTGRES_ARCHIVE_SEQUENCE,))
+    if cur.fetchone()[0] is None:
+        return False
+    cur.execute("SELECT COALESCE(MAX(archive_id), 0) FROM jobs_archive")
+    max_locator = int(cur.fetchone()[0])
+    cur.execute(
+        "SELECT last_value, is_called FROM jobs_archive_archive_id_seq"
+    )
+    last_value, is_called = cur.fetchone()
+    next_locator = int(last_value) + (1 if bool(is_called) else 0)
+    return next_locator > max_locator
+
+
+def _pg_archive_migration_timeout_ms(
+    name: str,
+    *,
+    default: int,
+    minimum: int,
+) -> int:
+    """Return a bounded integer timeout for archive schema migration work."""
+    try:
+        return max(minimum, int(os.getenv(name, str(default))))
+    except (TypeError, ValueError):
+        return default
+
+
+def _configure_pg_archive_migration_session(
+    cur: Any,
+    *,
+    local: bool = True,
+) -> None:
+    """Override request-oriented DSN timeouts for bounded schema migration work."""
+    statement_timeout_ms = _pg_archive_migration_timeout_ms(
+        "JOBS_PG_ARCHIVE_MIGRATION_STATEMENT_TIMEOUT_MS",
+        default=300_000,
+        minimum=0,
+    )
+    lock_timeout_ms = _pg_archive_migration_timeout_ms(
+        "JOBS_PG_ARCHIVE_MIGRATION_LOCK_TIMEOUT_MS",
+        default=30_000,
+        minimum=1_000,
+    )
+    cur.execute(
+        "SELECT set_config('statement_timeout', %s, %s)",
+        (f"{statement_timeout_ms}ms", local),
+    )
+    cur.execute(
+        "SELECT set_config('lock_timeout', %s, %s)",
+        (f"{lock_timeout_ms}ms", local),
+    )
+
+
+def _pg_archive_sequence_conflict(cur: Any) -> str | None:
+    """Describe any non-archive ownership or default use of the locator sequence."""
+    cur.execute("SELECT to_regclass(%s)", (_POSTGRES_ARCHIVE_SEQUENCE,))
+    if cur.fetchone()[0] is None:
+        return None
+
+    target_owner = False
+    cur.execute(
+        "SELECT dep.refobjid = 'jobs_archive'::regclass, attr.attname "
+        "FROM pg_depend dep "
+        "JOIN pg_attribute attr ON attr.attrelid = dep.refobjid "
+        "AND attr.attnum = dep.refobjsubid "
+        "WHERE dep.classid = 'pg_class'::regclass "
+        "AND dep.objid = %s::regclass "
+        "AND dep.refclassid = 'pg_class'::regclass "
+        "AND dep.deptype IN ('a', 'i')",
+        (_POSTGRES_ARCHIVE_SEQUENCE,),
+    )
+    for owns_archive, column_name in cur.fetchall() or []:
+        if bool(owns_archive) and str(column_name) == "archive_id":
+            target_owner = True
+        else:
+            return "owned by another table or column"
+
+    target_default = False
+    cur.execute(
+        "SELECT defaults.adrelid = 'jobs_archive'::regclass, attr.attname "
+        "FROM pg_attrdef defaults "
+        "JOIN pg_depend dep ON dep.classid = 'pg_attrdef'::regclass "
+        "AND dep.objid = defaults.oid "
+        "JOIN pg_attribute attr ON attr.attrelid = defaults.adrelid "
+        "AND attr.attnum = defaults.adnum "
+        "WHERE dep.refclassid = 'pg_class'::regclass "
+        "AND dep.refobjid = %s::regclass",
+        (_POSTGRES_ARCHIVE_SEQUENCE,),
+    )
+    for defaults_archive, column_name in cur.fetchall() or []:
+        if bool(defaults_archive) and str(column_name) == "archive_id":
+            target_default = True
+        else:
+            return "used by another table or column default"
+    if not (target_owner or target_default):
+        return "present without archive ownership or default binding"
+    return None
+
+
+def _ensure_pg_archive_locators(dsn: str) -> None:
+    """Run the legacy archive-locator upgrade once under migration locks."""
+
+    import psycopg
+    from psycopg import sql
+
+    with psycopg.connect(dsn) as conn, conn.cursor() as cur:
+        _configure_pg_archive_migration_session(cur)
+        if _pg_archive_locator_schema_ready(cur):
+            return
+
+        cur.execute(
+            "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+            (_POSTGRES_ARCHIVE_MIGRATION_LOCK,),
+        )
+        cur.execute("LOCK TABLE jobs_archive IN ACCESS EXCLUSIVE MODE")
+        if _pg_archive_locator_schema_ready(cur):
+            return
+
+        cur.execute(
+            "ALTER TABLE jobs_archive ADD COLUMN IF NOT EXISTS archive_id BIGINT"
+        )
+        cur.execute(
+            "SELECT data_type FROM information_schema.columns "
+            "WHERE table_schema = current_schema() "
+            "AND table_name = 'jobs_archive' AND column_name = 'archive_id'"
+        )
+        archive_id_type = str(cur.fetchone()[0])
+        if archive_id_type in {"smallint", "integer"}:
+            cur.execute(
+                "ALTER TABLE jobs_archive ALTER COLUMN archive_id "
+                "TYPE BIGINT USING archive_id::bigint"
+            )
+        elif archive_id_type != "bigint":
+            raise RuntimeError(
+                "jobs_archive.archive_id must use an integer-compatible type"
+            )
+
+        archive_index = _pg_archive_locator_index_state(cur)
+        archive_index_ready = _pg_archive_locator_index_ready(archive_index)
+        constraint_name = archive_index[5] if archive_index else None
+        if not archive_index_ready:
+            if constraint_name:
+                raise RuntimeError(
+                    "idx_jobs_archive_id is a misdefined constraint-backed index"
+                )
+            if archive_index is None:
+                cur.execute("SELECT to_regclass('idx_jobs_archive_id')")
+                conflicting_index = cur.fetchone()[0]
+                if conflicting_index is not None:
+                    raise RuntimeError(
+                        "idx_jobs_archive_id belongs to another table"
+                    )
+
+        sequence_conflict = _pg_archive_sequence_conflict(cur)
+        if sequence_conflict:
+            raise RuntimeError(
+                f"jobs_archive_archive_id_seq is {sequence_conflict}"
+            )
+        if not archive_index_ready:
+            cur.execute(
+                "SELECT archive_id FROM jobs_archive "
+                "WHERE archive_id IS NOT NULL GROUP BY archive_id "
+                "HAVING COUNT(*) > 1 LIMIT 1"
+            )
+            if cur.fetchone() is not None:
+                raise RuntimeError(
+                    "jobs_archive contains duplicate archive_id values"
+                )
+
+        cur.execute(
+            "CREATE SEQUENCE IF NOT EXISTS jobs_archive_archive_id_seq"
+        )
+        cur.execute(
+            "ALTER SEQUENCE jobs_archive_archive_id_seq "
+            "OWNED BY jobs_archive.archive_id"
+        )
+        cur.execute(
+            "ALTER TABLE jobs_archive ALTER COLUMN archive_id "
+            "SET DEFAULT nextval('jobs_archive_archive_id_seq'::regclass)"
+        )
+        cur.execute(
+            "SELECT pg_catalog.setval("
+            "'jobs_archive_archive_id_seq'::regclass, "
+            "GREATEST("
+            "COALESCE((SELECT MAX(archive_id) FROM jobs_archive), 0) + 1, "
+            "(SELECT CASE WHEN is_called THEN last_value + 1 "
+            "ELSE last_value END FROM jobs_archive_archive_id_seq)"
+            "), false)"
+        )
+        cur.execute(
+            "UPDATE jobs_archive SET archive_id = "
+            "nextval('jobs_archive_archive_id_seq'::regclass) "
+            "WHERE archive_id IS NULL"
+        )
+        if not archive_index_ready:
+            if archive_index is not None:
+                cur.execute(
+                    sql.SQL("DROP INDEX {}").format(
+                        sql.Identifier("idx_jobs_archive_id")
+                    )
+                )
+            cur.execute(
+                "CREATE UNIQUE INDEX idx_jobs_archive_id "
+                "ON jobs_archive(archive_id)"
+            )
+        cur.execute(
+            "ALTER TABLE jobs_archive ALTER COLUMN archive_id SET NOT NULL"
+        )
+        if not _pg_archive_locator_schema_ready(cur):
+            raise RuntimeError("PostgreSQL Jobs archive locator migration failed")
+
+
+def _ensure_pg_dependency_snapshot_columns(cur: Any) -> None:
+    """Add and verify dependency snapshots required by acquisition queries."""
+
+    cur.execute(
+        "ALTER TABLE job_dependencies "
+        "ADD COLUMN IF NOT EXISTS depends_on_terminal_status TEXT"
+    )
+    cur.execute(
+        "ALTER TABLE job_dependencies "
+        "ADD COLUMN IF NOT EXISTS depends_on_cancellation_reason TEXT"
+    )
+    cur.execute(
+        "SELECT depends_on_terminal_status, "
+        "depends_on_cancellation_reason FROM job_dependencies LIMIT 0"
+    )
+
 
 def ensure_jobs_tables_pg(db_url: str) -> str:
     """Ensure the jobs table exists in the given PostgreSQL database.
@@ -193,6 +539,7 @@ def ensure_jobs_tables_pg(db_url: str) -> str:
     _dsn = negotiate_pg_dsn(db_url)
     try:
         with psycopg.connect(_dsn) as conn, conn.cursor() as cur:
+            _configure_pg_archive_migration_session(cur)
             cur.execute(JOBS_POSTGRES_DDL)
             # Additional objects: queue controls, attachments, SLA policies
             cur.execute(
@@ -236,8 +583,19 @@ def ensure_jobs_tables_pg(db_url: str) -> str:
             )
             conn.commit()
         # Forward-migrate older installs: add missing columns that newer code expects
-        try:
-            with psycopg.connect(_dsn, autocommit=True) as cfix, cfix.cursor() as f:
+        with psycopg.connect(_dsn, autocommit=True) as cfix, cfix.cursor() as f:
+            _configure_pg_archive_migration_session(f, local=False)
+            required_migration_exceptions = (
+                psycopg.Error,
+                *_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS,
+            )
+            try:
+                _ensure_pg_dependency_snapshot_columns(f)
+            except required_migration_exceptions as exc:
+                raise RuntimeError(
+                    "PostgreSQL Jobs dependency snapshot migration failed"
+                ) from exc
+            try:
                 f.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS completion_token TEXT")
                 f.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS failure_streak_code TEXT")
                 f.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS failure_streak_count INTEGER DEFAULT 0")
@@ -256,15 +614,17 @@ def ensure_jobs_tables_pg(db_url: str) -> str:
                     f.execute("ALTER TABLE jobs_archive ADD COLUMN IF NOT EXISTS payload_compressed BYTEA")
                     f.execute("ALTER TABLE jobs_archive ADD COLUMN IF NOT EXISTS result_compressed BYTEA")
                     f.execute("ALTER TABLE jobs_archive ADD COLUMN IF NOT EXISTS batch_group TEXT")
-                except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
+                except required_migration_exceptions:
                     pass
-        except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
-            # Best-effort; if the DB already has these or lacks permissions, continue
-            pass
+            except required_migration_exceptions:
+                # Best-effort; existing installs may restrict optional columns.
+                pass
+        _ensure_pg_archive_locators(_dsn)
         # Create hot-path indexes concurrently (outside transaction) when possible
         try:
             with psycopg.connect(_dsn, autocommit=True) as c2:
                 with c2.cursor() as k:
+                    _configure_pg_archive_migration_session(k, local=False)
                     # Ready vs scheduled scans
                     k.execute("CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_jobs_status_available_at ON jobs(status, available_at)")
                     # Composite unique for idempotency (NULLs are allowed and do not conflict)
@@ -272,6 +632,8 @@ def ensure_jobs_tables_pg(db_url: str) -> str:
                     # Optional partial index to speed common hot-path queries
                     with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
                         k.execute("CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_jobs_hot ON jobs(domain, queue, job_type, priority, available_at, created_at) WHERE status IN ('queued','processing')")
+                    with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
+                        k.execute(POSTGRES_ARCHIVE_CURSOR_INDEX_SQL)
                     # Acquisition ordering index: priority ASC (lower number = higher priority),
                     # then available/created, then id; queued only. The ORDER BY in queries
                     # is explicit; this index simply supports that access pattern.
@@ -331,6 +693,7 @@ def ensure_jobs_tables_pg(db_url: str) -> str:
                 # Retry DDL
                 with psycopg.connect(_dsn) as conn3:
                     with conn3.cursor() as cur3:
+                        _configure_pg_archive_migration_session(cur3)
                         cur3.execute(JOBS_POSTGRES_DDL)
                     conn3.commit()
             except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS as e2:

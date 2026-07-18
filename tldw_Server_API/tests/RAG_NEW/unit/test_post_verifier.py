@@ -5,6 +5,15 @@ Verifies that unsupported claims trigger adaptive retry metrics and that
 central metrics registry counters/histograms are updated.
 """
 
+import asyncio
+import os
+import subprocess
+import sys
+import textwrap
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -15,6 +24,9 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatConfigurationError,
 )
 from tldw_Server_API.app.core.Claims_Extraction import monitoring as claims_monitoring
+from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import (
+    SummaryProviderError,
+)
 from tldw_Server_API.app.core.Metrics.metrics_manager import get_metrics_registry
 from tldw_Server_API.app.core.RAG.rag_service import post_generation_verifier as verifier_module
 from tldw_Server_API.app.core.RAG.rag_service.post_generation_verifier import PostGenerationVerifier
@@ -49,6 +61,411 @@ def _base_docs() -> list[Document]:
         Document(id="1", content="A", metadata={"source": DataSource.MEDIA_DB}),
         Document(id="2", content="B", metadata={"source": DataSource.MEDIA_DB}),
     ]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("provider_outcome", "should_mark", "should_log_usage"),
+    [
+        ("valid", True, True),
+        ("valid_stream", True, True),
+        ("empty", False, True),
+        ("malformed", False, True),
+        ("error_shaped", False, True),
+        ("error", False, False),
+        ("partial_error_stream", False, False),
+    ],
+)
+async def test_runtime_bound_real_claims_engine_starts_direct_and_closes_after_exit(
+    monkeypatch: pytest.MonkeyPatch,
+    provider_outcome: str,
+    should_mark: bool,
+    should_log_usage: bool,
+) -> None:
+    """Only structurally valid completed claims output is marked after exit."""
+    import tldw_Server_API.app.core.Claims_Extraction.claims_engine as claims_module
+    import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as sgl
+    from tldw_Server_API.app.core.Chat.bounded_daemon import BoundedDaemonPool
+
+    lifecycle: list[str] = []
+    provider_entered = threading.Event()
+    provider_release = threading.Event()
+    default_entered = threading.Event()
+    default_release = threading.Event()
+    usage_entered = asyncio.Event()
+    usage_release = asyncio.Event()
+
+    class TrackingPool(BoundedDaemonPool):
+        def _release_capacity(self) -> None:
+            lifecycle.append("capacity-release")
+            super()._release_capacity()
+
+    handle = SimpleNamespace(
+        provider="openai",
+        api_key="runtime-secret",
+        app_config={"openai_api": {"model": "model-a"}},
+    )
+
+    class Runtime:
+        async def resolve(self, provider: str, *, model: str | None = None):
+            assert provider == "openai"
+            assert model == "model-a"
+            return handle
+
+        async def mark_used(self, resolved_handle: object) -> None:
+            assert resolved_handle is handle
+            lifecycle.append("mark")
+
+        async def close(self) -> None:
+            lifecycle.append("runtime-close")
+
+    def block_default_executor() -> None:
+        default_entered.set()
+        default_release.wait(timeout=2.0)
+
+    def blocking_analyze(*_args: Any, **_kwargs: Any) -> Any:
+        lifecycle.append("provider-start")
+        provider_entered.set()
+        provider_release.wait(timeout=2.0)
+        lifecycle.append("provider-exit")
+        if provider_outcome == "error":
+            raise SummaryProviderError(code="provider_failure", provider="openai")
+        if provider_outcome == "valid_stream":
+            return iter(['{"claims": [{"text": "Supported runtime claim."}]}'])
+        if provider_outcome == "partial_error_stream":
+            return iter(
+                [
+                    '{"claims": [{"text": "Incomplete runtime claim."}]}',
+                    "Error: hostile provider trailer",
+                ]
+            )
+        if provider_outcome == "empty":
+            return ""
+        if provider_outcome == "malformed":
+            return "not valid claims json"
+        if provider_outcome == "error_shaped":
+            return '{"error": {"message": "provider failed"}}'
+        return '{"claims": [{"text": "Supported runtime claim."}]}'
+
+    async def controlled_usage_log(**_kwargs: Any) -> None:
+        lifecycle.append("usage-start")
+        usage_entered.set()
+        await usage_release.wait()
+        lifecycle.append("usage-exit")
+
+    pool = TrackingPool(1)
+    runtime = Runtime()
+    verifier = PostGenerationVerifier(credential_runtime=runtime)
+    monkeypatch.setattr(claims_module, "SYNC_ADAPTER_CALL_POOL", pool, raising=False)
+    monkeypatch.setattr(verifier_module, "ClaimsEngine", claims_module.ClaimsEngine)
+    monkeypatch.setattr(
+        claims_module,
+        "CLAIMS_PROVIDER_CALL_TIMEOUT_SECONDS",
+        1.0,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        claims_module,
+        "_resolve_claims_llm_config",
+        lambda: ("openai", "model-a", 0.1),
+    )
+    monkeypatch.setattr(claims_module, "_claims_local_nli_enabled", lambda: False)
+    monkeypatch.setattr(claims_module, "_log_claims_llm_usage", controlled_usage_log)
+    monkeypatch.setattr(sgl, "analyze", blocking_analyze)
+
+    engine, credential_handle, state = await verifier._build_claims_engine()
+
+    async def endpoint_scope() -> dict[str, Any]:
+        try:
+            return await verifier._run_claims_engine_owned(
+                engine,
+                credential_handle,
+                state,
+                answer="Supported runtime claim.",
+                query="query",
+                documents=_base_docs(),
+                claim_extractor="llm",
+                claim_verifier="nli",
+                claims_max=2,
+                nli_model=None,
+            )
+        finally:
+            await runtime.close()
+
+    loop = asyncio.get_running_loop()
+    previous_executor = getattr(loop, "_default_executor", None)
+    default_executor = ThreadPoolExecutor(max_workers=1)
+    loop.set_default_executor(default_executor)
+    blocker = loop.run_in_executor(None, block_default_executor)
+    task: asyncio.Task[dict[str, Any]] | None = None
+    try:
+        for _ in range(1000):
+            if default_entered.is_set():
+                break
+            await asyncio.sleep(0.001)
+        assert default_entered.is_set()
+
+        task = asyncio.create_task(endpoint_scope())
+        for _ in range(100):
+            if provider_entered.is_set():
+                break
+            await asyncio.sleep(0.001)
+        started_before_default_release = provider_entered.is_set()
+
+        if not provider_entered.is_set():
+            default_release.set()
+            await asyncio.gather(blocker, return_exceptions=True)
+            for _ in range(1000):
+                if provider_entered.is_set():
+                    break
+                await asyncio.sleep(0.001)
+        assert provider_entered.is_set()
+
+        task.cancel()
+        await asyncio.sleep(0.03)
+        assert "runtime-close" not in lifecycle
+
+        provider_release.set()
+        if should_log_usage:
+            for _ in range(1000):
+                if usage_entered.is_set():
+                    break
+                await asyncio.sleep(0.001)
+            assert usage_entered.is_set()
+            assert "runtime-close" not in lifecycle
+            usage_release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=1.0)
+    finally:
+        provider_release.set()
+        usage_release.set()
+        default_release.set()
+        await asyncio.gather(blocker, return_exceptions=True)
+        if task is not None and not task.done():
+            task.cancel()
+        if task is not None:
+            await asyncio.gather(task, return_exceptions=True)
+        loop.set_default_executor(previous_executor or ThreadPoolExecutor())
+        default_executor.shutdown(wait=True, cancel_futures=True)
+
+    assert started_before_default_release is True
+    expected = [
+        "provider-start",
+        "provider-exit",
+        "capacity-release",
+    ]
+    if should_log_usage:
+        expected.extend(["usage-start", "usage-exit"])
+    if should_mark:
+        expected.append("mark")
+    expected.append("runtime-close")
+    assert lifecycle == expected
+    assert lifecycle.count("mark") == int(should_mark)
+    expected_usage_calls = int(should_log_usage)
+    assert lifecycle.count("usage-start") == expected_usage_calls
+    assert lifecycle.count("usage-exit") == expected_usage_calls
+    assert pool.active_count == 0
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("provider_outcome", "should_mark"),
+    [
+        ("valid", True),
+        ("empty", False),
+        ("malformed", False),
+        ("error_shaped", False),
+        ("partial_error_stream", False),
+    ],
+)
+async def test_runtime_bound_verifier_output_marks_only_structurally_valid_json(
+    monkeypatch: pytest.MonkeyPatch,
+    provider_outcome: str,
+    should_mark: bool,
+) -> None:
+    """Verifier usage requires a completed valid verdict, never partial content."""
+    import tldw_Server_API.app.core.Claims_Extraction.claims_engine as claims_module
+    import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as sgl
+    from tldw_Server_API.app.core.Chat.bounded_daemon import BoundedDaemonPool
+
+    lifecycle: list[str] = []
+    handle = SimpleNamespace(
+        provider="openai",
+        api_key="runtime-secret",
+        app_config={"openai_api": {"model": "model-a"}},
+    )
+
+    class TrackingPool(BoundedDaemonPool):
+        def _release_capacity(self) -> None:
+            super()._release_capacity()
+            lifecycle.append("capacity-release")
+
+    class Runtime:
+        async def resolve(self, provider: str, *, model: str | None = None) -> object:
+            assert (provider, model) == ("openai", "model-a")
+            return handle
+
+        async def mark_used(self, resolved_handle: object) -> None:
+            assert resolved_handle is handle
+            lifecycle.append("mark")
+
+    def analyze_verdict(*_args: Any, **_kwargs: Any) -> Any:
+        lifecycle.append("provider-start")
+        if provider_outcome == "empty":
+            response: Any = ""
+        elif provider_outcome == "malformed":
+            response = "not valid verifier json"
+        elif provider_outcome == "error_shaped":
+            response = '{"error": {"message": "provider failed"}}'
+        elif provider_outcome == "partial_error_stream":
+            response = iter(
+                [
+                    '{"label": "supported", "confidence": 0.9}',
+                    "Error: hostile provider trailer",
+                ]
+            )
+        else:
+            response = (
+                '{"label": "supported", "confidence": 0.9, '
+                '"rationale": "complete"}'
+            )
+        lifecycle.append("provider-exit")
+        return response
+
+    async def ignore_usage_log(**_kwargs: Any) -> None:
+        return None
+
+    pool = TrackingPool(1)
+    runtime = Runtime()
+    verifier = PostGenerationVerifier(credential_runtime=runtime)
+    monkeypatch.setattr(claims_module, "SYNC_ADAPTER_CALL_POOL", pool, raising=False)
+    monkeypatch.setattr(verifier_module, "ClaimsEngine", claims_module.ClaimsEngine)
+    monkeypatch.setattr(
+        claims_module,
+        "_resolve_claims_llm_config",
+        lambda: ("openai", "model-a", 0.1),
+    )
+    monkeypatch.setattr(claims_module, "_claims_local_nli_enabled", lambda: False)
+    monkeypatch.setattr(claims_module, "_log_claims_llm_usage", ignore_usage_log)
+    monkeypatch.setattr(sgl, "analyze", analyze_verdict)
+    engine, credential_handle, state = await verifier._build_claims_engine()
+
+    operation = verifier._run_claims_engine_owned(
+        engine,
+        credential_handle,
+        state,
+        answer="Acme was founded in 2000.",
+        query="When was Acme founded?",
+        documents=[
+            Document(
+                id="evidence",
+                content="Acme was founded in 2000.",
+                metadata={"source": DataSource.MEDIA_DB},
+            )
+        ],
+        claim_extractor="heuristic",
+        claim_verifier="llm",
+        claims_max=1,
+        claims_concurrency=1,
+    )
+    if provider_outcome == "partial_error_stream":
+        with pytest.raises(SummaryProviderError):
+            await operation
+    else:
+        await operation
+
+    expected = ["provider-start", "provider-exit", "capacity-release"]
+    if should_mark:
+        expected.append("mark")
+    assert lifecycle == expected
+    assert lifecycle.count("mark") == int(should_mark)
+    assert pool.active_count == 0
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_production_claims_import_surface_binds_real_engine_to_verifier_and_pipeline() -> None:
+    """Production imports cannot silently downgrade verification to available/zero."""
+    from tldw_Server_API.app.core.Claims_Extraction.claims_engine import (
+        ClaimsEngine as RealClaimsEngine,
+    )
+    from tldw_Server_API.app.core.RAG.rag_service import claims as claims_surface
+    from tldw_Server_API.app.core.RAG.rag_service import unified_pipeline as pipeline_module
+
+    assert claims_surface.ClaimsEngine is RealClaimsEngine
+    assert pipeline_module.PostGenerationVerifier is PostGenerationVerifier
+
+    engine, credential_handle, state = await PostGenerationVerifier()._build_claims_engine()
+    assert isinstance(engine, RealClaimsEngine)
+    assert verifier_module.ClaimsEngine is RealClaimsEngine
+    assert credential_handle is None
+    assert state == {"used": False}
+
+
+@pytest.mark.unit
+def test_evaluator_first_import_lazily_recovers_all_claims_engine_bindings() -> None:
+    """Evaluation-first imports cannot permanently disable RAG claims checks."""
+    script = textwrap.dedent(
+        """
+        import asyncio
+
+        from tldw_Server_API.app.core.Evaluations import rag_evaluator
+        from tldw_Server_API.app.core.Claims_Extraction.budget_guard import (
+            ClaimsJobContext as RealClaimsJobContext,
+            resolve_claims_job_budget as real_resolve_claims_job_budget,
+        )
+        from tldw_Server_API.app.core.Claims_Extraction.claims_engine import (
+            ClaimsEngine as RealClaimsEngine,
+        )
+        from tldw_Server_API.app.core.RAG.rag_service import generation
+        from tldw_Server_API.app.core.RAG.rag_service import post_generation_verifier
+        from tldw_Server_API.app.core.RAG.rag_service import unified_pipeline
+
+        assert rag_evaluator.ClaimsEngine is RealClaimsEngine
+        assert unified_pipeline.ClaimsJobContext is RealClaimsJobContext
+        assert (
+            unified_pipeline.resolve_claims_job_budget
+            is real_resolve_claims_job_budget
+        )
+
+        def analyze(*_args, **_kwargs):
+            return '{"claims": []}'
+
+        for module in (generation, unified_pipeline):
+            resolved = module._resolve_claims_engine()
+            assert resolved is RealClaimsEngine
+            assert module.ClaimsEngine is RealClaimsEngine
+            assert isinstance(resolved(analyze), RealClaimsEngine)
+
+        verifier = post_generation_verifier.PostGenerationVerifier()
+        engine, credential_handle, state = asyncio.run(verifier._build_claims_engine())
+        assert isinstance(engine, RealClaimsEngine)
+        assert post_generation_verifier.ClaimsEngine is RealClaimsEngine
+        assert credential_handle is None
+        assert state == {"used": False}
+
+        class PatchedClaimsEngine:
+            pass
+
+        for module in (generation, post_generation_verifier, unified_pipeline):
+            module.ClaimsEngine = PatchedClaimsEngine
+            assert module._resolve_claims_engine() is PatchedClaimsEngine
+        """
+    )
+    env = dict(os.environ)
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    result = subprocess.run(  # noqa: S603 - fixed interpreter and in-repo script
+        [sys.executable, "-c", script],
+        cwd=Path(__file__).resolve().parents[4],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_embedding_degradation_preserves_missing_credentials_code() -> None:

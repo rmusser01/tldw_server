@@ -20,6 +20,12 @@ from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
 )
 from tldw_Server_API.app.core.Chat.provider_manager import get_provider_manager
 from tldw_Server_API.app.core.config import load_comprehensive_config
+from tldw_Server_API.app.core.custom_openai_providers import (
+    custom_openai_config_option_names,
+    custom_openai_provider_name,
+    iter_custom_openai_provider_numbers,
+    iter_custom_openai_provider_names,
+)
 from tldw_Server_API.app.core.exceptions import (
     EgressPolicyError,
     NetworkError,
@@ -1425,7 +1431,10 @@ def get_configured_providers(
         providers = []
 
         # Check if we have the required sections or env-only custom OpenAI config
-        has_env_custom_openai = has_custom_openai_env_configuration("custom_openai_api")
+        has_env_custom_openai = any(
+            has_custom_openai_env_configuration(provider_name)
+            for provider_name in iter_custom_openai_provider_names()
+        )
         if (
             not config_parser.has_section('API')
             and not config_parser.has_section('Local-API')
@@ -1641,6 +1650,58 @@ def get_configured_providers(
                 'model_discovery': 'openai',
             }
         }
+
+        def _configured_option_name(option_names: tuple[str, ...]) -> str:
+            """Select the configured alias while retaining deterministic fallback."""
+            if config_parser.has_section("API"):
+                for option_name in option_names:
+                    if config_parser.has_option("API", option_name):
+                        return option_name
+            return option_names[0]
+
+        for provider_number in iter_custom_openai_provider_numbers(start=2):
+            provider_name = custom_openai_provider_name(provider_number)
+            endpoint_field = _configured_option_name(
+                custom_openai_config_option_names(provider_number, "ip")
+            )
+            model_field = _configured_option_name(
+                custom_openai_config_option_names(provider_number, "model")
+            )
+            api_key_field = _configured_option_name(
+                custom_openai_config_option_names(provider_number, "key")
+            )
+            if not any(
+                (
+                    resolve_provider_endpoint_url(
+                        provider_name,
+                        config_parser,
+                        "API",
+                        endpoint_field,
+                    ),
+                    resolve_provider_model_value(
+                        provider_name,
+                        config_parser,
+                        "API",
+                        model_field,
+                    ),
+                    resolve_provider_api_key_value(
+                        provider_name,
+                        config_parser,
+                        "API",
+                        api_key_field,
+                    ),
+                )
+            ):
+                continue
+            provider_mappings[provider_name] = {
+                "display_name": f"Custom OpenAI API {provider_number}",
+                "endpoint_field": endpoint_field,
+                "api_key_field": api_key_field,
+                "model_field": model_field,
+                "type": "local",
+                "section": "API",
+                "model_discovery": "openai",
+            }
 
         # Optional: live health report
         health_report = {}
@@ -2278,8 +2339,6 @@ async def get_llm_providers(include_deprecated: bool = False):
     """
     try:
         result = await get_configured_providers_async(include_deprecated=include_deprecated)
-        result = apply_llm_provider_overrides_to_listing(result)
-        result = apply_llm_provider_overrides_to_listing(result)
 
         # Inject Diagnostics UI interval bounds from server config if available
         try:

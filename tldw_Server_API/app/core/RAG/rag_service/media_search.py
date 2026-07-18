@@ -15,6 +15,11 @@ from typing import Any, Optional
 
 from loguru import logger
 
+from .runtime_provider_call import (
+    attach_runtime_provider_credentials,
+    await_runtime_bound_provider_call,
+)
+
 
 # ---------------------------------------------------------------------------
 # Query reformulation prompts
@@ -90,19 +95,22 @@ async def _reformulate_query(
             call_kwargs["model"] = model
         credential_handle = None
         if credential_runtime is not None:
-            credential_handle = await credential_runtime.resolve(provider)
+            credential_handle = await credential_runtime.resolve(provider, model=model)
             call_kwargs.update(
                 api_key=credential_handle.api_key,
                 app_config=credential_handle.app_config,
                 credentials_resolved=True,
             )
+            attach_runtime_provider_credentials(call_kwargs, credential_handle)
 
         raw = await asyncio.wait_for(
-            perform_chat_api_call_async(**call_kwargs),
+            await_runtime_bound_provider_call(
+                perform_chat_api_call_async(**call_kwargs),
+                credential_runtime=credential_runtime,
+                credential_handle=credential_handle,
+            ),
             timeout=10.0,
         )
-        if credential_handle is not None:
-            await credential_runtime.mark_used(credential_handle)
 
         text = ""
         if isinstance(raw, str):

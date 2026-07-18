@@ -1,8 +1,12 @@
+import asyncio
 import io
 
 import pytest
 from loguru import logger
 
+from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+)
 from tldw_Server_API.app.core.RAG.rag_service.query_classifier import (
     _parse_classification_response,
     classify_and_reformulate,
@@ -10,10 +14,10 @@ from tldw_Server_API.app.core.RAG.rag_service.query_classifier import (
     reformulate_query,
 )
 from tldw_Server_API.tests.RAG_NEW.unit.test_generation_executor import (
-    _RecordingCredentialRuntime,
+    _install_blocking_sync_chat_adapter,
     _install_explicit_chat_capture,
+    _RecordingCredentialRuntime,
 )
-
 
 pytestmark = pytest.mark.unit
 
@@ -135,10 +139,12 @@ async def test_classify_query_uses_explicit_runtime_credentials(monkeypatch):
 
     assert result.reasoning == "requires retrieval"
     assert runtime.resolved == ["anthropic"]
+    assert runtime.resolved_models == ["claude-test"]
     assert runtime.marked == [runtime.handle]
     assert captured["kwargs"]["api_key"] == "runtime-only-key"
     assert captured["kwargs"]["app_config"] == runtime.handle.app_config
     assert captured["kwargs"]["credentials_resolved"] is True
+    assert captured["kwargs"][PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY] is runtime.handle
     assert stage_metadata == {"verification_available": True}
 
 
@@ -208,6 +214,7 @@ async def test_reformulate_query_runtime_success_records_verified(monkeypatch):
     )
 
     assert result == "standalone credential runtime query"
+    assert runtime.resolved_models == ["claude-test"]
     assert stage_metadata == {"verification_available": True}
 
 
@@ -278,3 +285,50 @@ async def test_classify_query_without_runtime_keeps_legacy_call_shape(monkeypatc
     assert "api_key" not in captured
     assert "app_config" not in captured
     assert "credentials_resolved" not in captured
+
+
+@pytest.mark.parametrize("stage", ["classify", "reformulate"])
+@pytest.mark.asyncio
+async def test_query_stage_cancellation_marks_completed_sync_adapter(
+    monkeypatch: pytest.MonkeyPatch,
+    stage: str,
+) -> None:
+    runtime = _RecordingCredentialRuntime()
+    response = (
+        '{"skip_search":false,"search_local_db":true,"search_web":false,'
+        '"standalone_query":"runtime query","confidence":0.9}'
+        if stage == "classify"
+        else "standalone runtime query"
+    )
+    entered, release = _install_blocking_sync_chat_adapter(monkeypatch, response)
+    if stage == "classify":
+        operation = classify_query(
+            "latest runtime credential research",
+            llm_provider="anthropic",
+            llm_model="claude-test",
+            credential_runtime=runtime,
+        )
+    else:
+        operation = reformulate_query(
+            "what about its concurrency behavior?",
+            [{"role": "user", "content": "Explain credential runtimes."}],
+            llm_provider="anthropic",
+            llm_model="claude-test",
+            credential_runtime=runtime,
+        )
+    task = asyncio.create_task(operation)
+    try:
+        assert await asyncio.to_thread(entered.wait, 1.0)
+        task.cancel()
+        await asyncio.sleep(0.03)
+        assert not task.done()
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=1.0)
+    finally:
+        release.set()
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+    assert runtime.marked == [runtime.handle]

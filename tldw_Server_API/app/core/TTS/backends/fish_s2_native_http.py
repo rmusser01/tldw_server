@@ -5,28 +5,31 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
+import contextlib
 from collections.abc import AsyncIterator
 from typing import Any
 
 from loguru import logger
 
+from tldw_Server_API.app.core.exceptions import (
+    NetworkError as CoreNetworkError,
+)
+from tldw_Server_API.app.core.exceptions import (
+    raise_detached_error,
+)
 from tldw_Server_API.app.core.http_client import afetch, astream_bytes
 
 from ..tts_exceptions import (
-    TTSAuthenticationError,
+    TTSError,
     TTSNetworkError,
     TTSProviderError,
-    TTSRateLimitError,
-    TTSTimeoutError,
     TTSValidationError,
     auth_error,
-    network_error,
     provider_error,
     rate_limit_error,
     timeout_error,
 )
 from .fish_s2_base import FishS2Backend, FishS2SynthesisResult
-
 
 _PASSTHROUGH_PARAMS = {
     "chunk_length",
@@ -38,6 +41,19 @@ _PASSTHROUGH_PARAMS = {
     "use_memory_cache",
     "references",
 }
+
+
+def _rebuild_typed_tts_error(exc: TTSError) -> TTSError:
+    """Recreate a local TTS error category without copying provider-owned state."""
+
+    error_class: type[TTSError] = type(exc)
+    if error_class.__module__ != TTSError.__module__:
+        error_class = TTSError
+    return error_class(
+        "Fish S2 request failed",
+        provider="fish_s2",
+        details={"error_type": error_class.__name__},
+    )
 
 
 class FishS2NativeHttpBackend(FishS2Backend):
@@ -74,6 +90,7 @@ class FishS2NativeHttpBackend(FishS2Backend):
         if streaming:
             return self._stream_audio(payload)
 
+        safe_error: Exception | None = None
         try:
             response = await afetch(
                 method="POST",
@@ -81,9 +98,12 @@ class FishS2NativeHttpBackend(FishS2Backend):
                 headers=self._headers(),
                 json=payload,
                 timeout=self.timeout,
+                sensitive_observability=True,
             )
-        except Exception as exc:
-            self._raise_transport_error(exc)
+        except Exception as exc:  # noqa: BLE001 - normalize the backend boundary
+            safe_error = self._normalize_transport_error(exc)
+        if safe_error is not None:
+            raise_detached_error(safe_error)
 
         self._raise_for_response_error(response)
         return getattr(response, "content", b"") or b""
@@ -99,12 +119,17 @@ class FishS2NativeHttpBackend(FishS2Backend):
     ) -> dict[str, Any]:
         try:
             audio_bytes = base64.b64decode(audio_b64, validate=True)
-        except (binascii.Error, ValueError) as exc:
-            raise TTSValidationError(
-                "Fish S2 reference audio must be valid base64",
-                provider=self.PROVIDER_KEY,
-                details={"reference_id": reference_id},
-            ) from exc
+        except (binascii.Error, ValueError):
+            audio_bytes = None
+        if audio_bytes is None:
+            del audio_b64
+            raise_detached_error(
+                TTSValidationError(
+                    "Fish S2 reference audio must be valid base64",
+                    provider=self.PROVIDER_KEY,
+                    details={"reference_id": reference_id},
+                )
+            )
 
         form_data = {
             "id": reference_id,
@@ -113,6 +138,7 @@ class FishS2NativeHttpBackend(FishS2Backend):
         files = {
             "audio": ("reference.wav", audio_bytes, "audio/wav"),
         }
+        safe_error: Exception | None = None
         try:
             response = await afetch(
                 method="POST",
@@ -121,9 +147,12 @@ class FishS2NativeHttpBackend(FishS2Backend):
                 data=form_data,
                 files=files,
                 timeout=self.timeout,
+                sensitive_observability=True,
             )
-        except Exception as exc:
-            self._raise_transport_error(exc)
+        except Exception as exc:  # noqa: BLE001 - normalize the backend boundary
+            safe_error = self._normalize_transport_error(exc)
+        if safe_error is not None:
+            raise_detached_error(safe_error)
 
         self._raise_for_response_error(response)
         data = self._response_json(response)
@@ -132,6 +161,7 @@ class FishS2NativeHttpBackend(FishS2Backend):
         return {"reference_id": reference_id}
 
     async def delete_reference(self, *, reference_id: str) -> bool:
+        safe_error: Exception | None = None
         try:
             response = await afetch(
                 method="DELETE",
@@ -139,9 +169,12 @@ class FishS2NativeHttpBackend(FishS2Backend):
                 headers=self._headers(),
                 json={"reference_id": reference_id},
                 timeout=self.timeout,
+                sensitive_observability=True,
             )
-        except Exception as exc:
-            self._raise_transport_error(exc)
+        except Exception as exc:  # noqa: BLE001 - normalize the backend boundary
+            safe_error = self._normalize_transport_error(exc)
+        if safe_error is not None:
+            raise_detached_error(safe_error)
 
         self._raise_for_response_error(response)
         return True
@@ -178,25 +211,31 @@ class FishS2NativeHttpBackend(FishS2Backend):
         return payload
 
     async def _stream_audio(self, payload: dict[str, Any]) -> AsyncIterator[bytes]:
+        safe_error: Exception | None = None
         try:
-            async for chunk in astream_bytes(
-                method="POST",
-                url=self._tts_url,
-                headers=self._headers(),
-                json=payload,
-                timeout=self.timeout,
-            ):
-                if chunk:
-                    yield chunk
-        except Exception as exc:
-            self._raise_transport_error(exc)
+            async with contextlib.aclosing(
+                astream_bytes(
+                    method="POST",
+                    url=self._tts_url,
+                    headers=self._headers(),
+                    json=payload,
+                    timeout=self.timeout,
+                    sensitive_observability=True,
+                )
+            ) as stream:
+                async for chunk in stream:
+                    if chunk:
+                        yield chunk
+        except Exception as exc:  # noqa: BLE001 - normalize the backend boundary
+            safe_error = self._normalize_transport_error(exc)
+        if safe_error is not None:
+            raise_detached_error(safe_error)
 
     def _raise_for_response_error(self, response: Any) -> None:
         status_code = getattr(response, "status_code", None)
         if status_code is None or status_code < 400:
             return
 
-        body = getattr(response, "text", "") or ""
         headers = getattr(response, "headers", {}) or {}
 
         logger.error(
@@ -204,50 +243,74 @@ class FishS2NativeHttpBackend(FishS2Backend):
             self.PROVIDER_KEY,
             status_code,
         )
-        self._raise_status_error(status_code=status_code, body=body, headers=headers)
+        self._raise_status_error(status_code=status_code, headers=headers)
 
     def _raise_status_error(
         self,
         *,
         status_code: int,
-        body: str,
         headers: dict[str, Any],
     ) -> None:
         if status_code in (401, 403):
-            raise auth_error(self.PROVIDER_KEY, "Fish S2 authentication failed")
+            raise_detached_error(
+                auth_error(self.PROVIDER_KEY, "Fish S2 authentication failed")
+            )
         if status_code == 429:
             retry_after = headers.get("retry-after") if isinstance(headers, dict) else None
-            raise rate_limit_error(
-                self.PROVIDER_KEY,
-                retry_after=self._parse_retry_after(retry_after),
+            raise_detached_error(
+                rate_limit_error(
+                    self.PROVIDER_KEY,
+                    retry_after=self._parse_retry_after(retry_after),
+                )
             )
         if status_code in (400, 404):
-            raise TTSValidationError(
-                f"Fish S2 request failed ({status_code})",
-                provider=self.PROVIDER_KEY,
-                details={"status": status_code, "body": body},
+            raise_detached_error(
+                TTSValidationError(
+                    f"Fish S2 request failed ({status_code})",
+                    provider=self.PROVIDER_KEY,
+                    details={"status": status_code},
+                )
             )
         if status_code in (408, 504):
-            raise timeout_error(self.PROVIDER_KEY, timeout_seconds=self.timeout)
-        if 500 <= status_code < 600:
-            raise provider_error(
-                "Fish S2 upstream error",
-                provider=self.PROVIDER_KEY,
-                error_code=str(status_code),
-                details={"status": status_code, "body": body},
+            raise_detached_error(
+                timeout_error(self.PROVIDER_KEY, timeout_seconds=self.timeout)
             )
-        raise TTSProviderError(
-            f"Fish S2 request failed ({status_code})",
+        if 500 <= status_code < 600:
+            raise_detached_error(
+                provider_error(
+                    "Fish S2 upstream error",
+                    provider=self.PROVIDER_KEY,
+                    error_code=str(status_code),
+                    details={"status": status_code},
+                )
+            )
+        raise_detached_error(
+            TTSProviderError(
+                f"Fish S2 request failed ({status_code})",
+                provider=self.PROVIDER_KEY,
+                details={"status": status_code},
+            )
+        )
+
+    def _normalize_transport_error(self, exc: Exception) -> Exception:
+        """Create a sanitized domain error from a transport failure."""
+
+        if isinstance(exc, TTSError):
+            return _rebuild_typed_tts_error(exc)
+        if self._is_timeout_error(exc):
+            return timeout_error(self.PROVIDER_KEY, timeout_seconds=self.timeout)
+        return TTSNetworkError(
+            f"Network request to {self.PROVIDER_KEY} failed",
             provider=self.PROVIDER_KEY,
-            details={"status": status_code, "body": body},
+            error_code="NETWORK_ERROR",
+            details={"error_type": type(exc).__name__},
         )
 
     def _raise_transport_error(self, exc: Exception) -> None:
-        if isinstance(exc, (TTSAuthenticationError, TTSRateLimitError, TTSTimeoutError, TTSValidationError, TTSProviderError)):
-            raise exc
-        if self._is_timeout_error(exc):
-            raise timeout_error(self.PROVIDER_KEY, timeout_seconds=self.timeout) from exc
-        raise network_error(self.PROVIDER_KEY, exc) from exc
+        """Raise a sanitized transport error for compatibility with direct callers."""
+
+        safe_error = self._normalize_transport_error(exc)
+        raise_detached_error(safe_error)
 
     @staticmethod
     def _response_json(response: Any) -> Any:
@@ -292,4 +355,9 @@ class FishS2NativeHttpBackend(FishS2Backend):
         if isinstance(exc, (TimeoutError, asyncio.TimeoutError)):
             return True
         exc_name = exc.__class__.__name__.lower()
-        return "timeout" in exc_name or "timeout" in str(exc).lower()
+        if "timeout" in exc_name:
+            return True
+        return type(exc) is CoreNetworkError and any(
+            isinstance(arg, str) and "timeout" in arg.lower()
+            for arg in exc.args
+        )

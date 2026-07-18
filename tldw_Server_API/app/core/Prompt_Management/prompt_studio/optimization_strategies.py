@@ -3,12 +3,16 @@
 
 import contextlib
 import random
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Any, Optional
 
 import numpy as np
 from loguru import logger
 
+from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+    ProviderCallCredentials,
+)
 from tldw_Server_API.app.core.DB_Management.PromptStudioDatabase import PromptStudioDatabase
 from tldw_Server_API.app.core.Logging.log_context import log_context
 
@@ -237,6 +241,8 @@ class IterativeRefinementOptimizer:
         model_config: dict[str, Any],
         max_iterations: int = 10,
         optimization_id: Optional[int] = None,
+        provider_credentials: ProviderCallCredentials | None = None,
+        on_provider_success: Callable[[], Awaitable[None]] | None = None,
     ) -> dict[str, Any]:
         """
         Iteratively refine prompt based on errors.
@@ -265,11 +271,19 @@ class IterativeRefinementOptimizer:
                 # Run evaluation
                 test_runs = []
                 for test_case_id in test_case_ids:
-                    result = await self.test_runner.run_single_test(
-                        prompt_id=current_prompt_id,
-                        test_case_id=test_case_id,
-                        model_config=model_config
-                    )
+                    runner_kwargs = {
+                        "prompt_id": current_prompt_id,
+                        "test_case_id": test_case_id,
+                        "model_config": model_config,
+                    }
+                    if provider_credentials is not None:
+                        runner_kwargs["provider_credentials"] = provider_credentials
+                    if on_provider_success is not None:
+                        runner_kwargs.update(
+                            strict_provider_errors=True,
+                            on_provider_success=on_provider_success,
+                        )
+                    result = await self.test_runner.run_single_test(**runner_kwargs)
                     test_runs.append(result)
 
                 # Analyze errors
@@ -280,7 +294,13 @@ class IterativeRefinementOptimizer:
                     break
 
                 # Generate refinement based on errors
-                refinement = await self._generate_refinement(current_prompt_id, errors)
+                refinement = await self._generate_refinement(
+                    current_prompt_id,
+                    errors,
+                    model_config=model_config,
+                    provider_credentials=provider_credentials,
+                    on_provider_success=on_provider_success,
+                )
 
                 if not refinement:
                     logger.warning("Could not generate refinement")
@@ -293,7 +313,11 @@ class IterativeRefinementOptimizer:
 
                 # Evaluate refined prompt
                 new_score = await self._evaluate_prompt(
-                    new_prompt_id, test_case_ids, model_config
+                    new_prompt_id,
+                    test_case_ids,
+                    model_config,
+                    provider_credentials=provider_credentials,
+                    on_provider_success=on_provider_success,
                 )
 
                 iteration_history.append({
@@ -312,7 +336,13 @@ class IterativeRefinementOptimizer:
                     break
 
             # Calculate final improvement
-            initial_score = await self._evaluate_prompt(prompt_id, test_case_ids, model_config)
+            initial_score = await self._evaluate_prompt(
+                prompt_id,
+                test_case_ids,
+                model_config,
+                provider_credentials=provider_credentials,
+                on_provider_success=on_provider_success,
+            )
             final_score = iteration_history[-1]["score"] if iteration_history else initial_score
 
             return {
@@ -343,8 +373,15 @@ class IterativeRefinementOptimizer:
 
         return errors
 
-    async def _generate_refinement(self, prompt_id: int,
-                                  errors: list[dict[str, Any]]) -> Optional[str]:
+    async def _generate_refinement(
+        self,
+        prompt_id: int,
+        errors: list[dict[str, Any]],
+        *,
+        model_config: dict[str, Any],
+        provider_credentials: ProviderCallCredentials | None = None,
+        on_provider_success: Callable[[], Awaitable[None]] | None = None,
+    ) -> Optional[str]:
         """Generate refinement based on error analysis."""
         # Get current prompt
         prompt = self._get_prompt(prompt_id)
@@ -367,15 +404,30 @@ Current prompt (user section):
 Suggest specific refinements to fix these errors:"""
 
         try:
+            parameters = dict(model_config.get("parameters") or {})
+            parameters.update({"temperature": 0.7, "max_tokens": 500})
             result = await self.executor._call_llm(
-                provider="openai",
-                model="gpt-3.5-turbo",
+                provider=str(model_config.get("provider") or "openai"),
+                model=str(model_config.get("model") or "gpt-3.5-turbo"),
                 prompt=refinement_prompt,
-                parameters={"temperature": 0.7, "max_tokens": 500}
+                parameters=parameters,
+                api_key_override=model_config.get("api_key"),
+                app_config=model_config.get("app_config"),
+                credentials_resolved=(
+                    model_config.get("credentials_resolved") is True
+                ),
+                provider_credentials=provider_credentials,
+                timeout_seconds=parameters.get("timeout_seconds"),
+                on_provider_success=on_provider_success,
             )
             return result["content"].strip()
         except Exception as e:
-            logger.debug(f"_generate_refinement failed to call LLM: error={e}")
+            if on_provider_success is not None:
+                raise
+            logger.debug(
+                "_generate_refinement failed to call LLM; error_type={}",
+                type(e).__name__,
+            )
             return None
 
     async def _create_refined_prompt(self, base_prompt_id: int,
@@ -415,20 +467,34 @@ Suggest specific refinements to fix these errors:"""
         return new_prompt_id
 
     async def _evaluate_prompt(self, prompt_id: int, test_case_ids: list[int],
-                              model_config: dict[str, Any]) -> float:
+                              model_config: dict[str, Any],
+                              *,
+                              provider_credentials: ProviderCallCredentials | None = None,
+                              on_provider_success: Callable[[], Awaitable[None]] | None = None,
+                              ) -> float:
         """Evaluate prompt and return average score."""
         scores = []
 
         for test_case_id in test_case_ids:
-            result = await self.test_runner.run_single_test(
-                prompt_id=prompt_id,
-                test_case_id=test_case_id,
-                model_config=model_config
-            )
+            runner_kwargs = {
+                "prompt_id": prompt_id,
+                "test_case_id": test_case_id,
+                "model_config": model_config,
+            }
+            if provider_credentials is not None:
+                runner_kwargs["provider_credentials"] = provider_credentials
+            if on_provider_success is not None:
+                runner_kwargs.update(
+                    strict_provider_errors=True,
+                    on_provider_success=on_provider_success,
+                )
+            result = await self.test_runner.run_single_test(**runner_kwargs)
 
             if result.get("success") and "scores" in result:
                 scores.append(result["scores"].get("aggregate_score", 0))
 
+        if not scores and on_provider_success is not None:
+            raise ValueError("Optimization requires one validated baseline result")
         return np.mean(scores) if scores else 0.0
 
     def _get_prompt(self, prompt_id: int) -> dict[str, Any]:

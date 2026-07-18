@@ -3008,83 +3008,18 @@ export class TldwApiClientBase {
   }
 
   async ragSearch(query: string, options?: any): Promise<any> {
-    const { timeoutMs, signal, ...rest } = options || {}
-    const normalizedQuery = this.normalizeRagQuery(query)
-    try {
-      return await this.requestWithCurrentConfig<any>({
-        path: '/api/v1/rag/search',
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: { query: normalizedQuery, ...rest },
-        timeoutMs,
-        abortSignal: signal
-      })
-    } catch (error) {
-      const status = (error as { status?: number } | null)?.status
-      const message = error instanceof Error ? error.message : String(error ?? '')
-      const aborted =
-        (error as { name?: string } | null)?.name === 'AbortError' ||
-        /abort|cancel/i.test(message)
-      if (aborted) {
-        throw error
-      }
-      const shouldRetryWithoutRerank =
-        status === 500 &&
-        rest?.enable_reranking !== false &&
-        rest?.reranking_strategy !== 'none'
-
-      if (!shouldRetryWithoutRerank) {
-        throw error
-      }
-
-      // Some local/dev servers fail hard when FlashRank assets are missing.
-      // Retry once with reranking disabled so retrieval still works.
-      console.warn(
-        '[tldw:rag] /api/v1/rag/search failed; retrying once without reranking',
-        { status, message }
-      )
-      return await this.requestWithCurrentConfig<any>({
-        path: '/api/v1/rag/search',
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: {
-          query: normalizedQuery,
-          ...rest,
-          enable_reranking: false,
-          reranking_strategy: 'none'
-        },
-        timeoutMs,
-        abortSignal: signal
-      })
-    }
+    return await chatRagMethods.ragSearch.call(this as any, query, options)
   }
 
   async *ragSearchStream(
     query: string,
     options?: any
   ): AsyncGenerator<any, void, unknown> {
-    const { timeoutMs, signal, ...rest } = options || {}
-    const normalizedQuery = this.normalizeRagQuery(query)
-    for await (const line of bgStream({
-      path: '/api/v1/rag/search/stream',
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: { query: normalizedQuery, ...rest },
-      abortSignal: signal,
-      streamIdleTimeoutMs: timeoutMs
-    })) {
-      try {
-        yield JSON.parse(line)
-      } catch {
-        // Ignore malformed stream chunks
-      }
-    }
+    yield* chatRagMethods.ragSearchStream.call(this as any, query, options)
   }
 
   async ragSimple(query: string, options?: any): Promise<any> {
-    const { timeoutMs, ...rest } = options || {}
-    const normalizedQuery = this.normalizeRagQuery(query)
-    return await bgRequest<any>({ path: '/api/v1/rag/simple', method: 'POST', headers: { 'Content-Type': 'application/json' }, body: { query: normalizedQuery, ...rest }, timeoutMs })
+    return await chatRagMethods.ragSimple.call(this as any, query, options)
   }
 
   // Research / Web search
@@ -8297,7 +8232,9 @@ export class TldwApiClientBase {
 import { adminMethods } from "./domains/admin"
 import { mediaMethods } from "./domains/media"
 import { characterMethods } from "./domains/characters"
-import { chatRagMethods } from "./domains/chat-rag"
+import {
+  chatRagMethods,
+} from "./domains/chat-rag"
 import { collectionsMethods } from "./domains/collections"
 import { modelsAudioMethods } from "./domains/models-audio"
 import { presentationsMethods } from "./domains/presentations"

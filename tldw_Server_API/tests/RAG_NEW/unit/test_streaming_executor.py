@@ -6,7 +6,11 @@ import pytest
 
 import tldw_Server_API.app.core.RAG.rag_service.streaming_executor as streaming_executor
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAuthenticationError
-from tldw_Server_API.app.core.RAG.rag_service.generation import GenerationConfig, LLMGenerator
+from tldw_Server_API.app.core.RAG.rag_service.generation import (
+    GenerationConfig,
+    LLMGenerator,
+    StreamingGenerator,
+)
 from tldw_Server_API.app.core.RAG.rag_service.request_resolution import ResolvedRAGRequest
 from tldw_Server_API.app.core.RAG.rag_service.retrieval_plan import RetrievalPlan
 from tldw_Server_API.app.core.RAG.rag_service.streaming_executor import (
@@ -15,6 +19,9 @@ from tldw_Server_API.app.core.RAG.rag_service.streaming_executor import (
 )
 from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
 from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import UnifiedSearchResult
+from tldw_Server_API.tests.provider_credential_test_helpers import (
+    issue_provider_call_credentials_async,
+)
 
 
 def _resolved_request(strategy: str = "standard") -> ResolvedRAGRequest:
@@ -53,19 +60,63 @@ def _retrieval_plan() -> RetrievalPlan:
 
 class _StreamingRuntime:
     def __init__(self) -> None:
-        self.handle = SimpleNamespace(
-            provider="test-provider",
-            api_key="runtime-stream-key",
-            app_config={"TestProvider": {"api_timeout": 9}},
-            credentials_resolved=True,
-        )
+        self.handle: Any = None
         self.marked: list[Any] = []
 
-    async def resolve(self, provider: str) -> Any:
+    async def resolve(self, provider: str, *, model: str | None = None) -> Any:
+        if self.handle is None:
+            self.handle = await issue_provider_call_credentials_async(
+                provider,
+                api_key="runtime-stream-key",
+                app_config={"TestProvider": {"api_timeout": 9}},
+                model=model,
+            )
         return self.handle
 
     async def mark_used(self, handle: Any) -> None:
         self.marked.append(handle)
+
+
+class _CloseTrackingAsyncStream:
+    def __init__(self, label: str = "answer") -> None:
+        self.label = label
+        self.close_calls = 0
+        self.next_calls = 0
+        self.waiting = asyncio.Event()
+        self.release = asyncio.Event()
+
+    def __aiter__(self) -> "_CloseTrackingAsyncStream":
+        return self
+
+    async def __anext__(self) -> str:
+        self.next_calls += 1
+        if self.next_calls == 1:
+            return self.label
+        self.waiting.set()
+        await self.release.wait()
+        raise StopAsyncIteration
+
+    async def aclose(self) -> None:
+        self.close_calls += 1
+        self.release.set()
+
+
+class _CloseTrackingSyncStream:
+    def __init__(self) -> None:
+        self.close_calls = 0
+        self.next_calls = 0
+
+    def __iter__(self) -> "_CloseTrackingSyncStream":
+        return self
+
+    def __next__(self) -> str:
+        self.next_calls += 1
+        if self.next_calls == 1:
+            return "answer"
+        raise StopIteration
+
+    def close(self) -> None:
+        self.close_calls += 1
 
 
 async def _consume_tracked_stream(
@@ -83,6 +134,169 @@ async def _consume_tracked_stream(
         GenerationConfig(provider="test-provider", model="test-model", streaming=True)
     )._call_llm("prompt", credential_runtime=runtime)
     return [chunk async for chunk in tracked]
+
+
+@pytest.mark.parametrize("stream_kind", ["async", "sync"])
+@pytest.mark.asyncio
+async def test_runtime_tracked_stream_closes_raw_iterator_on_early_close(
+    monkeypatch: pytest.MonkeyPatch,
+    stream_kind: str,
+) -> None:
+    raw: Any = (
+        _CloseTrackingAsyncStream()
+        if stream_kind == "async"
+        else _CloseTrackingSyncStream()
+    )
+
+    async def fake_chat_call(**_kwargs: Any) -> Any:
+        return raw
+
+    import tldw_Server_API.app.core.Chat.chat_service as chat_service
+
+    monkeypatch.setattr(chat_service, "perform_chat_api_call_async", fake_chat_call)
+    tracked = await LLMGenerator(
+        GenerationConfig(provider="test-provider", model="test-model", streaming=True)
+    )._call_llm("prompt", credential_runtime=_StreamingRuntime())
+
+    assert await tracked.__anext__() == "answer"  # nosec B101
+    await tracked.aclose()
+
+    assert raw.close_calls == 1  # nosec B101
+
+
+@pytest.mark.parametrize("stream_kind", ["async", "sync"])
+@pytest.mark.asyncio
+async def test_runtime_stream_acquisition_cancellation_closes_late_raw_stream(
+    monkeypatch: pytest.MonkeyPatch,
+    stream_kind: str,
+) -> None:
+    raw: Any = (
+        _CloseTrackingAsyncStream()
+        if stream_kind == "async"
+        else _CloseTrackingSyncStream()
+    )
+    acquisition_started = asyncio.Event()
+    release_acquisition = asyncio.Event()
+
+    async def fake_chat_call(**_kwargs: Any) -> Any:
+        acquisition_started.set()
+        await release_acquisition.wait()
+        return raw
+
+    import tldw_Server_API.app.core.Chat.chat_service as chat_service
+
+    runtime = _StreamingRuntime()
+    monkeypatch.setattr(chat_service, "perform_chat_api_call_async", fake_chat_call)
+    task = asyncio.create_task(
+        LLMGenerator(
+            GenerationConfig(
+                provider="test-provider",
+                model="test-model",
+                streaming=True,
+            )
+        )._call_llm("prompt", credential_runtime=runtime)
+    )
+
+    await acquisition_started.wait()
+    task.cancel()
+    await asyncio.sleep(0)
+    assert not task.done()  # nosec B101 - acquisition remains owned until it exits
+    release_acquisition.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert raw.close_calls == 1  # nosec B101
+    assert runtime.marked == []  # nosec B101
+
+
+@pytest.mark.parametrize("runtime_bound", [False, True])
+@pytest.mark.asyncio
+async def test_streaming_generator_closes_raw_iterator_on_early_close(
+    monkeypatch: pytest.MonkeyPatch,
+    runtime_bound: bool,
+) -> None:
+    raw = _CloseTrackingAsyncStream()
+
+    async def fake_chat_call(**_kwargs: Any) -> Any:
+        return raw
+
+    import tldw_Server_API.app.core.Chat.chat_service as chat_service
+
+    monkeypatch.setattr(chat_service, "perform_chat_api_call_async", fake_chat_call)
+    generator = StreamingGenerator(
+        GenerationConfig(provider="test-provider", model="test-model")
+    )
+    kwargs = {"credential_runtime": _StreamingRuntime()} if runtime_bound else {}
+    stream = generator.generate_stream(SimpleNamespace(documents=[]), "query", **kwargs)
+
+    assert await stream.__anext__() == "answer"  # nosec B101
+    await stream.aclose()
+
+    assert raw.close_calls == 1  # nosec B101
+    assert generator.config.streaming is False  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_streaming_generator_cancellation_closes_raw_iterator(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw = _CloseTrackingAsyncStream()
+
+    async def fake_chat_call(**_kwargs: Any) -> Any:
+        return raw
+
+    import tldw_Server_API.app.core.Chat.chat_service as chat_service
+
+    monkeypatch.setattr(chat_service, "perform_chat_api_call_async", fake_chat_call)
+    stream = StreamingGenerator(
+        GenerationConfig(provider="test-provider", model="test-model")
+    ).generate_stream(
+        SimpleNamespace(documents=[]),
+        "query",
+        credential_runtime=_StreamingRuntime(),
+    )
+
+    assert await stream.__anext__() == "answer"  # nosec B101
+    pending = asyncio.create_task(stream.__anext__())
+    await raw.waiting.wait()
+    pending.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await pending
+
+    assert raw.close_calls == 1  # nosec B101
+
+
+@pytest.mark.asyncio
+@pytest.mark.concurrent
+async def test_concurrent_streaming_generators_close_only_their_raw_iterator(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def build(label: str) -> tuple[Any, _CloseTrackingAsyncStream]:
+        raw = _CloseTrackingAsyncStream(label)
+        generator = StreamingGenerator(
+            GenerationConfig(provider="test-provider", model="test-model")
+        )
+
+        async def fake_call(_prompt: str, **_kwargs: Any) -> Any:
+            return raw
+
+        monkeypatch.setattr(generator, "_call_llm", fake_call)
+        stream = generator.generate_stream(SimpleNamespace(documents=[]), "query")
+        assert await stream.__anext__() == label  # nosec B101
+        return stream, raw
+
+    (stream_a, raw_a), (stream_b, raw_b) = await asyncio.gather(
+        build("answer-a"),
+        build("answer-b"),
+    )
+
+    await stream_a.aclose()
+    assert (raw_a.close_calls, raw_b.close_calls) == (1, 0)  # nosec B101
+
+    await stream_b.aclose()
+    assert (raw_a.close_calls, raw_b.close_calls) == (1, 1)  # nosec B101
 
 
 @pytest.mark.parametrize(
@@ -330,6 +544,41 @@ async def test_stream_rag_events_wraps_standard_stream_result_in_order():
 
 
 @pytest.mark.asyncio
+async def test_stream_rag_events_closes_generation_stream_when_consumer_stops() -> None:
+    lifecycle: list[str] = []
+
+    async def empty_standard_pipeline(**kwargs: Any) -> UnifiedSearchResult:
+        return UnifiedSearchResult(documents=[], query=str(kwargs.get("query", "")))
+
+    async def capture_generation(context: Any, **_kwargs: Any) -> Any:
+        async def generation_stream():
+            try:
+                yield "answer"
+                await asyncio.Event().wait()
+            finally:
+                lifecycle.append("generation_stream_close")
+
+        context.stream_generator = generation_stream()
+        return context
+
+    stream = stream_rag_events(
+        resolved_request=_resolved_request("standard"),
+        retrieval_plan=_retrieval_plan(),
+        standard_pipeline=empty_standard_pipeline,
+        extra_context={"generate_streaming_response": capture_generation},
+    )
+    try:
+        while True:
+            event = await stream.__anext__()
+            if event["type"] == "delta":
+                break
+    finally:
+        await stream.aclose()
+
+    assert lifecycle == ["generation_stream_close"]
+
+
+@pytest.mark.asyncio
 async def test_stream_rag_events_emits_structured_error():
     sentinel = "sk-secret-must-not-appear-in-stream-logs"
 
@@ -375,17 +624,19 @@ async def test_streaming_generation_marks_partial_output_and_propagates_failure(
 
     class RecordingRuntime:
         def __init__(self) -> None:
-            self.handle = SimpleNamespace(
-                provider="test-provider",
-                api_key="runtime-stream-key",
-                app_config={"TestProvider": {"api_timeout": 9}},
-                credentials_resolved=True,
-            )
+            self.handle: Any = None
             self.resolved: list[str] = []
             self.marked: list[Any] = []
 
-        async def resolve(self, provider: str) -> Any:
+        async def resolve(self, provider: str, *, model: str | None = None) -> Any:
             self.resolved.append(provider)
+            if self.handle is None:
+                self.handle = await issue_provider_call_credentials_async(
+                    provider,
+                    api_key="runtime-stream-key",
+                    app_config={"TestProvider": {"api_timeout": 9}},
+                    model=model,
+                )
             return self.handle
 
         async def mark_used(self, handle: Any) -> None:

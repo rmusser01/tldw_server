@@ -23,6 +23,24 @@ from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
 
 
 @pytest.mark.unit
+def test_media_chunk_scoring_is_case_insensitive() -> None:
+    """Mixed-case content must score identically to its lowercase equivalent."""
+    query_terms = ["knowledge", "graph"]
+
+    lowercase_score = retr_mod._score_media_chunk_text(
+        "a knowledge graph connects evidence",
+        query_terms,
+    )
+    mixed_case_score = retr_mod._score_media_chunk_text(
+        "a KnOwLeDgE GrApH connects evidence",
+        query_terms,
+    )
+
+    assert mixed_case_score == pytest.approx(lowercase_score)
+    assert mixed_case_score > 0.0
+
+
+@pytest.mark.unit
 class TestRetrievalConfig:
     def test_defaults_match_expected_contract(self):
         cfg = RetrievalConfig()

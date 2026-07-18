@@ -30,6 +30,7 @@ from typing import Any, Literal
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
+from tldw_Server_API.app.core.Chat.bounded_daemon import await_owned_worker
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import (
     SummaryProviderError,
@@ -346,7 +347,7 @@ async def agentic_rag_pipeline(
         logger.warning("Agentic coarse retrieval failed")
         docs = []
     except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError, TimeoutError):
-        logger.opt(exception=True).warning("Agentic coarse retrieval failed")
+        logger.warning("Agentic coarse retrieval failed")
         docs = []
 
     # Fallback: if no documents were retrieved via MultiDatabaseRetriever but we
@@ -600,8 +601,16 @@ async def agentic_rag_pipeline(
         security_report=None,
         total_time=0.0,
     )
-    if agentic_embedding_metadata:
-        result.metadata["agentic_embeddings"] = dict(agentic_embedding_metadata)
+    planner_metadata = agentic_embedding_metadata.get("planner")
+    embedding_metadata = {
+        key: value
+        for key, value in agentic_embedding_metadata.items()
+        if key != "planner"
+    }
+    if embedding_metadata:
+        result.metadata["agentic_embeddings"] = embedding_metadata
+    if isinstance(planner_metadata, dict):
+        result.metadata["agentic_planner"] = dict(planner_metadata)
 
     # Attach lightweight coverage/precision metrics
     try:
@@ -705,8 +714,11 @@ async def agentic_rag_pipeline(
                         _resolve_claims_llm_config,
                     )
 
-                    claims_provider, _, _ = _resolve_claims_llm_config()
-                    claims_handle = await credential_runtime.resolve(claims_provider)
+                    claims_provider, claims_model, _ = _resolve_claims_llm_config()
+                    claims_handle = await credential_runtime.resolve(
+                        claims_provider,
+                        model=claims_model,
+                    )
 
                 def _analyze(api_name: str, input_data: Any, custom_prompt_arg: str | None = None,
                              api_key: str | None = None, system_message: str | None = None,
@@ -721,6 +733,14 @@ async def agentic_rag_pipeline(
                             temp,
                             **kwargs,
                         )
+                    for key in (
+                        "app_config",
+                        "credentials_resolved",
+                        "provider_credentials",
+                        "_provider_call_credentials",
+                        "raise_on_error",
+                    ):
+                        kwargs.pop(key, None)
                     response = sgl.analyze(
                         claims_provider or claims_handle.provider,
                         input_data,
@@ -730,6 +750,7 @@ async def agentic_rag_pipeline(
                         temp,
                         app_config=claims_handle.app_config,
                         credentials_resolved=True,
+                        provider_credentials=claims_handle,
                         raise_on_error=True,
                         **kwargs,
                     )
@@ -763,23 +784,32 @@ async def agentic_rag_pipeline(
                 engine = ClaimsEngine(_analyze)
                 async def _retrieve_for_claim(_c_text: str, top_k: int = 3):
                     return [synthetic]
-                try:
-                    claims_run = await engine.run(
-                        answer=result.generated_answer,
-                        query=effective_query,
-                        documents=[synthetic],
-                        claim_extractor="auto",
-                        claim_verifier=claim_verifier,
-                        claims_top_k=claims_top_k,
-                        claims_conf_threshold=claims_conf_threshold,
-                        claims_max=claims_max,
-                        retrieve_fn=_retrieve_for_claim,
-                        nli_model=nli_model,
-                        claims_concurrency=claims_concurrency,
-                    )
-                finally:
-                    if claims_handle is not None and claims_state["used"]:
-                        await credential_runtime.mark_used(claims_handle)
+
+                async def _run_and_mark_claims() -> dict[str, Any]:
+                    try:
+                        return await engine.run(
+                            answer=result.generated_answer,
+                            query=effective_query,
+                            documents=[synthetic],
+                            claim_extractor="auto",
+                            claim_verifier=claim_verifier,
+                            claims_top_k=claims_top_k,
+                            claims_conf_threshold=claims_conf_threshold,
+                            claims_max=claims_max,
+                            retrieve_fn=_retrieve_for_claim,
+                            nli_model=nli_model,
+                            claims_concurrency=claims_concurrency,
+                        )
+                    finally:
+                        if claims_handle is not None and claims_state["used"]:
+                            await credential_runtime.mark_used(claims_handle)
+
+                claims_operation = _run_and_mark_claims()
+                claims_run = (
+                    await await_owned_worker(claims_operation)
+                    if claims_handle is not None
+                    else await claims_operation
+                )
                 claims_payload = claims_run.get("claims")
                 result.metadata["claims"] = claims_payload
                 result.metadata["factuality"] = claims_run.get("summary")
@@ -893,7 +923,32 @@ async def agentic_rag_pipeline(
 
         # NLI low-confidence gate (lightweight, optional)
         try:
-            if enable_claims and result.generated_answer:
+            claims_stage = result.metadata.get("claims")
+            claims_unavailable = (
+                isinstance(claims_stage, dict)
+                and claims_stage.get("verification_available") is False
+            )
+            if enable_claims and result.generated_answer and claims_unavailable:
+                failure_code = claims_stage.get("failure_code")
+                if failure_code not in {
+                    "invalid_provider_credentials",
+                    "missing_provider_credentials",
+                    "provider_configuration_invalid",
+                    "credential_store_unavailable",
+                    "credential_scope_revoked",
+                    "provider_unavailable",
+                }:
+                    failure_code = "provider_unavailable"
+                result.metadata["post_verification"] = {
+                    "unsupported_ratio": 0.0,
+                    "total_claims": 0,
+                    "unsupported_count": 0,
+                    "fixed": False,
+                    "reason": "verification_unavailable",
+                    "verification_available": False,
+                    "failure_code": failure_code,
+                }
+            elif enable_claims and result.generated_answer:
                 from .post_generation_verifier import PostGenerationVerifier as _PGV
                 verifier = _PGV(
                     max_retries=0,

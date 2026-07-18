@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import NoReturn
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from loguru import logger
@@ -21,7 +22,10 @@ from tldw_Server_API.app.core.AuthNZ.byok_helpers import (
     validate_base_url_override,
     validate_credential_fields,
 )
-from tldw_Server_API.app.core.AuthNZ.byok_testing import test_provider_credentials
+from tldw_Server_API.app.core.AuthNZ.byok_testing import (
+    provider_validation_public_error,
+    test_provider_credentials,
+)
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.orgs_teams import list_org_members, list_team_members
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
@@ -37,11 +41,23 @@ from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
     key_hint_for_api_key,
     loads_envelope,
 )
-from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
+from tldw_Server_API.app.core.exceptions import raise_detached_error
+from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
 
 router = APIRouter(prefix="", tags=["org-team-keys"])
 _ADMIN_CLAIM_PERMISSIONS = frozenset({"*", "system.configure"})
+
+
+def _raise_provider_validation_http_error(exc: ChatAPIError) -> NoReturn:
+    """Raise one detached, bounded credential-validation HTTP error."""
+    public_error = provider_validation_public_error(exc)
+    raise_detached_error(
+        HTTPException(
+            status_code=public_error.status_code,
+            detail=public_error.message,
+        )
+    )
 
 
 async def _get_shared_byok_repo() -> AuthnzOrgProviderSecretsRepo:
@@ -185,7 +201,10 @@ async def upsert_org_shared_key(
                 credential_fields["base_url"]
             )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail="Invalid provider credential fields") from exc
+        del exc
+        raise_detached_error(
+            HTTPException(status_code=400, detail="Invalid provider credential fields")
+        )
 
     try:
         await test_provider_credentials(
@@ -195,17 +214,26 @@ async def upsert_org_shared_key(
             model=None,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail="Provider credential validation failed") from exc
+        del exc
+        raise_detached_error(
+            HTTPException(status_code=400, detail="Provider credential validation failed")
+        )
     except ChatAPIError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+        _raise_provider_validation_http_error(exc)
     except Exception as exc:
-        raise HTTPException(status_code=502, detail="Provider test call failed") from exc
+        del exc
+        raise_detached_error(
+            HTTPException(status_code=502, detail="Provider test call failed")
+        )
 
     secret_payload = build_secret_payload(api_key, credential_fields or None)
     try:
         envelope = encrypt_byok_payload(secret_payload)
     except ValueError as exc:
-        raise HTTPException(status_code=500, detail="BYOK encryption is not configured") from exc
+        del exc
+        raise_detached_error(
+            HTTPException(status_code=500, detail="BYOK encryption is not configured")
+        )
 
     repo = await _get_shared_byok_repo()
     now = datetime.now(timezone.utc)
@@ -309,7 +337,10 @@ async def test_org_shared_key(
                 credential_fields["base_url"]
             )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail="Invalid provider credential fields") from exc
+        del exc
+        raise_detached_error(
+            HTTPException(status_code=400, detail="Invalid provider credential fields")
+        )
 
     try:
         model_used = await test_provider_credentials(
@@ -319,11 +350,17 @@ async def test_org_shared_key(
             model=payload.model,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail="Provider credential validation failed") from exc
+        del exc
+        raise_detached_error(
+            HTTPException(status_code=400, detail="Provider credential validation failed")
+        )
     except ChatAPIError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+        _raise_provider_validation_http_error(exc)
     except Exception as exc:
-        raise HTTPException(status_code=502, detail="Provider test call failed") from exc
+        del exc
+        raise_detached_error(
+            HTTPException(status_code=502, detail="Provider test call failed")
+        )
 
     try:
         await _touch_shared_last_used_if_match(
@@ -413,7 +450,10 @@ async def upsert_team_shared_key(
                 credential_fields["base_url"]
             )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail="Invalid provider credential fields") from exc
+        del exc
+        raise_detached_error(
+            HTTPException(status_code=400, detail="Invalid provider credential fields")
+        )
 
     try:
         await test_provider_credentials(
@@ -423,17 +463,26 @@ async def upsert_team_shared_key(
             model=None,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail="Provider credential validation failed") from exc
+        del exc
+        raise_detached_error(
+            HTTPException(status_code=400, detail="Provider credential validation failed")
+        )
     except ChatAPIError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+        _raise_provider_validation_http_error(exc)
     except Exception as exc:
-        raise HTTPException(status_code=502, detail="Provider test call failed") from exc
+        del exc
+        raise_detached_error(
+            HTTPException(status_code=502, detail="Provider test call failed")
+        )
 
     secret_payload = build_secret_payload(api_key, credential_fields or None)
     try:
         envelope = encrypt_byok_payload(secret_payload)
     except ValueError as exc:
-        raise HTTPException(status_code=500, detail="BYOK encryption is not configured") from exc
+        del exc
+        raise_detached_error(
+            HTTPException(status_code=500, detail="BYOK encryption is not configured")
+        )
 
     repo = await _get_shared_byok_repo()
     now = datetime.now(timezone.utc)
@@ -537,7 +586,10 @@ async def test_team_shared_key(
                 credential_fields["base_url"]
             )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail="Invalid provider credential fields") from exc
+        del exc
+        raise_detached_error(
+            HTTPException(status_code=400, detail="Invalid provider credential fields")
+        )
 
     try:
         model_used = await test_provider_credentials(
@@ -547,11 +599,17 @@ async def test_team_shared_key(
             model=payload.model,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail="Provider credential validation failed") from exc
+        del exc
+        raise_detached_error(
+            HTTPException(status_code=400, detail="Provider credential validation failed")
+        )
     except ChatAPIError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+        _raise_provider_validation_http_error(exc)
     except Exception as exc:
-        raise HTTPException(status_code=502, detail="Provider test call failed") from exc
+        del exc
+        raise_detached_error(
+            HTTPException(status_code=502, detail="Provider test call failed")
+        )
 
     try:
         await _touch_shared_last_used_if_match(

@@ -1,16 +1,18 @@
 # audio_streaming.py
 # Description: Audio streaming endpoints (HTTP + WebSocket) and non-streaming chat.
 import asyncio
-import base64
-from collections import deque
 import configparser
 import contextlib
+import copy
 import importlib
+import inspect
 import json
 import os
+import threading
 import time
+from collections import deque
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
 from uuid import uuid4
 
 import numpy as np
@@ -18,15 +20,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket
 from fastapi.responses import JSONResponse
 from loguru import logger
 from starlette import status
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, TokenScopeGuard, User
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import TokenScopeGuard, User, get_request_user
 from tldw_Server_API.app.api.v1.API_Deps.billing_deps import resolve_org_id_for_principal
-from tldw_Server_API.app.core.Resource_Governance import cost_units
-from tldw_Server_API.app.core.Billing.enforcement import (
-    LimitCategory,
-    enforcement_enabled,
-    get_billing_enforcer,
-)
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import (
     get_chacha_db_for_user,
     get_chacha_db_for_user_id,
@@ -44,42 +40,57 @@ from tldw_Server_API.app.api.v1.schemas.audio_schemas import (
 )
 from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import DEFAULT_LLM_PROVIDER, get_api_keys
 from tldw_Server_API.app.core.Audio.error_payloads import _maybe_debug_details
-from tldw_Server_API.app.core.Audio.streaming_exceptions import QuotaExceeded
-from tldw_Server_API.app.core.Audio.transcription_service import _map_openai_audio_model_to_whisper
 from tldw_Server_API.app.core.Audio.quota_helpers import EXPECTED_DB_EXC, EXPECTED_REDIS_EXC, _get_failopen_cap_minutes
-from tldw_Server_API.app.core.exceptions import AudioQuotaStoreUnavailable
-from tldw_Server_API.app.core.Usage.audio_quota import (
-    active_streams_count,
-    add_daily_minutes,
-    bytes_to_seconds,
-    can_start_stream,
-    check_daily_minutes_allow,
-    consume_daily_minutes,
-    consume_daily_minutes_with_compat,
-    finish_job,
-    finish_stream,
-    get_daily_minutes_used,
-    get_limits_for_user,
-    get_user_tier,
-    heartbeat_stream,
-    increment_jobs_started,
-)
+from tldw_Server_API.app.core.Audio.streaming_exceptions import QuotaExceeded
 from tldw_Server_API.app.core.Audio.streaming_service import (
     CHAT_HISTORY_MAX_MESSAGES,
     _audio_ws_authenticate,
     _stream_tts_to_websocket,
     receive_audio_websocket_text,
 )
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import resolve_byok_credentials
+from tldw_Server_API.app.core.Audio.transcription_service import _map_openai_audio_model_to_whisper
+from tldw_Server_API.app.core.Audio.tts_service import (
+    tts_provider_credential_scope,
+)
+from tldw_Server_API.app.core.AuthNZ.byok_helpers import (
+    derive_trusted_credential_scope,
+)
+from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
+    ByokResolutionError,
+)
+from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
+    capture_provider_override_call_snapshot,
+)
+from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+    ProviderCredentialRuntime,
+)
 from tldw_Server_API.app.core.AuthNZ.settings import is_multi_user_mode
 from tldw_Server_API.app.core.AuthNZ.websocket_session_auth import (
     cookie_websocket_rejection_code,
     resolve_single_user_cookie_websocket,
 )
-from tldw_Server_API.app.core.Chat.chat_service import perform_chat_api_call_async as chat_api_call_async
+from tldw_Server_API.app.core.Billing.enforcement import (
+    LimitCategory,
+    enforcement_enabled,
+    get_billing_enforcer,
+)
+from tldw_Server_API.app.core.Chat.bounded_daemon import (
+    STREAM_DAEMON_POOL,
+    await_bounded_daemon_with_timeout,
+    await_owned_worker,
+)
 from tldw_Server_API.app.core.Chat.chat_helpers import (
     get_or_create_character_context,
     get_or_create_conversation,
+)
+from tldw_Server_API.app.core.Chat.chat_service import perform_chat_api_call_async as chat_api_call_async
+from tldw_Server_API.app.core.Chat.streaming_utils import (
+    PROVIDER_STREAM_ERROR_MESSAGES,
+    await_bounded_owned_operation,
+    invoke_owned_stream_close,
+    invoke_stream_close_bounded,
+    provider_stream_error_payload,
 )
 from tldw_Server_API.app.core.config import (
     load_comprehensive_config,
@@ -89,31 +100,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGD
 from tldw_Server_API.app.core.DB_Management.media_db.legacy_transcripts import (
     upsert_transcript,
 )
-from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
-from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
-    ensure_app_config,
-    normalize_provider,
-    resolve_provider_api_key_from_config,
-)
-from tldw_Server_API.app.core.Logging.log_context import ensure_request_id, get_ps_logger
-from tldw_Server_API.app.core.Metrics.metrics_manager import get_metrics_registry, increment_counter
-from tldw_Server_API.app.core.Metrics.stt_metrics import (
-    emit_stt_error_total,
-    emit_stt_redaction_total,
-    emit_stt_request_total,
-    emit_stt_run_write_total,
-    emit_stt_session_end_total,
-    emit_stt_session_start_total,
-    observe_stt_final_latency_seconds,
-)
-from tldw_Server_API.app.core.Streaming.phrase_chunker import PhraseChunker
-from tldw_Server_API.app.core.Streaming import speech_chat_service
-from tldw_Server_API.app.core.testing import is_truthy
-from tldw_Server_API.app.core.TTS.realtime_session import RealtimeSessionConfig
-from tldw_Server_API.app.core.TTS.tts_request_resolution import (
-    resolve_tts_request_defaults,
-)
-from tldw_Server_API.app.core.TTS.tts_service_v2 import TTSServiceV2
+from tldw_Server_API.app.core.exceptions import AudioQuotaStoreUnavailable
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.audio_stream_protocol import (
     AUDIO_CHAT_ENDPOINT,
     AudioProtocolConfig,
@@ -129,6 +116,48 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_policy import
     apply_transcript_text_policy,
     get_websocket_auth_principal,
     resolve_effective_stt_policy,
+)
+from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
+from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
+    normalize_provider,
+    provider_auth_is_resolved,
+)
+from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
+from tldw_Server_API.app.core.Logging.log_context import ensure_request_id, get_ps_logger
+from tldw_Server_API.app.core.Metrics.metrics_manager import get_metrics_registry, increment_counter
+from tldw_Server_API.app.core.Metrics.stt_metrics import (
+    emit_stt_error_total,
+    emit_stt_redaction_total,
+    emit_stt_request_total,
+    emit_stt_run_write_total,
+    emit_stt_session_end_total,
+    emit_stt_session_start_total,
+    observe_stt_final_latency_seconds,
+)
+from tldw_Server_API.app.core.Resource_Governance import cost_units
+from tldw_Server_API.app.core.Streaming import speech_chat_service
+from tldw_Server_API.app.core.Streaming.phrase_chunker import PhraseChunker
+from tldw_Server_API.app.core.testing import is_truthy
+from tldw_Server_API.app.core.TTS.realtime_session import RealtimeSessionConfig
+from tldw_Server_API.app.core.TTS.tts_request_resolution import (
+    resolve_tts_request_defaults,
+)
+from tldw_Server_API.app.core.TTS.tts_service_v2 import TTSServiceV2
+from tldw_Server_API.app.core.Usage.audio_quota import (
+    active_streams_count,
+    add_daily_minutes,
+    bytes_to_seconds,
+    can_start_stream,
+    check_daily_minutes_allow,
+    consume_daily_minutes,
+    consume_daily_minutes_with_compat,
+    finish_job,
+    finish_stream,
+    get_daily_minutes_used,
+    get_limits_for_user,
+    get_user_tier,
+    heartbeat_stream,
+    increment_jobs_started,
 )
 from tldw_Server_API.app.services.app_lifecycle import assert_may_start_work
 
@@ -234,6 +263,10 @@ _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS = (
     *EXPECTED_REDIS_EXC,
 )
 _AUDIO_QUOTA_DB_EXC = (*EXPECTED_DB_EXC, AudioQuotaStoreUnavailable)
+AUDIO_STREAM_FACTORY_TIMEOUT_SECONDS = 300.0
+AUDIO_STREAM_ITERATOR_TIMEOUT_SECONDS = 5.0
+AUDIO_STREAM_NEXT_TIMEOUT_SECONDS = 300.0
+AUDIO_STREAM_CLOSE_TIMEOUT_SECONDS = 0.05
 
 router = APIRouter(
     tags=["Audio"],
@@ -559,8 +592,8 @@ def _resolve_default_streaming_model() -> tuple[str, str, str]:
             model = provider_name
         else:
             logger.warning(
-                "Unsupported streaming default model '{}'; falling back to platform STT default"
-                .format(default_model_id)
+                f"Unsupported streaming default model '{default_model_id}'; "
+                "falling back to platform STT default"
             )
             model = "parakeet"
             resolved_variant = "onnx"
@@ -572,8 +605,8 @@ def _resolve_default_streaming_model() -> tuple[str, str, str]:
             variant = candidate_variant
     except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as exc:
         logger.warning(
-            "Could not resolve configured streaming model '{}'; falling back to platform STT default. Error: {}"
-            .format(default_model_id, exc)
+            f"Could not resolve configured streaming model '{default_model_id}'; "
+            f"falling back to platform STT default. Error: {exc}"
         )
         model = "parakeet"
         variant = "onnx"
@@ -592,7 +625,6 @@ def _resolve_audio_chat_streaming_model(
 ) -> tuple[str, str, str]:
     """Normalize client STT identifiers into the canonical streaming selector fields."""
 
-    model = current_model
     variant = current_variant
     whisper_model_size = current_whisper_model_size
 
@@ -670,6 +702,222 @@ async def _shim_chat_api_call_async(**kwargs):
     except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS:
         fn = chat_api_call_async
     return await fn(**kwargs)
+
+
+def _next_audio_provider_stream_chunk(iterator: Any) -> tuple[bool, Any]:
+    """Read one synchronous provider chunk without leaking StopIteration."""
+    try:
+        return False, next(iterator)
+    except StopIteration:
+        return True, None
+
+
+def _audio_provider_chunk_has_nonempty_content(raw_line: Any) -> bool:
+    """Return whether one provider frame contains successful assistant content."""
+    try:
+        line = (
+            raw_line.decode("utf-8", errors="ignore")
+            if isinstance(raw_line, (bytes, bytearray))
+            else str(raw_line)
+        ).strip()
+    except Exception:  # noqa: BLE001 - malformed provider chunks are untrusted
+        return False
+    if not line or line.lower() in {"data: [done]", "[done]"}:
+        return False
+    if line.startswith("data:"):
+        line = line[len("data:") :].strip()
+    try:
+        payload = json.loads(line)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return False
+    if not isinstance(payload, dict) or "error" in payload:
+        return False
+    for choice in payload.get("choices") or ():
+        if not isinstance(choice, dict):
+            continue
+        delta = choice.get("delta") or choice.get("message") or {}
+        if isinstance(delta, dict) and (delta.get("content") or delta.get("text")):
+            return True
+    return False
+
+
+async def _mark_audio_credentials_used_once(
+    credential_runtime: ProviderCredentialRuntime,
+    provider_credentials: Any,
+    usage_claimed: threading.Event,
+) -> None:
+    """Route first-content accounting through the runtime exactly once."""
+    if usage_claimed.is_set():
+        return
+    usage_claimed.set()
+    try:
+        await await_owned_worker(credential_runtime.mark_used(provider_credentials))
+    except asyncio.CancelledError:
+        current_task = asyncio.current_task()
+        if current_task is not None and current_task.cancelling():
+            raise
+        logger.debug("Audio credential usage tracking self-cancelled")
+    except Exception as exc:  # noqa: BLE001 - usage accounting is best effort
+        logger.debug(
+            "Audio credential usage tracking failed error_type={}",
+            type(exc).__name__,
+        )
+
+
+async def _run_bounded_audio_sync_call(
+    call: Callable[[], Any],
+    *,
+    name: str,
+    timeout_seconds: float,
+    on_abandoned: Callable[[], Any] | None = None,
+    cleanup_claimed: threading.Event | None = None,
+    on_abandoned_success: Callable[[], Any] | None = None,
+) -> Any:
+    """Run one blocking provider-stream operation with capacity and a deadline."""
+    worker_released = threading.Event()
+    return await await_bounded_owned_operation(
+        await_bounded_daemon_with_timeout(
+            call,
+            pool=STREAM_DAEMON_POOL,
+            name=name,
+            timeout_seconds=timeout_seconds,
+            timeout_message=f"{name} timed out",
+            released_event=worker_released,
+            retain_result_after_timeout=True,
+        ),
+        timeout_seconds=timeout_seconds,
+        timeout_message=f"{name} timed out",
+        on_abandoned=on_abandoned or (lambda: None),
+        released_event=worker_released,
+        cleanup_claimed=cleanup_claimed,
+        on_abandoned_success=on_abandoned_success,
+    )
+
+
+async def _iterate_audio_provider_stream(
+    source: Any,
+    *,
+    resource_holder: dict[str, Any],
+    on_abandoned: Callable[[], Any],
+    cleanup_claimed: threading.Event,
+    on_late_chunk: Callable[[Any], Any] | None = None,
+):
+    """Advance provider streams without blocking the event-loop thread."""
+    if hasattr(source, "__aiter__"):
+        iterator = source.__aiter__()
+        resource_holder["iterator"] = iterator
+        while True:
+            result_holder: dict[str, Any] = {}
+
+            async def read_next(result_holder: dict[str, Any] = result_holder) -> Any:
+                result = await iterator.__anext__()
+                result_holder["chunk"] = result
+                return result
+
+            async def account_late_chunk(
+                result_holder: dict[str, Any] = result_holder,
+            ) -> None:
+                if on_late_chunk is None or "chunk" not in result_holder:
+                    return
+                result = on_late_chunk(result_holder["chunk"])
+                if inspect.isawaitable(result):
+                    await result
+
+            try:
+                yield await await_bounded_owned_operation(
+                    read_next(),
+                    timeout_seconds=AUDIO_STREAM_NEXT_TIMEOUT_SECONDS,
+                    timeout_message="audio-stream-next timed out",
+                    on_abandoned=on_abandoned,
+                    cleanup_claimed=cleanup_claimed,
+                    on_abandoned_success=account_late_chunk,
+                )
+            except StopAsyncIteration:
+                return
+
+    def create_iterator() -> Any:
+        iterator = iter(source)
+        resource_holder["iterator"] = iterator
+        return iterator
+
+    iterator = await _run_bounded_audio_sync_call(
+        create_iterator,
+        name="audio-stream-iterator",
+        timeout_seconds=AUDIO_STREAM_ITERATOR_TIMEOUT_SECONDS,
+        on_abandoned=on_abandoned,
+        cleanup_claimed=cleanup_claimed,
+    )
+    while True:
+        result_holder: dict[str, tuple[bool, Any]] = {}
+
+        def read_next(
+            result_holder: dict[str, tuple[bool, Any]] = result_holder,
+        ) -> tuple[bool, Any]:
+            result = _next_audio_provider_stream_chunk(iterator)
+            result_holder["result"] = result
+            return result
+
+        async def account_late_chunk(
+            result_holder: dict[str, tuple[bool, Any]] = result_holder,
+        ) -> None:
+            result = result_holder.get("result")
+            if on_late_chunk is None or result is None or result[0]:
+                return
+            callback_result = on_late_chunk(result[1])
+            if inspect.isawaitable(callback_result):
+                await callback_result
+
+        finished, chunk = await _run_bounded_audio_sync_call(
+            read_next,
+            name="audio-stream-next",
+            timeout_seconds=AUDIO_STREAM_NEXT_TIMEOUT_SECONDS,
+            on_abandoned=on_abandoned,
+            cleanup_claimed=cleanup_claimed,
+            on_abandoned_success=account_late_chunk,
+        )
+        if finished:
+            return
+        yield chunk
+
+
+async def _close_audio_provider_stream(
+    source: Any,
+    resource_holder: dict[str, Any] | None = None,
+    *,
+    owned_cleanup: bool = False,
+) -> None:
+    """Close provider output before releasing its credential runtime."""
+    iterator = (resource_holder or {}).get("iterator")
+    candidates = (iterator, source) if iterator is not source else (source,)
+    for candidate in candidates:
+        if candidate is None:
+            continue
+        close = getattr(candidate, "aclose", None)
+        if not callable(close):
+            close = getattr(candidate, "close", None)
+        if not callable(close):
+            continue
+        try:
+            if owned_cleanup:
+                await invoke_owned_stream_close(
+                    close,
+                    timeout=AUDIO_STREAM_CLOSE_TIMEOUT_SECONDS,
+                )
+            else:
+                await invoke_stream_close_bounded(
+                    close,
+                    timeout=AUDIO_STREAM_CLOSE_TIMEOUT_SECONDS,
+                )
+        except asyncio.CancelledError:
+            current_task = asyncio.current_task()
+            if current_task is not None and current_task.cancelling():
+                raise
+            logger.debug("Audio provider stream cleanup self-cancelled")
+        except Exception as exc:  # noqa: BLE001 - cleanup is best effort
+            logger.debug(
+                "Audio provider stream cleanup failed error_type={}",
+                type(exc).__name__,
+            )
 
 
 def _shim_transcriber_cls():
@@ -1679,6 +1927,12 @@ async def websocket_audio_chat_stream(
         db=None,
     )
 
+    processing_turn = False
+    active_turn_id: Optional[str] = None
+    active_turn_cancelled = False
+    active_turn_task: Optional[asyncio.Task] = None
+    active_tts_sender_task: Optional[asyncio.Task] = None
+    turn_sequence = 0
     acquired_stream = False
 
     try:
@@ -1892,7 +2146,6 @@ async def websocket_audio_chat_stream(
         llm_max_tokens = llm_cfg.get("max_tokens")
         llm_system_prompt = llm_cfg.get("system_prompt") or llm_cfg.get("system")
         llm_extra_params = llm_cfg.get("extra_params") if isinstance(llm_cfg.get("extra_params"), dict) else None
-
         try:
             tts_speed_raw = tts_cfg.get("speed", 1.0)
             tts_speed = float(tts_speed_raw)
@@ -2180,13 +2433,6 @@ async def websocket_audio_chat_stream(
                     payload["details"] = details
                 return payload
 
-        processing_turn = False
-        active_turn_id: Optional[str] = None
-        active_turn_cancelled = False
-        active_turn_task: Optional[asyncio.Task] = None
-        active_tts_sender_task: Optional[asyncio.Task] = None
-        turn_sequence = 0
-
         async def _send_stream_payload(payload: dict[str, Any]) -> None:
             redacted_payload = apply_transcript_payload_policy(payload, policy=effective_stt_policy)
             if str(redacted_payload.get("type", "")).strip().lower() in {
@@ -2208,213 +2454,394 @@ async def websocket_audio_chat_stream(
             else:
                 await websocket.send_json(redacted_payload)
 
-        async def _iter_stream_lines(stream_obj):
-            if hasattr(stream_obj, "__aiter__"):
-                async for line in stream_obj:
-                    yield line
-            else:
-                for line in stream_obj:
-                    yield line
+        async def _send_llm_provider_error(value: Any) -> str:
+            """Send one bounded provider error without exposing upstream text."""
+            safe_error = provider_stream_error_payload(value)["error"]
+            code = safe_error["code"]
+            await _send_stream_payload(
+                _audio_ws_error_payload(
+                    code=code,
+                    message=safe_error["message"],
+                    request_id=request_id,
+                    extra={"provider": llm_provider},
+                )
+            )
+            return code
 
-        async def _stream_llm(
+        async def _stream_llm_with_runtime(
             transcript_text: str,
+            credential_runtime: ProviderCredentialRuntime,
+            cleanup_claimed: threading.Event,
             on_delta: Optional[Any] = None,
             turn_id: Optional[str] = None,
         ) -> tuple[str, Optional[str], Optional[dict[str, Any]]]:
             nonlocal chat_history
             nonlocal active_turn_cancelled
             nonlocal active_turn_id
-            def _fallback_resolver(name: str) -> Optional[str]:
-                try:
-                    return _shim_get_api_keys().get(name)
-                except (KeyError, FileNotFoundError, OSError, ValueError, configparser.Error) as exc:
-                    logger.debug(f"LLM fallback resolver failed for provider '{name}': {exc}")
-                    return None
-
-            user_id_int = int(user_id_for_usage) if user_id_for_usage else None
-            byok_resolution = await resolve_byok_credentials(
-                llm_provider,
-                user_id=user_id_int,
-                request=websocket,
-                fallback_resolver=_fallback_resolver,
-            )
-            app_config = ensure_app_config(byok_resolution.app_config)
-            provider_api_key = byok_resolution.api_key or resolve_provider_api_key_from_config(
-                llm_provider,
-                app_config,
-            )
-            if not provider_api_key:
-                if _outer_stream:
-                    await _outer_stream.send_json(
-                        _audio_ws_error_payload(
-                            code="missing_provider_credentials",
-                            message="No API key available for provider",
-                            request_id=request_id,
-                            extra={"provider": llm_provider},
-                        )
+            try:
+                provider_credentials = await await_owned_worker(
+                    credential_runtime.resolve(
+                        llm_provider,
+                        model=llm_model,
                     )
+                )
+            except asyncio.CancelledError:
+                raise
+            except ByokResolutionError as exc:
+                code = getattr(exc, "policy_code", exc.code)
+                await _send_llm_provider_error(code)
+                return "", code, None
+            except Exception as exc:  # noqa: BLE001 - provider failures are normalized
+                logger.error(
+                    "Audio LLM credential resolution failed error_type={}",
+                    type(exc).__name__,
+                )
+                code = await _send_llm_provider_error(exc)
+                return "", code, None
+            app_config = copy.deepcopy(provider_credentials.app_config or {})
+            provider_api_key = provider_credentials.api_key
+            provider_llm_extra_params = speech_chat_service._provider_llm_extra_params(
+                llm_extra_params
+            )
+            if provider_requires_api_key(llm_provider) and not provider_auth_is_resolved(
+                llm_provider,
+                api_key=provider_api_key,
+                app_config=app_config,
+                credentials_resolved=provider_credentials.credentials_resolved,
+            ):
+                await _send_llm_provider_error("missing_provider_credentials")
                 return "", "missing_provider_credentials", None
             messages_payload = list(chat_history)
             messages_payload.append({"role": "user", "content": transcript_text})
-            try:
+
+            request_payload = {
+                "messages": messages_payload,
+                "system_message": llm_system_prompt,
+                "model": llm_model,
+                "api_key": provider_api_key,
+                "temperature": llm_temperature,
+                "max_tokens": llm_max_tokens,
+                "stream": True,
+                "user": str(user_id_for_usage),
+                "app_config": app_config,
+                "credentials_resolved": provider_credentials.credentials_resolved,
+                PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY: provider_credentials,
+                "timeout": AUDIO_STREAM_FACTORY_TIMEOUT_SECONDS,
+            }
+            if provider_llm_extra_params:
+                for key, value in provider_llm_extra_params.items():
+                    if request_payload.get(key) is None:
+                        request_payload[key] = value
+
+            async def _fallback_stream() -> Any:
+                return await _shim_chat_api_call_async(
+                    api_endpoint=llm_provider,
+                    messages_payload=messages_payload,
+                    api_key=provider_api_key,
+                    temp=llm_temperature,
+                    model=llm_model,
+                    max_tokens=llm_max_tokens,
+                    streaming=True,
+                    system_message=llm_system_prompt,
+                    user_identifier=str(user_id_for_usage),
+                    extra_body=provider_llm_extra_params,
+                    app_config=app_config,
+                    credentials_resolved=provider_credentials.credentials_resolved,
+                    **{
+                        PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY: provider_credentials,
+                    },
+                    timeout=AUDIO_STREAM_FACTORY_TIMEOUT_SECONDS,
+                )
+
+            stream_holder: dict[str, Any] = {}
+            resource_holder: dict[str, Any] = {}
+            late_cleanup_lock = asyncio.Lock()
+            late_cleanup_done = False
+
+            async def _cleanup_abandoned_turn() -> None:
+                """Release a late stream before its turn-scoped runtime once."""
+                nonlocal late_cleanup_done
+                async with late_cleanup_lock:
+                    if late_cleanup_done:
+                        return
+                    try:
+                        source = stream_holder.get("source")
+                        if source is not None:
+                            await _close_audio_provider_stream(
+                                source,
+                                resource_holder,
+                                owned_cleanup=True,
+                            )
+                    finally:
+                        await credential_runtime.close()
+                        late_cleanup_done = True
+
+            async def _await_and_store(candidate: Any) -> Any:
+                source = await candidate
+                stream_holder["source"] = source
+                return source
+
+            async def _acquire_stream() -> Any:
                 adapter = get_registry().get_adapter(normalize_provider(llm_provider))
                 if adapter is None:
-                    llm_stream = await _shim_chat_api_call_async(
-                        api_endpoint=llm_provider,
-                        messages_payload=messages_payload,
-                        api_key=provider_api_key,
-                        temp=llm_temperature,
-                        model=llm_model,
-                        max_tokens=llm_max_tokens,
-                        streaming=True,
-                        system_message=llm_system_prompt,
-                        user_identifier=str(user_id_for_usage),
-                        extra_body=llm_extra_params,
-                        app_config=app_config,
+                    source = await await_bounded_owned_operation(
+                        _await_and_store(_fallback_stream()),
+                        timeout_seconds=AUDIO_STREAM_FACTORY_TIMEOUT_SECONDS,
+                        timeout_message="audio-stream-factory timed out",
+                        on_abandoned=_cleanup_abandoned_turn,
+                        cleanup_claimed=cleanup_claimed,
                     )
                 else:
-                    request_payload = {
-                        "messages": messages_payload,
-                        "system_message": llm_system_prompt,
-                        "model": llm_model,
-                        "api_key": provider_api_key,
-                        "temperature": llm_temperature,
-                        "max_tokens": llm_max_tokens,
-                        "stream": True,
-                        "user": str(user_id_for_usage),
-                        "app_config": app_config,
-                    }
-                    if llm_extra_params:
-                        for key, value in llm_extra_params.items():
-                            if request_payload.get(key) is None:
-                                request_payload[key] = value
-                    stream_candidate = adapter.astream(request_payload)
-                    if iscoroutine(stream_candidate):
-                        try:
-                            llm_stream = await stream_candidate
-                        except NotImplementedError:
-                            llm_stream = await _shim_chat_api_call_async(
-                                api_endpoint=llm_provider,
-                                messages_payload=messages_payload,
-                                api_key=provider_api_key,
-                                temp=llm_temperature,
-                                model=llm_model,
-                                max_tokens=llm_max_tokens,
-                                streaming=True,
-                                system_message=llm_system_prompt,
-                                user_identifier=str(user_id_for_usage),
-                                extra_body=llm_extra_params,
-                                app_config=app_config,
+                    try:
+                        stream_method = adapter.astream
+                        if inspect.iscoroutinefunction(stream_method):
+                            source = await await_bounded_owned_operation(
+                                _await_and_store(stream_method(request_payload)),
+                                timeout_seconds=AUDIO_STREAM_FACTORY_TIMEOUT_SECONDS,
+                                timeout_message="audio-stream-factory timed out",
+                                on_abandoned=_cleanup_abandoned_turn,
+                                cleanup_claimed=cleanup_claimed,
                             )
-                    else:
-                        llm_stream = stream_candidate
-            except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as exc:
-                logger.error(f"LLM stream failed: {exc}", exc_info=True)
-                if _outer_stream:
-                    await _outer_stream.send_json(
-                        _audio_ws_error_payload(
-                            code="llm_error",
-                            message="LLM call failed",
-                            request_id=request_id,
-                            exc=exc,
+                        else:
+                            def invoke_sync_factory() -> Any:
+                                candidate = stream_method(request_payload)
+                                stream_holder["source"] = candidate
+                                return candidate
+
+                            stream_candidate = await _run_bounded_audio_sync_call(
+                                invoke_sync_factory,
+                                name="audio-stream-factory",
+                                timeout_seconds=AUDIO_STREAM_FACTORY_TIMEOUT_SECONDS,
+                                on_abandoned=_cleanup_abandoned_turn,
+                                cleanup_claimed=cleanup_claimed,
+                            )
+                            if inspect.isawaitable(stream_candidate):
+                                source = await await_bounded_owned_operation(
+                                    _await_and_store(stream_candidate),
+                                    timeout_seconds=AUDIO_STREAM_FACTORY_TIMEOUT_SECONDS,
+                                    timeout_message="audio-stream-factory timed out",
+                                    on_abandoned=_cleanup_abandoned_turn,
+                                    cleanup_claimed=cleanup_claimed,
+                                )
+                            else:
+                                source = stream_candidate
+                    except NotImplementedError:
+                        source = await await_bounded_owned_operation(
+                            _await_and_store(_fallback_stream()),
+                            timeout_seconds=AUDIO_STREAM_FACTORY_TIMEOUT_SECONDS,
+                            timeout_message="audio-stream-factory timed out",
+                            on_abandoned=_cleanup_abandoned_turn,
+                            cleanup_claimed=cleanup_claimed,
                         )
-                    )
-                return "", None, None
+                stream_holder["source"] = source
+                return source
+
+            try:
+                llm_stream = await _acquire_stream()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - provider failures are normalized
+                logger.error(
+                    "Audio LLM stream acquisition failed error_type={}",
+                    type(exc).__name__,
+                )
+                code = await _send_llm_provider_error(exc)
+                return "", code, None
 
             deltas: list[str] = []
             finish_reason: Optional[str] = None
             usage_payload: Optional[dict[str, Any]] = None
+            usage_claimed = threading.Event()
+            provider_error_code: Optional[str] = None
 
-            async for raw_line in _iter_stream_lines(llm_stream):
-                if turn_id is not None and (active_turn_cancelled or active_turn_id != turn_id):
-                    break
-                try:
-                    line_str = (
-                        raw_line.decode("utf-8", errors="ignore")
-                        if isinstance(raw_line, (bytes, bytearray))
-                        else str(raw_line)
+            async def _mark_late_chunk_usage(raw_line: Any) -> None:
+                if _audio_provider_chunk_has_nonempty_content(raw_line):
+                    await _mark_audio_credentials_used_once(
+                        credential_runtime,
+                        provider_credentials,
+                        usage_claimed,
                     )
-                except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS:
-                    continue
-                if not line_str:
-                    continue
-                stripped = line_str.strip()
-                if stripped.lower() == "data: [done]" or stripped.lower() == "[done]":
-                    break
-                if stripped.lower().endswith("[done]"):
-                    break
-                payload_str = stripped
-                if payload_str.startswith("data:"):
-                    payload_str = payload_str[len("data:") :].strip()
-                try:
-                    payload = json.loads(payload_str)
-                except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS:
-                    continue
-                if "error" in payload:
-                    if _outer_stream:
-                        await _outer_stream.send_json(
-                            _audio_ws_error_payload(
-                                code="llm_error",
-                                message=str(payload.get("error") or "LLM streaming error"),
-                                request_id=request_id,
-                            )
-                        )
-                    continue
-                choices = payload.get("choices") or []
-                for choice in choices:
-                    if turn_id is not None and (active_turn_cancelled or active_turn_id != turn_id):
+
+            async def _release_runtime_after_abandoned_close() -> None:
+                await credential_runtime.close()
+
+            try:
+                async for raw_line in _iterate_audio_provider_stream(
+                    llm_stream,
+                    resource_holder=resource_holder,
+                    on_abandoned=_cleanup_abandoned_turn,
+                    cleanup_claimed=cleanup_claimed,
+                    on_late_chunk=_mark_late_chunk_usage,
+                ):
+                    if turn_id is not None and (
+                        active_turn_cancelled or active_turn_id != turn_id
+                    ):
                         break
-                    delta = choice.get("delta") or choice.get("message") or {}
-                    content = delta.get("content") or delta.get("text") if isinstance(delta, dict) else None
-                    if content:
-                        deltas.append(content)
-                        if _outer_stream:
-                            await _outer_stream.send_json({"type": "llm_delta", "delta": content})
-                        if on_delta is not None:
-                            try:
-                                maybe_result = on_delta(content)
-                                if iscoroutine(maybe_result):
-                                    await maybe_result
-                            except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as cb_exc:
-                                logger.debug(f"audio.chat.stream on_delta callback failed: {cb_exc}")
-                    if choice.get("finish_reason"):
-                        finish_reason = choice.get("finish_reason")
-                if payload.get("usage"):
-                    usage_payload = payload.get("usage")
+                    try:
+                        line_str = (
+                            raw_line.decode("utf-8", errors="ignore")
+                            if isinstance(raw_line, (bytes, bytearray))
+                            else str(raw_line)
+                        )
+                    except Exception as exc:  # noqa: BLE001 - malformed chunks are ignored
+                        logger.debug(
+                            "Ignoring malformed audio provider chunk error_type={}",
+                            type(exc).__name__,
+                        )
+                        continue
+                    if not line_str:
+                        continue
+                    stripped = line_str.strip()
+                    if stripped.lower() in {"data: [done]", "[done]"}:
+                        break
+                    if stripped.lower().endswith("[done]"):
+                        break
+                    payload_str = stripped
+                    if payload_str.startswith("data:"):
+                        payload_str = payload_str[len("data:") :].strip()
+                    try:
+                        payload = json.loads(payload_str)
+                    except (TypeError, ValueError, json.JSONDecodeError):
+                        continue
+                    if not isinstance(payload, dict):
+                        continue
+                    if "error" in payload:
+                        provider_error_code = await _send_llm_provider_error(payload)
+                        break
+                    choices = payload.get("choices") or []
+                    for choice in choices:
+                        if not isinstance(choice, dict):
+                            continue
+                        if turn_id is not None and (
+                            active_turn_cancelled or active_turn_id != turn_id
+                        ):
+                            break
+                        delta = choice.get("delta") or choice.get("message") or {}
+                        content = (
+                            delta.get("content") or delta.get("text")
+                            if isinstance(delta, dict)
+                            else None
+                        )
+                        if content:
+                            await _mark_audio_credentials_used_once(
+                                credential_runtime,
+                                provider_credentials,
+                                usage_claimed,
+                            )
+                            content_text = str(content)
+                            deltas.append(content_text)
+                            if _outer_stream:
+                                await _outer_stream.send_json(
+                                    {"type": "llm_delta", "delta": content_text}
+                                )
+                            if on_delta is not None:
+                                try:
+                                    maybe_result = on_delta(content_text)
+                                    if iscoroutine(maybe_result):
+                                        await maybe_result
+                                except asyncio.CancelledError:
+                                    raise
+                                except Exception as cb_exc:  # noqa: BLE001 - optional callback
+                                    logger.debug(
+                                        "Audio LLM delta callback failed error_type={}",
+                                        type(cb_exc).__name__,
+                                    )
+                        if choice.get("finish_reason"):
+                            finish_reason = str(choice.get("finish_reason"))
+                    if isinstance(payload.get("usage"), dict):
+                        usage_payload = payload["usage"]
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - provider failures are normalized
+                logger.error(
+                    "Audio LLM stream iteration failed error_type={}",
+                    type(exc).__name__,
+                )
+                provider_error_code = await _send_llm_provider_error(exc)
+            finally:
+                if not cleanup_claimed.is_set():
+                    try:
+                        await await_bounded_owned_operation(
+                            _close_audio_provider_stream(
+                                llm_stream,
+                                resource_holder,
+                                owned_cleanup=True,
+                            ),
+                            timeout_seconds=AUDIO_STREAM_CLOSE_TIMEOUT_SECONDS,
+                            timeout_message="audio-stream-close timed out",
+                            on_abandoned=_release_runtime_after_abandoned_close,
+                            cleanup_claimed=cleanup_claimed,
+                        )
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as exc:  # noqa: BLE001 - cleanup is best effort
+                        logger.debug(
+                            "Audio provider stream cleanup failed error_type={}",
+                            type(exc).__name__,
+                        )
+
+            if provider_error_code is not None:
+                return "", provider_error_code, usage_payload
 
             assistant_text = "".join(deltas).strip()
-            chat_history.append({"role": "user", "content": transcript_text})
             if assistant_text:
+                chat_history.append({"role": "user", "content": transcript_text})
                 chat_history.append({"role": "assistant", "content": assistant_text})
             if len(chat_history) > CHAT_HISTORY_MAX_MESSAGES:
                 chat_history = chat_history[-CHAT_HISTORY_MAX_MESSAGES:]
-            try:
-                await byok_resolution.touch_last_used()
-            except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"Failed to update BYOK last_used timestamp for LLM: {exc}")
             return assistant_text, finish_reason, usage_payload
+
+        async def _stream_llm(
+            transcript_text: str,
+            on_delta: Optional[Any] = None,
+            turn_id: Optional[str] = None,
+        ) -> tuple[str, Optional[str], Optional[dict[str, Any]]]:
+            """Run one LLM turn with a fresh, turn-scoped credential snapshot."""
+            runtime_user_id, runtime_team_ids, runtime_org_ids, runtime_trusted_base_url = (
+                derive_trusted_credential_scope(
+                    websocket,
+                    get_websocket_auth_principal(websocket),
+                )
+            )
+            turn_runtime = ProviderCredentialRuntime(
+                user_id=runtime_user_id,
+                team_ids=runtime_team_ids,
+                org_ids=runtime_org_ids,
+                trusted_base_url_override=runtime_trusted_base_url,
+                override_snapshot_resolver=capture_provider_override_call_snapshot,
+            )
+            cleanup_claimed = threading.Event()
+            try:
+                return await _stream_llm_with_runtime(
+                    transcript_text,
+                    turn_runtime,
+                    cleanup_claimed,
+                    on_delta=on_delta,
+                    turn_id=turn_id,
+                )
+            finally:
+                if not cleanup_claimed.is_set():
+                    await await_owned_worker(turn_runtime.close())
 
         async def _stream_tts(text: str, voice_to_voice_start: float) -> None:
             if not text:
-                if _outer_stream:
-                    await _outer_stream.send_json(
-                        _audio_ws_error_payload(
-                            code="empty_assistant",
-                            message="Assistant reply empty",
-                            request_id=request_id,
-                        )
+                await _send_stream_payload(
+                    _audio_ws_error_payload(
+                        code="empty_assistant",
+                        message="Assistant reply empty",
+                        request_id=request_id,
                     )
+                )
                 return
             allowed_formats = {"mp3", "opus", "aac", "flac", "wav", "pcm"}
             if response_format not in allowed_formats:
-                if _outer_stream:
-                    await _outer_stream.send_json(
-                        _audio_ws_error_payload(
-                            code="bad_request",
-                            message=f"Unsupported format '{response_format}'",
-                            request_id=request_id,
-                        )
+                await _send_stream_payload(
+                    _audio_ws_error_payload(
+                        code="bad_request",
+                        message=f"Unsupported format '{response_format}'",
+                        request_id=request_id,
                     )
+                )
                 return
 
             speech_req = OpenAISpeechRequest(
@@ -2446,13 +2873,15 @@ async def websocket_audio_chat_stream(
                 async def _error_handler(exc: Exception) -> None:
                     if _outer_stream:
                         try:
-                            logger.error(f"audio.chat.stream TTS generation failed: {exc}", exc_info=True)
+                            logger.error(
+                                "audio.chat.stream TTS generation failed error_type={}",
+                                type(exc).__name__,
+                            )
                             await _outer_stream.send_json(
                                 _audio_ws_error_payload(
                                     code="tts_error",
                                     message="TTS generation failed",
                                     request_id=request_id,
-                                    exc=exc,
                                 )
                             )
                         except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as send_exc:
@@ -2460,19 +2889,38 @@ async def websocket_audio_chat_stream(
                                 f"audio.chat.stream producer error frame send failed: error={send_exc}"
                             )
 
-                await _stream_tts_to_websocket(
-                    websocket=websocket,
-                    speech_req=speech_req,
-                    tts_service=tts_service,
-                    provider=tts_provider,
-                    outer_stream=_outer_stream,
-                    reg=reg,
-                    route="audio.chat.stream",
-                    component_label="audio_chat_ws",
-                    voice_to_voice_start=voice_to_voice_start,
-                    error_handler=_error_handler,
-                    asyncio_module=aio,
+                tts_principal = (
+                    get_websocket_auth_principal(websocket)
+                    or SimpleNamespace(id=user_id_for_usage)
                 )
+                async with tts_provider_credential_scope(
+                    provider=tts_provider,
+                    model=tts_model,
+                    request=websocket,
+                    current_user=tts_principal,
+                ) as (tts_user_id, tts_overrides, tts_runtime, tts_credentials):
+                    await _stream_tts_to_websocket(
+                        websocket=websocket,
+                        speech_req=speech_req,
+                        tts_service=tts_service,
+                        provider=tts_provider,
+                        provider_overrides=tts_overrides,
+                        user_id=tts_user_id,
+                        on_first_output=lambda: tts_runtime.mark_used(
+                            tts_credentials
+                        ),
+                        outer_stream=_outer_stream,
+                        reg=reg,
+                        route="audio.chat.stream",
+                        component_label="audio_chat_ws",
+                        voice_to_voice_start=voice_to_voice_start,
+                        error_handler=_error_handler,
+                        asyncio_module=aio,
+                    )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - WS failures are bounded
+                await _error_handler(exc)
             finally:
                 if _outer_stream:
                     try:
@@ -2495,6 +2943,9 @@ async def websocket_audio_chat_stream(
             if processing_turn:
                 return
             processing_turn = True
+            tts_scope_stack = contextlib.AsyncExitStack()
+            overlap_session = None
+            overlap_sender_task = None
             try:
                 raw_transcript_text = transcriber.get_full_transcript()
                 transcript_text = apply_transcript_text_policy(
@@ -2541,10 +2992,10 @@ async def websocket_audio_chat_stream(
                         exc,
                     )
 
-                overlap_session = None
-                overlap_sender_task = None
                 overlap_chunker: Optional[PhraseChunker] = None
                 overlap_provider = tts_provider or "auto"
+                overlap_tts_runtime = None
+                overlap_tts_credentials = None
 
                 try:
                     tts_service = await _shim_get_tts_service()
@@ -2554,6 +3005,23 @@ async def websocket_audio_chat_stream(
 
                 if tts_service is not None and callable(getattr(tts_service, "open_realtime_session", None)):
                     try:
+                        tts_principal = (
+                            get_websocket_auth_principal(websocket)
+                            or SimpleNamespace(id=user_id_for_usage)
+                        )
+                        (
+                            rt_user_id,
+                            rt_overrides,
+                            overlap_tts_runtime,
+                            overlap_tts_credentials,
+                        ) = await tts_scope_stack.enter_async_context(
+                            tts_provider_credential_scope(
+                                provider=tts_provider,
+                                model=tts_model,
+                                request=websocket,
+                                current_user=tts_principal,
+                            )
+                        )
                         rt_config = RealtimeSessionConfig(
                             model=str(tts_model),
                             voice=str(tts_voice),
@@ -2566,8 +3034,9 @@ async def websocket_audio_chat_stream(
                         rt_handle = await tts_service.open_realtime_session(
                             config=rt_config,
                             provider_hint=str(tts_provider) if tts_provider else None,
+                            provider_overrides=rt_overrides,
                             route="audio.chat.stream",
-                            user_id=int(user_id_for_usage) if user_id_for_usage else None,
+                            user_id=rt_user_id,
                         )
                         overlap_session = getattr(rt_handle, "session", None)
                         overlap_provider = (
@@ -2592,22 +3061,44 @@ async def websocket_audio_chat_stream(
                                 )
 
                         async def _overlap_audio_sender() -> None:
+                            marked_used = False
                             try:
                                 async for chunk in overlap_session.audio_stream():
                                     if not chunk:
                                         continue
+                                    if (
+                                        not marked_used
+                                        and overlap_tts_runtime is not None
+                                        and overlap_tts_credentials is not None
+                                    ):
+                                        await await_owned_worker(
+                                            overlap_tts_runtime.mark_used(
+                                                overlap_tts_credentials
+                                            )
+                                        )
+                                        marked_used = True
                                     if turn_id is not None and (active_turn_cancelled or active_turn_id != turn_id):
                                         continue
                                     await websocket.send_bytes(chunk)
                                     if _outer_stream:
                                         _outer_stream.mark_activity()
+                            except asyncio.CancelledError:
+                                raise
                             except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as send_exc:
-                                logger.debug(f"audio.chat.stream overlap audio sender failed: {send_exc}")
+                                logger.debug(
+                                    "audio.chat.stream overlap audio sender failed error_type={}",
+                                    type(send_exc).__name__,
+                                )
 
                         overlap_sender_task = create_task(_overlap_audio_sender())
                         active_tts_sender_task = overlap_sender_task
+                    except asyncio.CancelledError:
+                        raise
                     except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as overlap_exc:
-                        logger.debug(f"audio.chat.stream overlap init failed: {overlap_exc}")
+                        logger.debug(
+                            "audio.chat.stream overlap init failed error_type={}",
+                            type(overlap_exc).__name__,
+                        )
                         overlap_session = None
                         overlap_chunker = None
                         overlap_sender_task = None
@@ -2654,6 +3145,12 @@ async def websocket_audio_chat_stream(
                         if active_tts_sender_task is overlap_sender_task:
                             active_tts_sender_task = None
 
+                if (
+                    not assistant_text
+                    and finish_reason in PROVIDER_STREAM_ERROR_MESSAGES
+                ):
+                    return
+
                 if _outer_stream and not (turn_id is not None and (active_turn_cancelled or active_turn_id != turn_id)):
                     await _outer_stream.send_json(
                         {
@@ -2688,11 +3185,46 @@ async def websocket_audio_chat_stream(
                 if overlap_session is None:
                     await _stream_tts(assistant_text, eos_detected_at)
             finally:
+                cleanup_cancelled = False
+
+                async def _close_overlap_tts_resources() -> None:
+                    finish_failed = False
+                    try:
+                        if overlap_session is not None:
+                            try:
+                                await overlap_session.finish()
+                            except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS:
+                                finish_failed = True
+                        if (
+                            finish_failed
+                            and overlap_sender_task is not None
+                            and not overlap_sender_task.done()
+                        ):
+                            overlap_sender_task.cancel()
+                        if overlap_sender_task is not None:
+                            with contextlib.suppress(
+                                *_AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS
+                            ):
+                                await overlap_sender_task
+                    finally:
+                        await tts_scope_stack.aclose()
+
+                try:
+                    await await_owned_worker(_close_overlap_tts_resources())
+                except asyncio.CancelledError:
+                    cleanup_cancelled = True
+                except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as cleanup_exc:
+                    logger.debug(
+                        "audio.chat.stream TTS cleanup failed error_type={}",
+                        type(cleanup_exc).__name__,
+                    )
                 try:
                     transcriber.reset()
                 except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as exc:  # noqa: BLE001
                     logger.debug(f"audio.chat.stream transcriber.reset() failed in finalize_turn: {exc}")
                 processing_turn = False
+                if cleanup_cancelled:
+                    raise asyncio.CancelledError
 
         async def _start_turn(
             commit_at: Optional[float],
@@ -3010,6 +3542,11 @@ async def websocket_audio_chat_stream(
             except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as send_exc:  # noqa: BLE001
                 logger.debug(f"audio.chat.stream failed to send internal_error frame: {send_exc}")
     finally:
+        if active_turn_task is not None and not active_turn_task.done():
+            active_turn_cancelled = True
+            active_turn_task.cancel()
+        if active_tts_sender_task is not None and not active_tts_sender_task.done():
+            active_tts_sender_task.cancel()
         if stt_session_started:
             emit_stt_session_end_total(
                 provider=stt_metrics_provider,
@@ -3226,31 +3763,55 @@ async def websocket_tts(
         async def _ws_tts_error_handler(exc: Exception) -> None:
             if not _outer_stream:
                 return
-            logger.error(f"audio.stream.tts TTS generation failed: {exc}", exc_info=True)
-            data_payload = {"request_id": request_id}
-            details = _maybe_debug_details(exc)
-            if details:
-                data_payload["details"] = details
+            logger.error(
+                "audio.stream.tts TTS generation failed error_type={}",
+                type(exc).__name__,
+            )
             await _outer_stream.error(
                 "internal_error",
                 "TTS generation failed",
-                data=data_payload if data_payload else None,
+                data={"request_id": request_id},
             )
 
         # Delegate to the shared streaming helper; it manages its own
         # producer/consumer tasks and error handling.
-        await _stream_tts_to_websocket(
-            websocket=websocket,
-            speech_req=speech_req,
-            tts_service=tts_service,
-            provider=provider_hint,
-            outer_stream=_outer_stream,
-            reg=reg,
-            route="audio.stream.tts",
-            component_label="audio_tts_ws",
-            error_handler=_ws_tts_error_handler if _outer_stream else None,
-            asyncio_module=aio,
-        )
+        try:
+            tts_principal = (
+                get_websocket_auth_principal(websocket)
+                or SimpleNamespace(id=user_id_for_usage)
+            )
+            async with tts_provider_credential_scope(
+                provider=provider_hint,
+                model=resolved_tts.model,
+                request=websocket,
+                current_user=tts_principal,
+            ) as (tts_user_id, tts_overrides, tts_runtime, tts_credentials):
+                await _stream_tts_to_websocket(
+                    websocket=websocket,
+                    speech_req=speech_req,
+                    tts_service=tts_service,
+                    provider=provider_hint,
+                    provider_overrides=tts_overrides,
+                    user_id=tts_user_id,
+                    on_first_output=lambda: tts_runtime.mark_used(
+                        tts_credentials
+                    ),
+                    outer_stream=_outer_stream,
+                    reg=reg,
+                    route="audio.stream.tts",
+                    component_label="audio_tts_ws",
+                    error_handler=_ws_tts_error_handler if _outer_stream else None,
+                    asyncio_module=aio,
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - WS failures are bounded
+            await _ws_tts_error_handler(exc)
+            if not _outer_stream:
+                with contextlib.suppress(
+                    *_AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS
+                ):
+                    await websocket.close(code=1011)
     finally:
         if acquired_stream:
             try:
@@ -3411,6 +3972,9 @@ async def websocket_tts_realtime(
     acquired_stream = False
     session = None
     sender_task: Optional[asyncio.Task] = None
+    credential_scope = None
+    credential_scope_entered = False
+    credentials_marked = False
 
     def _coerce_float(val: Any, default: float) -> float:
         try:
@@ -3487,6 +4051,23 @@ async def websocket_tts_realtime(
             return
 
         tts_service = await _shim_get_tts_service()
+        tts_principal = (
+            get_websocket_auth_principal(websocket)
+            or SimpleNamespace(id=user_id_for_usage)
+        )
+        credential_scope = tts_provider_credential_scope(
+            provider=str(provider_hint),
+            model=str(model),
+            request=websocket,
+            current_user=tts_principal,
+        )
+        (
+            tts_user_id,
+            tts_overrides,
+            tts_runtime,
+            tts_credentials,
+        ) = await credential_scope.__aenter__()
+        credential_scope_entered = True
         config = RealtimeSessionConfig(
             model=str(model),
             voice=str(voice),
@@ -3499,8 +4080,9 @@ async def websocket_tts_realtime(
         handle = await tts_service.open_realtime_session(
             config=config,
             provider_hint=str(provider_hint) if provider_hint else None,
+            provider_overrides=tts_overrides,
             route="audio.stream.tts.realtime",
-            user_id=user_id_for_usage,
+            user_id=tts_user_id,
         )
         session = handle.session
         if handle.provider:
@@ -3529,15 +4111,26 @@ async def websocket_tts_realtime(
             await _send_json({"type": "warning", "message": handle.warning, "request_id": request_id})
 
         async def _audio_sender(session_obj: Any) -> None:
+            nonlocal credentials_marked
             try:
                 async for chunk in session_obj.audio_stream():
                     if not chunk:
                         continue
+                    if not credentials_marked:
+                        await await_owned_worker(
+                            tts_runtime.mark_used(tts_credentials)
+                        )
+                        credentials_marked = True
                     await websocket.send_bytes(chunk)
                     if _outer_stream:
                         _outer_stream.mark_activity()
+            except asyncio.CancelledError:
+                raise
             except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"TTS realtime audio sender failed: {exc}")
+                logger.debug(
+                    "TTS realtime audio sender failed error_type={}",
+                    type(exc).__name__,
+                )
 
         sender_task = create_task(_audio_sender(session))
 
@@ -3610,8 +4203,9 @@ async def websocket_tts_realtime(
                     handle = await tts_service.open_realtime_session(
                         config=config,
                         provider_hint=str(provider_hint) if provider_hint else None,
+                        provider_overrides=tts_overrides,
                         route="audio.stream.tts.realtime",
-                        user_id=user_id_for_usage,
+                        user_id=tts_user_id,
                     )
                     session = handle.session
                     if handle.provider:
@@ -3638,8 +4232,13 @@ async def websocket_tts_realtime(
                             "request_id": request_id,
                         }
                     )
+                except asyncio.CancelledError:
+                    raise
                 except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as interrupt_exc:
-                    logger.error(f"TTS realtime interrupt recovery failed: {interrupt_exc}", exc_info=True)
+                    logger.error(
+                        "TTS realtime interrupt recovery failed error_type={}",
+                        type(interrupt_exc).__name__,
+                    )
                     await _send_error("internal_error", "Failed to recover realtime TTS session", close=True)
                     return
             elif msg_type == "final":
@@ -3662,20 +4261,46 @@ async def websocket_tts_realtime(
             else:
                 await _send_json({"type": "done"})
             done_sent = True
+    except asyncio.CancelledError:
+        raise
     except WebSocketDisconnect:
         logger.info("TTS realtime WS disconnected")
-    except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"TTS realtime WS error: {exc}", exc_info=True)
+    except Exception as exc:  # noqa: BLE001 - WS failures are bounded
+        logger.error(
+            "TTS realtime WS error error_type={}",
+            type(exc).__name__,
+        )
         with contextlib.suppress(_AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS):
             await _send_error("internal_error", "Internal error", close=True)
     finally:
-        if session is not None:
-            with contextlib.suppress(_AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS):
-                await session.finish()
-        if sender_task and not sender_task.done():
-            sender_task.cancel()
-            with contextlib.suppress(_AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS):
-                await sender_task
+        cleanup_cancelled = False
+
+        async def _close_realtime_tts_resources() -> None:
+            try:
+                if session is not None:
+                    with contextlib.suppress(
+                        *_AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS
+                    ):
+                        await session.finish()
+                if sender_task and not sender_task.done():
+                    sender_task.cancel()
+                    with contextlib.suppress(
+                        *_AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS
+                    ):
+                        await sender_task
+            finally:
+                if credential_scope is not None and credential_scope_entered:
+                    await credential_scope.__aexit__(None, None, None)
+
+        try:
+            await await_owned_worker(_close_realtime_tts_resources())
+        except asyncio.CancelledError:
+            cleanup_cancelled = True
+        except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as cleanup_exc:
+            logger.debug(
+                "audio.stream.tts.realtime cleanup failed error_type={}",
+                type(cleanup_exc).__name__,
+            )
         if acquired_stream:
             try:
                 await _finish_stream(user_id_for_usage)
@@ -3695,6 +4320,8 @@ async def websocket_tts_realtime(
                     "audio.stream.tts.realtime websocket close failed after _outer_stream.done error: "
                     f"outer_error={outer_exc}, close_error={close_exc}"
                 )
+        if cleanup_cancelled:
+            raise asyncio.CancelledError
 
 
 @router.get(

@@ -8,14 +8,19 @@ answer quality and reducing noise.
 Part of the Self-Correcting RAG feature set (Stage 4).
 """
 
-import asyncio
 import time
 import uuid
 from dataclasses import dataclass, field
+from functools import partial
 from typing import Any, Callable, Optional
 
 from loguru import logger
 
+from tldw_Server_API.app.core.Chat.bounded_daemon import (
+    SYNC_ADAPTER_CALL_POOL,
+    await_bounded_sync_call,
+    await_owned_worker,
+)
 from tldw_Server_API.app.core.LLM_Calls.structured_output import (
     StructuredOutputOptions,
     parse_structured_output,
@@ -277,7 +282,8 @@ class KnowledgeStripsProcessor:
             if self.credential_runtime is not None and self.credential_handle is None:
                 try:
                     self.credential_handle = await self.credential_runtime.resolve(
-                        self.llm_provider
+                        self.llm_provider,
+                        model=self.llm_model,
                     )
                     if self.credential_handle is None:
                         raise RuntimeError("provider unavailable")
@@ -389,11 +395,11 @@ For each strip, provide a JSON object with:
 - "relevance": score from 0.0 to 1.0
 
 Respond with a JSON array of objects.
-JSON:"""
+            JSON:"""
 
             try:
                 if self.credential_handle is None and self.llm_model is None:
-                    raw_response = await asyncio.to_thread(
+                    _call_analyzer = partial(
                         analyze_fn,
                         "openai",
                         "",
@@ -410,9 +416,11 @@ JSON:"""
                         call_kwargs.update(
                             app_config=self.credential_handle.app_config,
                             credentials_resolved=True,
+                            provider_credentials=self.credential_handle,
                             raise_on_error=True,
                         )
-                    raw_response = await asyncio.to_thread(
+
+                    _call_analyzer = partial(
                         analyze_fn,
                         self.llm_provider,
                         prompt,
@@ -426,15 +434,39 @@ JSON:"""
                         0.1,
                         **call_kwargs,
                     )
-                if (
-                    self.credential_handle is not None
-                    and isinstance(raw_response, str)
-                    and raw_response.startswith("Error:")
-                ):
-                    raise RuntimeError("provider unavailable")
-                if self.credential_handle is not None and not self._credential_marked:
-                    await self.credential_runtime.mark_used(self.credential_handle)
-                    self._credential_marked = True
+
+                async def _call_and_mark(
+                    analyzer: Callable[[], Any],
+                ) -> Any:
+                    raw = await await_bounded_sync_call(
+                        analyzer,
+                        pool=SYNC_ADAPTER_CALL_POOL,
+                        exhaustion_message=(
+                            "Knowledge strips adapter capacity is exhausted"
+                        ),
+                    )
+                    if (
+                        self.credential_handle is not None
+                        and isinstance(raw, str)
+                        and raw.startswith("Error:")
+                    ):
+                        raise RuntimeError("provider unavailable")
+                    if (
+                        self.credential_handle is not None
+                        and not self._credential_marked
+                    ):
+                        await self.credential_runtime.mark_used(
+                            self.credential_handle
+                        )
+                        self._credential_marked = True
+                    return raw
+
+                operation = _call_and_mark(_call_analyzer)
+                raw_response = (
+                    await await_owned_worker(operation)
+                    if self.credential_handle is not None
+                    else await operation
+                )
 
                 # Parse response
                 scores_payload = parse_structured_output(
@@ -563,7 +595,10 @@ async def process_knowledge_strips(
             import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as sgl
 
             if credential_runtime is not None:
-                credential_handle = await credential_runtime.resolve(llm_provider)
+                credential_handle = await credential_runtime.resolve(
+                    llm_provider,
+                    model=llm_model,
+                )
 
             def _analyze(*args, **kwargs):
                 return sgl.analyze(*args, **kwargs)
