@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import math
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from time import monotonic
 from typing import TYPE_CHECKING, Literal, Protocol
@@ -101,6 +101,8 @@ class PreflightRuntimeControls:
         self._budget_lock = asyncio.Lock()
         self._cleanup_handles: list[_CleanupHandle] = []
         self._cleanup_task: asyncio.Task[None] | None = None
+        self._cleanup_grace_remaining_s: float | None = None
+        self._cleanup_episode_lock = asyncio.Lock()
 
     @property
     def consumed(self) -> PreflightConsumed:
@@ -281,38 +283,90 @@ class PreflightRuntimeControls:
             deadline=grace_deadline,
         )
 
-    async def close(self, grace_s: float = 2.0) -> None:
-        """Close all resources within one grace while preserving caller cancellation."""
+    @staticmethod
+    def _validate_cleanup_grace(grace_s: float) -> float:
         if isinstance(grace_s, bool):
             raise ValueError("grace_s must be a non-negative finite number")
-        grace_s = float(grace_s)
-        if not math.isfinite(grace_s) or grace_s < 0:
+        normalized = float(grace_s)
+        if not math.isfinite(normalized) or normalized < 0:
             raise ValueError("grace_s must be a non-negative finite number")
+        return normalized
 
-        if self._cleanup_task is None:
-            handles = tuple(reversed(self._cleanup_handles))
-            self._cleanup_handles.clear()
-            self._cleanup_task = asyncio.create_task(
-                self._cleanup_with_grace(handles, grace_s),
-                name="preflight-cleanup-supervisor",
-            )
-
-        pending_cancellation: asyncio.CancelledError | None = None
-        while not self._cleanup_task.done():
+    async def _run_cleanup_episode(
+        self,
+        handles: tuple[_CleanupHandle, ...],
+        grace_s: float,
+    ) -> None:
+        async with self._cleanup_episode_lock:
+            if self._cleanup_grace_remaining_s is None:
+                self._cleanup_grace_remaining_s = grace_s
+            else:
+                self._cleanup_grace_remaining_s = min(
+                    self._cleanup_grace_remaining_s,
+                    grace_s,
+                )
+            episode_budget_s = self._cleanup_grace_remaining_s
+            loop = asyncio.get_running_loop()
+            started_at = loop.time()
             try:
-                await asyncio.shield(self._cleanup_task)
+                await self._cleanup_with_grace(handles, episode_budget_s)
+            finally:
+                elapsed_s = max(0.0, loop.time() - started_at)
+                self._cleanup_grace_remaining_s = max(
+                    0.0,
+                    self._cleanup_grace_remaining_s - elapsed_s,
+                )
+
+    @staticmethod
+    async def _await_cleanup_supervisor(task: asyncio.Task[None]) -> None:
+        pending_cancellation: asyncio.CancelledError | None = None
+        while not task.done():
+            try:
+                await asyncio.shield(task)
             except asyncio.CancelledError as exc:
                 if pending_cancellation is None:
                     pending_cancellation = exc
 
         try:
-            self._cleanup_task.result()
+            task.result()
         except BaseException:
             if pending_cancellation is not None:
                 raise pending_cancellation from None
             raise
         if pending_cancellation is not None:
             raise pending_cancellation
+
+    async def cleanup_handles(
+        self,
+        handles: Iterable[_CleanupHandle],
+        grace_s: float = 2.0,
+    ) -> None:
+        """Clean one owned handle graph without closing unrelated resources."""
+        normalized_grace = self._validate_cleanup_grace(grace_s)
+        owned_handles = tuple(handles)
+        if not owned_handles:
+            return
+        supervisor = asyncio.create_task(
+            self._run_cleanup_episode(
+                tuple(reversed(owned_handles)),
+                normalized_grace,
+            ),
+            name="preflight-cleanup-subset-supervisor",
+        )
+        await self._await_cleanup_supervisor(supervisor)
+
+    async def close(self, grace_s: float = 2.0) -> None:
+        """Close all resources within one grace while preserving caller cancellation."""
+        normalized_grace = self._validate_cleanup_grace(grace_s)
+
+        if self._cleanup_task is None:
+            handles = tuple(reversed(self._cleanup_handles))
+            self._cleanup_handles.clear()
+            self._cleanup_task = asyncio.create_task(
+                self._run_cleanup_episode(handles, normalized_grace),
+                name="preflight-cleanup-supervisor",
+            )
+        await self._await_cleanup_supervisor(self._cleanup_task)
 
 
 @dataclass(slots=True)

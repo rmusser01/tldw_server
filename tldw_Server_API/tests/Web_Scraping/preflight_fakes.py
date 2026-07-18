@@ -318,19 +318,32 @@ class FakeBrowserRequest:
 class FakeBrowserRoute:
     """HTTP route fake recording the selected routing action."""
 
-    def __init__(self, request: FakeBrowserRequest, events: list[str]) -> None:
+    def __init__(
+        self,
+        request: FakeBrowserRequest,
+        events: list[str],
+        *,
+        abort_error: BaseException | None = None,
+        continue_error: BaseException | None = None,
+    ) -> None:
         self.request = request
         self.events = events
+        self.abort_error = abort_error
+        self.continue_error = continue_error
         self.abort_calls = 0
         self.continue_calls = 0
 
     async def abort(self) -> None:
         self.abort_calls += 1
         self.events.append("http:abort")
+        if self.abort_error is not None:
+            raise self.abort_error
 
     async def continue_(self) -> None:
         self.continue_calls += 1
         self.events.append("http:continue")
+        if self.continue_error is not None:
+            raise self.continue_error
 
 
 class FakeWebSocketRoute:
@@ -342,16 +355,22 @@ class FakeWebSocketRoute:
         events: list[str],
         *,
         awaitable_connect: bool = True,
+        connect_error: BaseException | None = None,
+        close_error: BaseException | None = None,
     ) -> None:
         self.url = url
         self.events = events
         self.awaitable_connect = awaitable_connect
+        self.connect_error = connect_error
+        self.close_error = close_error
         self.connect_calls = 0
         self.close_calls: list[tuple[int | None, str | None]] = []
 
     def connect_to_server(self) -> Awaitable[None] | None:
         self.connect_calls += 1
         self.events.append("websocket:connect")
+        if self.connect_error is not None:
+            raise self.connect_error
         if not self.awaitable_connect:
             return None
 
@@ -368,6 +387,23 @@ class FakeWebSocketRoute:
     ) -> None:
         self.close_calls.append((code, reason))
         self.events.append("websocket:close")
+        if self.close_error is not None:
+            raise self.close_error
+
+
+class FakeBrowserStartupGate:
+    """Block one selected startup await until its caller is cancelled."""
+
+    def __init__(self, block_at: str | None = None) -> None:
+        self.block_at = block_at
+        self.started = asyncio.Event()
+        self._release = asyncio.Event()
+
+    async def wait(self, stage: str) -> None:
+        if stage != self.block_at:
+            return
+        self.started.set()
+        await self._release.wait()
 
 
 class FakeBrowserLocator:
@@ -401,11 +437,13 @@ class FakeBrowserPage:
         *,
         block_close: bool = False,
         suppress_close_cancellation: bool = False,
+        max_suppressed_close_cancellations: int = 1,
     ) -> None:
         self.context = context
         self.events = events
         self.block_close = block_close
         self.suppress_close_cancellation = suppress_close_cancellation
+        self.max_suppressed_close_cancellations = max_suppressed_close_cancellations
         self.calls: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
         self.results: dict[str, Any] = {
             "content": "<html>fake</html>",
@@ -459,12 +497,18 @@ class FakeBrowserPage:
                     await self._release_close.wait()
                 except asyncio.CancelledError:
                     self.close_cancellations += 1
-                    if not self.suppress_close_cancellation:
+                    if (
+                        not self.suppress_close_cancellation
+                        or self.close_cancellations > self.max_suppressed_close_cancellations
+                    ):
                         raise
 
     async def force_close(self) -> None:
         self.force_close_calls += 1
         self.events.append("force:page")
+        self._release_close.set()
+
+    def release_close(self) -> None:
         self._release_close.set()
 
 
@@ -476,9 +520,11 @@ class FakeBrowserContext:
         events: list[str],
         *,
         page_factory: Callable[[FakeBrowserContext, list[str]], FakeBrowserPage] | None = None,
+        startup_gate: FakeBrowserStartupGate | None = None,
     ) -> None:
         self.events = events
         self.page_factory = page_factory or FakeBrowserPage
+        self.startup_gate = startup_gate or FakeBrowserStartupGate()
         self.http_handler: Callable[[FakeBrowserRoute], Awaitable[None]] | None = None
         self.websocket_handler: Callable[[FakeWebSocketRoute], Awaitable[None]] | None = None
         self.request_handler: Callable[[FakeBrowserRequest], None] | None = None
@@ -488,6 +534,7 @@ class FakeBrowserContext:
         self.force_close_calls = 0
 
     async def route(self, pattern: str, handler: Callable[[FakeBrowserRoute], Awaitable[None]]) -> None:
+        await self.startup_gate.wait("route_http")
         assert pattern == "**/*"
         self.http_handler = handler
         self.events.append("route_http")
@@ -497,11 +544,13 @@ class FakeBrowserContext:
         pattern: str,
         handler: Callable[[FakeWebSocketRoute], Awaitable[None]],
     ) -> None:
+        await self.startup_gate.wait("route_web_socket")
         assert pattern == "**/*"
         self.websocket_handler = handler
         self.events.append("route_web_socket")
 
     async def add_init_script(self, *, script: str) -> None:
+        await self.startup_gate.wait("init_script")
         self.init_scripts.append(script)
         self.events.append("init_script")
 
@@ -511,6 +560,7 @@ class FakeBrowserContext:
         self.events.append("capture_requests")
 
     async def new_page(self) -> FakeBrowserPage:
+        await self.startup_gate.wait("new_page")
         self.events.append("new_page")
         page = self.page_factory(self, self.events)
         self.pages.append(page)
@@ -520,13 +570,21 @@ class FakeBrowserContext:
         self,
         url: str,
         resource_type: str = "document",
+        *,
+        abort_error: BaseException | None = None,
+        continue_error: BaseException | None = None,
     ) -> FakeBrowserRoute:
         if self.http_handler is None:
             raise AssertionError("HTTP handler was not installed")
         request = FakeBrowserRequest(url, resource_type)
         if self.request_handler is not None:
             self.request_handler(request)
-        route = FakeBrowserRoute(request, self.events)
+        route = FakeBrowserRoute(
+            request,
+            self.events,
+            abort_error=abort_error,
+            continue_error=continue_error,
+        )
         await self.http_handler(route)
         return route
 
@@ -535,6 +593,8 @@ class FakeBrowserContext:
         url: str,
         *,
         awaitable_connect: bool = True,
+        connect_error: BaseException | None = None,
+        close_error: BaseException | None = None,
     ) -> FakeWebSocketRoute:
         if self.websocket_handler is None:
             raise AssertionError("WebSocket handler was not installed")
@@ -542,6 +602,8 @@ class FakeBrowserContext:
             url,
             self.events,
             awaitable_connect=awaitable_connect,
+            connect_error=connect_error,
+            close_error=close_error,
         )
         await self.websocket_handler(route)
         return route
@@ -553,6 +615,8 @@ class FakeBrowserContext:
     async def force_close(self) -> None:
         self.force_close_calls += 1
         self.events.append("force:context")
+        for page in self.pages:
+            page.release_close()
 
 
 class FakeBrowser:
@@ -563,18 +627,22 @@ class FakeBrowser:
         events: list[str],
         *,
         context_factory: Callable[[list[str]], FakeBrowserContext] | None = None,
+        startup_gate: FakeBrowserStartupGate | None = None,
     ) -> None:
         self.events = events
         self.context_factory = context_factory or FakeBrowserContext
+        self.startup_gate = startup_gate or FakeBrowserStartupGate()
         self.contexts: list[FakeBrowserContext] = []
         self.context_options: list[dict[str, Any]] = []
         self.close_calls = 0
         self.force_close_calls = 0
 
     async def new_context(self, **kwargs: Any) -> FakeBrowserContext:
+        await self.startup_gate.wait("new_context")
         self.context_options.append(dict(kwargs))
         self.events.append(f"new_context:service_workers={kwargs.get('service_workers')}")
         context = self.context_factory(self.events)
+        context.startup_gate = self.startup_gate
         self.contexts.append(context)
         return context
 
@@ -590,12 +658,19 @@ class FakeBrowser:
 class FakeChromium:
     """Chromium fake recording secure launch options."""
 
-    def __init__(self, browser: FakeBrowser, events: list[str]) -> None:
+    def __init__(
+        self,
+        browser: FakeBrowser,
+        events: list[str],
+        startup_gate: FakeBrowserStartupGate,
+    ) -> None:
         self.browser = browser
         self.events = events
+        self.startup_gate = startup_gate
         self.launch_calls: list[dict[str, Any]] = []
 
     async def launch(self, **kwargs: Any) -> FakeBrowser:
+        await self.startup_gate.wait("launch_browser")
         self.launch_calls.append(dict(kwargs))
         self.events.append("launch_browser")
         return self.browser
@@ -604,9 +679,14 @@ class FakeChromium:
 class FakePlaywright:
     """Started Playwright fake exposing Chromium and stop hooks."""
 
-    def __init__(self, browser: FakeBrowser, events: list[str]) -> None:
+    def __init__(
+        self,
+        browser: FakeBrowser,
+        events: list[str],
+        startup_gate: FakeBrowserStartupGate,
+    ) -> None:
         self.events = events
-        self.chromium = FakeChromium(browser, events)
+        self.chromium = FakeChromium(browser, events, startup_gate)
         self.stop_calls = 0
         self.force_close_calls = 0
 
@@ -626,13 +706,24 @@ class FakePlaywrightLauncher:
         self,
         *,
         context_factory: Callable[[list[str]], FakeBrowserContext] | None = None,
+        block_at: str | None = None,
     ) -> None:
         self.events: list[str] = []
-        self.browser = FakeBrowser(self.events, context_factory=context_factory)
-        self.playwright = FakePlaywright(self.browser, self.events)
+        self.startup_gate = FakeBrowserStartupGate(block_at)
+        self.browser = FakeBrowser(
+            self.events,
+            context_factory=context_factory,
+            startup_gate=self.startup_gate,
+        )
+        self.playwright = FakePlaywright(
+            self.browser,
+            self.events,
+            self.startup_gate,
+        )
         self.start_calls = 0
 
     async def start(self) -> FakePlaywright:
+        await self.startup_gate.wait("launcher_start")
         self.start_calls += 1
         self.events.append("launch")
         return self.playwright

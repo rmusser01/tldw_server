@@ -21,6 +21,9 @@ from tldw_Server_API.app.core.Web_Scraping.runtime import RuntimeRequestContext
 from tldw_Server_API.tests.Web_Scraping.preflight_fakes import (
     FakeBrowserContext,
     FakeBrowserPage,
+    FakeBrowserRequest,
+    FakeBrowserRoute,
+    FakeCleanupHandle,
     FakeClock,
     FakePlaywrightLauncher,
     FakeProbeEgressGuard,
@@ -65,6 +68,15 @@ def _controls(
         limits=PreflightLimits(browsers=browsers),
         deadline=deadline,
         clock=clock or FakeClock(),
+    )
+
+
+def _live_controls(*, deadline_s: float) -> PreflightRuntimeControls:
+    loop = asyncio.get_running_loop()
+    return PreflightRuntimeControls(
+        RuntimeRequestContext(source="preflight", stage="preflight"),
+        deadline=loop.time() + deadline_s,
+        clock=loop.time,
     )
 
 
@@ -260,6 +272,80 @@ async def test_http_route_guard_cancellation_propagates() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("allowed", "resource_type", "continue_error", "abort_error"),
+    [
+        (
+            True,
+            "document",
+            RuntimeError("https://secret.example/continue"),
+            RuntimeError("https://secret.example/fallback-abort"),
+        ),
+        (False, "document", None, RuntimeError("https://secret.example/abort")),
+        (True, "image", None, RuntimeError("https://secret.example/blocked")),
+    ],
+)
+async def test_http_route_action_failures_are_contained_sanitized_and_fail_closed(
+    allowed: bool,
+    resource_type: str,
+    continue_error: BaseException | None,
+    abort_error: BaseException | None,
+) -> None:
+    messages: list[str] = []
+    sink = logger.add(messages.append, format="{message}")
+    controls = _controls()
+    launcher = FakePlaywrightLauncher()
+    guard = FakeProbeEgressGuard([] if resource_type == "image" else [allowed])
+    probe = _probe(controls=controls, guard=guard, launcher=launcher)
+    try:
+        async with probe.open_page(BrowserProbeOptions(block_resource_types=("image",))):
+            context = launcher.browser.contexts[0]
+            assert context.http_handler is not None
+            route = FakeBrowserRoute(
+                FakeBrowserRequest("https://secret.example/?token=raw", resource_type),
+                launcher.events,
+                continue_error=continue_error,
+                abort_error=abort_error,
+            )
+            await context.http_handler(route)
+        await controls.close()
+    finally:
+        logger.remove(sink)
+
+    assert route.abort_calls == 1
+    assert route.continue_calls == (1 if allowed and resource_type != "image" else 0)
+    rendered = "".join(messages)
+    assert "secret.example" not in rendered
+    assert "token=raw" not in rendered
+    assert "RuntimeError" not in rendered
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["continue", "abort"])
+async def test_http_route_action_cancellation_propagates(action: str) -> None:
+    controls = _controls()
+    launcher = FakePlaywrightLauncher()
+    probe = _probe(
+        controls=controls,
+        guard=FakeProbeEgressGuard([action == "continue"]),
+        launcher=launcher,
+    )
+
+    async with probe.open_page(BrowserProbeOptions()):
+        context = launcher.browser.contexts[0]
+        assert context.http_handler is not None
+        route = FakeBrowserRoute(
+            FakeBrowserRequest("https://allowed.example"),
+            launcher.events,
+            continue_error=asyncio.CancelledError() if action == "continue" else None,
+            abort_error=asyncio.CancelledError() if action == "abort" else None,
+        )
+        with pytest.raises(asyncio.CancelledError):
+            await context.http_handler(route)
+    await controls.close()
+
+
+@pytest.mark.asyncio
 async def test_blocked_resource_type_aborts_without_guard_decision() -> None:
     controls = _controls()
     guard = FakeProbeEgressGuard([])
@@ -340,6 +426,68 @@ async def test_websocket_guard_cancellation_propagates() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("allowed", [True, False])
+async def test_websocket_action_failures_are_contained_sanitized_and_fail_closed(
+    allowed: bool,
+) -> None:
+    messages: list[str] = []
+    sink = logger.add(messages.append, format="{message}")
+    controls = _controls()
+    launcher = FakePlaywrightLauncher()
+    probe = _probe(
+        controls=controls,
+        guard=FakeProbeEgressGuard([allowed]),
+        launcher=launcher,
+    )
+    try:
+        async with probe.open_page(BrowserProbeOptions()):
+            context = launcher.browser.contexts[0]
+            assert context.websocket_handler is not None
+            route = FakeWebSocketRoute(
+                "wss://secret.example/?token=raw",
+                launcher.events,
+                connect_error=(RuntimeError("wss://secret.example/connect") if allowed else None),
+                close_error=RuntimeError("wss://secret.example/close"),
+            )
+            await context.websocket_handler(route)
+        await controls.close()
+    finally:
+        logger.remove(sink)
+
+    assert route.connect_calls == (1 if allowed else 0)
+    assert route.close_calls == [(1011, "Connection failed") if allowed else (1008, "Policy denied")]
+    rendered = "".join(messages)
+    assert "secret.example" not in rendered
+    assert "token=raw" not in rendered
+    assert "RuntimeError" not in rendered
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["connect", "close"])
+async def test_websocket_action_cancellation_propagates(action: str) -> None:
+    controls = _controls()
+    launcher = FakePlaywrightLauncher()
+    probe = _probe(
+        controls=controls,
+        guard=FakeProbeEgressGuard([action == "connect"]),
+        launcher=launcher,
+    )
+
+    async with probe.open_page(BrowserProbeOptions()):
+        context = launcher.browser.contexts[0]
+        assert context.websocket_handler is not None
+        route = FakeWebSocketRoute(
+            "wss://allowed.example/socket",
+            launcher.events,
+            connect_error=asyncio.CancelledError() if action == "connect" else None,
+            close_error=asyncio.CancelledError() if action == "close" else None,
+        )
+        with pytest.raises(asyncio.CancelledError):
+            await context.websocket_handler(route)
+    await controls.close()
+
+
+@pytest.mark.asyncio
 async def test_browser_budget_is_reserved_exactly_once_before_launch() -> None:
     controls = _controls(browsers=1)
     launcher = FakePlaywrightLauncher()
@@ -390,6 +538,65 @@ async def test_exhausted_deadline_reserves_once_but_prevents_launch() -> None:
 
     assert controls.consumed.browsers == 1
     assert launcher.events == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "stage",
+    [
+        "launcher_start",
+        "launch_browser",
+        "new_context",
+        "route_http",
+        "route_web_socket",
+        "init_script",
+        "new_page",
+    ],
+)
+async def test_each_startup_await_is_bounded_by_the_shared_deadline(stage: str) -> None:
+    controls = _live_controls(deadline_s=0.02)
+    launcher = FakePlaywrightLauncher(block_at=stage)
+    probe = _probe(
+        controls=controls,
+        guard=FakeProbeEgressGuard([]),
+        launcher=launcher,
+    )
+    options = BrowserProbeOptions(init_scripts=("window.test = true",))
+
+    with pytest.raises(PreflightDeadlineExceeded):
+        async with asyncio.timeout(0.2):
+            async with probe.open_page(options):
+                pytest.fail("page must not be created")
+
+    assert launcher.startup_gate.started.is_set()
+    assert controls.consumed.browsers == 1
+    await controls.close(grace_s=0.02)
+
+
+@pytest.mark.asyncio
+async def test_startup_rechecks_deadline_before_the_next_side_effect() -> None:
+    clock = FakeClock(1.0)
+
+    class BoundaryLauncher(FakePlaywrightLauncher):
+        async def start(self) -> Any:
+            result = await super().start()
+            clock.advance(1.0)
+            return result
+
+    controls = _controls(deadline=2.0, clock=clock)
+    launcher = BoundaryLauncher()
+    probe = _probe(
+        controls=controls,
+        guard=FakeProbeEgressGuard([]),
+        launcher=launcher,
+    )
+
+    with pytest.raises(PreflightDeadlineExceeded):
+        async with probe.open_page(BrowserProbeOptions()):
+            pytest.fail("page must not be created")
+
+    assert launcher.playwright.chromium.launch_calls == []
+    assert launcher.playwright.stop_calls == 1
 
 
 @pytest.mark.asyncio
@@ -490,6 +697,43 @@ async def test_page_wrapper_delegates_operations_and_caps_timeout_ms() -> None:
 
 
 @pytest.mark.asyncio
+async def test_zero_timeout_uses_positive_shared_deadline_cap() -> None:
+    clock = FakeClock(8.0)
+    controls = _controls(deadline=10.0, clock=clock)
+    launcher = FakePlaywrightLauncher()
+    probe = _probe(
+        controls=controls,
+        guard=FakeProbeEgressGuard([]),
+        launcher=launcher,
+    )
+
+    async with probe.open_page(BrowserProbeOptions()) as page:
+        await page.reload(wait_until="load", timeout_ms=0)
+        raw = launcher.browser.contexts[0].pages[0]
+    await controls.close()
+
+    assert raw.calls[0] == ("reload", (), {"wait_until": "load", "timeout": 2000.0})
+
+
+@pytest.mark.asyncio
+async def test_zero_timeout_passes_through_without_shared_deadline() -> None:
+    controls = _controls()
+    launcher = FakePlaywrightLauncher()
+    probe = _probe(
+        controls=controls,
+        guard=FakeProbeEgressGuard([]),
+        launcher=launcher,
+    )
+
+    async with probe.open_page(BrowserProbeOptions()) as page:
+        await page.reload(wait_until="load", timeout_ms=0)
+        raw = launcher.browser.contexts[0].pages[0]
+    await controls.close()
+
+    assert raw.calls[0] == ("reload", (), {"wait_until": "load", "timeout": 0.0})
+
+
+@pytest.mark.asyncio
 async def test_wait_for_timeout_uses_remaining_deadline_and_then_expires() -> None:
     clock = FakeClock(8.0)
     controls = _controls(deadline=10.0, clock=clock)
@@ -507,6 +751,96 @@ async def test_wait_for_timeout_uses_remaining_deadline_and_then_expires() -> No
     await controls.close()
 
     assert raw.calls[0] == ("wait_for_timeout", (2000.0,), {})
+
+
+@pytest.mark.asyncio
+async def test_wait_for_timeout_checks_exact_deadline_boundary_after_completion() -> None:
+    clock = FakeClock(8.0)
+
+    class BoundaryWaitPage(FakeBrowserPage):
+        async def wait_for_timeout(self, timeout_ms: float) -> Any:
+            result = await super().wait_for_timeout(timeout_ms)
+            clock.advance(timeout_ms / 1000.0)
+            return result
+
+    controls = _controls(deadline=10.0, clock=clock)
+    launcher = FakePlaywrightLauncher(
+        context_factory=lambda events: FakeBrowserContext(
+            events,
+            page_factory=BoundaryWaitPage,
+        )
+    )
+    probe = _probe(
+        controls=controls,
+        guard=FakeProbeEgressGuard([]),
+        launcher=launcher,
+    )
+
+    async with probe.open_page(BrowserProbeOptions()) as page:
+        with pytest.raises(PreflightDeadlineExceeded):
+            await page.wait_for_timeout(2000)
+    await controls.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["content", "evaluate", "count", "visibility"])
+async def test_operations_without_playwright_timeout_are_deadline_bounded(
+    operation: str,
+) -> None:
+    blocker = asyncio.Event()
+
+    class BlockingLocator:
+        def __init__(self, index: int | None = None) -> None:
+            self.index = index
+
+        def nth(self, index: int) -> BlockingLocator:
+            return BlockingLocator(index)
+
+        async def count(self) -> int:
+            await blocker.wait()
+            return 0
+
+        async def is_visible(self) -> bool:
+            await blocker.wait()
+            return False
+
+    class BlockingPage(FakeBrowserPage):
+        async def content(self) -> str:
+            await blocker.wait()
+            return ""
+
+        async def evaluate(self, expression: str, argument: Any = None) -> Any:
+            await blocker.wait()
+            return None
+
+        def locator(self, selector: str) -> BlockingLocator:
+            assert selector == "a"
+            return BlockingLocator()
+
+    controls = _live_controls(deadline_s=0.02)
+    launcher = FakePlaywrightLauncher(
+        context_factory=lambda events: FakeBrowserContext(
+            events,
+            page_factory=BlockingPage,
+        )
+    )
+    probe = _probe(
+        controls=controls,
+        guard=FakeProbeEgressGuard([]),
+        launcher=launcher,
+    )
+
+    async with probe.open_page(BrowserProbeOptions()) as page:
+        call = {
+            "content": page.content,
+            "evaluate": lambda: page.evaluate("1"),
+            "count": page.link_count,
+            "visibility": lambda: page.link_is_visible(0),
+        }[operation]
+        with pytest.raises(PreflightDeadlineExceeded):
+            async with asyncio.timeout(0.2):
+                await call()
+    await controls.close(grace_s=0.02)
 
 
 @pytest.mark.asyncio
@@ -636,16 +970,127 @@ async def test_page_scope_and_request_cleanup_are_idempotent_and_ordered() -> No
     assert launcher.events.count("close:page") == 2
     assert [event for event in launcher.events if event.startswith("close:")] == [
         "close:page",
-        "close:page",
         "close:context",
         "close:browser",
         "close:playwright",
+        "close:page",
         "close:context",
         "close:browser",
         "close:playwright",
     ]
     assert launcher.playwright.stop_calls == 2
     assert all(page.close_calls == 1 for context in launcher.browser.contexts for page in context.pages)
+
+
+@pytest.mark.asyncio
+async def test_page_scope_cleanup_does_not_close_unrelated_registered_adapter() -> None:
+    controls = _controls()
+    unrelated = FakeCleanupHandle(name="unrelated")
+    controls.register_cleanup(unrelated)
+    launcher = FakePlaywrightLauncher()
+    probe = _probe(
+        controls=controls,
+        guard=FakeProbeEgressGuard([]),
+        launcher=launcher,
+    )
+
+    async with probe.open_page(BrowserProbeOptions()):
+        pass
+
+    assert unrelated.close_calls == 0
+    assert launcher.playwright.stop_calls == 1
+    await controls.close()
+    assert unrelated.close_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_page_scopes_share_one_non_additive_cleanup_grace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = _adapter_module()
+    assert adapter is not None
+    grace_s = 0.05
+    monkeypatch.setattr(adapter, "_BROWSER_CLEANUP_GRACE_S", grace_s)
+    controls = _controls()
+    launcher = FakePlaywrightLauncher(
+        context_factory=lambda events: FakeBrowserContext(
+            events,
+            page_factory=lambda context, page_events: FakeBrowserPage(
+                context,
+                page_events,
+                block_close=True,
+                suppress_close_cancellation=True,
+            ),
+        )
+    )
+    probe = _probe(
+        controls=controls,
+        guard=FakeProbeEgressGuard([]),
+        launcher=launcher,
+    )
+
+    started_at = asyncio.get_running_loop().time()
+    async with probe.open_page(BrowserProbeOptions()):
+        pass
+    async with probe.open_page(BrowserProbeOptions()):
+        pass
+    elapsed_s = asyncio.get_running_loop().time() - started_at
+    await controls.close(grace_s=grace_s)
+
+    assert elapsed_s < grace_s * 1.6
+    assert all(page.close_calls == 1 for context in launcher.browser.contexts for page in context.pages)
+
+
+@pytest.mark.asyncio
+async def test_analyzer_time_does_not_consume_shared_cleanup_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = _adapter_module()
+    assert adapter is not None
+    grace_s = 0.03
+    analyzer_delay_s = 0.05
+    monkeypatch.setattr(adapter, "_BROWSER_CLEANUP_GRACE_S", grace_s)
+
+    class SlowClosePage(FakeBrowserPage):
+        async def close(self) -> None:
+            self.close_calls += 1
+            self.events.append("close:page")
+            self.close_started.set()
+            try:
+                await asyncio.sleep(0.005)
+            except asyncio.CancelledError:
+                self.close_cancellations += 1
+                raise
+            self.results["close_complete"] = True
+
+    controls = _controls()
+    launcher = FakePlaywrightLauncher(
+        context_factory=lambda events: FakeBrowserContext(
+            events,
+            page_factory=SlowClosePage,
+        )
+    )
+    probe = _probe(
+        controls=controls,
+        guard=FakeProbeEgressGuard([]),
+        launcher=launcher,
+    )
+
+    started_at = asyncio.get_running_loop().time()
+    async with probe.open_page(BrowserProbeOptions()):
+        pass
+    await asyncio.sleep(analyzer_delay_s)
+    async with probe.open_page(BrowserProbeOptions()):
+        pass
+    elapsed_s = asyncio.get_running_loop().time() - started_at
+    await controls.close(grace_s=grace_s)
+
+    pages = [page for context in launcher.browser.contexts for page in context.pages]
+    assert [page.close_calls for page in pages] == [1, 1]
+    assert [page.close_cancellations for page in pages] == [0, 0]
+    assert [page.results.get("close_complete") for page in pages] == [True, True]
+    assert [page.force_close_calls for page in pages] == [0, 0]
+    assert elapsed_s - analyzer_delay_s < grace_s
 
 
 @pytest.mark.asyncio
@@ -700,12 +1145,68 @@ async def test_startup_cancellation_closes_created_resources_and_propagates() ->
 
 
 @pytest.mark.asyncio
-async def test_controls_force_cleanup_reaches_a_stuck_page_within_one_grace() -> None:
+async def test_fresh_caller_cancellation_wins_earlier_startup_error_cleanup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = _adapter_module()
+    assert adapter is not None
+    monkeypatch.setattr(adapter, "_BROWSER_CLEANUP_GRACE_S", 0.03)
+
+    class FailingContext(FakeBrowserContext):
+        def __init__(self, events: list[str]) -> None:
+            super().__init__(events)
+            self.close_started = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def route_web_socket(self, pattern: str, handler: Any) -> None:
+            raise RuntimeError("https://secret.example/startup")
+
+        async def close(self) -> None:
+            self.close_calls += 1
+            self.close_started.set()
+            await self.release.wait()
+
+    controls = _controls()
+    launcher = FakePlaywrightLauncher(context_factory=FailingContext)
+    probe = _probe(
+        controls=controls,
+        guard=FakeProbeEgressGuard([]),
+        launcher=launcher,
+    )
+
+    async def open_failing_page() -> None:
+        async with probe.open_page(BrowserProbeOptions()):
+            pytest.fail("page must not be created")
+
+    caller = asyncio.create_task(open_failing_page())
+    while not launcher.browser.contexts:
+        await asyncio.sleep(0)
+    context = launcher.browser.contexts[0]
+    assert isinstance(context, FailingContext)
+    await context.close_started.wait()
+    caller.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        async with asyncio.timeout(0.2):
+            await caller
+
+
+@pytest.mark.asyncio
+async def test_page_and_request_cleanup_share_one_idempotent_close_operation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = _adapter_module()
+    assert adapter is not None
+    monkeypatch.setattr(adapter, "_BROWSER_CLEANUP_GRACE_S", 0.02, raising=False)
+
+    class RealLikePage(FakeBrowserPage):
+        force_close = None
+
     controls = _controls()
     launcher = FakePlaywrightLauncher(
         context_factory=lambda events: FakeBrowserContext(
             events,
-            page_factory=lambda context, page_events: FakeBrowserPage(
+            page_factory=lambda context, page_events: RealLikePage(
                 context,
                 page_events,
                 block_close=True,
@@ -720,16 +1221,34 @@ async def test_controls_force_cleanup_reaches_a_stuck_page_within_one_grace() ->
     )
     manager = probe.open_page(BrowserProbeOptions())
     await manager.__aenter__()
-
-    await controls.close(grace_s=0.02)
-    await manager.__aexit__(None, None, None)
+    scope_cleanup = asyncio.create_task(manager.__aexit__(None, None, None))
+    request_cleanup = asyncio.create_task(controls.close(grace_s=0.02))
+    done, pending = await asyncio.wait(
+        {scope_cleanup, request_cleanup},
+        timeout=0.2,
+    )
+    if pending:
+        page = launcher.browser.contexts[0].pages[0]
+        page.release_close()
+        await asyncio.gather(*pending, return_exceptions=True)
 
     page = launcher.browser.contexts[0].pages[0]
-    assert page.force_close_calls == 1
+    assert not pending
+    assert all(task.exception() is None for task in done)
+    assert page.close_calls == 1
+    assert page.force_close_calls == 0
     assert page.close_cancellations >= 1
+    assert launcher.browser.contexts[0].close_calls == 0
+    assert launcher.browser.close_calls == 0
+    assert launcher.playwright.stop_calls == 0
     assert launcher.browser.contexts[0].force_close_calls == 1
     assert launcher.browser.force_close_calls == 1
     assert launcher.playwright.force_close_calls == 1
+    assert not {
+        task
+        for task in asyncio.all_tasks()
+        if task is not asyncio.current_task() and task.get_name().startswith("preflight-browser-close")
+    }
 
 
 @pytest.mark.asyncio
