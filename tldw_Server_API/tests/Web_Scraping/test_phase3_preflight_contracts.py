@@ -44,6 +44,7 @@ from tldw_Server_API.app.core.Web_Scraping.preflight import (
 )
 from tldw_Server_API.app.core.Web_Scraping.runtime import PolicyDecision, RuntimeRequestContext
 from tldw_Server_API.tests.Web_Scraping.preflight_fakes import (
+    EventSleep,
     FakeBrowserProbe,
     FakeCleanupHandle,
     FakeClock,
@@ -62,18 +63,19 @@ _LEGACY_BOOLEAN_KEYS = (
     ("web_scraper_preflight_include_results", "include_results"),
     ("web_scraper_playwright_no_sandbox", "playwright_no_sandbox"),
 )
-_SAFE_ERROR_CODES = (
-    "policy_denied",
-    "policy_error",
-    "budget_exhausted",
-    "timeout",
-    "unavailable",
-    "missing_dependency",
-    "external_tool_disabled",
-    "redirect_loop",
-    "invalid_redirect",
-    "too_many_redirects",
-    "probe_error",
+_APPROVED_PROBE_ERROR_PAIRS = (
+    ("policy_denied", "Probe destination was denied."),
+    ("policy_error", "Probe destination was denied."),
+    ("budget_exhausted", "Probe budget exhausted."),
+    ("timeout", "Probe timed out."),
+    ("unavailable", "Probe capability is unavailable."),
+    ("missing_dependency", "Probe dependency is unavailable."),
+    ("external_tool_disabled", "External tool probing is disabled."),
+    ("redirect_loop", "Redirect loop detected."),
+    ("invalid_redirect", "Redirect target is invalid."),
+    ("too_many_redirects", "Redirect limit exceeded."),
+    ("probe_error", "Probe failed."),
+    ("probe_error", "HTTP probe failed."),
 )
 
 
@@ -105,6 +107,22 @@ def _execution_context(
         external_tools=FakeExternalToolProbe(),
         identity_selector=identity_selector,
     )
+
+
+async def _complete_close_tasks_with_fallback(
+    tasks: set[asyncio.Task[None]],
+    cleanup: FakeCleanupHandle,
+    *,
+    timeout_s: float = 0.35,
+) -> bool:
+    """Keep a RED failure bounded while releasing deliberately stuck fakes."""
+    _, pending = await asyncio.wait(tasks, timeout=timeout_s)
+    completed_in_time = not pending
+    if pending:
+        cleanup.release_close()
+        cleanup.release_force_close()
+        await asyncio.gather(*tasks, return_exceptions=True)
+    return completed_in_time
 
 
 @pytest.mark.unit
@@ -407,19 +425,49 @@ def test_external_tool_result_normalizes_scalar_values() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("error_code", _SAFE_ERROR_CODES)
-def test_probe_error_accepts_only_stable_public_payload(error_code: str) -> None:
-    error = ProbeError(error_code, "Safe probe failure.")
+@pytest.mark.parametrize(("error_code", "public_message"), _APPROVED_PROBE_ERROR_PAIRS)
+def test_probe_error_accepts_approved_stable_public_payload(
+    error_code: str,
+    public_message: str,
+) -> None:
+    error = ProbeError(error_code, public_message)
 
     assert error.error_code == error_code
-    assert error.public_message == "Safe probe failure."
-    assert str(error) == "Safe probe failure."
+    assert error.public_message == public_message
+    assert str(error) == public_message
 
 
 @pytest.mark.unit
-def test_probe_error_rejects_unknown_error_code() -> None:
-    with pytest.raises(ValueError, match="unsupported probe error code"):
-        ProbeError("https://example.com/?token=secret", "Unsafe code")
+@pytest.mark.parametrize(
+    ("error_code", "public_message"),
+    [
+        ("probe_error", "Connection refused by 10.0.0.8:8443"),
+        ("probe_error", "https://example.com/?token=secret"),
+        ("policy_denied", "HTTP probe failed."),
+        ("unsupported", "Probe failed."),
+    ],
+)
+def test_probe_error_rejects_unapproved_public_payloads(
+    error_code: str,
+    public_message: str,
+) -> None:
+    with pytest.raises(ValueError, match="unsupported probe error payload") as caught:
+        ProbeError(error_code, public_message)
+
+    assert "secret" not in str(caught.value)
+    assert "10.0.0.8" not in str(caught.value)
+
+
+@pytest.mark.unit
+def test_probe_error_public_fields_are_immutable() -> None:
+    error = ProbeError("probe_error", "Probe failed.")
+
+    with pytest.raises(AttributeError):
+        error.error_code = "policy_denied"
+    with pytest.raises(AttributeError):
+        error.public_message = "Probe destination was denied."
+
+    assert (error.error_code, error.public_message) == ("probe_error", "Probe failed.")
 
 
 @pytest.mark.unit
@@ -574,17 +622,23 @@ async def test_sleep_uses_deadline_cap_and_raises_overall_deadline() -> None:
 @pytest.mark.asyncio
 async def test_observed_caller_cancellation_wins_deadline_race() -> None:
     clock = FakeClock(10.0)
-    sleep = FakeSleep(clock, cancel=True)
+    sleep = EventSleep(clock)
     controls = PreflightRuntimeControls(
         request_context=_request_context(),
         deadline=12.0,
         clock=clock,
         sleep=sleep,
     )
+    caller = asyncio.create_task(controls.sleep(5.0))
+    await sleep.started.wait()
+
+    clock.advance(2.0)
+    caller.cancel()
 
     with pytest.raises(asyncio.CancelledError):
-        await controls.sleep(5.0)
+        await caller
 
+    assert sleep.delays == [2.0]
     assert controls.deadline_exhausted() is True
 
 
@@ -617,8 +671,9 @@ async def test_cleanup_stack_closes_gracefully_in_reverse_registration_order() -
 
 @pytest.mark.asyncio
 async def test_cleanup_uses_one_shared_grace_for_all_remaining_handles() -> None:
-    first = FakeCleanupHandle(block_close=True)
-    second = FakeCleanupHandle(block_close=True)
+    events: list[str] = []
+    first = FakeCleanupHandle(block_close=True, events=events, name="first")
+    second = FakeCleanupHandle(block_close=True, events=events, name="second")
     controls = PreflightRuntimeControls(request_context=_request_context())
     controls.register_cleanup(first)
     controls.register_cleanup(second)
@@ -629,21 +684,110 @@ async def test_cleanup_uses_one_shared_grace_for_all_remaining_handles() -> None
     assert first.close_calls == 0
     assert second.force_close_calls == 1
     assert first.force_close_calls == 1
+    assert events == ["close:second", "force:second", "force:first"]
 
 
 @pytest.mark.asyncio
-async def test_cleanup_uses_one_shared_grace_and_preserves_cancellation() -> None:
-    cleanup = FakeCleanupHandle(block_close=True)
+async def test_cleanup_supervisor_bounds_cancellation_suppressing_workers() -> None:
+    cleanup = FakeCleanupHandle(
+        block_close=True,
+        suppress_close_cancellation=True,
+        block_force_close=True,
+    )
     controls = PreflightRuntimeControls(request_context=_request_context())
     controls.register_cleanup(cleanup)
-    task = asyncio.create_task(controls.close(grace_s=2.0))
+    task = asyncio.create_task(controls.close(grace_s=0.01))
+    started_at = asyncio.get_running_loop().time()
+
+    completed_in_time = await _complete_close_tasks_with_fallback({task}, cleanup)
+    elapsed_s = asyncio.get_running_loop().time() - started_at
+
+    assert completed_in_time, f"cleanup exceeded scheduling bound: {elapsed_s:.3f}s"
+    assert cleanup.close_cancellations == 1
+    assert cleanup.force_close_calls == 1
+    assert cleanup.force_close_cancellations == 1
+    assert cleanup.close_finished.is_set()
+    assert cleanup.force_close_finished.is_set()
+    assert all(task.done() for task in cleanup.close_tasks + cleanup.force_close_tasks)
+    assert not {
+        pending
+        for pending in asyncio.all_tasks()
+        if pending is not asyncio.current_task() and pending.get_name().startswith("preflight-cleanup")
+    }
+
+
+@pytest.mark.asyncio
+async def test_cleanup_preserves_caller_cancellation_after_bounded_force_close() -> None:
+    cleanup = FakeCleanupHandle(
+        block_close=True,
+        suppress_close_cancellation=True,
+    )
+    controls = PreflightRuntimeControls(request_context=_request_context())
+    controls.register_cleanup(cleanup)
+    task = asyncio.create_task(controls.close(grace_s=0.01))
     await cleanup.close_started.wait()
 
     task.cancel()
+    completed_in_time = await _complete_close_tasks_with_fallback({task}, cleanup)
 
     with pytest.raises(asyncio.CancelledError):
         await task
+    assert completed_in_time
     assert cleanup.force_close_calls == 1
+    assert cleanup.close_finished.is_set()
+    assert all(task.done() for task in cleanup.close_tasks + cleanup.force_close_tasks)
+
+
+@pytest.mark.asyncio
+async def test_cleanup_close_is_idempotent_for_repeated_and_concurrent_callers() -> None:
+    cleanup = FakeCleanupHandle()
+    controls = PreflightRuntimeControls(request_context=_request_context())
+    controls.register_cleanup(cleanup)
+
+    outcomes = await asyncio.gather(
+        controls.close(grace_s=0.05),
+        controls.close(grace_s=0.05),
+        controls.close(grace_s=0.05),
+        return_exceptions=True,
+    )
+    await controls.close(grace_s=0.05)
+
+    assert outcomes == [None, None, None]
+    assert cleanup.close_calls == 1
+    assert cleanup.force_close_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_concurrent_cleanup_callers_share_force_outcome_and_own_cancellation() -> None:
+    cleanup = FakeCleanupHandle(
+        block_close=True,
+        suppress_close_cancellation=True,
+    )
+    controls = PreflightRuntimeControls(request_context=_request_context())
+    controls.register_cleanup(cleanup)
+    cancelled_caller = asyncio.create_task(controls.close(grace_s=0.01))
+    await cleanup.close_started.wait()
+    other_callers = {
+        asyncio.create_task(controls.close(grace_s=1.0)),
+        asyncio.create_task(controls.close(grace_s=1.0)),
+    }
+
+    cancelled_caller.cancel()
+    callers = {cancelled_caller, *other_callers}
+    completed_in_time = await _complete_close_tasks_with_fallback(callers, cleanup)
+    outcomes = await asyncio.gather(
+        cancelled_caller,
+        *other_callers,
+        return_exceptions=True,
+    )
+    await controls.close(grace_s=1.0)
+
+    assert completed_in_time
+    assert isinstance(outcomes[0], asyncio.CancelledError)
+    assert outcomes[1:] == [None, None]
+    assert cleanup.close_calls == 1
+    assert cleanup.force_close_calls == 1
+    assert all(task.done() for task in cleanup.close_tasks + cleanup.force_close_tasks)
 
 
 @pytest.mark.asyncio

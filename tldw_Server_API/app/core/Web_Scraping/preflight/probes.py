@@ -9,19 +9,19 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, Literal, Protocol
 
-_SAFE_ERROR_CODES = frozenset(
+_SAFE_ERROR_MESSAGES: Mapping[str, frozenset[str]] = MappingProxyType(
     {
-        "policy_denied",
-        "policy_error",
-        "budget_exhausted",
-        "timeout",
-        "unavailable",
-        "missing_dependency",
-        "external_tool_disabled",
-        "redirect_loop",
-        "invalid_redirect",
-        "too_many_redirects",
-        "probe_error",
+        "policy_denied": frozenset({"Probe destination was denied."}),
+        "policy_error": frozenset({"Probe destination was denied."}),
+        "budget_exhausted": frozenset({"Probe budget exhausted."}),
+        "timeout": frozenset({"Probe timed out."}),
+        "unavailable": frozenset({"Probe capability is unavailable."}),
+        "missing_dependency": frozenset({"Probe dependency is unavailable."}),
+        "external_tool_disabled": frozenset({"External tool probing is disabled."}),
+        "redirect_loop": frozenset({"Redirect loop detected."}),
+        "invalid_redirect": frozenset({"Redirect target is invalid."}),
+        "too_many_redirects": frozenset({"Redirect limit exceeded."}),
+        "probe_error": frozenset({"Probe failed.", "HTTP probe failed."}),
     }
 )
 
@@ -221,15 +221,30 @@ class ExternalToolProbe(Protocol):
 class ProbeError(Exception):
     """Safe analyzer-scoped failure containing only stable public fields."""
 
-    __slots__ = ("error_code", "public_message")
+    __slots__ = ("_error_code", "_public_message")
 
     def __init__(self, error_code: str, public_message: str) -> None:
         normalized_code = str(error_code)
-        if normalized_code not in _SAFE_ERROR_CODES:
-            raise ValueError("unsupported probe error code")
-        self.error_code = normalized_code
-        self.public_message = str(public_message)
+        normalized_message = str(public_message)
+        approved_messages = _SAFE_ERROR_MESSAGES.get(normalized_code)
+        if approved_messages is None or normalized_message not in approved_messages:
+            raise ValueError("unsupported probe error payload")
+        self._error_code = normalized_code
+        self._public_message = normalized_message
         super().__init__(self.public_message)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if name in {"error_code", "public_message", "args"}:
+            raise AttributeError(f"{name} is immutable")
+        super().__setattr__(name, value)
+
+    @property
+    def error_code(self) -> str:
+        return self._error_code
+
+    @property
+    def public_message(self) -> str:
+        return self._public_message
 
 
 class ProbeBudgetExhausted(ProbeError):
