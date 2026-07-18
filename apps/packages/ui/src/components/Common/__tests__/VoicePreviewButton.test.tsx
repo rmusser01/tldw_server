@@ -3,11 +3,11 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest"
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
 import { VoicePreviewButton } from "../VoicePreviewButton"
 
-const mockSynthesizeSpeech = vi.fn()
+const mockSynthesizeSpeechDetailed = vi.fn()
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
-    synthesizeSpeech: (...args: any[]) => mockSynthesizeSpeech(...args),
+    synthesizeSpeechDetailed: (...args: any[]) => mockSynthesizeSpeechDetailed(...args),
   },
 }))
 
@@ -55,7 +55,7 @@ describe("VoicePreviewButton", () => {
       revokeObjectURL: vi.fn(),
     })
 
-    mockSynthesizeSpeech.mockReset()
+    mockSynthesizeSpeechDetailed.mockReset()
   })
 
   afterEach(() => {
@@ -81,12 +81,21 @@ describe("VoicePreviewButton", () => {
     expect(button).toBeDisabled()
   })
 
-  it("calls synthesizeSpeech with correct args and plays audio on click", async () => {
+  it("calls detailed synthesis with gateway scope and plays audio on click", async () => {
     const fakeAudioData = new ArrayBuffer(8)
-    mockSynthesizeSpeech.mockResolvedValue(fakeAudioData)
+    mockSynthesizeSpeechDetailed.mockResolvedValue({
+      buffer: fakeAudioData,
+      fallbackUsed: false
+    })
 
     render(
-      <VoicePreviewButton model="tts-1" voice="alloy" provider="openai" />
+      <VoicePreviewButton
+        model="SpeechModel"
+        voice="narrator"
+        provider="tldw"
+        backend="gateway:primary"
+        allowFallback={false}
+      />
     )
 
     const button = screen.getByRole("button", { name: "Preview voice" })
@@ -96,9 +105,15 @@ describe("VoicePreviewButton", () => {
     })
 
     await waitFor(() => {
-      expect(mockSynthesizeSpeech).toHaveBeenCalledWith(
+      expect(mockSynthesizeSpeechDetailed).toHaveBeenCalledWith(
         "Hello, this is a preview of the selected voice.",
-        { model: "tts-1", voice: "alloy", responseFormat: "mp3" }
+        {
+          model: "SpeechModel",
+          voice: "narrator",
+          responseFormat: "mp3",
+          backend: "gateway:primary",
+          allowFallback: false
+        }
       )
     })
 

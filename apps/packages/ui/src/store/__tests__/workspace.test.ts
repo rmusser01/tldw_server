@@ -592,6 +592,8 @@ describe("workspace store snapshot persistence", () => {
             rightPaneCollapsed: true,
             audioSettings: {
               ...DEFAULT_AUDIO_SETTINGS,
+              backend: "gateway:Research",
+              allowFallback: false,
               speed: 1.25
             }
           }
@@ -628,6 +630,8 @@ describe("workspace store snapshot persistence", () => {
     expect(state.generatedArtifacts[0]?.createdAt).toBeInstanceOf(Date)
     expect(state.leftPaneCollapsed).toBe(true)
     expect(state.rightPaneCollapsed).toBe(true)
+    expect(state.audioSettings.backend).toBe("gateway:Research")
+    expect(state.audioSettings.allowFallback).toBe(false)
     expect(state.sources).toHaveLength(1)
     expect(state.sources[0]?.title).toBe("Snapshot Source")
     expect(state.generatedArtifacts).toHaveLength(1)
@@ -2586,6 +2590,8 @@ describe("workspace store snapshot persistence", () => {
         provider: "openai",
         model: "tts-1",
         voice: "alloy",
+        backend: "gateway:Company",
+        allowFallback: false,
         speed: 1.2,
         format: "wav"
       }
@@ -2668,6 +2674,8 @@ describe("workspace store snapshot persistence", () => {
     expect(importedState.leftPaneCollapsed).toBe(true)
     expect(importedState.rightPaneCollapsed).toBe(true)
     expect(importedState.audioSettings.model).toBe("tts-1")
+    expect(importedState.audioSettings.backend).toBe("gateway:Company")
+    expect(importedState.audioSettings.allowFallback).toBe(false)
 
     const importedSession = useWorkspaceStore
       .getState()
