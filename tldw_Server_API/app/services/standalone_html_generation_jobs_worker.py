@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import inspect
 import json
 import os
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -54,6 +55,8 @@ from tldw_Server_API.app.core.Slides.standalone_html_validation_pool import (
     StandaloneHtmlValidationPool,
 )
 
+_JOBS_IDEMPOTENCY_KEY_RE = re.compile(r"slides:v1:[0-9a-f]{64}\Z")
+
 
 class StandaloneHtmlGenerationRetry(RuntimeError):
     """Typed retryable precommit failure consumed by WorkerSDK."""
@@ -80,6 +83,21 @@ def _safe_now(now: Callable[[], datetime]) -> datetime:
     if value.tzinfo is None or value.utcoffset() != timedelta(0):
         raise RuntimeError("generation clock must return aware UTC")
     return value
+
+
+async def _load_digest_snapshot(
+    loader: Callable[[], Awaitable[DigestKeySnapshot]],
+) -> DigestKeySnapshot:
+    try:
+        snapshot = await loader()
+        if not isinstance(snapshot, DigestKeySnapshot):
+            raise DigestKeyUnavailableError("invalid digest registry snapshot")
+        snapshot.require_generation_ready()
+    except asyncio.CancelledError:
+        raise
+    except Exception:  # noqa: BLE001 - collapse registry implementation detail
+        raise DigestKeyUnavailableError("generation digest key unavailable") from None
+    return snapshot
 
 
 def _parse_utc(value: object) -> datetime | None:
@@ -358,6 +376,25 @@ def _retry(
     except Exception:  # noqa: BLE001 - source-free retry boundary
         raise StandaloneHtmlGenerationRetry("generation_store_unavailable") from None
     if not reset:
+        try:
+            winner = service.slides_db.get_generation_receipt(
+                receipt.id,
+                owner_user_id=receipt.owner_user_id,
+            )
+        except KeyError:
+            raise StandaloneHtmlGenerationError(
+                "generation_correlation_mismatch",
+                status_code=409,
+            ) from None
+        if winner.job_uuid != receipt.job_uuid:
+            raise StandaloneHtmlGenerationError(
+                "generation_correlation_mismatch",
+                status_code=409,
+            )
+        if winner.receipt_status == "completed":
+            return _completed_metadata(service, winner)
+        if winner.receipt_status in {"failed", "cancelled"}:
+            return _terminal_outcome(service, winner)
         raise StandaloneHtmlGenerationError(
             "generation_correlation_mismatch",
             status_code=409,
@@ -369,12 +406,21 @@ def _job_identity_is_exact(
     candidate: Mapping[str, Any],
     acquired_job: Mapping[str, Any],
 ) -> bool:
+    candidate_jobs_key = candidate.get("idempotency_key")
+    acquired_jobs_key = acquired_job.get("idempotency_key")
+    jobs_key_matches = bool(
+        isinstance(candidate_jobs_key, str)
+        and _JOBS_IDEMPOTENCY_KEY_RE.fullmatch(candidate_jobs_key) is not None
+        and isinstance(acquired_jobs_key, str)
+        and _JOBS_IDEMPOTENCY_KEY_RE.fullmatch(acquired_jobs_key) is not None
+        and hmac.compare_digest(candidate_jobs_key, acquired_jobs_key)
+    )
     return (
         _job_scope_is_exact(candidate)
         and candidate.get("id") == acquired_job.get("id")
         and candidate.get("uuid") == acquired_job.get("uuid")
         and candidate.get("owner_user_id") == acquired_job.get("owner_user_id")
-        and candidate.get("idempotency_key") == acquired_job.get("idempotency_key")
+        and jobs_key_matches
         and candidate.get("payload") == acquired_job.get("payload")
     )
 
@@ -399,12 +445,16 @@ def _final_job_is_live(
 
 
 def make_generation_acquire_guard(
-    digest_snapshot: DigestKeySnapshot,
+    digest_snapshot_loader: Callable[[], Awaitable[DigestKeySnapshot]],
 ) -> Callable[[dict[str, Any]], Any]:
     """Build the source-free WorkerSDK gate used while key material is absent."""
 
     async def guard(_job: dict[str, Any]) -> bool:
-        return digest_snapshot.generation_ready
+        try:
+            await _load_digest_snapshot(digest_snapshot_loader)
+        except DigestKeyUnavailableError:
+            return False
+        return True
 
     return guard
 
@@ -437,6 +487,57 @@ def _release_for_missing_key(
     except Exception:  # noqa: BLE001 - bounded control-plane failure
         raise StandaloneHtmlGenerationRetry("generation_digest_key_unavailable") from None
     raise StandaloneHtmlGenerationRetry("generation_digest_key_unavailable")
+
+
+def _reset_and_release_for_missing_key(
+    service: StandaloneHtmlGenerationService,
+    receipt: SlidesGenerationReceiptRow,
+    job_manager: JobManager,
+    job: Mapping[str, Any],
+    *,
+    now: datetime,
+) -> dict[str, Any] | WorkerTerminalOutcome:
+    if receipt.job_uuid is None:
+        raise StandaloneHtmlGenerationError(
+            "generation_correlation_mismatch",
+            status_code=409,
+        )
+    try:
+        reset = service.slides_db.reset_generation_receipt_queued(
+            receipt_id=receipt.id,
+            owner_user_id=receipt.owner_user_id,
+            job_uuid=receipt.job_uuid,
+            error_code="generation_digest_key_unavailable",
+            error_message="Generation will retry.",
+            updated_at=now.isoformat(),
+        )
+    except Exception:  # noqa: BLE001 - source-free retry boundary
+        raise StandaloneHtmlGenerationRetry("generation_store_unavailable") from None
+    if not reset:
+        try:
+            winner = service.slides_db.get_generation_receipt(
+                receipt.id,
+                owner_user_id=receipt.owner_user_id,
+            )
+        except KeyError:
+            raise StandaloneHtmlGenerationError(
+                "generation_correlation_mismatch",
+                status_code=409,
+            ) from None
+        if winner.job_uuid != receipt.job_uuid:
+            raise StandaloneHtmlGenerationError(
+                "generation_correlation_mismatch",
+                status_code=409,
+            )
+        if winner.receipt_status == "completed":
+            return _completed_metadata(service, winner)
+        if winner.receipt_status in {"failed", "cancelled"}:
+            return _terminal_outcome(service, winner)
+        raise StandaloneHtmlGenerationError(
+            "generation_correlation_mismatch",
+            status_code=409,
+        )
+    _release_for_missing_key(job_manager, job)
 
 
 def _cancel_requested(job: Mapping[str, Any]) -> bool:
@@ -552,7 +653,7 @@ async def process_standalone_html_generation_job(
     job_manager: JobManager,
     slides_db_factory: Callable[[str], SlidesDatabase],
     keyring: StandaloneHtmlHmacKeyring,
-    digest_snapshot: DigestKeySnapshot,
+    digest_snapshot_loader: Callable[[], Awaitable[DigestKeySnapshot]],
     validation_pool: StandaloneHtmlValidationPool,
     current_config_loader: Callable[[], SlidesStandaloneHtmlConfig],
     provider_api_key_loader: Callable[[ResolvedExecutionTarget], str | None],
@@ -568,7 +669,7 @@ async def process_standalone_html_generation_job(
         )
     job = _normalized_job(job_manager, job)
     try:
-        digest_snapshot.require_generation_ready()
+        start_snapshot = await _load_digest_snapshot(digest_snapshot_loader)
     except DigestKeyUnavailableError:
         _release_for_missing_key(job_manager, job)
     receipt_id = _receipt_id(job)
@@ -586,16 +687,36 @@ async def process_standalone_html_generation_job(
         slides_db=slides_db,
         job_manager=job_manager,
         keyring=keyring,
-        digest_snapshot=digest_snapshot,
+        digest_snapshot_loader=digest_snapshot_loader,
         now=now,
     )
+    try:
+        receipt = slides_db.get_generation_receipt(
+            receipt_id,
+            owner_user_id=owner,
+        )
+    except KeyError:
+        raise StandaloneHtmlGenerationError(
+            "generation_correlation_mismatch",
+            status_code=409,
+        ) from None
     try:
         receipt = service.correlate_job(
             job,
             owner_user_id=owner,
             receipt_id=receipt_id,
+            digest_snapshot=start_snapshot,
         )
-    except StandaloneHtmlGenerationError:
+    except StandaloneHtmlGenerationError as exc:
+        if exc.code == "generation_correlation_mismatch":
+            return _terminalize(
+                service,
+                receipt,
+                status="failed",
+                code="generation_correlation_mismatch",
+                message="Generation correlation failed.",
+                now=current_time,
+            )
         raise
     except Exception:  # noqa: BLE001 - reduce storage failures to one code
         raise StandaloneHtmlGenerationRetry("generation_store_unavailable") from None
@@ -613,7 +734,22 @@ async def process_standalone_html_generation_job(
             now=current_time,
         )
 
-    generation_input = service.verified_input(receipt)
+    try:
+        generation_input = service.verified_input(
+            receipt,
+            digest_snapshot=start_snapshot,
+        )
+    except StandaloneHtmlGenerationError as exc:
+        if exc.code != "generation_correlation_mismatch":
+            raise
+        return _terminalize(
+            service,
+            receipt,
+            status="failed",
+            code="generation_correlation_mismatch",
+            message="Generation correlation failed.",
+            now=current_time,
+        )
     input_deadline = _parse_utc(generation_input.input_expires_at)
     if input_deadline is None or current_time >= input_deadline:
         return _terminalize(
@@ -624,7 +760,17 @@ async def process_standalone_html_generation_job(
             message="Generation input expired.",
             now=input_deadline or current_time,
         )
-    target = _target_from_input(generation_input)
+    try:
+        target = _target_from_input(generation_input)
+    except Exception:  # noqa: BLE001 - malformed persisted target is correlation failure
+        return _terminalize(
+            service,
+            receipt,
+            status="failed",
+            code="generation_correlation_mismatch",
+            message="Generation correlation failed.",
+            now=current_time,
+        )
     target_failure = _target_failure_code(target, current_config_loader)
     if target_failure is not None:
         return _terminalize(
@@ -697,19 +843,15 @@ async def process_standalone_html_generation_job(
                 now=input_deadline or pre_provider_time,
             )
         try:
-            digest_snapshot.require_generation_ready()
+            await _load_digest_snapshot(digest_snapshot_loader)
         except DigestKeyUnavailableError:
-            try:
-                slides_db.reset_generation_receipt_queued(
-                    receipt_id=receipt.id,
-                    owner_user_id=receipt.owner_user_id,
-                    job_uuid=str(receipt.job_uuid),
-                    error_code="generation_digest_key_unavailable",
-                    error_message="Generation will retry.",
-                    updated_at=pre_provider_time.isoformat(),
-                )
-            finally:
-                _release_for_missing_key(job_manager, job)
+            return _reset_and_release_for_missing_key(
+                service,
+                receipt,
+                job_manager,
+                job,
+                now=pre_provider_time,
+            )
         target_failure = _target_failure_code(target, current_config_loader)
         if target_failure is not None:
             return _terminalize(
@@ -752,19 +894,20 @@ async def process_standalone_html_generation_job(
         except asyncio.CancelledError:
             raise
         except StandaloneHtmlProviderError as exc:
+            provider_failure_time = _safe_now(now)
             if exc.code in {
                 "standalone_html_provider_timeout",
                 "standalone_html_provider_unavailable",
                 "standalone_html_provider_http_error",
             }:
-                return _retry(service, receipt, job, code=exc.code, now=pre_provider_time)
+                return _retry(service, receipt, job, code=exc.code, now=provider_failure_time)
             return _terminalize(
                 service,
                 receipt,
                 status="failed",
                 code=exc.code,
                 message="Standalone HTML generation failed.",
-                now=pre_provider_time,
+                now=provider_failure_time,
             )
         except Exception:  # noqa: BLE001 - provider/source bytes must never escape
             return _retry(
@@ -772,7 +915,18 @@ async def process_standalone_html_generation_job(
                 receipt,
                 job,
                 code="standalone_html_provider_unavailable",
-                now=pre_provider_time,
+                now=_safe_now(now),
+            )
+        post_provider_time = _safe_now(now)
+        try:
+            await _load_digest_snapshot(digest_snapshot_loader)
+        except DigestKeyUnavailableError:
+            return _reset_and_release_for_missing_key(
+                service,
+                receipt,
+                job_manager,
+                job,
+                now=post_provider_time,
             )
         try:
             options = json.loads(generation_input.html_options_json)
@@ -821,12 +975,23 @@ async def process_standalone_html_generation_job(
         if fenced is not None:
             return fenced
         try:
+            commit_snapshot = await _load_digest_snapshot(digest_snapshot_loader)
+        except DigestKeyUnavailableError:
+            return _reset_and_release_for_missing_key(
+                service,
+                receipt,
+                job_manager,
+                job,
+                now=_safe_now(now),
+            )
+        try:
             presentation = service.commit(
                 receipt=receipt,
                 html_document=html_document,
                 validation_result=validation,
+                digest_snapshot=commit_snapshot,
             )
-        except (ConflictError, StandaloneHtmlGenerationError):
+        except (ConflictError, StandaloneHtmlGenerationError) as exc:
             try:
                 winner = slides_db.get_generation_receipt(
                     receipt.id,
@@ -841,6 +1006,25 @@ async def process_standalone_html_generation_job(
                 return _completed_metadata(service, winner)
             if winner.receipt_status in {"failed", "cancelled"}:
                 return _terminal_outcome(service, winner)
+            failure_code = exc.code if isinstance(exc, StandaloneHtmlGenerationError) else str(exc)
+            if failure_code == "generation_expired":
+                return _terminalize(
+                    service,
+                    winner,
+                    status="failed",
+                    code="generation_expired",
+                    message="Generation input expired.",
+                    now=input_deadline or final_time,
+                )
+            if failure_code == "generation_correlation_mismatch":
+                return _terminalize(
+                    service,
+                    winner,
+                    status="failed",
+                    code="generation_correlation_mismatch",
+                    message="Generation correlation failed.",
+                    now=final_time,
+                )
             return _retry(
                 service,
                 winner,
@@ -891,7 +1075,7 @@ def _slides_db(owner_user_id: str) -> SlidesDatabase:
 async def run_standalone_html_generation_jobs_worker(
     *,
     keyring: StandaloneHtmlHmacKeyring,
-    digest_snapshot: DigestKeySnapshot,
+    digest_snapshot_loader: Callable[[], Awaitable[DigestKeySnapshot]],
     validation_pool: StandaloneHtmlValidationPool,
     current_config_loader: Callable[[], SlidesStandaloneHtmlConfig],
     provider_api_key_loader: Callable[[ResolvedExecutionTarget], str | None],
@@ -918,7 +1102,7 @@ async def run_standalone_html_generation_jobs_worker(
             job_manager=manager,
             slides_db_factory=_slides_db,
             keyring=keyring,
-            digest_snapshot=digest_snapshot,
+            digest_snapshot_loader=digest_snapshot_loader,
             validation_pool=validation_pool,
             current_config_loader=current_config_loader,
             provider_api_key_loader=provider_api_key_loader,
@@ -934,7 +1118,7 @@ async def run_standalone_html_generation_jobs_worker(
         await sdk.run(
             handler=handler,
             job_type=JOB_TYPE,
-            acquire_guard=make_generation_acquire_guard(digest_snapshot),
+            acquire_guard=make_generation_acquire_guard(digest_snapshot_loader),
         )
     finally:
         stop_task.cancel()

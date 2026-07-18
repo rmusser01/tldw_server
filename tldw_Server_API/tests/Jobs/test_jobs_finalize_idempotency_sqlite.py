@@ -140,6 +140,66 @@ def test_worker_terminalizer_is_exact_idempotent_cas(monkeypatch, tmp_path):
     )
 
 
+@pytest.mark.parametrize("winner_status", ["failed", "cancelled"])
+def test_worker_terminalizer_reports_exact_generic_terminal_winner(
+    monkeypatch,
+    tmp_path,
+    winner_status,
+):
+    _set_env(monkeypatch, tmp_path)
+    monkeypatch.setenv("JOBS_REQUIRE_COMPLETION_TOKEN", "false")
+    jm = JobManager()
+    job = jm.create_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        payload={},
+        owner_user_id="owner-1",
+        idempotency_key=f"terminal-winner-{winner_status}",
+    )
+    acquired = jm.acquire_next_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        lease_seconds=30,
+        worker_id="slides-worker",
+    )
+    assert acquired is not None
+    lease_id = str(acquired["lease_id"])
+    if winner_status == "failed":
+        assert jm.fail_job(
+            int(job["id"]),
+            error="generic terminal winner",
+            retryable=False,
+            worker_id="slides-worker",
+            lease_id=lease_id,
+            completion_token=lease_id,
+            enforce=True,
+            error_code="terminal_first_failure",
+            error_class="TerminalFirstFailure",
+        )
+    else:
+        assert jm.cancel_job(int(job["id"]), reason="generic terminal winner")
+
+    assert (
+        jm.terminalize_job_from_worker(
+            job_id=int(job["id"]),
+            job_uuid=str(job["uuid"]),
+            owner_user_id="owner-1",
+            domain="slides",
+            queue="default",
+            job_type="presentation.generate",
+            worker_id="slides-worker",
+            lease_id=lease_id,
+            completion_token=lease_id,
+            status=winner_status,
+            error_code=f"handler_{winner_status}",
+            error_message="bounded handler outcome",
+        )
+        == "ALREADY_TERMINAL"
+    )
+
+
 @pytest.mark.parametrize(
     ("status", "event_type"),
     [("failed", "job.failed"), ("cancelled", "job.cancelled")],

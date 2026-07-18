@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import gzip
+import hmac
 import importlib
+import inspect
 import json
 import uuid
 from dataclasses import replace
@@ -18,6 +22,7 @@ from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.worker_sdk import (
     WorkerConfig,
     WorkerSDK,
+    WorkerTerminalizationConflict,
     WorkerTerminalOutcome,
 )
 from tldw_Server_API.app.core.Slides.slides_db import SlidesDatabase
@@ -154,6 +159,13 @@ def _digest_material() -> tuple[StandaloneHtmlHmacKeyring, DigestKeySnapshot]:
     return keyring, snapshot
 
 
+def _digest_snapshot_loader(snapshot: DigestKeySnapshot):
+    async def load() -> DigestKeySnapshot:
+        return snapshot
+
+    return load
+
+
 def _source_snapshot() -> StandaloneHtmlSourceSnapshot:
     text = "Exact café source"
     return StandaloneHtmlSourceSnapshot(
@@ -189,17 +201,24 @@ def _service(
     *,
     keyring: StandaloneHtmlHmacKeyring | None = None,
     digest_snapshot: DigestKeySnapshot | None = None,
+    digest_snapshot_loader: Any | None = None,
     receipt_id_factory: Any | None = None,
 ):
     module = _service_module()
     default_keyring, default_snapshot = _digest_material()
+    kwargs = {
+        "slides_db": slides,
+        "job_manager": jobs,
+        "keyring": keyring or default_keyring,
+        "now": lambda: _FIXED_NOW,
+        "receipt_id_factory": receipt_id_factory or (lambda: _RECEIPT_ID),
+    }
+    assert "digest_snapshot_loader" in inspect.signature(module.StandaloneHtmlGenerationService).parameters
+    kwargs["digest_snapshot_loader"] = digest_snapshot_loader or _digest_snapshot_loader(
+        digest_snapshot or default_snapshot
+    )
     return module.StandaloneHtmlGenerationService(
-        slides_db=slides,
-        job_manager=jobs,
-        keyring=keyring or default_keyring,
-        digest_snapshot=digest_snapshot or default_snapshot,
-        now=lambda: _FIXED_NOW,
-        receipt_id_factory=receipt_id_factory or (lambda: _RECEIPT_ID),
+        **kwargs,
     )
 
 
@@ -354,7 +373,10 @@ async def test_truncating_jobs_policy_is_rejected_without_mutated_row(
     with pytest.raises(module.StandaloneHtmlGenerationError) as exc:
         await _submit(service)
 
-    assert exc.value.code == "generation_job_payload_invalid"
+    assert (exc.value.code, exc.value.status_code) == (
+        "generation_job_payload_too_large",
+        413,
+    )
     assert (
         jobs.lookup_slides_generation_job(
             owner_user_id="owner-1",
@@ -369,6 +391,102 @@ async def test_truncating_jobs_policy_is_rejected_without_mutated_row(
     )
     with pytest.raises(KeyError):
         slides.get_generation_receipt(_RECEIPT_ID, owner_user_id="owner-1")
+    assert jobs.list_jobs(domain="slides", queue="default") == []
+
+
+@pytest.mark.parametrize("invalid_shape", ["redacted", "nonexact"])
+@pytest.mark.asyncio
+async def test_invalid_jobs_payload_construction_is_deterministic_422(
+    stores,
+    monkeypatch: pytest.MonkeyPatch,
+    invalid_shape: str,
+):
+    slides, jobs = stores
+    if invalid_shape == "redacted":
+        monkeypatch.setattr(
+            jobs,
+            "_scan_and_redact_secrets",
+            lambda _payload: ({"receipt_id": "[REDACTED]"}, True, "payload"),
+        )
+    else:
+        monkeypatch.setattr(
+            jobs,
+            "_maybe_encrypt_json",
+            lambda _payload, _domain: {"unexpected": "envelope"},
+        )
+
+    module = _service_module()
+    with pytest.raises(module.StandaloneHtmlGenerationError) as exc:
+        await _submit(_service(slides, jobs))
+    assert (exc.value.code, exc.value.status_code) == (
+        "generation_job_payload_invalid",
+        422,
+    )
+    with pytest.raises(KeyError):
+        slides.get_generation_receipt(_RECEIPT_ID, owner_user_id="owner-1")
+    assert jobs.list_jobs(domain="slides", queue="default") == []
+
+
+@pytest.mark.parametrize(
+    ("failure_phase", "expected_code", "expected_status"),
+    [
+        ("encrypt", "generation_job_payload_unavailable", 503),
+        ("decrypt", "generation_job_payload_invalid", 422),
+    ],
+)
+@pytest.mark.asyncio
+async def test_jobs_payload_crypto_preflight_fails_closed_without_a_jobs_row(
+    stores,
+    monkeypatch: pytest.MonkeyPatch,
+    failure_phase: str,
+    expected_code: str,
+    expected_status: int,
+):
+    slides, jobs = stores
+
+    def unavailable(*_args: object, **_kwargs: object):
+        raise RuntimeError("source-bearing payload policy failure")
+
+    monkeypatch.setattr(
+        jobs,
+        "_maybe_encrypt_json" if failure_phase == "encrypt" else "_maybe_decrypt_json",
+        unavailable,
+    )
+    module = _service_module()
+    with pytest.raises(module.StandaloneHtmlGenerationError) as exc:
+        await _submit(_service(slides, jobs))
+    assert (exc.value.code, exc.value.status_code, str(exc.value)) == (
+        expected_code,
+        expected_status,
+        expected_code,
+    )
+    with pytest.raises(KeyError):
+        slides.get_generation_receipt(_RECEIPT_ID, owner_user_id="owner-1")
+    assert jobs.list_jobs(domain="slides", queue="default") == []
+
+
+@pytest.mark.asyncio
+async def test_jobs_payload_policy_failure_is_the_only_transient_preflight_error(
+    stores,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    slides, jobs = stores
+
+    def unavailable(_payload: object):
+        raise RuntimeError("source-bearing jobs policy failure")
+
+    monkeypatch.setattr(jobs, "_scan_and_redact_secrets", unavailable)
+    module = _service_module()
+    with pytest.raises(module.StandaloneHtmlGenerationError) as exc:
+        await _submit(_service(slides, jobs))
+    assert (exc.value.code, exc.value.status_code, str(exc.value)) == (
+        "generation_job_payload_unavailable",
+        503,
+        "generation_job_payload_unavailable",
+    )
+    with pytest.raises(KeyError):
+        slides.get_generation_receipt(_RECEIPT_ID, owner_user_id="owner-1")
+    assert jobs.list_jobs(domain="slides", queue="default") == []
 
 
 class _Reservation:
@@ -480,6 +598,7 @@ async def _process(
     now: Any | None = None,
     keyring: StandaloneHtmlHmacKeyring | None = None,
     digest_snapshot: DigestKeySnapshot | None = None,
+    digest_snapshot_loader: Any | None = None,
     current_config_loader: Any | None = None,
     provider_api_key_loader: Any | None = None,
 ):
@@ -488,17 +607,23 @@ async def _process(
     async def default_provider(**_kwargs: Any) -> bytes:
         return _HTML
 
+    kwargs = {
+        "job_manager": jobs,
+        "slides_db_factory": slides_db_factory or (lambda owner: slides if owner == "owner-1" else slides),
+        "keyring": keyring or _digest_material()[0],
+        "validation_pool": pool or _ValidationPool(_validation()),
+        "current_config_loader": current_config_loader or _config,
+        "provider_api_key_loader": provider_api_key_loader or (lambda _target: None),
+        "provider_generate": provider_generate or default_provider,
+        "now": now or (lambda: _FIXED_NOW + timedelta(minutes=1)),
+    }
+    assert "digest_snapshot_loader" in inspect.signature(worker.process_standalone_html_generation_job).parameters
+    kwargs["digest_snapshot_loader"] = digest_snapshot_loader or _digest_snapshot_loader(
+        digest_snapshot or _digest_material()[1]
+    )
     return await worker.process_standalone_html_generation_job(
         job,
-        job_manager=jobs,
-        slides_db_factory=slides_db_factory or (lambda owner: slides if owner == "owner-1" else slides),
-        keyring=keyring or _digest_material()[0],
-        digest_snapshot=digest_snapshot or _digest_material()[1],
-        validation_pool=pool or _ValidationPool(_validation()),
-        current_config_loader=current_config_loader or _config,
-        provider_api_key_loader=provider_api_key_loader or (lambda _target: None),
-        provider_generate=provider_generate or default_provider,
-        now=now or (lambda: _FIXED_NOW + timedelta(minutes=1)),
+        **kwargs,
     )
 
 
@@ -536,7 +661,7 @@ async def test_worker_commits_presentation_receipt_and_input_once(stores):
         job_manager=jobs,
         slides_db_factory=lambda owner: slides if owner == "owner-1" else None,
         keyring=_digest_material()[0],
-        digest_snapshot=_digest_material()[1],
+        digest_snapshot_loader=_digest_snapshot_loader(_digest_material()[1]),
         validation_pool=pool,
         current_config_loader=_config,
         provider_api_key_loader=lambda _target: None,
@@ -639,6 +764,111 @@ async def test_historical_key_replay_uses_constant_time_digest_comparison(
 
 
 @pytest.mark.asyncio
+async def test_persisted_provenance_source_hmac_uses_strict_constant_time_comparison(stores, monkeypatch):
+    slides, jobs = stores
+    await _submit(_service(slides, jobs))
+    receipt = slides.get_generation_receipt(_RECEIPT_ID, owner_user_id="owner-1")
+    generation_input = slides.get_generation_input(_RECEIPT_ID, owner_user_id="owner-1")
+    module = _service_module()
+    comparisons: list[tuple[object, object]] = []
+    real_compare = hmac.compare_digest
+
+    def record_compare(left: object, right: object) -> bool:
+        comparisons.append((left, right))
+        return real_compare(left, right)
+
+    monkeypatch.setattr(module.hmac, "compare_digest", record_compare)
+    module._validated_provenance(receipt, generation_input)
+    assert (
+        generation_input.source_hmac_sha256,
+        generation_input.source_hmac_sha256,
+    ) in comparisons
+
+    different_source_hmac = "0" * 64 if generation_input.source_hmac_sha256 != "0" * 64 else "1" * 64
+    provenance = json.loads(generation_input.provenance_json)
+    provenance["source_snapshot_hmac_sha256"] = different_source_hmac
+    mismatched = replace(
+        generation_input,
+        provenance_json=json.dumps(provenance, sort_keys=True, separators=(",", ":")),
+    )
+    with pytest.raises(module.StandaloneHtmlGenerationError):
+        module._validated_provenance(receipt, mismatched)
+    assert (different_source_hmac, generation_input.source_hmac_sha256) in comparisons
+
+    provenance = json.loads(generation_input.provenance_json)
+    provenance["source_snapshot_hmac_sha256"] = generation_input.source_hmac_sha256.upper()
+    malformed = replace(
+        generation_input,
+        source_hmac_sha256=generation_input.source_hmac_sha256.upper(),
+        provenance_json=json.dumps(provenance, sort_keys=True, separators=(",", ":")),
+    )
+    with pytest.raises(module.StandaloneHtmlGenerationError):
+        module._validated_provenance(receipt, malformed)
+
+
+@pytest.mark.asyncio
+async def test_jobs_hmac_derived_idempotency_key_uses_strict_constant_time_comparison(
+    stores,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    slides, jobs = stores
+    _submitted, job = await _submitted_and_acquired(slides, jobs)
+    receipt = slides.get_generation_receipt(_RECEIPT_ID, owner_user_id="owner-1")
+    service = _service(slides, jobs)
+    comparisons: list[tuple[object, object]] = []
+    real_compare = hmac.compare_digest
+
+    def record_compare(left: object, right: object) -> bool:
+        comparisons.append((left, right))
+        return real_compare(left, right)
+
+    monkeypatch.setattr(hmac, "compare_digest", record_compare)
+    service._validate_job(job, receipt=receipt)
+    assert (receipt.jobs_idempotency_key, receipt.jobs_idempotency_key) in comparisons
+
+    different_jobs_key = "slides:v1:" + ("0" * 64 if not receipt.jobs_idempotency_key.endswith("0" * 64) else "1" * 64)
+    with pytest.raises(_service_module().StandaloneHtmlGenerationError):
+        service._validate_job(
+            {**job, "idempotency_key": different_jobs_key},
+            receipt=receipt,
+        )
+    assert (different_jobs_key, receipt.jobs_idempotency_key) in comparisons
+    assert (
+        _worker_module()._job_identity_is_exact(
+            {**job, "idempotency_key": different_jobs_key},
+            job,
+        )
+        is False
+    )
+    assert (different_jobs_key, job["idempotency_key"]) in comparisons
+
+    malformed_receipt = replace(receipt, jobs_idempotency_key="slides:v1:not-a-digest")
+    malformed_job = {**job, "idempotency_key": "slides:v1:not-a-digest"}
+    with pytest.raises(_service_module().StandaloneHtmlGenerationError):
+        service._validate_job(malformed_job, receipt=malformed_receipt)
+
+
+@pytest.mark.parametrize("bool_field", ["schema_version", "source_bytes"])
+@pytest.mark.asyncio
+async def test_provenance_rejects_bool_as_integer_fields(stores, bool_field: str):
+    slides, jobs = stores
+    await _submit(_service(slides, jobs))
+    receipt = slides.get_generation_receipt(_RECEIPT_ID, owner_user_id="owner-1")
+    generation_input = slides.get_generation_input(_RECEIPT_ID, owner_user_id="owner-1")
+    provenance = json.loads(generation_input.provenance_json)
+    provenance[bool_field] = True
+    if bool_field == "source_bytes":
+        generation_input = replace(generation_input, source_bytes=1)
+    generation_input = replace(
+        generation_input,
+        provenance_json=json.dumps(provenance, sort_keys=True, separators=(",", ":")),
+    )
+
+    with pytest.raises(_service_module().StandaloneHtmlGenerationError):
+        _service_module()._validated_provenance(receipt, generation_input)
+
+
+@pytest.mark.asyncio
 async def test_missing_digest_key_has_one_stable_admission_error_before_lookup(stores):
     slides, jobs = stores
     keyring, snapshot = _digest_material()
@@ -675,6 +905,110 @@ async def test_missing_digest_key_has_one_stable_admission_error_before_lookup(s
         "generation_digest_key_unavailable",
     )
     assert config_calls == source_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_admission_reloads_digest_snapshot_after_source_before_claim(stores):
+    slides, jobs = stores
+    keyring, ready = _digest_material()
+    missing = replace(
+        ready,
+        availability=DigestKeyAvailability(missing_key_ids=("key-v1",)),
+    )
+    state = {"snapshot": ready}
+
+    async def digest_snapshot_loader():
+        return state["snapshot"]
+
+    service = _service(
+        slides,
+        jobs,
+        keyring=keyring,
+        digest_snapshot_loader=digest_snapshot_loader,
+    )
+
+    async def source_resolver(_source: dict[str, Any], _limits: Any):
+        state["snapshot"] = missing
+        return _source_snapshot()
+
+    module = _service_module()
+    with pytest.raises(module.StandaloneHtmlGenerationError) as exc:
+        await service.submit(
+            owner_user_id="owner-1",
+            idempotency_key=_IDEMPOTENCY_KEY,
+            request=_request(),
+            config_loader=_config,
+            source_resolver=source_resolver,
+        )
+    assert (exc.value.code, exc.value.status_code) == (
+        "generation_digest_key_unavailable",
+        503,
+    )
+    with pytest.raises(KeyError):
+        slides.get_generation_receipt(_RECEIPT_ID, owner_user_id="owner-1")
+    assert (
+        jobs.lookup_slides_generation_job(
+            owner_user_id="owner-1",
+            idempotency_key=module.derive_jobs_idempotency_key(
+                owner_user_id="owner-1",
+                idempotency_key=_IDEMPOTENCY_KEY,
+                keyring=keyring,
+                digest_snapshot=ready,
+            ),
+        )
+        is None
+    )
+
+
+@pytest.mark.asyncio
+async def test_admission_rechecks_live_digest_state_before_idempotency_lookup(
+    stores,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    slides, jobs = stores
+    keyring, ready = _digest_material()
+    state = {"snapshot": ready}
+    events: list[str] = []
+    real_lookup = slides.find_generation_receipt_by_idempotency_digests
+
+    async def digest_snapshot_loader():
+        events.append("snapshot")
+        return state["snapshot"]
+
+    def receipt_lookup(**kwargs: Any):
+        events.append("lookup")
+        assert events[-2:] == ["snapshot", "lookup"]
+        return real_lookup(**kwargs)
+
+    monkeypatch.setattr(
+        slides,
+        "find_generation_receipt_by_idempotency_digests",
+        receipt_lookup,
+    )
+
+    service = _service(
+        slides,
+        jobs,
+        keyring=keyring,
+        digest_snapshot_loader=digest_snapshot_loader,
+    )
+    first = await _submit(service)
+    assert events == ["snapshot", "lookup", "snapshot", "lookup"]
+    events.clear()
+    state["snapshot"] = replace(
+        ready,
+        availability=DigestKeyAvailability(missing_key_ids=("key-v1",)),
+    )
+
+    module = _service_module()
+    with pytest.raises(module.StandaloneHtmlGenerationError) as exc:
+        await _submit(service)
+    assert (exc.value.code, exc.value.status_code) == (
+        "generation_digest_key_unavailable",
+        503,
+    )
+    assert events == ["snapshot"]
+    assert first.receipt_id == _RECEIPT_ID
 
 
 @pytest.mark.asyncio
@@ -819,6 +1153,28 @@ async def test_terminal_input_deletion_occurs_only_when_receipt_cas_wins(stores)
 
 
 @pytest.mark.asyncio
+async def test_stale_unbound_terminal_cas_cannot_delete_concurrently_bound_input(stores):
+    slides, jobs = stores
+    await _submit(_service(slides, jobs))
+    bound = slides.get_generation_receipt(_RECEIPT_ID, owner_user_id="owner-1")
+    stale_unbound = replace(bound, job_id=None, job_uuid=None, receipt_status="claimed")
+
+    assert (
+        _service(slides, jobs).terminalize(
+            receipt=stale_unbound,
+            status="failed",
+            error_code="generation_correlation_mismatch",
+            error_message="Generation correlation failed.",
+        )
+        is False
+    )
+    winner = slides.get_generation_receipt(_RECEIPT_ID, owner_user_id="owner-1")
+    assert winner.job_uuid == bound.job_uuid
+    assert winner.receipt_status == "queued"
+    assert slides.get_generation_input(_RECEIPT_ID, owner_user_id="owner-1")
+
+
+@pytest.mark.asyncio
 async def test_truncation_enabled_with_sufficient_limit_keeps_exact_receipt_payload(
     stores,
     monkeypatch: pytest.MonkeyPatch,
@@ -936,6 +1292,153 @@ async def test_claim_recovers_active_or_archived_job_by_uuid_authority(stores, a
     assert recovered["archived"] is archived
 
 
+@pytest.mark.asyncio
+async def test_bound_claim_replay_uses_uuid_authority_for_compressed_archive_with_null_id(
+    stores,
+):
+    slides, jobs = stores
+    submitted = await _submit(_service(slides, jobs))
+    job = jobs.get_job_by_uuid(submitted.job_uuid)
+    assert job is not None
+    connection = jobs._connect()
+    try:
+        with connection:
+            stored_payload = connection.execute(
+                "SELECT payload FROM jobs WHERE uuid=?",
+                (submitted.job_uuid,),
+            ).fetchone()[0]
+            active_columns = {row[1] for row in connection.execute("PRAGMA table_info(jobs)")}
+            copied_columns = [
+                row[1] for row in connection.execute("PRAGMA table_info(jobs_archive)") if row[1] in active_columns
+            ]
+            columns_sql = ", ".join(f'"{column}"' for column in copied_columns)
+            connection.execute(
+                f"INSERT INTO jobs_archive ({columns_sql}) "  # nosec B608 - trusted schema metadata
+                f"SELECT {columns_sql} FROM jobs WHERE uuid = ?",  # nosec B608 - trusted schema metadata
+                (submitted.job_uuid,),
+            )
+            connection.execute("DELETE FROM jobs WHERE uuid=?", (submitted.job_uuid,))
+            compressed_payload = "gzip64:" + base64.b64encode(gzip.compress(stored_payload.encode("utf-8"))).decode(
+                "ascii"
+            )
+            connection.execute(
+                "UPDATE jobs_archive SET id=NULL, payload=NULL, payload_compressed=? WHERE uuid=?",
+                (compressed_payload, submitted.job_uuid),
+            )
+    finally:
+        connection.close()
+    with slides.transaction(immediate=True) as connection:
+        connection.execute(
+            "UPDATE slides_generation_receipts SET receipt_status='claimed' WHERE id=?",
+            (_RECEIPT_ID,),
+        )
+
+    replay = await _submit(_service(slides, jobs))
+    assert replay.replayed is True
+    assert replay.job_uuid == submitted.job_uuid
+    rebound = slides.get_generation_receipt(_RECEIPT_ID, owner_user_id="owner-1")
+    assert rebound.receipt_status == "queued"
+    assert rebound.job_uuid == submitted.job_uuid
+    assert rebound.job_id == job["id"]
+    archived = jobs.lookup_slides_generation_job(
+        owner_user_id="owner-1",
+        idempotency_key=rebound.jobs_idempotency_key,
+        expected_job_uuid=submitted.job_uuid,
+    )
+    assert archived is not None
+    assert archived["id"] is None
+    assert archived["payload"] == {"receipt_id": _RECEIPT_ID}
+
+
+@pytest.mark.parametrize("recovered_job", [False, True])
+@pytest.mark.asyncio
+async def test_post_enqueue_bind_storage_failure_retains_claim_and_returns_bounded_503(
+    stores,
+    monkeypatch: pytest.MonkeyPatch,
+    recovered_job: bool,
+):
+    slides, jobs = stores
+    module = _service_module()
+    keyring, snapshot = _digest_material()
+    if recovered_job:
+        jobs.create_job(
+            domain="slides",
+            queue="default",
+            job_type="presentation.generate",
+            payload={"receipt_id": _RECEIPT_ID},
+            owner_user_id="owner-1",
+            idempotency_key=module.derive_jobs_idempotency_key(
+                owner_user_id="owner-1",
+                idempotency_key=_IDEMPOTENCY_KEY,
+                keyring=keyring,
+                digest_snapshot=snapshot,
+            ),
+        )
+
+    def bind_failure(**_kwargs: Any):
+        raise RuntimeError("source-bearing storage failure")
+
+    monkeypatch.setattr(slides, "bind_generation_job", bind_failure)
+    with pytest.raises(module.StandaloneHtmlGenerationError) as exc:
+        await _submit(
+            _service(
+                slides,
+                jobs,
+                keyring=keyring,
+                digest_snapshot=snapshot,
+            )
+        )
+    assert (exc.value.code, exc.value.status_code, str(exc.value)) == (
+        "generation_receipt_unresolved",
+        503,
+        "generation_receipt_unresolved",
+    )
+    assert exc.value.__cause__ is None
+    receipt = slides.get_generation_receipt(_RECEIPT_ID, owner_user_id="owner-1")
+    assert receipt.receipt_status == "claimed"
+    assert receipt.job_uuid is None
+    assert slides.get_generation_input(_RECEIPT_ID, owner_user_id="owner-1")
+    retained_job = jobs.lookup_slides_generation_job(
+        owner_user_id="owner-1",
+        idempotency_key=module.derive_jobs_idempotency_key(
+            owner_user_id="owner-1",
+            idempotency_key=_IDEMPOTENCY_KEY,
+            keyring=keyring,
+            digest_snapshot=snapshot,
+        ),
+    )
+    assert retained_job is not None
+    assert retained_job["payload"] == {"receipt_id": _RECEIPT_ID}
+
+
+@pytest.mark.asyncio
+async def test_unbound_null_job_uuid_terminal_cas_deletes_input(
+    stores,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    slides, jobs = stores
+
+    def bind_failure(**_kwargs: Any):
+        raise RuntimeError("source-bearing storage failure")
+
+    monkeypatch.setattr(slides, "bind_generation_job", bind_failure)
+    service = _service(slides, jobs)
+    with pytest.raises(_service_module().StandaloneHtmlGenerationError):
+        await _submit(service)
+    receipt = slides.get_generation_receipt(_RECEIPT_ID, owner_user_id="owner-1")
+    assert receipt.job_uuid is None
+    assert service.terminalize(
+        receipt=receipt,
+        status="failed",
+        error_code="generation_correlation_mismatch",
+        error_message="Generation correlation failed.",
+    )
+    terminal = slides.get_generation_receipt(_RECEIPT_ID, owner_user_id="owner-1")
+    assert terminal.receipt_status == "failed"
+    with pytest.raises(KeyError):
+        slides.get_generation_input(_RECEIPT_ID, owner_user_id="owner-1")
+
+
 @pytest.mark.parametrize("mutation", ["numeric_id", "uuid"])
 @pytest.mark.asyncio
 async def test_bound_job_rejects_numeric_id_or_uuid_mismatch_with_zero_provider_calls(
@@ -956,12 +1459,17 @@ async def test_bound_job_rejects_numeric_id_or_uuid_mismatch_with_zero_provider_
         provider_calls += 1
         return _HTML
 
-    module = _service_module()
-    with pytest.raises(module.StandaloneHtmlGenerationError) as exc:
-        await _process(slides, jobs, bad_job, provider_generate=provider_generate)
-    assert exc.value.code == "generation_correlation_mismatch"
+    outcome = await _process(slides, jobs, bad_job, provider_generate=provider_generate)
+    assert outcome == WorkerTerminalOutcome(
+        status="failed",
+        error_code="generation_correlation_mismatch",
+        message="Generation correlation failed.",
+    )
     assert provider_calls == 0
-    assert slides.get_generation_input(_RECEIPT_ID, owner_user_id="owner-1")
+    receipt = slides.get_generation_receipt(_RECEIPT_ID, owner_user_id="owner-1")
+    assert receipt.receipt_status == "failed"
+    with pytest.raises(KeyError):
+        slides.get_generation_input(_RECEIPT_ID, owner_user_id="owner-1")
 
 
 @pytest.mark.parametrize("lookup", ["other_owner", "missing"])
@@ -1023,11 +1531,15 @@ async def test_verified_input_rejects_tampered_timestamps_before_egress(
         provider_calls += 1
         return _HTML
 
-    module = _service_module()
-    with pytest.raises(module.StandaloneHtmlGenerationError) as exc:
-        await _process(slides, jobs, job, provider_generate=provider_generate)
-    assert exc.value.code == "generation_correlation_mismatch"
+    outcome = await _process(slides, jobs, job, provider_generate=provider_generate)
+    assert outcome == WorkerTerminalOutcome(
+        status="failed",
+        error_code="generation_correlation_mismatch",
+        message="Generation correlation failed.",
+    )
     assert provider_calls == 0
+    with pytest.raises(KeyError):
+        slides.get_generation_input(_RECEIPT_ID, owner_user_id="owner-1")
 
 
 @pytest.mark.parametrize(
@@ -1065,11 +1577,15 @@ async def test_verified_input_rejects_inconsistent_or_open_provenance_before_egr
         provider_calls += 1
         return _HTML
 
-    module = _service_module()
-    with pytest.raises(module.StandaloneHtmlGenerationError) as exc:
-        await _process(slides, jobs, job, provider_generate=provider_generate)
-    assert exc.value.code == "generation_correlation_mismatch"
+    outcome = await _process(slides, jobs, job, provider_generate=provider_generate)
+    assert outcome == WorkerTerminalOutcome(
+        status="failed",
+        error_code="generation_correlation_mismatch",
+        message="Generation correlation failed.",
+    )
     assert provider_calls == 0
+    with pytest.raises(KeyError):
+        slides.get_generation_input(_RECEIPT_ID, owner_user_id="owner-1")
 
 
 @pytest.mark.asyncio
@@ -1301,8 +1817,93 @@ async def test_missing_digest_key_releases_without_retry_or_provider_burn(stores
     assert stored_job["status"] == "queued"
     assert stored_job["retry_count"] == job["retry_count"]
     assert slides.get_generation_input(_RECEIPT_ID, owner_user_id="owner-1")
-    guard = worker.make_generation_acquire_guard(missing)
+    guard = worker.make_generation_acquire_guard(_digest_snapshot_loader(missing))
     assert await guard(job) is False
+
+
+@pytest.mark.parametrize("loss_stage", ["pre_provider", "post_provider", "pre_commit"])
+@pytest.mark.asyncio
+async def test_live_digest_key_loss_releases_and_discards_uncommitted_output(
+    stores,
+    loss_stage: str,
+):
+    slides, jobs = stores
+    _submitted, job = await _submitted_and_acquired(slides, jobs)
+    keyring, ready = _digest_material()
+    missing = replace(
+        ready,
+        availability=DigestKeyAvailability(missing_key_ids=("key-v1",)),
+    )
+    state = {"snapshot": ready}
+
+    async def digest_snapshot_loader():
+        return state["snapshot"]
+
+    pool = _ValidationPool(
+        _validation(),
+        on_acquire=((lambda: state.update(snapshot=missing)) if loss_stage == "pre_provider" else None),
+        on_validate=((lambda: state.update(snapshot=missing)) if loss_stage == "pre_commit" else None),
+    )
+    provider_calls = 0
+
+    async def provider_generate(**_kwargs: Any) -> bytes:
+        nonlocal provider_calls
+        provider_calls += 1
+        if loss_stage == "post_provider":
+            state["snapshot"] = missing
+        return _HTML
+
+    worker = _worker_module()
+    with pytest.raises(worker.StandaloneHtmlGenerationRetry) as exc:
+        await _process(
+            slides,
+            jobs,
+            job,
+            pool=pool,
+            keyring=keyring,
+            digest_snapshot_loader=digest_snapshot_loader,
+            provider_generate=provider_generate,
+        )
+    assert exc.value.failure_code == "generation_digest_key_unavailable"
+    assert provider_calls == (0 if loss_stage == "pre_provider" else 1)
+    assert len(pool.reservation.validate_calls) == (1 if loss_stage == "pre_commit" else 0)
+    receipt = slides.get_generation_receipt(_RECEIPT_ID, owner_user_id="owner-1")
+    assert receipt.receipt_status == "queued"
+    assert slides.get_generation_input(_RECEIPT_ID, owner_user_id="owner-1")
+    with pytest.raises(KeyError):
+        slides.get_presentation_by_id(_RECEIPT_ID)
+    stored_job = jobs.get_job(int(job["id"]))
+    assert stored_job["status"] == "queued"
+    assert stored_job["retry_count"] == job["retry_count"]
+
+
+@pytest.mark.parametrize("loader_failure", ["raises", "invalid"])
+@pytest.mark.asyncio
+async def test_digest_snapshot_loader_failures_close_guard_and_handler(
+    stores,
+    loader_failure: str,
+):
+    slides, jobs = stores
+    _submitted, job = await _submitted_and_acquired(slides, jobs)
+
+    async def digest_snapshot_loader():
+        if loader_failure == "raises":
+            raise RuntimeError("source-bearing registry failure")
+        return object()
+
+    worker = _worker_module()
+    guard = worker.make_generation_acquire_guard(digest_snapshot_loader)
+    assert await guard(job) is False
+    with pytest.raises(worker.StandaloneHtmlGenerationRetry) as exc:
+        await _process(
+            slides,
+            jobs,
+            job,
+            digest_snapshot_loader=digest_snapshot_loader,
+        )
+    assert exc.value.failure_code == "generation_digest_key_unavailable"
+    assert slides.get_generation_input(_RECEIPT_ID, owner_user_id="owner-1")
+    assert jobs.get_job(int(job["id"]))["status"] == "queued"
 
 
 @pytest.mark.asyncio
@@ -1698,6 +2299,142 @@ async def test_cancellation_winning_commit_cas_returns_cancelled_not_raw_conflic
 
 
 @pytest.mark.asyncio
+async def test_commit_transaction_rechecks_expiry_and_terminalizes_at_logical_deadline(
+    stores,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    slides, jobs = stores
+    _submitted, job = await _submitted_and_acquired(slides, jobs)
+    clock = {"value": _FIXED_NOW + timedelta(minutes=1)}
+    input_deadline = _FIXED_NOW + timedelta(hours=24)
+    original_commit = slides.commit_generation_presentation
+    provider_calls = 0
+
+    def expiry_wins_inside_commit(**kwargs: Any):
+        original_now = kwargs["now"]
+
+        def advance_after_begin() -> datetime:
+            assert slides.get_connection().in_transaction
+            clock["value"] = input_deadline
+            return original_now()
+
+        kwargs["now"] = advance_after_begin
+        return original_commit(**kwargs)
+
+    async def provider_generate(**_kwargs: Any) -> bytes:
+        nonlocal provider_calls
+        provider_calls += 1
+        return _HTML
+
+    monkeypatch.setattr(slides, "commit_generation_presentation", expiry_wins_inside_commit)
+    outcome = await _process(
+        slides,
+        jobs,
+        job,
+        provider_generate=provider_generate,
+        now=lambda: clock["value"],
+    )
+    assert outcome == WorkerTerminalOutcome(
+        status="failed",
+        error_code="generation_expired",
+        message="Generation input expired.",
+    )
+    assert provider_calls == 1
+    receipt = slides.get_generation_receipt(_RECEIPT_ID, owner_user_id="owner-1")
+    assert receipt.receipt_status == "failed"
+    assert receipt.updated_at == input_deadline.isoformat()
+    assert receipt.expires_at == (input_deadline + timedelta(days=30)).isoformat()
+    with pytest.raises(KeyError):
+        slides.get_generation_input(_RECEIPT_ID, owner_user_id="owner-1")
+    with pytest.raises(KeyError):
+        slides.get_presentation_by_id(_RECEIPT_ID)
+
+
+@pytest.mark.parametrize("tampered_column", ["created_at", "input_expires_at"])
+@pytest.mark.asyncio
+async def test_commit_transaction_independently_rejects_concurrent_input_time_tamper(
+    stores,
+    monkeypatch: pytest.MonkeyPatch,
+    tampered_column: str,
+):
+    slides, jobs = stores
+    _submitted, job = await _submitted_and_acquired(slides, jobs)
+    original_commit = slides.commit_generation_presentation
+    tampered_value = (
+        (_FIXED_NOW + timedelta(seconds=1)).isoformat()
+        if tampered_column == "created_at"
+        else (_FIXED_NOW + timedelta(hours=48)).isoformat()
+    )
+
+    def tamper_after_service_verification(**kwargs: Any):
+        with slides.transaction(immediate=True) as connection:
+            connection.execute(
+                f"UPDATE slides_generation_inputs SET {tampered_column} = ? WHERE receipt_id = ?",  # nosec B608 - closed parametrization
+                (tampered_value, _RECEIPT_ID),
+            )
+        return original_commit(**kwargs)
+
+    monkeypatch.setattr(slides, "commit_generation_presentation", tamper_after_service_verification)
+    outcome = await _process(slides, jobs, job)
+    assert outcome == WorkerTerminalOutcome(
+        status="failed",
+        error_code="generation_correlation_mismatch",
+        message="Generation correlation failed.",
+    )
+    receipt = slides.get_generation_receipt(_RECEIPT_ID, owner_user_id="owner-1")
+    assert receipt.receipt_status == "failed"
+    with pytest.raises(KeyError):
+        slides.get_generation_input(_RECEIPT_ID, owner_user_id="owner-1")
+    with pytest.raises(KeyError):
+        slides.get_presentation_by_id(_RECEIPT_ID)
+
+
+@pytest.mark.parametrize(
+    ("provider_code", "quarantine", "expected_code"),
+    [
+        ("standalone_html_provider_response_invalid", False, "standalone_html_provider_response_invalid"),
+        ("standalone_html_provider_timeout", True, "generation_quarantined"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_provider_terminal_retention_starts_when_failure_occurs(
+    stores,
+    monkeypatch: pytest.MonkeyPatch,
+    provider_code: str,
+    quarantine: bool,
+    expected_code: str,
+):
+    slides, jobs = stores
+    monkeypatch.setenv("JOBS_QUARANTINE_THRESHOLD", "2")
+    _submitted, job = await _submitted_and_acquired(slides, jobs)
+    if quarantine:
+        job = {
+            **job,
+            "failure_streak_code": provider_code,
+            "failure_streak_count": 1,
+        }
+    clock = {"value": _FIXED_NOW + timedelta(minutes=1)}
+    terminal_time = _FIXED_NOW + timedelta(hours=2)
+
+    async def provider_generate(**_kwargs: Any) -> bytes:
+        clock["value"] = terminal_time
+        raise StandaloneHtmlProviderError(provider_code)
+
+    outcome = await _process(
+        slides,
+        jobs,
+        job,
+        provider_generate=provider_generate,
+        now=lambda: clock["value"],
+    )
+    assert outcome.status == "failed"
+    assert outcome.error_code == expected_code
+    receipt = slides.get_generation_receipt(_RECEIPT_ID, owner_user_id="owner-1")
+    assert receipt.updated_at == terminal_time.isoformat()
+    assert receipt.expires_at == (terminal_time + timedelta(days=30)).isoformat()
+
+
+@pytest.mark.asyncio
 async def test_lost_terminal_cas_reloads_completed_winner(stores, monkeypatch):
     slides, jobs = stores
     _submitted, job = await _submitted_and_acquired(slides, jobs)
@@ -1730,6 +2467,61 @@ async def test_lost_terminal_cas_reloads_completed_winner(stores, monkeypatch):
     result = await _process(slides, jobs, job)
     assert result["presentation_id"] == _RECEIPT_ID
     monkeypatch.setattr(slides, "terminalize_generation_receipt", original_terminalize)
+
+
+@pytest.mark.parametrize("winner_status", ["completed", "failed"])
+@pytest.mark.asyncio
+async def test_lost_retry_reset_cas_reloads_completed_or_terminal_winner(
+    stores,
+    monkeypatch: pytest.MonkeyPatch,
+    winner_status: str,
+):
+    slides, jobs = stores
+    _submitted, job = await _submitted_and_acquired(slides, jobs)
+    generation_input = slides.get_generation_input(_RECEIPT_ID, owner_user_id="owner-1")
+
+    def winner_takes_reset(**_kwargs: Any) -> bool:
+        if winner_status == "completed":
+            slides.commit_generation_presentation(
+                receipt_id=_RECEIPT_ID,
+                owner_user_id="owner-1",
+                job_uuid=job["uuid"],
+                html_document=_HTML,
+                validation_result=_validation(),
+                generation_provenance_json=generation_input.provenance_json,
+                committed_at=(_FIXED_NOW + timedelta(minutes=2)).isoformat(),
+                expires_at=(_FIXED_NOW + timedelta(days=30, minutes=2)).isoformat(),
+            )
+        else:
+            current = slides.get_generation_receipt(_RECEIPT_ID, owner_user_id="owner-1")
+            assert _service(slides, jobs).terminalize(
+                receipt=current,
+                status="failed",
+                error_code="generation_failed_elsewhere",
+                error_message="Generation failed.",
+                terminal_at=_FIXED_NOW + timedelta(minutes=2),
+            )
+        return False
+
+    monkeypatch.setattr(slides, "reset_generation_receipt_queued", winner_takes_reset)
+
+    async def provider_generate(**_kwargs: Any) -> bytes:
+        raise StandaloneHtmlProviderError("standalone_html_provider_timeout")
+
+    outcome = await _process(
+        slides,
+        jobs,
+        job,
+        provider_generate=provider_generate,
+    )
+    if winner_status == "completed":
+        assert outcome["presentation_id"] == _RECEIPT_ID
+    else:
+        assert outcome == WorkerTerminalOutcome(
+            status="failed",
+            error_code="generation_failed_elsewhere",
+            message="Generation failed.",
+        )
 
 
 async def _run_one_worker_sdk_job(
@@ -1768,6 +2560,102 @@ async def _run_one_worker_sdk_job(
         sdk.run(handler=handler, job_type="presentation.generate"),
         timeout=2,
     )
+
+
+@pytest.mark.parametrize("terminal_first", ["cancelled", "failed"])
+@pytest.mark.asyncio
+async def test_real_worker_sdk_observes_terminal_first_job_without_second_finalize(
+    stores,
+    monkeypatch: pytest.MonkeyPatch,
+    terminal_first: str,
+):
+    slides, jobs = stores
+    submitted = await _submit(_service(slides, jobs))
+    calls = {"terminalize": 0, "complete": 0}
+    original_terminalize = jobs.terminalize_job_from_worker
+    original_complete = jobs.complete_job
+
+    def record_terminalize(**kwargs: Any):
+        calls["terminalize"] += 1
+        return original_terminalize(**kwargs)
+
+    def record_complete(*args: Any, **kwargs: Any):
+        calls["complete"] += 1
+        return original_complete(*args, **kwargs)
+
+    monkeypatch.setattr(jobs, "terminalize_job_from_worker", record_terminalize)
+    monkeypatch.setattr(jobs, "complete_job", record_complete)
+
+    async def provider_generate(**_kwargs: Any) -> bytes:
+        live = jobs.get_job_by_uuid(submitted.job_uuid)
+        assert live is not None
+        if terminal_first == "cancelled":
+            assert jobs.cancel_job(int(live["id"]), reason="terminal-first")
+        else:
+            assert jobs.fail_job(
+                int(live["id"]),
+                error="terminal-first",
+                retryable=False,
+                worker_id=str(live["worker_id"]),
+                lease_id=str(live["lease_id"]),
+                enforce=True,
+                error_code="terminal_first_failure",
+                error_class="TerminalFirstFailure",
+            )
+        return _HTML
+
+    await _run_one_worker_sdk_job(
+        slides,
+        jobs,
+        provider_generate=provider_generate,
+    )
+
+    assert calls == {"terminalize": 0, "complete": 0}
+    terminal_job = jobs.get_job_by_uuid(submitted.job_uuid)
+    assert terminal_job is not None
+    assert terminal_job["status"] == terminal_first
+    receipt = slides.get_generation_receipt(_RECEIPT_ID, owner_user_id="owner-1")
+    assert receipt.receipt_status == terminal_first
+    with pytest.raises(KeyError):
+        slides.get_generation_input(_RECEIPT_ID, owner_user_id="owner-1")
+    with pytest.raises(KeyError):
+        slides.get_presentation_by_id(_RECEIPT_ID)
+
+
+@pytest.mark.asyncio
+async def test_real_worker_sdk_rejects_completed_first_job_as_terminal_conflict(stores):
+    slides, jobs = stores
+    submitted = await _submit(_service(slides, jobs))
+
+    async def provider_generate(**_kwargs: Any) -> bytes:
+        live = jobs.get_job_by_uuid(submitted.job_uuid)
+        assert live is not None
+        lease_id = str(live["lease_id"])
+        assert jobs.complete_job(
+            int(live["id"]),
+            result={"winner": "completed"},
+            worker_id=str(live["worker_id"]),
+            lease_id=lease_id,
+            completion_token=lease_id,
+            enforce=True,
+        )
+        return _HTML
+
+    with pytest.raises(WorkerTerminalizationConflict):
+        await _run_one_worker_sdk_job(
+            slides,
+            jobs,
+            provider_generate=provider_generate,
+        )
+
+    completed_job = jobs.get_job_by_uuid(submitted.job_uuid)
+    assert completed_job is not None
+    assert completed_job["status"] == "completed"
+    receipt = slides.get_generation_receipt(_RECEIPT_ID, owner_user_id="owner-1")
+    assert receipt.receipt_status == "failed"
+    assert receipt.error_code == "generation_job_terminal"
+    with pytest.raises(KeyError):
+        slides.get_generation_input(_RECEIPT_ID, owner_user_id="owner-1")
 
 
 @pytest.mark.parametrize(

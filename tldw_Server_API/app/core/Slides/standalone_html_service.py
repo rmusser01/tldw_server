@@ -43,6 +43,7 @@ JOB_TYPE = "presentation.generate"
 _IDEMPOTENCY_KEY_RE = re.compile(r"[A-Za-z0-9._~-]{16,200}\Z")
 _REVISION_RE = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _LOWER_SHA256_RE = re.compile(r"[0-9a-f]{64}\Z")
+_JOBS_IDEMPOTENCY_KEY_RE = re.compile(r"slides:v1:[0-9a-f]{64}\Z")
 _SAFE_ERROR_CODE_RE = re.compile(r"[a-z][a-z0-9_.-]{0,127}\Z")
 _TERMINAL_RETENTION = timedelta(days=30)
 _INPUT_RETENTION = timedelta(hours=24)
@@ -384,14 +385,30 @@ def _validated_provenance(
         "endpoint_identity",
         "prompt_sha256",
     }
+    provenance_source_hmac = provenance.get("source_snapshot_hmac_sha256") if isinstance(provenance, dict) else None
+    stored_source_hmac = generation_input.source_hmac_sha256
+    source_hmac_is_valid = (
+        isinstance(provenance_source_hmac, str)
+        and _LOWER_SHA256_RE.fullmatch(provenance_source_hmac) is not None
+        and isinstance(stored_source_hmac, str)
+        and _LOWER_SHA256_RE.fullmatch(stored_source_hmac) is not None
+    )
+    source_hmac_matches = bool(source_hmac_is_valid and hmac.compare_digest(provenance_source_hmac, stored_source_hmac))
     if (
         not isinstance(provenance, dict)
         or set(provenance) != fields
         or _canonical_json_bytes(provenance).decode("utf-8") != generation_input.provenance_json
+        or isinstance(provenance["schema_version"], bool)
+        or not isinstance(provenance["schema_version"], int)
         or provenance["schema_version"] != 1
         or provenance["source_kind"] != generation_input.source_kind
-        or provenance["source_snapshot_hmac_sha256"] != generation_input.source_hmac_sha256
+        or not source_hmac_matches
         or provenance["digest_key_id"] != receipt.digest_key_id
+        or isinstance(provenance["source_bytes"], bool)
+        or not isinstance(provenance["source_bytes"], int)
+        or provenance["source_bytes"] < 0
+        or isinstance(generation_input.source_bytes, bool)
+        or not isinstance(generation_input.source_bytes, int)
         or provenance["source_bytes"] != generation_input.source_bytes
         or provenance["provider"] != generation_input.provider
         or provenance["model"] != generation_input.model
@@ -462,14 +479,14 @@ class StandaloneHtmlGenerationService:
         slides_db: SlidesDatabase,
         job_manager: JobManager,
         keyring: StandaloneHtmlHmacKeyring,
-        digest_snapshot: DigestKeySnapshot,
+        digest_snapshot_loader: Callable[[], Awaitable[DigestKeySnapshot]],
         now: Callable[[], datetime] | None = None,
         receipt_id_factory: Callable[[], str] | None = None,
     ) -> None:
         self.slides_db = slides_db
         self.job_manager = job_manager
         self.keyring = keyring
-        self.digest_snapshot = digest_snapshot
+        self._digest_snapshot_loader = digest_snapshot_loader
         self._now = now or (lambda: datetime.now(timezone.utc))
         self._receipt_id_factory = receipt_id_factory or (lambda: str(uuid.uuid4()))
 
@@ -478,20 +495,38 @@ class StandaloneHtmlGenerationService:
         _iso(value)
         return value.replace(microsecond=0)
 
+    async def _load_digest_snapshot(self) -> DigestKeySnapshot:
+        try:
+            snapshot = await self._digest_snapshot_loader()
+            if not isinstance(snapshot, DigestKeySnapshot):
+                raise DigestKeyUnavailableError("generation digest registry returned an invalid snapshot")
+            snapshot.require_generation_ready()
+        except Exception:  # noqa: BLE001 - collapse registry and key detail
+            _fail("generation_digest_key_unavailable", status_code=503, retry_after=1)
+        return snapshot
+
     def _candidate_hmacs(
         self,
         idempotency_key: str,
+        *,
+        digest_snapshot: DigestKeySnapshot,
     ) -> tuple[tuple[str, str], ...]:
         candidates = self.keyring.digest_candidates(
-            snapshot=self.digest_snapshot,
+            snapshot=digest_snapshot,
             domain=HmacDomain.CLIENT_IDEMPOTENCY_KEY,
             payload=idempotency_key.encode("ascii"),
         )
         return tuple((candidate.key_id, candidate.digest_hex) for candidate in candidates)
 
-    def _request_hmac(self, key_id: str, request_bytes: bytes) -> str:
+    def _request_hmac(
+        self,
+        key_id: str,
+        request_bytes: bytes,
+        *,
+        digest_snapshot: DigestKeySnapshot,
+    ) -> str:
         return self.keyring.digest_for_key(
-            snapshot=self.digest_snapshot,
+            snapshot=digest_snapshot,
             key_id=key_id,
             domain=HmacDomain.CLIENT_REQUEST,
             payload=request_bytes,
@@ -503,6 +538,7 @@ class StandaloneHtmlGenerationService:
         owner_user_id: str,
         idempotency_candidates: tuple[tuple[str, str], ...],
         request_bytes: bytes,
+        digest_snapshot: DigestKeySnapshot,
     ) -> SlidesGenerationReceiptRow | None:
         receipt = self.slides_db.find_generation_receipt_by_idempotency_digests(
             owner_user_id=owner_user_id,
@@ -523,6 +559,7 @@ class StandaloneHtmlGenerationService:
         incoming_request_hmac = self._request_hmac(
             receipt.digest_key_id,
             request_bytes,
+            digest_snapshot=digest_snapshot,
         )
         if not hmac.compare_digest(
             incoming_request_hmac,
@@ -550,27 +587,41 @@ class StandaloneHtmlGenerationService:
         job: Mapping[str, Any],
         *,
         receipt: SlidesGenerationReceiptRow,
-    ) -> tuple[int, str]:
+    ) -> tuple[int | None, str]:
         try:
             job_id = job["id"]
             job_uuid = _valid_uuid(job["uuid"])
         except (KeyError, TypeError):
             _fail("generation_correlation_mismatch", status_code=409)
-        if isinstance(job_id, bool) or not isinstance(job_id, int) or job_id < 0:
+        archived = job.get("archived") is True
+        if (
+            isinstance(job_id, bool)
+            or (job_id is not None and (not isinstance(job_id, int) or job_id <= 0))
+            or (job_id is None and not archived)
+        ):
             _fail("generation_correlation_mismatch", status_code=409)
         payload = self.job_manager._maybe_decrypt_json(self.job_manager._parse_json_value(job.get("payload")))
+        candidate_jobs_key = job.get("idempotency_key")
+        stored_jobs_key = receipt.jobs_idempotency_key
+        jobs_key_matches = bool(
+            isinstance(candidate_jobs_key, str)
+            and _JOBS_IDEMPOTENCY_KEY_RE.fullmatch(candidate_jobs_key) is not None
+            and isinstance(stored_jobs_key, str)
+            and _JOBS_IDEMPOTENCY_KEY_RE.fullmatch(stored_jobs_key) is not None
+            and hmac.compare_digest(candidate_jobs_key, stored_jobs_key)
+        )
         if (
             job.get("domain") != JOB_DOMAIN
             or job.get("queue") != JOB_QUEUE
             or job.get("job_type") != JOB_TYPE
             or job.get("owner_user_id") != receipt.owner_user_id
-            or job.get("idempotency_key") != receipt.jobs_idempotency_key
+            or not jobs_key_matches
             or payload != expected_job_payload(receipt.id)
         ):
             _fail("generation_correlation_mismatch", status_code=409)
         if receipt.job_uuid is not None and receipt.job_uuid != job_uuid:
             _fail("generation_correlation_mismatch", status_code=409)
-        if receipt.job_id is not None and receipt.job_id != job_id:
+        if not archived and receipt.job_id is not None and receipt.job_id != job_id:
             _fail("generation_correlation_mismatch", status_code=409)
         return job_id, job_uuid
 
@@ -607,6 +658,8 @@ class StandaloneHtmlGenerationService:
     def verified_input(
         self,
         receipt: SlidesGenerationReceiptRow,
+        *,
+        digest_snapshot: DigestKeySnapshot,
     ) -> SlidesGenerationInputRow:
         """Load immutable input and recompute every worker-available correlation."""
         try:
@@ -635,7 +688,7 @@ class StandaloneHtmlGenerationService:
         input_expires = _parse_canonical_utc(generation_input.input_expires_at)
         try:
             source_verified = self.keyring.verify(
-                snapshot=self.digest_snapshot,
+                snapshot=digest_snapshot,
                 key_id=receipt.digest_key_id,
                 domain=HmacDomain.SOURCE_SNAPSHOT,
                 payload=source_bytes,
@@ -655,7 +708,7 @@ class StandaloneHtmlGenerationService:
         _validated_provenance(receipt, generation_input)
         try:
             execution_verified = self.keyring.verify(
-                snapshot=self.digest_snapshot,
+                snapshot=digest_snapshot,
                 key_id=receipt.digest_key_id,
                 domain=HmacDomain.EXECUTION_MANIFEST,
                 payload=self._execution_manifest(
@@ -677,6 +730,7 @@ class StandaloneHtmlGenerationService:
         *,
         owner_user_id: str,
         receipt_id: str,
+        digest_snapshot: DigestKeySnapshot,
     ) -> SlidesGenerationReceiptRow:
         """Validate exact Jobs correlation and support API-first or worker-first binding."""
         try:
@@ -702,7 +756,7 @@ class StandaloneHtmlGenerationService:
             return receipt
         if receipt.receipt_status in {"failed", "cancelled"}:
             return receipt
-        self.verified_input(receipt)
+        self.verified_input(receipt, digest_snapshot=digest_snapshot)
         try:
             return self.slides_db.bind_generation_job(
                 receipt_id=receipt.id,
@@ -714,7 +768,12 @@ class StandaloneHtmlGenerationService:
         except (ConflictError, KeyError):
             _fail("generation_correlation_mismatch", status_code=409)
 
-    def _replay(self, receipt: SlidesGenerationReceiptRow) -> StandaloneHtmlGenerationSubmission:
+    def _replay(
+        self,
+        receipt: SlidesGenerationReceiptRow,
+        *,
+        digest_snapshot: DigestKeySnapshot,
+    ) -> StandaloneHtmlGenerationSubmission:
         if receipt.receipt_status == "completed":
             if not receipt.presentation_id or not receipt.job_uuid:
                 _fail("generation_correlation_mismatch", status_code=409)
@@ -730,14 +789,13 @@ class StandaloneHtmlGenerationService:
             return self._submission(receipt, replayed=True)
         if receipt.receipt_status != "claimed":
             if receipt.receipt_status in {"queued", "running"}:
-                self.verified_input(receipt)
+                self.verified_input(receipt, digest_snapshot=digest_snapshot)
             return self._submission(receipt, replayed=True)
         try:
             job = self.job_manager.lookup_slides_generation_job(
                 owner_user_id=receipt.owner_user_id,
                 idempotency_key=receipt.jobs_idempotency_key,
                 expected_job_uuid=receipt.job_uuid,
-                expected_job_id=receipt.job_id,
             )
         except Exception as exc:  # noqa: BLE001 - Jobs errors cross a bounded boundary
             raise StandaloneHtmlGenerationError(
@@ -751,6 +809,7 @@ class StandaloneHtmlGenerationService:
             job,
             owner_user_id=receipt.owner_user_id,
             receipt_id=receipt.id,
+            digest_snapshot=digest_snapshot,
         )
         return self._submission(bound, replayed=True)
 
@@ -776,17 +835,30 @@ class StandaloneHtmlGenerationService:
     def _preflight_payload(self, payload: dict[str, str]) -> None:
         try:
             cleaned, _found, _where = self.job_manager._scan_and_redact_secrets(payload)
-            if cleaned != payload:
-                _fail("generation_job_payload_invalid", status_code=503)
-            stored = self.job_manager._maybe_encrypt_json(payload, JOB_DOMAIN)
-            encoded = json.dumps(stored).encode("utf-8")
-            max_bytes = int(os.getenv("JOBS_MAX_JSON_BYTES", "1048576") or "1048576")
-        except StandaloneHtmlGenerationError:
-            raise
         except Exception:  # noqa: BLE001 - existing Jobs policy has varied failures
-            _fail("generation_job_payload_invalid", status_code=503)
+            _fail("generation_job_payload_unavailable", status_code=503)
+        if _found or cleaned != payload:
+            _fail("generation_job_payload_invalid")
+        try:
+            stored = self.job_manager._maybe_encrypt_json(payload, JOB_DOMAIN)
+        except Exception:  # noqa: BLE001 - encryption policy is a transient boundary
+            _fail("generation_job_payload_unavailable", status_code=503)
+        try:
+            encoded = json.dumps(stored, allow_nan=False).encode("utf-8")
+        except (TypeError, UnicodeEncodeError, ValueError):
+            _fail("generation_job_payload_invalid")
+        try:
+            round_trip = self.job_manager._maybe_decrypt_json(self.job_manager._parse_json_value(stored))
+        except Exception:  # noqa: BLE001 - malformed fresh policy output is deterministic
+            _fail("generation_job_payload_invalid")
+        if round_trip != payload:
+            _fail("generation_job_payload_invalid")
+        try:
+            max_bytes = int(os.getenv("JOBS_MAX_JSON_BYTES", "1048576") or "1048576")
+        except (TypeError, ValueError):
+            _fail("generation_job_payload_unavailable", status_code=503)
         if len(encoded) > max_bytes:
-            _fail("generation_job_payload_invalid", status_code=503)
+            _fail("generation_job_payload_too_large", status_code=413)
 
     async def submit(
         self,
@@ -806,18 +878,19 @@ class StandaloneHtmlGenerationService:
             _fail("generation_request_invalid")
         key = validate_idempotency_key(idempotency_key)
         canonical = canonicalize_generation_request(request)
-        try:
-            self.digest_snapshot.require_generation_ready()
-        except DigestKeyUnavailableError:
-            _fail("generation_digest_key_unavailable", status_code=503, retry_after=1)
-        candidates = self._candidate_hmacs(key)
+        lookup_snapshot = await self._load_digest_snapshot()
+        candidates = self._candidate_hmacs(
+            key,
+            digest_snapshot=lookup_snapshot,
+        )
         replay = self._find_replay(
             owner_user_id=owner,
             idempotency_candidates=candidates,
             request_bytes=canonical.manifest_bytes,
+            digest_snapshot=lookup_snapshot,
         )
         if replay is not None:
-            return self._replay(replay)
+            return self._replay(replay, digest_snapshot=lookup_snapshot)
 
         config = config_loader()
         if not isinstance(config, SlidesStandaloneHtmlConfig) or not config.enabled:
@@ -834,14 +907,28 @@ class StandaloneHtmlGenerationService:
         ):
             _fail("source_invalid")
 
+        claim_snapshot = await self._load_digest_snapshot()
+        candidates = self._candidate_hmacs(
+            key,
+            digest_snapshot=claim_snapshot,
+        )
+        replay = self._find_replay(
+            owner_user_id=owner,
+            idempotency_candidates=candidates,
+            request_bytes=canonical.manifest_bytes,
+            digest_snapshot=claim_snapshot,
+        )
+        if replay is not None:
+            return self._replay(replay, digest_snapshot=claim_snapshot)
         current_key_id, current_idempotency_hmac = candidates[0]
         client_request_hmac = self._request_hmac(
             current_key_id,
             canonical.manifest_bytes,
+            digest_snapshot=claim_snapshot,
         )
         source_bytes = source_snapshot.text.encode("utf-8")
         source_hmac = self.keyring.digest_for_key(
-            snapshot=self.digest_snapshot,
+            snapshot=claim_snapshot,
             key_id=current_key_id,
             domain=HmacDomain.SOURCE_SNAPSHOT,
             payload=source_bytes,
@@ -849,7 +936,7 @@ class StandaloneHtmlGenerationService:
         source_ref = source_snapshot.provenance.source_ref
         if source_snapshot.provenance.reference_hmac_input is not None:
             source_ref = self.keyring.digest_for_key(
-                snapshot=self.digest_snapshot,
+                snapshot=claim_snapshot,
                 key_id=current_key_id,
                 domain=HmacDomain.SOURCE_SNAPSHOT,
                 payload=(_REFERENCE_HMAC_PREFIX + source_snapshot.provenance.reference_hmac_input),
@@ -876,7 +963,7 @@ class StandaloneHtmlGenerationService:
             owner_user_id=owner,
             idempotency_key=key,
             keyring=self.keyring,
-            digest_snapshot=self.digest_snapshot,
+            digest_snapshot=claim_snapshot,
         )
         provisional_receipt = SlidesGenerationReceiptRow(
             id=receipt_id,
@@ -915,7 +1002,7 @@ class StandaloneHtmlGenerationService:
             created_at=_iso(created_at),
         )
         execution_hmac = self.keyring.digest_for_key(
-            snapshot=self.digest_snapshot,
+            snapshot=claim_snapshot,
             key_id=current_key_id,
             domain=HmacDomain.EXECUTION_MANIFEST,
             payload=self._execution_manifest(
@@ -939,10 +1026,11 @@ class StandaloneHtmlGenerationService:
                 owner_user_id=owner,
                 idempotency_candidates=candidates,
                 request_bytes=canonical.manifest_bytes,
+                digest_snapshot=claim_snapshot,
             )
             if winner is None:
                 _fail("generation_correlation_mismatch", status_code=409)
-            return self._replay(winner)
+            return self._replay(winner, digest_snapshot=claim_snapshot)
 
         payload = expected_job_payload(receipt_id)
         try:
@@ -990,11 +1078,17 @@ class StandaloneHtmlGenerationService:
                     "generation_job_enqueue_rejected",
                     status_code=503,
                 ) from exc
-        bound = self.correlate_job(
-            job,
-            owner_user_id=owner,
-            receipt_id=receipt_id,
-        )
+        try:
+            bound = self.correlate_job(
+                job,
+                owner_user_id=owner,
+                receipt_id=receipt_id,
+                digest_snapshot=claim_snapshot,
+            )
+        except StandaloneHtmlGenerationError:
+            raise
+        except Exception:  # noqa: BLE001 - collapse unexpected bind/storage detail
+            _fail("generation_receipt_unresolved", status_code=503, retry_after=1)
         return self._submission(bound, replayed=False)
 
     def terminalize(
@@ -1027,6 +1121,7 @@ class StandaloneHtmlGenerationService:
         receipt: SlidesGenerationReceiptRow,
         html_document: str | bytes,
         validation_result: StandaloneHtmlValidationResult,
+        digest_snapshot: DigestKeySnapshot,
     ) -> PresentationRow:
         """Atomically commit validated output using immutable input provenance."""
         if receipt.job_uuid is None:
@@ -1057,7 +1152,10 @@ class StandaloneHtmlGenerationService:
             _fail("generation_correlation_mismatch", status_code=409)
         receipt = current
         try:
-            generation_input = self.verified_input(receipt)
+            generation_input = self.verified_input(
+                receipt,
+                digest_snapshot=digest_snapshot,
+            )
         except StandaloneHtmlGenerationError as original_error:
             try:
                 winner = self.slides_db.get_generation_receipt(
@@ -1088,6 +1186,7 @@ class StandaloneHtmlGenerationService:
             generation_provenance_json=generation_input.provenance_json,
             committed_at=_iso(when),
             expires_at=_iso(when + _TERMINAL_RETENTION),
+            now=self._now,
         )
         return result.presentation
 

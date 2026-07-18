@@ -7,10 +7,10 @@ import json
 import sqlite3
 import threading
 import uuid
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -1975,7 +1975,7 @@ class SlidesDatabase:
         *,
         receipt_id: str,
         owner_user_id: str,
-        job_id: int,
+        job_id: int | None,
         job_uuid: str,
         updated_at: str,
     ) -> SlidesGenerationReceiptRow:
@@ -1988,9 +1988,11 @@ class SlidesDatabase:
             )
             if current.job_uuid is not None and current.job_uuid != job_uuid:
                 raise ConflictError("generation_correlation_mismatch")
-            if current.job_id is not None and current.job_id != int(job_id):
+            if current.job_id is not None and job_id is not None and current.job_id != int(job_id):
                 raise ConflictError("generation_correlation_mismatch")
-            stored_job_id = current.job_id if current.job_id is not None else int(job_id)
+            stored_job_id = (
+                current.job_id if current.job_id is not None else (int(job_id) if job_id is not None else None)
+            )
             next_status = "queued" if current.receipt_status == "claimed" else current.receipt_status
             conn.execute(
                 "UPDATE slides_generation_receipts SET job_id = ?, job_uuid = ?, "
@@ -2088,6 +2090,8 @@ class SlidesDatabase:
             if job_uuid is not None:
                 conditions.append("job_uuid = ?")
                 parameters.append(job_uuid)
+            else:
+                conditions.append("job_uuid IS NULL")
             cursor = conn.execute(
                 "UPDATE slides_generation_receipts SET receipt_status = ?, "
                 "error_code = ?, error_message = ?, updated_at = ?, expires_at = ? "
@@ -2113,6 +2117,7 @@ class SlidesDatabase:
         generation_provenance_json: str,
         committed_at: str,
         expires_at: str,
+        now: Callable[[], datetime] | None = None,
     ) -> SlidesGenerationCommitResult:
         """Atomically insert one presentation, complete its receipt, and delete input."""
         source = bind_validated_standalone_source(html_document, validation_result)
@@ -2140,12 +2145,44 @@ class SlidesDatabase:
                 receipt_id,
                 owner_user_id,
             )
+
+            def canonical_utc(value: object) -> datetime:
+                if not isinstance(value, str):
+                    raise ConflictError("generation_correlation_mismatch")
+                try:
+                    parsed = datetime.fromisoformat(value)
+                except ValueError:
+                    raise ConflictError("generation_correlation_mismatch") from None
+                if (
+                    parsed.tzinfo is None
+                    or parsed.utcoffset() != timedelta(0)
+                    or parsed.replace(microsecond=0).isoformat() != value
+                ):
+                    raise ConflictError("generation_correlation_mismatch")
+                return parsed
+
+            receipt_created = canonical_utc(receipt.created_at)
+            input_created = canonical_utc(generation_input.created_at)
+            input_deadline = canonical_utc(generation_input.input_expires_at)
+            if (
+                input_created != receipt_created
+                or input_deadline != receipt_created + timedelta(hours=24)
+                or generation_provenance_json != generation_input.provenance_json
+            ):
+                raise ConflictError("generation_correlation_mismatch")
             try:
-                input_deadline = datetime.fromisoformat(generation_input.input_expires_at)
                 commit_time = datetime.fromisoformat(committed_at)
-            except ValueError as exc:
+                transaction_time = (now or (lambda: datetime.now(timezone.utc)))()
+            except Exception as exc:
                 raise SlidesDatabaseError("generation_timestamp_invalid") from exc
-            if input_deadline.tzinfo is None or commit_time.tzinfo is None or commit_time >= input_deadline:
+            if (
+                input_deadline.tzinfo is None
+                or commit_time.tzinfo is None
+                or transaction_time.tzinfo is None
+                or transaction_time.utcoffset() != timedelta(0)
+            ):
+                raise SlidesDatabaseError("generation_timestamp_invalid")
+            if transaction_time >= input_deadline:
                 raise ConflictError("generation_expired")
 
             candidate = {
