@@ -646,6 +646,8 @@ Inside the serialized transaction, resolve an existing idempotency tuple before 
 
 Repeat the focused red/green review tests, the Step 7 matrix with required real PostgreSQL execution and no skips, both review stages, compile checks, Ruff on changed files, and Bandit on touched production files.
 
+The first quality re-review validated one additional PostgreSQL race: `prune_jobs` can delete configured nonterminal statuses without acquiring the admission advisory lock. Lock the exact replay row during the pre-quota probe so a concurrent delete cannot turn an observed replay into a fresh quota-bypassed insert. Add a deterministic real-PostgreSQL delete/replay regression, then repeat both review stages and every gate above.
+
 - [ ] **Step 13: Commit and open PR 1**
 
 ```bash
