@@ -40,12 +40,22 @@ def _admission_is_consistent(
     durable_events: tuple,
 ) -> bool:
     """Independent oracle mirroring the AdmissionResult contract."""
+    is_idempotent_existing = (
+        outcome is OperationOutcome.NO_TRANSITION
+        and no_transition_reason is NoTransitionReason.IDEMPOTENT_EXISTING
+    )
     if outcome is OperationOutcome.APPLIED:
         if not was_inserted or row is None:
             return False
     else:
-        if was_inserted or durable_events:
+        if was_inserted:
             return False
+    if is_idempotent_existing and row is None:
+        return False
+    if durable_events and not (
+        outcome is OperationOutcome.APPLIED or is_idempotent_existing
+    ):
+        return False
     if outcome is OperationOutcome.NO_TRANSITION and no_transition_reason is None:
         return False
     if outcome is not OperationOutcome.NO_TRANSITION and no_transition_reason is not None:
@@ -127,6 +137,10 @@ class TestAdmissionResultContract:
             outcome=OperationOutcome.NO_TRANSITION,
             no_transition_reason=NoTransitionReason.MISSING,
         )
+        AdmissionResult.existing(
+            row={"id": 1},
+            durable_events=({"type": "created", "idempotent": True},),
+        )
         AdmissionResult(
             outcome=OperationOutcome.ADMISSION_REJECTED,
             admission_rejection_reason=AdmissionRejectionReason.QUEUE_PAUSED,
@@ -145,6 +159,10 @@ class TestAdmissionResultContract:
                 "outcome": OperationOutcome.BACKEND_ERROR,
                 "no_transition_reason": NoTransitionReason.MISSING,
             },  # only no_transition carries a reason
+            {
+                "outcome": OperationOutcome.NO_TRANSITION,
+                "no_transition_reason": NoTransitionReason.IDEMPOTENT_EXISTING,
+            },  # idempotent existing requires the existing row
         ],
     )
     def test_impossible_states_raise(self, kwargs: dict) -> None:

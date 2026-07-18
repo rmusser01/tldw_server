@@ -20,6 +20,7 @@ def _set_base_env(monkeypatch, tmp_path: Path):
     # Jobs DB under tmpdir
     monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "Databases" / "jobs.db"))
     # Webhooks worker configuration
+    monkeypatch.setenv("JOBS_EVENTS_OUTBOX", "true")
     monkeypatch.setenv("JOBS_WEBHOOKS_ENABLED", "true")
     monkeypatch.setenv("JOBS_WEBHOOKS_URL", "http://127.0.0.1/webhook")  # loopback OK in TEST_MODE
     monkeypatch.setenv("JOBS_WEBHOOKS_SECRET_KEYS", "testsecret,oldsecret")
@@ -129,6 +130,35 @@ async def test_webhooks_signed_and_cursor_resume(monkeypatch, tmp_path):
     # Cursor should advance
     second_after = int(cursor_path.read_text().strip() or "0")
     assert second_after > first_after
+
+
+@pytest.mark.asyncio
+async def test_webhooks_enabled_without_outbox_refuses_before_database_access(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _set_base_env(monkeypatch, tmp_path)
+    monkeypatch.setenv("JOBS_EVENTS_OUTBOX", "false")
+
+    from tldw_Server_API.app.services import jobs_webhooks_service as svc
+
+    manager_calls: list[str] = []
+
+    class _UnexpectedJobManager:
+        @staticmethod
+        def set_rls_context(**_kwargs) -> None:
+            manager_calls.append("set_rls_context")
+
+        def __init__(self) -> None:
+            manager_calls.append("init")
+
+    monkeypatch.setattr(svc, "JobManager", _UnexpectedJobManager)
+    stop_event = asyncio.Event()
+    stop_event.set()
+
+    await svc.run_jobs_webhooks_worker(stop_event=stop_event)
+
+    assert manager_calls == []
 
 
 @pytest.mark.asyncio

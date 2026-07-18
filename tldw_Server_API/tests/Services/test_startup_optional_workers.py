@@ -125,7 +125,21 @@ def test_optional_worker_spec_predicates_match_legacy_gates(
     assert enabled_envs == [
         "JOBS_METRICS_RECONCILE_ENABLE",
         "JOBS_WEBHOOKS_ENABLED",
+        "JOBS_EVENTS_OUTBOX",
     ]
+
+
+def test_jobs_webhooks_worker_spec_rejects_disabled_outbox(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_workers = _import_startup_optional_workers()
+    monkeypatch.setenv("JOBS_WEBHOOKS_ENABLED", "true")
+    monkeypatch.setenv("JOBS_WEBHOOKS_URL", "https://hooks.test/jobs")
+    monkeypatch.setenv("JOBS_EVENTS_OUTBOX", "false")
+
+    specs = _specs_by_name(startup_workers)
+
+    assert specs["jobs_webhooks_task"].enabled(_context()) is False
 
 
 @pytest.mark.asyncio
@@ -250,6 +264,39 @@ async def test_start_jobs_webhooks_worker_skips_without_url(
 
 
 @pytest.mark.asyncio
+async def test_start_jobs_webhooks_worker_skips_without_outbox(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_workers = _import_startup_optional_workers()
+    created: list[str] = []
+
+    monkeypatch.setenv("JOBS_WEBHOOKS_ENABLED", "true")
+    monkeypatch.setenv("JOBS_WEBHOOKS_URL", "https://example.test/jobs-webhooks")
+    monkeypatch.setenv("JOBS_EVENTS_OUTBOX", "false")
+    monkeypatch.setattr(
+        startup_workers,
+        "_make_event",
+        lambda: created.append("event") or object(),
+    )
+    monkeypatch.setattr(
+        startup_workers,
+        "_run_jobs_webhooks_worker_service",
+        lambda _stop_event: "webhook-worker",
+    )
+    monkeypatch.setattr(
+        startup_workers,
+        "_create_task",
+        lambda _awaitable: created.append("task") or object(),
+    )
+
+    stop_event, task = await startup_workers._start_jobs_webhooks_worker()
+
+    assert stop_event is None
+    assert task is None
+    assert created == []
+
+
+@pytest.mark.asyncio
 async def test_start_jobs_webhooks_worker_registers_background_inventory_when_enabled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -266,6 +313,7 @@ async def test_start_jobs_webhooks_worker_registers_background_inventory_when_en
 
     monkeypatch.setenv("JOBS_WEBHOOKS_ENABLED", "true")
     monkeypatch.setenv("JOBS_WEBHOOKS_URL", "https://example.test/jobs-webhooks")
+    monkeypatch.setenv("JOBS_EVENTS_OUTBOX", "true")
     monkeypatch.setattr(
         startup_workers,
         "_run_jobs_webhooks_worker_service",
