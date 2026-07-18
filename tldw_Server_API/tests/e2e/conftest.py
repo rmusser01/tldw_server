@@ -199,17 +199,18 @@ def _ensure_inprocess_admin_bearer(disable_rate_limiting, _ensure_inprocess_sing
         yield
         return
 
-    from tldw_Server_API.tests.e2e.fixtures import APIClient
     from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService
+    from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
+    from tldw_Server_API.app.core.AuthNZ.username_utils import (
+        InvalidUsernameError,
+        normalize_admin_username,
+    )
     from tldw_Server_API.app.core.DB_Management.Users_DB import (
-        get_users_db,
         DuplicateUserError,
         ensure_user_directories,
+        get_users_db,
     )
-    from tldw_Server_API.app.core.AuthNZ.username_utils import (
-        normalize_admin_username,
-        InvalidUsernameError,
-    )
+    from tldw_Server_API.tests.e2e.fixtures import APIClient
 
     admin_username_raw = os.getenv("E2E_ADMIN_USERNAME", "e2e_admin")
     try:
@@ -236,7 +237,7 @@ def _ensure_inprocess_admin_bearer(disable_rate_limiting, _ensure_inprocess_sing
             password_hash = PasswordService().hash_password(admin_password)
             existing = await users_db.get_user_by_username(admin_username)
             if existing:
-                updated = await users_db.update_user(
+                admin_user = await users_db.update_user(
                     int(existing["id"]),
                     password_hash=password_hash,
                     role="admin",
@@ -244,29 +245,36 @@ def _ensure_inprocess_admin_bearer(disable_rate_limiting, _ensure_inprocess_sing
                     is_active=True,
                     is_verified=True,
                 )
-                await ensure_user_directories(int(updated["id"]))
-                return updated
+            else:
+                admin_user = None
+                for email_candidate in (
+                    admin_email,
+                    f"{admin_username}+{uuid.uuid4().hex[:6]}@example.com",
+                ):
+                    try:
+                        admin_user = await users_db.create_user(
+                            username=admin_username,
+                            email=email_candidate,
+                            password_hash=password_hash,
+                            role="admin",
+                            is_active=True,
+                            is_verified=True,
+                            is_superuser=True,
+                        )
+                        break
+                    except DuplicateUserError:
+                        continue
 
-            for email_candidate in (
-                admin_email,
-                f"{admin_username}+{uuid.uuid4().hex[:6]}@example.com",
-            ):
-                try:
-                    created = await users_db.create_user(
-                        username=admin_username,
-                        email=email_candidate,
-                        password_hash=password_hash,
-                        role="admin",
-                        is_active=True,
-                        is_verified=True,
-                        is_superuser=True,
-                    )
-                    await ensure_user_directories(int(created["id"]))
-                    return created
-                except DuplicateUserError:
-                    continue
+                if admin_user is None:
+                    raise RuntimeError("Unable to create in-process admin user for E2E tests.")
 
-            raise RuntimeError("Unable to create or update in-process admin user for E2E tests.")
+            admin_user_id = int(admin_user["id"])
+            users_repo = await AuthnzUsersRepo.from_pool()
+            await users_repo.assign_role_if_missing(user_id=admin_user_id, role_name="admin")
+            if not await users_repo.has_role_assignment(user_id=admin_user_id, role_name="admin"):
+                raise RuntimeError("Canonical admin role membership is unavailable for E2E tests.")
+            await ensure_user_directories(admin_user_id)
+            return admin_user
 
         asyncio.run(_ensure_admin_user())
         api_client.login(admin_username, admin_password)
