@@ -592,7 +592,7 @@ def _fence_job(
     job_manager: JobManager,
     acquired_job: Mapping[str, Any],
     *,
-    now: datetime,
+    now: Callable[[], datetime],
 ) -> dict[str, Any] | WorkerTerminalOutcome | None:
     """Require exact immutable identity plus one live, uncancelled lease."""
     try:
@@ -603,7 +603,7 @@ def _fence_job(
             receipt,
             acquired_job,
             code="generation_jobs_unavailable",
-            now=now,
+            now=_safe_now(now),
         )
     if candidate is None:
         return _retry(
@@ -611,7 +611,7 @@ def _fence_job(
             receipt,
             acquired_job,
             code="generation_job_state_changed",
-            now=now,
+            now=_safe_now(now),
         )
     try:
         candidate = _normalized_job(job_manager, candidate)
@@ -622,8 +622,9 @@ def _fence_job(
             status="failed",
             code="generation_correlation_mismatch",
             message="Generation correlation failed.",
-            now=now,
+            now=_safe_now(now),
         )
+    fence_time = _safe_now(now)
     if not _job_identity_is_exact(candidate, acquired_job):
         return _terminalize(
             service,
@@ -631,18 +632,18 @@ def _fence_job(
             status="failed",
             code="generation_correlation_mismatch",
             message="Generation correlation failed.",
-            now=now,
+            now=fence_time,
         )
-    terminal = _terminal_jobs_outcome(service, receipt, candidate, now=now)
+    terminal = _terminal_jobs_outcome(service, receipt, candidate, now=fence_time)
     if terminal is not None:
         return terminal
-    if not _final_job_is_live(candidate, acquired_job, now=now):
+    if not _final_job_is_live(candidate, acquired_job, now=fence_time):
         return _retry(
             service,
             receipt,
             acquired_job,
             code="generation_job_state_changed",
-            now=now,
+            now=fence_time,
         )
     return None
 
@@ -832,6 +833,17 @@ async def process_standalone_html_generation_job(
                 now=current_time,
             )
 
+        try:
+            await _load_digest_snapshot(digest_snapshot_loader)
+        except DigestKeyUnavailableError:
+            return _reset_and_release_for_missing_key(
+                service,
+                receipt,
+                job_manager,
+                job,
+                now=_safe_now(now),
+            )
+        target_failure = _target_failure_code(target, current_config_loader)
         pre_provider_time = _safe_now(now)
         if input_deadline is None or pre_provider_time >= input_deadline:
             return _terminalize(
@@ -842,17 +854,6 @@ async def process_standalone_html_generation_job(
                 message="Generation input expired.",
                 now=input_deadline or pre_provider_time,
             )
-        try:
-            await _load_digest_snapshot(digest_snapshot_loader)
-        except DigestKeyUnavailableError:
-            return _reset_and_release_for_missing_key(
-                service,
-                receipt,
-                job_manager,
-                job,
-                now=pre_provider_time,
-            )
-        target_failure = _target_failure_code(target, current_config_loader)
         if target_failure is not None:
             return _terminalize(
                 service,
@@ -862,16 +863,6 @@ async def process_standalone_html_generation_job(
                 message="Standalone HTML generation is unavailable.",
                 now=pre_provider_time,
             )
-        fenced = _fence_job(
-            service,
-            receipt,
-            job_manager,
-            job,
-            now=pre_provider_time,
-        )
-        if fenced is not None:
-            return fenced
-
         try:
             provider_api_key = provider_api_key_loader(target)
         except Exception:  # noqa: BLE001 - credentials must never escape
@@ -881,6 +872,35 @@ async def process_standalone_html_generation_job(
                 job,
                 code="standalone_html_provider_credentials_unavailable",
                 now=pre_provider_time,
+            )
+        pre_provider_time = _safe_now(now)
+        if input_deadline is None or pre_provider_time >= input_deadline:
+            return _terminalize(
+                service,
+                receipt,
+                status="failed",
+                code="generation_expired",
+                message="Generation input expired.",
+                now=input_deadline or pre_provider_time,
+            )
+        fenced = _fence_job(
+            service,
+            receipt,
+            job_manager,
+            job,
+            now=now,
+        )
+        if fenced is not None:
+            return fenced
+        provider_start_time = _safe_now(now)
+        if input_deadline is None or provider_start_time >= input_deadline:
+            return _terminalize(
+                service,
+                receipt,
+                status="failed",
+                code="generation_expired",
+                message="Generation input expired.",
+                now=input_deadline or provider_start_time,
             )
         try:
             generated = provider_generate(
@@ -955,6 +975,16 @@ async def process_standalone_html_generation_job(
                 now=_safe_now(now),
             )
 
+        try:
+            commit_snapshot = await _load_digest_snapshot(digest_snapshot_loader)
+        except DigestKeyUnavailableError:
+            return _reset_and_release_for_missing_key(
+                service,
+                receipt,
+                job_manager,
+                job,
+                now=_safe_now(now),
+            )
         final_time = _safe_now(now)
         if input_deadline is None or final_time >= input_deadline:
             return _terminalize(
@@ -970,20 +1000,10 @@ async def process_standalone_html_generation_job(
             receipt,
             job_manager,
             job,
-            now=final_time,
+            now=now,
         )
         if fenced is not None:
             return fenced
-        try:
-            commit_snapshot = await _load_digest_snapshot(digest_snapshot_loader)
-        except DigestKeyUnavailableError:
-            return _reset_and_release_for_missing_key(
-                service,
-                receipt,
-                job_manager,
-                job,
-                now=_safe_now(now),
-            )
         try:
             presentation = service.commit(
                 receipt=receipt,

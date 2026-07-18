@@ -594,6 +594,14 @@ def test_postgres_admission_and_public_lookup_hold_serialized_readiness_lock():
     assert "COUNT(DISTINCT uuid)" not in audit_source
 
 
+def test_postgres_archive_lookup_queries_are_bounded_by_authority():
+    source = inspect.getsource(JobManager._lookup_slides_generation_job_in_connection)
+
+    assert "ORDER BY archived_at DESC, uuid LIMIT 1" in source
+    assert "AND idempotency_key=%s AND uuid=%s" in source
+    assert "ORDER BY archived_at DESC, uuid LIMIT 2" in source
+
+
 @pytest.mark.pg_jobs
 def test_postgres_archive_lookup_selects_expected_uuid_or_newest_distinct_candidate(
     jobs_pg_dsn,
@@ -1038,6 +1046,10 @@ def test_postgres_worker_terminalizer_bookkeeping_is_exactly_once(
     lease_id = str(acquired["lease_id"])
     with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
         cur.execute(
+            "UPDATE jobs SET last_error='prior_retry' WHERE id=%s",
+            (int(job["id"]),),
+        )
+        cur.execute(
             """
             UPDATE job_counters SET processing_count=1
             WHERE domain='slides' AND queue='default' AND job_type='presentation.generate'
@@ -1074,6 +1086,60 @@ def test_postgres_worker_terminalizer_bookkeeping_is_exactly_once(
             (int(job["id"]), event_type),
         )
         assert cur.fetchone()[0] == 1
+        cur.execute("SELECT last_error FROM jobs WHERE id=%s", (int(job["id"]),))
+        assert cur.fetchone()[0] is None
+
+
+@pytest.mark.pg_jobs
+def test_postgres_worker_terminalizer_accepts_reconciler_cas_winner(jobs_pg_dsn):
+    manager = JobManager(None, backend="postgres", db_url=jobs_pg_dsn)
+    job = manager.create_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        payload={},
+        owner_user_id="owner-1",
+        idempotency_key="worker-reconciler-race-pg",
+    )
+    acquired = manager.acquire_next_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        lease_seconds=30,
+        worker_id="slides-worker",
+    )
+    assert acquired is not None
+    assert (
+        manager.terminalize_slides_generation_job_from_reconciler(
+            job_uuid=str(job["uuid"]),
+            job_id=int(job["id"]),
+            owner_user_id="owner-1",
+            expected_status="processing",
+            status="failed",
+            error_code="generation_expired",
+            error_message="Generation input expired.",
+            completion_token="reconciler:pg:expiry:v1",
+        )
+        == "APPLIED"
+    )
+
+    assert (
+        manager.terminalize_job_from_worker(
+            job_id=int(job["id"]),
+            job_uuid=str(job["uuid"]),
+            owner_user_id="owner-1",
+            domain="slides",
+            queue="default",
+            job_type="presentation.generate",
+            worker_id="slides-worker",
+            lease_id=str(acquired["lease_id"]),
+            completion_token=str(acquired["lease_id"]),
+            status="failed",
+            error_code="slides_render_failed",
+            error_message="bounded worker-safe detail",
+        )
+        == "ALREADY_TERMINAL"
+    )
 
 
 @pytest.mark.pg_jobs

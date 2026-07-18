@@ -1039,6 +1039,67 @@ async def test_terminal_outcome_accepts_exact_already_terminal_race(monkeypatch,
 
 
 @pytest.mark.asyncio
+async def test_terminal_outcome_accepts_real_reconciler_cas_winner(monkeypatch, tmp_path):
+    db_path = tmp_path / "jobs_wsdk_reconciler_terminal_race.db"
+    ensure_jobs_tables(db_path)
+    jm = JobManager(db_path)
+    job = jm.create_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        payload={},
+        owner_user_id="owner-1",
+        idempotency_key=_slides_jobs_key("e"),
+    )
+    sdk = WorkerSDK(
+        jm,
+        WorkerConfig(domain="slides", queue="default", worker_id="slides-worker"),
+    )
+    sdk._sleep = DummySleep(asyncio.sleep)
+    original_terminalize = jm.terminalize_job_from_worker
+    reconciler_results: list[str] = []
+
+    def reconciler_wins_after_sdk_preread(**kwargs):
+        reconciler_results.append(
+            jm.terminalize_slides_generation_job_from_reconciler(
+                job_uuid=kwargs["job_uuid"],
+                owner_user_id=kwargs["owner_user_id"],
+                expected_status="processing",
+                status="failed",
+                error_code="generation_expired",
+                error_message="Generation input expired.",
+                completion_token="reconciler:expiry:v1",
+                job_id=kwargs["job_id"],
+            )
+        )
+        return original_terminalize(**kwargs)
+
+    monkeypatch.setattr(
+        jm,
+        "terminalize_job_from_worker",
+        reconciler_wins_after_sdk_preread,
+    )
+
+    async def handler(_job_row):
+        sdk.stop()
+        return worker_sdk_module.WorkerTerminalOutcome(
+            status="failed",
+            error_code="slides_render_failed",
+            message="bounded worker-safe detail",
+        )
+
+    await asyncio.wait_for(
+        sdk.run(handler=handler, job_type="presentation.generate"),
+        timeout=1,
+    )
+
+    assert reconciler_results == ["APPLIED"]
+    stored = jm.get_job(int(job["id"]))
+    assert stored["status"] == "failed"
+    assert stored["error_code"] == "generation_expired"
+
+
+@pytest.mark.asyncio
 async def test_terminal_outcome_observes_uuid_authoritative_compressed_archive(
     monkeypatch,
     tmp_path,

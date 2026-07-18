@@ -1426,12 +1426,21 @@ class JobManager:
             rows = list(cur.fetchall() or [])
             archived = False
             if not rows:
-                cur.execute(
-                    "SELECT * FROM jobs_archive WHERE domain='slides' AND queue='default' "
-                    "AND job_type='presentation.generate' AND owner_user_id=%s "
-                    "AND idempotency_key=%s ORDER BY archived_at DESC, uuid",
-                    (owner_user_id, idempotency_key),
-                )
+                if expected_job_uuid is None:
+                    cur.execute(
+                        "SELECT * FROM jobs_archive WHERE domain='slides' AND queue='default' "
+                        "AND job_type='presentation.generate' AND owner_user_id=%s "
+                        "AND idempotency_key=%s ORDER BY archived_at DESC, uuid LIMIT 1",
+                        (owner_user_id, idempotency_key),
+                    )
+                else:
+                    cur.execute(
+                        "SELECT * FROM jobs_archive WHERE domain='slides' AND queue='default' "
+                        "AND job_type='presentation.generate' AND owner_user_id=%s "
+                        "AND idempotency_key=%s AND uuid=%s "
+                        "ORDER BY archived_at DESC, uuid LIMIT 2",
+                        (owner_user_id, idempotency_key, expected_job_uuid),
+                    )
                 rows = list(cur.fetchall() or [])
                 archived = bool(rows)
         else:
@@ -1445,14 +1454,26 @@ class JobManager:
             )
             archived = False
             if not rows:
-                rows = list(
-                    conn.execute(
+                if expected_job_uuid is None:
+                    archived_query = (
                         "SELECT * FROM jobs_archive WHERE domain='slides' AND queue='default' "
                         "AND job_type='presentation.generate' AND owner_user_id=? "
-                        "AND idempotency_key=? ORDER BY archived_at DESC, uuid",
-                        (owner_user_id, idempotency_key),
-                    ).fetchall()
-                )
+                        "AND idempotency_key=? ORDER BY archived_at DESC, uuid LIMIT 1"
+                    )
+                    archived_params = (owner_user_id, idempotency_key)
+                else:
+                    archived_query = (
+                        "SELECT * FROM jobs_archive WHERE domain='slides' AND queue='default' "
+                        "AND job_type='presentation.generate' AND owner_user_id=? "
+                        "AND idempotency_key=? AND uuid=? "
+                        "ORDER BY archived_at DESC, uuid LIMIT 2"
+                    )
+                    archived_params = (
+                        owner_user_id,
+                        idempotency_key,
+                        expected_job_uuid,
+                    )
+                rows = list(conn.execute(archived_query, archived_params).fetchall())
                 archived = bool(rows)
         if not rows:
             return None
@@ -5594,7 +5615,7 @@ class JobManager:
                     cur.execute(
                         """
                         UPDATE jobs
-                        SET status=%s, error_code=%s, error_message=%s,
+                        SET status=%s, error_code=%s, error_message=%s, last_error=NULL,
                             completion_token=%s, completed_at=NOW(), leased_until=NULL,
                             cancelled_at=CASE WHEN %s='cancelled' THEN NOW() ELSE cancelled_at END,
                             cancellation_reason=CASE WHEN %s='cancelled' THEN %s ELSE cancellation_reason END
@@ -5662,7 +5683,7 @@ class JobManager:
                     updated = conn.execute(
                         """
                         UPDATE jobs
-                        SET status=?, error_code=?, error_message=?, completion_token=?,
+                        SET status=?, error_code=?, error_message=?, last_error=NULL, completion_token=?,
                             completed_at=?, leased_until=NULL,
                             cancelled_at=CASE WHEN ?='cancelled' THEN ? ELSE cancelled_at END,
                             cancellation_reason=CASE WHEN ?='cancelled' THEN ? ELSE cancellation_reason END
@@ -5763,9 +5784,7 @@ class JobManager:
                 and stored.get("job_type") == job_type
             )
             exact_correlation = (
-                stable_correlation
-                and stored.get("worker_id") == worker_id
-                and stored.get("lease_id") == lease_id
+                stable_correlation and stored.get("worker_id") == worker_id and stored.get("lease_id") == lease_id
             )
             identical_terminal = (
                 stored.get("status") == status
@@ -5775,12 +5794,19 @@ class JobManager:
             )
             if exact_correlation and identical_terminal:
                 return "IDEMPOTENT"
-            generic_terminal_winner = (
-                stored.get("status") == "quarantined"
-                or (stored.get("status") == "failed" and stored.get("last_error") is not None)
-                or (stored.get("status") == "cancelled" and stored.get("completed_at") is None)
+            terminal_status = stored.get("status")
+            worker_terminal_winner = (
+                exact_correlation
+                and terminal_status in {"failed", "cancelled"}
+                and stored.get("completion_token") == stored.get("lease_id")
+                and stored.get("last_error") is None
+                and stored.get("completed_at") is not None
             )
-            if stable_correlation and generic_terminal_winner:
+            if (
+                stable_correlation
+                and terminal_status in {"failed", "cancelled", "quarantined"}
+                and not worker_terminal_winner
+            ):
                 return "ALREADY_TERMINAL"
             return "CONFLICT"
         finally:
@@ -7044,7 +7070,7 @@ class JobManager:
             raise ValueError("completion_token required by JOBS_REQUIRE_COMPLETION_TOKEN")  # noqa: TRY003
         if enforce is None:
             enforce = self._should_enforce_ack()
-        failure_streak_code = str(error_code or error)
+        streak_code = str(error_code or error)
         outbox_enabled = JobManager._is_truthy(os.getenv("JOBS_EVENTS_OUTBOX", ""))
         post_commit_side_effects: list[
             tuple[Any, tuple[Any, ...], dict[str, Any]]
@@ -7132,23 +7158,23 @@ class JobManager:
                                         "WHERE id = %s AND status = 'processing' AND retry_count < max_retries AND worker_id = %s AND lease_id = %s AND (completion_token IS NULL OR completion_token = %s)"
                                     ),
                                     (
-                                        failure_streak_code,
+                                        streak_code,
                                         int(thresh),
-                                        (error_code or error),
+                                        streak_code,
                                         error,
                                         error_code,
                                         error_class,
                                         (json.dumps(error_stack) if error_stack is not None else None),
-                                        failure_streak_code,
-                                        failure_streak_code,
-                                        failure_streak_code,
+                                        streak_code,
+                                        streak_code,
+                                        streak_code,
                                         int(thresh),
                                         completion_token,
-                                        failure_streak_code,
+                                        streak_code,
                                         int(thresh),
                                         int(delay),
                                         int(delay),
-                                        failure_streak_code,
+                                        streak_code,
                                         int(thresh),
                                         int(job_id),
                                         worker_id,
@@ -7170,23 +7196,23 @@ class JobManager:
                                         "WHERE id = %s AND status = 'processing' AND retry_count < max_retries AND (completion_token IS NULL OR completion_token = %s)"
                                     ),
                                     (
-                                        failure_streak_code,
+                                        streak_code,
                                         int(thresh),
-                                        (error_code or error),
+                                        streak_code,
                                         error,
                                         error_code,
                                         error_class,
                                         (json.dumps(error_stack) if error_stack is not None else None),
-                                        failure_streak_code,
-                                        failure_streak_code,
-                                        failure_streak_code,
+                                        streak_code,
+                                        streak_code,
+                                        streak_code,
                                         int(thresh),
                                         completion_token,
-                                        failure_streak_code,
+                                        streak_code,
                                         int(thresh),
                                         int(delay),
                                         int(delay),
-                                        failure_streak_code,
+                                        streak_code,
                                         int(thresh),
                                         int(job_id),
                                         completion_token,
@@ -7725,23 +7751,23 @@ class JobManager:
                                     "WHERE id = ? AND status = 'processing' AND retry_count < max_retries AND worker_id = ? AND lease_id = ? AND (completion_token IS NULL OR completion_token = ?)"
                                 ),
                                 (
-                                    failure_streak_code,
+                                    streak_code,
                                     int(thresh),
-                                    (error_code or error),
+                                    streak_code,
                                     error,
                                     error_code,
                                     error_class,
                                     (json.dumps(error_stack) if error_stack is not None else None),
-                                    failure_streak_code,
-                                    failure_streak_code,
-                                    failure_streak_code,
+                                    streak_code,
+                                    streak_code,
+                                    streak_code,
                                     int(thresh),
                                     completion_token,
-                                    failure_streak_code,
+                                    streak_code,
                                     int(thresh),
                                     int(delay),
                                     f"+{delay} seconds",
-                                    failure_streak_code,
+                                    streak_code,
                                     int(thresh),
                                     job_id,
                                     worker_id,
@@ -7763,23 +7789,23 @@ class JobManager:
                                     "WHERE id = ? AND status = 'processing' AND retry_count < max_retries AND (completion_token IS NULL OR completion_token = ?)"
                                 ),
                                 (
-                                    failure_streak_code,
+                                    streak_code,
                                     int(thresh),
-                                    (error_code or error),
+                                    streak_code,
                                     error,
                                     error_code,
                                     error_class,
                                     (json.dumps(error_stack) if error_stack is not None else None),
-                                    failure_streak_code,
-                                    failure_streak_code,
-                                    failure_streak_code,
+                                    streak_code,
+                                    streak_code,
+                                    streak_code,
                                     int(thresh),
                                     completion_token,
-                                    failure_streak_code,
+                                    streak_code,
                                     int(thresh),
                                     int(delay),
                                     f"+{delay} seconds",
-                                    failure_streak_code,
+                                    streak_code,
                                     int(thresh),
                                     job_id,
                                     completion_token,

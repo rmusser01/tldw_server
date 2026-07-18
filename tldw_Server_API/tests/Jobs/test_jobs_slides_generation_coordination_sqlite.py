@@ -1150,6 +1150,61 @@ def test_sqlite_archive_lookup_selects_expected_uuid_or_newest_distinct_candidat
     )
 
 
+def test_sqlite_archive_lookup_bounds_rows_for_newest_and_expected_uuid(
+    tmp_path,
+    monkeypatch,
+):
+    db_path = ensure_jobs_tables(tmp_path / "slides-bounded-archive-lookup.db")
+    with sqlite3.connect(db_path) as conn:
+        for index in range(25):
+            _insert_archive(
+                conn,
+                job_id=100 + index,
+                job_uuid=f"archive-authority-{index:02d}",
+                owner="owner-1",
+                idempotency_key="bounded-archive-key",
+                archived_at=NOW + timedelta(seconds=index),
+            )
+        conn.commit()
+
+    manager = JobManager(db_path)
+    statements: list[str] = []
+    original_connect = manager._connect
+
+    def traced_connect():
+        connection = original_connect()
+        connection.set_trace_callback(statements.append)
+        return connection
+
+    monkeypatch.setattr(manager, "_connect", traced_connect)
+
+    newest = manager.lookup_slides_generation_job(
+        owner_user_id="owner-1",
+        idempotency_key="bounded-archive-key",
+    )
+    assert newest is not None
+    assert newest["uuid"] == "archive-authority-24"
+
+    expected = manager.lookup_slides_generation_job(
+        owner_user_id="owner-1",
+        idempotency_key="bounded-archive-key",
+        expected_job_uuid="archive-authority-03",
+        expected_job_id=103,
+    )
+    assert expected is not None
+    assert expected["uuid"] == "archive-authority-03"
+
+    archive_selects = [
+        " ".join(statement.lower().split())
+        for statement in statements
+        if "select * from jobs_archive" in statement.lower() and "bounded-archive-key" in statement
+    ]
+    assert len(archive_selects) == 2
+    assert "limit 1" in archive_selects[0]
+    assert "uuid='archive-authority-03'" in archive_selects[1]
+    assert "limit 2" in archive_selects[1]
+
+
 def test_sqlite_archived_generation_replay_precedes_quota_admission(tmp_path, monkeypatch):
     db_path = ensure_jobs_tables(tmp_path / "slides-pre-admission-replay.db")
     with sqlite3.connect(db_path) as conn:

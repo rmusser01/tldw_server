@@ -10,9 +10,11 @@ import importlib
 import inspect
 import json
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from threading import Barrier
 from types import ModuleType
 from typing import Any
 
@@ -336,6 +338,74 @@ async def test_atomic_claim_uses_receipt_only_job_payload_and_exact_replay(store
     assert exc.value.code == "generation_idempotency_conflict"
 
 
+def test_atomic_claim_serializes_two_connection_race(tmp_path: Path):
+    slides_path = tmp_path / "atomic-claim-race.db"
+    bootstrap = SlidesDatabase(slides_path, client_id="owner-1")
+    bootstrap.close_connection()
+    barrier = Barrier(2)
+    created_at = _FIXED_NOW.isoformat()
+
+    def claim(index: int):
+        slides = SlidesDatabase(slides_path, client_id="owner-1")
+        receipt_id = f"0198b65f-a600-7000-8000-{index:012d}"
+        receipt = {
+            "id": receipt_id,
+            "owner_user_id": "owner-1",
+            "digest_key_id": "key-v1",
+            "idempotency_key_hmac_sha256": "a" * 64,
+            "jobs_idempotency_key": "slides:v1:" + "b" * 64,
+            "client_request_hmac_sha256": "c" * 64,
+            "execution_hmac_sha256": "d" * 64,
+            "created_at": created_at,
+            "updated_at": created_at,
+        }
+        generation_input = {
+            "receipt_id": receipt_id,
+            "source_kind": "prompt",
+            "source_text": "source",
+            "source_hmac_sha256": "e" * 64,
+            "source_bytes": 6,
+            "provenance_json": "{}",
+            "html_options_json": "{}",
+            "provider": "openai",
+            "model": "gpt-test",
+            "adapter_id": "openai_official_chat_v1",
+            "endpoint_identity": "https://api.openai.com:443/v1/chat/completions",
+            "system_prompt": "prompt",
+            "prompt_sha256": "f" * 64,
+            "prompt_contract_version": "slides.standalone_html.v1",
+            "input_expires_at": (_FIXED_NOW + timedelta(hours=24)).isoformat(),
+            "created_at": created_at,
+        }
+        try:
+            barrier.wait(timeout=5)
+            return slides.claim_generation_receipt_input(
+                receipt=receipt,
+                generation_input=generation_input,
+                replay_digest_candidates=("a" * 64,),
+            )
+        finally:
+            slides.close_connection()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(claim, (1, 2)))
+
+    assert sorted(result.created for result in results) == [False, True]
+    winner_ids = {result.receipt.id for result in results}
+    assert len(winner_ids) == 1
+    assert all(result.generation_input is not None for result in results)
+    assert {
+        result.generation_input.receipt_id for result in results if result.generation_input is not None
+    } == winner_ids
+    slides = SlidesDatabase(slides_path, client_id="owner-1")
+    try:
+        connection = slides.get_connection()
+        assert connection.execute("SELECT COUNT(*) FROM slides_generation_receipts").fetchone()[0] == 1
+        assert connection.execute("SELECT COUNT(*) FROM slides_generation_inputs").fetchone()[0] == 1
+    finally:
+        slides.close_connection()
+
+
 @pytest.mark.asyncio
 async def test_replay_precedes_current_config_and_source_resolution(stores):
     slides, jobs = stores
@@ -402,6 +472,7 @@ async def test_invalid_jobs_payload_construction_is_deterministic_422(
     invalid_shape: str,
 ):
     slides, jobs = stores
+    monkeypatch.setenv("JOBS_MAX_JSON_BYTES", "1")
     if invalid_shape == "redacted":
         monkeypatch.setattr(
             jobs,
@@ -740,8 +811,26 @@ async def test_historical_key_replay_uses_constant_time_digest_comparison(
             digest_snapshot=old_snapshot,
         )
     )
+    receipt = slides.get_generation_receipt(_RECEIPT_ID, owner_user_id="owner-1")
     new_keyring, new_snapshot = _rotation_material("key-new")
     module = _service_module()
+    service = _service(
+        slides,
+        jobs,
+        keyring=new_keyring,
+        digest_snapshot=new_snapshot,
+    )
+    canonical = module.canonicalize_generation_request(_request())
+    candidates = service._candidate_hmacs(
+        _IDEMPOTENCY_KEY,
+        digest_snapshot=new_snapshot,
+    )
+    candidate_digest = next(digest for key_id, digest in candidates if key_id == receipt.digest_key_id)
+    incoming_request_hmac = service._request_hmac(
+        receipt.digest_key_id,
+        canonical.manifest_bytes,
+        digest_snapshot=new_snapshot,
+    )
     real_compare = module.hmac.compare_digest
     comparisons: list[tuple[object, object]] = []
 
@@ -750,16 +839,16 @@ async def test_historical_key_replay_uses_constant_time_digest_comparison(
         return real_compare(left, right)
 
     monkeypatch.setattr(module.hmac, "compare_digest", record_compare)
-    replay = await _submit(
-        _service(
-            slides,
-            jobs,
-            keyring=new_keyring,
-            digest_snapshot=new_snapshot,
-        )
-    )
+    replay = await _submit(service)
     assert replay.replayed is True
-    assert len(comparisons) >= 2
+    assert (
+        candidate_digest,
+        receipt.idempotency_key_hmac_sha256,
+    ) in comparisons
+    assert (
+        incoming_request_hmac,
+        receipt.client_request_hmac_sha256,
+    ) in comparisons
     assert all(isinstance(left, str) and isinstance(right, str) for left, right in comparisons)
 
 
@@ -1044,6 +1133,111 @@ async def test_reference_hmac_is_framed_inside_the_existing_source_domain(stores
     provenance = json.loads(generation_input.provenance_json)
     assert provenance["source_ref"] != generation_input.source_hmac_sha256
     assert len(provenance["source_ref"]) == 64
+
+
+@pytest.mark.parametrize(
+    (
+        "source_selector",
+        "source_kind",
+        "source_ref",
+        "reference_input",
+        "replacement_ref",
+    ),
+    (
+        (
+            {"kind": "notes", "note_ids": ["note-1"]},
+            "notes",
+            None,
+            b'["note-1"]',
+            "f" * 64,
+        ),
+        (
+            {"kind": "media", "media_id": 7},
+            "media",
+            "7",
+            None,
+            "8",
+        ),
+    ),
+)
+@pytest.mark.asyncio
+async def test_execution_hmac_rejects_valid_shape_provenance_reference_tamper_before_egress(
+    stores,
+    source_selector: dict[str, Any],
+    source_kind: str,
+    source_ref: str | None,
+    reference_input: bytes | None,
+    replacement_ref: str,
+):
+    slides, jobs = stores
+    request = _request()
+    request["source"] = source_selector
+
+    async def resolve_source(_source: dict[str, Any], _limits: Any):
+        text = "Bounded note source"
+        return StandaloneHtmlSourceSnapshot(
+            source_kind=source_kind,
+            text=text,
+            char_count=len(text),
+            byte_count=len(text.encode("utf-8")),
+            token_count=3,
+            provenance=StandaloneHtmlSourceProvenance(
+                source_kind=source_kind,
+                source_ref=source_ref,
+                reference_hmac_input=reference_input,
+            ),
+        )
+
+    submitted = await _service(slides, jobs).submit(
+        owner_user_id="owner-1",
+        idempotency_key=_IDEMPOTENCY_KEY,
+        request=request,
+        config_loader=_config,
+        source_resolver=resolve_source,
+    )
+    job = jobs.acquire_next_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        lease_seconds=600,
+        worker_id="slides-worker-1",
+    )
+    assert job is not None
+    generation_input = slides.get_generation_input(
+        submitted.receipt_id,
+        owner_user_id="owner-1",
+    )
+    provenance = json.loads(generation_input.provenance_json)
+    assert provenance["source_ref"] != replacement_ref
+    provenance["source_ref"] = replacement_ref
+    with slides.transaction(immediate=True) as connection:
+        connection.execute(
+            "UPDATE slides_generation_inputs SET provenance_json=? WHERE receipt_id=?",
+            (
+                json.dumps(provenance, sort_keys=True, separators=(",", ":")),
+                submitted.receipt_id,
+            ),
+        )
+    provider_calls = 0
+
+    async def provider_generate(**_kwargs: Any) -> bytes:
+        nonlocal provider_calls
+        provider_calls += 1
+        return _HTML
+
+    outcome = await _process(
+        slides,
+        jobs,
+        job,
+        provider_generate=provider_generate,
+    )
+
+    assert outcome == WorkerTerminalOutcome(
+        status="failed",
+        error_code="generation_correlation_mismatch",
+        message="Generation correlation failed.",
+    )
+    assert provider_calls == 0
 
 
 @pytest.mark.parametrize("receipt_status", ["running", "failed", "cancelled"])
@@ -1942,6 +2136,101 @@ async def test_input_expiry_is_rechecked_after_reservation_wait_before_egress(st
 
 
 @pytest.mark.asyncio
+async def test_input_expiry_during_pre_provider_digest_load_blocks_egress(stores):
+    slides, jobs = stores
+    _submitted, job = await _submitted_and_acquired(slides, jobs)
+    _keyring, ready = _digest_material()
+    input_deadline = _FIXED_NOW + timedelta(hours=24)
+    clock = {"value": _FIXED_NOW + timedelta(minutes=1)}
+    snapshot_loads = 0
+    provider_calls = 0
+
+    async def digest_snapshot_loader():
+        nonlocal snapshot_loads
+        snapshot_loads += 1
+        if snapshot_loads == 2:
+            await asyncio.sleep(0)
+            clock["value"] = input_deadline
+        return ready
+
+    async def provider_generate(**_kwargs: Any) -> bytes:
+        nonlocal provider_calls
+        provider_calls += 1
+        return _HTML
+
+    outcome = await _process(
+        slides,
+        jobs,
+        job,
+        digest_snapshot_loader=digest_snapshot_loader,
+        provider_generate=provider_generate,
+        now=lambda: clock["value"],
+    )
+
+    assert outcome == WorkerTerminalOutcome(
+        status="failed",
+        error_code="generation_expired",
+        message="Generation input expired.",
+    )
+    assert snapshot_loads == 2
+    assert provider_calls == 0
+    with pytest.raises(KeyError):
+        slides.get_presentation_by_id(_RECEIPT_ID)
+
+
+@pytest.mark.asyncio
+async def test_input_expiry_during_pre_provider_jobs_lookup_blocks_egress(
+    stores,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    slides, jobs = stores
+    _submitted, job = await _submitted_and_acquired(slides, jobs)
+    input_deadline = _FIXED_NOW + timedelta(hours=24)
+    clock = {"value": _FIXED_NOW + timedelta(minutes=1)}
+    _update_job(
+        jobs,
+        int(job["id"]),
+        "leased_until = ?",
+        ((input_deadline + timedelta(hours=1)).isoformat(),),
+    )
+    original_get_job_by_uuid = jobs.get_job_by_uuid
+    lookups = 0
+    provider_calls = 0
+
+    def delayed_get_job_by_uuid(job_uuid: str):
+        nonlocal lookups
+        candidate = original_get_job_by_uuid(job_uuid)
+        lookups += 1
+        if lookups == 1:
+            clock["value"] = input_deadline
+        return candidate
+
+    async def provider_generate(**_kwargs: Any) -> bytes:
+        nonlocal provider_calls
+        provider_calls += 1
+        return _HTML
+
+    monkeypatch.setattr(jobs, "get_job_by_uuid", delayed_get_job_by_uuid)
+    outcome = await _process(
+        slides,
+        jobs,
+        job,
+        provider_generate=provider_generate,
+        now=lambda: clock["value"],
+    )
+
+    assert outcome == WorkerTerminalOutcome(
+        status="failed",
+        error_code="generation_expired",
+        message="Generation input expired.",
+    )
+    assert lookups == 1
+    assert provider_calls == 0
+    with pytest.raises(KeyError):
+        slides.get_presentation_by_id(_RECEIPT_ID)
+
+
+@pytest.mark.asyncio
 async def test_changed_default_target_does_not_replace_allowed_stored_target(stores):
     slides, jobs = stores
     _submitted, job = await _submitted_and_acquired(slides, jobs)
@@ -2093,6 +2382,153 @@ async def test_cancel_requested_after_provider_discards_late_result(stores):
         slides.get_presentation_by_id(_RECEIPT_ID)
     with pytest.raises(KeyError):
         slides.get_generation_input(_RECEIPT_ID, owner_user_id="owner-1")
+
+
+@pytest.mark.asyncio
+async def test_cancel_requested_during_precommit_digest_load_is_fenced(stores):
+    slides, jobs = stores
+    _submitted, job = await _submitted_and_acquired(slides, jobs)
+    keyring, ready = _digest_material()
+    snapshot_loads = 0
+
+    async def digest_snapshot_loader():
+        nonlocal snapshot_loads
+        snapshot_loads += 1
+        if snapshot_loads == 4:
+            await asyncio.sleep(0)
+            _update_job(
+                jobs,
+                int(job["id"]),
+                "cancel_requested_at = ?",
+                ((_FIXED_NOW + timedelta(seconds=3)).isoformat(),),
+            )
+        return ready
+
+    outcome = await _process(
+        slides,
+        jobs,
+        job,
+        keyring=keyring,
+        digest_snapshot_loader=digest_snapshot_loader,
+    )
+    assert snapshot_loads == 4
+    assert outcome == WorkerTerminalOutcome(
+        status="cancelled",
+        error_code="generation_cancelled",
+        message="Generation was cancelled.",
+    )
+    assert (
+        slides.get_generation_receipt(
+            _RECEIPT_ID,
+            owner_user_id="owner-1",
+        ).receipt_status
+        == "cancelled"
+    )
+    with pytest.raises(KeyError):
+        slides.get_presentation_by_id(_RECEIPT_ID)
+    with pytest.raises(KeyError):
+        slides.get_generation_input(_RECEIPT_ID, owner_user_id="owner-1")
+
+
+@pytest.mark.asyncio
+async def test_lease_loss_during_precommit_digest_load_is_fenced(stores):
+    slides, jobs = stores
+    _submitted, job = await _submitted_and_acquired(slides, jobs)
+    keyring, ready = _digest_material()
+    snapshot_loads = 0
+
+    async def digest_snapshot_loader():
+        nonlocal snapshot_loads
+        snapshot_loads += 1
+        if snapshot_loads == 4:
+            await asyncio.sleep(0)
+            _update_job(
+                jobs,
+                int(job["id"]),
+                "leased_until = ?",
+                ((_FIXED_NOW - timedelta(seconds=1)).isoformat(),),
+            )
+        return ready
+
+    worker = _worker_module()
+    with pytest.raises(worker.StandaloneHtmlGenerationRetry) as exc:
+        await _process(
+            slides,
+            jobs,
+            job,
+            keyring=keyring,
+            digest_snapshot_loader=digest_snapshot_loader,
+        )
+    assert exc.value.failure_code == "generation_job_state_changed"
+    assert snapshot_loads == 4
+    assert (
+        slides.get_generation_receipt(
+            _RECEIPT_ID,
+            owner_user_id="owner-1",
+        ).receipt_status
+        == "queued"
+    )
+    assert slides.get_generation_input(_RECEIPT_ID, owner_user_id="owner-1")
+    with pytest.raises(KeyError):
+        slides.get_presentation_by_id(_RECEIPT_ID)
+
+
+@pytest.mark.asyncio
+async def test_lease_expiry_during_final_jobs_lookup_is_fenced(
+    stores,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    slides, jobs = stores
+    _submitted, job = await _submitted_and_acquired(slides, jobs)
+    clock = {"value": _FIXED_NOW + timedelta(minutes=1)}
+    lease_deadline = _FIXED_NOW + timedelta(minutes=2)
+    _update_job(
+        jobs,
+        int(job["id"]),
+        "leased_until = ?",
+        (lease_deadline.isoformat(),),
+    )
+    original_get_job_by_uuid = jobs.get_job_by_uuid
+    lookups = 0
+    provider_calls = 0
+
+    def delayed_get_job_by_uuid(job_uuid: str):
+        nonlocal lookups
+        candidate = original_get_job_by_uuid(job_uuid)
+        lookups += 1
+        if lookups == 2:
+            clock["value"] = lease_deadline
+        return candidate
+
+    async def provider_generate(**_kwargs: Any) -> bytes:
+        nonlocal provider_calls
+        provider_calls += 1
+        return _HTML
+
+    monkeypatch.setattr(jobs, "get_job_by_uuid", delayed_get_job_by_uuid)
+    worker = _worker_module()
+    with pytest.raises(worker.StandaloneHtmlGenerationRetry) as exc:
+        await _process(
+            slides,
+            jobs,
+            job,
+            provider_generate=provider_generate,
+            now=lambda: clock["value"],
+        )
+
+    assert exc.value.failure_code == "generation_job_state_changed"
+    assert lookups == 2
+    assert provider_calls == 1
+    assert (
+        slides.get_generation_receipt(
+            _RECEIPT_ID,
+            owner_user_id="owner-1",
+        ).receipt_status
+        == "queued"
+    )
+    assert slides.get_generation_input(_RECEIPT_ID, owner_user_id="owner-1")
+    with pytest.raises(KeyError):
+        slides.get_presentation_by_id(_RECEIPT_ID)
 
 
 @pytest.mark.parametrize(
@@ -2560,6 +2996,49 @@ async def _run_one_worker_sdk_job(
         sdk.run(handler=handler, job_type="presentation.generate"),
         timeout=2,
     )
+
+
+@pytest.mark.asyncio
+async def test_real_worker_sdk_retryable_failure_succeeds_on_next_attempt(stores):
+    slides, jobs = stores
+    submitted = await _submit(_service(slides, jobs))
+    provider_calls = 0
+
+    async def provider_generate(**_kwargs: Any) -> bytes:
+        nonlocal provider_calls
+        provider_calls += 1
+        if provider_calls == 1:
+            raise StandaloneHtmlProviderError("standalone_html_provider_timeout")
+        return _HTML
+
+    await _run_one_worker_sdk_job(
+        slides,
+        jobs,
+        provider_generate=provider_generate,
+    )
+    retry_job = jobs.get_job_by_uuid(submitted.job_uuid)
+    assert retry_job is not None
+    assert retry_job["status"] == "queued"
+    retry_receipt = slides.get_generation_receipt(_RECEIPT_ID, owner_user_id="owner-1")
+    assert retry_receipt.receipt_status == "queued"
+    assert slides.get_generation_input(_RECEIPT_ID, owner_user_id="owner-1")
+
+    await _run_one_worker_sdk_job(
+        slides,
+        jobs,
+        provider_generate=provider_generate,
+    )
+
+    assert provider_calls == 2
+    completed_job = jobs.get_job_by_uuid(submitted.job_uuid)
+    assert completed_job is not None
+    assert completed_job["status"] == "completed"
+    completed_receipt = slides.get_generation_receipt(_RECEIPT_ID, owner_user_id="owner-1")
+    assert completed_receipt.receipt_status == "completed"
+    assert completed_receipt.presentation_id == _RECEIPT_ID
+    assert slides.get_presentation_by_id(_RECEIPT_ID).generation_job_uuid == submitted.job_uuid
+    with pytest.raises(KeyError):
+        slides.get_generation_input(_RECEIPT_ID, owner_user_id="owner-1")
 
 
 @pytest.mark.parametrize("terminal_first", ["cancelled", "failed"])

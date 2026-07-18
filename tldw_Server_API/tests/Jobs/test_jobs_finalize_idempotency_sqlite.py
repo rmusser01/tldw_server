@@ -140,6 +140,80 @@ def test_worker_terminalizer_is_exact_idempotent_cas(monkeypatch, tmp_path):
     )
 
 
+def test_worker_terminalizer_clears_retry_error_and_rejects_conflicting_replay(
+    monkeypatch,
+    tmp_path,
+):
+    _set_env(monkeypatch, tmp_path)
+    jm = JobManager()
+    job = jm.create_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        payload={},
+        owner_user_id="owner-1",
+        idempotency_key="terminal-after-retry",
+    )
+    first = jm.acquire_next_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        lease_seconds=30,
+        worker_id="slides-worker",
+    )
+    assert first is not None
+    assert jm.fail_job(
+        int(job["id"]),
+        error="prior bounded retry",
+        retryable=True,
+        backoff_seconds=0,
+        worker_id="slides-worker",
+        lease_id=str(first["lease_id"]),
+        completion_token=str(first["lease_id"]),
+        enforce=True,
+        error_code="prior_retry",
+    )
+    acquired = jm.acquire_next_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        lease_seconds=30,
+        worker_id="slides-worker",
+    )
+    assert acquired is not None
+    lease_id = str(acquired["lease_id"])
+    arguments = {
+        "job_id": int(job["id"]),
+        "job_uuid": str(job["uuid"]),
+        "owner_user_id": "owner-1",
+        "domain": "slides",
+        "queue": "default",
+        "job_type": "presentation.generate",
+        "worker_id": "slides-worker",
+        "lease_id": lease_id,
+        "completion_token": lease_id,
+        "status": "failed",
+        "error_code": "terminal_failure",
+        "error_message": "bounded terminal detail",
+    }
+
+    assert jm.terminalize_job_from_worker(**arguments) == "APPLIED"
+    stored = jm.get_job(int(job["id"]))
+    assert stored["last_error"] is None
+    assert (
+        jm.terminalize_job_from_worker(
+            **{**arguments, "error_message": "different bounded detail"},
+        )
+        == "CONFLICT"
+    )
+    assert (
+        jm.terminalize_job_from_worker(
+            **{**arguments, "completion_token": "different-completion-token"},
+        )
+        == "CONFLICT"
+    )
+
+
 @pytest.mark.parametrize("winner_status", ["failed", "cancelled"])
 def test_worker_terminalizer_reports_exact_generic_terminal_winner(
     monkeypatch,
