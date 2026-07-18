@@ -63,7 +63,7 @@ quota concurrency: 2 created, expected 1
 **Goal:** Serialize quota check plus insert only within the enabled owner/domain quota scope and fail closed on quota query errors.
 **Success Criteria:** Concurrent submissions cannot oversubscribe max-queued quotas; unrelated PostgreSQL scopes remain concurrent; quota-disabled SQLite admission retains its deferred transaction path.
 **Tests:** Deterministic delayed-insert concurrency tests on SQLite and PostgreSQL plus existing quota/parity suites.
-**Status:** In Progress
+**Status:** Complete
 
 ### Stage 3: Acquisition Contract and Parity Safety Net
 **Goal:** Define the typed acquisition command and characterize acquisition before moving SQL.
@@ -618,7 +618,7 @@ python -m bandit -r \
   tldw_Server_API/app/core/Jobs/manager.py \
   tldw_Server_API/app/core/Jobs/operations/postgres/admission.py \
   tldw_Server_API/app/core/Jobs/operations/sqlite/admission.py \
-  -f json -o /tmp/bandit_task_12968_1.json
+  -f json -o /tmp/bandit_task_12969_1.json
 ```
 
 Expected: compile succeeds and Bandit reports no new findings in touched code.
@@ -634,15 +634,15 @@ Commit `0cd9fb8f0e` passed strict specification review. Code-quality review iden
 
 The first, second, and fourth findings are validated for remediation. The third is an intentional consequence of the existing fail-closed database error boundary: keep the bounded database timeout and propagate its error rather than adding implicit whole-transaction retries without a public retry contract.
 
-- [ ] **Step 10: Add red review-regression tests**
+- [x] **Step 10: Add red review-regression tests**
 
 Add sequential and concurrent idempotent replay tests for both backends with `max_queued=1`; both calls must return the same job and leave one queued row. Add PostgreSQL coverage that begins admissions from `REPEATABLE READ` connections and still admits exactly one same-scope job. Replace timing-only same-scope coordination with test connection/cursor events that force the pre-fix quota-read-to-insert race while allowing the serialized implementation to complete. Ensure every worker thread is joined in cleanup paths.
 
-- [ ] **Step 11: Preserve replay semantics and pin the PostgreSQL quota transaction snapshot**
+- [x] **Step 11: Preserve replay semantics and pin the PostgreSQL quota transaction snapshot**
 
 Inside the serialized transaction, resolve an existing idempotency tuple before quota evaluation. Skip quota evaluation only for an existing tuple, then continue through the existing replay path so durable event and facade behavior remain unchanged. For PostgreSQL quota-enabled admissions, set the current transaction to `READ COMMITTED` before the advisory-lock `SELECT`, ensuring the quota query receives a fresh statement snapshot after any wait.
 
-- [ ] **Step 12: Re-run review, admission, security, and syntax gates**
+- [x] **Step 12: Re-run review, admission, security, and syntax gates**
 
 Repeat the focused red/green review tests, the Step 7 matrix with required real PostgreSQL execution and no skips, both review stages, compile checks, Ruff on changed files, and Bandit on touched production files.
 
@@ -655,7 +655,7 @@ git add tldw_Server_API/app/core/Jobs/operations/postgres/admission.py \
   tldw_Server_API/app/core/Jobs/operations/sqlite/admission.py \
   tldw_Server_API/tests/Jobs/test_jobs_quotas_postgres.py \
   tldw_Server_API/tests/Jobs/test_jobs_quotas_sqlite.py \
-  backlog/tasks/task-12968* \
+  backlog/tasks/task-12969* \
   Docs/superpowers/plans/2026-07-14-jobs-admission-hardening-and-lease-lifecycle.md
 git commit -m "fix(jobs): serialize owner scoped admission quotas"
 ```
