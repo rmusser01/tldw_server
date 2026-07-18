@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Any, Protocol
@@ -33,28 +34,117 @@ def _normalize_viewport_dimension(value: Any, *, field_name: str) -> int:
     return normalized
 
 
+class RuntimeBrowserRequest(Protocol):
+    @property
+    def url(self) -> str:
+        raise NotImplementedError
+
+    @property
+    def resource_type(self) -> str:
+        raise NotImplementedError
+
+
+class RuntimeBrowserRoute(Protocol):
+    @property
+    def request(self) -> RuntimeBrowserRequest:
+        raise NotImplementedError
+
+    async def abort(self) -> None:
+        raise NotImplementedError
+
+    async def continue_(self) -> None:
+        raise NotImplementedError
+
+
+class RuntimeWebSocketRoute(Protocol):
+    @property
+    def url(self) -> str:
+        raise NotImplementedError
+
+    def connect_to_server(self) -> Awaitable[Any] | Any:
+        raise NotImplementedError
+
+    async def close(
+        self,
+        *,
+        code: int | None = None,
+        reason: str | None = None,
+    ) -> None:
+        raise NotImplementedError
+
+
+class RuntimeBrowserLocator(Protocol):
+    def nth(self, index: int) -> RuntimeBrowserLocator:
+        raise NotImplementedError
+
+    async def count(self) -> int:
+        raise NotImplementedError
+
+    async def is_visible(self) -> bool:
+        raise NotImplementedError
+
+
 class RuntimeBrowserPage(Protocol):
     async def goto(self, url: str, **kwargs: Any) -> Any:
-        """Navigate to a URL."""
+        raise NotImplementedError
+
+    async def reload(self, **kwargs: Any) -> Any:
+        raise NotImplementedError
+
+    async def wait_for_load_state(self, state: str, **kwargs: Any) -> Any:
+        raise NotImplementedError
+
+    async def wait_for_timeout(self, timeout_ms: float) -> Any:
+        raise NotImplementedError
 
     async def content(self) -> str:
-        """Return current page content."""
+        raise NotImplementedError
+
+    async def evaluate(self, expression: str, argument: Any = None) -> Any:
+        raise NotImplementedError
+
+    def locator(self, selector: str) -> RuntimeBrowserLocator:
+        raise NotImplementedError
 
     async def close(self) -> None:
-        """Close the page."""
+        raise NotImplementedError
 
 
 class RuntimeBrowserContext(Protocol):
+    async def route(
+        self,
+        pattern: str,
+        handler: Callable[[RuntimeBrowserRoute], Awaitable[None]],
+    ) -> None:
+        raise NotImplementedError
+
+    async def route_web_socket(
+        self,
+        pattern: str,
+        handler: Callable[[RuntimeWebSocketRoute], Awaitable[None]],
+    ) -> None:
+        raise NotImplementedError
+
+    async def add_init_script(self, *, script: str) -> None:
+        raise NotImplementedError
+
+    def on(
+        self,
+        event: str,
+        handler: Callable[[RuntimeBrowserRequest], None],
+    ) -> None:
+        raise NotImplementedError
+
     async def new_page(self) -> RuntimeBrowserPage:
-        """Create a page in this context."""
+        raise NotImplementedError
 
     async def close(self) -> None:
-        """Close the context."""
+        raise NotImplementedError
 
 
 class RuntimeBrowserLauncher(Protocol):
-    async def new_context(self, options: "BrowserLaunchOptions") -> RuntimeBrowserContext:
-        """Create a browser context with the supplied options."""
+    async def new_context(self, options: BrowserLaunchOptions) -> RuntimeBrowserContext:
+        raise NotImplementedError
 
 
 @dataclass(frozen=True, slots=True)

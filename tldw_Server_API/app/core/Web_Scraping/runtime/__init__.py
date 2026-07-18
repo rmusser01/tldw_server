@@ -4,7 +4,16 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from .browser import BrowserLaunchOptions, RuntimeBrowserContext, RuntimeBrowserLauncher, RuntimeBrowserPage
+from .browser import (
+    BrowserLaunchOptions,
+    RuntimeBrowserContext,
+    RuntimeBrowserLauncher,
+    RuntimeBrowserLocator,
+    RuntimeBrowserPage,
+    RuntimeBrowserRequest,
+    RuntimeBrowserRoute,
+    RuntimeWebSocketRoute,
+)
 from .cancellation import is_cancellation
 from .policy import OutboundPolicyChecker, ProbeEgressDecision, ProbeEgressGuard
 from .requests import FetchRequest, RuntimeRequestContext
@@ -27,11 +36,15 @@ __all__ = [
     "ProbeEgressGuard",
     "RuntimeBrowserContext",
     "RuntimeBrowserLauncher",
+    "RuntimeBrowserLocator",
     "RuntimeBrowserPage",
+    "RuntimeBrowserRequest",
+    "RuntimeBrowserRoute",
     "RuntimeCookie",
     "RuntimeRequestContext",
     "RuntimeSessionState",
     "RuntimeTimeouts",
+    "RuntimeWebSocketRoute",
     "is_cancellation",
 ]
 
