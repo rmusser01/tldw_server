@@ -131,8 +131,8 @@ describe("tldw gateway speech client", () => {
         },
         responseType: "arrayBuffer",
         abortSignal: controller.signal,
-        returnResponse: true,
-        timeoutMs: 120_000
+        timeoutMs: 120_000,
+        returnResponse: true
       }
     ])
   })

@@ -49,6 +49,18 @@ vi.mock("@plasmohq/storage/hook", () => ({
   useStorage: () => [null]
 }))
 
+vi.mock("@/services/tts", () => ({
+  getTTSSettings: vi.fn()
+}))
+
+vi.mock("@/services/tts-provider", () => ({
+  inferTldwProviderFromModel: vi.fn(() => null)
+}))
+
+vi.mock("@/services/tts-providers", () => ({
+  getTtsProviderLabel: vi.fn((provider?: string) => provider || "browser")
+}))
+
 vi.mock("@/hooks/useAudiobookGeneration", () => ({
   useAudiobookGeneration: () => ({
     generateAllChapters: vi.fn(),
