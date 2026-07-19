@@ -5,9 +5,11 @@ import inspect
 from collections.abc import Awaitable
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
+from tldw_Server_API.app.core.Web_Scraping.contracts import PreflightResult
 from tldw_Server_API.app.core.Web_Scraping.runtime import FetchRequest, FetchResponse, PolicyDecision
 from tldw_Server_API.app.core.Web_Scraping.scraper_analyzers import runner
 from tldw_Server_API.app.core.Web_Scraping.scraper_analyzers.recommendations.recommender import (
@@ -516,7 +518,6 @@ async def test_scoring_recommendations_and_article_payload_are_current(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as article_extractor
-    from tldw_Server_API.app.core.Web_Scraping import scraper_analyzers
 
     score = calculate_difficulty_score(ANALYSIS_RESULTS)
     recommendations = generate_recommendations(ANALYSIS_RESULTS)
@@ -525,8 +526,16 @@ async def test_scoring_recommendations_and_article_payload_are_current(
     assert recommendations == EXPECTED_RECOMMENDATIONS  # nosec B101
 
     analysis = {"results": ANALYSIS_RESULTS, "score": score, "recommendations": recommendations}
+    preflight_result = PreflightResult(analysis=analysis)
+    public_analysis = {
+        **analysis,
+        "results": {
+            **ANALYSIS_RESULTS,
+            "waf": {"status": "success", "wafs": [["DataDome", None]]},
+        },
+    }
     expected_payload = {
-        "analysis": analysis,
+        "analysis": public_analysis,
         "advice": {
             "backend": "curl",
             "method": "playwright",
@@ -561,7 +570,8 @@ async def test_scoring_recommendations_and_article_payload_are_current(
             }
         },
     )
-    monkeypatch.setattr(scraper_analyzers, "run_analysis", lambda *_args, **_kwargs: analysis)
+    run_preflight = AsyncMock(return_value=preflight_result)
+    monkeypatch.setattr(article_extractor.preflight_facade, "run_preflight", run_preflight)
     monkeypatch.setattr(
         article_extractor,
         "extract_article_with_pipeline",
@@ -613,6 +623,7 @@ async def test_scoring_recommendations_and_article_payload_are_current(
     article_result = await article_extractor.scrape_article("https://example.com/article")
 
     assert article_result["preflight_analysis"] == expected_payload  # nosec B101
+    run_preflight.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -712,8 +723,6 @@ async def test_article_policy_denial_prevents_preflight_and_extraction(
 async def test_article_preflight_failure_is_advisory_and_preserves_http_path(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from tldw_Server_API.app.core.Web_Scraping import scraper_analyzers
-
     article_extractor = _configure_article_consumer(
         monkeypatch,
         include_results=True,
@@ -722,16 +731,14 @@ async def test_article_preflight_failure_is_advisory_and_preserves_http_path(
     fetch_client = FakeFetchClient([_article_response()])
     extraction_calls: list[object] = []
 
-    def fail_analysis(*_args: Any, **_kwargs: Any) -> None:
-        raise RuntimeError("preflight failed")
-
     def extract(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
         extraction_calls.append(object())
         return {"extraction_successful": True, "content": "article"}
 
+    run_preflight = AsyncMock(side_effect=RuntimeError("preflight failed"))
     monkeypatch.setattr(article_extractor, "_ARTICLE_POLICY_CHECKER", FakePolicyChecker())
     monkeypatch.setattr(article_extractor, "_ARTICLE_FETCH_CLIENT", fetch_client)
-    monkeypatch.setattr(scraper_analyzers, "run_analysis", fail_analysis)
+    monkeypatch.setattr(article_extractor.preflight_facade, "run_preflight", run_preflight)
     monkeypatch.setattr(article_extractor, "extract_article_with_pipeline", extract)
 
     result = await article_extractor.scrape_article("https://example.com/article")
@@ -740,34 +747,33 @@ async def test_article_preflight_failure_is_advisory_and_preserves_http_path(
     assert fetch_client.requests[0].backend == "httpx"  # nosec B101
     assert len(extraction_calls) == 1  # nosec B101
     assert "preflight_analysis" not in result  # nosec B101
+    run_preflight.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_article_preflight_cancellation_is_advisory_and_extraction_continues(
+async def test_article_preflight_cancellation_propagates_before_extraction(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from tldw_Server_API.app.core.Web_Scraping import scraper_analyzers
-
     article_extractor = _configure_article_consumer(monkeypatch, include_results=True)
+    fetch_client = FakeFetchClient([_article_response()])
     extraction_calls: list[object] = []
-
-    def cancel_analysis(*_args: Any, **_kwargs: Any) -> None:
-        raise asyncio.CancelledError
 
     def extract(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
         extraction_calls.append(object())
         return {"extraction_successful": True, "content": "article"}
 
+    run_preflight = AsyncMock(side_effect=asyncio.CancelledError)
     monkeypatch.setattr(article_extractor, "_ARTICLE_POLICY_CHECKER", FakePolicyChecker())
-    monkeypatch.setattr(article_extractor, "_ARTICLE_FETCH_CLIENT", FakeFetchClient([_article_response()]))
-    monkeypatch.setattr(scraper_analyzers, "run_analysis", cancel_analysis)
+    monkeypatch.setattr(article_extractor, "_ARTICLE_FETCH_CLIENT", fetch_client)
+    monkeypatch.setattr(article_extractor.preflight_facade, "run_preflight", run_preflight)
     monkeypatch.setattr(article_extractor, "extract_article_with_pipeline", extract)
 
-    result = await article_extractor.scrape_article("https://example.com/article")
+    with pytest.raises(asyncio.CancelledError):
+        await article_extractor.scrape_article("https://example.com/article")
 
-    assert result["extraction_successful"] is True  # nosec B101
-    assert len(extraction_calls) == 1  # nosec B101
-    assert "preflight_analysis" not in result  # nosec B101
+    run_preflight.assert_awaited_once()
+    assert fetch_client.requests == []  # nosec B101
+    assert extraction_calls == []  # nosec B101
 
 
 @pytest.mark.asyncio
@@ -776,20 +782,15 @@ async def test_article_successful_advice_omits_payload_when_results_are_disabled
     monkeypatch: pytest.MonkeyPatch,
     include_results: bool | None,
 ) -> None:
-    from tldw_Server_API.app.core.Web_Scraping import scraper_analyzers
-
     article_extractor = _configure_article_consumer(
         monkeypatch,
         include_results=include_results,
     )
     fetch_client = FakeFetchClient([_article_response()])
+    run_preflight = AsyncMock(return_value=PreflightResult(analysis={"results": {"tls": {"status": "active"}}}))
     monkeypatch.setattr(article_extractor, "_ARTICLE_POLICY_CHECKER", FakePolicyChecker())
     monkeypatch.setattr(article_extractor, "_ARTICLE_FETCH_CLIENT", fetch_client)
-    monkeypatch.setattr(
-        scraper_analyzers,
-        "run_analysis",
-        lambda *_args, **_kwargs: {"results": {"tls": {"status": "active"}}},
-    )
+    monkeypatch.setattr(article_extractor.preflight_facade, "run_preflight", run_preflight)
     monkeypatch.setattr(
         article_extractor,
         "extract_article_with_pipeline",
@@ -801,6 +802,7 @@ async def test_article_successful_advice_omits_payload_when_results_are_disabled
     assert result["extraction_successful"] is True  # nosec B101
     assert fetch_client.requests[0].backend == "curl"  # nosec B101
     assert "preflight_analysis" not in result  # nosec B101
+    run_preflight.assert_awaited_once()
 
 
 @pytest.mark.asyncio
