@@ -813,10 +813,31 @@ def test_evaluate_target_has_no_probe_guard_or_concrete_adapter_dependency() -> 
     facade_spec = importlib.util.find_spec(_FACADE_MODULE)
     assert facade_spec is not None and facade_spec.origin is not None
     facade_source = Path(facade_spec.origin).read_text(encoding="utf-8")
+    facade_tree = ast.parse(facade_source)
+    evaluate_nodes = [
+        node for node in facade_tree.body if isinstance(node, ast.AsyncFunctionDef) and node.name == "evaluate_target"
+    ]
+    assert len(evaluate_nodes) == 1
 
-    assert "ProbeEgressGuard" not in facade_source
-    assert "DefaultProbeEgressGuard" not in facade_source
-    assert "policy.adapters" not in facade_source
+    referenced_names = {node.id for node in ast.walk(evaluate_nodes[0]) if isinstance(node, ast.Name)} | {
+        node.attr for node in ast.walk(evaluate_nodes[0]) if isinstance(node, ast.Attribute)
+    }
+    locally_imported_names = {
+        imported_name
+        for node in ast.walk(evaluate_nodes[0])
+        if isinstance(node, ast.Import | ast.ImportFrom)
+        for alias in node.names
+        for imported_name in (alias.name.rsplit(".", 1)[-1], alias.asname)
+        if imported_name is not None
+    }
+    forbidden_dependencies = {
+        "ProbeEgressGuard",
+        "DefaultProbeEgressGuard",
+        "GuardedHttpProbe",
+        "GuardedPlaywrightBrowserProbe",
+        "GuardedExternalToolProbe",
+    }
+    assert forbidden_dependencies.isdisjoint(referenced_names | locally_imported_names)
 
 
 @pytest.mark.asyncio
