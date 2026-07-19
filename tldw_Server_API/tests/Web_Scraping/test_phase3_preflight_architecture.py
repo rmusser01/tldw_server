@@ -55,9 +55,17 @@ ALLOWED_ANALYZER_IMPORT_MODULES = {
     "typing",
     "urllib.parse",
 }
-FORBIDDEN_ASYNCIO_PROCESS_APIS = {
+FORBIDDEN_ASYNCIO_DIRECT_IO_APIS = {
+    "create_connection",
+    "create_datagram_endpoint",
     "create_subprocess_exec",
     "create_subprocess_shell",
+    "create_unix_connection",
+    "open_connection",
+    "open_unix_connection",
+    "sock_connect",
+    "subprocess_exec",
+    "subprocess_shell",
 }
 FORBIDDEN_PREFLIGHT_CONSUMERS = {
     f"{WEB_SCRAPING_PACKAGE}.Article_Extractor_Lib",
@@ -471,22 +479,24 @@ def _analyzer_import_is_allowed(reference: ImportReference) -> bool:
     return reference.module in ALLOWED_ANALYZER_IMPORT_MODULES
 
 
-def _forbidden_asyncio_process_references(path: Path, tree: ast.AST) -> list[str]:
-    # Conservative by design: spelling either process API requires review. This
+def _forbidden_asyncio_direct_io_references(path: Path, tree: ast.AST) -> list[str]:
+    # Conservative by design: spelling any direct-I/O constructor requires review. This
     # avoids maintaining a partial evaluator for Python's binding semantics.
     violations: list[str] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
             for alias in node.names:
-                if alias.name in FORBIDDEN_ASYNCIO_PROCESS_APIS:
+                if alias.name in FORBIDDEN_ASYNCIO_DIRECT_IO_APIS:
                     violations.append(
-                        f"{_display_path(path)}:{node.lineno} imports forbidden asyncio process API {alias.name}"
+                        f"{_display_path(path)}:{node.lineno} imports forbidden asyncio direct-I/O API {alias.name}"
                     )
-        elif isinstance(node, ast.Name) and node.id in FORBIDDEN_ASYNCIO_PROCESS_APIS:
-            violations.append(f"{_display_path(path)}:{node.lineno} references forbidden asyncio process API {node.id}")
-        elif isinstance(node, ast.Attribute) and node.attr in FORBIDDEN_ASYNCIO_PROCESS_APIS:
+        elif isinstance(node, ast.Name) and node.id in FORBIDDEN_ASYNCIO_DIRECT_IO_APIS:
             violations.append(
-                f"{_display_path(path)}:{node.lineno} references forbidden asyncio process API {node.attr}"
+                f"{_display_path(path)}:{node.lineno} references forbidden asyncio direct-I/O API {node.id}"
+            )
+        elif isinstance(node, ast.Attribute) and node.attr in FORBIDDEN_ASYNCIO_DIRECT_IO_APIS:
+            violations.append(
+                f"{_display_path(path)}:{node.lineno} references forbidden asyncio direct-I/O API {node.attr}"
             )
     return violations
 
@@ -498,7 +508,7 @@ def assert_analyzer_dependencies_are_governed(root: Path) -> None:
         for reference in _import_references(path):
             if not _analyzer_import_is_allowed(reference):
                 violations.append(f"{reference.display()} (not in the analyzer import allowlist)")
-        violations.extend(_forbidden_asyncio_process_references(path, tree))
+        violations.extend(_forbidden_asyncio_direct_io_references(path, tree))
 
     assert violations == []
 
@@ -732,6 +742,21 @@ def test_preflight_dependency_direction() -> None:
         "import asyncio\n\nprobe = lambda spawn=asyncio.create_subprocess_shell: spawn\n",
         "import asyncio\n\nasync def probe():\n" "    return await (spawn := asyncio.create_subprocess_exec)('tool')\n",
         "import pathlib\n\ndef probe():\n    return pathlib.Path('result.json')\n",
+        "import asyncio\n\nasync def probe(protocol_factory):\n"
+        "    return await asyncio.get_running_loop().subprocess_exec(protocol_factory, 'tool')\n",
+        "import asyncio\n\nasync def probe(protocol_factory):\n"
+        "    return await asyncio.get_running_loop().subprocess_shell(protocol_factory, 'tool')\n",
+        "import asyncio\n\nasync def probe():\n" "    return await asyncio.open_connection('example.test', 443)\n",
+        "import asyncio\n\nasync def probe():\n" "    return await asyncio.open_unix_connection('/tmp/service.sock')\n",
+        "import asyncio\n\nasync def probe(protocol_factory):\n"
+        "    return await asyncio.get_running_loop().create_connection(protocol_factory, 'example.test', 443)\n",
+        "import asyncio\n\nasync def probe(protocol_factory):\n"
+        "    return await asyncio.get_running_loop().create_unix_connection(protocol_factory, '/tmp/service.sock')\n",
+        "import asyncio\n\nasync def probe(protocol_factory):\n"
+        "    return await asyncio.get_running_loop().create_datagram_endpoint("
+        "protocol_factory, remote_addr=('example.test', 53))\n",
+        "import asyncio\n\nasync def probe(sock):\n"
+        "    return await asyncio.get_running_loop().sock_connect(sock, ('example.test', 443))\n",
     ),
 )
 def test_analyzer_guard_rejects_direct_ungoverned_resource_creation(
