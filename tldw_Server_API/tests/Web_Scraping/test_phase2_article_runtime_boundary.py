@@ -3,10 +3,13 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from types import ModuleType
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+from tldw_Server_API.app.core.Web_Scraping import preflight as preflight_facade
+from tldw_Server_API.app.core.Web_Scraping.contracts import PreflightResult
+from tldw_Server_API.app.core.Web_Scraping.preflight import PreflightTarget
 from tldw_Server_API.app.core.Web_Scraping.runtime import (
     FetchRequest,
     FetchResponse,
@@ -52,6 +55,20 @@ class FakeFetchClient:
         if isinstance(response, BaseException):
             raise response
         return response
+
+
+def _allowed_target(url: str) -> PreflightTarget:
+    return PreflightTarget(
+        url=url,
+        decision=PolicyDecision(
+            allowed=True,
+            mode="compat",
+            reason="allowed",
+            stage="pre_fetch",
+            source="article_extract",
+        ),
+        request_context=RuntimeRequestContext(source="article_extract", stage="pre_fetch"),
+    )
 
 
 def _install_article_defaults(
@@ -109,15 +126,14 @@ async def test_scrape_article_uses_runtime_policy_before_preflight(monkeypatch: 
         )
     )
     fetch_client = FakeFetchClient([])
-    run_analysis = AsyncMock()
+    build_context = Mock()
+    run_preflight = AsyncMock()
 
     monkeypatch.setattr(ael, "_ARTICLE_POLICY_CHECKER", policy_checker)
     monkeypatch.setattr(ael, "_ARTICLE_FETCH_CLIENT", fetch_client)
-    monkeypatch.setattr(
-        "tldw_Server_API.app.core.Web_Scraping.scraper_analyzers.run_analysis",
-        run_analysis,
-        raising=False,
-    )
+    monkeypatch.setattr(ael, "preflight_facade", preflight_facade, raising=False)
+    monkeypatch.setattr(preflight_facade, "build_execution_context", build_context)
+    monkeypatch.setattr(preflight_facade, "run_preflight", run_preflight)
 
     result = await ael.scrape_article("https://example.com/path")
 
@@ -127,7 +143,8 @@ async def test_scrape_article_uses_runtime_policy_before_preflight(monkeypatch: 
     assert policy_checker.calls[0]["context"].source == "article_extract"
     assert policy_checker.calls[0]["context"].stage == "pre_fetch"
     assert fetch_client.requests == []
-    run_analysis.assert_not_called()
+    build_context.assert_not_called()
+    run_preflight.assert_not_awaited()
 
 
 @pytest.mark.unit
@@ -215,9 +232,9 @@ async def test_scrape_article_preflight_tls_advice_still_selects_curl(monkeypatc
     )
     policy_checker = FakePolicyChecker(
         PolicyDecision(
-            allowed=True,
-            mode="compat",
-            reason="allowed",
+            allowed=False,
+            mode="strict",
+            reason="deny_legacy_path",
             stage="pre_fetch",
             source="article_extract",
         )
@@ -234,15 +251,22 @@ async def test_scrape_article_preflight_tls_advice_still_selects_curl(monkeypatc
         ]
     )
 
-    def fake_run_analysis(*args: object, **kwargs: object) -> dict[str, object]:
-        return {"results": {"tls": {"status": "active"}, "js": {"status": "success"}}}
-
     monkeypatch.setattr(ael, "_ARTICLE_POLICY_CHECKER", policy_checker)
     monkeypatch.setattr(ael, "_ARTICLE_FETCH_CLIENT", fetch_client)
+    monkeypatch.setattr(ael, "preflight_facade", preflight_facade, raising=False)
     monkeypatch.setattr(
-        "tldw_Server_API.app.core.Web_Scraping.scraper_analyzers.run_analysis",
-        fake_run_analysis,
-        raising=False,
+        preflight_facade,
+        "evaluate_target",
+        AsyncMock(return_value=_allowed_target("https://example.com/path")),
+    )
+    monkeypatch.setattr(
+        preflight_facade,
+        "run_preflight",
+        AsyncMock(
+            return_value=PreflightResult(
+                analysis={"results": {"tls": {"status": "active"}, "js": {"status": "success"}}}
+            )
+        ),
     )
 
     result = await ael.scrape_article("https://example.com/path")

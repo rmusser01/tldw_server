@@ -1,10 +1,19 @@
+import types
 from collections.abc import Mapping
 from typing import Any
-import types
+from unittest.mock import AsyncMock
 
 import pytest
 
-from tldw_Server_API.app.core.Web_Scraping.runtime import FetchRequest, FetchResponse, PolicyDecision
+from tldw_Server_API.app.core.Web_Scraping import preflight as preflight_facade
+from tldw_Server_API.app.core.Web_Scraping.contracts import PreflightResult
+from tldw_Server_API.app.core.Web_Scraping.preflight import PreflightTarget
+from tldw_Server_API.app.core.Web_Scraping.runtime import (
+    FetchRequest,
+    FetchResponse,
+    PolicyDecision,
+    RuntimeRequestContext,
+)
 
 
 class FakeArticlePolicyChecker:
@@ -35,12 +44,26 @@ class FakeArticleFetchClient:
         return self.response
 
 
+def _allowed_article_target(url: str) -> PreflightTarget:
+    return PreflightTarget(
+        url=url,
+        decision=PolicyDecision(
+            allowed=True,
+            mode="compat",
+            reason="allowed",
+            stage="pre_fetch",
+            source="article_extract",
+        ),
+        request_context=RuntimeRequestContext(source="article_extract", stage="pre_fetch"),
+    )
+
+
 @pytest.mark.asyncio
 async def test_egress_denied_scrape_article(monkeypatch):
-    from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as ael
-
     # Deny egress
     from tldw_Server_API.app.core.Security import egress as eg
+    from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as ael
+
     pol = types.SimpleNamespace(allowed=False, reason="deny_test")
     monkeypatch.setattr(eg, 'evaluate_url_policy', lambda url: pol)
 
@@ -51,8 +74,8 @@ async def test_egress_denied_scrape_article(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_egress_denied_enhanced_scraper(monkeypatch):
-    from tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping import EnhancedWebScraper
     from tldw_Server_API.app.core.Security import egress as eg
+    from tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping import EnhancedWebScraper
 
     pol = types.SimpleNamespace(allowed=False, reason="deny_test")
     monkeypatch.setattr(eg, 'evaluate_url_policy', lambda url: pol)
@@ -315,9 +338,8 @@ def test_recommendations_include_fingerprint_and_integrity_guidance():
 
 @pytest.mark.asyncio
 async def test_article_preflight_prefers_playwright_for_js(monkeypatch):
-    from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as ael
-    from tldw_Server_API.app.core.Web_Scraping import scraper_analyzers as sa
     from tldw_Server_API.app.core.Security import egress as eg
+    from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as ael
 
     monkeypatch.setattr(eg, "evaluate_url_policy", lambda url: types.SimpleNamespace(allowed=True))
 
@@ -338,18 +360,26 @@ async def test_article_preflight_prefers_playwright_for_js(monkeypatch):
         "_ARTICLE_POLICY_CHECKER",
         FakeArticlePolicyChecker(
             PolicyDecision(
-                allowed=True,
-                mode="compat",
-                reason="allowed",
+                allowed=False,
+                mode="strict",
+                reason="deny_legacy_path",
                 stage="pre_fetch",
                 source="article_extract",
             )
         ),
     )
+    monkeypatch.setattr(ael, "preflight_facade", preflight_facade, raising=False)
     monkeypatch.setattr(
-        sa,
-        "run_analysis",
-        lambda *args, **kwargs: {"results": {"js": {"status": "success", "js_required": True}}},
+        preflight_facade,
+        "evaluate_target",
+        AsyncMock(return_value=_allowed_article_target("https://example.com")),
+    )
+    monkeypatch.setattr(
+        preflight_facade,
+        "run_preflight",
+        AsyncMock(
+            return_value=PreflightResult(analysis={"results": {"js": {"status": "success", "js_required": True}}})
+        ),
     )
 
     playwright_used = {"used": False}
@@ -417,9 +447,8 @@ async def test_article_preflight_prefers_playwright_for_js(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_article_preflight_prefers_curl_for_tls(monkeypatch):
-    from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as ael
-    from tldw_Server_API.app.core.Web_Scraping import scraper_analyzers as sa
     from tldw_Server_API.app.core.Security import egress as eg
+    from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as ael
 
     monkeypatch.setattr(eg, "evaluate_url_policy", lambda url: types.SimpleNamespace(allowed=True))
 
@@ -440,18 +469,24 @@ async def test_article_preflight_prefers_curl_for_tls(monkeypatch):
         "_ARTICLE_POLICY_CHECKER",
         FakeArticlePolicyChecker(
             PolicyDecision(
-                allowed=True,
-                mode="compat",
-                reason="allowed",
+                allowed=False,
+                mode="strict",
+                reason="deny_legacy_path",
                 stage="pre_fetch",
                 source="article_extract",
             )
         ),
     )
+    monkeypatch.setattr(ael, "preflight_facade", preflight_facade, raising=False)
     monkeypatch.setattr(
-        sa,
-        "run_analysis",
-        lambda *args, **kwargs: {"results": {"tls": {"status": "active"}}},
+        preflight_facade,
+        "evaluate_target",
+        AsyncMock(return_value=_allowed_article_target("https://example.com")),
+    )
+    monkeypatch.setattr(
+        preflight_facade,
+        "run_preflight",
+        AsyncMock(return_value=PreflightResult(analysis={"results": {"tls": {"status": "active"}}})),
     )
 
     fetch_client = FakeArticleFetchClient(
