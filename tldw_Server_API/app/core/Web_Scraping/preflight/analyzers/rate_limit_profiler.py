@@ -78,17 +78,25 @@ async def _profile_rate_limits_impl(
             if index < GENTLE_PROBE_COUNT - 1:
                 await context.controls.sleep(delay)
 
-        burst_statuses = await asyncio.gather(
-            *(
+        burst_tasks = [
+            asyncio.create_task(
                 _request_status(
                     url,
                     context,
                     identity=identity,
                     impersonate_target=impersonate_target,
                 )
-                for _ in range(BURST_COUNT)
             )
-        )
+            for _ in range(BURST_COUNT)
+        ]
+        try:
+            burst_statuses = await asyncio.gather(*burst_tasks)
+        except BaseException:
+            for task in burst_tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*burst_tasks, return_exceptions=True)
+            raise
     except ProbeUnavailable as exc:
         if impersonate and exc.error_code == "missing_dependency":
             return dict(_MISSING_DEPENDENCY)

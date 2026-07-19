@@ -419,6 +419,75 @@ async def test_rate_limit_burst_reports_first_blocking_status_in_response_order(
 
 
 @pytest.mark.asyncio
+async def test_rate_limit_failed_burst_retires_siblings_before_returning() -> None:
+    _, _, rate, _ = _canonical_analyzers()
+    failure = ProbeError("probe_error", "HTTP probe failed.")
+
+    class BlockingBurstHttpProbe:
+        def __init__(self) -> None:
+            self.requests: list[ProbeHttpRequest] = []
+            self.all_started = asyncio.Event()
+            self.release_siblings = asyncio.Event()
+            self.all_finished = asyncio.Event()
+            self.finished: set[int] = set()
+            self.cancelled: set[int] = set()
+
+        async def get(self, request: ProbeHttpRequest) -> ProbeHttpResponse:
+            request_index = len(self.requests)
+            self.requests.append(request)
+            if request_index < 4:
+                return _response(200)
+
+            burst_index = request_index - 4
+            if len(self.requests) == 12:
+                self.all_started.set()
+            await self.all_started.wait()
+
+            try:
+                if burst_index == 0:
+                    raise failure
+                await self.release_siblings.wait()
+                return _response(200)
+            except asyncio.CancelledError:
+                self.cancelled.add(burst_index)
+                raise
+            finally:
+                self.finished.add(burst_index)
+                if len(self.finished) == 8:
+                    self.all_finished.set()
+
+    http = BlockingBurstHttpProbe()
+    context = FakeAnalyzerContext(
+        http=http,  # type: ignore[arg-type]
+        external_tools=RecordingExternalToolProbe([]),
+        controls=RecordingControls(),
+        identity=_IDENTITY,
+    )
+    profile_task = asyncio.create_task(rate(_URL, context, 0.0))
+
+    try:
+        await asyncio.wait_for(http.all_started.wait(), timeout=1.0)
+        result = await asyncio.wait_for(profile_task, timeout=1.0)
+        all_finished_before_return = http.all_finished.is_set()
+    finally:
+        http.release_siblings.set()
+        if not profile_task.done():
+            profile_task.cancel()
+            await asyncio.gather(profile_task, return_exceptions=True)
+        await asyncio.wait_for(http.all_finished.wait(), timeout=1.0)
+
+    assert all_finished_before_return
+    assert http.cancelled == set(range(1, 8))
+    assert result == {
+        "status": "error",
+        "message": "HTTP probe failed.",
+        "error_code": "probe_error",
+    }
+    assert context.identity_calls == 1
+    assert all(dict(request.headers) == _IDENTITY for request in http.requests)
+
+
+@pytest.mark.asyncio
 async def test_rate_limit_missing_impersonation_dependency_preserves_public_result() -> None:
     _, _, rate, _ = _canonical_analyzers()
     context = fake_context(http_responses=[ProbeUnavailable(error_code="missing_dependency")])
