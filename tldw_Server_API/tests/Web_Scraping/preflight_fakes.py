@@ -289,6 +289,7 @@ class FakeExternalProcess:
         stdout: bytes | str = b"",
         stderr: bytes | str = b"",
         block_communicate: bool = False,
+        block_wait: bool = False,
         communicate_error: BaseException | None = None,
         communicate_hook: Callable[[], None] | None = None,
         terminate_completes: bool = True,
@@ -301,6 +302,7 @@ class FakeExternalProcess:
         self.stdout = stdout
         self.stderr = stderr
         self.block_communicate = block_communicate
+        self.block_wait = block_wait
         self.communicate_error = communicate_error
         self.communicate_hook = communicate_hook
         self.terminate_completes = terminate_completes
@@ -316,6 +318,7 @@ class FakeExternalProcess:
         self.communicate_started = asyncio.Event()
         self.wait_started = asyncio.Event()
         self._release_communicate = asyncio.Event()
+        self._release_wait = asyncio.Event()
         self._terminal = asyncio.Event()
 
     async def communicate(self) -> tuple[bytes | str, bytes | str]:
@@ -342,6 +345,10 @@ class FakeExternalProcess:
         if self.events is not None:
             self.events.append("process:terminate")
         if self.terminate_error is not None:
+            if isinstance(self.terminate_error, ProcessLookupError):
+                self.returncode = self.planned_returncode
+                self._terminal.set()
+                self._release_communicate.set()
             raise self.terminate_error
         if self.terminate_completes:
             self.returncode = -15
@@ -353,6 +360,10 @@ class FakeExternalProcess:
         if self.events is not None:
             self.events.append("process:kill")
         if self.kill_error is not None:
+            if isinstance(self.kill_error, ProcessLookupError):
+                self.returncode = self.planned_returncode
+                self._terminal.set()
+                self._release_communicate.set()
             raise self.kill_error
         self.returncode = -9
         self._terminal.set()
@@ -365,6 +376,8 @@ class FakeExternalProcess:
             self.events.append("process:wait")
         try:
             await self._terminal.wait()
+            if self.block_wait:
+                await self._release_wait.wait()
         except asyncio.CancelledError:
             self.wait_cancellations += 1
             raise
@@ -373,6 +386,9 @@ class FakeExternalProcess:
 
     def release_communicate(self) -> None:
         self._release_communicate.set()
+
+    def release_wait(self) -> None:
+        self._release_wait.set()
 
 
 class FakeProcessFactory:

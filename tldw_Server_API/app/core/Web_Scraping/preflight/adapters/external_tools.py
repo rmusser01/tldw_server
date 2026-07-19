@@ -11,7 +11,6 @@ from typing import Any
 
 from loguru import logger
 
-from tldw_Server_API.app.core.Metrics import increment_counter
 from tldw_Server_API.app.core.Web_Scraping.preflight.context import (
     PreflightDeadlineExceeded,
     PreflightRuntimeControls,
@@ -44,7 +43,7 @@ class _LegacyExternalToolDefaultObserver:
         self,
         *,
         warning: Callable[[str], Any] = logger.warning,
-        increment_counter: Callable[..., Any] = increment_counter,
+        increment_counter: Callable[..., Any] | None = None,
     ) -> None:
         self._warning = warning
         self._increment_counter = increment_counter
@@ -58,11 +57,16 @@ class _LegacyExternalToolDefaultObserver:
             self._observed = True
 
         _run_best_effort(lambda: self._warning(_LEGACY_DEFAULT_WARNING))
-        _run_best_effort(
-            lambda: self._increment_counter(
-                _LEGACY_DEFAULT_METRIC,
-                labels={"tool": "wafw00f"},
-            )
+        _run_best_effort(self._increment_legacy_default_metric)
+
+    def _increment_legacy_default_metric(self) -> None:
+        increment_counter = self._increment_counter
+        if increment_counter is None:
+            from tldw_Server_API.app.core.Metrics import increment_counter
+
+        increment_counter(
+            _LEGACY_DEFAULT_METRIC,
+            labels={"tool": "wafw00f"},
         )
 
 
@@ -154,7 +158,7 @@ class _ProcessCleanupHandle:
                 try:
                     self._process.terminate()
                 except ProcessLookupError:
-                    return
+                    pass
             wait_task = self._wait_task_locked()
         await _shield_process_wait(wait_task)
 
@@ -167,7 +171,7 @@ class _ProcessCleanupHandle:
                 try:
                     self._process.kill()
                 except ProcessLookupError:
-                    return
+                    pass
             wait_task = self._wait_task_locked()
         await _shield_process_wait(wait_task)
 

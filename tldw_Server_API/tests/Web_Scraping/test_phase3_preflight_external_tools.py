@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import builtins
 import importlib
-from collections.abc import Callable
+import sys
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from typing import Any
 
 import pytest
@@ -37,8 +40,11 @@ from tldw_Server_API.tests.Web_Scraping.preflight_fakes import (
 pytestmark = pytest.mark.unit
 
 _ADAPTER_MODULE = "tldw_Server_API.app.core.Web_Scraping.preflight.adapters.external_tools"
+_ADAPTER_PACKAGE = "tldw_Server_API.app.core.Web_Scraping.preflight.adapters"
+_METRICS_MODULE = "tldw_Server_API.app.core.Metrics"
 _URL = "https://example.com/path?token=secret"
 _EXECUTABLE = "/opt/private/bin/wafw00f"
+_MISSING = object()
 
 
 def _adapter_module() -> Any | None:
@@ -55,6 +61,27 @@ def _required(name: str) -> Any:
     assert module is not None, "Task 6 governed external-tool adapter module is missing"
     assert hasattr(module, name), f"Task 6 external-tool symbol {name} is missing"
     return getattr(module, name)
+
+
+@contextmanager
+def _fresh_adapter_package() -> Iterator[Any]:
+    parent_name, _, attribute = _ADAPTER_PACKAGE.rpartition(".")
+    parent = importlib.import_module(parent_name)
+    saved_attribute = getattr(parent, attribute, _MISSING)
+    saved_modules = {name: sys.modules.pop(name) for name in (_ADAPTER_MODULE, _ADAPTER_PACKAGE) if name in sys.modules}
+    if saved_attribute is not _MISSING:
+        delattr(parent, attribute)
+    try:
+        yield importlib.import_module(_ADAPTER_PACKAGE)
+    finally:
+        sys.modules.pop(_ADAPTER_MODULE, None)
+        sys.modules.pop(_ADAPTER_PACKAGE, None)
+        sys.modules.update(saved_modules)
+        if saved_attribute is _MISSING:
+            if hasattr(parent, attribute):
+                delattr(parent, attribute)
+        else:
+            setattr(parent, attribute, saved_attribute)
 
 
 @pytest.fixture(autouse=True)
@@ -223,6 +250,74 @@ async def test_raising_injected_observer_does_not_block_governed_execution() -> 
     assert result.stdout == "ok"
     assert len(observer.calls) == 1
     assert len(factory.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_import_disabled_and_missing_paths_do_not_load_metrics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    metrics_imports: list[str] = []
+    real_import = builtins.__import__
+
+    def reject_metrics_import(name: str, *args: Any, **kwargs: Any) -> Any:
+        if name == _METRICS_MODULE or name.startswith(f"{_METRICS_MODULE}."):
+            metrics_imports.append(name)
+            raise ImportError("Metrics unavailable")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", reject_metrics_import)
+    try:
+        with _fresh_adapter_package() as package:
+            assert _ADAPTER_MODULE in sys.modules
+            for enabled, dependency in ((False, _EXECUTABLE), (None, None), (True, None)):
+                probe = package.GuardedExternalToolProbe(
+                    controls=_controls(),
+                    egress_guard=FakeProbeEgressGuard([]),
+                    which=FakeWhich(dependency),
+                    process_factory=FakeProcessFactory(),
+                )
+                with pytest.raises(ProbeError):
+                    await probe.run_waf(_URL, find_all=False, enabled=enabled)
+    except ImportError:
+        pytest.fail("adapter import eagerly loaded Metrics", pytrace=False)
+
+    assert metrics_imports == []
+
+
+@pytest.mark.asyncio
+async def test_lazy_metric_import_failure_does_not_block_governed_launch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    metrics_imports: list[str] = []
+    real_import = builtins.__import__
+
+    def reject_metrics_import(name: str, *args: Any, **kwargs: Any) -> Any:
+        if name == _METRICS_MODULE or name.startswith(f"{_METRICS_MODULE}."):
+            metrics_imports.append(name)
+            raise ImportError("Metrics unavailable")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", reject_metrics_import)
+    try:
+        with _fresh_adapter_package() as package:
+            warning = FakeCallRecorder()
+            module = sys.modules[_ADAPTER_MODULE]
+            observer = module._LegacyExternalToolDefaultObserver(warning=warning)
+            process = FakeExternalProcess(stdout=b"governed")
+            probe = package.GuardedExternalToolProbe(
+                controls=_controls(),
+                egress_guard=FakeProbeEgressGuard([True]),
+                which=FakeWhich(_EXECUTABLE),
+                process_factory=FakeProcessFactory([process]),
+                legacy_default_observer=observer,
+            )
+            result = await probe.run_waf(_URL, find_all=False, enabled=None)
+    except ImportError:
+        pytest.fail("adapter import eagerly loaded Metrics", pytrace=False)
+
+    assert result.stdout == "governed"
+    assert len(warning.calls) == 1
+    assert metrics_imports == [_METRICS_MODULE]
 
 
 @pytest.mark.asyncio
@@ -592,6 +687,48 @@ async def test_stubborn_process_is_terminated_killed_and_waited_once() -> None:
         await task
 
     assert process.terminate_calls == 1
+    assert process.kill_calls == 1
+    assert process.wait_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_terminate_process_lookup_error_still_awaits_shared_wait() -> None:
+    process = FakeExternalProcess(
+        block_wait=True,
+        terminate_error=ProcessLookupError(),
+    )
+    handle = _required("_ProcessCleanupHandle")(process)
+    cleanup = asyncio.create_task(handle.close())
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    assert process.wait_started.is_set()
+    assert cleanup.done() is False
+    process.release_wait()
+    await cleanup
+    await handle.close()
+
+    assert process.terminate_calls == 1
+    assert process.wait_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_kill_process_lookup_error_still_awaits_shared_wait() -> None:
+    process = FakeExternalProcess(
+        block_wait=True,
+        kill_error=ProcessLookupError(),
+    )
+    handle = _required("_ProcessCleanupHandle")(process)
+    cleanup = asyncio.create_task(handle.force_close())
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    assert process.wait_started.is_set()
+    assert cleanup.done() is False
+    process.release_wait()
+    await cleanup
+    await handle.force_close()
+
     assert process.kill_calls == 1
     assert process.wait_calls == 1
 
