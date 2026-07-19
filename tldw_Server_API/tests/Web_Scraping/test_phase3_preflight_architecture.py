@@ -956,7 +956,7 @@ def test_legacy_export_identity_guard_covers_constants_and_callable_types(
         test_legacy_public_exports_match_canonical_contracts()
 
 
-def test_all_playwright_dependency_floors_are_exactly_1_48() -> None:
+def test_preflight_dependency_floors_are_exact() -> None:
     project = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
     requirement_groups = {
         "base": project["dependencies"],
@@ -976,5 +976,17 @@ def test_all_playwright_dependency_floors_are_exactly_1_48() -> None:
         specifier = str(playwright_requirements[0].specifier)
         if specifier != ">=1.48.0":
             violations.append(f"{group_name} pins Playwright as {specifier!r}, expected '>=1.48.0'")
+
+    curl_requirements = [
+        Requirement(requirement)
+        for requirement in requirement_groups["scrape-analyzers"]
+        if Requirement(requirement).name.lower() == "curl-cffi"
+    ]
+    if len(curl_requirements) != 1:
+        violations.append(f"scrape-analyzers has {len(curl_requirements)} curl-cffi requirements")
+    elif str(curl_requirements[0].specifier) != ">=0.5.9":
+        violations.append(
+            "scrape-analyzers pins curl-cffi as " f"{str(curl_requirements[0].specifier)!r}, expected '>=0.5.9'"
+        )
 
     assert violations == []

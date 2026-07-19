@@ -1529,6 +1529,11 @@ def _validate_proxies_or_raise(proxies: str | dict[str, str] | None) -> None:
             raise EgressPolicyError(f"Proxy host not in allowlist: {h}")  # noqa: TRY003
 
 
+def validate_proxies_or_raise(proxies: str | dict[str, str] | None) -> None:
+    """Validate outbound proxies through the central egress policy."""
+    _validate_proxies_or_raise(proxies)
+
+
 def _resolve_proxy_for_url(url: str, proxies: str | dict[str, str] | None) -> str | None:
     if not proxies:
         return None
@@ -5834,6 +5839,7 @@ __all__ = [
     "RetryPolicy",
     "SSEEvent",
     "build_limits",
+    "validate_proxies_or_raise",
     "create_async_client",
     "create_client",
     "afetch",

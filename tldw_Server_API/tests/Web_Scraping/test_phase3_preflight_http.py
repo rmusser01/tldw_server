@@ -17,7 +17,10 @@ from tldw_Server_API.app.core.Web_Scraping.preflight import (
     ProbeTimeout,
     ProbeUnavailable,
 )
-from tldw_Server_API.app.core.Web_Scraping.runtime import RuntimeRequestContext
+from tldw_Server_API.app.core.Web_Scraping.runtime import (
+    ProbeEgressDecision,
+    RuntimeRequestContext,
+)
 from tldw_Server_API.tests.Web_Scraping.preflight_fakes import (
     FakeClock,
     FakeHttpTransport,
@@ -28,6 +31,11 @@ from tldw_Server_API.tests.Web_Scraping.preflight_fakes import (
 pytestmark = pytest.mark.unit
 
 _ADAPTER_MODULE = "tldw_Server_API.app.core.Web_Scraping.preflight.adapters.http"
+_APPROVED_IP = "203.0.113.10"
+
+
+class _FakeCurlOpt:
+    RESOLVE = 10203
 
 
 def _adapter_module() -> Any | None:
@@ -44,6 +52,21 @@ def _required(name: str) -> Any:
     assert module is not None, "Task 4 governed HTTP adapter module is missing"
     assert hasattr(module, name), f"Task 4 governed HTTP adapter {name} is missing"
     return getattr(module, name)
+
+
+@pytest.fixture(autouse=True)
+def _curl_resolve_option(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _adapter_module()
+    if module is not None:
+        monkeypatch.setattr(module, "_CurlOpt", _FakeCurlOpt, raising=False)
+
+
+def _pinned_decision(*resolved_ips: str) -> ProbeEgressDecision:
+    return ProbeEgressDecision(
+        allowed=True,
+        reason="allowed",
+        resolved_ips=resolved_ips or (_APPROVED_IP,),
+    )
 
 
 def _controls(
@@ -813,7 +836,7 @@ async def test_curl_native_timeout_classification_reaches_probe_boundary(
             return await super().get(url, **kwargs)
 
     session = DeadlineSession([timeout_error])
-    guard = FakeProbeEgressGuard([True, True])
+    guard = FakeProbeEgressGuard([True, _pinned_decision()])
     curl = _required("CurlCffiProbeTransport")(
         egress_guard=guard,
         request_context=controls.request_context,
@@ -851,7 +874,7 @@ async def test_non_curl_code_28_error_remains_sanitized_probe_error() -> None:
 
     controls = _controls(deadline=10.0, clock=FakeClock(0.0))
     session = _FakeSession([ThirdPartyError()])
-    guard = FakeProbeEgressGuard([True, True])
+    guard = FakeProbeEgressGuard([True, _pinned_decision()])
     curl = _required("CurlCffiProbeTransport")(
         egress_guard=guard,
         request_context=controls.request_context,
@@ -1043,7 +1066,7 @@ async def test_curl_cleanup_uses_one_bounded_window_and_consumes_late_errors(
         close_error_after_release=RuntimeError("late-session-secret"),
     )
     controls = _controls()
-    guard = FakeProbeEgressGuard([True, True])
+    guard = FakeProbeEgressGuard([True, _pinned_decision()])
     curl = _required("CurlCffiProbeTransport")(
         egress_guard=guard,
         request_context=controls.request_context,
@@ -1196,6 +1219,12 @@ async def test_httpx_transport_uses_central_single_attempt_boundary(
 ) -> None:
     calls: list[dict[str, Any]] = []
     raw = FakeRawResponse(200)
+    client = _FakeSession([])
+    client_factory_calls: list[dict[str, Any]] = []
+
+    def fake_create_async_client(**kwargs: Any) -> _FakeSession:
+        client_factory_calls.append(dict(kwargs))
+        return client
 
     async def fake_afetch(**kwargs: Any) -> FakeRawResponse:
         calls.append(dict(kwargs))
@@ -1203,6 +1232,7 @@ async def test_httpx_transport_uses_central_single_attempt_boundary(
 
     module = _adapter_module()
     assert module is not None, "Task 4 governed HTTP adapter module is missing"
+    monkeypatch.setattr(module.http_client, "create_async_client", fake_create_async_client)
     monkeypatch.setattr(module.http_client, "afetch", fake_afetch)
     transport = _required("HttpxProbeTransport")()
     request = ProbeHttpRequest(
@@ -1215,8 +1245,10 @@ async def test_httpx_transport_uses_central_single_attempt_boundary(
 
     result = await transport.send(request)
 
-    assert result is raw
+    assert result.status_code == raw.status_code
+    assert client_factory_calls == [{"proxies": dict(request.proxies)}]
     assert len(calls) == 1
+    assert calls[0]["client"] is client
     assert calls[0]["method"] == "GET"
     assert calls[0]["url"] == request.url
     assert calls[0]["headers"] == dict(request.headers)
@@ -1227,6 +1259,109 @@ async def test_httpx_transport_uses_central_single_attempt_boundary(
     assert isinstance(calls[0]["retry"], http_client.RetryPolicy)
     assert calls[0]["retry"].attempts == 1
     assert calls[0]["sensitive_observability"] is True
+    await result.aclose()
+    assert raw.closed is True
+    assert client.closed is True
+
+
+@pytest.mark.asyncio
+async def test_httpx_transport_uses_a_distinct_owned_client_per_send(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clients = [_FakeSession([]), _FakeSession([])]
+    created: list[_FakeSession] = []
+    afetch_clients: list[_FakeSession] = []
+    responses = [FakeRawResponse(200), FakeRawResponse(201)]
+
+    def fake_create_async_client(**_kwargs: Any) -> _FakeSession:
+        client = clients[len(created)]
+        created.append(client)
+        return client
+
+    async def fake_afetch(**kwargs: Any) -> FakeRawResponse:
+        afetch_clients.append(kwargs["client"])
+        return responses[len(afetch_clients) - 1]
+
+    module = _adapter_module()
+    assert module is not None
+    monkeypatch.setattr(module.http_client, "create_async_client", fake_create_async_client)
+    monkeypatch.setattr(module.http_client, "afetch", fake_afetch)
+    transport = _required("HttpxProbeTransport")()
+
+    owned = [await transport.send(ProbeHttpRequest(url=f"https://example.com/{index}")) for index in range(2)]
+
+    assert len(created) == 2
+    assert created[0] is not created[1]
+    assert afetch_clients == created
+    await asyncio.gather(*(response.aclose() for response in owned))
+    assert all(response.closed for response in responses)
+    assert all(client.closed for client in clients)
+
+
+@pytest.mark.asyncio
+async def test_httpx_transport_closes_owned_client_when_afetch_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _FakeSession([])
+
+    async def failing_afetch(**_kwargs: Any) -> Any:
+        raise RuntimeError("central fetch failed")
+
+    module = _adapter_module()
+    assert module is not None
+    monkeypatch.setattr(module.http_client, "create_async_client", lambda **_kwargs: client)
+    monkeypatch.setattr(module.http_client, "afetch", failing_afetch)
+
+    with pytest.raises(RuntimeError, match="central fetch failed"):
+        await _required("HttpxProbeTransport")().send(ProbeHttpRequest(url="https://example.com/error"))
+
+    assert client.closed is True
+    assert client.close_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_httpx_transport_closes_owned_client_before_cancellation_propagates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _FakeSession([])
+    afetch_started = asyncio.Event()
+
+    async def blocked_afetch(**_kwargs: Any) -> Any:
+        afetch_started.set()
+        await asyncio.Event().wait()
+
+    module = _adapter_module()
+    assert module is not None
+    monkeypatch.setattr(module.http_client, "create_async_client", lambda **_kwargs: client)
+    monkeypatch.setattr(module.http_client, "afetch", blocked_afetch)
+    task = asyncio.create_task(
+        _required("HttpxProbeTransport")().send(ProbeHttpRequest(url="https://example.com/cancel"))
+    )
+    await afetch_started.wait()
+
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert client.closed is True
+    assert client.close_calls == 1
+
+
+def test_public_proxy_validation_wrapper_delegates_to_central_policy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[Any] = []
+    proxies = {"https": "http://proxy.example:8080"}
+    monkeypatch.setattr(
+        http_client,
+        "_validate_proxies_or_raise",
+        lambda value: calls.append(value),
+    )
+
+    http_client.validate_proxies_or_raise(proxies)
+
+    assert calls == [proxies]
+    assert "validate_proxies_or_raise" in http_client.__all__
 
 
 @pytest.mark.asyncio
@@ -1253,12 +1388,17 @@ async def test_impersonated_request_selects_curl_transport() -> None:
 
 
 @pytest.mark.asyncio
-async def test_curl_transport_rechecks_egress_immediately_before_get_and_closes() -> None:
+async def test_curl_transport_rechecks_egress_immediately_before_get_and_closes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     events: list[str] = []
     raw = FakeRawResponse(200, events=events)
     session = _FakeSession([raw], events=events)
     factory = _SessionFactory([session], events=events)
-    guard = FakeProbeEgressGuard([True, True], events=events)
+    guard = FakeProbeEgressGuard(
+        [True, _pinned_decision("203.0.113.10", "2001:0db8::1")],
+        events=events,
+    )
     controls = _controls()
     curl = _required("CurlCffiProbeTransport")(
         egress_guard=guard,
@@ -1272,9 +1412,18 @@ async def test_curl_transport_rechecks_egress_immediately_before_get_and_closes(
         curl_transport=curl,
     )
 
+    module = _adapter_module()
+    assert module is not None
+    validated_proxies: list[Any] = []
+    monkeypatch.setattr(
+        module.http_client,
+        "validate_proxies_or_raise",
+        lambda proxies: validated_proxies.append(proxies),
+        raising=False,
+    )
     await probe.get(
         ProbeHttpRequest(
-            url="https://example.com/start",
+            url="https://EXAMPLE.com:8443/start",
             headers={"Accept": "text/html"},
             cookies={"session": "value"},
             timeout_s=4.0,
@@ -1283,11 +1432,22 @@ async def test_curl_transport_rechecks_egress_immediately_before_get_and_closes(
         )
     )
 
-    assert guard.urls == ["https://example.com/start"] * 2
-    assert factory.calls == [{"impersonate": "chrome120"}]
+    assert guard.urls == ["https://EXAMPLE.com:8443/start"] * 2
+    assert validated_proxies == [{"https": "http://proxy.example:8080"}]
+    assert factory.calls == [
+        {
+            "impersonate": "chrome120",
+            "curl_options": {
+                _FakeCurlOpt.RESOLVE: [
+                    "example.com:8443:203.0.113.10",
+                    "example.com:8443:[2001:db8::1]",
+                ]
+            },
+        }
+    ]
     assert session.get_calls == [
         (
-            "https://example.com/start",
+            "https://EXAMPLE.com:8443/start",
             {
                 "headers": {"Accept": "text/html"},
                 "cookies": {"session": "value"},
@@ -1298,10 +1458,10 @@ async def test_curl_transport_rechecks_egress_immediately_before_get_and_closes(
         )
     ]
     assert events == [
-        "guard:https://example.com/start",
+        "guard:https://EXAMPLE.com:8443/start",
+        "guard:https://EXAMPLE.com:8443/start",
         "session:create",
-        "guard:https://example.com/start",
-        "session:get:https://example.com/start",
+        "session:get:https://EXAMPLE.com:8443/start",
         "response:close",
         "session:close",
     ]
@@ -1330,8 +1490,102 @@ async def test_curl_second_egress_denial_prevents_get_and_closes_session() -> No
         )
 
     assert raised.value.error_code == "policy_denied"
+    assert factory.calls == []
     assert session.get_calls == []
-    assert session.closed is True
+    assert session.closed is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("url", "resolved_ips"),
+    [
+        ("https://example.com/start", ()),
+        ("https://example.com/start", ("not-an-ip",)),
+        ("https://example.com:0/start", (_APPROVED_IP,)),
+    ],
+    ids=["empty-pins", "malformed-pin", "malformed-port"],
+)
+async def test_curl_hostname_dispatch_fails_closed_before_session_creation(
+    url: str,
+    resolved_ips: tuple[str, ...],
+) -> None:
+    session = _FakeSession([])
+    factory = _SessionFactory([session])
+    transport = _required("CurlCffiProbeTransport")(
+        egress_guard=FakeProbeEgressGuard(
+            [
+                ProbeEgressDecision(
+                    allowed=True,
+                    reason="allowed",
+                    resolved_ips=resolved_ips,
+                )
+            ]
+        ),
+        request_context=_controls().request_context,
+        session_factory=factory,
+    )
+
+    with pytest.raises(ProbeError) as raised:
+        await transport.send(ProbeHttpRequest(url=url, impersonate="chrome120"))
+
+    assert raised.value.error_code == "policy_error"
+    assert factory.calls == []
+    assert session.get_calls == []
+
+
+@pytest.mark.asyncio
+async def test_curl_literal_ip_dispatch_needs_no_resolve_entry() -> None:
+    raw = FakeRawResponse(200)
+    session = _FakeSession([raw])
+    factory = _SessionFactory([session])
+    url = "https://[2001:db8::1]/start"
+    guard = FakeProbeEgressGuard([ProbeEgressDecision(allowed=True, reason="allowed")])
+    transport = _required("CurlCffiProbeTransport")(
+        egress_guard=guard,
+        request_context=_controls().request_context,
+        session_factory=factory,
+    )
+
+    response = await transport.send(ProbeHttpRequest(url=url, impersonate="chrome120"))
+
+    assert factory.calls == [{"impersonate": "chrome120"}]
+    assert session.get_calls[0][0] == url
+    await response.aclose()
+
+
+@pytest.mark.asyncio
+async def test_curl_proxy_rejection_precedes_guard_and_session_creation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _adapter_module()
+    assert module is not None
+    monkeypatch.setattr(
+        module.http_client,
+        "validate_proxies_or_raise",
+        lambda _proxies: (_ for _ in ()).throw(RuntimeError("proxy rejected")),
+        raising=False,
+    )
+    session = _FakeSession([])
+    factory = _SessionFactory([session])
+    guard = FakeProbeEgressGuard([])
+    transport = _required("CurlCffiProbeTransport")(
+        egress_guard=guard,
+        request_context=_controls().request_context,
+        session_factory=factory,
+    )
+
+    with pytest.raises(RuntimeError, match="proxy rejected"):
+        await transport.send(
+            ProbeHttpRequest(
+                url="https://example.com/start",
+                impersonate="chrome120",
+                proxies={"https": "http://rejected.example:8080"},
+            )
+        )
+
+    assert guard.urls == []
+    assert factory.calls == []
+    assert session.get_calls == []
 
 
 @pytest.mark.asyncio
@@ -1359,7 +1613,7 @@ async def test_missing_curl_dependency_is_safe_and_does_no_transport_work() -> N
 @pytest.mark.asyncio
 async def test_curl_transport_closes_session_on_timeout() -> None:
     session = _FakeSession([TimeoutError("secret timeout")])
-    guard = FakeProbeEgressGuard([True])
+    guard = FakeProbeEgressGuard([_pinned_decision()])
     transport = _required("CurlCffiProbeTransport")(
         egress_guard=guard,
         request_context=_controls().request_context,
@@ -1381,7 +1635,7 @@ async def test_curl_transport_closes_session_on_timeout() -> None:
 @pytest.mark.asyncio
 async def test_curl_transport_closes_session_before_propagating_cancellation() -> None:
     session = _FakeSession([], block_get=True)
-    guard = FakeProbeEgressGuard([True])
+    guard = FakeProbeEgressGuard([_pinned_decision()])
     transport = _required("CurlCffiProbeTransport")(
         egress_guard=guard,
         request_context=_controls().request_context,
@@ -1412,7 +1666,7 @@ async def test_curl_response_close_failure_still_closes_session() -> None:
         close_error=RuntimeError("secret response cleanup"),
     )
     session = _FakeSession([raw])
-    guard = FakeProbeEgressGuard([True, True])
+    guard = FakeProbeEgressGuard([True, _pinned_decision()])
     controls = _controls()
     curl = _required("CurlCffiProbeTransport")(
         egress_guard=guard,
@@ -1442,7 +1696,7 @@ async def test_curl_response_close_failure_still_closes_session() -> None:
 async def test_curl_response_close_cancellation_is_secondary_and_closes_session() -> None:
     raw = FakeRawResponse(200, close_error=asyncio.CancelledError())
     session = _FakeSession([raw])
-    guard = FakeProbeEgressGuard([True, True])
+    guard = FakeProbeEgressGuard([True, _pinned_decision()])
     controls = _controls()
     curl = _required("CurlCffiProbeTransport")(
         egress_guard=guard,

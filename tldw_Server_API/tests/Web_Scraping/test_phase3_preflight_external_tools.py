@@ -579,6 +579,65 @@ async def test_process_creation_is_bounded_by_overall_deadline() -> None:
 
 
 @pytest.mark.asyncio
+async def test_process_creation_is_bounded_by_analyzer_local_timeout() -> None:
+    factory = FakeProcessFactory(block_creation=True)
+
+    with pytest.raises(ProbeTimeout):
+        async with asyncio.timeout(0.2):
+            await _probe(
+                process_factory=factory,
+            ).run_waf(_URL, find_all=False, enabled=True)
+
+    assert factory.creation_cancellations == 1
+
+
+@pytest.mark.asyncio
+async def test_spawn_elapsed_time_reduces_communicate_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _adapter_module()
+    assert module is not None
+    monkeypatch.setattr(module, "_WAF_TIMEOUT_SECONDS", 10.0)
+    clock = FakeClock()
+    monkeypatch.setattr(module, "_monotonic", clock, raising=False)
+    process = FakeExternalProcess()
+
+    class ElapsedFactory(FakeProcessFactory):
+        async def __call__(self, *args: Any, **kwargs: Any) -> FakeExternalProcess:
+            created = await super().__call__(*args, **kwargs)
+            clock.advance(4.0)
+            return created
+
+    creation_timeouts: list[float | None] = []
+    communicate_timeouts: list[float | None] = []
+
+    class RecordingTimeout:
+        def __init__(self, timeout_s: float | None) -> None:
+            creation_timeouts.append(timeout_s)
+
+        async def __aenter__(self) -> None:
+            return None
+
+        async def __aexit__(self, *_args: Any) -> None:
+            return None
+
+    async def recording_wait_for(awaitable: Any, timeout: float | None) -> Any:
+        communicate_timeouts.append(timeout)
+        return await awaitable
+
+    monkeypatch.setattr(module.asyncio, "timeout", RecordingTimeout)
+    monkeypatch.setattr(module.asyncio, "wait_for", recording_wait_for)
+
+    result = await _probe(
+        process_factory=ElapsedFactory([process]),
+    ).run_waf(_URL, find_all=False, enabled=True)
+
+    assert result.returncode == 0
+    assert creation_timeouts == [10.0]
+    assert communicate_timeouts == [6.0]
+
+
+@pytest.mark.asyncio
 async def test_exhausted_deadline_prevents_process_creation_after_reservation_and_guard() -> None:
     clock = FakeClock(10.0)
     controls = _controls(active_probes=1, deadline=10.0, clock=clock)

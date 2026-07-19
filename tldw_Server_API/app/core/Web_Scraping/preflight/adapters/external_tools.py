@@ -7,7 +7,8 @@ import shutil
 import threading
 from collections.abc import Callable
 from dataclasses import replace
-from typing import Any
+from time import monotonic as _monotonic
+from typing import Any, cast
 
 from loguru import logger
 
@@ -206,16 +207,10 @@ class GuardedExternalToolProbe:
         url: str,
         *,
         find_all: bool,
+        timeout_s: float,
     ) -> Any:
-        timeout_s = self._controls.cap_timeout(None)
         argv = (executable, url, *(("-a",) if find_all else ()))
         try:
-            if timeout_s is None:
-                return await self._process_factory(
-                    *argv,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
             async with asyncio.timeout(timeout_s):
                 return await self._process_factory(
                     *argv,
@@ -227,7 +222,7 @@ class GuardedExternalToolProbe:
         except TimeoutError:
             if self._controls.deadline_exhausted():
                 raise PreflightDeadlineExceeded() from None
-            raise ProbeError("probe_error", "Probe failed.") from None
+            raise ProbeTimeout() from None
         except (ProbeError, PreflightDeadlineExceeded):
             raise
         except Exception:  # noqa: BLE001 - sanitize the process boundary
@@ -276,12 +271,17 @@ class GuardedExternalToolProbe:
         allowed, reason = _decision_fields(decision)
         if not allowed:
             raise _denied_error(reason)
-        self._controls.cap_timeout(None)
+        effective_timeout_s = cast(
+            float,
+            self._controls.cap_timeout(_WAF_TIMEOUT_SECONDS),
+        )
+        operation_deadline = _monotonic() + effective_timeout_s
 
         process = await self._create_process(
             executable,
             url,
             find_all=find_all,
+            timeout_s=effective_timeout_s,
         )
         handle = _ProcessCleanupHandle(process)
         try:
@@ -293,11 +293,19 @@ class GuardedExternalToolProbe:
         try:
             if enabled is None:
                 self._observe_legacy_default()
-            timeout_s = self._controls.cap_timeout(_WAF_TIMEOUT_SECONDS)
+            timeout_s = operation_deadline - _monotonic()
+            if timeout_s <= 0:
+                if self._controls.deadline_exhausted():
+                    raise PreflightDeadlineExceeded()
+                raise ProbeTimeout()
             stdout, stderr = await asyncio.wait_for(
                 process.communicate(),
                 timeout=timeout_s,
             )
+            if _monotonic() >= operation_deadline:
+                if self._controls.deadline_exhausted():
+                    raise PreflightDeadlineExceeded()
+                raise ProbeTimeout()
             self._controls.cap_timeout(None)
             result = ExternalToolResult(
                 returncode=process.returncode,

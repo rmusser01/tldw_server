@@ -300,7 +300,7 @@ web_research = [
 # Scraper analyzers (optional)
 scrape-analyzers = [
   "playwright>=1.48.0",
-  "curl-cffi>=0.5.0",
+  "curl-cffi>=0.5.9",
 ]
 
 scrape-analyzers-waf = [

@@ -36,6 +36,7 @@ from tldw_Server_API.app.core.Web_Scraping.runtime.requests import (
 )
 
 try:
+    from curl_cffi import CurlOpt as _CurlOpt
     from curl_cffi.requests import AsyncSession as _CurlAsyncSession
 
     try:
@@ -43,6 +44,7 @@ try:
     except ImportError:  # pragma: no cover - legacy optional dependency
         _CurlTimeout = None
 except ImportError:  # pragma: no cover - optional dependency
+    _CurlOpt = None
     _CurlAsyncSession = None
     _CurlTimeout = None
 
@@ -171,7 +173,7 @@ async def _close_resource(resource: Any, *, label: str) -> None:
 
 
 async def _close_response(raw: Any) -> None:
-    if isinstance(raw, _CurlResponse):
+    if isinstance(raw, _OwnedResponse):
         await raw.aclose()
         return
     await _close_resource(raw, label="response")
@@ -470,21 +472,32 @@ class HttpxProbeTransport:
     """Single-attempt transport over the central DNS-pinned async boundary."""
 
     async def send(self, request: ProbeHttpRequest) -> Any:
-        return await http_client.afetch(
-            method="GET",
-            url=request.url,
-            headers=dict(request.headers),
-            cookies=dict(request.cookies),
-            timeout=request.timeout_s,
-            allow_redirects=False,
-            proxies=_mutable_proxies(request.proxies),
-            retry=http_client.RetryPolicy(attempts=1),
-            sensitive_observability=True,
-        )
+        proxies = _mutable_proxies(request.proxies)
+        client = http_client.create_async_client(proxies=proxies)
+        try:
+            response = await http_client.afetch(
+                method="GET",
+                url=request.url,
+                client=client,
+                headers=dict(request.headers),
+                cookies=dict(request.cookies),
+                timeout=request.timeout_s,
+                allow_redirects=False,
+                proxies=proxies,
+                retry=http_client.RetryPolicy(attempts=1),
+                sensitive_observability=True,
+            )
+        except asyncio.CancelledError:
+            await _close_resource(client, label="client")
+            raise
+        except Exception:
+            await _close_resource(client, label="client")
+            raise
+        return _OwnedResponse(response, client)
 
 
-class _CurlResponse:
-    """Bind a curl response to the async session that owns it."""
+class _OwnedResponse:
+    """Bind a response to the async client or session that owns it."""
 
     def __init__(self, response: Any, session: Any) -> None:
         self._response = response
@@ -497,9 +510,44 @@ class _CurlResponse:
         await _close_resources(
             (
                 (self._response, "response"),
-                (self._session, "session"),
+                (self._session, "client"),
             )
         )
+
+
+def _curl_resolve_entries(
+    url: str,
+    resolved_ips: tuple[str, ...],
+) -> list[str]:
+    validated = _validated_absolute_url(url)
+    if validated is None:
+        raise ProbeError("policy_error", "Probe destination was denied.")
+    _, _, host, port = validated
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        pass
+    else:
+        return []
+
+    entries: list[str] = []
+    for raw_ip in resolved_ips:
+        if not isinstance(raw_ip, str) or raw_ip != raw_ip.strip() or "%" in raw_ip:
+            raise ProbeError("policy_error", "Probe destination was denied.")
+        try:
+            approved_ip = ipaddress.ip_address(raw_ip)
+        except ValueError:
+            raise ProbeError(
+                "policy_error",
+                "Probe destination was denied.",
+            ) from None
+        address = approved_ip.compressed
+        if approved_ip.version == 6:
+            address = f"[{address}]"
+        entries.append(f"{host}:{port}:{address}")
+    if not entries:
+        raise ProbeError("policy_error", "Probe destination was denied.")
+    return entries
 
 
 class CurlCffiProbeTransport:
@@ -517,25 +565,34 @@ class CurlCffiProbeTransport:
         self._session_factory = _CurlAsyncSession if session_factory is _DEFAULT_SESSION_FACTORY else session_factory
 
     async def send(self, request: ProbeHttpRequest) -> Any:
-        if self._session_factory is None:
+        if self._session_factory is None or _CurlOpt is None:
             raise ProbeUnavailable(error_code="missing_dependency")
 
-        session = self._session_factory(impersonate=request.impersonate)
+        proxies = _mutable_proxies(request.proxies)
+        http_client.validate_proxies_or_raise(proxies)
+        decision = await _fresh_decision(
+            self._egress_guard,
+            request.url,
+            context=self._request_context,
+        )
+        if not decision.allowed:
+            raise _denied_error(decision.reason)
+        resolve_entries = _curl_resolve_entries(
+            request.url,
+            decision.resolved_ips,
+        )
+        session_kwargs: dict[str, Any] = {"impersonate": request.impersonate}
+        if resolve_entries:
+            session_kwargs["curl_options"] = {_CurlOpt.RESOLVE: resolve_entries}
+        session = self._session_factory(**session_kwargs)
         try:
-            decision = await _fresh_decision(
-                self._egress_guard,
-                request.url,
-                context=self._request_context,
-            )
-            if not decision.allowed:
-                raise _denied_error(decision.reason)
             response = await session.get(
                 request.url,
                 headers=dict(request.headers),
                 cookies=dict(request.cookies),
                 timeout=request.timeout_s,
                 allow_redirects=False,
-                proxies=_mutable_proxies(request.proxies),
+                proxies=proxies,
             )
         except asyncio.CancelledError:
             await _close_resource(session, label="session")
@@ -543,7 +600,7 @@ class CurlCffiProbeTransport:
         except Exception:
             await _close_resource(session, label="session")
             raise
-        return _CurlResponse(response, session)
+        return _OwnedResponse(response, session)
 
 
 class GuardedHttpProbe:
