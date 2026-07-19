@@ -1019,16 +1019,20 @@ async def refresh_llm_provider_overrides(
     _task_epoch: int | None = None,
 ) -> dict[str, LLMProviderOverride]:
     """Load and atomically publish a bounded, serialized override snapshot."""
-    requested_at = time.monotonic()
+    with _OVERRIDE_LOCK:
+        requested_completed_generation = _OVERRIDE_COMPLETED_GENERATION
     should_force = pool is not None if force is None else force
     refresh_lock = _get_override_refresh_lock()
 
     async with refresh_lock:
         if not should_force:
             with _OVERRIDE_LOCK:
+                completed_after_request = (
+                    requested_completed_generation < _OVERRIDE_COMPLETED_GENERATION
+                )
                 if (
                     _OVERRIDE_CACHE_HEALTHY
-                    and requested_at <= _OVERRIDE_CACHE_REFRESHED_AT
+                    and completed_after_request
                 ):
                     return _copy_override_map(_OVERRIDE_CACHE)
 

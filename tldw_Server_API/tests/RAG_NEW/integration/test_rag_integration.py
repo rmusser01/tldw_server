@@ -109,6 +109,27 @@ async def test_rag_cache_hit_regenerates_with_current_distinct_provider_credenti
         model_id_override=None,
         **kwargs,
     ):
+        from tldw_Server_API.app.core.LLM_Calls.openai_credentials import (
+            bind_openai_embedding_credentials,
+        )
+
+        provider_credentials = kwargs.pop("_provider_call_credentials", None)
+        require_provider_credentials = kwargs.pop(
+            "_require_provider_call_credentials",
+            False,
+        )
+        if require_provider_credentials or provider_credentials is not None:
+            (
+                kwargs["api_key_override"],
+                kwargs["base_url_override"],
+                _runtime_openai_config,
+            ) = bind_openai_embedding_credentials(
+                provider_credentials=provider_credentials,
+                credentials_resolved=kwargs.get("credentials_resolved") is True,
+                api_key_override=kwargs.get("api_key_override"),
+                base_url_override=kwargs.get("base_url_override"),
+            )
+            kwargs["credentials_resolved"] = True
         embedding_calls.append(
             {
                 "texts": list(texts),
@@ -239,6 +260,8 @@ async def test_rag_cache_hit_regenerates_with_current_distinct_provider_credenti
         == f"{_RAG_USER_SECRET}-first-openai"
     )
     assert embedding_calls[0]["credentials_resolved"] is True
+    assert "_provider_call_credentials" not in embedding_calls[0]
+    assert "_require_provider_call_credentials" not in embedding_calls[0]
     assert [call["api_key"] for call in generation_calls] == [
         f"{_RAG_USER_SECRET}-first-anthropic",
         f"{_RAG_USER_SECRET}-second-anthropic",

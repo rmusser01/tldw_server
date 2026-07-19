@@ -45,11 +45,30 @@ describe("frontend CI workflow networking", () => {
     }
   })
 
-  it("forces the smoke gate to build the production frontend artifact explicitly", () => {
+  it("builds the advanced smoke artifact and retains a quickstart production browser smoke", () => {
     const workflow = readWorkflow("frontend-ux-gates.yml")
-    const jobBlock = getJobBlock(workflow, "smoke-gate")
+    const smokeGate = getJobBlock(workflow, "smoke-gate")
+    const onboardingGate = getJobBlock(workflow, "onboarding-gate")
 
-    expect(jobBlock).toContain("run: bun run build:prod")
+    expect(smokeGate).toContain("run: bun run build:dev")
+    expect(smokeGate).not.toContain("run: bun run build:prod")
+
+    expect(onboardingGate).toContain("Build quickstart frontend production bundle")
+    expect(onboardingGate).toContain("run: bun run build:prod")
+    expect(onboardingGate).toContain("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE: quickstart")
+    expect(onboardingGate).toContain("NEXT_PUBLIC_API_URL: ''")
+    expect(onboardingGate).toContain("TLDW_WEBUI_EXPOSE_RUNTIME_AUTH: '1'")
+    expect(smokeGate).not.toContain("TLDW_WEBUI_EXPOSE_RUNTIME_AUTH: '1'")
+    expect(onboardingGate).toContain(
+      "TLDW_INTERNAL_API_ORIGIN: http://127.0.0.1:8000"
+    )
+    expect(onboardingGate).toContain(
+      "node .next/standalone/apps/tldw-frontend/server.js"
+    )
+    expect(onboardingGate).toContain("e2e/login.spec.ts")
+    expect(onboardingGate).toContain(
+      "loopback quickstart authenticates without a browser-readable API key"
+    )
   })
 
   it("pins advanced-mode browser API settings for the frontend E2E tiers", () => {

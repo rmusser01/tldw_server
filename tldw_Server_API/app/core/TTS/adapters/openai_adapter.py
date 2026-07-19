@@ -381,17 +381,14 @@ class OpenAIAdapter(TTSAdapter):
         if request_error is not None:
             raise_detached_error(request_error)
 
-    def _normalized_http_status_error(self, e: Exception) -> Exception:
+    def _normalized_http_status(
+        self,
+        status_code: int | None,
+        headers: Any = None,
+    ) -> Exception:
         """Build a bounded TTS exception for one upstream HTTP status."""
-        response = getattr(e, "response", None)
-        status_code = getattr(response, "status_code", None)
-        headers = getattr(response, "headers", {}) if response is not None else {}
-        logger.error(
-            f"{self.provider_name} API error: {status_code}; "
-            f"exception_type={_safe_exception_label(e)}; response body redacted"
-        )
 
-        if status_code == 401:
+        if status_code in (401, 403):
             # Standardize message and provider fields
             return auth_error(self.provider_name, "Invalid API key")
         elif status_code == 429:
@@ -408,12 +405,26 @@ class OpenAIAdapter(TTSAdapter):
                 error_code="BAD_REQUEST",
                 details={"status": status_code},
             )
+        elif status_code in (408, 504):
+            return timeout_error(self.provider_name, timeout_seconds=60)
         return TTSProviderError(
             "OpenAI API request failed",
             provider=self.provider_name,
             error_code=str(status_code),
             details={"status": status_code},
         )
+
+    def _normalized_http_status_error(self, e: Exception) -> Exception:
+        """Build a bounded TTS exception from an upstream HTTP response."""
+
+        response = getattr(e, "response", None)
+        status_code = getattr(response, "status_code", None)
+        headers = getattr(response, "headers", {}) if response is not None else {}
+        logger.error(
+            f"{self.provider_name} API error: {status_code}; "
+            f"exception_type={_safe_exception_label(e)}; response body redacted"
+        )
+        return self._normalized_http_status(status_code, headers)
 
     async def _handle_http_status_error(self, e: Exception) -> None:
         """Raise a bounded HTTP error without retaining the upstream object."""
@@ -427,6 +438,8 @@ class OpenAIAdapter(TTSAdapter):
             return self._normalized_http_status_error(e)
         if isinstance(e, TTSError):
             return _bounded_existing_tts_error(self.provider_name, e)
+        if isinstance(e, CoreNetworkError) and e.status_code is not None:
+            return self._normalized_http_status(e.status_code)
         if isinstance(e, (CoreNetworkError, RetryExhaustedError)) or _is_httpx_exception(e):
             logger.error(
                 f"{self.provider_name} network/timeout error; "

@@ -32,7 +32,13 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatProviderError,
     ChatRateLimitError,
 )
+from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
+    bind_provider_call_credentials,
+)
 from tldw_Server_API.app.services import admin_llm_providers_service as service
+from tldw_Server_API.tests.provider_credential_test_helpers import (
+    resolved_request_fields_async,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -148,10 +154,36 @@ class _ProviderCancellingAdapter(_CapturingAdapter):
 
 class _Registry:
     def __init__(self, adapters: dict[str, Any]) -> None:
-        self.adapters = adapters
+        self.adapters = {
+            provider: _CredentialBindingAdapter(provider, adapter)
+            for provider, adapter in adapters.items()
+        }
 
     def get_adapter(self, provider: str) -> Any | None:
         return self.adapters.get(provider)
+
+
+class _CredentialBindingAdapter:
+    """Mirror the credential-consumption boundary implemented by real adapters."""
+
+    async_chat_is_native = False
+
+    def __init__(self, provider: str, adapter: Any) -> None:
+        self._provider = provider
+        self._adapter = adapter
+
+    def chat(
+        self,
+        request: dict[str, Any],
+        *,
+        timeout: float | None = None,
+    ) -> dict[str, Any]:
+        bound_request, _credentials = bind_provider_call_credentials(
+            self._provider,
+            request,
+            consume=True,
+        )
+        return self._adapter.chat(bound_request, timeout=timeout)
 
 
 def _install_adapter_boundary(
@@ -812,13 +844,22 @@ def _install_real_health_chat_capacity_boundary(
 
 
 async def _ordinary_chat_dispatch() -> dict[str, Any]:
+    resolved_fields = await resolved_request_fields_async(
+        "openai",
+        api_key="sk-ordinary-chat",
+        app_config={
+            "openai_api": {
+                "api_base_url": "https://ordinary-chat.example/v1",
+            }
+        },
+        model="gpt-chat-headroom",
+    )
     return await chat_service.perform_chat_api_call_async(
         api_endpoint="openai",
-        api_key="sk-ordinary-chat",
-        credentials_resolved=True,
         messages_payload=[],
         model="gpt-chat-headroom",
         streaming=False,
+        **resolved_fields,
     )
 
 

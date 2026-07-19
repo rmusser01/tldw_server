@@ -1,17 +1,19 @@
-import pytest
-import httpx
+import traceback
 from unittest.mock import AsyncMock, patch
 
+import httpx
+import pytest
+
 from tldw_Server_API.app.core.TTS.adapters import elevenlabs_adapter as elevenlabs_mod
-from tldw_Server_API.app.core.TTS.adapters.elevenlabs_adapter import ElevenLabsAdapter, ElevenLabsTTSAdapter
 from tldw_Server_API.app.core.TTS.adapters.base import AudioFormat, TTSRequest
+from tldw_Server_API.app.core.TTS.adapters.elevenlabs_adapter import ElevenLabsAdapter
 from tldw_Server_API.app.core.TTS.tts_exceptions import (
     TTSAuthenticationError,
     TTSGenerationError,
-    TTSRateLimitError,
-    TTSTimeoutError,
     TTSProviderError,
     TTSProviderInitializationError,
+    TTSRateLimitError,
+    TTSTimeoutError,
     TTSValidationError,
 )
 
@@ -20,6 +22,20 @@ def make_http_status_error(status_code: int, body: str = "") -> httpx.HTTPStatus
     request = httpx.Request("POST", "https://api.elevenlabs.io/v1/text-to-speech/test")
     response = httpx.Response(status_code, request=request, text=body)
     return httpx.HTTPStatusError("error", request=request, response=response)
+
+
+def assert_sanitized_error(
+    exc: TTSProviderError,
+    raw_marker: str,
+    *,
+    details: dict[str, object],
+) -> None:
+    """Assert the public adapter error retains only allowlisted metadata."""
+    assert exc.details == details
+    assert exc.__cause__ is None
+    assert exc.__context__ is None
+    rendered = repr((str(exc), vars(exc), traceback.format_exception(exc)))
+    assert raw_marker not in rendered
 
 
 class TestElevenLabsAdapterBasics:
@@ -112,7 +128,11 @@ class TestElevenLabsSanitizedFallbackLogs:
         finally:
             elevenlabs_mod.logger.remove(sink_id)
 
-        assert raw_marker in exc_info.value.details["error"]
+        assert_sanitized_error(
+            exc_info.value,
+            raw_marker,
+            details={"error_type": "RuntimeError"},
+        )
         assert any("Initialization failed" in message for message in messages)
         assert all(raw_marker not in message for message in messages)
 
@@ -159,7 +179,11 @@ class TestElevenLabsSanitizedFallbackLogs:
         finally:
             elevenlabs_mod.logger.remove(sink_id)
 
-        assert raw_marker in exc_info.value.details["body"]
+        assert_sanitized_error(
+            exc_info.value,
+            raw_marker,
+            details={"status": 400},
+        )
         assert any("HTTP error" in message for message in messages)
         assert all(raw_marker not in message for message in messages)
 
@@ -220,7 +244,11 @@ class TestElevenLabsSanitizedFallbackLogs:
         finally:
             elevenlabs_mod.logger.remove(sink_id)
 
-        assert raw_marker in exc_info.value.details["error"]
+        assert_sanitized_error(
+            exc_info.value,
+            raw_marker,
+            details={"error_type": "RuntimeError"},
+        )
         assert any("generation error" in message for message in messages)
         assert all(raw_marker not in message for message in messages)
 
@@ -238,7 +266,7 @@ class TestElevenLabsSanitizedFallbackLogs:
 
         try:
             with patch("tldw_Server_API.app.core.TTS.adapters.elevenlabs_adapter.astream_bytes", new=fake_stream):
-                with pytest.raises(RuntimeError) as exc_info:
+                with pytest.raises(TTSProviderError) as exc_info:
                     async for _ in adapter._stream_audio_elevenlabs(
                         text=request.text,
                         voice_id="21m00Tcm4TlvDq8ikWAM",
@@ -249,7 +277,11 @@ class TestElevenLabsSanitizedFallbackLogs:
         finally:
             elevenlabs_mod.logger.remove(sink_id)
 
-        assert raw_marker in str(exc_info.value)
+        assert_sanitized_error(
+            exc_info.value,
+            raw_marker,
+            details={"error_type": "RuntimeError"},
+        )
         assert any("streaming error" in message for message in messages)
         assert all(raw_marker not in message for message in messages)
 
@@ -265,7 +297,7 @@ class TestElevenLabsSanitizedFallbackLogs:
                 "tldw_Server_API.app.core.TTS.adapters.elevenlabs_adapter.afetch",
                 new=AsyncMock(side_effect=RuntimeError(raw_marker)),
             ):
-                with pytest.raises(RuntimeError) as exc_info:
+                with pytest.raises(TTSProviderError) as exc_info:
                     await adapter._generate_complete_elevenlabs(
                         text=request.text,
                         voice_id="21m00Tcm4TlvDq8ikWAM",
@@ -275,7 +307,11 @@ class TestElevenLabsSanitizedFallbackLogs:
         finally:
             elevenlabs_mod.logger.remove(sink_id)
 
-        assert raw_marker in str(exc_info.value)
+        assert_sanitized_error(
+            exc_info.value,
+            raw_marker,
+            details={"error_type": "RuntimeError"},
+        )
         assert any("non-stream error" in message for message in messages)
         assert all(raw_marker not in message for message in messages)
 

@@ -199,6 +199,20 @@ async def test_chunking_real_byok_resolution_cannot_mix_config_generations(
     class UserRepo:
         calls = 0
 
+        async def fetch_secret_for_active_user(
+            self,
+            _user_id,
+            _provider,
+            *,
+            include_revoked=False,
+        ):
+            assert include_revoked is True
+            self.calls += 1
+            if self.calls == 1:
+                lookup_started.set()
+                await release_lookup.wait()
+            return row if source == "user" else None
+
         async def fetch_secret_for_user(
             self,
             _user_id,
@@ -206,12 +220,7 @@ async def test_chunking_real_byok_resolution_cannot_mix_config_generations(
             *,
             include_revoked=False,
         ):
-            self.calls += 1
-            if self.calls == 1:
-                lookup_started.set()
-                await release_lookup.wait()
-            if source == "user" and not include_revoked:
-                return row
+            assert include_revoked is True
             return None
 
     class SharedRepo:

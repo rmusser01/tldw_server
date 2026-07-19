@@ -548,10 +548,15 @@ async def test_httpx_sse_does_not_retry_non_retriable_status(monkeypatch):
         retry=hc.RetryPolicy(attempts=3),
     )
 
-    with pytest.raises(hc.NetworkError, match=r"^HTTP 404$"):
+    with pytest.raises(hc.NetworkError, match=r"^HTTP 404$") as exc_info:
         await stream.__anext__()
 
     assert calls == 1
+    assert exc_info.value.status_code == 404
+    assert getattr(exc_info.value, "request", None) is None
+    assert getattr(exc_info.value, "response", None) is None
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__context__ is None
 
 
 @requires_aiohttp
@@ -575,10 +580,15 @@ async def test_aiohttp_sse_does_not_retry_non_retriable_status(monkeypatch):
         retry=hc.RetryPolicy(attempts=3),
     )
 
-    with pytest.raises(hc.NetworkError, match=r"^HTTP 404$"):
+    with pytest.raises(hc.NetworkError, match=r"^HTTP 404$") as exc_info:
         await stream.__anext__()
 
     assert calls == 1
+    assert exc_info.value.status_code == 404
+    assert getattr(exc_info.value, "request", None) is None
+    assert getattr(exc_info.value, "response", None) is None
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__context__ is None
 
 
 @requires_httpx
@@ -842,6 +852,48 @@ async def test_httpx_terminal_status_survives_stream_context_exit_failure(
 
 @requires_httpx
 @pytest.mark.asyncio
+@pytest.mark.parametrize("stream_kind", ["bytes", "sse"])
+async def test_httpx_invalid_terminal_status_is_sanitized_and_detached(
+    monkeypatch,
+    stream_kind,
+):
+    import httpx
+
+    from tldw_Server_API.app.core import http_client as hc
+
+    request = httpx.Request("GET", "http://93.184.216.34/stream")
+
+    @asynccontextmanager
+    async def fake_httpx_stream_io(**_kwargs):
+        yield httpx.Response(700, request=request), ClosableByteIterator()
+
+    monkeypatch.setattr(hc, "_httpx_stream_io", fake_httpx_stream_io)
+    if stream_kind == "bytes":
+        stream = hc.astream_bytes(
+            method="GET",
+            url=str(request.url),
+            client=object(),
+            retry=hc.RetryPolicy(attempts=1),
+        )
+    else:
+        stream = hc.astream_sse(
+            url=str(request.url),
+            client=object(),
+            retry=hc.RetryPolicy(attempts=1),
+        )
+
+    with pytest.raises(hc.NetworkError, match=r"^HTTP 700$") as exc_info:
+        await stream.__anext__()
+
+    assert exc_info.value.status_code is None
+    assert getattr(exc_info.value, "request", None) is None
+    assert getattr(exc_info.value, "response", None) is None
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__context__ is None
+
+
+@requires_httpx
+@pytest.mark.asyncio
 async def test_terminal_status_does_not_hide_non_transport_cleanup_failure(
     monkeypatch,
 ):
@@ -920,6 +972,48 @@ async def test_aiohttp_terminal_status_survives_stream_context_exit_failure(
         await stream.__anext__()
 
     assert calls == 1
+
+
+@requires_aiohttp
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stream_kind", ["bytes", "sse"])
+async def test_aiohttp_invalid_terminal_status_is_sanitized_and_detached(
+    monkeypatch,
+    stream_kind,
+):
+    from tldw_Server_API.app.core import http_client as hc
+
+    @asynccontextmanager
+    async def fake_aiohttp_stream_io(**_kwargs):
+        yield AioStreamResponse(
+            "http://93.184.216.34/stream",
+            status=700,
+        ), ClosableByteIterator()
+
+    monkeypatch.setattr(hc, "_is_aiohttp_client", lambda _client: True)
+    monkeypatch.setattr(hc, "_aiohttp_stream_io", fake_aiohttp_stream_io)
+    if stream_kind == "bytes":
+        stream = hc.astream_bytes(
+            method="GET",
+            url="http://93.184.216.34/stream",
+            client=object(),
+            retry=hc.RetryPolicy(attempts=1),
+        )
+    else:
+        stream = hc.astream_sse(
+            url="http://93.184.216.34/stream",
+            client=object(),
+            retry=hc.RetryPolicy(attempts=1),
+        )
+
+    with pytest.raises(hc.NetworkError, match=r"^HTTP 700$") as exc_info:
+        await stream.__anext__()
+
+    assert exc_info.value.status_code is None
+    assert getattr(exc_info.value, "request", None) is None
+    assert getattr(exc_info.value, "response", None) is None
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__context__ is None
 
 
 @requires_aiohttp

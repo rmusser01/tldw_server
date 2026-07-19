@@ -238,6 +238,7 @@ async def test_direct_noncooperative_provider_tasks_are_bounded_and_capacity_rec
         await _wait_for_live_count(live, 0)
         for generator in generators:
             await generator.aclose()
+        await _wait_for_stream_task_count(0)
 
     healthy = _HealthyAsyncIterator("healthy direct output")
     wire = "".join(

@@ -228,50 +228,55 @@ class FishS2CommercialApiBackend:
             return
 
         headers = getattr(response, "headers", {}) or {}
+        raise_detached_error(
+            self._normalized_status_error(
+                status_code=status_code,
+                headers=headers,
+            )
+        )
+
+    def _normalized_status_error(
+        self,
+        *,
+        status_code: int,
+        headers: Any,
+    ) -> TTSError:
+        """Build a sanitized domain error for one upstream HTTP status."""
+
         if status_code in (401, 403):
-            raise_detached_error(auth_error("fish_s2", "Fish Audio authentication failed"))
+            return auth_error("fish_s2", "Fish Audio authentication failed")
         if status_code == 429:
             retry_after = headers.get("retry-after") if isinstance(headers, dict) else None
-            raise_detached_error(
-                rate_limit_error(
-                    "fish_s2",
-                    retry_after=self._parse_retry_after(retry_after),
-                )
+            return rate_limit_error(
+                "fish_s2",
+                retry_after=self._parse_retry_after(retry_after),
             )
         if status_code in (400, 404, 422):
-            raise_detached_error(
-                TTSValidationError(
-                    f"Fish Audio request failed ({status_code})",
-                    provider="fish_s2",
-                    details={"status": status_code},
-                )
-            )
-        if status_code in (408, 504):
-            raise_detached_error(timeout_error("fish_s2", timeout_seconds=self.timeout))
-        if status_code == 402:
-            raise_detached_error(
-                TTSProviderError(
-                    "Fish Audio payment required",
-                    provider="fish_s2",
-                    error_code=str(status_code),
-                    details={"status": status_code},
-                )
-            )
-        if 500 <= status_code < 600:
-            raise_detached_error(
-                provider_error(
-                    "Fish Audio upstream error",
-                    provider="fish_s2",
-                    error_code=str(status_code),
-                    details={"status": status_code},
-                )
-            )
-        raise_detached_error(
-            TTSProviderError(
+            return TTSValidationError(
                 f"Fish Audio request failed ({status_code})",
                 provider="fish_s2",
                 details={"status": status_code},
             )
+        if status_code in (408, 504):
+            return timeout_error("fish_s2", timeout_seconds=self.timeout)
+        if status_code == 402:
+            return TTSProviderError(
+                "Fish Audio payment required",
+                provider="fish_s2",
+                error_code=str(status_code),
+                details={"status": status_code},
+            )
+        if 500 <= status_code < 600:
+            return provider_error(
+                "Fish Audio upstream error",
+                provider="fish_s2",
+                error_code=str(status_code),
+                details={"status": status_code},
+            )
+        return TTSProviderError(
+            f"Fish Audio request failed ({status_code})",
+            provider="fish_s2",
+            details={"status": status_code},
         )
 
     def _normalize_transport_error(self, exc: Exception) -> Exception:
@@ -279,6 +284,11 @@ class FishS2CommercialApiBackend:
 
         if isinstance(exc, TTSError):
             return _rebuild_typed_tts_error(exc)
+        if isinstance(exc, CoreNetworkError) and exc.status_code is not None:
+            return self._normalized_status_error(
+                status_code=exc.status_code,
+                headers={},
+            )
         if self._is_timeout_error(exc):
             return timeout_error("fish_s2", timeout_seconds=self.timeout)
         return TTSNetworkError(

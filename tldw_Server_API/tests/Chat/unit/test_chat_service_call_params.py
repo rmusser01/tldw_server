@@ -16,6 +16,9 @@ from tldw_Server_API.app.core.Chat.chat_service import (
     perform_chat_api_call,
 )
 from tldw_Server_API.app.core.LLM_Calls import adapter_registry
+from tldw_Server_API.tests.provider_credential_test_helpers import (
+    resolved_request_fields,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -524,20 +527,29 @@ def test_public_bedrock_controls_fail_before_real_signer_while_safe_extensions_d
             },
         }
     )
+    trusted_app_config = {
+        "bedrock_api": {
+            "api_base_url": "https://bedrock-runtime.us-west-2.amazonaws.com/openai",
+            "_runtime_auth_source": "aws_default_chain",
+        }
+    }
     params = build_call_params_from_request(
         request_data=request,
         target_api_provider="bedrock",
         provider_api_key=None,
         templated_llm_payload=[{"role": "user", "content": "safe"}],
         final_system_message=None,
-        app_config={
-            "bedrock_api": {
-                "api_base_url": "https://bedrock-runtime.us-west-2.amazonaws.com/openai",
-                "_runtime_auth_source": "aws_default_chain",
-            }
-        },
+        app_config=trusted_app_config,
     )
-    params["credentials_resolved"] = True
+    params.update(
+        resolved_request_fields(
+            "bedrock",
+            api_key=None,
+            app_config=trusted_app_config,
+            model=request.model,
+            auth_source="aws_default_chain",
+        )
+    )
 
     result = perform_chat_api_call(**params)
 
@@ -640,6 +652,12 @@ def test_concurrent_public_bedrock_control_cannot_reach_inflight_real_signer(
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "trusted-access")
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "trusted-secret")
     monkeypatch.setenv("AWS_SESSION_TOKEN", "trusted-session")
+    trusted_app_config = {
+        "bedrock_api": {
+            "api_base_url": "https://bedrock-runtime.us-east-2.amazonaws.com/openai",
+            "_runtime_auth_source": "aws_default_chain",
+        }
+    }
 
     def _dispatch_public(payload: dict[str, Any]) -> dict[str, Any]:
         request = ChatCompletionRequest.model_validate(payload)
@@ -649,14 +667,17 @@ def test_concurrent_public_bedrock_control_cannot_reach_inflight_real_signer(
             provider_api_key=None,
             templated_llm_payload=list(payload["messages"]),
             final_system_message=None,
-            app_config={
-                "bedrock_api": {
-                    "api_base_url": "https://bedrock-runtime.us-east-2.amazonaws.com/openai",
-                    "_runtime_auth_source": "aws_default_chain",
-                }
-            },
+            app_config=trusted_app_config,
         )
-        params["credentials_resolved"] = True
+        params.update(
+            resolved_request_fields(
+                "bedrock",
+                api_key=None,
+                app_config=trusted_app_config,
+                model=request.model,
+                auth_source="aws_default_chain",
+            )
+        )
         return perform_chat_api_call(**params)
 
     legitimate_payload = {

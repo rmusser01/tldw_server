@@ -286,12 +286,17 @@ async def test_remote_runtime_stream_dispatches_post_once_before_first_byte_fail
             resolved_model="Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice",
             mode="custom_voice",
         )
-        with pytest.raises(expected_error):
+        with pytest.raises(expected_error) as exc_info:
             [chunk async for chunk in response.audio_stream]
     finally:
         await runtime.client.aclose()
 
     assert dispatches == 1
+    _assert_exception_graph_is_sanitized(
+        exc_info.value,
+        "pre-first-byte failure",
+        "rate limited",
+    )
 
 
 @pytest.mark.asyncio

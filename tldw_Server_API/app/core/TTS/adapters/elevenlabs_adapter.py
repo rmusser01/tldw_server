@@ -607,10 +607,9 @@ class ElevenLabsAdapter(TTSAdapter):
         # Default to 44100 for mp3/wav/pcm/ulaw
         return 44100
 
-    def _normalized_mapped_http_error(self, e: Exception) -> Exception:
+    def _normalized_mapped_http_status(self, status: int | None) -> Exception:
         """Build a bounded TTS exception for one upstream HTTP status."""
-        response = getattr(e, "response", None)
-        status = getattr(response, "status_code", None) if response is not None else None
+
         if status in (401, 403):
             return TTSAuthenticationError(
                 f"{self.provider_name} authentication failed",
@@ -630,6 +629,13 @@ class ElevenLabsAdapter(TTSAdapter):
             details={"status": status},
         )
 
+    def _normalized_mapped_http_error(self, e: Exception) -> Exception:
+        """Build a bounded TTS exception from an upstream HTTP response."""
+
+        response = getattr(e, "response", None)
+        status = getattr(response, "status_code", None) if response is not None else None
+        return self._normalized_mapped_http_status(status)
+
     def _raise_mapped_http_error(self, e: Exception) -> None:
         """Raise a bounded HTTP error without retaining the upstream object."""
         normalized = self._normalized_mapped_http_error(e)
@@ -642,6 +648,8 @@ class ElevenLabsAdapter(TTSAdapter):
             return _bounded_existing_tts_error(self.provider_name, exc)
         if _is_http_status_error(exc):
             return self._normalized_mapped_http_error(exc)
+        if isinstance(exc, CoreNetworkError) and exc.status_code is not None:
+            return self._normalized_mapped_http_status(exc.status_code)
         if _is_timeout_error(exc):
             return TTSTimeoutError(
                 f"{self.provider_name} timeout",
@@ -932,6 +940,18 @@ class ElevenLabsTTSAdapter(ElevenLabsAdapter):
             raise_detached_error(stream_error)
 
     # Override error mapping to align with tests (invalid voice -> validation error, 429 cases)
+    def _normalized_mapped_http_status(self, status: int | None) -> Exception:
+        """Preserve the compatibility adapter's public provider identity."""
+
+        if status in (401, 403):
+            return TTSAuthenticationError(
+                "elevenlabs authentication failed",
+                provider=self._provider_simple,
+            )
+        if status == 429:
+            return rate_limit_error(self._provider_simple)
+        return super()._normalized_mapped_http_status(status)
+
     def _normalized_mapped_http_error(self, e: Exception) -> Exception:
         response = getattr(e, "response", None)
         status = getattr(response, "status_code", None) if response is not None else None
@@ -945,7 +965,7 @@ class ElevenLabsTTSAdapter(ElevenLabsAdapter):
         code = detail.get("status") or detail.get("code")
 
         if status in (401, 403):
-            return TTSAuthenticationError("elevenlabs authentication failed", provider=self._provider_simple)
+            return self._normalized_mapped_http_status(status)
         if status == 429:
             # Distinguish quota vs. rate limit when possible
             if code == "quota_exceeded":

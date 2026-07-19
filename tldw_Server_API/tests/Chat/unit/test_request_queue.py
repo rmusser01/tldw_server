@@ -1417,9 +1417,9 @@ async def test_stream_expiring_before_dispatch_emits_terminal_error_without_adap
     await asyncio.sleep(0.02)
     await queue.start(num_workers=1)
     try:
-        terminal = await asyncio.wait_for(channel.get(), timeout=1.0)
         with pytest.raises(TimeoutError):
             await asyncio.wait_for(asyncio.shield(future), timeout=1.0)
+        terminal = await asyncio.wait_for(channel.get(), timeout=1.0)
     finally:
         await asyncio.wait_for(queue.stop(), timeout=1.0)
 

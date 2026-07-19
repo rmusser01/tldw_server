@@ -150,14 +150,14 @@ class RemoteQwenRuntime:
         except (TypeError, ValueError):
             return None
 
-    def _normalize_http_status_error(self, exc: Exception) -> TTSError:
-        """Map an HTTP status failure without retaining its request or response."""
+    def _normalize_http_status(
+        self,
+        status_code: int | None,
+        headers: Any = None,
+    ) -> TTSError:
+        """Map one HTTP status without retaining its response."""
 
-        response = getattr(exc, "response", None)
-        status_code = getattr(response, "status_code", None)
-        headers = getattr(response, "headers", {}) if response is not None else {}
-
-        if status_code == 401:
+        if status_code in (401, 403):
             return auth_error(self.provider_key, "Invalid API key")
         if status_code == 429:
             retry_after = None
@@ -174,6 +174,11 @@ class RemoteQwenRuntime:
                 error_code="BAD_REQUEST",
                 details={"status": status_code},
             )
+        if status_code in (408, 504):
+            return timeout_error(
+                self.provider_key,
+                timeout_seconds=int(self.config.get("timeout") or 60),
+            )
         return TTSProviderError(
             "Remote Qwen API request failed",
             provider=self.provider_key,
@@ -181,11 +186,21 @@ class RemoteQwenRuntime:
             details={"status": status_code},
         )
 
+    def _normalize_http_status_error(self, exc: Exception) -> TTSError:
+        """Map an HTTP status failure without retaining its request or response."""
+
+        response = getattr(exc, "response", None)
+        status_code = getattr(response, "status_code", None)
+        headers = getattr(response, "headers", {}) if response is not None else {}
+        return self._normalize_http_status(status_code, headers)
+
     def _normalize_remote_error(self, exc: Exception) -> TTSError:
         """Create a sanitized domain error from a remote transport failure."""
 
         if self._is_http_status_error(exc):
             return self._normalize_http_status_error(exc)
+        if isinstance(exc, CoreNetworkError) and exc.status_code is not None:
+            return self._normalize_http_status(exc.status_code)
         if isinstance(exc, (CoreNetworkError, RetryExhaustedError)) or self._is_httpx_exception(exc):
             if self._is_timeout_error(exc):
                 return timeout_error(

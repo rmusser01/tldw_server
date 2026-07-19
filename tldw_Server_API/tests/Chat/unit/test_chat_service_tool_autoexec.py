@@ -20,6 +20,9 @@ from tldw_Server_API.app.core.Chat.tool_auto_exec import (
 from tldw_Server_API.app.core.LLM_Calls.structured_generation import (
     StructuredGenerationParseError,
 )
+from tldw_Server_API.tests.provider_credential_test_helpers import (
+    resolved_request_fields_async,
+)
 from tldw_Server_API.tests.run_first_constants import PHASE2C_RUN_FIRST_COHORT
 
 _REGISTRY_OPENAI_BASE_URL = "https://registry-openai.test/v1"
@@ -80,7 +83,7 @@ class _NoModeration:
 
 
 def _adapter_nonstream_call(
-    api_key: str,
+    resolved_fields: dict[str, Any],
     *,
     messages_payload: list[dict[str, Any]] | None = None,
 ) -> Any:
@@ -88,12 +91,10 @@ def _adapter_nonstream_call(
 
     return chat_service.perform_chat_api_call(
         api_endpoint="openai",
-        api_key=api_key,
-        credentials_resolved=True,
-        app_config=_registry_openai_app_config(),
         messages_payload=messages_payload or [],
         model="gpt-4o-mini",
         streaming=False,
+        **resolved_fields,
     )
 
 
@@ -1642,12 +1643,19 @@ async def test_normal_tool_continuation_result_is_gated_before_retry_mark_and_re
 
     monkeypatch.setattr(chat_service, "execute_assistant_tool_calls", fake_autoexec)
 
+    resolved_fields = await resolved_request_fields_async(
+        "openai",
+        api_key="test-key",
+        app_config=_registry_openai_app_config(),
+        model="gpt-4o-mini",
+    )
     response = await _run_execute_non_stream_call(
         llm_call_func=lambda: _adapter_nonstream_call(
-            "test-key",
+            resolved_fields,
             messages_payload=[{"role": "user", "content": "hi"}],
         ),
         save_message_fn=save_message,
+        cleaned_args_overrides=dict(resolved_fields),
         on_success=mark_used,
     )
 
@@ -1796,13 +1804,19 @@ async def test_real_adapter_continuation_has_attempt_scoped_accounting(
         },
     )
 
+    resolved_fields = await resolved_request_fields_async(
+        "openai",
+        api_key="continuation-accounting-key",
+        app_config=_registry_openai_app_config(),
+        model="gpt-4o-mini",
+    )
     response = await _run_execute_non_stream_call(
         llm_call_func=lambda: _adapter_nonstream_call(
-            "continuation-accounting-key",
+            resolved_fields,
             messages_payload=[{"role": "user", "content": "hi"}],
         ),
         save_message_fn=AsyncMock(return_value="saved-message"),
-        cleaned_args_overrides={"api_key": "continuation-accounting-key"},
+        cleaned_args_overrides=dict(resolved_fields),
         metrics=metrics,
         provider_manager=provider_manager,
         on_success=mark_used,
@@ -2004,13 +2018,19 @@ async def test_concurrent_tool_continuations_do_not_cross_results_or_marks(
             return f"message-{index}-{len(saved[index])}"
 
         label = "bad" if index == 0 else "good"
+        resolved_fields = await resolved_request_fields_async(
+            "openai",
+            api_key=f"{label}-continuation-key",
+            app_config=_registry_openai_app_config(),
+            model="gpt-4o-mini",
+        )
         return await _run_execute_non_stream_call(
             llm_call_func=lambda: _adapter_nonstream_call(
-                f"{label}-continuation-key",
+                resolved_fields,
                 messages_payload=[{"role": "user", "content": "hi"}],
             ),
             save_message_fn=save_message,
-            cleaned_args_overrides={"api_key": f"{label}-continuation-key"},
+            cleaned_args_overrides=dict(resolved_fields),
             metrics=metrics[index],
             provider_manager=provider_managers[index],
             on_success=mark_used,
@@ -2353,15 +2373,22 @@ async def test_cancelled_continuation_drains_real_adapter_before_classify_mark_a
     async def mark_used(_provider: str) -> None:
         await runtime.mark_used(handle)
 
+    resolved_fields = await resolved_request_fields_async(
+        "openai",
+        api_key="cancelled-continuation-key",
+        app_config=_registry_openai_app_config(),
+        model="gpt-4o-mini",
+    )
+
     async def invoke() -> dict[str, Any]:
         try:
             return await _run_execute_non_stream_call(
                 llm_call_func=lambda: _adapter_nonstream_call(
-                    "cancelled-continuation-key",
+                    resolved_fields,
                     messages_payload=[{"role": "user", "content": "hi"}],
                 ),
                 save_message_fn=AsyncMock(return_value="saved-message"),
-                cleaned_args_overrides={"api_key": "cancelled-continuation-key"},
+                cleaned_args_overrides=dict(resolved_fields),
                 on_success=mark_used,
             )
         finally:

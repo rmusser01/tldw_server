@@ -1245,13 +1245,30 @@ class TestTTSJobsHistoryIntegration:
             job_id = int(submit_data["job_id"])
 
             jm = audio_jobs.get_job_manager()
-            job = jm.get_job(job_id)
+            worker_id = "tts-history-integration-worker"
+            job = jm.acquire_next_job(
+                domain="audio",
+                queue="default",
+                job_type="tts_longform",
+                lease_seconds=60,
+                worker_id=worker_id,
+            )
             assert job is not None
+            assert int(job["id"]) == job_id
+            assert job["worker_id"] == worker_id
+            lease_id = str(job["lease_id"])
+            assert lease_id
 
             result = await _handle_tts_job(job)
             output_id = int(result["output_id"])
             assert output_id > 0
-            jm.complete_job(job_id, result=result)
+            assert jm.complete_job(
+                job_id,
+                result=result,
+                worker_id=worker_id,
+                lease_id=lease_id,
+                enforce=True,
+            )
 
             artifacts_resp = test_client.get(
                 f"/api/v1/audio/speech/jobs/{job_id}/artifacts",

@@ -117,6 +117,7 @@ from tldw_Server_API.app.core.RAG.rag_service.streaming_executor import (
 
 # Unified Pipeline
 from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import (
+    UnifiedSearchResult,  # noqa: F401 - compatibility export for endpoint adapters
     advanced_search,
     simple_search,
     unified_batch_pipeline,

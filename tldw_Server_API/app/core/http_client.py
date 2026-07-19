@@ -80,6 +80,7 @@ from tldw_Server_API.app.core.exceptions import (  # noqa: E402
     NetworkError,
     RetryExhaustedError,
     StreamingProtocolError,
+    raise_detached_error,
 )
 from tldw_Server_API.app.core.Metrics import (  # noqa: E402
     MetricDefinition,
@@ -102,6 +103,13 @@ class _TerminalHTTPStatusError(Exception):
     def __init__(self, status_code: int) -> None:
         self.status_code = int(status_code)
         super().__init__(f"HTTP {self.status_code}")
+
+
+def _terminal_status_network_error(error: _TerminalHTTPStatusError) -> NetworkError:
+    """Return a detached-safe error without propagating an invalid HTTP status."""
+    status_code = error.status_code if 100 <= error.status_code <= 599 else None
+    return NetworkError(str(error), status_code=status_code)
+
 
 _HTTPCLIENT_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     AttributeError,
@@ -4629,7 +4637,9 @@ async def _astream_bytes_httpx(
                     )
                     return
             except _TerminalHTTPStatusError as e:
-                raise NetworkError(str(e)) from None
+                raise_detached_error(
+                    _terminal_status_network_error(e)
+                )
             except asyncio.CancelledError:
                 raise
             except httpx.HTTPError as e:
@@ -4880,7 +4890,9 @@ async def _astream_bytes_aiohttp(
                     )
                     return
             except _TerminalHTTPStatusError as e:
-                raise NetworkError(str(e)) from None
+                raise_detached_error(
+                    _terminal_status_network_error(e)
+                )
             except asyncio.CancelledError:
                 raise
             except NetworkError as e:
@@ -5190,7 +5202,9 @@ async def _astream_sse_httpx(
                         )
                         return  # finished streaming without error
                 except _TerminalHTTPStatusError as e:
-                    raise NetworkError(str(e)) from None
+                    raise_detached_error(
+                        _terminal_status_network_error(e)
+                    )
                 except asyncio.CancelledError:
                     raise
                 except _HTTPCLIENT_REQUEST_EXCEPTIONS as e:
@@ -5395,7 +5409,9 @@ async def _astream_sse_aiohttp(
                     )
                     return
             except _TerminalHTTPStatusError as e:
-                raise NetworkError(str(e)) from None
+                raise_detached_error(
+                    _terminal_status_network_error(e)
+                )
             except asyncio.CancelledError:
                 raise
             except _HTTPCLIENT_REQUEST_EXCEPTIONS as e:

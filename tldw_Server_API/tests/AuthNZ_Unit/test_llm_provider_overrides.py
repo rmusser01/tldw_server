@@ -4,6 +4,7 @@ import importlib
 import multiprocessing
 import threading
 from concurrent.futures import Future
+from types import SimpleNamespace
 
 import pytest
 
@@ -430,6 +431,7 @@ def test_override_accessor_resolves_runtime_provider_alias() -> None:
 
 async def test_refresh_provider_overrides_sanitizes_load_warning(monkeypatch) -> None:
     module = importlib.import_module("tldw_Server_API.app.core.AuthNZ.llm_provider_overrides")
+    monkeypatch.setattr(module, "time", SimpleNamespace(monotonic=lambda: 42.0))
     last_good = LLMProviderOverride(provider="openai", api_key="last-good-key")
     set_llm_provider_overrides_cache_for_tests({"openai": last_good})
 
@@ -457,6 +459,52 @@ async def test_refresh_provider_overrides_sanitizes_load_warning(monkeypatch) ->
     assert "Failed to load provider overrides" in joined
     assert "provider override DB failed" not in joined
     assert "/private/provider-overrides.db" not in joined
+    set_llm_provider_overrides_cache_for_tests({})
+
+
+@pytest.mark.concurrent
+async def test_equal_tick_unforced_refreshes_coalesce_by_completed_generation(
+    monkeypatch,
+) -> None:
+    """A completed causal refresh, not clock precision, satisfies waiters."""
+    module = importlib.import_module("tldw_Server_API.app.core.AuthNZ.llm_provider_overrides")
+    monkeypatch.setattr(module, "time", SimpleNamespace(monotonic=lambda: 42.0))
+    load_started = asyncio.Event()
+    release_load = asyncio.Event()
+    load_calls = 0
+
+    class FakeRepo:
+        def __init__(self, _pool) -> None:
+            pass
+
+        async def list_overrides(self):
+            nonlocal load_calls
+            load_calls += 1
+            load_started.set()
+            await release_load.wait()
+            return [{"provider": "openai"}]
+
+    async def get_pool():
+        return object()
+
+    monkeypatch.setattr(module, "AuthnzLLMProviderOverridesRepo", FakeRepo)
+    monkeypatch.setattr(module, "get_db_pool", get_pool)
+    set_llm_provider_overrides_cache_for_tests(
+        {"openai": LLMProviderOverride(provider="openai", api_key="old-key")}
+    )
+
+    first = asyncio.create_task(module.refresh_llm_provider_overrides())
+    await asyncio.wait_for(load_started.wait(), timeout=1.0)
+    second = asyncio.create_task(module.refresh_llm_provider_overrides())
+    await asyncio.sleep(0)
+    assert load_calls == 1
+
+    release_load.set()
+    first_result, second_result = await asyncio.gather(first, second)
+
+    assert load_calls == 1
+    assert first_result == second_result
+    assert list(first_result) == ["openai"]
     set_llm_provider_overrides_cache_for_tests({})
 
 

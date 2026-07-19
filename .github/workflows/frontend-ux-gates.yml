@@ -95,6 +95,34 @@ jobs:
         working-directory: apps/tldw-frontend
         run: bun run e2e:onboarding
 
+      - name: Build quickstart frontend production bundle
+        working-directory: apps/tldw-frontend
+        env:
+          TLDW_INTERNAL_API_ORIGIN: http://127.0.0.1:8000
+        run: bun run build:prod
+
+      - name: Stage quickstart Next standalone static assets
+        working-directory: apps/tldw-frontend
+        run: |
+          mkdir -p .next/standalone/apps/tldw-frontend/.next
+          cp -R public .next/standalone/apps/tldw-frontend/public
+          cp -R .next/static .next/standalone/apps/tldw-frontend/.next/static
+
+      - name: Run quickstart production-profile browser smoke
+        working-directory: apps/tldw-frontend
+        env:
+          NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE: quickstart
+          NEXT_PUBLIC_API_URL: ''
+          TLDW_WEBUI_EXPOSE_RUNTIME_AUTH: '1'
+          TLDW_INTERNAL_API_ORIGIN: http://127.0.0.1:8000
+          TLDW_WEB_CMD: 'env NEXT_PUBLIC_API_URL= NODE_OPTIONS=--max-old-space-size=4096 PORT=8080 HOSTNAME=0.0.0.0 node .next/standalone/apps/tldw-frontend/server.js'
+        run: |
+          bunx playwright test e2e/login.spec.ts \
+            --project=chromium \
+            --reporter=line \
+            --workers=1 \
+            --grep "loopback quickstart authenticates without a browser-readable API key"
+
       - name: Upload onboarding evidence
         if: always()
         uses: actions/upload-artifact@v7
@@ -175,9 +203,9 @@ jobs:
         working-directory: apps
         run: bun install
 
-      - name: Build frontend production bundle for smoke gate
+      - name: Build advanced frontend production bundle for smoke gate
         working-directory: apps/tldw-frontend
-        run: bun run build:prod
+        run: bun run build:dev
 
       - name: Stage Next standalone static assets
         working-directory: apps/tldw-frontend

@@ -4513,6 +4513,10 @@ async def test_converted_adapter_eof_without_finish_reason_cannot_synthesize_ter
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The real OpenAI adapter's synthetic DONE cannot certify truncated output."""
+    from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+        ProviderCredentialRuntime,
+    )
+    from tldw_Server_API.app.core.Chat import chat_service
     from tldw_Server_API.app.core.LLM_Calls.providers import (
         openai_adapter as openai_adapter_module,
     )
@@ -4521,9 +4525,26 @@ async def test_converted_adapter_eof_without_finish_reason_cannot_synthesize_ter
     )
 
     touched: list[str] = []
-    _install_resolutions(
-        monkeypatch,
-        {1: _resolved_credentials("openai", "adapter-eof-key", touched)},
+    resolved = _resolved_credentials("openai", "adapter-eof-key", touched)
+
+    async def _resolve(provider: str, **_kwargs: Any) -> ResolvedByokCredentials:
+        assert provider == "openai"
+        return resolved
+
+    def _runtime(*_args: Any, **_kwargs: Any) -> ProviderCredentialRuntime:
+        return ProviderCredentialRuntime(
+            user_id=1,
+            team_ids=[],
+            org_ids=[],
+            trusted_base_url_override=False,
+            server_config_snapshot={},
+            resolver=_resolve,
+        )
+
+    monkeypatch.setattr(
+        messages_endpoint,
+        "_new_messages_credential_runtime",
+        _runtime,
     )
 
     class _Response:
@@ -4561,17 +4582,15 @@ async def test_converted_adapter_eof_without_finish_reason_cannot_synthesize_ter
     )
     adapter = OpenAIAdapter()
 
-    async def _actual_adapter(**kwargs: Any):
-        # The production dispatcher consumes routing metadata before invoking
-        # the concrete adapter. Keep this boundary test faithful to that seam.
-        adapter_request = dict(kwargs)
-        adapter_request.pop("api_provider", None)
-        return adapter.stream(adapter_request)
+    class _Registry:
+        def get_adapter(self, provider: str) -> OpenAIAdapter:
+            assert provider == "openai"
+            return adapter
 
     monkeypatch.setattr(
-        messages_endpoint,
-        "perform_chat_api_call_async",
-        _actual_adapter,
+        chat_service,
+        "_get_llm_registry",
+        lambda: _Registry(),
     )
     response = await messages_endpoint._handle_messages(
         _message_request("openai/gpt-4o-mini", stream=True),

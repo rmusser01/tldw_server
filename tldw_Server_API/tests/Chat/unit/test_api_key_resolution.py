@@ -125,10 +125,14 @@ def test_resolver_ignores_module_keys_outside_tests(monkeypatch):
     monkeypatch.setattr(chat_endpoint, "API_KEYS", {"openai": "module-test-key"}, raising=False)
     monkeypatch.setattr(chat_request_schemas, "get_api_keys", lambda: {"openai": "env-key"})
 
-    resolved_key, debug_info = resolve_provider_api_key("openai")
+    set_llm_provider_overrides_cache_for_tests({})
+    try:
+        resolved_key, debug_info = resolve_provider_api_key("openai")
 
-    assert resolved_key == "env-key"
-    assert debug_info["selected_source"] != "module_override"
+        assert resolved_key == "env-key"
+        assert debug_info["selected_source"] != "module_override"
+    finally:
+        set_llm_provider_overrides_cache_for_tests({})
 
 
 def test_resolver_can_skip_module_preference(monkeypatch):
@@ -142,13 +146,17 @@ def test_resolver_can_skip_module_preference(monkeypatch):
     monkeypatch.setattr(chat_endpoint, "API_KEYS", {"openai": "module-test-key"}, raising=False)
     monkeypatch.setattr(chat_request_schemas, "get_api_keys", lambda: {"openai": "env-key"})
 
-    resolved_key, debug_info = resolve_provider_api_key(
-        "openai",
-        prefer_module_keys_in_tests=False,
-    )
+    set_llm_provider_overrides_cache_for_tests({})
+    try:
+        resolved_key, debug_info = resolve_provider_api_key(
+            "openai",
+            prefer_module_keys_in_tests=False,
+        )
 
-    assert resolved_key == "env-key"
-    assert debug_info["selected_source"] != "module_override"
+        assert resolved_key == "env-key"
+        assert debug_info["selected_source"] != "module_override"
+    finally:
+        set_llm_provider_overrides_cache_for_tests({})
 
 
 def test_resolver_tldw_test_mode_y_prefers_module_keys(monkeypatch):
