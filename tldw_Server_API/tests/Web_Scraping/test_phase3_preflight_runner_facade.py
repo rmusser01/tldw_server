@@ -616,6 +616,56 @@ async def test_expired_deadline_stays_timeout_when_runner_suppresses_cancellatio
 
 
 @pytest.mark.asyncio
+async def test_no_deadline_caller_cancellation_survives_runner_suppression(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner = _runner()
+    events: list[str] = []
+    started = asyncio.Event()
+    child_tasks: list[asyncio.Task[Any]] = []
+    context = _context(events=events)
+
+    async def suppress_cancellation(*_args: Any) -> dict[str, Any]:
+        child = asyncio.current_task()
+        assert child is not None
+        child_tasks.append(child)
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            events.append("runner-cancelled")
+        events.append("runner-returned")
+        return {"results": {}, "score": {}, "recommendations": {}}
+
+    monkeypatch.setattr(
+        runner,
+        "gather_analysis_with_context",
+        suppress_cancellation,
+    )
+    task = asyncio.create_task(
+        facade.run_preflight(
+            _target(),
+            PreflightOptions(enabled=True),
+            context,
+        )
+    )
+    await asyncio.wait_for(started.wait(), timeout=1.0)
+    task.cancel("caller cancelled")
+
+    try:
+        result = await task
+    except asyncio.CancelledError as cancellation:
+        assert cancellation.args == ("caller cancelled",)
+    else:
+        pytest.fail(f"run_preflight returned {result.status.name} instead of raising caller cancellation")
+
+    assert len(child_tasks) == 1
+    assert child_tasks[0].done()
+    assert events == ["runner-cancelled", "runner-returned", "close"]
+    assert cast(_Context, context).close_calls == 1
+
+
+@pytest.mark.asyncio
 async def test_run_preflight_cancellation_retires_runner_and_cleans_before_propagating(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

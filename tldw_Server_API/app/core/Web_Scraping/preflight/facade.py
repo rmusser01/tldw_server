@@ -289,9 +289,13 @@ async def _run_before_deadline(
     )
     if remaining_s is None:
         try:
-            return await runner_task
+            return await asyncio.shield(runner_task)
         except asyncio.CancelledError:
-            await _retire_runner_task(runner_task)
+            try:
+                await _retire_runner_task(runner_task)
+            except asyncio.CancelledError:
+                # Retirement may surface the child cancellation; the outer one wins.
+                pass
             raise
 
     deadline_task = asyncio.create_task(
