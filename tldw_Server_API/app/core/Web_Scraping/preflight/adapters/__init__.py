@@ -1,5 +1,6 @@
 """Concrete governed preflight probe adapters."""
 
+from .external_tools import GuardedExternalToolProbe
 from .http import (
     CurlCffiProbeTransport,
     GuardedHttpProbe,
@@ -8,6 +9,7 @@ from .http import (
 
 __all__ = [
     "CurlCffiProbeTransport",
+    "GuardedExternalToolProbe",
     "GuardedHttpProbe",
     "HttpxProbeTransport",
 ]

@@ -177,12 +177,251 @@ class FakeExternalToolProbe:
         raise AssertionError("external probing is not expected in contract tests")
 
 
+class FakeCallRecorder:
+    """Record synchronous observer calls and optionally raise a fixed error."""
+
+    def __init__(
+        self,
+        *,
+        error: BaseException | None = None,
+        events: list[str] | None = None,
+        name: str = "call",
+    ) -> None:
+        self.error = error
+        self.events = events
+        self.name = name
+        self.calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+
+    def __call__(self, *args: Any, **kwargs: Any) -> None:
+        self.calls.append((args, dict(kwargs)))
+        if self.events is not None:
+            self.events.append(self.name)
+        if self.error is not None:
+            raise self.error
+
+    def observe(self) -> None:
+        self()
+
+
+class FakeWhich:
+    """Deterministic executable lookup that never inspects the host system."""
+
+    def __init__(
+        self,
+        result: str | None,
+        *,
+        error: BaseException | None = None,
+        events: list[str] | None = None,
+    ) -> None:
+        self.result = result
+        self.error = error
+        self.events = events
+        self.calls: list[str] = []
+
+    def __call__(self, executable: str) -> str | None:
+        self.calls.append(executable)
+        if self.events is not None:
+            self.events.append("which")
+        if self.error is not None:
+            raise self.error
+        return self.result
+
+
+class FakeCoercionValue:
+    """Raise fixed errors when policy values are coerced."""
+
+    def __init__(
+        self,
+        *,
+        bool_error: BaseException | None = None,
+        str_error: BaseException | None = None,
+    ) -> None:
+        self.bool_error = bool_error
+        self.str_error = str_error
+
+    def __bool__(self) -> bool:
+        if self.bool_error is not None:
+            raise self.bool_error
+        return True
+
+    def __str__(self) -> str:
+        if self.str_error is not None:
+            raise self.str_error
+        return "allowed"
+
+
+class FakeExternalToolDecision:
+    """Controllable policy decision with failing accessors when requested."""
+
+    def __init__(
+        self,
+        *,
+        allowed: Any = True,
+        reason: Any = "allowed",
+        allowed_error: BaseException | None = None,
+        reason_error: BaseException | None = None,
+    ) -> None:
+        self._allowed = allowed
+        self._reason = reason
+        self.allowed_error = allowed_error
+        self.reason_error = reason_error
+
+    @property
+    def allowed(self) -> Any:
+        if self.allowed_error is not None:
+            raise self.allowed_error
+        return self._allowed
+
+    @property
+    def reason(self) -> Any:
+        if self.reason_error is not None:
+            raise self.reason_error
+        return self._reason
+
+
+class FakeExternalProcess:
+    """Controllable async subprocess without host process creation."""
+
+    def __init__(
+        self,
+        *,
+        returncode: int = 0,
+        stdout: bytes | str = b"",
+        stderr: bytes | str = b"",
+        block_communicate: bool = False,
+        communicate_error: BaseException | None = None,
+        communicate_hook: Callable[[], None] | None = None,
+        terminate_completes: bool = True,
+        terminate_error: BaseException | None = None,
+        kill_error: BaseException | None = None,
+        events: list[str] | None = None,
+    ) -> None:
+        self.planned_returncode = returncode
+        self.returncode: int | None = None
+        self.stdout = stdout
+        self.stderr = stderr
+        self.block_communicate = block_communicate
+        self.communicate_error = communicate_error
+        self.communicate_hook = communicate_hook
+        self.terminate_completes = terminate_completes
+        self.terminate_error = terminate_error
+        self.kill_error = kill_error
+        self.events = events
+        self.communicate_calls = 0
+        self.communicate_cancellations = 0
+        self.terminate_calls = 0
+        self.kill_calls = 0
+        self.wait_calls = 0
+        self.wait_cancellations = 0
+        self.communicate_started = asyncio.Event()
+        self.wait_started = asyncio.Event()
+        self._release_communicate = asyncio.Event()
+        self._terminal = asyncio.Event()
+
+    async def communicate(self) -> tuple[bytes | str, bytes | str]:
+        self.communicate_calls += 1
+        self.communicate_started.set()
+        if self.events is not None:
+            self.events.append("process:communicate")
+        try:
+            if self.block_communicate:
+                await self._release_communicate.wait()
+            if self.communicate_error is not None:
+                raise self.communicate_error
+        except asyncio.CancelledError:
+            self.communicate_cancellations += 1
+            raise
+        self.returncode = self.planned_returncode
+        self._terminal.set()
+        if self.communicate_hook is not None:
+            self.communicate_hook()
+        return self.stdout, self.stderr
+
+    def terminate(self) -> None:
+        self.terminate_calls += 1
+        if self.events is not None:
+            self.events.append("process:terminate")
+        if self.terminate_error is not None:
+            raise self.terminate_error
+        if self.terminate_completes:
+            self.returncode = -15
+            self._terminal.set()
+            self._release_communicate.set()
+
+    def kill(self) -> None:
+        self.kill_calls += 1
+        if self.events is not None:
+            self.events.append("process:kill")
+        if self.kill_error is not None:
+            raise self.kill_error
+        self.returncode = -9
+        self._terminal.set()
+        self._release_communicate.set()
+
+    async def wait(self) -> int:
+        self.wait_calls += 1
+        self.wait_started.set()
+        if self.events is not None:
+            self.events.append("process:wait")
+        try:
+            await self._terminal.wait()
+        except asyncio.CancelledError:
+            self.wait_cancellations += 1
+            raise
+        assert self.returncode is not None
+        return self.returncode
+
+    def release_communicate(self) -> None:
+        self._release_communicate.set()
+
+
+class FakeProcessFactory:
+    """Queue-backed create_subprocess_exec replacement with call capture."""
+
+    def __init__(
+        self,
+        processes: list[FakeExternalProcess] | None = None,
+        *,
+        error: BaseException | None = None,
+        block_creation: bool = False,
+        events: list[str] | None = None,
+    ) -> None:
+        self.processes = list(processes or [])
+        self.error = error
+        self.block_creation = block_creation
+        self.events = events
+        self.calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+        self.creation_started = asyncio.Event()
+        self.creation_cancellations = 0
+        self._release_creation = asyncio.Event()
+
+    async def __call__(self, *args: Any, **kwargs: Any) -> FakeExternalProcess:
+        self.calls.append((args, dict(kwargs)))
+        self.creation_started.set()
+        if self.events is not None:
+            self.events.append("process:create")
+        try:
+            if self.block_creation:
+                await self._release_creation.wait()
+        except asyncio.CancelledError:
+            self.creation_cancellations += 1
+            raise
+        if self.error is not None:
+            raise self.error
+        if not self.processes:
+            raise AssertionError("unexpected process creation")
+        return self.processes.pop(0)
+
+    def release_creation(self) -> None:
+        self._release_creation.set()
+
+
 class FakeProbeEgressGuard:
     """Queue-backed probe guard that records each fresh decision."""
 
     def __init__(
         self,
-        decisions: list[bool | str | ProbeEgressDecision | BaseException],
+        decisions: list[bool | str | ProbeEgressDecision | FakeExternalToolDecision | BaseException],
         *,
         events: list[str] | None = None,
     ) -> None:
@@ -206,6 +445,8 @@ class FakeProbeEgressGuard:
         decision = self._decisions.pop(0)
         if isinstance(decision, BaseException):
             raise decision
+        if isinstance(decision, FakeExternalToolDecision):
+            return decision  # type: ignore[return-value]
         if isinstance(decision, ProbeEgressDecision):
             return decision
         if isinstance(decision, str):

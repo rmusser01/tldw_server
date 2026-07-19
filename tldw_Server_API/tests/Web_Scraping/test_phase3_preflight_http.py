@@ -1468,10 +1468,19 @@ async def test_curl_response_close_cancellation_is_secondary_and_closes_session(
     assert session.closed is True
 
 
-def test_adapter_package_exports_only_task_4_http_adapters() -> None:
+def test_adapter_package_preserves_task_4_http_adapter_exports() -> None:
     package = importlib.import_module("tldw_Server_API.app.core.Web_Scraping.preflight.adapters")
 
-    assert package.__all__ == [
+    assert [
+        name
+        for name in package.__all__
+        if name
+        in {
+            "CurlCffiProbeTransport",
+            "GuardedHttpProbe",
+            "HttpxProbeTransport",
+        }
+    ] == [
         "CurlCffiProbeTransport",
         "GuardedHttpProbe",
         "HttpxProbeTransport",
