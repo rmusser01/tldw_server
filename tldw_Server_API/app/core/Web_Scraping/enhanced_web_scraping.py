@@ -25,7 +25,6 @@ import time
 import uuid
 import warnings
 from collections import defaultdict
-from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum, auto
@@ -69,7 +68,7 @@ from tldw_Server_API.app.core.Web_Scraping.outbound_policy import (
     decide_web_outbound_policy_sync,
 )
 from tldw_Server_API.app.core.Web_Scraping.policy import DefaultWebOutboundPolicyChecker
-from tldw_Server_API.app.core.Web_Scraping.runtime import PolicyDecision, RuntimeRequestContext
+from tldw_Server_API.app.core.Web_Scraping.runtime import RuntimeRequestContext
 from tldw_Server_API.app.core.Web_Scraping.scoring import (
     CompositeScorer,
     DomainAuthorityScorer,
@@ -135,37 +134,7 @@ DEFAULT_USER_AGENT = (
 BEST_FIRST_BATCH_SIZE = 10
 
 
-class _EnhancedWebOutboundPolicyChecker(DefaultWebOutboundPolicyChecker):
-    """Keep the existing Enhanced policy patch boundary behind the typed adapter."""
-
-    async def decide(
-        self,
-        url: str,
-        *,
-        respect_robots: bool,
-        user_agent: str | None,
-        context: RuntimeRequestContext,
-        config: Mapping[str, Any] | None = None,
-    ) -> PolicyDecision:
-        raw = await decide_web_outbound_policy(
-            url,
-            respect_robots=respect_robots,
-            user_agent=user_agent,
-            source=context.source,
-            stage=context.stage,
-            config=dict(config or {}),
-        )
-        return PolicyDecision(
-            allowed=bool(raw.allowed),
-            mode=str(raw.mode),
-            reason=str(raw.reason),
-            stage=str(raw.stage),
-            source=str(raw.source),
-            details=getattr(raw, "details", None),
-        )
-
-
-_ENHANCED_POLICY_CHECKER = _EnhancedWebOutboundPolicyChecker()
+_ENHANCED_POLICY_CHECKER = DefaultWebOutboundPolicyChecker()
 
 # Stable skip reasons for crawl observability. Keep this list small and
 # explicit to prevent accidental metric cardinality growth.

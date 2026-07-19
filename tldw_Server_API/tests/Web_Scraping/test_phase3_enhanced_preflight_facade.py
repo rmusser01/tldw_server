@@ -17,21 +17,12 @@ from tldw_Server_API.app.core.Web_Scraping.contracts import (
     RuntimeFailure,
     WebScrapingStatus,
 )
+from tldw_Server_API.app.core.Web_Scraping.policy import DefaultWebOutboundPolicyChecker
 from tldw_Server_API.app.core.Web_Scraping.preflight import PreflightTarget
 from tldw_Server_API.app.core.Web_Scraping.runtime import PolicyDecision, RuntimeRequestContext
 
 URL = "https://example.com/article"
 ANALYSIS = {"results": {"headers": {"status": "success"}}}
-
-
-class FakePolicyChecker:
-    def __init__(self, decision: PolicyDecision) -> None:
-        self.decision = decision
-        self.calls: list[dict[str, Any]] = []
-
-    async def decide(self, url: str, **kwargs: Any) -> PolicyDecision:
-        self.calls.append({"url": url, **kwargs})
-        return self.decision
 
 
 def allowed_decision() -> PolicyDecision:
@@ -79,7 +70,7 @@ def successful_article(url: str, *, method: str) -> dict[str, Any]:
 class EnhancedHarness:
     enhanced: Any
     scraper: Any
-    policy_checker: FakePolicyChecker
+    policy_checker: DefaultWebOutboundPolicyChecker
     evaluate_target: AsyncMock
     build_context: Mock
     run_preflight: AsyncMock
@@ -125,7 +116,7 @@ def install_enhanced_defaults(
         cluster_settings=None,
     )
     scraper = enhanced.EnhancedWebScraper(config=config)
-    policy_checker = FakePolicyChecker(denied_decision())
+    policy_checker = enhanced._ENHANCED_POLICY_CHECKER
     evaluate = AsyncMock(return_value=target(selected_decision))
     build_context = Mock(return_value=object())
     run = AsyncMock(return_value=preflight_result or successful_preflight())
@@ -150,7 +141,6 @@ def install_enhanced_defaults(
     monkeypatch.setattr(preflight_facade, "run_preflight", run)
     monkeypatch.setattr(preflight_facade, "apply_preflight_advice", apply_advice)
     monkeypatch.setattr(preflight_facade, "public_preflight_payload", public_payload)
-    monkeypatch.setattr(enhanced, "_ENHANCED_POLICY_CHECKER", policy_checker, raising=False)
     monkeypatch.setattr(enhanced, "decide_web_outbound_policy", deny_legacy_policy)
     monkeypatch.setattr(scraper.rate_limiter, "acquire", AsyncMock(return_value=None))
     monkeypatch.setattr(scraper, "_resolve_scrape_plan", lambda _url: (plan, backend, ""))
@@ -265,6 +255,7 @@ async def test_enhanced_evaluates_target_once_with_runtime_context(
     assert call.kwargs["respect_robots"] is True
     assert call.kwargs["user_agent"] == "caller-agent"
     assert call.kwargs["policy_checker"] is harness.policy_checker
+    assert type(harness.policy_checker) is DefaultWebOutboundPolicyChecker
     assert call.kwargs["config"] == {"web_scraper": harness.scraper.config}
     context = call.kwargs["request_context"]
     assert context.source == "enhanced_scrape"
@@ -272,7 +263,6 @@ async def test_enhanced_evaluates_target_once_with_runtime_context(
     harness.build_context.assert_called_once()
     assert harness.build_context.call_args.kwargs["policy_checker"] is harness.policy_checker
     harness.run_preflight.assert_awaited_once()
-    assert harness.policy_checker.calls == []
 
 
 @pytest.mark.unit
@@ -492,3 +482,9 @@ def test_enhanced_consumer_uses_package_facade_without_duplicate_helpers() -> No
     assert not hasattr(enhanced.EnhancedWebScraper, "_apply_preflight_advice")
     assert module_source.count("Web_Scraping import preflight as preflight_facade") == 1
     assert "decide_web_outbound_policy(" not in scrape_source
+
+
+def test_enhanced_policy_checker_is_exact_default_adapter() -> None:
+    from tldw_Server_API.app.core.Web_Scraping import enhanced_web_scraping as enhanced
+
+    assert type(enhanced._ENHANCED_POLICY_CHECKER) is DefaultWebOutboundPolicyChecker
