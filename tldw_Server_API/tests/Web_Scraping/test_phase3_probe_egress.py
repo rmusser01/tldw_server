@@ -833,11 +833,131 @@ def test_evaluate_target_has_no_probe_guard_or_concrete_adapter_dependency() -> 
     forbidden_dependencies = {
         "ProbeEgressGuard",
         "DefaultProbeEgressGuard",
+        "DefaultWebOutboundPolicyChecker",
         "GuardedHttpProbe",
         "GuardedPlaywrightBrowserProbe",
         "GuardedExternalToolProbe",
     }
     assert forbidden_dependencies.isdisjoint(referenced_names | locally_imported_names)
+
+    top_level_concrete_dependencies = forbidden_dependencies - {"ProbeEgressGuard"}
+    top_level_imported_names = {
+        imported_name
+        for node in facade_tree.body
+        if isinstance(node, ast.Import | ast.ImportFrom)
+        for alias in node.names
+        for imported_name in (alias.name.rsplit(".", 1)[-1], alias.asname)
+        if imported_name is not None
+    }
+    assert top_level_concrete_dependencies.isdisjoint(top_level_imported_names)
+
+
+def test_facade_import_and_injected_context_do_not_load_concrete_stacks() -> None:
+    script = f"""
+import json
+import sys
+
+from {_FACADE_MODULE} import PreflightAdapterOverrides, build_execution_context, evaluate_target
+from tldw_Server_API.app.core.Web_Scraping.preflight.options import PreflightOptions
+from tldw_Server_API.app.core.Web_Scraping.preflight.target import PreflightTarget
+from tldw_Server_API.app.core.Web_Scraping.runtime import PolicyDecision, RuntimeRequestContext
+
+forbidden_exact = {{
+    'tldw_Server_API.app.core.Web_Scraping.outbound_policy',
+    'tldw_Server_API.app.core.Security.egress',
+    'tldw_Server_API.app.core.http_client',
+    'tldw_Server_API.app.core.Web_Scraping.preflight.adapters.http',
+    'tldw_Server_API.app.core.Web_Scraping.preflight.adapters.browser',
+    'tldw_Server_API.app.core.Web_Scraping.preflight.adapters.external_tools',
+}}
+forbidden_prefixes = (
+    'tldw_Server_API.app.core.Metrics',
+    'playwright',
+    'curl_cffi',
+)
+
+def loaded_forbidden():
+    return sorted(
+        name
+        for name in sys.modules
+        if name in forbidden_exact or name.startswith(forbidden_prefixes)
+    )
+
+initial = loaded_forbidden()
+request_context = RuntimeRequestContext(source='test', stage='preflight')
+target = PreflightTarget(
+    url='https://example.com',
+    decision=PolicyDecision(
+        allowed=True,
+        mode='test',
+        reason='allowed',
+        stage='preflight',
+        source='test',
+    ),
+    request_context=request_context,
+)
+injected = object()
+context = build_execution_context(
+    target,
+    PreflightOptions(),
+    policy_checker=injected,
+    injected_adapters=PreflightAdapterOverrides(
+        http=injected,
+        browser=injected,
+        external_tools=injected,
+        egress_guard=injected,
+    ),
+)
+after_injected = loaded_forbidden()
+default_context = build_execution_context(target, PreflightOptions())
+default_types = [
+    type(default_context.policy_checker).__name__,
+    type(default_context.egress_guard).__name__,
+    type(default_context.http).__name__,
+    type(default_context.browser).__name__,
+    type(default_context.external_tools).__name__,
+]
+required_default_modules = sorted(forbidden_exact)
+default_loaded = sorted(name for name in sys.modules if name in forbidden_exact)
+result = {{
+    'initial': initial,
+    'after_injected': after_injected,
+    'default_types': default_types,
+    'default_modules_present': all(name in default_loaded for name in required_default_modules),
+}}
+print(json.dumps(result))
+raise SystemExit(0 if (
+    evaluate_target is not None
+    and not initial
+    and not after_injected
+    and result['default_modules_present']
+) else 1)
+"""
+
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=_ROOT.parent,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert completed.stdout.strip(), completed.stderr
+    result = json.loads(completed.stdout.strip().splitlines()[-1])
+    assert completed.returncode == 0, result
+    assert result == {
+        "initial": [],
+        "after_injected": [],
+        "default_types": [
+            "DefaultWebOutboundPolicyChecker",
+            "DefaultProbeEgressGuard",
+            "GuardedHttpProbe",
+            "GuardedPlaywrightBrowserProbe",
+            "GuardedExternalToolProbe",
+        ],
+        "default_modules_present": True,
+    }
 
 
 @pytest.mark.asyncio

@@ -11,12 +11,8 @@ from typing import Any
 
 from loguru import logger
 
-from ..policy import DefaultProbeEgressGuard, DefaultWebOutboundPolicyChecker
 from ..runtime.policy import OutboundPolicyChecker, ProbeEgressGuard
 from ..runtime.requests import RuntimeRequestContext
-from .adapters.browser import GuardedPlaywrightBrowserProbe
-from .adapters.external_tools import GuardedExternalToolProbe
-from .adapters.http import GuardedHttpProbe
 from .context import PreflightExecutionContext, PreflightLimits, PreflightRuntimeControls
 from .options import PreflightOptions
 from .probes import BrowserProbe, ExternalToolProbe, HttpProbe
@@ -67,10 +63,14 @@ def _default_identity_selector() -> Mapping[str, str]:
 
 
 def _default_policy_checker() -> OutboundPolicyChecker:
+    from ..policy import DefaultWebOutboundPolicyChecker
+
     return DefaultWebOutboundPolicyChecker()
 
 
 def _default_egress_guard() -> ProbeEgressGuard:
+    from ..policy import DefaultProbeEgressGuard
+
     return DefaultProbeEgressGuard()
 
 
@@ -104,9 +104,13 @@ def build_execution_context(
 
     http = overrides.http
     if http is None:
+        from .adapters.http import GuardedHttpProbe
+
         http = GuardedHttpProbe(controls=controls, egress_guard=selected_guard)
     browser = overrides.browser
     if browser is None:
+        from .adapters.browser import GuardedPlaywrightBrowserProbe
+
         browser = GuardedPlaywrightBrowserProbe(
             controls=controls,
             egress_guard=selected_guard,
@@ -114,6 +118,8 @@ def build_execution_context(
         )
     external_tools = overrides.external_tools
     if external_tools is None:
+        from .adapters.external_tools import GuardedExternalToolProbe
+
         external_tools = GuardedExternalToolProbe(
             controls=controls,
             egress_guard=selected_guard,

@@ -9,7 +9,7 @@ import threading
 import time
 import warnings
 from collections.abc import Callable
-from typing import Any
+from typing import Any, get_type_hints
 
 import pytest
 
@@ -38,10 +38,19 @@ from tldw_Server_API.app.core.Web_Scraping.preflight.facade import (
     run_legacy_analyzer,
 )
 from tldw_Server_API.app.core.Web_Scraping.preflight.options import PreflightOptions
+from tldw_Server_API.app.core.Web_Scraping.preflight.probes import (
+    BrowserProbe,
+    ExternalToolProbe,
+    HttpProbe,
+)
 from tldw_Server_API.app.core.Web_Scraping.preflight.target import PreflightTarget
 from tldw_Server_API.app.core.Web_Scraping.runtime import (
     PolicyDecision,
     RuntimeRequestContext,
+)
+from tldw_Server_API.app.core.Web_Scraping.runtime.policy import (
+    OutboundPolicyChecker,
+    ProbeEgressGuard,
 )
 from tldw_Server_API.app.core.Web_Scraping.scraper_analyzers.utils.browser_identities import (
     MODERN_BROWSER_IDENTITIES,
@@ -194,6 +203,99 @@ def test_bridge_starts_lazily_and_reuses_one_process_thread(
     _assert_stopped(thread, loop)
 
 
+def test_first_submission_waits_until_run_forever_executes_ready_callback(
+    bridge: _BackgroundLoopBridge,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    loop = asyncio.new_event_loop()
+    original_run_forever = loop.run_forever
+    run_forever_entered = threading.Event()
+    allow_run_forever = threading.Event()
+    results: list[str] = []
+    errors: list[BaseException] = []
+
+    def gated_run_forever() -> None:
+        run_forever_entered.set()
+        allow_run_forever.wait(1.0)
+        original_run_forever()
+
+    def submit() -> None:
+        try:
+            results.append(bridge.submit(asyncio.sleep(0, result="ready"), timeout_s=1.0))
+        except BaseException as exc:  # noqa: BLE001 - assert exact caller outcome
+            errors.append(exc)
+
+    monkeypatch.setattr(compatibility.asyncio, "new_event_loop", lambda: loop)
+    monkeypatch.setattr(loop, "run_forever", gated_run_forever)
+    caller = threading.Thread(target=submit, name="task-7-startup-barrier-caller")
+    caller.start()
+    try:
+        assert run_forever_entered.wait(1.0)
+        time.sleep(0.05)
+        assert caller.is_alive()
+        assert errors == []
+    finally:
+        allow_run_forever.set()
+        caller.join(2.0)
+
+    assert not caller.is_alive()
+    assert errors == []
+    assert results == ["ready"]
+
+
+def test_shutdown_queues_stop_while_initialized_loop_is_transitioning(
+    bridge: _BackgroundLoopBridge,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    loop = asyncio.new_event_loop()
+    original_run_forever = loop.run_forever
+    run_forever_entered = threading.Event()
+    allow_run_forever = threading.Event()
+    caller_errors: list[BaseException] = []
+
+    def gated_run_forever() -> None:
+        run_forever_entered.set()
+        allow_run_forever.wait(1.0)
+        original_run_forever()
+
+    async def wait_forever() -> None:
+        await asyncio.Event().wait()
+
+    def submit() -> None:
+        try:
+            bridge.submit(wait_forever())
+        except (RuntimeError, concurrent.futures.CancelledError) as exc:
+            caller_errors.append(exc)
+
+    monkeypatch.setattr(compatibility.asyncio, "new_event_loop", lambda: loop)
+    monkeypatch.setattr(loop, "run_forever", gated_run_forever)
+    caller = threading.Thread(target=submit, name="task-7-transition-submit")
+    caller.start()
+    assert run_forever_entered.wait(1.0)
+
+    shutdown = threading.Thread(target=bridge.shutdown, name="task-7-transition-shutdown")
+    shutdown.start()
+    try:
+        time.sleep(0.05)
+        allow_run_forever.set()
+        shutdown.join(2.0)
+        caller.join(2.0)
+        assert not shutdown.is_alive()
+        assert not caller.is_alive()
+        assert caller_errors
+        assert not loop.is_running()
+        assert loop.is_closed()
+    finally:
+        allow_run_forever.set()
+        if not loop.is_closed():
+            try:
+                loop.call_soon_threadsafe(loop.stop)
+            except RuntimeError:
+                pass
+        shutdown.join(2.0)
+        caller.join(2.0)
+
+
 def test_bridge_preserves_return_values_and_exception_identity(
     bridge: _BackgroundLoopBridge,
 ) -> None:
@@ -282,6 +384,59 @@ def test_shutdown_cancels_and_gathers_pending_tasks_before_loop_close(
     assert len(caller_errors) == 1
     assert isinstance(caller_errors[0], concurrent.futures.CancelledError)
     _assert_stopped(bridge_thread, loop)
+
+
+def test_shutdown_forces_second_cancellation_within_one_bounded_deadline(
+    bridge: _BackgroundLoopBridge,
+) -> None:
+    started = threading.Event()
+    first_cancelled = threading.Event()
+    second_cancelled = threading.Event()
+    cancellation_times: list[float] = []
+    caller_errors: list[BaseException] = []
+    loop_errors: list[dict[str, Any]] = []
+
+    async def suppress_first_cancellation() -> None:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            first_cancelled.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                cancellation_times.append(time.monotonic())
+                second_cancelled.set()
+                raise
+
+    def submit() -> None:
+        try:
+            bridge.submit(suppress_first_cancellation())
+        except concurrent.futures.CancelledError as exc:
+            caller_errors.append(exc)
+
+    caller = threading.Thread(target=submit, name="task-7-forced-cancel-caller")
+    caller.start()
+    assert started.wait(1.0)
+    loop = bridge._loop
+    thread = bridge._thread
+    assert loop is not None
+    assert thread is not None
+    loop.call_soon_threadsafe(loop.set_exception_handler, lambda _loop, context: loop_errors.append(context))
+
+    shutdown_started = time.monotonic()
+    bridge.shutdown()
+    shutdown_elapsed = time.monotonic() - shutdown_started
+    caller.join(1.0)
+
+    assert first_cancelled.is_set()
+    assert second_cancelled.is_set()
+    assert cancellation_times[0] - shutdown_started < 1.5
+    assert shutdown_elapsed < 2.2
+    assert not caller.is_alive()
+    assert len(caller_errors) == 1
+    assert not [context for context in loop_errors if "destroyed" in str(context.get("message", "")).lower()]
+    _assert_stopped(thread, loop)
 
 
 def test_shutdown_is_idempotent_and_rejects_owned_coroutines(
@@ -439,6 +594,7 @@ def test_pid_change_retires_a_live_same_process_thread_and_recreates_state(
     old_lock = bridge._lock
     old_thread = bridge._thread
     old_loop = bridge._loop
+    old_generation = bridge._generation
     assert old_pid is not None
     assert old_thread is not None
     assert old_loop is not None
@@ -449,7 +605,8 @@ def test_pid_change_retires_a_live_same_process_thread_and_recreates_state(
     assert not old_thread.is_alive()
     assert old_loop.is_closed()
     assert bridge._owner_pid == old_pid + 1000
-    assert bridge._lock is not old_lock
+    assert bridge._lock is old_lock
+    assert bridge._generation == old_generation + 1
     assert bridge._thread is not old_thread
     assert bridge._thread is not None and bridge._thread.is_alive()
 
@@ -474,6 +631,7 @@ def test_pid_change_replaces_inherited_mutex_without_touching_parent_loop(
 
     owner_pid = compatibility.os.getpid() - 1
     bridge._owner_pid = owner_pid
+    bridge._real_pid -= 1
     bridge._lock = InheritedLock()  # type: ignore[assignment]
     bridge._loop = ParentLoop()  # type: ignore[assignment]
     bridge._thread = threading.Thread(name="inherited-dead-thread")
@@ -481,6 +639,82 @@ def test_pid_change_replaces_inherited_mutex_without_touching_parent_loop(
     assert bridge.submit(asyncio.sleep(0, result="child"), timeout_s=1.0) == "child"
     assert bridge._owner_pid == compatibility.os.getpid()
     assert bridge._thread is not None and bridge._thread.is_alive()
+
+
+def test_actual_pid_change_resets_ownerless_state_before_inherited_lock() -> None:
+    class InheritedLock:
+        def __enter__(self) -> None:
+            raise AssertionError("inherited mutex was acquired")
+
+        def __exit__(self, *_args: Any) -> None:
+            return None
+
+    class ParentLoop:
+        def call_soon_threadsafe(self, *_args: Any) -> None:
+            raise AssertionError("parent loop was called")
+
+        def close(self) -> None:
+            raise AssertionError("parent loop was closed")
+
+    inherited_lock = InheritedLock()
+    bridge = _BackgroundLoopBridge()
+    bridge._owner_pid = None
+    bridge._real_pid -= 1
+    bridge._lock = inherited_lock  # type: ignore[assignment]
+    bridge._loop = ParentLoop()  # type: ignore[assignment]
+    bridge._thread = threading.Thread(name="inherited-ownerless-dead-thread")
+    try:
+        assert bridge.submit(asyncio.sleep(0, result="child"), timeout_s=1.0) == "child"
+        assert bridge._lock is not inherited_lock
+        assert bridge._owner_pid == compatibility.os.getpid()
+        assert bridge._thread is not None and bridge._thread.is_alive()
+    finally:
+        bridge.shutdown()
+
+
+def test_concurrent_simulated_pid_reset_has_one_generation_and_live_loop(
+    bridge: _BackgroundLoopBridge,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert bridge.submit(asyncio.sleep(0, result="parent"), timeout_s=1.0) == "parent"
+    old_pid = bridge._owner_pid
+    old_thread = bridge._thread
+    old_loop = bridge._loop
+    old_generation = bridge._generation
+    assert old_pid is not None
+    assert old_thread is not None
+    assert old_loop is not None
+
+    monkeypatch.setattr(compatibility.os, "getpid", lambda: old_pid + 1000)
+    start = threading.Barrier(3)
+    results: list[str] = []
+    errors: list[BaseException] = []
+
+    def submit(value: str) -> None:
+        start.wait()
+        try:
+            results.append(bridge.submit(asyncio.sleep(0, result=value), timeout_s=1.0))
+        except BaseException as exc:  # noqa: BLE001 - assert concurrent outcome
+            errors.append(exc)
+
+    callers = [
+        threading.Thread(target=submit, args=(value,), name=f"task-7-pid-reset-{value}") for value in ("one", "two")
+    ]
+    for caller in callers:
+        caller.start()
+    start.wait()
+    for caller in callers:
+        caller.join(3.0)
+
+    assert not any(caller.is_alive() for caller in callers)
+    assert errors == []
+    assert sorted(results) == ["one", "two"]
+    assert bridge._generation == old_generation + 1
+    assert not old_thread.is_alive()
+    assert old_loop.is_closed()
+    assert bridge._thread is not old_thread
+    assert bridge._thread is not None and bridge._thread.is_alive()
+    assert bridge._loop is not old_loop
 
 
 def test_process_exit_hook_shuts_down_the_process_singleton(
@@ -537,6 +771,21 @@ def test_build_execution_context_shares_clock_deadline_guard_and_controls() -> N
     assert context.browser._guard is guard
     assert context.external_tools._egress_guard is guard
     assert context.browser._no_sandbox is True
+
+
+def test_public_facade_type_hints_resolve_runtime_protocols() -> None:
+    override_hints = get_type_hints(PreflightAdapterOverrides)
+    assert override_hints["http"] == HttpProbe | None
+    assert override_hints["browser"] == BrowserProbe | None
+    assert override_hints["external_tools"] == ExternalToolProbe | None
+    assert override_hints["egress_guard"] == ProbeEgressGuard | None
+
+    evaluate_hints = get_type_hints(facade.evaluate_target)
+    build_hints = get_type_hints(build_execution_context)
+    helper_hints = get_type_hints(run_legacy_analyzer)
+    assert evaluate_hints["policy_checker"] is OutboundPolicyChecker
+    assert build_hints["policy_checker"] == OutboundPolicyChecker | None
+    assert helper_hints["policy_checker_factory"] == Callable[[], OutboundPolicyChecker]
 
 
 @pytest.mark.parametrize("timeout_s", [None, 0.0, -1.0])
