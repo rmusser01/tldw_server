@@ -1,0 +1,292 @@
+# Embeddings Workflow Stage 2: Concrete API Steps Design
+
+**Status:** Approved design; written-spec review pending
+
+**Parent task:** `TASK-12973`
+
+**Depends on:** PR #2733 and `Docs/superpowers/specs/2026-07-03-embeddings-workflow-architecture-design.md`
+
+## Purpose
+
+Stage 1 placed the feature-flagged `/api/v1/embeddings` path behind typed workflow contracts and an inline runner, but the runner still delegates execution to `EmbeddingRequestOrchestrator`. Stage 2 extracts the concrete preparation and execution responsibilities into workflow-compatible components while preserving current API behavior.
+
+Stage 2 is delivered as five sequential child tasks and pull requests. Each pull request must leave the workflow-enabled endpoint usable, tested, and independently reversible.
+
+## Goals
+
+1. Represent the actual preparation and execution order with explicit contracts.
+2. Isolate adapter execution, provider readiness, single-provider attempts, fallback policy, vector processing, and result assembly.
+3. Make the inline runner sequence the concrete application-level workflow.
+4. Reduce `EmbeddingRequestOrchestrator` to delegation and legacy result compatibility.
+5. Move HTTP response-header construction to the endpoint boundary.
+6. Preserve endpoint output, fallback, caching, resource governance, metrics inputs, credential touching, and error behavior.
+
+## Non-Goals
+
+Stage 2 does not add durable workflow storage, Jobs workers, retries across process boundaries, pause/resume, cancellation, leases, persisted item records, media-ingestion migration, vector-store migration, or re-embedding migration. Those remain later stages of the architecture roadmap.
+
+Stage 2 also does not redesign cache keys, make cache writes transactional, optimize full-cache-hit credential checks, alter fallback policy, remove the legacy endpoint path, or promote the workflow feature flag.
+
+## Existing Behavioral Order
+
+The extraction must start from the current order rather than the apparent order implied by existing phase names.
+
+Preparation currently performs:
+
+1. Resolve provider/model intent.
+2. Normalize and decode input using the resolved model.
+3. Enforce provider, model, dimension, and fallback policy.
+4. Build the execution plan and token totals.
+
+Execution currently performs:
+
+1. Run the optional resource-governor reservation hook after planning.
+2. Try the preferred adapter path before provider preflight or cache access.
+3. Preflight the requested primary provider.
+4. Read primary cache entries in request order.
+5. Execute only primary misses.
+6. If an eligible primary provider-call failure occurs, discard primary partial results and resolve the complete request through fallback candidates.
+7. Validate and canonicalize provider output, apply request-specific dimension processing, then write provider-native vectors to cache.
+8. Assemble the result, touch credentials for the actual provider, record metrics and usage, map HTTP headers, and commit the resource reservation at the endpoint boundary.
+
+The extraction may not reorder these operations unless a child task explicitly identifies, tests, and documents a separate behavior correction.
+
+## Architecture
+
+### EmbeddingPreparationPipeline
+
+`EmbeddingPreparationPipeline` owns the existing preparation order. It exposes one preparation operation and accepts an optional phase sink so the inline runner can report truthful phases without duplicating the preparation algorithm.
+
+Its internal steps are:
+
+- Resolve `ProviderModelIntent`.
+- Produce `NormalizedEmbeddingInput`.
+- Produce `EmbeddingPolicyDecision`.
+- Produce `PreparedEmbeddingRequest` and `EmbeddingExecutionPlan`.
+
+The compatibility orchestrator calls the same pipeline without a phase sink.
+
+### EmbeddingAdapterAttempt
+
+`EmbeddingAdapterAttempt` implements the optional preferred adapter fast path. It runs only when the execution plan requests the adapter path and the executor exposes `create_adapter`.
+
+An adapter result must be validated and postprocessed. A successful adapter result bypasses provider preflight and all cache access. A `None` or non-adapter result continues to primary readiness. Adapter exceptions propagate unchanged and never activate provider fallback.
+
+### EmbeddingProviderReadinessCheck
+
+`EmbeddingProviderReadinessCheck` wraps provider preflight independently from cache and execution. Keeping readiness separate is required because primary and fallback readiness failures have different policy:
+
+- A requested primary readiness failure propagates immediately and does not enter fallback.
+- A fallback candidate with missing credentials is skipped.
+- Other fallback readiness failures follow the existing eligibility rules.
+
+Readiness continues to run before cache lookup, including full cache hits.
+
+### EmbeddingVectorProcessor
+
+`EmbeddingVectorProcessor` is a pure component for vector-count validation, numeric canonicalization, and request-specific dimension adjustment. It preserves the current rule that base64 requests with explicit dimensions use the `reduce` policy.
+
+It receives provider/model context for domain errors and adjustment metrics but does not access the cache, executor, endpoint response, or workflow collector.
+
+### EmbeddingProviderAttempt
+
+`EmbeddingProviderAttempt` resolves one provider/model against the complete ordered input. Readiness is performed by the caller before the attempt.
+
+The attempt performs:
+
+1. Resolve backend identity and derive cache keys.
+2. Read cache entries in request order.
+3. Canonicalize and postprocess each cache hit before provider execution.
+4. Execute only missing texts.
+5. Validate the complete miss response before any writeback.
+6. Canonicalize provider-native miss vectors.
+7. Postprocess all miss vectors successfully.
+8. Write provider-native miss vectors to cache in request order unless the executor marked them as adapter-originated.
+9. Assemble final vectors in original request order.
+
+The attempt does not promise transactional cache writes. If a later write fails, earlier writes may already exist, matching current behavior. Cache read, postprocessing, and writeback failures are not provider-call failures and must never trigger fallback.
+
+Stage 2A must verify that the production endpoint cache adapter does not translate cache failures into fallback-eligible provider errors. If characterization finds such a translation, changing that observable behavior is outside this extraction and requires a separately approved correction.
+
+Provider-call failures are represented separately from other exceptions so the coordinator can make a fallback decision without wrapping or replacing the original domain exception.
+
+### EmbeddingFallbackCoordinator
+
+`EmbeddingFallbackCoordinator` owns fallback candidate traversal only. For each candidate it:
+
+1. Maps the requested model to the candidate provider.
+2. Runs candidate readiness.
+3. Skips missing candidate credentials.
+4. Executes a full-request provider attempt.
+5. Applies fallback eligibility and exhausted-error precedence to provider-call or readiness failures.
+
+A successful fallback always returns vectors for the complete original input. Primary cache hits and partial primary state never appear in a fallback result.
+
+### EmbeddingExecutionCoordinator
+
+`EmbeddingExecutionCoordinator` owns the domain execution sequence:
+
+1. Try `EmbeddingAdapterAttempt`.
+2. Run primary `EmbeddingProviderReadinessCheck` outside fallback handling.
+3. Run the primary `EmbeddingProviderAttempt`.
+4. Return primary success, or invoke `EmbeddingFallbackCoordinator` for an eligible primary provider-call failure when policy allows fallback.
+5. Preserve the original error object when fallback is denied or exhausted-error selection chooses it.
+
+The coordinator contains no HTTP response formatting, resource-governor reservation, usage logging, or workflow persistence.
+
+### EmbeddingExecutionOutcome and Result Assembly
+
+`EmbeddingResultAssembler` combines a prepared request and successful execution into a canonical `EmbeddingExecutionOutcome`. The outcome contains:
+
+- Ordered vectors.
+- Actual provider and model.
+- Prompt and total token counts.
+- Cache hit and miss counts.
+- Requested dimensions and effective dimension policy.
+- `fallback_from` when applicable.
+- Whether the returned vectors originated from an adapter.
+
+The canonical outcome contains no HTTP headers.
+
+`EmbeddingExecutionResult` remains temporarily as the compatibility DTO returned by `EmbeddingRequestOrchestrator`. A compatibility mapper derives it from the canonical outcome and preserves the current `response_headers` field for existing internal callers and tests. The endpoint workflow path consumes the canonical outcome directly.
+
+### Endpoint Response Mapping
+
+The endpoint maps canonical outcome metadata to:
+
+- `X-Embeddings-Provider`
+- `X-Embeddings-Fallback-From` when fallback changed the provider
+- `X-Embeddings-Dimensions-Policy` when dimensions were requested
+
+Credential touching, cache-hit metrics, duration metrics, usage logging, OpenAI response formatting, and resource-governor commit remain endpoint responsibilities in Stage 2.
+
+## Inline Runner and State Model
+
+The inline runner sequences:
+
+1. Workflow creation.
+2. Preparation pipeline.
+3. Existing `pre_execute` reservation hook.
+4. Execution coordinator.
+5. Result assembly.
+6. Workflow completion or failure.
+
+The truthful Stage 2 top-level phase order is:
+
+```text
+created
+  -> resolving_intent
+  -> normalizing
+  -> resolving_policy
+  -> planning
+  -> executing
+  -> finalizing
+  -> completed
+```
+
+The `pre_execute` hook runs while the workflow is in `planning`. Its failure is recorded as a planning failure and prevents adapter, readiness, cache, and provider work.
+
+Cache lookup, provider call, postprocessing, and cache writeback are attempt-local stages under `executing`. Fallback repeats attempt-local stages without moving the top-level workflow phase backward. Existing `serving_cache` and `postprocessing` phase literals may remain temporarily for compatibility but are not emitted as Stage 2 top-level transitions.
+
+Stage 2 emits aggregate workflow and attempt metadata only. It does not emit one event per input item. Attempt metadata may include bounded fields such as attempt index, primary/fallback role, cache hit count, cache miss count, adapter use, and retryability. It must not include provider names, model names, raw input, token arrays, cache keys, credentials, provider response bodies, or caller-controlled headers.
+
+The production default collector remains disabled. The bounded in-memory collector remains fail-closed when enabled. Collector failures are never interpreted as provider failures and never trigger fallback. Failure-event recording remains best effort so a collector failure cannot replace the original request exception.
+
+## Error Routing Matrix
+
+| Operation | Result |
+| --- | --- |
+| Intent resolution, normalization, or policy failure | Fail request; no execution or fallback |
+| Resource reservation failure | Fail in planning; no adapter, cache, provider, or fallback work |
+| Preferred adapter exception | Fail request unchanged; no provider fallback |
+| Preferred adapter returns no result | Continue to primary readiness |
+| Primary readiness failure | Fail request unchanged; no fallback |
+| Primary cache read, postprocessing, or cache write failure | Fail request; no fallback |
+| Eligible primary provider-call failure with fallback allowed | Start fallback with the complete input |
+| Ineligible primary provider-call failure | Raise the original error unchanged |
+| Fallback readiness reports missing credentials | Skip candidate |
+| Other eligible fallback readiness or provider-call failure | Continue to the next candidate |
+| Ineligible fallback failure | Raise immediately |
+| Fallback cache read, postprocessing, or cache write failure | Fail request; do not try another provider |
+| Fallback exhaustion | Apply existing exhausted-error selection, preserving rate-limit retry metadata |
+| Trace collector failure during normal tracing | Fail closed, but never enter provider fallback |
+| Failure-event collector failure | Preserve and re-raise the original request error |
+| Resource-governor commit failure | Log as noncritical at the endpoint boundary |
+
+## Security and Privacy
+
+- Raw text and token arrays remain outside execution plans, results, and workflow events.
+- Provider/model identifiers remain excluded from trace metadata because caller-controlled values can resemble credentials.
+- Cache keys and backend identities are never traced.
+- Domain exceptions are traced only as fixed failure kind, phase, and retryability fields.
+- The existing metadata allowlist, credential-pattern checks, immutable event metadata, generated workflow identifiers, and event bounds remain enforced.
+- No provider secrets, BYOK material, request headers, or provider bodies enter component DTO representations.
+
+## Compatibility and Rollback
+
+The existing workflow feature flag remains the operational rollback for all Stage 2 pull requests. Disabling it routes requests through the legacy endpoint implementation.
+
+Within the workflow-enabled path:
+
+- `EmbeddingRequestOrchestrator.prepare` delegates to `EmbeddingPreparationPipeline`.
+- `EmbeddingRequestOrchestrator.execute` delegates to `EmbeddingExecutionCoordinator` and the compatibility result mapper.
+- The final Stage 2 orchestrator contains no cache loops, executor calls, fallback traversal, vector postprocessing, or HTTP policy decisions.
+
+The legacy endpoint implementation is not removed in Stage 2.
+
+## Delivery Plan
+
+### Stage 2A: Characterization and Contracts (`TASK-12973.1`)
+
+Add missing behavior-first tests before production extraction. Coverage includes preparation order, reservation ordering, primary readiness non-fallback behavior, fallback readiness behavior, cache failure routing, adapter writeback bypass, exact error identity, and exhausted-error precedence. This pull request changes no production execution behavior.
+
+### Stage 2B: Preparation and Result Contracts (`TASK-12973.2`)
+
+Extract preparation steps, vector processing, the canonical outcome, a parity-tested endpoint header mapper, and the legacy result adapter. Existing execution and production endpoint wiring remain in place while the pure components gain focused coverage. The endpoint switches to the new mapper in Stage 2E.
+
+### Stage 2C: Single-Provider Attempts (`TASK-12973.3`)
+
+Extract readiness and provider-attempt behavior. Differential tests run the new attempt and existing orchestrator scenarios with independent fakes. The production orchestrator may delegate the isolated responsibility only after those tests pass.
+
+### Stage 2D: Execution and Fallback Coordinators (`TASK-12973.4`)
+
+Extract adapter, primary, fallback, mapping, eligibility, coherence, and exhausted-error behavior. Differential tests remain until the coordinator fully replaces the old execution branches.
+
+### Stage 2E: Runner and Facade Integration (`TASK-12973.5`)
+
+Wire the inline runner to the preparation pipeline, reservation hook, execution coordinator, and result assembler. Move workflow-path HTTP headers to the endpoint mapper, reduce the orchestrator to its compatibility facade, and remove superseded private execution branches.
+
+## Test Strategy
+
+Every child pull request runs the focused Embeddings isolated suites and endpoint parity suite. Stage-specific tests cover:
+
+- Provider/model intent resolution before model-dependent normalization.
+- Existing preparation error precedence.
+- Reservation ordering for adapter success, cache hit, provider success, and failure.
+- Adapter success, adapter decline, adapter exception, and adapter-originated standard executor output.
+- Primary full and partial cache hits, ordered misses, and canonical raw writeback.
+- Provider vector count mismatch and malformed numeric data before writeback.
+- Request-specific dimension processing over cached provider-native vectors.
+- Primary readiness failures with no fallback.
+- Fallback candidate missing credentials and retryable readiness failures.
+- Whole-request fallback after partial primary cache hits.
+- Nonretryable provider errors and exact exception identity.
+- Rate-limit `retry_after` preservation and exhausted-error selection.
+- Cache read and write failures never activating fallback.
+- Aggregate trace ordering, metadata allowlisting, event bounds, and failure preservation.
+- Workflow-enabled versus legacy endpoint status, body, headers, credential touching, resource accounting, and metric inputs.
+
+Tests mock external embedding providers and use deterministic in-memory caches and executors. No external API calls are required.
+
+## Verification Gates
+
+Each pull request must pass:
+
+1. Its new focused unit tests.
+2. `test_embedding_orchestrator.py`.
+3. `test_workflow_types.py` and `test_workflow_runner.py` when workflow contracts change.
+4. `test_embeddings_orchestrator_endpoint_parity.py`.
+5. Formatting and lint checks for touched files.
+6. Bandit over touched Python paths.
+
+Stage 2 is complete only when all five child tasks are merged, the compatibility facade contains delegation only, the feature flag still provides rollback, and no Stage 3 durability behavior has entered the implementation.
