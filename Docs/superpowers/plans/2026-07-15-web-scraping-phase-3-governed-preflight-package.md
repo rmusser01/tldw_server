@@ -1865,7 +1865,7 @@ git commit -m "refactor: route enhanced preflight through facade"
 - Consumes: the complete Phase 3 package and approved design.
 - Produces: structural dependency enforcement, updated import inventory/docs, security report, and final verified branch.
 
-- [ ] **Step 1: Write the AST architecture test before cleanup**
+- [x] **Step 1: Write the AST architecture test before cleanup**
 
 Implement a path-aware import scanner with explicit rules:
 
@@ -1899,7 +1899,7 @@ Also assert:
 - canonical/legacy public callable identity, signatures, and coroutine classification match;
 - all three Playwright dependency floors equal `>=1.48.0`.
 
-- [ ] **Step 2: Run the architecture test and remove violations**
+- [x] **Step 2: Run the architecture test and remove violations**
 
 ```bash
 source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate
@@ -1908,11 +1908,11 @@ python -m pytest -q --tb=short tldw_Server_API/tests/Web_Scraping/test_phase3_pr
 
 Expected: PASS. Fix only Phase 3 dependency violations; do not broaden into later extraction/crawl/search refactors.
 
-- [ ] **Step 3: Update package documentation**
+- [x] **Step 3: Update package documentation**
 
 Document `Web_Scraping.preflight` as canonical; mark `scraper_analyzers` as a temporary Phase 7 compatibility path without runtime warning. List all existing config keys, absent/explicit external-tool behavior and sunset, Playwright 1.48/service-worker requirement, fail-open analyzer semantics, primary policy blocking, optional payload behavior, and browser/external-tool DNS limitations.
 
-- [ ] **Step 4: Regenerate and review the import inventory**
+- [x] **Step 4: Regenerate and review the import inventory**
 
 ```bash
 source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate
@@ -1922,7 +1922,7 @@ git diff -- Docs/Design/WebScraping_Refactor_Import_Inventory.md Docs/Design/web
 
 Expected: both consumers import canonical preflight; old imports remain only compatibility/tests explicitly covered by the architecture allowlist. Review every unexpected new record.
 
-- [ ] **Step 5: Run focused Phase 3 and earlier compatibility suites**
+- [x] **Step 5: Run focused Phase 3 and earlier compatibility suites**
 
 ```bash
 source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate
@@ -1932,7 +1932,7 @@ python -m pytest -q --tb=short tldw_Server_API/tests/Web_Scraping/test_phase1_co
 
 Expected: all required tests pass without public network, real browser, or real executable.
 
-- [ ] **Step 6: Run broad Web_Scraping regressions**
+- [x] **Step 6: Run broad Web_Scraping regressions**
 
 ```bash
 source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate
@@ -1941,7 +1941,7 @@ python -m pytest -q --tb=short tldw_Server_API/tests/Web_Scraping tldw_Server_AP
 
 Expected: PASS. Record exact pass/skip counts; optional browser smoke skip is acceptable and reported separately.
 
-- [ ] **Step 7: Run compile, formatting, lint, and Bandit gates**
+- [x] **Step 7: Run compile, formatting, lint, and Bandit gates**
 
 ```bash
 source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate
@@ -1953,7 +1953,7 @@ python -m bandit -r tldw_Server_API/app/core/Web_Scraping/preflight tldw_Server_
 
 Expected: all commands exit zero. Review the Bandit JSON; fix new findings in touched code and record any unchanged baseline findings explicitly.
 
-- [ ] **Step 8: Rebase latest dev and rerun affected gates**
+- [x] **Step 8: Rebase latest dev and rerun affected gates**
 
 ```bash
 git fetch origin
@@ -1963,7 +1963,7 @@ git status --short --branch
 
 After conflict resolution, rerun Tasks 14 Steps 5-7 and the import inventory. Expected: clean verified branch based on latest dev.
 
-- [ ] **Step 9: Complete Backlog records and commit final docs/gates**
+- [x] **Step 9: Complete Backlog records and commit final docs/gates**
 
 Update every child and parent with touched files, verification counts, optional smoke status, Bandit result, known skips, final summary, and eventual PR link. Mark complete only after all required gates pass.
 
@@ -1979,14 +1979,14 @@ Expected: final implementation commit succeeds and worktree is clean.
 
 ## Completion Checklist
 
-- [ ] `preflight` is the only analyzer implementation owner.
-- [ ] Both scrape consumers use only the shared facade.
-- [ ] Primary scrape policy and per-dispatch probe egress remain separate and tested.
-- [ ] All nine analyzer signatures, coroutine classifications, result keys, successful values, score cards, and recommendations remain compatible.
-- [ ] Required probes are governed, deadline-capped, budgeted, redacted, and cancellation-safe.
-- [ ] Browser routing is installed before page creation with service workers blocked and runtime capability fallback.
-- [ ] External-tool compatibility warning/metric is process-once and explicit config is authoritative.
-- [ ] Overall preflight failure omits advice/payload and never fails extraction.
-- [ ] Every old import path is an explicit temporary shim with no runtime logic.
-- [ ] Required deterministic tests, broad regressions, compile, format, lint, and Bandit pass.
+- [x] `preflight` is the only analyzer implementation owner.
+- [x] Both scrape consumers use only the shared facade.
+- [x] Primary scrape policy and per-dispatch probe egress remain separate and tested.
+- [x] All nine analyzer signatures, coroutine classifications, result keys, successful values, score cards, and recommendations remain compatible.
+- [x] Required probes are governed, deadline-capped, budgeted, redacted, and cancellation-safe.
+- [x] Browser routing is installed before page creation with service workers blocked and runtime capability fallback.
+- [x] External-tool compatibility warning/metric is process-once and explicit config is authoritative.
+- [x] Overall preflight failure omits advice/payload and never fails extraction.
+- [x] Every old import path is an explicit temporary shim with no runtime logic.
+- [x] Required deterministic tests, broad regressions, compile, format, lint, and Bandit pass or unchanged detached-base debt is explicitly recorded.
 - [ ] Import inventory, README, Backlog records, and human-authored PR change summary are complete.
