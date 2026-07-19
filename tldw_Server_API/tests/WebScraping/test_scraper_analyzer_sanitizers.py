@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import pytest
 
 from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as article_extractor
@@ -5,10 +7,7 @@ from tldw_Server_API.app.core.Web_Scraping.scraper_analyzers.analyzers import (
     behavioral_detector,
     captcha_detector,
     js_detector,
-    rate_limit_profiler,
-    robots_checker,
 )
-
 
 pytestmark = pytest.mark.unit
 
@@ -57,27 +56,60 @@ def test_js_detector_sanitizes_defensive_failures(monkeypatch):
     assert result == {"status": "error", "message": "JavaScript rendering analysis failed."}
 
 
-def test_robots_checker_sanitizes_fetch_failures(monkeypatch):
-    def fail_fetch(**_kwargs):
-        raise RuntimeError("robots backend failed at /private/robots.txt")
+@pytest.mark.asyncio
+async def test_robots_checker_sanitizes_injected_probe_failures():
+    from tldw_Server_API.app.core.Web_Scraping.preflight.analyzers.robots_checker import (
+        _check_robots_txt,
+    )
 
-    monkeypatch.setattr(robots_checker, "http_fetch", fail_fetch)
+    class FailingHttpProbe:
+        async def get(self, _request):
+            raise RuntimeError("robots backend failed at /private/robots.txt")
 
-    result = robots_checker.check_robots_txt("https://example.com")
+    result = await _check_robots_txt(
+        "https://example.com",
+        SimpleNamespace(http=FailingHttpProbe()),
+    )
 
-    assert result == {"status": "error", "message": "Robots.txt check failed."}
+    assert result == {
+        "status": "error",
+        "message": "Robots.txt check failed.",
+        "error_code": "analyzer_error",
+    }
 
 
 @pytest.mark.asyncio
-async def test_rate_limit_profiler_sanitizes_defensive_failures(monkeypatch):
-    async def fail_profiler(*_args, **_kwargs):
-        raise RuntimeError("rate limit backend failed at /private/rate-limit.json")
+async def test_rate_limit_profiler_sanitizes_injected_probe_failures():
+    from tldw_Server_API.app.core.Web_Scraping.preflight.analyzers.rate_limit_profiler import (
+        _profile_rate_limits,
+    )
 
-    monkeypatch.setattr(rate_limit_profiler, "_run_rate_limit_profiler", fail_profiler)
+    class FailingHttpProbe:
+        async def get(self, _request):
+            raise RuntimeError("rate limit backend failed at /private/rate-limit.json")
 
-    result = await rate_limit_profiler.profile_rate_limits("https://example.com", crawl_delay=0)
+    async def unexpected_sleep(_delay):
+        raise AssertionError("profiling must fail before sleeping")
 
-    assert result == {"status": "error", "message": "Rate limit profiling failed."}
+    def browser_identity():
+        return {"User-Agent": "sanitizer-test"}
+
+    context = SimpleNamespace(
+        http=FailingHttpProbe(),
+        controls=SimpleNamespace(sleep=unexpected_sleep),
+        browser_identity=browser_identity,
+    )
+    result = await _profile_rate_limits(
+        "https://example.com",
+        context,
+        crawl_delay=0,
+    )
+
+    assert result == {
+        "status": "error",
+        "message": "Rate limit profiling failed.",
+        "error_code": "analyzer_error",
+    }
 
 
 def test_article_pipeline_schema_import_failure_sanitizes_trace_detail(monkeypatch):

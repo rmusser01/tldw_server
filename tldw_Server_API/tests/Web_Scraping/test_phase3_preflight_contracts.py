@@ -603,6 +603,21 @@ def test_local_timeout_remains_independent_without_overall_deadline() -> None:
 
 
 @pytest.mark.asyncio
+async def test_zero_delay_sleep_invokes_injected_sleep_once() -> None:
+    clock = FakeClock()
+    sleep = FakeSleep(clock)
+    controls = PreflightRuntimeControls(
+        request_context=_request_context(),
+        clock=clock,
+        sleep=sleep,
+    )
+
+    await controls.sleep(0)
+
+    assert sleep.delays == [0]
+
+
+@pytest.mark.asyncio
 async def test_sleep_uses_deadline_cap_and_raises_overall_deadline() -> None:
     clock = FakeClock(10.0)
     sleep = FakeSleep(clock)

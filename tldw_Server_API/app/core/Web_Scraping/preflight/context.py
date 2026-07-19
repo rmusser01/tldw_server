@@ -150,6 +150,9 @@ class PreflightRuntimeControls:
 
     async def sleep(self, delay_s: float) -> None:
         """Sleep no longer than the overall deadline permits."""
+        if delay_s == 0:
+            await self._sleep(0)
+            return
         effective = self.cap_timeout(delay_s)
         if effective is None:
             effective = delay_s

@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import concurrent.futures
 import gc
+import importlib
+import inspect
 import threading
 import time
 import warnings
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any, get_type_hints
 
 import pytest
@@ -44,6 +48,9 @@ from tldw_Server_API.app.core.Web_Scraping.preflight.probes import (
     HttpProbe,
 )
 from tldw_Server_API.app.core.Web_Scraping.preflight.target import PreflightTarget
+from tldw_Server_API.app.core.Web_Scraping.preflight.utils.browser_identities import (
+    MODERN_BROWSER_IDENTITIES,
+)
 from tldw_Server_API.app.core.Web_Scraping.runtime import (
     PolicyDecision,
     RuntimeRequestContext,
@@ -51,9 +58,6 @@ from tldw_Server_API.app.core.Web_Scraping.runtime import (
 from tldw_Server_API.app.core.Web_Scraping.runtime.policy import (
     OutboundPolicyChecker,
     ProbeEgressGuard,
-)
-from tldw_Server_API.app.core.Web_Scraping.preflight.utils.browser_identities import (
-    MODERN_BROWSER_IDENTITIES,
 )
 from tldw_Server_API.tests.Web_Scraping.preflight_fakes import (
     FakeBrowserProbe,
@@ -901,36 +905,163 @@ def test_default_browser_identity_is_lazy_cached_and_uses_canonical_collection(
 
 def test_utility_shims_reexport_canonical_public_surface() -> None:
     from tldw_Server_API.app.core.Web_Scraping.preflight.utils.browser_identities import (
-        MODERN_BROWSER_IDENTITIES as canonical_identities,
+        MODERN_BROWSER_IDENTITIES as CANONICAL_IDENTITIES,
     )
     from tldw_Server_API.app.core.Web_Scraping.preflight.utils.impersonate_target import (
         get_impersonate_target as canonical_impersonate_target,
     )
     from tldw_Server_API.app.core.Web_Scraping.preflight.utils.waf_result_parser import (
-        ANSI_RE as canonical_ansi_re,
-        GENERIC_PHRASES as canonical_generic_phrases,
+        ANSI_RE as CANONICAL_ANSI_RE,
+    )
+    from tldw_Server_API.app.core.Web_Scraping.preflight.utils.waf_result_parser import (
+        GENERIC_PHRASES as CANONICAL_GENERIC_PHRASES,
+    )
+    from tldw_Server_API.app.core.Web_Scraping.preflight.utils.waf_result_parser import (
         clean_text as canonical_clean_text,
+    )
+    from tldw_Server_API.app.core.Web_Scraping.preflight.utils.waf_result_parser import (
         parse_wafw00f_output as canonical_waf_parser,
     )
     from tldw_Server_API.app.core.Web_Scraping.scraper_analyzers.utils.browser_identities import (
-        MODERN_BROWSER_IDENTITIES as legacy_identities,
+        MODERN_BROWSER_IDENTITIES as LEGACY_IDENTITIES,
     )
     from tldw_Server_API.app.core.Web_Scraping.scraper_analyzers.utils.impersonate_target import (
         get_impersonate_target as legacy_impersonate_target,
     )
     from tldw_Server_API.app.core.Web_Scraping.scraper_analyzers.utils.waf_result_parser import (
-        ANSI_RE as legacy_ansi_re,
-        GENERIC_PHRASES as legacy_generic_phrases,
+        ANSI_RE as LEGACY_ANSI_RE,
+    )
+    from tldw_Server_API.app.core.Web_Scraping.scraper_analyzers.utils.waf_result_parser import (
+        GENERIC_PHRASES as LEGACY_GENERIC_PHRASES,
+    )
+    from tldw_Server_API.app.core.Web_Scraping.scraper_analyzers.utils.waf_result_parser import (
         clean_text as legacy_clean_text,
+    )
+    from tldw_Server_API.app.core.Web_Scraping.scraper_analyzers.utils.waf_result_parser import (
         parse_wafw00f_output as legacy_waf_parser,
     )
 
-    assert legacy_identities is canonical_identities  # nosec B101
+    assert LEGACY_IDENTITIES is CANONICAL_IDENTITIES  # nosec B101
     assert legacy_impersonate_target is canonical_impersonate_target  # nosec B101
     assert legacy_waf_parser is canonical_waf_parser  # nosec B101
-    assert legacy_ansi_re is canonical_ansi_re  # nosec B101
-    assert legacy_generic_phrases is canonical_generic_phrases  # nosec B101
+    assert LEGACY_ANSI_RE is CANONICAL_ANSI_RE  # nosec B101
+    assert LEGACY_GENERIC_PHRASES is CANONICAL_GENERIC_PHRASES  # nosec B101
     assert legacy_clean_text is canonical_clean_text  # nosec B101
+
+
+def test_nonbrowser_analyzer_shims_preserve_identity_signatures_and_classification() -> None:
+    module_contracts = {
+        "robots_checker": {
+            "exports": ["check_robots_txt"],
+            "signature": "(url: 'str') -> 'dict[str, Any]'",
+            "async": False,
+        },
+        "tls_analyzer": {
+            "exports": ["analyze_tls_fingerprint"],
+            "signature": "(url: 'str') -> 'dict[str, Any]'",
+            "async": True,
+        },
+        "rate_limit_profiler": {
+            "exports": [
+                "GENTLE_PROBE_COUNT",
+                "BURST_COUNT",
+                "DEFAULT_DELAY",
+                "BLOCKING_STATUS_CODES",
+                "profile_rate_limits",
+            ],
+            "signature": (
+                "(url: 'str', crawl_delay: 'float | None', impersonate: 'bool' = False) " "-> 'dict[str, Any]'"
+            ),
+            "async": True,
+        },
+        "waf_detector": {
+            "exports": ["detect_waf"],
+            "signature": "(url: 'str', find_all: 'bool' = False) -> 'dict[str, Any]'",
+            "async": False,
+        },
+    }
+    public_names = {
+        "robots_checker": "check_robots_txt",
+        "tls_analyzer": "analyze_tls_fingerprint",
+        "rate_limit_profiler": "profile_rate_limits",
+        "waf_detector": "detect_waf",
+    }
+
+    for module_name, contract in module_contracts.items():
+        canonical = importlib.import_module(f"tldw_Server_API.app.core.Web_Scraping.preflight.analyzers.{module_name}")
+        legacy = importlib.import_module(
+            "tldw_Server_API.app.core.Web_Scraping.scraper_analyzers.analyzers." f"{module_name}"
+        )
+        public_name = public_names[module_name]
+        canonical_callable = getattr(canonical, public_name)
+        legacy_callable = getattr(legacy, public_name)
+
+        assert legacy_callable is canonical_callable  # nosec B101
+        assert str(inspect.signature(canonical_callable)) == contract["signature"]
+        assert inspect.iscoroutinefunction(canonical_callable) is contract["async"]
+        assert inspect.iscoroutinefunction(legacy_callable) is contract["async"]
+        assert len(legacy.__all__) == len(contract["exports"])
+        assert set(legacy.__all__) == set(contract["exports"])
+        assert not hasattr(legacy, f"_{public_name}")
+        assert not hasattr(canonical, "BROWSER_IDENTITY")
+        assert not hasattr(legacy, "BROWSER_IDENTITY")
+
+        source_path = Path(legacy.__file__ or "")
+        tree = ast.parse(source_path.read_text(encoding="utf-8"))
+        assert not any(
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) for node in ast.walk(tree)
+        )
+        assert not any(
+            isinstance(node, ast.ImportFrom) and any(alias.name == "*" for alias in node.names)
+            for node in ast.walk(tree)
+        )
+        assert "warnings" not in {
+            alias.name
+            for node in ast.walk(tree)
+            if isinstance(node, (ast.Import, ast.ImportFrom))
+            for alias in node.names
+        }
+
+    canonical_rate = importlib.import_module(
+        "tldw_Server_API.app.core.Web_Scraping.preflight.analyzers.rate_limit_profiler"
+    )
+    legacy_rate = importlib.import_module(
+        "tldw_Server_API.app.core.Web_Scraping.scraper_analyzers.analyzers.rate_limit_profiler"
+    )
+    assert canonical_rate.GENTLE_PROBE_COUNT == 4
+    assert canonical_rate.BURST_COUNT == 8
+    assert canonical_rate.DEFAULT_DELAY == 3.0
+    assert {401, 403, 429, 503} == canonical_rate.BLOCKING_STATUS_CODES
+    assert legacy_rate.BLOCKING_STATUS_CODES is canonical_rate.BLOCKING_STATUS_CODES
+
+
+def test_nonbrowser_canonical_analyzers_have_no_concrete_probe_dependencies() -> None:
+    forbidden_import_fragments = {
+        "http_client",
+        "playwright",
+        "curl_cffi",
+        "subprocess",
+        "preflight.adapters",
+        "policy.adapters",
+    }
+
+    for module_name in (
+        "robots_checker",
+        "tls_analyzer",
+        "rate_limit_profiler",
+        "waf_detector",
+    ):
+        module = importlib.import_module(f"tldw_Server_API.app.core.Web_Scraping.preflight.analyzers.{module_name}")
+        tree = ast.parse(Path(module.__file__ or "").read_text(encoding="utf-8"))
+        imported_modules = {
+            alias.name for node in ast.walk(tree) if isinstance(node, ast.Import) for alias in node.names
+        } | {node.module or "" for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)}
+
+        assert not {
+            imported
+            for imported in imported_modules
+            if any(fragment in imported for fragment in forbidden_import_fragments)
+        }
 
 
 def _context_factory(

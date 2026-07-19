@@ -1,6 +1,8 @@
-"""Scraper analyzer modules (honeypots, CAPTCHAs, JavaScript, rate limiting, TLS, WAF)."""
+"""Scraper analyzer modules with governed compatibility re-exports."""
 
 from __future__ import annotations
+
+from . import rate_limit_profiler, robots_checker, tls_analyzer, waf_detector
 
 __all__ = [
     "behavioral_detector",
