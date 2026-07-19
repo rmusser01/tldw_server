@@ -1,7 +1,7 @@
 ---
 id: TASK-12117
 title: Design time-delayed source-available licensing for frontend clients
-status: In Progress
+status: Done
 labels:
 - licensing
 - frontend
@@ -24,7 +24,7 @@ Document the approved licensing design for protecting the WebUI, browser extensi
 - [x] #1 Design records the protected path boundary and unchanged GPL backend boundary.
 - [x] #2 Design defines permitted use, Competing Offering constraints, rolling Change Dates, CLA, trademark policy, and selective commercial licensing.
 - [x] #3 Design documents provenance, artifact, CI, legal-review, and release gates.
-- [ ] #4 Approved design is committed without modifying unrelated user work.
+- [x] #4 Approved design is committed without modifying unrelated user work.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -35,6 +35,7 @@ Document the approved licensing design for protecting the WebUI, browser extensi
 - Verification: placeholder scan clean and `git diff --check` will be run on the staged task scope.
 - Bandit is not applicable because this task changes Markdown records only.
 - Legal review is intentionally a release gate for later implementation, not a blocker to completing this design task.
+- Commit `5b10f82218` records the approved design and task without staging unrelated work.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
@@ -45,7 +46,7 @@ Recorded the user-approved policy for BSL 1.1 protection of the WebUI, extension
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
+- [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
