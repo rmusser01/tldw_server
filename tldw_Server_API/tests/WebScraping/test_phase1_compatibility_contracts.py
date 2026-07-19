@@ -107,6 +107,26 @@ def _allowed_article_target(url: str) -> PreflightTarget:
     )
 
 
+def _enhanced_target(
+    url: str,
+    *,
+    allowed: bool = True,
+    reason: str = "allowed",
+    mode: str = "compat",
+) -> PreflightTarget:
+    return PreflightTarget(
+        url=url,
+        decision=PolicyDecision(
+            allowed=allowed,
+            mode=mode,  # type: ignore[arg-type]
+            reason=reason,
+            stage="pre_fetch",
+            source="enhanced_scrape",
+        ),
+        request_context=RuntimeRequestContext(source="enhanced_scrape", stage="pre_fetch"),
+    )
+
+
 class _FakeArticlePolicyChecker:
     def __init__(self, decision: PolicyDecision):
         self.decision = decision
@@ -210,22 +230,41 @@ async def test_enhanced_scrape_policy_denial_keeps_public_blocked_shape(
     expected_error: str,
 ) -> None:
     from tldw_Server_API.app.core.Web_Scraping import enhanced_web_scraping as enhanced
-    from tldw_Server_API.app.core.Web_Scraping.outbound_policy import WebOutboundPolicyDecision
 
     scraper = enhanced.EnhancedWebScraper(config={})
     monkeypatch.setattr(scraper.rate_limiter, "acquire", lambda: _noop_async())
     monkeypatch.setattr(scraper, "_resolve_scrape_plan", lambda _url: (_enhanced_plan(), "auto", ""))
+    decision = PolicyDecision(
+        allowed=False,
+        mode=mode,  # type: ignore[arg-type]
+        reason=reason,
+        stage="pre_fetch",
+        source="enhanced_scrape",
+    )
+    monkeypatch.setattr(enhanced, "preflight_facade", preflight_facade, raising=False)
+    monkeypatch.setattr(
+        preflight_facade,
+        "evaluate_target",
+        AsyncMock(
+            return_value=_enhanced_target(
+                "https://example.com/blocked",
+                allowed=False,
+                reason=reason,
+                mode=mode,
+            )
+        ),
+    )
 
-    async def deny(_url: str, **kwargs: Any) -> WebOutboundPolicyDecision:
-        return WebOutboundPolicyDecision(
-            allowed=False,
-            mode=mode,  # type: ignore[arg-type]
-            reason=reason,
-            stage=str(kwargs.get("stage", "pre_fetch")),
-            source=str(kwargs.get("source", "enhanced_scrape")),
+    async def deny_legacy(_url: str, **_kwargs: Any) -> Any:
+        return enhanced.WebOutboundPolicyDecision(
+            allowed=decision.allowed,
+            mode=decision.mode,
+            reason=decision.reason,
+            stage=decision.stage,
+            source=decision.source,
         )
 
-    monkeypatch.setattr(enhanced, "decide_web_outbound_policy", deny)
+    monkeypatch.setattr(enhanced, "decide_web_outbound_policy", deny_legacy)
 
     result = await scraper.scrape_article("https://example.com/blocked")
 
@@ -421,7 +460,6 @@ async def test_enhanced_preflight_js_and_tls_advice_is_attached_without_network(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from tldw_Server_API.app.core.Web_Scraping import enhanced_web_scraping as enhanced
-    from tldw_Server_API.app.core.Web_Scraping.outbound_policy import WebOutboundPolicyDecision
 
     analysis = _sample_analysis(js_required=True, tls_active=True)
     scraper = enhanced.EnhancedWebScraper(
@@ -432,23 +470,34 @@ async def test_enhanced_preflight_js_and_tls_advice_is_attached_without_network(
     )
     monkeypatch.setattr(scraper.rate_limiter, "acquire", lambda: _noop_async())
     monkeypatch.setattr(scraper, "_resolve_scrape_plan", lambda _url: (_enhanced_plan(), "auto", ""))
-    monkeypatch.setattr(scraper, "_run_preflight_analysis", lambda _url: _return_async(analysis))
+    monkeypatch.setattr(enhanced, "preflight_facade", preflight_facade, raising=False)
+    monkeypatch.setattr(
+        preflight_facade,
+        "evaluate_target",
+        AsyncMock(return_value=_enhanced_target("https://example.com/spa")),
+    )
+    monkeypatch.setattr(preflight_facade, "build_execution_context", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(
+        preflight_facade,
+        "run_preflight",
+        AsyncMock(return_value=PreflightResult(analysis=analysis)),
+    )
     monkeypatch.setattr(
         scraper,
         "_scrape_with_playwright",
         lambda url, *_args, **_kwargs: _return_async(_successful_article(url, content="Rendered content")),
     )
 
-    async def allow(_url: str, **kwargs: Any) -> WebOutboundPolicyDecision:
-        return WebOutboundPolicyDecision(
-            allowed=True,
-            mode="compat",
-            reason="allowed",
-            stage=str(kwargs.get("stage", "pre_fetch")),
-            source=str(kwargs.get("source", "enhanced_scrape")),
+    async def deny_legacy(_url: str, **_kwargs: Any) -> Any:
+        return enhanced.WebOutboundPolicyDecision(
+            allowed=False,
+            mode="strict",
+            reason="deny_legacy_path",
+            stage="pre_fetch",
+            source="enhanced_scrape",
         )
 
-    monkeypatch.setattr(enhanced, "decide_web_outbound_policy", allow)
+    monkeypatch.setattr(enhanced, "decide_web_outbound_policy", deny_legacy)
 
     result = await scraper.scrape_article("https://example.com/spa")
 

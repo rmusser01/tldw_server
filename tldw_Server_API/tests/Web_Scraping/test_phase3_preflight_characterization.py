@@ -9,8 +9,19 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from tldw_Server_API.app.core.Web_Scraping.contracts import PreflightResult
-from tldw_Server_API.app.core.Web_Scraping.runtime import FetchRequest, FetchResponse, PolicyDecision
+from tldw_Server_API.app.core.Web_Scraping import preflight as preflight_facade
+from tldw_Server_API.app.core.Web_Scraping.contracts import (
+    PreflightResult,
+    RuntimeFailure,
+    WebScrapingStatus,
+)
+from tldw_Server_API.app.core.Web_Scraping.preflight import PreflightTarget
+from tldw_Server_API.app.core.Web_Scraping.runtime import (
+    FetchRequest,
+    FetchResponse,
+    PolicyDecision,
+    RuntimeRequestContext,
+)
 from tldw_Server_API.app.core.Web_Scraping.scraper_analyzers import runner
 from tldw_Server_API.app.core.Web_Scraping.scraper_analyzers.recommendations.recommender import (
     generate_recommendations,
@@ -210,6 +221,20 @@ def _enhanced_plan(*, backend: str) -> SimpleNamespace:
     )
 
 
+def _enhanced_target(url: str, *, allowed: bool = True) -> PreflightTarget:
+    return PreflightTarget(
+        url=url,
+        decision=PolicyDecision(
+            allowed=allowed,
+            mode="compat",
+            reason="allowed" if allowed else "robots_disallowed",
+            stage="pre_fetch",
+            source="enhanced_scrape",
+        ),
+        request_context=RuntimeRequestContext(source="enhanced_scrape", stage="pre_fetch"),
+    )
+
+
 def _configure_enhanced_consumer(
     monkeypatch: pytest.MonkeyPatch,
     *,
@@ -232,6 +257,29 @@ def _configure_enhanced_consumer(
         "_resolve_scrape_plan",
         lambda _url: (_enhanced_plan(backend=backend), backend, ""),
     )
+    monkeypatch.setattr(enhanced, "preflight_facade", preflight_facade, raising=False)
+    monkeypatch.setattr(
+        enhanced.preflight_facade,
+        "evaluate_target",
+        AsyncMock(return_value=_enhanced_target("https://example.com/article")),
+    )
+    monkeypatch.setattr(
+        enhanced.preflight_facade,
+        "build_execution_context",
+        lambda *_args, **_kwargs: object(),
+    )
+    monkeypatch.setattr(enhanced, "_ENHANCED_POLICY_CHECKER", object(), raising=False)
+
+    async def deny_legacy_policy(*_args: Any, **_kwargs: Any) -> Any:
+        return enhanced.WebOutboundPolicyDecision(
+            allowed=False,
+            mode="strict",
+            reason="deny_legacy_path",
+            stage="pre_fetch",
+            source="enhanced_scrape",
+        )
+
+    monkeypatch.setattr(enhanced, "decide_web_outbound_policy", deny_legacy_policy)
     monkeypatch.setattr(enhanced, "increment_counter", lambda *_args, **_kwargs: None)
     return enhanced, scraper
 
@@ -633,8 +681,15 @@ async def test_enhanced_consumer_payload_is_current(monkeypatch: pytest.MonkeyPa
     score = calculate_difficulty_score(ANALYSIS_RESULTS)
     recommendations = generate_recommendations(ANALYSIS_RESULTS)
     analysis = {"results": ANALYSIS_RESULTS, "score": score, "recommendations": recommendations}
+    public_analysis = {
+        **analysis,
+        "results": {
+            **ANALYSIS_RESULTS,
+            "waf": {"status": "success", "wafs": [["DataDome", None]]},
+        },
+    }
     expected_payload = {
-        "analysis": analysis,
+        "analysis": public_analysis,
         "advice": {
             "backend": "curl",
             "method": "playwright",
@@ -651,9 +706,6 @@ async def test_enhanced_consumer_payload_is_current(monkeypatch: pytest.MonkeyPa
 
     async def acquire() -> None:
         return None
-
-    async def allow_policy(*_args: Any, **_kwargs: Any) -> SimpleNamespace:
-        return SimpleNamespace(allowed=True)
 
     async def scrape_with_playwright(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
         return {"extraction_successful": True, "content": "enhanced"}
@@ -675,18 +727,38 @@ async def test_enhanced_consumer_payload_is_current(monkeypatch: pytest.MonkeyPa
     )
     scraper.rate_limiter.acquire = acquire
     monkeypatch.setattr(scraper, "_resolve_scrape_plan", lambda _url: (plan, "auto", ""))
-    monkeypatch.setattr(scraper, "_run_preflight_analysis", lambda _url: _return(analysis))
+    monkeypatch.setattr(enhanced, "preflight_facade", preflight_facade, raising=False)
+    monkeypatch.setattr(
+        enhanced.preflight_facade,
+        "evaluate_target",
+        AsyncMock(return_value=_enhanced_target("https://example.com/article")),
+    )
+    monkeypatch.setattr(
+        enhanced.preflight_facade,
+        "build_execution_context",
+        lambda *_args, **_kwargs: object(),
+    )
+    run_preflight = AsyncMock(return_value=PreflightResult(analysis=analysis))
+    monkeypatch.setattr(enhanced.preflight_facade, "run_preflight", run_preflight)
     monkeypatch.setattr(scraper, "_scrape_with_playwright", scrape_with_playwright)
-    monkeypatch.setattr(enhanced, "decide_web_outbound_policy", allow_policy)
+    monkeypatch.setattr(enhanced, "_ENHANCED_POLICY_CHECKER", object(), raising=False)
+
+    async def deny_legacy_policy(*_args: Any, **_kwargs: Any) -> Any:
+        return enhanced.WebOutboundPolicyDecision(
+            allowed=False,
+            mode="strict",
+            reason="deny_legacy_path",
+            stage="pre_fetch",
+            source="enhanced_scrape",
+        )
+
+    monkeypatch.setattr(enhanced, "decide_web_outbound_policy", deny_legacy_policy)
     monkeypatch.setattr(enhanced, "increment_counter", lambda *_args, **_kwargs: None)
 
     enhanced_result = await scraper.scrape_article("https://example.com/article")
 
     assert enhanced_result["preflight_analysis"] == expected_payload  # nosec B101
-
-
-async def _return(value: dict[str, Any]) -> dict[str, Any]:
-    return value
+    run_preflight.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -811,24 +883,19 @@ async def test_enhanced_policy_denial_prevents_preflight_and_extraction(
     enhanced, scraper = _configure_enhanced_consumer(monkeypatch, include_results=True)
     extraction_calls: list[object] = []
 
-    async def deny_policy(*_args: Any, **_kwargs: Any) -> Any:
-        return enhanced.WebOutboundPolicyDecision(
-            allowed=False,
-            mode="compat",
-            reason="robots_disallowed",
-            stage="pre_fetch",
-            source="characterization",
-        )
-
-    async def preflight_should_not_run(_url: str) -> None:
-        raise AssertionError("preflight ran")
-
     async def extraction_should_not_run(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
         extraction_calls.append(object())
         return {"extraction_successful": True}
 
-    monkeypatch.setattr(enhanced, "decide_web_outbound_policy", deny_policy)
-    monkeypatch.setattr(scraper, "_run_preflight_analysis", preflight_should_not_run)
+    build_context = Mock(side_effect=AssertionError("preflight context created"))
+    run_preflight = AsyncMock(side_effect=AssertionError("preflight ran"))
+    monkeypatch.setattr(
+        enhanced.preflight_facade,
+        "evaluate_target",
+        AsyncMock(return_value=_enhanced_target("https://example.com/article", allowed=False)),
+    )
+    monkeypatch.setattr(enhanced.preflight_facade, "build_execution_context", build_context)
+    monkeypatch.setattr(enhanced.preflight_facade, "run_preflight", run_preflight)
     monkeypatch.setattr(scraper, "_scrape_with_trafilatura", extraction_should_not_run)
 
     result = await scraper.scrape_article("https://example.com/article")
@@ -837,14 +904,14 @@ async def test_enhanced_policy_denial_prevents_preflight_and_extraction(
     assert result["policy_reason"] == "robots_disallowed"  # nosec B101
     assert extraction_calls == []  # nosec B101
     assert "preflight_analysis" not in result  # nosec B101
+    build_context.assert_not_called()
+    run_preflight.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_enhanced_preflight_failure_is_advisory_and_preserves_method_and_backend(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from tldw_Server_API.app.core.Web_Scraping import scraper_analyzers
-
     enhanced, scraper = _configure_enhanced_consumer(
         monkeypatch,
         include_results=True,
@@ -852,24 +919,20 @@ async def test_enhanced_preflight_failure_is_advisory_and_preserves_method_and_b
     )
     scrape_calls: list[dict[str, Any]] = []
 
-    async def allow_policy(*_args: Any, **_kwargs: Any) -> Any:
-        return enhanced.WebOutboundPolicyDecision(
-            allowed=True,
-            mode="compat",
-            reason="allowed",
-            stage="pre_fetch",
-            source="characterization",
-        )
-
-    def fail_analysis(*_args: Any, **_kwargs: Any) -> None:
-        raise RuntimeError("preflight failed")
-
     async def scrape_with_beautifulsoup(*_args: Any, **kwargs: Any) -> dict[str, Any]:
         scrape_calls.append(kwargs)
         return {"extraction_successful": True, "content": "enhanced"}
 
-    monkeypatch.setattr(enhanced, "decide_web_outbound_policy", allow_policy)
-    monkeypatch.setattr(scraper_analyzers, "run_analysis", fail_analysis)
+    run_preflight = AsyncMock(
+        return_value=PreflightResult(
+            status=WebScrapingStatus.ERROR,
+            failure=RuntimeFailure(
+                status=WebScrapingStatus.ERROR,
+                public_message="Preflight analysis failed.",
+            ),
+        )
+    )
+    monkeypatch.setattr(enhanced.preflight_facade, "run_preflight", run_preflight)
     monkeypatch.setattr(scraper, "_scrape_with_beautifulsoup", scrape_with_beautifulsoup)
 
     result = await scraper.scrape_article("https://example.com/article", method="beautifulsoup")
@@ -878,42 +941,28 @@ async def test_enhanced_preflight_failure_is_advisory_and_preserves_method_and_b
     assert len(scrape_calls) == 1  # nosec B101
     assert scrape_calls[0]["backend"] == "httpx"  # nosec B101
     assert "preflight_analysis" not in result  # nosec B101
+    run_preflight.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_enhanced_preflight_cancellation_returns_error_without_extraction(
+async def test_enhanced_preflight_cancellation_propagates_without_extraction(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     enhanced, scraper = _configure_enhanced_consumer(monkeypatch, include_results=True)
     extraction_calls: list[object] = []
 
-    async def allow_policy(*_args: Any, **_kwargs: Any) -> Any:
-        return enhanced.WebOutboundPolicyDecision(
-            allowed=True,
-            mode="compat",
-            reason="allowed",
-            stage="pre_fetch",
-            source="characterization",
-        )
-
-    async def cancel_preflight(_url: str) -> None:
-        raise asyncio.CancelledError
-
     async def extraction_should_not_run(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
         extraction_calls.append(object())
         return {"extraction_successful": True}
 
-    monkeypatch.setattr(enhanced, "decide_web_outbound_policy", allow_policy)
-    monkeypatch.setattr(scraper, "_run_preflight_analysis", cancel_preflight)
+    run_preflight = AsyncMock(side_effect=asyncio.CancelledError)
+    monkeypatch.setattr(enhanced.preflight_facade, "run_preflight", run_preflight)
     monkeypatch.setattr(scraper, "_scrape_with_trafilatura", extraction_should_not_run)
 
-    result = await scraper.scrape_article("https://example.com/article")
+    with pytest.raises(asyncio.CancelledError):
+        await scraper.scrape_article("https://example.com/article")
 
-    assert result == {  # nosec B101
-        "url": "https://example.com/article",
-        "error": "",
-        "extraction_successful": False,
-    }
+    run_preflight.assert_awaited_once()
     assert extraction_calls == []  # nosec B101
 
 
@@ -929,24 +978,12 @@ async def test_enhanced_successful_advice_omits_payload_when_results_are_disable
     )
     scrape_calls: list[dict[str, Any]] = []
 
-    async def allow_policy(*_args: Any, **_kwargs: Any) -> Any:
-        return enhanced.WebOutboundPolicyDecision(
-            allowed=True,
-            mode="compat",
-            reason="allowed",
-            stage="pre_fetch",
-            source="characterization",
-        )
-
-    async def successful_preflight(_url: str) -> dict[str, Any]:
-        return {"results": {"tls": {"status": "active"}}}
-
     async def scrape_with_trafilatura(*_args: Any, **kwargs: Any) -> dict[str, Any]:
         scrape_calls.append(kwargs)
         return {"extraction_successful": True, "content": "enhanced"}
 
-    monkeypatch.setattr(enhanced, "decide_web_outbound_policy", allow_policy)
-    monkeypatch.setattr(scraper, "_run_preflight_analysis", successful_preflight)
+    run_preflight = AsyncMock(return_value=PreflightResult(analysis={"results": {"tls": {"status": "active"}}}))
+    monkeypatch.setattr(enhanced.preflight_facade, "run_preflight", run_preflight)
     monkeypatch.setattr(scraper, "_scrape_with_trafilatura", scrape_with_trafilatura)
 
     result = await scraper.scrape_article("https://example.com/article")
@@ -954,3 +991,4 @@ async def test_enhanced_successful_advice_omits_payload_when_results_are_disable
     assert result["extraction_successful"] is True  # nosec B101
     assert scrape_calls[0]["backend"] == "curl"  # nosec B101
     assert "preflight_analysis" not in result  # nosec B101
+    run_preflight.assert_awaited_once()
