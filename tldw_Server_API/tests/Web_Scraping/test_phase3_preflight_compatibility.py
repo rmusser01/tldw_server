@@ -52,7 +52,7 @@ from tldw_Server_API.app.core.Web_Scraping.runtime.policy import (
     OutboundPolicyChecker,
     ProbeEgressGuard,
 )
-from tldw_Server_API.app.core.Web_Scraping.scraper_analyzers.utils.browser_identities import (
+from tldw_Server_API.app.core.Web_Scraping.preflight.utils.browser_identities import (
     MODERN_BROWSER_IDENTITIES,
 )
 from tldw_Server_API.tests.Web_Scraping.preflight_fakes import (
@@ -875,7 +875,7 @@ def test_browser_identity_is_selected_lazily_once_and_defensively_copied() -> No
     assert selector.calls == 1
 
 
-def test_default_browser_identity_is_lazy_cached_and_uses_legacy_collection(
+def test_default_browser_identity_is_lazy_cached_and_uses_canonical_collection(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     selected = MODERN_BROWSER_IDENTITIES[0]
@@ -897,6 +897,40 @@ def test_default_browser_identity_is_lazy_cached_and_uses_legacy_collection(
 
     assert context.browser_identity() == expected
     assert choice_calls == [MODERN_BROWSER_IDENTITIES]
+
+
+def test_utility_shims_reexport_canonical_public_surface() -> None:
+    from tldw_Server_API.app.core.Web_Scraping.preflight.utils.browser_identities import (
+        MODERN_BROWSER_IDENTITIES as canonical_identities,
+    )
+    from tldw_Server_API.app.core.Web_Scraping.preflight.utils.impersonate_target import (
+        get_impersonate_target as canonical_impersonate_target,
+    )
+    from tldw_Server_API.app.core.Web_Scraping.preflight.utils.waf_result_parser import (
+        ANSI_RE as canonical_ansi_re,
+        GENERIC_PHRASES as canonical_generic_phrases,
+        clean_text as canonical_clean_text,
+        parse_wafw00f_output as canonical_waf_parser,
+    )
+    from tldw_Server_API.app.core.Web_Scraping.scraper_analyzers.utils.browser_identities import (
+        MODERN_BROWSER_IDENTITIES as legacy_identities,
+    )
+    from tldw_Server_API.app.core.Web_Scraping.scraper_analyzers.utils.impersonate_target import (
+        get_impersonate_target as legacy_impersonate_target,
+    )
+    from tldw_Server_API.app.core.Web_Scraping.scraper_analyzers.utils.waf_result_parser import (
+        ANSI_RE as legacy_ansi_re,
+        GENERIC_PHRASES as legacy_generic_phrases,
+        clean_text as legacy_clean_text,
+        parse_wafw00f_output as legacy_waf_parser,
+    )
+
+    assert legacy_identities is canonical_identities  # nosec B101
+    assert legacy_impersonate_target is canonical_impersonate_target  # nosec B101
+    assert legacy_waf_parser is canonical_waf_parser  # nosec B101
+    assert legacy_ansi_re is canonical_ansi_re  # nosec B101
+    assert legacy_generic_phrases is canonical_generic_phrases  # nosec B101
+    assert legacy_clean_text is canonical_clean_text  # nosec B101
 
 
 def _context_factory(

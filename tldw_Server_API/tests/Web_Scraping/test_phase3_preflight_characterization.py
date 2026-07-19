@@ -82,6 +82,25 @@ EXPECTED_RECOMMENDATIONS = {
 }
 
 
+@pytest.mark.unit
+def test_scoring_and_recommendation_shims_reexport_canonical_callables() -> None:
+    from tldw_Server_API.app.core.Web_Scraping.preflight.recommendations.recommender import (
+        generate_recommendations as canonical_recommend,
+    )
+    from tldw_Server_API.app.core.Web_Scraping.preflight.scoring.scoring_engine import (
+        calculate_difficulty_score as canonical_score,
+    )
+    from tldw_Server_API.app.core.Web_Scraping.scraper_analyzers.recommendations.recommender import (
+        generate_recommendations as legacy_recommend,
+    )
+    from tldw_Server_API.app.core.Web_Scraping.scraper_analyzers.scoring.scoring_engine import (
+        calculate_difficulty_score as legacy_score,
+    )
+
+    assert legacy_score is canonical_score  # nosec B101
+    assert legacy_recommend is canonical_recommend  # nosec B101
+
+
 class FakePolicyChecker:
     def __init__(self, decision: PolicyDecision | None = None) -> None:
         self.decision = decision or _policy_decision(allowed=True)

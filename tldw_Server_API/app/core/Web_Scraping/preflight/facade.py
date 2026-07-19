@@ -56,7 +56,7 @@ class PreflightAdapterOverrides:
 
 
 def _default_identity_selector() -> Mapping[str, str]:
-    from ..scraper_analyzers.utils.browser_identities import MODERN_BROWSER_IDENTITIES
+    from .utils.browser_identities import MODERN_BROWSER_IDENTITIES
 
     # Browser profile selection is not security-sensitive.
     return random.choice(MODERN_BROWSER_IDENTITIES)  # nosec B311
