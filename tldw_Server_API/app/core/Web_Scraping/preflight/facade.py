@@ -255,13 +255,16 @@ async def _retire_runner_task(task: asyncio.Task[Any]) -> None:
     if not task.done():
         task.cancel()
 
-    pending_cancellation: asyncio.CancelledError | None = None
     current = asyncio.current_task()
+    observed_cancellations = current.cancelling() if current is not None else 0
+    pending_cancellation: asyncio.CancelledError | None = None
     while not task.done():
         try:
-            await asyncio.shield(task)
+            await asyncio.wait({task})
         except asyncio.CancelledError as exc:
-            if current is not None and current.cancelling():
+            current_cancellations = current.cancelling() if current is not None else 0
+            if current_cancellations > observed_cancellations:
+                observed_cancellations = current_cancellations
                 if pending_cancellation is None:
                     pending_cancellation = exc
                 if not task.done():
@@ -288,15 +291,21 @@ async def _run_before_deadline(
         name="preflight-runner",
     )
     if remaining_s is None:
+        runner_waiter = asyncio.create_task(
+            asyncio.wait({runner_task}),
+            name="preflight-runner-waiter",
+        )
         try:
-            return await asyncio.shield(runner_task)
+            await asyncio.shield(runner_waiter)
         except asyncio.CancelledError:
             try:
                 await _retire_runner_task(runner_task)
             except asyncio.CancelledError:
                 # Retirement may surface the child cancellation; the outer one wins.
                 pass
+            await runner_waiter
             raise
+        return runner_task.result()
 
     deadline_task = asyncio.create_task(
         asyncio.sleep(remaining_s),

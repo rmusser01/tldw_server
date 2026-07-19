@@ -616,6 +616,66 @@ async def test_expired_deadline_stays_timeout_when_runner_suppresses_cancellatio
 
 
 @pytest.mark.asyncio
+async def test_deadline_timeout_survives_retired_child_failure_without_unhandled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner = _runner()
+    events: list[str] = []
+    started = asyncio.Event()
+    child_tasks: list[asyncio.Task[Any]] = []
+    unhandled: list[dict[str, Any]] = []
+    context = _context(remaining_s=0.01, events=events)
+
+    async def fail_after_cancellation(*_args: Any) -> dict[str, Any]:
+        child = asyncio.current_task()
+        assert child is not None
+        child_tasks.append(child)
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            events.append("runner-cancelled")
+            events.append("runner-failed")
+            raise RuntimeError("retired child failed") from None
+
+    monkeypatch.setattr(
+        runner,
+        "gather_analysis_with_context",
+        fail_after_cancellation,
+    )
+    loop = asyncio.get_running_loop()
+    previous_handler = loop.get_exception_handler()
+    loop.set_exception_handler(lambda _loop, details: unhandled.append(details))
+    try:
+        result = await facade.run_preflight(
+            _target(),
+            PreflightOptions(enabled=True),
+            context,
+        )
+        assert started.is_set()
+        assert len(child_tasks) == 1
+        child = child_tasks.pop()
+        assert child.done()
+        del child
+        gc.collect()
+        await asyncio.sleep(0)
+    finally:
+        loop.set_exception_handler(previous_handler)
+
+    assert not any(task.get_name() == "preflight-runner" for task in asyncio.all_tasks())
+    assert result is not None
+    assert events == ["runner-cancelled", "runner-failed", "close"]
+    assert cast(_Context, context).close_calls == 1
+    problems: list[str] = []
+    if result.status is not WebScrapingStatus.TIMEOUT:
+        problems.append(f"run_preflight returned {result.status.name} instead of TIMEOUT")
+    if unhandled:
+        problems.append(f"unhandled loop exceptions: {[item.get('message') for item in unhandled]}")
+    if problems:
+        pytest.fail("; ".join(problems))
+
+
+@pytest.mark.asyncio
 async def test_no_deadline_caller_cancellation_survives_runner_suppression(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -663,6 +723,78 @@ async def test_no_deadline_caller_cancellation_survives_runner_suppression(
     assert child_tasks[0].done()
     assert events == ["runner-cancelled", "runner-returned", "close"]
     assert cast(_Context, context).close_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_no_deadline_cancellation_survives_retired_child_failure_without_unhandled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner = _runner()
+    events: list[str] = []
+    started = asyncio.Event()
+    child_tasks: list[asyncio.Task[Any]] = []
+    unhandled: list[dict[str, Any]] = []
+    context = _context(events=events)
+
+    async def fail_after_cancellation(*_args: Any) -> dict[str, Any]:
+        child = asyncio.current_task()
+        assert child is not None
+        child_tasks.append(child)
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            events.append("runner-cancelled")
+            events.append("runner-failed")
+            raise RuntimeError("retired child failed") from None
+
+    monkeypatch.setattr(
+        runner,
+        "gather_analysis_with_context",
+        fail_after_cancellation,
+    )
+    loop = asyncio.get_running_loop()
+    previous_handler = loop.get_exception_handler()
+    loop.set_exception_handler(lambda _loop, details: unhandled.append(details))
+    cancellation: asyncio.CancelledError | None = None
+    result: PreflightResult | None = None
+    try:
+        task = asyncio.create_task(
+            facade.run_preflight(
+                _target(),
+                PreflightOptions(enabled=True),
+                context,
+            )
+        )
+        await asyncio.wait_for(started.wait(), timeout=1.0)
+        task.cancel("caller cancelled")
+        try:
+            result = await task
+        except asyncio.CancelledError as exc:
+            cancellation = exc
+
+        assert len(child_tasks) == 1
+        child = child_tasks.pop()
+        assert child.done()
+        del child
+        gc.collect()
+        await asyncio.sleep(0)
+    finally:
+        loop.set_exception_handler(previous_handler)
+
+    assert not any(task.get_name() == "preflight-runner" for task in asyncio.all_tasks())
+    assert events == ["runner-cancelled", "runner-failed", "close"]
+    assert cast(_Context, context).close_calls == 1
+    problems: list[str] = []
+    if cancellation is None:
+        assert result is not None
+        problems.append(f"run_preflight returned {result.status.name} instead of raising caller cancellation")
+    if unhandled:
+        problems.append(f"unhandled loop exceptions: {[item.get('message') for item in unhandled]}")
+    if problems:
+        pytest.fail("; ".join(problems))
+    assert cancellation is not None
+    assert cancellation.args == ("caller cancelled",)
 
 
 @pytest.mark.asyncio
