@@ -6,7 +6,7 @@ import ast
 import importlib
 import importlib.util
 import inspect
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -38,33 +38,26 @@ class ExpectedReexport:
 @dataclass(frozen=True)
 class ExpectedShim:
     canonical_reexports: tuple[ExpectedReexport, ...]
-    all_exports: frozenset[str]
     child_modules: frozenset[str] = frozenset()
 
+    @property
+    def all_exports(self) -> frozenset[str]:
+        return frozenset(export.bound_name for export in self.canonical_reexports) | self.child_modules
 
-FORBIDDEN_ANALYZER_IMPORTS = {
-    "asyncio.subprocess",
-    "aiohttp",
-    "curl_cffi",
-    "http.client",
-    "httpx",
-    "playwright",
-    "requests",
-    "subprocess",
-    "tldw_Server_API.app.core.http_client",
-    "tldw_Server_API.app.core.Security.egress",
-    "urllib.request",
-    "urllib3",
+
+ALLOWED_ANALYZER_IMPORT_MODULES = {
+    "__future__",
+    "asyncio",
+    "bs4",
+    "collections.abc",
+    "json",
+    "math",
+    "typing",
+    "urllib.parse",
 }
-FORBIDDEN_ANALYZER_PROCESS_CALLS = {
-    "asyncio.create_subprocess_exec",
-    "asyncio.create_subprocess_shell",
-    "os.fork",
-    "os.forkpty",
-    "os.popen",
-    "os.posix_spawn",
-    "os.posix_spawnp",
-    "os.system",
+FORBIDDEN_ASYNCIO_PROCESS_APIS = {
+    "create_subprocess_exec",
+    "create_subprocess_shell",
 }
 FORBIDDEN_PREFLIGHT_CONSUMERS = {
     f"{WEB_SCRAPING_PACKAGE}.Article_Extractor_Lib",
@@ -96,23 +89,9 @@ EXPECTED_SHIM_MANIFEST = {
             ExpectedReexport(f"{PREFLIGHT_PACKAGE}.runner", "gather_analysis", "gather_analysis"),
             ExpectedReexport(f"{PREFLIGHT_PACKAGE}.runner", "run_analysis", "run_analysis"),
         ),
-        all_exports=frozenset({"gather_analysis", "run_analysis"}),
     ),
     "analyzers/__init__.py": ExpectedShim(
         canonical_reexports=(),
-        all_exports=frozenset(
-            {
-                "behavioral_detector",
-                "captcha_detector",
-                "fingerprint_analyzer",
-                "integrity_analyzer",
-                "js_detector",
-                "rate_limit_profiler",
-                "robots_checker",
-                "tls_analyzer",
-                "waf_detector",
-            }
-        ),
         child_modules=frozenset(
             {
                 "behavioral_detector",
@@ -141,7 +120,6 @@ EXPECTED_SHIM_MANIFEST = {
                 "detect_honeypots",
             ),
         ),
-        all_exports=frozenset({"HONEYPOT_THRESHOLD", "ScanDepth", "detect_honeypots"}),
     ),
     "analyzers/captcha_detector.py": ExpectedShim(
         canonical_reexports=(
@@ -156,7 +134,6 @@ EXPECTED_SHIM_MANIFEST = {
                 "detect_captcha",
             ),
         ),
-        all_exports=frozenset({"CAPTCHA_FINGERPRINTS", "detect_captcha"}),
     ),
     "analyzers/fingerprint_analyzer.py": ExpectedShim(
         canonical_reexports=(
@@ -181,14 +158,6 @@ EXPECTED_SHIM_MANIFEST = {
                 "analyze_fingerprinting",
             ),
         ),
-        all_exports=frozenset(
-            {
-                "JS_PROBE_SCRIPT",
-                "KNOWN_BOT_DETECTION_SCRIPTS",
-                "KNOWN_BOT_GLOBAL_OBJECTS",
-                "analyze_fingerprinting",
-            }
-        ),
     ),
     "analyzers/integrity_analyzer.py": ExpectedShim(
         canonical_reexports=(
@@ -208,7 +177,6 @@ EXPECTED_SHIM_MANIFEST = {
                 "analyze_function_integrity",
             ),
         ),
-        all_exports=frozenset({"FUNCTION_SUSPICION_MAP", "FUNCTIONS_TO_CHECK", "analyze_function_integrity"}),
     ),
     "analyzers/js_detector.py": ExpectedShim(
         canonical_reexports=(
@@ -218,7 +186,6 @@ EXPECTED_SHIM_MANIFEST = {
                 "analyze_js_rendering",
             ),
         ),
-        all_exports=frozenset({"analyze_js_rendering"}),
     ),
     "analyzers/rate_limit_profiler.py": ExpectedShim(
         canonical_reexports=(
@@ -248,9 +215,6 @@ EXPECTED_SHIM_MANIFEST = {
                 "profile_rate_limits",
             ),
         ),
-        all_exports=frozenset(
-            {"BLOCKING_STATUS_CODES", "BURST_COUNT", "DEFAULT_DELAY", "GENTLE_PROBE_COUNT", "profile_rate_limits"}
-        ),
     ),
     "analyzers/robots_checker.py": ExpectedShim(
         canonical_reexports=(
@@ -260,7 +224,6 @@ EXPECTED_SHIM_MANIFEST = {
                 "check_robots_txt",
             ),
         ),
-        all_exports=frozenset({"check_robots_txt"}),
     ),
     "analyzers/tls_analyzer.py": ExpectedShim(
         canonical_reexports=(
@@ -270,13 +233,11 @@ EXPECTED_SHIM_MANIFEST = {
                 "analyze_tls_fingerprint",
             ),
         ),
-        all_exports=frozenset({"analyze_tls_fingerprint"}),
     ),
     "analyzers/waf_detector.py": ExpectedShim(
         canonical_reexports=(
             ExpectedReexport(f"{PREFLIGHT_PACKAGE}.analyzers.waf_detector", "detect_waf", "detect_waf"),
         ),
-        all_exports=frozenset({"detect_waf"}),
     ),
     "recommendations/__init__.py": ExpectedShim(
         canonical_reexports=(
@@ -286,7 +247,6 @@ EXPECTED_SHIM_MANIFEST = {
                 "generate_recommendations",
             ),
         ),
-        all_exports=frozenset({"generate_recommendations"}),
     ),
     "recommendations/recommender.py": ExpectedShim(
         canonical_reexports=(
@@ -296,7 +256,6 @@ EXPECTED_SHIM_MANIFEST = {
                 "generate_recommendations",
             ),
         ),
-        all_exports=frozenset({"generate_recommendations"}),
     ),
     "runner.py": ExpectedShim(
         canonical_reexports=tuple(
@@ -317,23 +276,6 @@ EXPECTED_SHIM_MANIFEST = {
                 "run_analysis",
             )
         ),
-        all_exports=frozenset(
-            {
-                "AnalysisOutput",
-                "ScanDepth",
-                "analyze_fingerprinting",
-                "analyze_function_integrity",
-                "analyze_js_rendering",
-                "analyze_tls_fingerprint",
-                "check_robots_txt",
-                "detect_captcha",
-                "detect_honeypots",
-                "detect_waf",
-                "gather_analysis",
-                "profile_rate_limits",
-                "run_analysis",
-            }
-        ),
     ),
     "scoring/__init__.py": ExpectedShim(
         canonical_reexports=(
@@ -343,7 +285,6 @@ EXPECTED_SHIM_MANIFEST = {
                 "calculate_difficulty_score",
             ),
         ),
-        all_exports=frozenset({"calculate_difficulty_score"}),
     ),
     "scoring/scoring_engine.py": ExpectedShim(
         canonical_reexports=(
@@ -353,7 +294,6 @@ EXPECTED_SHIM_MANIFEST = {
                 "calculate_difficulty_score",
             ),
         ),
-        all_exports=frozenset({"calculate_difficulty_score"}),
     ),
     "utils/__init__.py": ExpectedShim(
         canonical_reexports=(
@@ -373,7 +313,6 @@ EXPECTED_SHIM_MANIFEST = {
                 "parse_wafw00f_output",
             ),
         ),
-        all_exports=frozenset({"MODERN_BROWSER_IDENTITIES", "get_impersonate_target", "parse_wafw00f_output"}),
     ),
     "utils/browser_identities.py": ExpectedShim(
         canonical_reexports=(
@@ -383,7 +322,6 @@ EXPECTED_SHIM_MANIFEST = {
                 "MODERN_BROWSER_IDENTITIES",
             ),
         ),
-        all_exports=frozenset({"MODERN_BROWSER_IDENTITIES"}),
     ),
     "utils/impersonate_target.py": ExpectedShim(
         canonical_reexports=(
@@ -393,7 +331,6 @@ EXPECTED_SHIM_MANIFEST = {
                 "get_impersonate_target",
             ),
         ),
-        all_exports=frozenset({"get_impersonate_target"}),
     ),
     "utils/waf_result_parser.py": ExpectedShim(
         canonical_reexports=(
@@ -410,7 +347,6 @@ EXPECTED_SHIM_MANIFEST = {
                 "parse_wafw00f_output",
             ),
         ),
-        all_exports=frozenset({"ANSI_RE", "GENERIC_PHRASES", "clean_text", "parse_wafw00f_output"}),
     ),
 }
 
@@ -433,6 +369,7 @@ class ImportReference:
     line: int
     module: str
     imported_name: str | None
+    is_relative: bool = False
 
     @property
     def imported_path(self) -> str:
@@ -494,7 +431,13 @@ def _import_references(path: Path) -> list[ImportReference]:
         elif isinstance(node, ast.ImportFrom):
             module = _resolve_from_module(path, node)
             references.extend(
-                ImportReference(path=path, line=node.lineno, module=module, imported_name=alias.name)
+                ImportReference(
+                    path=path,
+                    line=node.lineno,
+                    module=module,
+                    imported_name=alias.name,
+                    is_relative=node.level > 0,
+                )
                 for alias in node.names
             )
     return references
@@ -522,263 +465,30 @@ def assert_no_imports(root: Path, forbidden_modules: set[str]) -> None:
     assert violations == []
 
 
-def _dotted_expression_name(expression: ast.expr) -> str | None:
-    if isinstance(expression, ast.Name):
-        return expression.id
-    if isinstance(expression, ast.Attribute):
-        parent = _dotted_expression_name(expression.value)
-        if parent is not None:
-            return f"{parent}.{expression.attr}"
-    return None
+def _analyzer_import_is_allowed(reference: ImportReference) -> bool:
+    if reference.is_relative:
+        return _matches_module(reference.module, PREFLIGHT_PACKAGE)
+    return reference.module in ALLOWED_ANALYZER_IMPORT_MODULES
 
 
-@dataclass
-class LexicalScope:
-    parent: LexicalScope | None
-    kind: str
-    bindings: dict[str, str | None] = field(default_factory=dict)
-    global_names: set[str] = field(default_factory=set)
-    nonlocal_names: set[str] = field(default_factory=set)
-
-    def lookup(self, name: str) -> str | None:
-        if name in self.global_names:
-            return self.module_scope().bindings.get(name)
-        if name in self.bindings:
-            return self.bindings[name]
-        if self.parent is not None:
-            return self.parent.lookup(name)
-        return None
-
-    def bind(self, name: str, value: str | None) -> None:
-        if name in self.global_names:
-            self.module_scope().bindings[name] = value
-            return
-        if name in self.nonlocal_names:
-            parent = self.parent
-            while parent is not None:
-                if name in parent.bindings:
-                    parent.bindings[name] = value
-                    return
-                parent = parent.parent
-        self.bindings[name] = value
-
-    def module_scope(self) -> LexicalScope:
-        scope = self
-        while scope.parent is not None:
-            scope = scope.parent
-        return scope
-
-
-class ScopeDeclarationCollector(ast.NodeVisitor):
-    def __init__(self) -> None:
-        self.local_names: set[str] = set()
-        self.global_names: set[str] = set()
-        self.nonlocal_names: set[str] = set()
-
-    def visit_Name(self, node: ast.Name) -> None:
-        if isinstance(node.ctx, (ast.Store, ast.Del)):
-            self.local_names.add(node.id)
-
-    def visit_Import(self, node: ast.Import) -> None:
-        for alias in node.names:
-            self.local_names.add(alias.asname or alias.name.split(".", maxsplit=1)[0])
-
-    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
-        for alias in node.names:
-            if alias.name != "*":
-                self.local_names.add(alias.asname or alias.name)
-
-    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
-        self.local_names.add(node.name)
-
-    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
-        self.local_names.add(node.name)
-
-    def visit_ClassDef(self, node: ast.ClassDef) -> None:
-        self.local_names.add(node.name)
-
-    def visit_Lambda(self, node: ast.Lambda) -> None:
-        return
-
-    def visit_Global(self, node: ast.Global) -> None:
-        self.global_names.update(node.names)
-
-    def visit_Nonlocal(self, node: ast.Nonlocal) -> None:
-        self.nonlocal_names.update(node.names)
-
-
-def _argument_names(arguments: ast.arguments) -> set[str]:
-    names = {argument.arg for argument in (*arguments.posonlyargs, *arguments.args, *arguments.kwonlyargs)}
-    if arguments.vararg is not None:
-        names.add(arguments.vararg.arg)
-    if arguments.kwarg is not None:
-        names.add(arguments.kwarg.arg)
-    return names
-
-
-def _closure_parent(scope: LexicalScope) -> LexicalScope:
-    while scope.kind == "class" and scope.parent is not None:
-        scope = scope.parent
-    return scope
-
-
-def _resolve_bound_expression(expression: ast.expr, scope: LexicalScope) -> str | None:
-    if isinstance(expression, ast.Name):
-        return scope.lookup(expression.id)
-    if isinstance(expression, ast.Attribute):
-        parent = _resolve_bound_expression(expression.value, scope)
-        if parent is not None:
-            return f"{parent}.{expression.attr}"
-    return None
-
-
-def _is_forbidden_process_call(call_name: str) -> bool:
-    if call_name in FORBIDDEN_ANALYZER_PROCESS_CALLS:
-        return True
-    if call_name.startswith("subprocess."):
-        return True
-    return call_name.startswith("os.exec") or call_name.startswith("os.spawn")
-
-
-class AnalyzerProcessCallVisitor(ast.NodeVisitor):
-    def __init__(self, path: Path) -> None:
-        self.path = path
-        self.scope = LexicalScope(parent=None, kind="module")
-        self.violations: list[str] = []
-
-    def _bind_target(self, target: ast.expr, value: str | None = None) -> None:
-        if isinstance(target, ast.Name):
-            self.scope.bind(target.id, value)
-            return
-        if isinstance(target, (ast.Tuple, ast.List)):
-            for element in target.elts:
-                self._bind_target(element)
-
-    def _visit_defaults(self, arguments: ast.arguments) -> None:
-        for default in (*arguments.defaults, *arguments.kw_defaults):
-            if default is not None:
-                self.visit(default)
-
-    def _function_scope(self, arguments: ast.arguments, body: list[ast.stmt]) -> LexicalScope:
-        declarations = ScopeDeclarationCollector()
-        for statement in body:
-            declarations.visit(statement)
-        local_names = declarations.local_names - declarations.global_names - declarations.nonlocal_names
-        child = LexicalScope(
-            parent=_closure_parent(self.scope),
-            kind="function",
-            global_names=declarations.global_names,
-            nonlocal_names=declarations.nonlocal_names,
-        )
-        for name in local_names | _argument_names(arguments):
-            child.bindings[name] = None
-        return child
-
-    def _visit_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
-        for decorator in node.decorator_list:
-            self.visit(decorator)
-        self._visit_defaults(node.args)
-        self.scope.bind(node.name, None)
-        parent_scope = self.scope
-        self.scope = self._function_scope(node.args, node.body)
-        for statement in node.body:
-            self.visit(statement)
-        self.scope = parent_scope
-
-    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
-        self._visit_function(node)
-
-    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
-        self._visit_function(node)
-
-    def visit_Lambda(self, node: ast.Lambda) -> None:
-        self._visit_defaults(node.args)
-        parent_scope = self.scope
-        self.scope = LexicalScope(parent=_closure_parent(self.scope), kind="lambda")
-        for name in _argument_names(node.args):
-            self.scope.bindings[name] = None
-        self.visit(node.body)
-        self.scope = parent_scope
-
-    def visit_ClassDef(self, node: ast.ClassDef) -> None:
-        for expression in (*node.decorator_list, *node.bases):
-            self.visit(expression)
-        for keyword in node.keywords:
-            self.visit(keyword.value)
-        self.scope.bind(node.name, None)
-        parent_scope = self.scope
-        self.scope = LexicalScope(parent=parent_scope, kind="class")
-        for statement in node.body:
-            self.visit(statement)
-        self.scope = parent_scope
-
-    def visit_Import(self, node: ast.Import) -> None:
-        for alias in node.names:
-            bound_name = alias.asname or alias.name.split(".", maxsplit=1)[0]
-            self.scope.bind(bound_name, alias.name if alias.asname else bound_name)
-
-    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
-        for alias in node.names:
-            if alias.name == "*":
-                continue
-            value = f"{node.module}.{alias.name}" if node.level == 0 and node.module else None
-            self.scope.bind(alias.asname or alias.name, value)
-
-    def visit_Assign(self, node: ast.Assign) -> None:
-        self.visit(node.value)
-        value = _resolve_bound_expression(node.value, self.scope)
-        for target in node.targets:
-            self._bind_target(target, value)
-
-    def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
-        if node.value is not None:
-            self.visit(node.value)
-        self._bind_target(
-            node.target,
-            _resolve_bound_expression(node.value, self.scope) if node.value is not None else None,
-        )
-
-    def visit_AugAssign(self, node: ast.AugAssign) -> None:
-        self.visit(node.value)
-        self._bind_target(node.target)
-
-    def visit_NamedExpr(self, node: ast.NamedExpr) -> None:
-        self.visit(node.value)
-        self._bind_target(node.target, _resolve_bound_expression(node.value, self.scope))
-
-    def visit_For(self, node: ast.For) -> None:
-        self.visit(node.iter)
-        self._bind_target(node.target)
-        for statement in (*node.body, *node.orelse):
-            self.visit(statement)
-
-    def visit_AsyncFor(self, node: ast.AsyncFor) -> None:
-        self.visit_For(node)
-
-    def visit_With(self, node: ast.With) -> None:
-        for item in node.items:
-            self.visit(item.context_expr)
-            if item.optional_vars is not None:
-                self._bind_target(item.optional_vars)
-        for statement in node.body:
-            self.visit(statement)
-
-    def visit_AsyncWith(self, node: ast.AsyncWith) -> None:
-        self.visit_With(node)
-
-    def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
-        if node.type is not None:
-            self.visit(node.type)
-        if node.name is not None:
-            self.scope.bind(node.name, None)
-        for statement in node.body:
-            self.visit(statement)
-
-    def visit_Call(self, node: ast.Call) -> None:
-        call_name = _resolve_bound_expression(node.func, self.scope)
-        if call_name is not None and _is_forbidden_process_call(call_name):
-            self.violations.append(f"{_display_path(self.path)}:{node.lineno} calls ungoverned process API {call_name}")
-        self.generic_visit(node)
+def _forbidden_asyncio_process_references(path: Path, tree: ast.AST) -> list[str]:
+    # Conservative by design: spelling either process API requires review. This
+    # avoids maintaining a partial evaluator for Python's binding semantics.
+    violations: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                if alias.name in FORBIDDEN_ASYNCIO_PROCESS_APIS:
+                    violations.append(
+                        f"{_display_path(path)}:{node.lineno} imports forbidden asyncio process API {alias.name}"
+                    )
+        elif isinstance(node, ast.Name) and node.id in FORBIDDEN_ASYNCIO_PROCESS_APIS:
+            violations.append(f"{_display_path(path)}:{node.lineno} references forbidden asyncio process API {node.id}")
+        elif isinstance(node, ast.Attribute) and node.attr in FORBIDDEN_ASYNCIO_PROCESS_APIS:
+            violations.append(
+                f"{_display_path(path)}:{node.lineno} references forbidden asyncio process API {node.attr}"
+            )
+    return violations
 
 
 def assert_analyzer_dependencies_are_governed(root: Path) -> None:
@@ -786,13 +496,9 @@ def assert_analyzer_dependencies_are_governed(root: Path) -> None:
     for path in _python_files(root):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for reference in _import_references(path):
-            matches = sorted(module for module in FORBIDDEN_ANALYZER_IMPORTS if _reference_matches(reference, module))
-            if matches:
-                violations.append(f"{reference.display()} (forbidden: {', '.join(matches)})")
-
-        process_visitor = AnalyzerProcessCallVisitor(path)
-        process_visitor.visit(tree)
-        violations.extend(process_visitor.violations)
+            if not _analyzer_import_is_allowed(reference):
+                violations.append(f"{reference.display()} (not in the analyzer import allowlist)")
+        violations.extend(_forbidden_asyncio_process_references(path, tree))
 
     assert violations == []
 
@@ -1022,6 +728,10 @@ def test_preflight_dependency_direction() -> None:
         "def unrelated():\n    import types as aio\n    return aio\n",
         "import os\n\ndef probe():\n    return os.fork()\n",
         "from os import forkpty as create_child\n\ndef probe():\n    return create_child()\n",
+        "import asyncio\n\nasync def probe(spawn=asyncio.create_subprocess_exec):\n" "    return await spawn('tool')\n",
+        "import asyncio\n\nprobe = lambda spawn=asyncio.create_subprocess_shell: spawn\n",
+        "import asyncio\n\nasync def probe():\n" "    return await (spawn := asyncio.create_subprocess_exec)('tool')\n",
+        "import pathlib\n\ndef probe():\n    return pathlib.Path('result.json')\n",
     ),
 )
 def test_analyzer_guard_rejects_direct_ungoverned_resource_creation(
@@ -1052,24 +762,6 @@ async def wait_for_result(awaitable):
         raise
 """,
     )
-    monkeypatch.setitem(globals(), "PREFLIGHT_ANALYZERS", tmp_path)
-
-    test_preflight_dependency_direction()
-
-
-@pytest.mark.parametrize(
-    "source",
-    (
-        "import asyncio as aio\n\nasync def probe(aio):\n    return await aio.create_subprocess_exec('value')\n",
-        "import os\n\ndef probe():\n    os = object()\n    return os.fork()\n",
-    ),
-)
-def test_analyzer_guard_honors_lexical_shadowing(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    source: str,
-) -> None:
-    _write_python_fixture(tmp_path, "safe_shadow.py", source)
     monkeypatch.setitem(globals(), "PREFLIGHT_ANALYZERS", tmp_path)
 
     test_preflight_dependency_direction()
