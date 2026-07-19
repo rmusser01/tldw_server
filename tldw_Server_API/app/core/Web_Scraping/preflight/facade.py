@@ -5,15 +5,27 @@ from __future__ import annotations
 import asyncio
 import random
 from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from time import monotonic
 from typing import Any
 
 from loguru import logger
 
+from ..contracts import (
+    PreflightAdvice,
+    PreflightResult,
+    RuntimeFailure,
+    WebScrapingStatus,
+)
+from ..contracts.conversion import preflight_result_to_public_dict
 from ..runtime.policy import OutboundPolicyChecker, ProbeEgressGuard
 from ..runtime.requests import RuntimeRequestContext
-from .context import PreflightExecutionContext, PreflightLimits, PreflightRuntimeControls
+from .context import (
+    PreflightDeadlineExceeded,
+    PreflightExecutionContext,
+    PreflightLimits,
+    PreflightRuntimeControls,
+)
 from .options import PreflightOptions
 from .probes import BrowserProbe, ExternalToolProbe, HttpProbe
 from .target import PreflightTarget
@@ -187,3 +199,206 @@ async def run_legacy_analyzer(
             raise
         except Exception:  # noqa: BLE001 - preserve the analyzer outcome
             logger.warning("Legacy analyzer context cleanup failed.")
+
+
+def _advice_signals(analysis: Mapping[str, Any]) -> tuple[bool, bool]:
+    results = analysis.get("results")
+    if not isinstance(results, Mapping):
+        return False, False
+
+    js_result = results.get("js")
+    js_required = bool(
+        isinstance(js_result, Mapping)
+        and js_result.get("status") == "success"
+        and (js_result.get("js_required") or js_result.get("is_spa"))
+    )
+    tls_result = results.get("tls")
+    tls_active = bool(isinstance(tls_result, Mapping) and tls_result.get("status") == "active")
+    return js_required, tls_active
+
+
+def _derive_advice(analysis: Mapping[str, Any]) -> PreflightAdvice:
+    js_required, tls_active = _advice_signals(analysis)
+    notes: list[str] = []
+    if js_required:
+        notes.append("js_required")
+    if tls_active:
+        notes.append("tls_active")
+    return PreflightAdvice(
+        backend="curl" if tls_active else None,
+        method="playwright" if js_required else None,
+        notes=tuple(notes),
+    )
+
+
+def _failed_preflight(
+    status: WebScrapingStatus,
+    public_message: str,
+) -> PreflightResult:
+    return PreflightResult(
+        status=status,
+        failure=RuntimeFailure(
+            status=status,
+            public_message=public_message,
+        ),
+    )
+
+
+def _consume_runner_task(task: asyncio.Task[Any]) -> None:
+    try:
+        task.exception()
+    except asyncio.CancelledError:
+        pass
+
+
+async def _retire_runner_task(task: asyncio.Task[Any]) -> None:
+    if not task.done():
+        task.cancel()
+
+    pending_cancellation: asyncio.CancelledError | None = None
+    current = asyncio.current_task()
+    while not task.done():
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError as exc:
+            if current is not None and current.cancelling():
+                if pending_cancellation is None:
+                    pending_cancellation = exc
+                if not task.done():
+                    task.cancel()
+
+    _consume_runner_task(task)
+    if pending_cancellation is not None:
+        raise pending_cancellation
+
+
+async def _run_before_deadline(
+    target: PreflightTarget,
+    options: PreflightOptions,
+    context: PreflightExecutionContext,
+) -> Mapping[str, Any]:
+    from .runner import gather_analysis_with_context
+
+    remaining_s = context.controls.remaining_seconds()
+    if remaining_s is not None and remaining_s <= 0:
+        raise PreflightDeadlineExceeded
+
+    runner_task = asyncio.create_task(
+        gather_analysis_with_context(target, options, context),
+        name="preflight-runner",
+    )
+    if remaining_s is None:
+        try:
+            return await runner_task
+        except asyncio.CancelledError:
+            await _retire_runner_task(runner_task)
+            raise
+
+    deadline_task = asyncio.create_task(
+        asyncio.sleep(remaining_s),
+        name="preflight-deadline",
+    )
+    try:
+        try:
+            done, _pending = await asyncio.wait(
+                {runner_task, deadline_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+        except asyncio.CancelledError:
+            await _retire_runner_task(runner_task)
+            raise
+
+        current = asyncio.current_task()
+        if current is not None and current.cancelling():
+            await _retire_runner_task(runner_task)
+            raise asyncio.CancelledError from None
+        if runner_task in done:
+            return runner_task.result()
+
+        await _retire_runner_task(runner_task)
+        current = asyncio.current_task()
+        if current is not None and current.cancelling():
+            raise asyncio.CancelledError from None
+        raise PreflightDeadlineExceeded from None
+    finally:
+        await _retire_runner_task(deadline_task)
+
+
+async def run_preflight(
+    target: PreflightTarget,
+    options: PreflightOptions,
+    context: PreflightExecutionContext,
+) -> PreflightResult | None:
+    """Run governed preflight analysis and normalize only overall failures."""
+    if not options.enabled:
+        return None
+    if not target.decision.allowed:
+        raise ValueError("run_preflight requires an allowed target")
+
+    try:
+        analysis = await _run_before_deadline(target, options, context)
+        return PreflightResult(
+            analysis=analysis,
+            advice=_derive_advice(analysis),
+        )
+    except asyncio.CancelledError:
+        raise
+    except PreflightDeadlineExceeded:
+        return _failed_preflight(
+            WebScrapingStatus.TIMEOUT,
+            "Preflight analysis timed out.",
+        )
+    except Exception:  # noqa: BLE001 - overall preflight failure is sanitized
+        return _failed_preflight(
+            WebScrapingStatus.ERROR,
+            "Preflight analysis failed.",
+        )
+    finally:
+        try:
+            await context.close()
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - cleanup cannot replace an outcome
+            logger.warning("Preflight context cleanup failed.")
+
+
+def apply_preflight_advice(
+    result: PreflightResult | None,
+    *,
+    backend: str,
+    method: str,
+    backend_setting: str,
+) -> tuple[str, str, PreflightResult | None]:
+    """Apply successful analyzer signals to current routing selections."""
+    if result is None:
+        return backend, method, None
+
+    notes: list[str] = []
+    if result.status is WebScrapingStatus.OK:
+        js_required, tls_active = _advice_signals(result.analysis)
+        if method == "auto" and js_required:
+            method = "playwright"
+            notes.append("js_required")
+        if backend_setting == "auto" and tls_active:
+            backend = "curl"
+            notes.append("tls_active")
+
+    updated = replace(
+        result,
+        advice=PreflightAdvice(
+            backend=backend,
+            method=method,
+            notes=tuple(notes),
+        ),
+    )
+    return backend, method, updated
+
+
+def public_preflight_payload(
+    result: PreflightResult | None,
+    include_results: bool,
+) -> dict[str, Any] | None:
+    """Return the legacy payload only for included successful overall runs."""
+    if not include_results or result is None or result.status is not WebScrapingStatus.OK:
+        return None
+    return preflight_result_to_public_dict(result)

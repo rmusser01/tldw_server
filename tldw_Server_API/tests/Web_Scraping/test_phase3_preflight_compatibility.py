@@ -949,6 +949,60 @@ def test_utility_shims_reexport_canonical_public_surface() -> None:
     assert legacy_clean_text is canonical_clean_text  # nosec B101
 
 
+def test_runner_and_package_shims_are_explicit_body_free_canonical_reexports() -> None:
+    canonical_package = importlib.import_module("tldw_Server_API.app.core.Web_Scraping.preflight")
+    canonical_runner = importlib.import_module("tldw_Server_API.app.core.Web_Scraping.preflight.runner")
+    legacy_package = importlib.import_module("tldw_Server_API.app.core.Web_Scraping.scraper_analyzers")
+    legacy_runner = importlib.import_module("tldw_Server_API.app.core.Web_Scraping.scraper_analyzers.runner")
+
+    assert canonical_package.build_execution_context is build_execution_context  # nosec B101
+    assert canonical_package.gather_analysis is canonical_runner.gather_analysis  # nosec B101
+    assert canonical_package.run_analysis is canonical_runner.run_analysis  # nosec B101
+    assert canonical_package.gather_analysis_with_context is (  # nosec B101
+        canonical_runner.gather_analysis_with_context
+    )
+    assert canonical_package.run_preflight is facade.run_preflight  # nosec B101
+    assert canonical_package.apply_preflight_advice is facade.apply_preflight_advice  # nosec B101
+    assert canonical_package.public_preflight_payload is facade.public_preflight_payload  # nosec B101
+
+    assert legacy_package.gather_analysis is canonical_runner.gather_analysis  # nosec B101
+    assert legacy_package.run_analysis is canonical_runner.run_analysis  # nosec B101
+    assert legacy_runner.gather_analysis is canonical_runner.gather_analysis  # nosec B101
+    assert legacy_runner.run_analysis is canonical_runner.run_analysis  # nosec B101
+    assert legacy_runner.AnalysisOutput is canonical_runner.AnalysisOutput  # nosec B101
+    assert legacy_runner.ScanDepth is canonical_runner.ScanDepth  # nosec B101
+    assert legacy_package.__all__ == ["gather_analysis", "run_analysis"]
+
+    public_analyzers = {
+        "check_robots_txt": "robots_checker",
+        "analyze_tls_fingerprint": "tls_analyzer",
+        "analyze_js_rendering": "js_detector",
+        "detect_honeypots": "behavioral_detector",
+        "detect_captcha": "captcha_detector",
+        "analyze_fingerprinting": "fingerprint_analyzer",
+        "analyze_function_integrity": "integrity_analyzer",
+        "profile_rate_limits": "rate_limit_profiler",
+        "detect_waf": "waf_detector",
+    }
+    for public_name, module_name in public_analyzers.items():
+        analyzer_module = importlib.import_module(
+            "tldw_Server_API.app.core.Web_Scraping.preflight.analyzers." f"{module_name}"
+        )
+        canonical_callable = getattr(analyzer_module, public_name)
+        assert getattr(canonical_runner, public_name) is canonical_callable  # nosec B101
+        assert getattr(legacy_runner, public_name) is canonical_callable  # nosec B101
+
+    for shim in (legacy_runner, legacy_package):
+        tree = ast.parse(Path(shim.__file__ or "").read_text(encoding="utf-8"))
+        assert not any(
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) for node in ast.walk(tree)
+        )
+        assert not any(
+            isinstance(node, ast.ImportFrom) and any(alias.name == "*" for alias in node.names)
+            for node in ast.walk(tree)
+        )
+
+
 def test_nonbrowser_analyzer_shims_preserve_identity_signatures_and_classification() -> None:
     module_contracts = {
         "robots_checker": {

@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+from collections.abc import Awaitable
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
+from tldw_Server_API.app.core.Web_Scraping.runtime import FetchRequest, FetchResponse, PolicyDecision
 from tldw_Server_API.app.core.Web_Scraping.scraper_analyzers import runner
 from tldw_Server_API.app.core.Web_Scraping.scraper_analyzers.recommendations.recommender import (
     generate_recommendations,
@@ -14,7 +16,6 @@ from tldw_Server_API.app.core.Web_Scraping.scraper_analyzers.recommendations.rec
 from tldw_Server_API.app.core.Web_Scraping.scraper_analyzers.scoring.scoring_engine import (
     calculate_difficulty_score,
 )
-from tldw_Server_API.app.core.Web_Scraping.runtime import FetchRequest, FetchResponse, PolicyDecision
 
 EXPECTED_SIGNATURES = {
     "check_robots_txt": "(url: 'str') -> 'dict[str, Any]'",
@@ -119,6 +120,14 @@ class FakeFetchClient:
     def fetch(self, request: FetchRequest) -> FetchResponse:
         self.requests.append(request)
         return self.responses.pop(0)
+
+
+class _NoopPreflightContext:
+    def __init__(self) -> None:
+        self.close_calls = 0
+
+    async def close(self) -> None:
+        self.close_calls += 1
 
 
 def _policy_decision(*, allowed: bool) -> PolicyDecision:
@@ -274,41 +283,34 @@ def test_analyzer_and_public_entry_point_signatures_match_current_inventory() ->
 async def test_gather_analysis_preserves_order_and_arguments(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from tldw_Server_API.app.core.Web_Scraping.preflight import runner as canonical_runner
+
     events: list[str] = []
     calls: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
+    context = _NoopPreflightContext()
 
-    def sync_result(name: str, payload: dict[str, Any]):
-        def call(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+    def analyzer_result(name: str, payload: dict[str, Any]):
+        async def call(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
             events.append(name)
             calls.append((name, _args, _kwargs))
             return payload
 
         return call
 
-    async def async_result(
-        name: str,
-        payload: dict[str, Any],
-        *args: Any,
-        **kwargs: Any,
-    ) -> dict[str, Any]:
-        events.append(name)
-        calls.append((name, args, kwargs))
-        return payload
-
     monkeypatch.setattr(
-        runner,
-        "check_robots_txt",
-        sync_result("robots", {"status": "success", "crawl_delay": 2.5}),
+        canonical_runner,
+        "_check_robots_txt",
+        analyzer_result("robots", {"status": "success", "crawl_delay": 2.5}),
     )
     monkeypatch.setattr(
-        runner,
-        "analyze_tls_fingerprint",
-        lambda *args, **kwargs: async_result("tls", {"status": "inactive"}, *args, **kwargs),
+        canonical_runner,
+        "_analyze_tls_fingerprint",
+        analyzer_result("tls", {"status": "inactive"}),
     )
     monkeypatch.setattr(
-        runner,
-        "analyze_js_rendering",
-        sync_result(
+        canonical_runner,
+        "_analyze_js_rendering",
+        analyzer_result(
             "js",
             {
                 "status": "success",
@@ -319,39 +321,44 @@ async def test_gather_analysis_preserves_order_and_arguments(
         ),
     )
     monkeypatch.setattr(
-        runner,
-        "detect_honeypots",
-        sync_result("behavioral", {"status": "success", "honeypot_detected": False}),
+        canonical_runner,
+        "_detect_honeypots",
+        analyzer_result("behavioral", {"status": "success", "honeypot_detected": False}),
     )
     monkeypatch.setattr(
-        runner,
-        "detect_captcha",
-        sync_result("captcha", {"status": "success", "captcha_detected": False}),
+        canonical_runner,
+        "_detect_captcha",
+        analyzer_result("captcha", {"status": "success", "captcha_detected": False}),
     )
     monkeypatch.setattr(
-        runner,
-        "analyze_fingerprinting",
-        sync_result("fingerprint", {"status": "success", "detected_services": []}),
+        canonical_runner,
+        "_analyze_fingerprinting",
+        analyzer_result("fingerprint", {"status": "success", "detected_services": []}),
     )
     monkeypatch.setattr(
-        runner,
-        "analyze_function_integrity",
-        sync_result("integrity", {"status": "success", "modified_functions": {}}),
+        canonical_runner,
+        "_analyze_function_integrity",
+        analyzer_result("integrity", {"status": "success", "modified_functions": {}}),
     )
     monkeypatch.setattr(
-        runner,
-        "profile_rate_limits",
-        lambda *args, **kwargs: async_result(
-            "rate_limit",
-            {"status": "success", "results": {"requests_sent": 12}},
-            *args,
-            **kwargs,
-        ),
+        canonical_runner,
+        "_profile_rate_limits",
+        analyzer_result("rate_limit", {"status": "success", "results": {"requests_sent": 12}}),
     )
     monkeypatch.setattr(
-        runner,
-        "detect_waf",
-        sync_result("waf", {"status": "success", "wafs": []}),
+        canonical_runner,
+        "_detect_waf",
+        analyzer_result("waf", {"status": "success", "wafs": []}),
+    )
+    monkeypatch.setattr(
+        canonical_runner,
+        "_default_policy_checker",
+        lambda: FakePolicyChecker(),
+    )
+    monkeypatch.setattr(
+        canonical_runner,
+        "build_execution_context",
+        lambda *_args, **_kwargs: context,
     )
 
     result = await runner.gather_analysis(
@@ -375,15 +382,15 @@ async def test_gather_analysis_preserves_order_and_arguments(
     assert list(result) == ["results", "score", "recommendations"]  # nosec B101
     assert list(result["results"]) == events  # nosec B101
     assert calls == [  # nosec B101
-        ("robots", ("https://example.com",), {}),
-        ("tls", ("https://example.com",), {}),
-        ("js", ("https://example.com",), {}),
-        ("behavioral", ("https://example.com",), {"scan_depth": "deep"}),
-        ("captcha", ("https://example.com",), {}),
-        ("fingerprint", ("https://example.com",), {}),
-        ("integrity", ("https://example.com",), {}),
-        ("rate_limit", ("https://example.com", 2.5), {"impersonate": True}),
-        ("waf", ("https://example.com",), {"find_all": True}),
+        ("robots", ("https://example.com", context), {}),
+        ("tls", ("https://example.com", context), {}),
+        ("js", ("https://example.com", context), {}),
+        ("behavioral", ("https://example.com", context, "deep"), {}),
+        ("captcha", ("https://example.com", context), {}),
+        ("fingerprint", ("https://example.com", context), {}),
+        ("integrity", ("https://example.com", context), {}),
+        ("rate_limit", ("https://example.com", context, 2.5, True), {}),
+        ("waf", ("https://example.com", context, True, None), {}),
     ]
     assert result == {  # nosec B101
         "results": {
@@ -408,69 +415,100 @@ async def test_gather_analysis_preserves_order_and_arguments(
             "strategy": ["A simple, direct scraping approach is likely to work."],
         },
     }
+    assert context.close_calls == 1  # nosec B101
 
 
 @pytest.mark.asyncio
-async def test_gather_analysis_propagates_middle_analyzer_failure_without_later_calls(
+async def test_gather_analysis_isolates_middle_analyzer_failure_and_runs_remaining(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    events: list[str] = []
-    failure = RuntimeError("safe analyzer failure")
+    from tldw_Server_API.app.core.Web_Scraping.preflight import runner as canonical_runner
 
-    def sync_result(name: str, payload: dict[str, Any]):
-        def call(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+    events: list[str] = []
+    context = _NoopPreflightContext()
+
+    def analyzer_result(name: str, payload: dict[str, Any]):
+        async def call(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
             events.append(name)
             return payload
 
         return call
 
-    async def async_result(name: str, payload: dict[str, Any]) -> dict[str, Any]:
-        events.append(name)
-        return payload
-
-    def fail_captcha(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+    def fail_captcha(*_args: Any, **_kwargs: Any) -> Awaitable[dict[str, Any]]:
         events.append("captcha")
-        raise failure
+        raise RuntimeError("credential-bearing analyzer setup failure")
 
     monkeypatch.setattr(
-        runner,
-        "check_robots_txt",
-        sync_result("robots", {"status": "success", "crawl_delay": None}),
+        canonical_runner,
+        "_check_robots_txt",
+        analyzer_result("robots", {"status": "success", "crawl_delay": None}),
     )
     monkeypatch.setattr(
-        runner,
-        "analyze_tls_fingerprint",
-        lambda *_args, **_kwargs: async_result("tls", {"status": "inactive"}),
-    )
-    monkeypatch.setattr(runner, "analyze_js_rendering", sync_result("js", {"status": "success"}))
-    monkeypatch.setattr(
-        runner,
-        "detect_honeypots",
-        sync_result("behavioral", {"status": "success"}),
-    )
-    monkeypatch.setattr(runner, "detect_captcha", fail_captcha)
-    monkeypatch.setattr(
-        runner,
-        "analyze_fingerprinting",
-        sync_result("fingerprint", {"status": "success"}),
+        canonical_runner,
+        "_analyze_tls_fingerprint",
+        analyzer_result("tls", {"status": "inactive"}),
     )
     monkeypatch.setattr(
-        runner,
-        "analyze_function_integrity",
-        sync_result("integrity", {"status": "success"}),
+        canonical_runner,
+        "_analyze_js_rendering",
+        analyzer_result("js", {"status": "success"}),
     )
     monkeypatch.setattr(
-        runner,
-        "profile_rate_limits",
-        lambda *_args, **_kwargs: async_result("rate_limit", {"status": "success"}),
+        canonical_runner,
+        "_detect_honeypots",
+        analyzer_result("behavioral", {"status": "success"}),
     )
-    monkeypatch.setattr(runner, "detect_waf", sync_result("waf", {"status": "success"}))
+    monkeypatch.setattr(canonical_runner, "_detect_captcha", fail_captcha)
+    monkeypatch.setattr(
+        canonical_runner,
+        "_analyze_fingerprinting",
+        analyzer_result("fingerprint", {"status": "success"}),
+    )
+    monkeypatch.setattr(
+        canonical_runner,
+        "_analyze_function_integrity",
+        analyzer_result("integrity", {"status": "success"}),
+    )
+    monkeypatch.setattr(
+        canonical_runner,
+        "_profile_rate_limits",
+        analyzer_result("rate_limit", {"status": "success"}),
+    )
+    monkeypatch.setattr(
+        canonical_runner,
+        "_detect_waf",
+        analyzer_result("waf", {"status": "success"}),
+    )
+    monkeypatch.setattr(
+        canonical_runner,
+        "_default_policy_checker",
+        lambda: FakePolicyChecker(),
+    )
+    monkeypatch.setattr(
+        canonical_runner,
+        "build_execution_context",
+        lambda *_args, **_kwargs: context,
+    )
 
-    with pytest.raises(RuntimeError) as caught:
-        await runner.gather_analysis("https://example.com")
+    result = await runner.gather_analysis("https://example.com")
 
-    assert caught.value is failure  # nosec B101
-    assert events == ["robots", "tls", "js", "behavioral", "captcha"]  # nosec B101
+    assert events == [  # nosec B101
+        "robots",
+        "tls",
+        "js",
+        "behavioral",
+        "captcha",
+        "fingerprint",
+        "integrity",
+        "rate_limit",
+        "waf",
+    ]
+    assert result["results"]["captcha"] == {  # nosec B101
+        "status": "error",
+        "message": "Captcha detection failed.",
+        "error_code": "analyzer_error",
+    }
+    assert context.close_calls == 1  # nosec B101
 
 
 @pytest.mark.asyncio
