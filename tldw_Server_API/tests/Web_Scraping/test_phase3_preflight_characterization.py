@@ -5,7 +5,7 @@ import inspect
 from collections.abc import Awaitable
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -693,30 +693,29 @@ async def _return(value: dict[str, Any]) -> dict[str, Any]:
 async def test_article_policy_denial_prevents_preflight_and_extraction(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from tldw_Server_API.app.core.Web_Scraping import scraper_analyzers
-
     article_extractor = _configure_article_consumer(monkeypatch, include_results=True)
     policy_checker = FakePolicyChecker(_policy_decision(allowed=False))
-    extraction_calls: list[object] = []
+    build_context = Mock(side_effect=AssertionError("preflight context created"))
+    run_preflight = AsyncMock(side_effect=AssertionError("preflight ran"))
+    fetch_client = FakeFetchClient([])
+    extract = Mock(side_effect=AssertionError("extraction ran"))
+
     monkeypatch.setattr(article_extractor, "_ARTICLE_POLICY_CHECKER", policy_checker)
-    monkeypatch.setattr(
-        scraper_analyzers,
-        "run_analysis",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("preflight ran")),
-    )
-    monkeypatch.setattr(
-        article_extractor,
-        "extract_article_with_pipeline",
-        lambda *_args, **_kwargs: extraction_calls.append(object()),
-    )
+    monkeypatch.setattr(article_extractor.preflight_facade, "build_execution_context", build_context)
+    monkeypatch.setattr(article_extractor.preflight_facade, "run_preflight", run_preflight)
+    monkeypatch.setattr(article_extractor, "_ARTICLE_FETCH_CLIENT", fetch_client)
+    monkeypatch.setattr(article_extractor, "extract_article_with_pipeline", extract)
 
     result = await article_extractor.scrape_article("https://example.com/article")
 
     assert policy_checker.calls == 1  # nosec B101
     assert result["extraction_successful"] is False  # nosec B101
     assert result["policy_reason"] == "robots_disallowed"  # nosec B101
-    assert extraction_calls == []  # nosec B101
     assert "preflight_analysis" not in result  # nosec B101
+    build_context.assert_not_called()
+    run_preflight.assert_not_awaited()
+    assert fetch_client.requests == []  # nosec B101
+    extract.assert_not_called()
 
 
 @pytest.mark.asyncio
