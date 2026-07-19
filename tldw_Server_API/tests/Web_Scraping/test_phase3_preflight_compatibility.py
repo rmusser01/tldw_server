@@ -1064,6 +1064,132 @@ def test_nonbrowser_canonical_analyzers_have_no_concrete_probe_dependencies() ->
         }
 
 
+def test_browser_analyzer_shims_preserve_identity_signatures_and_classification() -> None:
+    module_contracts = {
+        "js_detector": {
+            "public_name": "analyze_js_rendering",
+            "exports": ["analyze_js_rendering"],
+            "signature": "(url: 'str') -> 'dict[str, Any]'",
+        },
+        "behavioral_detector": {
+            "public_name": "detect_honeypots",
+            "exports": ["HONEYPOT_THRESHOLD", "ScanDepth", "detect_honeypots"],
+            "signature": "(url: 'str', scan_depth: 'ScanDepth' = 'default') -> 'dict[str, Any]'",
+        },
+        "captcha_detector": {
+            "public_name": "detect_captcha",
+            "exports": ["CAPTCHA_FINGERPRINTS", "detect_captcha"],
+            "signature": "(url: 'str') -> 'dict[str, Any]'",
+        },
+        "fingerprint_analyzer": {
+            "public_name": "analyze_fingerprinting",
+            "exports": [
+                "JS_PROBE_SCRIPT",
+                "KNOWN_BOT_DETECTION_SCRIPTS",
+                "KNOWN_BOT_GLOBAL_OBJECTS",
+                "analyze_fingerprinting",
+            ],
+            "signature": "(url: 'str') -> 'dict[str, Any]'",
+        },
+        "integrity_analyzer": {
+            "public_name": "analyze_function_integrity",
+            "exports": [
+                "FUNCTIONS_TO_CHECK",
+                "FUNCTION_SUSPICION_MAP",
+                "analyze_function_integrity",
+            ],
+            "signature": "(url: 'str') -> 'dict[str, Any]'",
+        },
+    }
+
+    for module_name, contract in module_contracts.items():
+        canonical = importlib.import_module(f"tldw_Server_API.app.core.Web_Scraping.preflight.analyzers.{module_name}")
+        legacy = importlib.import_module(
+            "tldw_Server_API.app.core.Web_Scraping.scraper_analyzers.analyzers." f"{module_name}"
+        )
+        public_name = contract["public_name"]
+        canonical_callable = getattr(canonical, public_name)
+        legacy_callable = getattr(legacy, public_name)
+
+        assert legacy_callable is canonical_callable  # nosec B101
+        assert str(inspect.signature(canonical_callable)) == contract["signature"]
+        assert inspect.iscoroutinefunction(canonical_callable) is False
+        assert inspect.iscoroutinefunction(legacy_callable) is False
+        assert set(legacy.__all__) == set(contract["exports"])
+        assert len(legacy.__all__) == len(contract["exports"])
+
+        for exported_name in contract["exports"]:
+            assert getattr(legacy, exported_name) is getattr(canonical, exported_name)  # nosec B101
+
+        source_path = Path(legacy.__file__ or "")
+        tree = ast.parse(source_path.read_text(encoding="utf-8"))
+        assert not any(
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) for node in ast.walk(tree)
+        )
+        assert not any(
+            isinstance(node, ast.ImportFrom) and any(alias.name == "*" for alias in node.names)
+            for node in ast.walk(tree)
+        )
+        assert "warnings" not in {
+            alias.name
+            for node in ast.walk(tree)
+            if isinstance(node, (ast.Import, ast.ImportFrom))
+            for alias in node.names
+        }
+
+
+def test_browser_analyzer_packages_export_the_same_canonical_modules() -> None:
+    canonical_package = importlib.import_module("tldw_Server_API.app.core.Web_Scraping.preflight.analyzers")
+    legacy_package = importlib.import_module("tldw_Server_API.app.core.Web_Scraping.scraper_analyzers.analyzers")
+    module_names = {
+        "behavioral_detector",
+        "captcha_detector",
+        "fingerprint_analyzer",
+        "integrity_analyzer",
+        "js_detector",
+    }
+
+    for module_name in module_names:
+        canonical_module = importlib.import_module(
+            f"tldw_Server_API.app.core.Web_Scraping.preflight.analyzers.{module_name}"
+        )
+        assert getattr(canonical_package, module_name) is canonical_module  # nosec B101
+        assert getattr(legacy_package, module_name) is importlib.import_module(  # nosec B101
+            "tldw_Server_API.app.core.Web_Scraping.scraper_analyzers.analyzers." f"{module_name}"
+        )
+
+
+def test_browser_canonical_analyzers_have_no_concrete_probe_dependencies() -> None:
+    forbidden_import_fragments = {
+        "curl_cffi",
+        "http_client",
+        "playwright",
+        "preflight.adapters",
+        "policy.adapters",
+        "random",
+        "requests",
+    }
+
+    for module_name in (
+        "behavioral_detector",
+        "captcha_detector",
+        "fingerprint_analyzer",
+        "integrity_analyzer",
+        "js_detector",
+    ):
+        module = importlib.import_module(f"tldw_Server_API.app.core.Web_Scraping.preflight.analyzers.{module_name}")
+        tree = ast.parse(Path(module.__file__ or "").read_text(encoding="utf-8"))
+        imported_modules = {
+            alias.name for node in ast.walk(tree) if isinstance(node, ast.Import) for alias in node.names
+        } | {node.module or "" for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)}
+
+        assert not {
+            imported
+            for imported in imported_modules
+            if any(fragment in imported for fragment in forbidden_import_fragments)
+        }
+
+
 def _context_factory(
     context: _RecordingContext,
     calls: list[tuple[PreflightTarget, PreflightOptions, Any]],

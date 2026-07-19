@@ -3,11 +3,6 @@ from types import SimpleNamespace
 import pytest
 
 from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as article_extractor
-from tldw_Server_API.app.core.Web_Scraping.scraper_analyzers.analyzers import (
-    behavioral_detector,
-    captcha_detector,
-    js_detector,
-)
 
 pytestmark = pytest.mark.unit
 
@@ -22,38 +17,100 @@ def _assert_safe_text(value):
     assert "api_key" not in text.lower()
 
 
-def test_captcha_detector_sanitizes_defensive_failures(monkeypatch):
-    def fail_playwright():
-        raise RuntimeError("captcha backend failed at /private/captcha.json")
+class _FailingPageManager:
+    async def __aenter__(self):
+        raise RuntimeError(_LEAKY_ERROR)
 
-    monkeypatch.setattr(captcha_detector, "sync_playwright", fail_playwright)
+    async def __aexit__(self, *_args):
+        return None
 
-    result = captcha_detector.detect_captcha("https://example.com")
+
+class _FailingBrowserProbe:
+    def open_page(self, _options):
+        return _FailingPageManager()
+
+
+def _browser_context(**overrides):
+    values = {
+        "browser": _FailingBrowserProbe(),
+        "browser_identity": lambda: {"User-Agent": "sanitizer-test"},
+    }
+    values.update(overrides)
+    return SimpleNamespace(**values)
+
+
+@pytest.mark.asyncio
+async def test_captcha_detector_sanitizes_defensive_failures():
+    from tldw_Server_API.app.core.Web_Scraping.preflight.analyzers.captcha_detector import (
+        _detect_captcha,
+    )
+
+    result = await _detect_captcha("https://example.com", _browser_context())
 
     assert result == {"status": "error", "message": "Captcha detection failed."}
 
 
-def test_behavioral_detector_sanitizes_defensive_failures(monkeypatch):
-    def fail_playwright():
-        raise RuntimeError("behavior backend failed at /private/behavior.json")
+@pytest.mark.asyncio
+async def test_behavioral_detector_sanitizes_defensive_failures():
+    from tldw_Server_API.app.core.Web_Scraping.preflight.analyzers.behavioral_detector import (
+        _detect_honeypots,
+    )
 
-    monkeypatch.setattr(behavioral_detector, "sync_playwright", fail_playwright)
-
-    result = behavioral_detector.detect_honeypots("https://example.com")
+    result = await _detect_honeypots("https://example.com", _browser_context())
 
     assert result == {"status": "error", "message": "Honeypot detection failed."}
 
 
-def test_js_detector_sanitizes_defensive_failures(monkeypatch):
-    def fail_session(*_args, **_kwargs):
-        raise RuntimeError("js backend failed at /private/js.json")
+@pytest.mark.asyncio
+async def test_js_detector_sanitizes_defensive_failures():
+    from tldw_Server_API.app.core.Web_Scraping.preflight.analyzers.js_detector import (
+        _analyze_js_rendering,
+    )
 
-    monkeypatch.setattr(js_detector, "CurlCffiSession", fail_session)
-    monkeypatch.setattr(js_detector, "sync_playwright", lambda: None)
+    class FailingHttpProbe:
+        async def get(self, _request):
+            raise RuntimeError(_LEAKY_ERROR)
 
-    result = js_detector.analyze_js_rendering("https://example.com")
+    result = await _analyze_js_rendering(
+        "https://example.com",
+        _browser_context(http=FailingHttpProbe()),
+    )
 
     assert result == {"status": "error", "message": "JavaScript rendering analysis failed."}
+
+
+@pytest.mark.asyncio
+async def test_fingerprint_detector_sanitizes_defensive_failures():
+    from tldw_Server_API.app.core.Web_Scraping.preflight.analyzers.fingerprint_analyzer import (
+        _analyze_fingerprinting,
+    )
+
+    result = await _analyze_fingerprinting("https://example.com", _browser_context())
+
+    assert result == {
+        "status": "error",
+        "message": "Fingerprint analysis failed.",
+        "error_code": "analyzer_error",
+        "detected_services": [],
+        "canvas_fingerprinting_signal": False,
+        "behavioral_listeners_detected": [],
+    }
+
+
+@pytest.mark.asyncio
+async def test_integrity_detector_sanitizes_defensive_failures():
+    from tldw_Server_API.app.core.Web_Scraping.preflight.analyzers.integrity_analyzer import (
+        _analyze_function_integrity,
+    )
+
+    result = await _analyze_function_integrity("https://example.com", _browser_context())
+
+    assert result == {
+        "status": "error",
+        "message": "Function integrity analysis failed.",
+        "error_code": "analyzer_error",
+        "modified_functions": {},
+    }
 
 
 @pytest.mark.asyncio
