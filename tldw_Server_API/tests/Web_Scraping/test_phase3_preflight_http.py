@@ -1428,19 +1428,17 @@ async def test_curl_transport_rechecks_egress_immediately_before_get_and_closes(
             cookies={"session": "value"},
             timeout_s=4.0,
             impersonate="chrome120",
-            proxies={"https": "http://proxy.example:8080"},
         )
     )
 
     assert guard.urls == ["https://EXAMPLE.com:8443/start"] * 2
-    assert validated_proxies == [{"https": "http://proxy.example:8080"}]
+    assert validated_proxies == [None]
     assert factory.calls == [
         {
             "impersonate": "chrome120",
             "curl_options": {
                 _FakeCurlOpt.RESOLVE: [
-                    "example.com:8443:203.0.113.10",
-                    "example.com:8443:[2001:db8::1]",
+                    "example.com:8443:203.0.113.10,[2001:db8::1]",
                 ]
             },
         }
@@ -1453,7 +1451,7 @@ async def test_curl_transport_rechecks_egress_immediately_before_get_and_closes(
                 "cookies": {"session": "value"},
                 "timeout": 4.0,
                 "allow_redirects": False,
-                "proxies": {"https": "http://proxy.example:8080"},
+                "proxies": None,
             },
         )
     ]
@@ -1583,6 +1581,46 @@ async def test_curl_proxy_rejection_precedes_guard_and_session_creation(
             )
         )
 
+    assert guard.urls == []
+    assert factory.calls == []
+    assert session.get_calls == []
+
+
+@pytest.mark.asyncio
+async def test_curl_accepted_proxy_is_unavailable_before_guard_and_session_creation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _adapter_module()
+    assert module is not None
+    validated_proxies: list[Any] = []
+    monkeypatch.setattr(
+        module.http_client,
+        "validate_proxies_or_raise",
+        lambda proxies: validated_proxies.append(proxies),
+        raising=False,
+    )
+    proxies = {"https": "http://accepted.example:8080"}
+    session = _FakeSession([FakeRawResponse(200)])
+    factory = _SessionFactory([session])
+    guard = FakeProbeEgressGuard([_pinned_decision(_APPROVED_IP)])
+    transport = _required("CurlCffiProbeTransport")(
+        egress_guard=guard,
+        request_context=_controls().request_context,
+        session_factory=factory,
+    )
+
+    with pytest.raises(ProbeUnavailable) as raised:
+        await transport.send(
+            ProbeHttpRequest(
+                url="https://example.com/start",
+                impersonate="chrome120",
+                proxies=proxies,
+            )
+        )
+
+    assert raised.value.error_code == "unavailable"
+    assert raised.value.public_message == "Probe capability is unavailable."
+    assert validated_proxies == [proxies]
     assert guard.urls == []
     assert factory.calls == []
     assert session.get_calls == []

@@ -530,7 +530,7 @@ def _curl_resolve_entries(
     else:
         return []
 
-    entries: list[str] = []
+    addresses: list[str] = []
     for raw_ip in resolved_ips:
         if not isinstance(raw_ip, str) or raw_ip != raw_ip.strip() or "%" in raw_ip:
             raise ProbeError("policy_error", "Probe destination was denied.")
@@ -544,10 +544,10 @@ def _curl_resolve_entries(
         address = approved_ip.compressed
         if approved_ip.version == 6:
             address = f"[{address}]"
-        entries.append(f"{host}:{port}:{address}")
-    if not entries:
+        addresses.append(address)
+    if not addresses:
         raise ProbeError("policy_error", "Probe destination was denied.")
-    return entries
+    return [f"{host}:{port}:{','.join(addresses)}"]
 
 
 class CurlCffiProbeTransport:
@@ -570,6 +570,8 @@ class CurlCffiProbeTransport:
 
         proxies = _mutable_proxies(request.proxies)
         http_client.validate_proxies_or_raise(proxies)
+        if proxies:
+            raise ProbeUnavailable()
         decision = await _fresh_decision(
             self._egress_guard,
             request.url,
