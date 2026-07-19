@@ -173,6 +173,7 @@ def _install_character_completion_runtime(
     *,
     provider_response: Any,
     lifecycle: list[Any],
+    runtime_closed: asyncio.Event | None = None,
 ) -> None:
     """Install a deterministic credential runtime and provider adapter."""
 
@@ -202,6 +203,8 @@ def _install_character_completion_runtime(
 
         async def close(self) -> None:
             lifecycle.append("runtime_close")
+            if runtime_closed is not None:
+                runtime_closed.set()
 
     monkeypatch.setenv("ENABLE_LOCAL_LLM_PROVIDER", "true")
     monkeypatch.setenv("STREAMS_UNIFIED", "0")
@@ -245,6 +248,7 @@ async def test_complete_v2_sync_stream_keeps_credentials_until_blocked_next_exit
     lifecycle: list[Any] = []
     entered = threading.Event()
     release = threading.Event()
+    runtime_closed = asyncio.Event()
 
     class BlockingStream:
         def __iter__(self) -> BlockingStream:
@@ -263,6 +267,7 @@ async def test_complete_v2_sync_stream_keeps_credentials_until_blocked_next_exit
         monkeypatch,
         provider_response=BlockingStream(),
         lifecycle=lifecycle,
+        runtime_closed=runtime_closed,
     )
 
     response = await character_chat_sessions.character_chat_completion(
@@ -289,10 +294,10 @@ async def test_complete_v2_sync_stream_keeps_credentials_until_blocked_next_exit
     with pytest.raises(asyncio.CancelledError):
         await consume
 
-    for _ in range(100):
-        if "runtime_close" in lifecycle:
-            break
-        await asyncio.sleep(0.01)
+    await asyncio.wait_for(
+        runtime_closed.wait(),
+        timeout=character_chat_sessions.CHARACTER_STREAM_CLOSE_TIMEOUT_SECONDS + 1.0,
+    )
 
     assert lifecycle.index("next_exit") < lifecycle.index("upstream_close")
     assert lifecycle.index("upstream_close") < lifecycle.index("runtime_close")
@@ -308,6 +313,7 @@ async def test_complete_v2_cancelled_sync_factory_hands_off_completed_result_bef
     lifecycle: list[Any] = []
     entered = threading.Event()
     release = threading.Event()
+    runtime_closed = asyncio.Event()
 
     class UnconsumedStream:
         def __iter__(self) -> UnconsumedStream:
@@ -328,6 +334,7 @@ async def test_complete_v2_cancelled_sync_factory_hands_off_completed_result_bef
         monkeypatch,
         provider_response=result,
         lifecycle=lifecycle,
+        runtime_closed=runtime_closed,
     )
 
     def blocking_provider_call(**_kwargs: Any) -> Any:
@@ -366,10 +373,10 @@ async def test_complete_v2_cancelled_sync_factory_hands_off_completed_result_bef
     with pytest.raises(asyncio.CancelledError):
         await request_task
 
-    for _ in range(100):
-        if "runtime_close" in lifecycle:
-            break
-        await asyncio.sleep(0.01)
+    await asyncio.wait_for(
+        runtime_closed.wait(),
+        timeout=character_chat_sessions.CHARACTER_STREAM_CLOSE_TIMEOUT_SECONDS + 1.0,
+    )
 
     assert lifecycle.index("factory_exit") < lifecycle.index("runtime_close")
     if result_kind == "nonstream":
@@ -631,6 +638,7 @@ async def test_timed_out_character_factory_closes_late_stream_result(
     started = threading.Event()
     release = threading.Event()
     late_closed = threading.Event()
+    runtime_closed = asyncio.Event()
     pool = BoundedDaemonPool(1)
 
     class LateStream:
@@ -648,6 +656,7 @@ async def test_timed_out_character_factory_closes_late_stream_result(
         monkeypatch,
         provider_response=LateStream(),
         lifecycle=lifecycle,
+        runtime_closed=runtime_closed,
     )
 
     def blocking_provider(**_kwargs: Any) -> LateStream:
@@ -686,10 +695,10 @@ async def test_timed_out_character_factory_closes_late_stream_result(
 
     release.set()
     assert await asyncio.to_thread(late_closed.wait, 1)
-    for _ in range(100):
-        if "runtime_close" in lifecycle:
-            break
-        await asyncio.sleep(0.01)
+    await asyncio.wait_for(
+        runtime_closed.wait(),
+        timeout=character_chat_sessions.CHARACTER_STREAM_CLOSE_TIMEOUT_SECONDS + 1.0,
+    )
     assert lifecycle.count("late_stream_close") == 1
     assert lifecycle.index("late_stream_close") < lifecycle.index("runtime_close")
     assert lifecycle.count("runtime_close") == 1
@@ -1628,6 +1637,7 @@ async def test_cancelled_character_stream_late_non_output_is_not_marked_used(
     sync_release = threading.Event()
     async_entered = asyncio.Event()
     async_release = asyncio.Event()
+    runtime_closed = asyncio.Event()
     terminal_error = 'data: {"error": {"message": "private late provider error"}}'
 
     class SyncStream:
@@ -1673,6 +1683,7 @@ async def test_cancelled_character_stream_late_non_output_is_not_marked_used(
         monkeypatch,
         provider_response=stream,
         lifecycle=lifecycle,
+        runtime_closed=runtime_closed,
     )
     monkeypatch.setenv("STREAMS_UNIFIED", streams_unified)
 
@@ -1706,10 +1717,10 @@ async def test_cancelled_character_stream_late_non_output_is_not_marked_used(
     with pytest.raises(asyncio.CancelledError):
         await consume
 
-    for _ in range(100):
-        if "runtime_close" in lifecycle:
-            break
-        await asyncio.sleep(0.01)
+    await asyncio.wait_for(
+        runtime_closed.wait(),
+        timeout=character_chat_sessions.CHARACTER_STREAM_CLOSE_TIMEOUT_SECONDS + 1.0,
+    )
 
     assert "mark_used" not in lifecycle
     assert lifecycle.count("upstream_close") == 1
@@ -1733,6 +1744,7 @@ async def test_cancelled_character_stream_late_terminal_error_overrides_partial_
     sync_release = threading.Event()
     async_entered = asyncio.Event()
     async_release = asyncio.Event()
+    runtime_closed = asyncio.Event()
     content_frame = 'data: {"choices": [{"delta": {"content": "partial"}}]}'
     terminal_error = 'data: {"error": {"message": "private late provider error"}}'
 
@@ -1779,6 +1791,7 @@ async def test_cancelled_character_stream_late_terminal_error_overrides_partial_
         monkeypatch,
         provider_response=stream,
         lifecycle=lifecycle,
+        runtime_closed=runtime_closed,
     )
     monkeypatch.setenv("STREAMS_UNIFIED", streams_unified)
 
@@ -1814,10 +1827,10 @@ async def test_cancelled_character_stream_late_terminal_error_overrides_partial_
     with pytest.raises(asyncio.CancelledError):
         await consume
 
-    for _ in range(100):
-        if "runtime_close" in lifecycle:
-            break
-        await asyncio.sleep(0.01)
+    await asyncio.wait_for(
+        runtime_closed.wait(),
+        timeout=character_chat_sessions.CHARACTER_STREAM_CLOSE_TIMEOUT_SECONDS + 1.0,
+    )
 
     assert "mark_used" not in lifecycle
     assert lifecycle.count("upstream_close") == 1

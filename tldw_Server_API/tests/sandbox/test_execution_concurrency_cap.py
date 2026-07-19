@@ -77,6 +77,7 @@ def _wait_for_phase(
 class _DeterministicBackgroundExecutor:
     def __init__(self) -> None:
         self._threads: list[threading.Thread] = []
+        self._futures: list[Future] = []
 
     def submit(self, worker_fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Future:
         future = Future()
@@ -95,15 +96,24 @@ class _DeterministicBackgroundExecutor:
             daemon=True,
         )
         self._threads.append(thread)
+        self._futures.append(future)
         thread.start()
         return future
+
+    def wait_for_workers(self) -> None:
+        """Join every worker and surface exceptions retained by its Future."""
+        for thread in self._threads:
+            thread.join(timeout=RUNNER_START_TIMEOUT_SEC)
+            if thread.is_alive():
+                raise TimeoutError(f"background worker did not finish: {thread.name}")
+        for future in self._futures:
+            future.result(timeout=RUNNER_START_TIMEOUT_SEC)
 
     def shutdown(self, wait: bool = True, cancel_futures: bool = False) -> None:
         del cancel_futures
         if not wait:
             return
-        for thread in self._threads:
-            thread.join(timeout=RUNNER_START_TIMEOUT_SEC)
+        self.wait_for_workers()
 
 
 def _install_test_background_executor(
@@ -197,7 +207,8 @@ def test_background_execution_respects_max_concurrent_runs(
         assert second_started.is_set() is False
 
         allow_first_finish.set()
-        assert second_started.wait(timeout=RUNNER_START_TIMEOUT_SEC) is True
+        executor.wait_for_workers()
+        assert second_started.is_set() is True
 
         done1 = _wait_for_phase(svc, run1.id, RunPhase.completed)
         done2 = _wait_for_phase(svc, run2.id, RunPhase.completed)
@@ -285,7 +296,8 @@ def test_background_admission_renews_queued_claim_while_waiting(
         assert second_started.is_set() is False
 
         allow_first_finish.set()
-        assert second_started.wait(timeout=RUNNER_START_TIMEOUT_SEC) is True
+        executor.wait_for_workers()
+        assert second_started.is_set() is True
 
         done1 = _wait_for_phase(svc, run1.id, RunPhase.completed)
         done2 = _wait_for_phase(svc, run2.id, RunPhase.completed)
@@ -382,7 +394,9 @@ def test_global_active_cap_enforced_across_service_instances(
         assert second_started.is_set() is False
 
         allow_first_finish.set()
-        assert second_started.wait(timeout=RUNNER_START_TIMEOUT_SEC) is True
+        executor_a.wait_for_workers()
+        executor_b.wait_for_workers()
+        assert second_started.is_set() is True
 
         done1 = _wait_for_phase(svc_a, run1.id, RunPhase.completed)
         done2 = _wait_for_phase(svc_b, run2.id, RunPhase.completed)
@@ -480,7 +494,9 @@ def test_per_user_active_cap_enforced_across_service_instances(
         assert second_started.is_set() is False
 
         allow_first_finish.set()
-        assert second_started.wait(timeout=RUNNER_START_TIMEOUT_SEC) is True
+        executor_a.wait_for_workers()
+        executor_b.wait_for_workers()
+        assert second_started.is_set() is True
 
         done1 = _wait_for_phase(svc_a, run1.id, RunPhase.completed)
         done2 = _wait_for_phase(svc_b, run2.id, RunPhase.completed)

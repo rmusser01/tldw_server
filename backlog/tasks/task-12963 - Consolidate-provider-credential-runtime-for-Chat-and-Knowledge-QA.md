@@ -22,7 +22,10 @@ modified_files:
 - .github/workflows/frontend-ux-gates.yml
 - .github/workflows/mkdocs.yml
 - .github/workflows/onboarding-docs-gate.yml
+- Docs/AuthNZ/AUTHNZ_DATABASE_CONFIG.md
 - Docs/Deployment/Long_Term_Admin_Guide.md
+- Docs/Design/WebScraping_Refactor_Import_Inventory.md
+- Docs/Design/web_scraping_refactor_import_inventory.json
 - Docs/Published/Deployment/Long_Term_Admin_Guide.md
 - Docs/Published/Deployment/horizontal-scaling.md
 - Docs/Published/Env_Vars.md
@@ -41,11 +44,13 @@ modified_files:
 - pyproject.toml
 - tldw_Server_API/app/api/v1/endpoints/audio/audio_streaming.py
 - tldw_Server_API/app/api/v1/endpoints/rag_unified.py
+- tldw_Server_API/app/api/v1/endpoints/workflows.py
 - tldw_Server_API/app/core/AuthNZ/byok_config.py
 - tldw_Server_API/app/core/AuthNZ/byok_runtime.py
 - tldw_Server_API/app/core/AuthNZ/byok_testing.py
 - tldw_Server_API/app/core/AuthNZ/llm_provider_overrides.py
 - tldw_Server_API/app/core/Chat/chat_service.py
+- tldw_Server_API/app/core/DB_Management/db_path_utils.py
 - tldw_Server_API/app/core/Embeddings/Embeddings_Server/Embeddings_Create.py
 - tldw_Server_API/app/core/Embeddings/async_embeddings.py
 - tldw_Server_API/app/core/Evaluations/ms_g_eval.py
@@ -53,6 +58,7 @@ modified_files:
 - tldw_Server_API/app/core/LLM_Calls/openai_credentials.py
 - tldw_Server_API/app/core/LLM_Calls/providers/openai_adapter.py
 - tldw_Server_API/app/core/LLM_Calls/providers/openai_embeddings_adapter.py
+- tldw_Server_API/app/core/Monitoring/notification_service.py
 - tldw_Server_API/app/core/Prompt_Management/prompt_studio/evaluation_manager.py
 - tldw_Server_API/app/core/Prompt_Management/prompt_studio/prompt_executor.py
 - tldw_Server_API/app/core/Prompt_Management/prompt_studio/test_runner.py
@@ -65,9 +71,11 @@ modified_files:
 - tldw_Server_API/app/core/TTS/adapters/qwen3_runtime_remote.py
 - tldw_Server_API/app/core/TTS/backends/fish_s2_commercial_api.py
 - tldw_Server_API/app/core/TTS/backends/fish_s2_native_http.py
+- tldw_Server_API/app/core/Web_Scraping/Article_Extractor_Lib.py
 - tldw_Server_API/app/core/exceptions.py
 - tldw_Server_API/app/core/http_client.py
 - tldw_Server_API/tests/Admin/test_admin_llm_provider_test_runtime.py
+- tldw_Server_API/tests/Audio/test_audio_transcriptions_timed_segments.py
 - tldw_Server_API/tests/Audio/test_speech_chat_service.py
 - tldw_Server_API/tests/Audio/test_ws_audio_chat_stream.py
 - tldw_Server_API/tests/Audiobooks/integration/test_audiobook_alignment_flow.py
@@ -79,6 +87,8 @@ modified_files:
 - tldw_Server_API/tests/Character_Chat/conftest.py
 - tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_e2e_mock.py
 - tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_unified_flag_monkeypatched.py
+- tldw_Server_API/tests/Character_Chat_NEW/unit/test_chat_session_error_mapping.py
+- tldw_Server_API/tests/Chat/integration/test_messages_provider_override_store_boundary.py
 - tldw_Server_API/tests/Chat/test_custom_openai_endpoint_provenance.py
 - tldw_Server_API/tests/Chat/unit/test_api_key_resolution.py
 - tldw_Server_API/tests/Chat/unit/test_async_stream_task_capacity.py
@@ -90,34 +100,54 @@ modified_files:
 - tldw_Server_API/tests/Chunking/test_chunking_runtime_lifecycle.py
 - tldw_Server_API/tests/Config/test_config_providers_endpoints.py
 - tldw_Server_API/tests/DB_Management/test_chacha_postgres_migration_v52.py
+- tldw_Server_API/tests/DB_Management/test_db_path_utils.py
+- tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator_endpoint_parity.py
+- tldw_Server_API/tests/Evaluations/test_evaluation_integration.py
+- tldw_Server_API/tests/Guardian/test_comprehensive_edge_cases.py
+- tldw_Server_API/tests/LLM_Adapters/unit/test_authoritative_local_adapter_snapshot.py
 - tldw_Server_API/tests/LLM_Adapters/unit/test_openai_embeddings_adapter_batch_single.py
 - tldw_Server_API/tests/LLM_Calls/test_async_streaming_dedup.py
 - tldw_Server_API/tests/LLM_Calls/test_provider_adapter_runtime_boundary.py
+- tldw_Server_API/tests/Media_Ingestion_Modification/test_mineru_discovery.py
+- tldw_Server_API/tests/Media_Ingestion_Modification/test_ocr_runtime_discovery.py
+- tldw_Server_API/tests/Monitoring/test_notification_service.py
 - tldw_Server_API/tests/RAG/test_user_personalization_store.py
 - tldw_Server_API/tests/RAG_NEW/integration/test_rag_integration.py
 - tldw_Server_API/tests/RAG_NEW/unit/test_advanced_retrieval_sanitizers.py
 - tldw_Server_API/tests/RAG_NEW/unit/test_agentic_execution.py
 - tldw_Server_API/tests/RAG_NEW/unit/test_embedding_credential_transport_boundary.py
 - tldw_Server_API/tests/RAG_NEW/unit/test_hyde.py
+- tldw_Server_API/tests/Research/test_research_discovery_network_boundary.py
+- tldw_Server_API/tests/Resource_Governance/test_e2e_tokens_daily_cap.py
 - tldw_Server_API/tests/Skills/unit/test_skills_service.py
 - tldw_Server_API/tests/Streaming/test_chat_doc_stream_unified_flag.py
 - tldw_Server_API/tests/TTS/test_elevenlabs_adapter.py
 - tldw_Server_API/tests/TTS/test_supertonic2_endpoint_integration.py
 - tldw_Server_API/tests/TTS_NEW/integration/test_custom_voice_resolution.py
 - tldw_Server_API/tests/TTS_NEW/integration/test_qwen3_voice_prompt_reuse.py
+- tldw_Server_API/tests/TTS_NEW/integration/test_transcription_auth.py
 - tldw_Server_API/tests/TTS_NEW/integration/test_tts_endpoints.py
 - tldw_Server_API/tests/TTS_NEW/unit/adapters/test_qwen3_remote_runtime.py
 - tldw_Server_API/tests/TTS_NEW/unit/adapters/test_streaming_status_classification.py
 - tldw_Server_API/tests/Utils/test_release_helper.py
 - tldw_Server_API/tests/Visual_Identities/test_visual_identities_api.py
+- tldw_Server_API/tests/Web_Scraping/test_ingest_cookie_parsing.py
+- tldw_Server_API/tests/Web_Scraping/test_persistence_crawl_metadata.py
+- tldw_Server_API/tests/Workflows/adapters/test_audio_adapters.py
+- tldw_Server_API/tests/Workflows/test_workflows_api.py
 - tldw_Server_API/tests/conftest.py
 - tldw_Server_API/tests/e2e/conftest.py
 - tldw_Server_API/tests/e2e/test_chats_and_characters.py
 - tldw_Server_API/tests/e2e/test_deep_research_runs.py
 - tldw_Server_API/tests/http_client/test_http_client_sensitive_observability.py
 - tldw_Server_API/tests/http_client/test_http_client_stream_timeouts.py
+- tldw_Server_API/tests/prompt_studio/integration/test_api_endpoints.py
 - tldw_Server_API/tests/prompt_studio/unit/test_evaluation_bg_propagation_unit.py
 - tldw_Server_API/tests/prompt_studio/unit/test_optimization_job_provider_runtime.py
+- tldw_Server_API/tests/sandbox/test_execution_concurrency_cap.py
+- tldw_Server_API/tests/sandbox/test_session_store_durability.py
+- tldw_Server_API/tests/sandbox/test_session_upload.py
+- tldw_Server_API/tests/sandbox/test_ws_signed_validation.py
 ---
 
 ## Description
@@ -268,27 +298,6 @@ Consolidated Chat, Knowledge QA/RAG, embeddings, secondary provider surfaces, Pr
 2026-07-13: Post-rebase production-safety review found and fixed three runtime risks: explicit/BYOK embedding requests could share a provider-global cache across credentials, their auth failures could open the provider-global circuit breaker across tenants, and invalid non-stream provider objects could be generator-wrapped into a 200 stream instead of failing before headers. Explicit credentials now bypass shared embedding cache/breaker while retaining pooled HTTP/retry/stats behavior; server-configured traffic retains existing cache/breaker behavior; invalid stream objects fail with 502. Stale Chat/embedding fixtures were aligned with fail-closed sanitized contracts. Verification before the next dev refresh: full Chat 837 passed/31 skipped; full Embeddings 444 passed/36 skipped with pinned random/Hypothesis seeds; RAG_NEW+AuthNZ_Unit+http_client 1794 passed/7 skipped plus one known order-polluted prompt-loader assertion that passed isolated with the same seed; loopback Chat integrations 2 passed outside sandbox; py_compile and git diff checks passed; Bandit 0 findings/0 errors across 7421 production LOC; fatal Ruff findings match HEAD baseline exactly. origin/dev advanced to db0cfb6611 with backlog-only commits, so final rebase and focused post-rebase verification remain pending.
 
 2026-07-13: Final rebase completed onto origin/dev db0cfb6611. The two incoming commits were backlog-only and had no runtime/test overlap. Range-diff confirmed all 75 feature patches replayed exactly; origin/dev is an ancestor and the branch is 0 commits behind. Final post-rebase high-risk matrix: 192 passed, 17 expected skips across provider runtime/BYOK, Chat error and streaming behavior, loopback Chat integration, explicit embedding cache/breaker isolation, and RAG credential convenience paths. Final committed-tree py_compile passed; full-range git diff check passed; Bandit reported 0 findings and 0 scan errors across 7421 production LOC. Only the two unrelated untracked watchlist templates remain untouched.
-<!-- SECTION:NOTES:END -->
-
-## Final Summary
-
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Consolidated Chat, Knowledge QA/RAG, embeddings, secondary provider surfaces, Prompt Studio, and durable Jobs onto server-owned execution-scoped provider credentials with user/team/org/server precedence and explicit fail-closed behavior. Credentials remain non-serializable and server-side; semantic caching is retrieval-only; streaming errors are bounded, ordered, and non-replayed; provider/model/endpoint provenance is authoritative; and credential/runtime cleanup is cancellation- and concurrency-safe across SQLite/PostgreSQL operations. Final high-risk backend/frontend, adapter-boundary, concurrency, static, compatibility, and security gates pass. PR #2727 remains draft solely for the mandatory requester-authored Change summary.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
-## Definition of Done
-<!-- DOD:BEGIN -->
-- [x] #1 Acceptance criteria completed
-- [x] #2 Tests or verification recorded
-- [x] #3 Documentation updated when relevant
-- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [x] #5 Final summary added
-- [x] #6 Known skips or blockers documented
-<!-- DOD:END -->
-
-## Implementation Notes
-
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-07-14: Adapter-boundary hardening slice complete in the shared worktree. `credentials_resolved` now survives Chat, SGL, converted Messages, and capability validation; marked commercial/custom adapters treat captured endpoint/region config (including empty maps) as authoritative while unmarked legacy behavior remains unchanged; numbered custom adapters fail closed; native Messages normalizes missing resolved config to an authoritative empty snapshot. TDD evidence: new regression initially failed at the Messages boundary, then focused adapter/translation/credential suite passed 119/119 and adjacent high-risk adapter/dispatch/Messages suite passed 239/239 (seed 12963). py_compile and diff checks passed; Bandit 0 findings across 11,301 production LOC; new tests Ruff-clean, with only pre-existing lint categories remaining in shared production files. Final integration review separately flagged that structured static fallback still had no production caller; central Chat/RAG/Embeddings surface wiring remains root-owned and merge-blocking until addressed.
 2026-07-14: OpenAI credential mutation-lock production-capacity hardening slice complete. Design: Docs/superpowers/specs/2026-07-14-openai-oauth-lock-pool-capacity-hardening-design.md. Plan: Docs/superpowers/plans/2026-07-14-openai-credential-lock-pool-capacity-hardening-implementation-plan.md. PostgreSQL now uses a DatabasePool-owned zero-idle, fixed-max-4 advisory-lock pool with explicit acquisition, cancellation-safe release, partial-initialization cleanup, lock-pool-before-main shutdown, and no fallback to the main AuthNZ pool. The public openai_credential_mutation_lock canonicalizes OpenAI aliases, rejects non-OpenAI identities, returns a connection-bound repo supporting reads and writes, and requires positive advisory-unlock confirmation without masking an existing protected-body exception. The public OAuth generation seam is an opaque SHA-256 digest of access-token generation only. Regressions cover distinct-user capacity isolation, bound revoke/CAS query shape, real SQLite FileLock serialization across independent loops/threads plus timeout/cancellation/release ownership, backend default/invalid=>db, explicit Redis without REDIS_URL fail-closed, provider aliases, generation secrecy, and unlock failures. Canonical env/operations/horizontal-scale docs specify the zero-idle/four-session bound, Redis scale path, and PgBouncer transaction-pooling restriction. Final focused/adjacent suite with seed 12963: 158 passed, 1 skipped. Ruff and py_compile passed; Bandit: 0 findings, 0 errors across 2,837 production LOC; scoped git diff --check passed. No commit made. Residual integration note: endpoint whole-row mutation adoption is being completed and validated in the separate user_keys/admin mutation slice; this lock-boundary slice itself has no known blocker.
 2026-07-15: Final Chunking review follow-up started. Scope is limited to the endpoint contract/lifecycle findings: exercise the real TemplateProcessor contract, preserve rolling semantic summaries by disabling source alignment only for rolling output, sanitize JSON/file config and credential-setup failures through detached bounded error mapping, and replace cancellation sleeps with Event acknowledgements. Strict TDD and full Chunking/Ruff/compile/Bandit/diff verification will be recorded; no commit requested.
@@ -317,4 +326,21 @@ Fresh evidence: consolidated backend groups 934 passed and a second-seed concurr
 
 Latest origin/dev remains 29acaca8c781 and the branch is 0 commits behind (99 ahead), so no further rebase is required before this push. The exact Turbopack builds remain a hosted-new-head gate because the local worktree node_modules symlink is outside Turbopack's root; local webpack equivalents passed. The task remains In Progress until exact-new-head hosted CI is terminal and the requester supplies the policy-required human-written Change summary. Unrelated server-ux-smoke.pid and both untracked watchlist templates remain untouched and must not be staged.
 2026-07-18: Exact-head CI follow-up for commit 0e12655b39. The Python 3.13 gap-verified-9 shard exposed one packaging defect introduced by the final simplicity review: removing MkDocs from the dev extra broke the clean Docs pytest shard because test_release_docs_contract intentionally invokes python -m mkdocs after CI installs .[dev]. This is a real executable consumer in addition to the two dedicated docs workflows. Restored the same bounded MkDocs, Material, and revision-date-plugin constraints to project.optional-dependencies.dev; workflow-local pins remain for their intentionally lightweight installs. Focused RED was hosted (183 passed, 6 skipped, 1 failed solely with No module named mkdocs); local GREEN reran the exact strict-build test 1/1 and validated the three parsed dev constraints plus git diff hygiene. A corrected exact head and fresh hosted matrix are pending.
+2026-07-18: Fresh exact-head hosted CI on commit 3478b94c2c validated the MkDocs fix in both Ubuntu/Python 3.12 and the previously failing Python 3.13 gap-verified-9 shards. The Windows/Python 3.12 chat-character-unit-chat shard then exposed a test-only cancellation synchronization race: the clean-exhaustion sync legacy case polled detached cleanup for a hard-coded ~1 second even though cancellation intentionally returns before the cleanup owner and the production close budget is 5 seconds. Hosted evidence was 254 passed/1 failed with lifecycle through next_exit but no close yet; exact local CI-plugin reproduction passes. Independent diagnosis recommends an explicit mocked runtime-close completion event in both affected cancellation matrices, preserving exact-once/order/no-mark assertions and production ownership semantics.
+2026-07-18: The same exact-head matrix exposed two additional test-harness egress defects while production correctly remained fail closed. macOS/Python 3.12 Messages override-store tests used https://atomic.example/v1 and returned invalid_provider_credentials before patched adapter dispatch because CI allows example.com but not arbitrary .example hosts. Windows/Python 3.12 authoritative local-adapter tests used https://selected-local.example and raised EgressPolicyError at the now-real HTTP security boundary. The stable test-only correction is to use distinct paths on allowlisted https://example.com, preserving atomic endpoint identity and exercising the real egress policy without relaxing production validation.
+2026-07-18: The hosted media-ingestion-modification shard also exposed four stale OCR discovery assertions inherited unchanged from current origin/dev. Production ocr.py intentionally sanitizes backend exceptions to MinerU/llamacpp/chatllm backend discovery failed and omits secret/path-bearing exception text, while the tests expected the raw exceptions. The secure test-only correction updates those public-contract assertions and explicitly proves the raw command, backend message, path, and token are absent; production sanitization remains unchanged.
+2026-07-18: Exact-head Windows/Python 3.12 ai-embeddings-observability exposed the same test-only egress-fixture defect: the atomic concurrent override regression used reserved .example hosts, so the real fail-closed egress policy rejected both requests before the provider boundary. The bounded correction moves the two provider identities to distinct paths on allowlisted https://example.com; production egress remains unchanged.
+2026-07-18: Exact-head macOS/Ubuntu Python 3.12 research-websearch exposed an inherited interpreter-schema defect in the frozen discovery boundary test: raw ast.dump hashes include empty type_params on 3.12 and change empty-field rendering again on 3.13. The bounded correction uses a local stable serializer that preserves the reviewed pre-3.12 representation, omits only empty version-added type_params, and still hashes nonempty type parameters and every other AST field.
+2026-07-18: Exact-head macOS/Python 3.12 product-workflows-adapters-core exposed five inherited multi-voice TTS unit-test isolation failures. The tests invoked real say/espeak/FFmpeg despite the shard intentionally omitting FFmpeg; several provider fakes also rejected the real provider keyword before exercising their named failure, and the orphan fixture contained a zero-data WAV. The correction is test-only: match the provider boundary, inject deterministic system-audio/conversion fakes, and assert format/path/orphan cleanup without weakening or changing production fallback.
+2026-07-18: Exact-head hosted platform-infrastructure-metrics exposed two inherited production contract defects. USER_DB_BASE_DIR was documented and loaded as env-over-config, but the runtime path resolver inverted that precedence after LazySettings had cached an earlier value; the bounded fix restores canonical env authority and adds direct stale-settings coverage. NotificationService.notify_generic mutated caller-owned payloads while adding its generated timestamp; the bounded fix timestamps a detached copy, updates the stale Guardian mutation expectation, and adds immutability/timestamp regressions without changing redaction or delivery semantics.
+2026-07-18: Exact-head Windows product-prompt-studio then exposed two inherited unauthenticated WebSocket integration tests. The endpoint correctly bypasses HTTP dependency overrides and authenticates the socket itself, so both tests closed 4401 before a frame. The secure correction supplies the configured single-user API key and makes the project-subscribe case authorize against a real fixture project owned by that authenticated principal; production WebSocket auth remains fail closed.
+2026-07-18: Independent final review caught two pre-commit hardening gaps. Runtime USER_DB_BASE_DIR precedence now trims values like the canonical config loader, so a blank env falls back and surrounding whitespace cannot redirect storage; direct regressions cover both. The AuthNZ database runbook is updated from its stale config-over-env claim to the actual env-over-config contract. Multi-voice tests remain hermetic while a direct mocked system-TTS wrapper regression preserves executable selection, requested-format conversion, output-size, and cleanup coverage.
+2026-07-18: Hosted Resource Governance and Evaluations shards exposed three stale harness boundaries after fail-closed credential hardening. The RG chat test now supplies a server provider credential while keeping CHAT_FORCE_MOCK disabled, so it exercises real credential resolution before deterministic TEST_MODE dispatch; the embeddings fake explicitly accepts and asserts cache_scope_sensitive=False. The concurrent RAG evaluation test patches the current bounded analyze boundary rather than obsolete asyncio.to_thread, preserving concurrent coverage without reaching a real provider.
+Hosted-CI follow-up: evaluation relevance concurrency patched the wrong LLM helper boundary; workflow definition, saved-run, and ad-hoc writes bypassed `_tenant_id_for_user`, persisting the literal `"None"` for absent tenants. Add focused seam/concurrency assertions and endpoint regressions for missing/blank tenant normalization before changing production.
+Hosted integrations follow-up: regenerate the official Web Scraping import inventory pair; update two cookie ingestion fakes to the explicit allow_llm_extraction boundary and assert False; harden ContentMetadataHandler with a fixed pre-decode JSON nesting ceiling because Python 3.12/3.13 accept a 2,000-deep envelope that 3.10/3.11 reject. Add boundary/string-escaping/public-method agreement regressions and preserve fail-closed original-content behavior.
+Hosted Windows media-audio follow-up is test-boundary/timing drift, not a production defect: positive WAV transcription endpoint tests must stub canonical conversion independent of module import order; speech-chat recovery and late audio stream tests must use explicit start/cleanup events instead of 10–20ms scheduling assumptions or awaiting an already-timed-out operation before pytest.raises. Preserve production conversion, capacity ownership, cancellation, and fail-closed timeout semantics.
+Hosted sandbox follow-up is test-harness drift: configure the deletion regression's mocked workspace under the allowed sandbox root; accept Starlette 1.2.1's ClosedResourceError as a pre-accept fail-closed WebSocket denial while retaining close-code checks when available; widen only the Windows thread-start handshake; and retain/resolve deterministic executor Futures so background worker exceptions surface immediately instead of becoming a 60s opaque event timeout. Do not weaken production root containment or signed-token validation.
+2026-07-18: Final hosted-follow-up stabilization completed locally. Corrected the actual bounded RAG evaluation seam; normalized absent/blank workflow tenants across definition, saved-run, ad-hoc, event, step, control, and rejection writes; regenerated the official Web Scraping inventory artifacts; added a fail-closed 64-level metadata JSON pre-decode guard with escaped-string and public-method boundary coverage; and made Windows audio plus sandbox concurrency/auth/deletion regressions deterministic without weakening production timeouts, egress, root containment, or signed-token validation. Independent final re-review found no remaining P0-P3 issue after executor Future propagation and snapshot-lock cleanup were corrected.
+
+Fresh high-risk results: product Workflows API 85 passed; Workflows storage 37; Evaluations core 284 passed/5 skipped; Integrations 961/2; Media/Audio 2,241 passed/39 skipped/1 expected xfail/1 existing xpass; Sandbox combined 335/6 plus the final corrected five-test concurrency/durability subset 5/5; Resource Governance 202 passed/2 expected xfails. Earlier affected Prompt Studio, Character, Chat, Embeddings, LLM, ingestion, research, workflow-adapter, database, and monitoring suites also remained green. Fatal Ruff passed; Python 3.10/3.12/3.13 py_compile passed; full Ruff found zero issues on added lines (116 historical full-file findings); final production Bandit reported 0 findings/0 errors over 9,633 LOC; test Bandit reported 0 findings/0 errors after excluding two verified unchanged baseline findings (B106/B112, plus standard intentional test exclusions); git diff --check passed. The task remains In Progress pending exact-new-head hosted CI and the requester-authored Change summary required by policy. The unrelated PID and two untracked watchlist templates remain untouched and must not be staged.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->

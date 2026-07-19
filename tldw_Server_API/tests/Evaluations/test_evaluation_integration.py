@@ -204,8 +204,11 @@ class TestEvaluationIntegration:
         evaluator.embedding_available = False  # Force LLM path
 
         # Mock LLM for predictable results
-        with patch('tldw_Server_API.app.core.Evaluations.rag_evaluator.asyncio.to_thread') as mock_thread:
-            mock_thread.return_value = "3"  # Average score
+        with patch(
+            "tldw_Server_API.app.core.Evaluations.rag_evaluator._run_circuit_bounded_rag_analyze",
+            new_callable=AsyncMock,
+            return_value="3",
+        ) as mock_analyze:
 
             # Create multiple evaluation tasks
             tasks = []
@@ -225,6 +228,7 @@ class TestEvaluationIntegration:
             assert len(results) == 5
             for result in results:
                 assert "metrics" in result
+            assert mock_analyze.await_count == 5
 
             evaluator.close()
 

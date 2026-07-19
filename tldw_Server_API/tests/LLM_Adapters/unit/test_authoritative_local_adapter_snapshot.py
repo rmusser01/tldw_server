@@ -278,7 +278,7 @@ def test_explicit_timeout_overrides_config_at_local_http_boundary(
     kobold_responses: list[_KoboldResponse] = []
     app_config = {
         section: {
-            endpoint_field: "https://selected-local.example/v1",
+            endpoint_field: "https://example.com/selected-local/v1",
             "model": "snapshot-model",
             "api_timeout": 999,
         }
@@ -332,11 +332,11 @@ def test_local_credential_base_url_projects_to_handler_endpoint_field(
 ) -> None:
     app_config = build_app_config_overrides(
         provider,
-        {"base_url": "https://selected-local.example/v1"},
+        {"base_url": "https://example.com/selected-local/v1"},
     )
 
     assert app_config == {
-        section: {endpoint_field: "https://selected-local.example/v1"}
+        section: {endpoint_field: "https://example.com/selected-local/v1"}
     }
 
 
@@ -525,7 +525,7 @@ def test_openai_compatible_local_http_boundary_preserves_explicit_timeout(
         return _OpenAICompatibleResponse()
 
     result = local_adapters._chat_with_openai_compatible_local_server(
-        api_base_url="https://selected-local.example/v1",
+        api_base_url="https://example.com/selected-local/v1",
         model_name="snapshot-model",
         input_data=[{"role": "user", "content": "hello"}],
         streaming=streaming,
@@ -550,7 +550,7 @@ def test_openai_compatible_local_nonstream_error_is_detached_and_sanitized(
 
     with pytest.raises(ChatProviderError) as exc_info:
         local_adapters._chat_with_openai_compatible_local_server(
-            api_base_url="https://selected-local.example/v1",
+            api_base_url="https://example.com/selected-local/v1",
             model_name="snapshot-model",
             input_data=[{"role": "user", "content": "hello"}],
             timeout=1.25,
@@ -575,7 +575,7 @@ def test_openai_compatible_local_stream_error_has_canonical_wire_and_safe_log(
 
     chunks = list(
         local_adapters._chat_with_openai_compatible_local_server(
-            api_base_url="https://selected-local.example/v1",
+            api_base_url="https://example.com/selected-local/v1",
             model_name="snapshot-model",
             input_data=[{"role": "user", "content": "hello"}],
             streaming=True,
@@ -608,7 +608,7 @@ def test_openai_compatible_local_in_band_error_is_replaced_and_terminal(
 
     chunks = list(
         local_adapters._chat_with_openai_compatible_local_server(
-            api_base_url="https://selected-local.example/v1",
+            api_base_url="https://example.com/selected-local/v1",
             model_name="snapshot-model",
             input_data=[{"role": "user", "content": "hello"}],
             streaming=True,
@@ -642,7 +642,7 @@ def test_openai_compatible_local_context_exit_failure_has_one_terminal_sequence(
 
     chunks = list(
         local_adapters._chat_with_openai_compatible_local_server(
-            api_base_url="https://selected-local.example/v1",
+            api_base_url="https://example.com/selected-local/v1",
             model_name="snapshot-model",
             input_data=[{"role": "user", "content": "hello"}],
             streaming=True,
@@ -671,7 +671,7 @@ def test_openai_compatible_local_client_close_failure_cannot_break_terminal_wire
 
     chunks = list(
         local_adapters._chat_with_openai_compatible_local_server(
-            api_base_url="https://selected-local.example/v1",
+            api_base_url="https://example.com/selected-local/v1",
             model_name="snapshot-model",
             input_data=[{"role": "user", "content": "hello"}],
             streaming=True,
@@ -698,7 +698,7 @@ def test_openai_compatible_local_http_error_is_sanitized_at_adapter_boundary(
     sentinel = "LOCAL-HTTP-PRIVATE-URL-AND-BODY"
     request = httpx.Request(
         "POST",
-        f"https://selected-local.example/{sentinel}/v1/chat/completions",
+        f"https://example.com/selected-local/{sentinel}/v1/chat/completions",
     )
     response = httpx.Response(
         502,
@@ -719,7 +719,7 @@ def test_openai_compatible_local_http_error_is_sanitized_at_adapter_boundary(
 
     def invoke():
         return local_adapters._chat_with_openai_compatible_local_server(
-            api_base_url=f"https://selected-local.example/{sentinel}/v1",
+            api_base_url=f"https://example.com/selected-local/{sentinel}/v1",
             model_name="snapshot-model",
             input_data=[{"role": "user", "content": "hello"}],
             streaming=streaming,
@@ -753,7 +753,7 @@ def test_unstarted_openai_compatible_local_stream_never_creates_client() -> None
         return client
 
     stream = local_adapters._chat_with_openai_compatible_local_server(
-        api_base_url="https://selected-local.example/v1",
+        api_base_url="https://example.com/selected-local/v1",
         model_name="snapshot-model",
         input_data=[{"role": "user", "content": "hello"}],
         streaming=True,
@@ -774,7 +774,7 @@ def test_started_openai_compatible_local_stream_closes_once_and_releases_key() -
     credential_ref = weakref.ref(credential)
     client = _OpenAICompatibleClient([])
     stream = local_adapters._chat_with_openai_compatible_local_server(
-        api_base_url="https://selected-local.example/v1",
+        api_base_url="https://example.com/selected-local/v1",
         model_name="snapshot-model",
         input_data=[{"role": "user", "content": "hello"}],
         api_key=credential,

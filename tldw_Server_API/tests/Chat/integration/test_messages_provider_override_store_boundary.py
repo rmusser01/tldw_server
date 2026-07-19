@@ -107,7 +107,7 @@ def test_messages_dispatch_uses_one_atomic_override_snapshot(
             "openai": LLMProviderOverride(
                 provider="openai",
                 api_key="atomic-key",
-                credential_fields={"base_url": "https://atomic.example/v1"},
+                credential_fields={"base_url": "https://example.com/atomic/v1"},
             )
         }
     )
@@ -120,7 +120,7 @@ def test_messages_dispatch_uses_one_atomic_override_snapshot(
     assert len(adapter_calls) == 1
     assert adapter_calls[0]["api_key"] == "atomic-key"
     assert adapter_calls[0]["app_config"]["openai_api"]["api_base_url"] == (
-        "https://atomic.example/v1"
+        "https://example.com/atomic/v1"
     )
 
 
@@ -275,7 +275,7 @@ def test_messages_policy_and_credentials_share_one_override_snapshot(
         if operation == "messages"
         else "claude-3-sonnet-20240229"
     )
-    base_url = f"https://{provider}-snapshot-a.example/v1"
+    base_url = f"https://example.com/{provider}-snapshot-a/v1"
 
     overrides_module.set_llm_provider_overrides_cache_for_tests(
         {

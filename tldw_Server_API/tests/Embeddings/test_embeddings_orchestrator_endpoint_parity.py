@@ -2489,7 +2489,7 @@ def test_concurrent_server_overrides_reach_provider_as_atomic_key_endpoint_snaps
         provider: LLMProviderOverride(
             provider=provider,
             api_key=f"override-key-{provider}",
-            credential_fields={"base_url": f"https://override-{provider}.example/custom"},
+            credential_fields={"base_url": f"https://example.com/{provider}/custom"},
         )
         for provider in ("openai", "google")
     }
@@ -2566,14 +2566,14 @@ def test_concurrent_server_overrides_reach_provider_as_atomic_key_endpoint_snaps
         (
             "openai",
             "override-key-openai",
-            "https://override-openai.example/custom",
+            "https://example.com/openai/custom",
             "text-embedding-3-small",
             "text-openai",
         ),
         (
             "google",
             "override-key-google",
-            "https://override-google.example/custom",
+            "https://example.com/google/custom",
             "text-embedding-004",
             "text-google",
         ),

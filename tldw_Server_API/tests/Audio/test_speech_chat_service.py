@@ -1073,6 +1073,7 @@ async def test_speech_chat_sync_adapter_timeout_capacity_and_recovery(
     closed_runtime_ids: list[int] = []
     marked_runtime_ids: list[int] = []
     runtime_pool_states: list[tuple[str, int, int]] = []
+    first_runtime_closed = asyncio.Event()
     runtime_count = 0
     call_count = 0
 
@@ -1096,6 +1097,8 @@ async def test_speech_chat_sync_adapter_timeout_capacity_and_recovery(
         async def close(self) -> None:
             closed_runtime_ids.append(self.runtime_id)
             runtime_pool_states.append(("close", self.runtime_id, pool.active_count))
+            if self.runtime_id == 1:
+                first_runtime_closed.set()
 
     def blocking_chat(
         request: dict[str, Any],
@@ -1128,7 +1131,7 @@ async def test_speech_chat_sync_adapter_timeout_capacity_and_recovery(
         lambda: registry,
     )
     monkeypatch.setattr(speech_chat_service, "SYNC_ADAPTER_CALL_POOL", pool, raising=False)
-    monkeypatch.setattr(speech_chat_service, "SPEECH_CHAT_LLM_TIMEOUT_SECONDS", 0.02)
+    monkeypatch.setattr(speech_chat_service, "SPEECH_CHAT_LLM_TIMEOUT_SECONDS", 0.5)
 
     async def request_once() -> Any:
         return await run_speech_chat_turn(
@@ -1143,7 +1146,7 @@ async def test_speech_chat_sync_adapter_timeout_capacity_and_recovery(
         )
 
     with pytest.raises(HTTPException) as first_error:
-        await asyncio.wait_for(request_once(), timeout=0.5)
+        await asyncio.wait_for(request_once(), timeout=2.0)
     assert first_error.value.status_code == status.HTTP_502_BAD_GATEWAY
     assert "private-speech-credential-marker" not in repr(first_error.value.detail)
     assert started.is_set()
@@ -1154,7 +1157,7 @@ async def test_speech_chat_sync_adapter_timeout_capacity_and_recovery(
     assert closed_runtime_ids == []
 
     with pytest.raises(HTTPException) as capacity_error:
-        await asyncio.wait_for(request_once(), timeout=0.5)
+        await asyncio.wait_for(request_once(), timeout=2.0)
     assert capacity_error.value.status_code == status.HTTP_502_BAD_GATEWAY
     assert capacity_error.value.detail == "LLM provider error during speech chat"
     assert call_count == 1
@@ -1162,17 +1165,14 @@ async def test_speech_chat_sync_adapter_timeout_capacity_and_recovery(
     assert ("close", 2, 1) in runtime_pool_states
 
     release.set()
-    for _ in range(100):
-        if pool.active_count == 0 and 1 in closed_runtime_ids:
-            break
-        await asyncio.sleep(0.01)
+    await asyncio.wait_for(first_runtime_closed.wait(), timeout=2.0)
     assert pool.active_count == 0
     assert sorted(closed_runtime_ids) == [1, 2]
     assert marked_runtime_ids == [1]
     assert ("mark", 1, 0) in runtime_pool_states
     assert ("close", 1, 0) in runtime_pool_states
 
-    recovered = await asyncio.wait_for(request_once(), timeout=0.5)
+    recovered = await asyncio.wait_for(request_once(), timeout=2.0)
     assert recovered.assistant_text == "recovered reply"
     assert call_count == 2
     assert sorted(closed_runtime_ids) == [1, 2, 3]
@@ -1180,7 +1180,7 @@ async def test_speech_chat_sync_adapter_timeout_capacity_and_recovery(
     assert ("mark", 3, 0) in runtime_pool_states
     assert ("close", 3, 0) in runtime_pool_states
     assert all("timeout" not in request for request in requests)
-    assert adapter_timeouts == [0.02, 0.02]
+    assert adapter_timeouts == [0.5, 0.5]
 
 
 @pytest.mark.asyncio

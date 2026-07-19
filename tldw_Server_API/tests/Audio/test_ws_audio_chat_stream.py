@@ -130,21 +130,12 @@ async def test_audio_sync_call_never_starts_late_when_default_executor_is_satura
         audio_streaming_module._run_bounded_audio_sync_call(
             provider_call,
             name="audio-default-executor-regression",
-            timeout_seconds=0.01 if abandonment == "timeout" else 30.0,
+            timeout_seconds=0.5 if abandonment == "timeout" else 30.0,
             on_abandoned=cleanup,
         )
     )
-    started_waiter = asyncio.create_task(call_started.wait())
     try:
-        done, _pending = await asyncio.wait(
-            {operation, started_waiter},
-            return_when=asyncio.FIRST_COMPLETED,
-            timeout=1.0,
-        )
-        assert done, "Audio provider call did not start or terminate"
-        if operation in done:
-            await operation
-        assert started_waiter in done
+        await asyncio.wait_for(call_started.wait(), timeout=2.0)
 
         if abandonment == "caller_cancel":
             operation.cancel()
@@ -162,11 +153,8 @@ async def test_audio_sync_call_never_starts_late_when_default_executor_is_satura
         if not operation.done():
             operation.cancel()
             await asyncio.gather(operation, return_exceptions=True)
-        if not started_waiter.done():
-            started_waiter.cancel()
-        await asyncio.gather(started_waiter, return_exceptions=True)
         if invocation_count:
-            await asyncio.wait_for(cleanup_finished.wait(), timeout=1.0)
+            await asyncio.wait_for(cleanup_finished.wait(), timeout=2.0)
         loop.set_default_executor(
             previous_executor or concurrent.futures.ThreadPoolExecutor()
         )
@@ -265,7 +253,7 @@ async def test_audio_late_chunk_usage_matches_normal_success_semantics(
     async def cleanup() -> None:
         cleanup_finished.set()
 
-    monkeypatch.setattr(audio_streaming_module, "AUDIO_STREAM_NEXT_TIMEOUT_SECONDS", 0.01)
+    monkeypatch.setattr(audio_streaming_module, "AUDIO_STREAM_NEXT_TIMEOUT_SECONDS", 0.5)
     stream: Any = AsyncStream() if stream_mode == "async" else SyncStream()
     iterator = audio_streaming_module._iterate_audio_provider_stream(
         stream,
@@ -275,15 +263,8 @@ async def test_audio_late_chunk_usage_matches_normal_success_semantics(
         on_late_chunk=mark_late_chunk,
     )
     operation = asyncio.create_task(iterator.__anext__())
-    started_waiter = asyncio.create_task(next_started.wait())
     try:
-        done, _pending = await asyncio.wait(
-            {operation, started_waiter},
-            return_when=asyncio.FIRST_COMPLETED,
-        )
-        if operation in done:
-            await operation
-        assert started_waiter in done
+        await asyncio.wait_for(next_started.wait(), timeout=2.0)
 
         if abandonment == "caller_cancel":
             operation.cancel()
@@ -299,11 +280,8 @@ async def test_audio_late_chunk_usage_matches_normal_success_semantics(
         if not operation.done():
             operation.cancel()
             await asyncio.gather(operation, return_exceptions=True)
-        if not started_waiter.done():
-            started_waiter.cancel()
-        await asyncio.gather(started_waiter, return_exceptions=True)
 
-    await asyncio.wait_for(cleanup_finished.wait(), timeout=1.0)
+    await asyncio.wait_for(cleanup_finished.wait(), timeout=2.0)
     assert marks == expected_marks
 
 
@@ -354,7 +332,7 @@ async def test_audio_late_sync_iterator_is_closed_with_its_source(
     monkeypatch.setattr(
         audio_streaming_module,
         "AUDIO_STREAM_ITERATOR_TIMEOUT_SECONDS",
-        0.01,
+        0.5 if abandonment == "timeout" else 30.0,
     )
     stream = audio_streaming_module._iterate_audio_provider_stream(
         source,
@@ -363,7 +341,7 @@ async def test_audio_late_sync_iterator_is_closed_with_its_source(
         cleanup_claimed=cleanup_claimed,
     )
     operation = asyncio.create_task(stream.__anext__())
-    await iterator_started.wait()
+    await asyncio.wait_for(iterator_started.wait(), timeout=2.0)
     if abandonment == "caller_cancel":
         operation.cancel()
         with pytest.raises(asyncio.CancelledError):
@@ -374,7 +352,7 @@ async def test_audio_late_sync_iterator_is_closed_with_its_source(
     assert lifecycle == []
 
     release_iterator.set()
-    await asyncio.wait_for(cleanup_finished.wait(), timeout=1.0)
+    await asyncio.wait_for(cleanup_finished.wait(), timeout=2.0)
 
     assert lifecycle == ["iterator_close", "source_close", "runtime_close"]
 

@@ -5,6 +5,7 @@ import gc
 import os
 import tempfile
 import time
+from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -20,6 +21,7 @@ os.environ["CSRF_ENABLED"] = "false"
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_current_active_user
 from tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps import get_prompt_studio_db, get_security_config
 from tldw_Server_API.app.api.v1.schemas.prompt_studio_base import SecurityConfig
+from tldw_Server_API.app.core.AuthNZ.settings import get_settings as get_auth_settings
 from tldw_Server_API.app.core.DB_Management.PromptStudioDatabase import PromptStudioDatabase
 from tldw_Server_API.app.main import app
 
@@ -239,6 +241,31 @@ def mock_user():
         "is_authenticated": True,
         "permissions": ["read", "write", "delete"]
     }
+
+
+@pytest.fixture
+def websocket_auth() -> tuple[dict[str, str], str]:
+    """Return real single-user WebSocket credentials and their principal ID."""
+    auth_settings = get_auth_settings()
+    return (
+        {"X-API-KEY": auth_settings.SINGLE_USER_API_KEY},
+        str(auth_settings.SINGLE_USER_FIXED_ID),
+    )
+
+
+@pytest.fixture
+def owned_websocket_project(test_db, websocket_auth):
+    """Bind WebSocket tests to a project owned by the authenticated principal."""
+    headers, user_id = websocket_auth
+    project = test_db.create_project(
+        "WebSocket ownership boundary",
+        user_id=user_id,
+    )
+    with patch(
+        "tldw_Server_API.app.api.v1.endpoints.prompt_studio.prompt_studio_websocket.managed_prompt_studio_db",
+        return_value=nullcontext(test_db),
+    ):
+        yield headers, project
 
 
 @pytest.fixture
@@ -1640,50 +1667,49 @@ class TestOptimizationEndpoints:
 class TestWebSocketEndpoints:
     """Test WebSocket functionality."""
 
-    def test_websocket_connection(self, client):
+    def test_websocket_connection(self, client, owned_websocket_project):
 
         """Test WebSocket connection."""
-        with client.websocket_connect("/api/v1/prompt-studio/ws") as websocket:
-            # Send a test message
+        headers, project = owned_websocket_project
+        with client.websocket_connect(
+            "/api/v1/prompt-studio/ws",
+            headers=headers,
+        ) as websocket:
             websocket.send_json({
                 "type": "subscribe",
-                "project_id": 1
+                "project_id": project["id"],
             })
 
-            # Receive acknowledgment
             data = websocket.receive_json()
             assert data["type"] == "subscribed"
-            assert data["project_id"] == 1
+            assert data["project_id"] == project["id"]
 
-    def test_websocket_job_updates(self, client):
+    def test_websocket_job_updates(self, client, owned_websocket_project):
 
         """Test receiving job updates via WebSocket."""
-        with client.websocket_connect("/api/v1/prompt-studio/ws") as websocket:
+        headers, project = owned_websocket_project
+        with client.websocket_connect(
+            f"/api/v1/prompt-studio/ws?project_id={project['id']}",
+            headers=headers,
+        ) as websocket:
             # Subscribe to job updates
             websocket.send_json({
                 "type": "subscribe_job",
                 "job_id": "job-123"
             })
 
-            # Simulate job update
-            with patch('tldw_Server_API.app.core.Prompt_Management.prompt_studio.event_broadcaster.EventBroadcaster.broadcast') as mock_broadcast:
-                mock_broadcast.return_value = None
+            update_message = {
+                "type": "job_update",
+                "job_id": "job-123",
+                "status": "completed",
+                "result": {"score": 0.95}
+            }
 
-                # Trigger a job update
-                update_message = {
-                    "type": "job_update",
-                    "job_id": "job-123",
-                    "status": "completed",
-                    "result": {"score": 0.95}
-                }
+            websocket.send_json(update_message)
 
-                # In real scenario, this would be triggered by job processor
-                websocket.send_json(update_message)
-
-                # Receive the update
-                data = websocket.receive_json()
-                assert data["type"] == "job_update"
-                assert data["status"] == "completed"
+            data = websocket.receive_json()
+            assert data["type"] == "job_update"
+            assert data["status"] == "completed"
 
 ########################################################################################################################
 # Error Handling Tests
