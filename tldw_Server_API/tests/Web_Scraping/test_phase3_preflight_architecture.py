@@ -6,7 +6,7 @@ import ast
 import importlib
 import importlib.util
 import inspect
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
@@ -27,6 +27,21 @@ WEB_SCRAPING_PACKAGE = "tldw_Server_API.app.core.Web_Scraping"
 PREFLIGHT_PACKAGE = f"{WEB_SCRAPING_PACKAGE}.preflight"
 LEGACY_PACKAGE = f"{WEB_SCRAPING_PACKAGE}.scraper_analyzers"
 
+
+@dataclass(frozen=True)
+class ExpectedReexport:
+    canonical_module: str
+    imported_name: str
+    bound_name: str
+
+
+@dataclass(frozen=True)
+class ExpectedShim:
+    canonical_reexports: tuple[ExpectedReexport, ...]
+    all_exports: frozenset[str]
+    child_modules: frozenset[str] = frozenset()
+
+
 FORBIDDEN_ANALYZER_IMPORTS = {
     "asyncio.subprocess",
     "aiohttp",
@@ -44,6 +59,8 @@ FORBIDDEN_ANALYZER_IMPORTS = {
 FORBIDDEN_ANALYZER_PROCESS_CALLS = {
     "asyncio.create_subprocess_exec",
     "asyncio.create_subprocess_shell",
+    "os.fork",
+    "os.forkpty",
     "os.popen",
     "os.posix_spawn",
     "os.posix_spawnp",
@@ -73,40 +90,341 @@ PHASE0_APPLICATION_LEGACY_IMPORT_ALLOWLIST = {
     ),
 }
 
-PHASE0_LEGACY_MODULES = {
-    LEGACY_PACKAGE,
-    f"{LEGACY_PACKAGE}.analyzers",
-    f"{LEGACY_PACKAGE}.analyzers.behavioral_detector",
-    f"{LEGACY_PACKAGE}.analyzers.captcha_detector",
-    f"{LEGACY_PACKAGE}.analyzers.fingerprint_analyzer",
-    f"{LEGACY_PACKAGE}.analyzers.integrity_analyzer",
-    f"{LEGACY_PACKAGE}.analyzers.js_detector",
-    f"{LEGACY_PACKAGE}.analyzers.rate_limit_profiler",
-    f"{LEGACY_PACKAGE}.analyzers.robots_checker",
-    f"{LEGACY_PACKAGE}.analyzers.tls_analyzer",
-    f"{LEGACY_PACKAGE}.analyzers.waf_detector",
-    f"{LEGACY_PACKAGE}.recommendations.recommender",
-    f"{LEGACY_PACKAGE}.runner",
-    f"{LEGACY_PACKAGE}.scoring.scoring_engine",
-    f"{LEGACY_PACKAGE}.utils.browser_identities",
-    f"{LEGACY_PACKAGE}.utils.impersonate_target",
-    f"{LEGACY_PACKAGE}.utils.waf_result_parser",
-}
-ALLOWED_CHILD_SHIM_IMPORTS = {
-    "analyzers/__init__.py": frozenset(
-        {
-            "behavioral_detector",
-            "captcha_detector",
-            "fingerprint_analyzer",
-            "integrity_analyzer",
-            "js_detector",
-            "rate_limit_profiler",
-            "robots_checker",
-            "tls_analyzer",
-            "waf_detector",
-        }
+EXPECTED_SHIM_MANIFEST = {
+    "__init__.py": ExpectedShim(
+        canonical_reexports=(
+            ExpectedReexport(f"{PREFLIGHT_PACKAGE}.runner", "gather_analysis", "gather_analysis"),
+            ExpectedReexport(f"{PREFLIGHT_PACKAGE}.runner", "run_analysis", "run_analysis"),
+        ),
+        all_exports=frozenset({"gather_analysis", "run_analysis"}),
+    ),
+    "analyzers/__init__.py": ExpectedShim(
+        canonical_reexports=(),
+        all_exports=frozenset(
+            {
+                "behavioral_detector",
+                "captcha_detector",
+                "fingerprint_analyzer",
+                "integrity_analyzer",
+                "js_detector",
+                "rate_limit_profiler",
+                "robots_checker",
+                "tls_analyzer",
+                "waf_detector",
+            }
+        ),
+        child_modules=frozenset(
+            {
+                "behavioral_detector",
+                "captcha_detector",
+                "fingerprint_analyzer",
+                "integrity_analyzer",
+                "js_detector",
+                "rate_limit_profiler",
+                "robots_checker",
+                "tls_analyzer",
+                "waf_detector",
+            }
+        ),
+    ),
+    "analyzers/behavioral_detector.py": ExpectedShim(
+        canonical_reexports=(
+            ExpectedReexport(
+                f"{PREFLIGHT_PACKAGE}.analyzers.behavioral_detector",
+                "HONEYPOT_THRESHOLD",
+                "HONEYPOT_THRESHOLD",
+            ),
+            ExpectedReexport(f"{PREFLIGHT_PACKAGE}.analyzers.behavioral_detector", "ScanDepth", "ScanDepth"),
+            ExpectedReexport(
+                f"{PREFLIGHT_PACKAGE}.analyzers.behavioral_detector",
+                "detect_honeypots",
+                "detect_honeypots",
+            ),
+        ),
+        all_exports=frozenset({"HONEYPOT_THRESHOLD", "ScanDepth", "detect_honeypots"}),
+    ),
+    "analyzers/captcha_detector.py": ExpectedShim(
+        canonical_reexports=(
+            ExpectedReexport(
+                f"{PREFLIGHT_PACKAGE}.analyzers.captcha_detector",
+                "CAPTCHA_FINGERPRINTS",
+                "CAPTCHA_FINGERPRINTS",
+            ),
+            ExpectedReexport(
+                f"{PREFLIGHT_PACKAGE}.analyzers.captcha_detector",
+                "detect_captcha",
+                "detect_captcha",
+            ),
+        ),
+        all_exports=frozenset({"CAPTCHA_FINGERPRINTS", "detect_captcha"}),
+    ),
+    "analyzers/fingerprint_analyzer.py": ExpectedShim(
+        canonical_reexports=(
+            ExpectedReexport(
+                f"{PREFLIGHT_PACKAGE}.analyzers.fingerprint_analyzer",
+                "JS_PROBE_SCRIPT",
+                "JS_PROBE_SCRIPT",
+            ),
+            ExpectedReexport(
+                f"{PREFLIGHT_PACKAGE}.analyzers.fingerprint_analyzer",
+                "KNOWN_BOT_DETECTION_SCRIPTS",
+                "KNOWN_BOT_DETECTION_SCRIPTS",
+            ),
+            ExpectedReexport(
+                f"{PREFLIGHT_PACKAGE}.analyzers.fingerprint_analyzer",
+                "KNOWN_BOT_GLOBAL_OBJECTS",
+                "KNOWN_BOT_GLOBAL_OBJECTS",
+            ),
+            ExpectedReexport(
+                f"{PREFLIGHT_PACKAGE}.analyzers.fingerprint_analyzer",
+                "analyze_fingerprinting",
+                "analyze_fingerprinting",
+            ),
+        ),
+        all_exports=frozenset(
+            {
+                "JS_PROBE_SCRIPT",
+                "KNOWN_BOT_DETECTION_SCRIPTS",
+                "KNOWN_BOT_GLOBAL_OBJECTS",
+                "analyze_fingerprinting",
+            }
+        ),
+    ),
+    "analyzers/integrity_analyzer.py": ExpectedShim(
+        canonical_reexports=(
+            ExpectedReexport(
+                f"{PREFLIGHT_PACKAGE}.analyzers.integrity_analyzer",
+                "FUNCTION_SUSPICION_MAP",
+                "FUNCTION_SUSPICION_MAP",
+            ),
+            ExpectedReexport(
+                f"{PREFLIGHT_PACKAGE}.analyzers.integrity_analyzer",
+                "FUNCTIONS_TO_CHECK",
+                "FUNCTIONS_TO_CHECK",
+            ),
+            ExpectedReexport(
+                f"{PREFLIGHT_PACKAGE}.analyzers.integrity_analyzer",
+                "analyze_function_integrity",
+                "analyze_function_integrity",
+            ),
+        ),
+        all_exports=frozenset({"FUNCTION_SUSPICION_MAP", "FUNCTIONS_TO_CHECK", "analyze_function_integrity"}),
+    ),
+    "analyzers/js_detector.py": ExpectedShim(
+        canonical_reexports=(
+            ExpectedReexport(
+                f"{PREFLIGHT_PACKAGE}.analyzers.js_detector",
+                "analyze_js_rendering",
+                "analyze_js_rendering",
+            ),
+        ),
+        all_exports=frozenset({"analyze_js_rendering"}),
+    ),
+    "analyzers/rate_limit_profiler.py": ExpectedShim(
+        canonical_reexports=(
+            ExpectedReexport(
+                f"{PREFLIGHT_PACKAGE}.analyzers.rate_limit_profiler",
+                "BLOCKING_STATUS_CODES",
+                "BLOCKING_STATUS_CODES",
+            ),
+            ExpectedReexport(
+                f"{PREFLIGHT_PACKAGE}.analyzers.rate_limit_profiler",
+                "BURST_COUNT",
+                "BURST_COUNT",
+            ),
+            ExpectedReexport(
+                f"{PREFLIGHT_PACKAGE}.analyzers.rate_limit_profiler",
+                "DEFAULT_DELAY",
+                "DEFAULT_DELAY",
+            ),
+            ExpectedReexport(
+                f"{PREFLIGHT_PACKAGE}.analyzers.rate_limit_profiler",
+                "GENTLE_PROBE_COUNT",
+                "GENTLE_PROBE_COUNT",
+            ),
+            ExpectedReexport(
+                f"{PREFLIGHT_PACKAGE}.analyzers.rate_limit_profiler",
+                "profile_rate_limits",
+                "profile_rate_limits",
+            ),
+        ),
+        all_exports=frozenset(
+            {"BLOCKING_STATUS_CODES", "BURST_COUNT", "DEFAULT_DELAY", "GENTLE_PROBE_COUNT", "profile_rate_limits"}
+        ),
+    ),
+    "analyzers/robots_checker.py": ExpectedShim(
+        canonical_reexports=(
+            ExpectedReexport(
+                f"{PREFLIGHT_PACKAGE}.analyzers.robots_checker",
+                "check_robots_txt",
+                "check_robots_txt",
+            ),
+        ),
+        all_exports=frozenset({"check_robots_txt"}),
+    ),
+    "analyzers/tls_analyzer.py": ExpectedShim(
+        canonical_reexports=(
+            ExpectedReexport(
+                f"{PREFLIGHT_PACKAGE}.analyzers.tls_analyzer",
+                "analyze_tls_fingerprint",
+                "analyze_tls_fingerprint",
+            ),
+        ),
+        all_exports=frozenset({"analyze_tls_fingerprint"}),
+    ),
+    "analyzers/waf_detector.py": ExpectedShim(
+        canonical_reexports=(
+            ExpectedReexport(f"{PREFLIGHT_PACKAGE}.analyzers.waf_detector", "detect_waf", "detect_waf"),
+        ),
+        all_exports=frozenset({"detect_waf"}),
+    ),
+    "recommendations/__init__.py": ExpectedShim(
+        canonical_reexports=(
+            ExpectedReexport(
+                f"{PREFLIGHT_PACKAGE}.recommendations.recommender",
+                "generate_recommendations",
+                "generate_recommendations",
+            ),
+        ),
+        all_exports=frozenset({"generate_recommendations"}),
+    ),
+    "recommendations/recommender.py": ExpectedShim(
+        canonical_reexports=(
+            ExpectedReexport(
+                f"{PREFLIGHT_PACKAGE}.recommendations.recommender",
+                "generate_recommendations",
+                "generate_recommendations",
+            ),
+        ),
+        all_exports=frozenset({"generate_recommendations"}),
+    ),
+    "runner.py": ExpectedShim(
+        canonical_reexports=tuple(
+            ExpectedReexport(f"{PREFLIGHT_PACKAGE}.runner", name, name)
+            for name in (
+                "AnalysisOutput",
+                "ScanDepth",
+                "analyze_fingerprinting",
+                "analyze_function_integrity",
+                "analyze_js_rendering",
+                "analyze_tls_fingerprint",
+                "check_robots_txt",
+                "detect_captcha",
+                "detect_honeypots",
+                "detect_waf",
+                "gather_analysis",
+                "profile_rate_limits",
+                "run_analysis",
+            )
+        ),
+        all_exports=frozenset(
+            {
+                "AnalysisOutput",
+                "ScanDepth",
+                "analyze_fingerprinting",
+                "analyze_function_integrity",
+                "analyze_js_rendering",
+                "analyze_tls_fingerprint",
+                "check_robots_txt",
+                "detect_captcha",
+                "detect_honeypots",
+                "detect_waf",
+                "gather_analysis",
+                "profile_rate_limits",
+                "run_analysis",
+            }
+        ),
+    ),
+    "scoring/__init__.py": ExpectedShim(
+        canonical_reexports=(
+            ExpectedReexport(
+                f"{PREFLIGHT_PACKAGE}.scoring.scoring_engine",
+                "calculate_difficulty_score",
+                "calculate_difficulty_score",
+            ),
+        ),
+        all_exports=frozenset({"calculate_difficulty_score"}),
+    ),
+    "scoring/scoring_engine.py": ExpectedShim(
+        canonical_reexports=(
+            ExpectedReexport(
+                f"{PREFLIGHT_PACKAGE}.scoring.scoring_engine",
+                "calculate_difficulty_score",
+                "calculate_difficulty_score",
+            ),
+        ),
+        all_exports=frozenset({"calculate_difficulty_score"}),
+    ),
+    "utils/__init__.py": ExpectedShim(
+        canonical_reexports=(
+            ExpectedReexport(
+                f"{PREFLIGHT_PACKAGE}.utils.browser_identities",
+                "MODERN_BROWSER_IDENTITIES",
+                "MODERN_BROWSER_IDENTITIES",
+            ),
+            ExpectedReexport(
+                f"{PREFLIGHT_PACKAGE}.utils.impersonate_target",
+                "get_impersonate_target",
+                "get_impersonate_target",
+            ),
+            ExpectedReexport(
+                f"{PREFLIGHT_PACKAGE}.utils.waf_result_parser",
+                "parse_wafw00f_output",
+                "parse_wafw00f_output",
+            ),
+        ),
+        all_exports=frozenset({"MODERN_BROWSER_IDENTITIES", "get_impersonate_target", "parse_wafw00f_output"}),
+    ),
+    "utils/browser_identities.py": ExpectedShim(
+        canonical_reexports=(
+            ExpectedReexport(
+                f"{PREFLIGHT_PACKAGE}.utils.browser_identities",
+                "MODERN_BROWSER_IDENTITIES",
+                "MODERN_BROWSER_IDENTITIES",
+            ),
+        ),
+        all_exports=frozenset({"MODERN_BROWSER_IDENTITIES"}),
+    ),
+    "utils/impersonate_target.py": ExpectedShim(
+        canonical_reexports=(
+            ExpectedReexport(
+                f"{PREFLIGHT_PACKAGE}.utils.impersonate_target",
+                "get_impersonate_target",
+                "get_impersonate_target",
+            ),
+        ),
+        all_exports=frozenset({"get_impersonate_target"}),
+    ),
+    "utils/waf_result_parser.py": ExpectedShim(
+        canonical_reexports=(
+            ExpectedReexport(f"{PREFLIGHT_PACKAGE}.utils.waf_result_parser", "ANSI_RE", "ANSI_RE"),
+            ExpectedReexport(
+                f"{PREFLIGHT_PACKAGE}.utils.waf_result_parser",
+                "GENERIC_PHRASES",
+                "GENERIC_PHRASES",
+            ),
+            ExpectedReexport(f"{PREFLIGHT_PACKAGE}.utils.waf_result_parser", "clean_text", "clean_text"),
+            ExpectedReexport(
+                f"{PREFLIGHT_PACKAGE}.utils.waf_result_parser",
+                "parse_wafw00f_output",
+                "parse_wafw00f_output",
+            ),
+        ),
+        all_exports=frozenset({"ANSI_RE", "GENERIC_PHRASES", "clean_text", "parse_wafw00f_output"}),
     ),
 }
+
+
+def _legacy_module_from_manifest_path(relative_path: str) -> str:
+    parts = list(Path(relative_path).with_suffix("").parts)
+    if parts[-1] == "__init__":
+        parts.pop()
+    return ".".join((LEGACY_PACKAGE, *parts))
+
+
+PHASE0_LEGACY_MODULES = frozenset(
+    _legacy_module_from_manifest_path(relative_path) for relative_path in EXPECTED_SHIM_MANIFEST
+)
 
 
 @dataclass(frozen=True)
@@ -214,30 +532,104 @@ def _dotted_expression_name(expression: ast.expr) -> str | None:
     return None
 
 
-def _import_bindings(tree: ast.AST) -> dict[str, str]:
-    bindings: dict[str, str] = {}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                bound_name = alias.asname or alias.name.split(".", maxsplit=1)[0]
-                bindings[bound_name] = alias.name if alias.asname else bound_name
-        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
-            for alias in node.names:
-                if alias.name == "*":
-                    continue
-                bindings[alias.asname or alias.name] = f"{node.module}.{alias.name}"
-    return bindings
+@dataclass
+class LexicalScope:
+    parent: LexicalScope | None
+    kind: str
+    bindings: dict[str, str | None] = field(default_factory=dict)
+    global_names: set[str] = field(default_factory=set)
+    nonlocal_names: set[str] = field(default_factory=set)
 
-
-def _resolve_bound_expression(expression: ast.expr, bindings: dict[str, str]) -> str | None:
-    dotted_name = _dotted_expression_name(expression)
-    if dotted_name is None:
+    def lookup(self, name: str) -> str | None:
+        if name in self.global_names:
+            return self.module_scope().bindings.get(name)
+        if name in self.bindings:
+            return self.bindings[name]
+        if self.parent is not None:
+            return self.parent.lookup(name)
         return None
-    root_name, separator, remainder = dotted_name.partition(".")
-    imported_root = bindings.get(root_name)
-    if imported_root is None:
-        return dotted_name
-    return f"{imported_root}.{remainder}" if separator else imported_root
+
+    def bind(self, name: str, value: str | None) -> None:
+        if name in self.global_names:
+            self.module_scope().bindings[name] = value
+            return
+        if name in self.nonlocal_names:
+            parent = self.parent
+            while parent is not None:
+                if name in parent.bindings:
+                    parent.bindings[name] = value
+                    return
+                parent = parent.parent
+        self.bindings[name] = value
+
+    def module_scope(self) -> LexicalScope:
+        scope = self
+        while scope.parent is not None:
+            scope = scope.parent
+        return scope
+
+
+class ScopeDeclarationCollector(ast.NodeVisitor):
+    def __init__(self) -> None:
+        self.local_names: set[str] = set()
+        self.global_names: set[str] = set()
+        self.nonlocal_names: set[str] = set()
+
+    def visit_Name(self, node: ast.Name) -> None:
+        if isinstance(node.ctx, (ast.Store, ast.Del)):
+            self.local_names.add(node.id)
+
+    def visit_Import(self, node: ast.Import) -> None:
+        for alias in node.names:
+            self.local_names.add(alias.asname or alias.name.split(".", maxsplit=1)[0])
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        for alias in node.names:
+            if alias.name != "*":
+                self.local_names.add(alias.asname or alias.name)
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self.local_names.add(node.name)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        self.local_names.add(node.name)
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        self.local_names.add(node.name)
+
+    def visit_Lambda(self, node: ast.Lambda) -> None:
+        return
+
+    def visit_Global(self, node: ast.Global) -> None:
+        self.global_names.update(node.names)
+
+    def visit_Nonlocal(self, node: ast.Nonlocal) -> None:
+        self.nonlocal_names.update(node.names)
+
+
+def _argument_names(arguments: ast.arguments) -> set[str]:
+    names = {argument.arg for argument in (*arguments.posonlyargs, *arguments.args, *arguments.kwonlyargs)}
+    if arguments.vararg is not None:
+        names.add(arguments.vararg.arg)
+    if arguments.kwarg is not None:
+        names.add(arguments.kwarg.arg)
+    return names
+
+
+def _closure_parent(scope: LexicalScope) -> LexicalScope:
+    while scope.kind == "class" and scope.parent is not None:
+        scope = scope.parent
+    return scope
+
+
+def _resolve_bound_expression(expression: ast.expr, scope: LexicalScope) -> str | None:
+    if isinstance(expression, ast.Name):
+        return scope.lookup(expression.id)
+    if isinstance(expression, ast.Attribute):
+        parent = _resolve_bound_expression(expression.value, scope)
+        if parent is not None:
+            return f"{parent}.{expression.attr}"
+    return None
 
 
 def _is_forbidden_process_call(call_name: str) -> bool:
@@ -246,6 +638,147 @@ def _is_forbidden_process_call(call_name: str) -> bool:
     if call_name.startswith("subprocess."):
         return True
     return call_name.startswith("os.exec") or call_name.startswith("os.spawn")
+
+
+class AnalyzerProcessCallVisitor(ast.NodeVisitor):
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self.scope = LexicalScope(parent=None, kind="module")
+        self.violations: list[str] = []
+
+    def _bind_target(self, target: ast.expr, value: str | None = None) -> None:
+        if isinstance(target, ast.Name):
+            self.scope.bind(target.id, value)
+            return
+        if isinstance(target, (ast.Tuple, ast.List)):
+            for element in target.elts:
+                self._bind_target(element)
+
+    def _visit_defaults(self, arguments: ast.arguments) -> None:
+        for default in (*arguments.defaults, *arguments.kw_defaults):
+            if default is not None:
+                self.visit(default)
+
+    def _function_scope(self, arguments: ast.arguments, body: list[ast.stmt]) -> LexicalScope:
+        declarations = ScopeDeclarationCollector()
+        for statement in body:
+            declarations.visit(statement)
+        local_names = declarations.local_names - declarations.global_names - declarations.nonlocal_names
+        child = LexicalScope(
+            parent=_closure_parent(self.scope),
+            kind="function",
+            global_names=declarations.global_names,
+            nonlocal_names=declarations.nonlocal_names,
+        )
+        for name in local_names | _argument_names(arguments):
+            child.bindings[name] = None
+        return child
+
+    def _visit_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
+        for decorator in node.decorator_list:
+            self.visit(decorator)
+        self._visit_defaults(node.args)
+        self.scope.bind(node.name, None)
+        parent_scope = self.scope
+        self.scope = self._function_scope(node.args, node.body)
+        for statement in node.body:
+            self.visit(statement)
+        self.scope = parent_scope
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self._visit_function(node)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        self._visit_function(node)
+
+    def visit_Lambda(self, node: ast.Lambda) -> None:
+        self._visit_defaults(node.args)
+        parent_scope = self.scope
+        self.scope = LexicalScope(parent=_closure_parent(self.scope), kind="lambda")
+        for name in _argument_names(node.args):
+            self.scope.bindings[name] = None
+        self.visit(node.body)
+        self.scope = parent_scope
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        for expression in (*node.decorator_list, *node.bases):
+            self.visit(expression)
+        for keyword in node.keywords:
+            self.visit(keyword.value)
+        self.scope.bind(node.name, None)
+        parent_scope = self.scope
+        self.scope = LexicalScope(parent=parent_scope, kind="class")
+        for statement in node.body:
+            self.visit(statement)
+        self.scope = parent_scope
+
+    def visit_Import(self, node: ast.Import) -> None:
+        for alias in node.names:
+            bound_name = alias.asname or alias.name.split(".", maxsplit=1)[0]
+            self.scope.bind(bound_name, alias.name if alias.asname else bound_name)
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        for alias in node.names:
+            if alias.name == "*":
+                continue
+            value = f"{node.module}.{alias.name}" if node.level == 0 and node.module else None
+            self.scope.bind(alias.asname or alias.name, value)
+
+    def visit_Assign(self, node: ast.Assign) -> None:
+        self.visit(node.value)
+        value = _resolve_bound_expression(node.value, self.scope)
+        for target in node.targets:
+            self._bind_target(target, value)
+
+    def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
+        if node.value is not None:
+            self.visit(node.value)
+        self._bind_target(
+            node.target,
+            _resolve_bound_expression(node.value, self.scope) if node.value is not None else None,
+        )
+
+    def visit_AugAssign(self, node: ast.AugAssign) -> None:
+        self.visit(node.value)
+        self._bind_target(node.target)
+
+    def visit_NamedExpr(self, node: ast.NamedExpr) -> None:
+        self.visit(node.value)
+        self._bind_target(node.target, _resolve_bound_expression(node.value, self.scope))
+
+    def visit_For(self, node: ast.For) -> None:
+        self.visit(node.iter)
+        self._bind_target(node.target)
+        for statement in (*node.body, *node.orelse):
+            self.visit(statement)
+
+    def visit_AsyncFor(self, node: ast.AsyncFor) -> None:
+        self.visit_For(node)
+
+    def visit_With(self, node: ast.With) -> None:
+        for item in node.items:
+            self.visit(item.context_expr)
+            if item.optional_vars is not None:
+                self._bind_target(item.optional_vars)
+        for statement in node.body:
+            self.visit(statement)
+
+    def visit_AsyncWith(self, node: ast.AsyncWith) -> None:
+        self.visit_With(node)
+
+    def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
+        if node.type is not None:
+            self.visit(node.type)
+        if node.name is not None:
+            self.scope.bind(node.name, None)
+        for statement in node.body:
+            self.visit(statement)
+
+    def visit_Call(self, node: ast.Call) -> None:
+        call_name = _resolve_bound_expression(node.func, self.scope)
+        if call_name is not None and _is_forbidden_process_call(call_name):
+            self.violations.append(f"{_display_path(self.path)}:{node.lineno} calls ungoverned process API {call_name}")
+        self.generic_visit(node)
 
 
 def assert_analyzer_dependencies_are_governed(root: Path) -> None:
@@ -257,13 +790,9 @@ def assert_analyzer_dependencies_are_governed(root: Path) -> None:
             if matches:
                 violations.append(f"{reference.display()} (forbidden: {', '.join(matches)})")
 
-        bindings = _import_bindings(tree)
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Call):
-                continue
-            call_name = _resolve_bound_expression(node.func, bindings)
-            if call_name is not None and _is_forbidden_process_call(call_name):
-                violations.append(f"{_display_path(path)}:{node.lineno} calls ungoverned process API {call_name}")
+        process_visitor = AnalyzerProcessCallVisitor(path)
+        process_visitor.visit(tree)
+        violations.extend(process_visitor.violations)
 
     assert violations == []
 
@@ -321,8 +850,10 @@ def _inspect_shim(
 ) -> tuple[list[CanonicalReexport], set[str], list[str]]:
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     relative_path = path.relative_to(root).as_posix()
+    shim_label = f"scraper_analyzers/{relative_path}"
     legacy_module = _shim_module_name(path, root)
-    allowed_children = ALLOWED_CHILD_SHIM_IMPORTS.get(relative_path)
+    expected_shim = EXPECTED_SHIM_MANIFEST.get(relative_path)
+    allowed_children = expected_shim.child_modules if expected_shim is not None else frozenset()
     canonical_exports: list[CanonicalReexport] = []
     child_exports: set[str] = set()
     imported_bindings: list[str] = []
@@ -341,11 +872,11 @@ def _inspect_shim(
             all_names = explicit_all
             continue
         if isinstance(statement, ast.Import):
-            violations.append(f"{_display_path(path)}:{statement.lineno} imports a noncanonical or side-effect module")
+            violations.append(f"{shim_label}:{statement.lineno} imports a noncanonical or side-effect module")
             continue
         if isinstance(statement, ast.ImportFrom):
             if any(alias.name == "*" for alias in statement.names):
-                violations.append(f"{_display_path(path)}:{statement.lineno} uses a wildcard re-export")
+                violations.append(f"{shim_label}:{statement.lineno} uses a wildcard re-export")
                 continue
 
             source_module = _resolve_from_module_name(
@@ -354,26 +885,22 @@ def _inspect_shim(
                 statement,
             )
             is_child_import = statement.level == 1 and statement.module is None
-            if allowed_children is not None and is_child_import:
+            if allowed_children and is_child_import:
                 for alias in statement.names:
                     bound_name = alias.asname or alias.name
                     if alias.asname is not None or alias.name not in allowed_children:
-                        violations.append(
-                            f"{_display_path(path)}:{statement.lineno} imports unexpected child shim " f"{alias.name}"
-                        )
+                        violations.append(f"{shim_label}:{statement.lineno} imports unexpected child shim {alias.name}")
                     child_exports.add(bound_name)
                     imported_bindings.append(bound_name)
                 continue
-            if allowed_children is not None:
+            if allowed_children:
                 violations.append(
-                    f"{_display_path(path)}:{statement.lineno} package aggregator may import only its "
+                    f"{shim_label}:{statement.lineno} package aggregator may import only its "
                     "known relative child shims"
                 )
                 continue
             if not _matches_module(source_module, PREFLIGHT_PACKAGE):
-                violations.append(
-                    f"{_display_path(path)}:{statement.lineno} imports noncanonical source {source_module}"
-                )
+                violations.append(f"{shim_label}:{statement.lineno} imports noncanonical source {source_module}")
                 continue
 
             for alias in statement.names:
@@ -390,32 +917,73 @@ def _inspect_shim(
                 )
             continue
         violations.append(
-            f"{_display_path(path)}:{getattr(statement, 'lineno', '?')} "
-            f"contains disallowed {type(statement).__name__}"
+            f"{shim_label}:{getattr(statement, 'lineno', '?')} " f"contains disallowed {type(statement).__name__}"
         )
 
     if all_assignments != 1:
-        violations.append(f"{_display_path(path)} must contain exactly one explicit __all__ assignment")
+        violations.append(f"{shim_label} must contain exactly one explicit __all__ assignment")
     elif all_names is not None:
         duplicate_exports = sorted(name for name in set(all_names) if all_names.count(name) > 1)
         if duplicate_exports:
-            violations.append(f"{_display_path(path)} repeats __all__ exports: {', '.join(duplicate_exports)}")
+            violations.append(f"{shim_label} repeats __all__ exports: {', '.join(duplicate_exports)}")
         missing_exports = sorted(set(imported_bindings) - set(all_names))
         unexpected_exports = sorted(set(all_names) - set(imported_bindings))
         if missing_exports or unexpected_exports:
             violations.append(
-                f"{_display_path(path)} __all__ disagrees with imported bindings "
+                f"{shim_label} __all__ disagrees with imported bindings "
                 f"(missing: {missing_exports}; unexpected: {unexpected_exports})"
             )
 
-    if allowed_children is not None and child_exports != allowed_children:
+    if child_exports != allowed_children:
         violations.append(
-            f"{_display_path(path)} child shim set differs "
+            f"{shim_label} child shim set differs "
             f"(missing: {sorted(allowed_children - child_exports)}; "
             f"unexpected: {sorted(child_exports - allowed_children)})"
         )
 
+    if expected_shim is None:
+        violations.append(f"{shim_label} is not present in the expected shim manifest")
+    else:
+        actual_reexports = sorted(
+            (export.canonical_module, export.imported_name, export.bound_name) for export in canonical_exports
+        )
+        expected_reexports = sorted(
+            (export.canonical_module, export.imported_name, export.bound_name)
+            for export in expected_shim.canonical_reexports
+        )
+        if actual_reexports != expected_reexports:
+            violations.append(
+                f"{shim_label} canonical re-export surface differs "
+                f"(expected count: {len(expected_reexports)}; actual: {actual_reexports})"
+            )
+        if all_names is not None and set(all_names) != expected_shim.all_exports:
+            violations.append(
+                f"{shim_label} public export surface differs "
+                f"(missing: {sorted(expected_shim.all_exports - set(all_names))}; "
+                f"unexpected: {sorted(set(all_names) - expected_shim.all_exports)})"
+            )
+
     return canonical_exports, child_exports, violations
+
+
+def _inspect_shim_tree(root: Path) -> tuple[list[CanonicalReexport], list[str]]:
+    paths = _python_files(root)
+    actual_relative_paths = {path.relative_to(root).as_posix() for path in paths}
+    expected_relative_paths = set(EXPECTED_SHIM_MANIFEST)
+    violations: list[str] = []
+    canonical_exports: list[CanonicalReexport] = []
+    for path in paths:
+        path_exports, _, path_violations = _inspect_shim(path, root)
+        canonical_exports.extend(path_exports)
+        violations.extend(path_violations)
+
+    missing_paths = sorted(expected_relative_paths - actual_relative_paths)
+    unexpected_paths = sorted(actual_relative_paths - expected_relative_paths)
+    if missing_paths:
+        violations.append(f"{_display_path(root)} is missing expected shims: {missing_paths}")
+    if unexpected_paths:
+        violations.append(f"{_display_path(root)} has unexpected shims: {unexpected_paths}")
+    return canonical_exports, violations
 
 
 def _write_python_fixture(root: Path, relative_path: str, source: str) -> None:
@@ -446,6 +1014,14 @@ def test_preflight_dependency_direction() -> None:
         "import os as operating_system\n\ndef probe():\n    return operating_system.system('tool')\n",
         "from os import posix_spawn as spawn\n\ndef probe():\n    return spawn('tool', ['tool'], {})\n",
         "import subprocess as process\n\ndef probe():\n    return process.Popen(['tool'])\n",
+        "import asyncio as aio\n\nspawn = aio.create_subprocess_exec\n\n"
+        "async def probe():\n    return await spawn('tool')\n",
+        "import asyncio as aio\n\ndef outer():\n    spawn = aio.create_subprocess_shell\n\n"
+        "    async def probe():\n        return await spawn('tool')\n\n    return probe\n",
+        "import asyncio as aio\n\nasync def probe():\n    return await aio.create_subprocess_exec('tool')\n\n"
+        "def unrelated():\n    import types as aio\n    return aio\n",
+        "import os\n\ndef probe():\n    return os.fork()\n",
+        "from os import forkpty as create_child\n\ndef probe():\n    return create_child()\n",
     ),
 )
 def test_analyzer_guard_rejects_direct_ungoverned_resource_creation(
@@ -476,6 +1052,24 @@ async def wait_for_result(awaitable):
         raise
 """,
     )
+    monkeypatch.setitem(globals(), "PREFLIGHT_ANALYZERS", tmp_path)
+
+    test_preflight_dependency_direction()
+
+
+@pytest.mark.parametrize(
+    "source",
+    (
+        "import asyncio as aio\n\nasync def probe(aio):\n    return await aio.create_subprocess_exec('value')\n",
+        "import os\n\ndef probe():\n    os = object()\n    return os.fork()\n",
+    ),
+)
+def test_analyzer_guard_honors_lexical_shadowing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    source: str,
+) -> None:
+    _write_python_fixture(tmp_path, "safe_shadow.py", source)
     monkeypatch.setitem(globals(), "PREFLIGHT_ANALYZERS", tmp_path)
 
     test_preflight_dependency_direction()
@@ -523,10 +1117,7 @@ def test_every_phase0_legacy_module_resolves() -> None:
 
 
 def test_legacy_shims_contain_only_explicit_reexports() -> None:
-    violations: list[str] = []
-    for path in _python_files(SCRAPER_ANALYZERS_ROOT):
-        _, _, shim_violations = _inspect_shim(path, SCRAPER_ANALYZERS_ROOT)
-        violations.extend(shim_violations)
+    _, violations = _inspect_shim_tree(SCRAPER_ANALYZERS_ROOT)
 
     assert violations == []
 
@@ -551,6 +1142,14 @@ def test_legacy_shims_contain_only_explicit_reexports() -> None:
             '"""Mutated shim."""\n\nfrom . import behavioral_detector, surprise\n\n'
             '__all__ = ["behavioral_detector", "surprise"]\n',
         ),
+        (
+            "runner.py",
+            '"""Mutated shim."""\n\nfrom __future__ import annotations\n\n__all__ = []\n',
+        ),
+        (
+            "runner.py",
+            '"""Mutated shim."""\n\nfrom ..preflight.options import ScanDepth\n\n' '__all__ = ["ScanDepth"]\n',
+        ),
     ),
 )
 def test_shim_guard_rejects_noncanonical_or_incomplete_reexports(
@@ -567,12 +1166,8 @@ def test_shim_guard_rejects_noncanonical_or_incomplete_reexports(
 
 
 def test_legacy_public_exports_match_canonical_contracts() -> None:
-    violations: list[str] = []
-    canonical_exports: list[CanonicalReexport] = []
-    for path in _python_files(SCRAPER_ANALYZERS_ROOT):
-        path_exports, _, shim_violations = _inspect_shim(path, SCRAPER_ANALYZERS_ROOT)
-        canonical_exports.extend(path_exports)
-        violations.extend(shim_violations)
+    canonical_exports, violations = _inspect_shim_tree(SCRAPER_ANALYZERS_ROOT)
+    assert violations == []
 
     for export in canonical_exports:
         legacy_module = importlib.import_module(export.legacy_module)
@@ -595,7 +1190,10 @@ def test_legacy_public_exports_match_canonical_contracts() -> None:
             if inspect.iscoroutinefunction(legacy_value) != inspect.iscoroutinefunction(canonical_value):
                 violations.append(f"{export_label} changed coroutine classification")
 
-    for relative_path, expected_children in ALLOWED_CHILD_SHIM_IMPORTS.items():
+    for relative_path, expected_shim in EXPECTED_SHIM_MANIFEST.items():
+        expected_children = expected_shim.child_modules
+        if not expected_children:
+            continue
         path = SCRAPER_ANALYZERS_ROOT / relative_path
         legacy_module_name = _shim_module_name(path, SCRAPER_ANALYZERS_ROOT)
         legacy_module = importlib.import_module(legacy_module_name)
