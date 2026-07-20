@@ -1742,14 +1742,14 @@ app = FastAPI(
     title="tldw API",
     version="0.1.41",
     description=APP_DESCRIPTION,
-    terms_of_service="https://github.com/cpacker/tldw_server",
+    terms_of_service="https://github.com/rmusser01/tldw_server",
     contact={
         "name": "tldw_server Maintainers",
-        "url": "https://github.com/cpacker/tldw_server/issues",
+        "url": "https://github.com/rmusser01/tldw_server/issues",
     },
     license_info={
-        "name": "GNU GPL v2.0",
-        "url": "https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html",
+        "name": "Apache License 2.0 (OpenAPI contract only)",
+        "identifier": "Apache-2.0",
     },
     openapi_tags=OPENAPI_TAGS,
     swagger_ui_parameters=_swagger_ui_params,
@@ -2083,8 +2083,12 @@ def custom_openapi():
         description=app.description,
         routes=app.routes,
         tags=OPENAPI_TAGS,
+        terms_of_service=app.terms_of_service,
+        contact=app.contact,
+        license_info=app.license_info,
     )
     _ensure_openapi_operation_tags_declared(openapi_schema)
+    openapi_schema.setdefault("info", {})["x-server-code-license"] = "GPL-3.0-only"
 
     # Servers for common deployments
     openapi_schema["servers"] = [
