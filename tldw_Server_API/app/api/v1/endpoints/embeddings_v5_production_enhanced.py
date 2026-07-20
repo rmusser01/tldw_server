@@ -104,6 +104,7 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import (
 # Authentication
 # Configuration
 from tldw_Server_API.app.core.config import settings
+from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Embeddings import embedding_policy as embedding_policy_core
 from tldw_Server_API.app.core.Embeddings.async_embeddings import (
     EmbeddingProviderError as RuntimeEmbeddingProviderError,
@@ -971,7 +972,15 @@ def _get_allowed_providers() -> list[str] | None:
 
 def _chroma_manager_for_user(user: User) -> ChromaDBManager:
     cfg = settings.get("EMBEDDING_CONFIG", {}).copy()
-    cfg["USER_DB_BASE_DIR"] = settings.get("USER_DB_BASE_DIR")
+    try:
+        user_db_base_dir = str(DatabasePaths.get_user_db_base_dir())
+    except Exception as exc:  # noqa: BLE001 - canonical storage failures must fail closed
+        logger.error(
+            "Canonical user DB base resolution failed ({})",
+            type(exc).__name__,
+        )
+        raise
+    cfg["USER_DB_BASE_DIR"] = user_db_base_dir
     user_id = getattr(user, "id", None) or settings.get("SINGLE_USER_FIXED_ID", "1")
     return ChromaDBManager(user_id=str(user_id), user_embedding_config=cfg)
 

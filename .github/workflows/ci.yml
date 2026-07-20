@@ -5697,7 +5697,12 @@ jobs:
           mkdir -p "$RESULTS_DIR"
           export DATABASE_URL="sqlite:///./Databases/users.db"
           unset TEST_DATABASE_URL POSTGRES_TEST_DB
+          EXTRA_PYTEST_ARGS=()
+          if [ "$SHARD_NAME" = "research-websearch" ]; then
+            EXTRA_PYTEST_ARGS=(-vv -p pytest_timeout --timeout=120 --timeout-method=thread)
+          fi
           pytest -q --disable-warnings -p pytest_asyncio.plugin \
+            "${EXTRA_PYTEST_ARGS[@]}" \
             -m "not jobs and not e2e" \
             $TEST_PATHS \
             --durations=50 \

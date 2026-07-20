@@ -78,6 +78,7 @@ class _DeterministicBackgroundExecutor:
     def __init__(self) -> None:
         self._threads: list[threading.Thread] = []
         self._futures: list[Future] = []
+        self._drain_attempted = False
 
     def submit(self, worker_fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Future:
         future = Future()
@@ -102,18 +103,74 @@ class _DeterministicBackgroundExecutor:
 
     def wait_for_workers(self) -> None:
         """Join every worker and surface exceptions retained by its Future."""
+        if self._drain_attempted:
+            return
+        self._drain_attempted = True
+        deadline = time.monotonic() + RUNNER_START_TIMEOUT_SEC
         for thread in self._threads:
-            thread.join(timeout=RUNNER_START_TIMEOUT_SEC)
+            thread.join(timeout=max(0.0, deadline - time.monotonic()))
             if thread.is_alive():
                 raise TimeoutError(f"background worker did not finish: {thread.name}")
+        first_error: Exception | None = None
         for future in self._futures:
-            future.result(timeout=RUNNER_START_TIMEOUT_SEC)
+            try:
+                future.result(timeout=max(0.0, deadline - time.monotonic()))
+            except Exception as exc:  # noqa: BLE001 - test executor must retain arbitrary worker failures
+                if first_error is None:
+                    first_error = exc
+        if first_error is not None:
+            raise first_error
 
     def shutdown(self, wait: bool = True, cancel_futures: bool = False) -> None:
         del cancel_futures
         if not wait:
             return
         self.wait_for_workers()
+
+
+def test_deterministic_executor_surfaces_worker_failure_once() -> None:
+    executor = _DeterministicBackgroundExecutor()
+
+    def _fail() -> None:
+        raise RuntimeError("synthetic worker failure")
+
+    executor.submit(_fail)
+
+    with pytest.raises(RuntimeError, match="synthetic worker failure"):
+        executor.wait_for_workers()
+
+    executor.shutdown(wait=True, cancel_futures=True)
+
+
+def test_deterministic_executor_does_not_repeat_stuck_worker_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "tldw_Server_API.tests.sandbox.test_execution_concurrency_cap.RUNNER_START_TIMEOUT_SEC",
+        0.01,
+    )
+    executor = _DeterministicBackgroundExecutor()
+    release = threading.Event()
+    executor.submit(release.wait)
+    thread = executor._threads[0]
+    real_join = thread.join
+    join_calls = 0
+
+    def _counting_join(timeout: float | None = None) -> None:
+        nonlocal join_calls
+        join_calls += 1
+        real_join(timeout=timeout)
+
+    monkeypatch.setattr(thread, "join", _counting_join)
+    try:
+        with pytest.raises(TimeoutError, match="background worker did not finish"):
+            executor.wait_for_workers()
+
+        executor.shutdown(wait=True, cancel_futures=True)
+        assert join_calls == 1
+    finally:
+        release.set()
+        real_join(timeout=1.0)
 
 
 def _install_test_background_executor(
@@ -207,8 +264,8 @@ def test_background_execution_respects_max_concurrent_runs(
         assert second_started.is_set() is False
 
         allow_first_finish.set()
+        assert second_started.wait(timeout=RUNNER_START_TIMEOUT_SEC) is True
         executor.wait_for_workers()
-        assert second_started.is_set() is True
 
         done1 = _wait_for_phase(svc, run1.id, RunPhase.completed)
         done2 = _wait_for_phase(svc, run2.id, RunPhase.completed)
@@ -228,7 +285,7 @@ def test_background_admission_renews_queued_claim_while_waiting(
     monkeypatch.setenv("SANDBOX_ENABLE_EXECUTION", "true")
     monkeypatch.setenv("SANDBOX_BACKGROUND_EXECUTION", "true")
     monkeypatch.setenv("SANDBOX_MAX_CONCURRENT_RUNS", "1")
-    monkeypatch.setenv("SANDBOX_RUN_CLAIM_LEASE_SEC", "1")
+    monkeypatch.setenv("SANDBOX_RUN_CLAIM_LEASE_SEC", "30")
     monkeypatch.setenv("TLDW_SANDBOX_DOCKER_FAKE_EXEC", "0")
     _force_docker_preflight_available(monkeypatch)
 
@@ -279,6 +336,7 @@ def test_background_admission_renews_queued_claim_while_waiting(
         )
         assert first_started.wait(timeout=RUNNER_START_TIMEOUT_SEC) is True
 
+        monkeypatch.setenv("SANDBOX_RUN_CLAIM_LEASE_SEC", "1")
         run2 = svc.start_run_scaffold(
             user_id="user-queued-renew",
             spec=RunSpec(
@@ -294,10 +352,14 @@ def test_background_admission_renews_queued_claim_while_waiting(
 
         time.sleep(1.2)
         assert second_started.is_set() is False
+        queued = svc.get_run(run2.id)
+        assert queued is not None
+        assert queued.phase == RunPhase.queued
+        assert queued.claim_owner == svc._claim_worker_id
 
         allow_first_finish.set()
+        assert second_started.wait(timeout=RUNNER_START_TIMEOUT_SEC) is True
         executor.wait_for_workers()
-        assert second_started.is_set() is True
 
         done1 = _wait_for_phase(svc, run1.id, RunPhase.completed)
         done2 = _wait_for_phase(svc, run2.id, RunPhase.completed)
@@ -394,9 +456,9 @@ def test_global_active_cap_enforced_across_service_instances(
         assert second_started.is_set() is False
 
         allow_first_finish.set()
+        assert second_started.wait(timeout=RUNNER_START_TIMEOUT_SEC) is True
         executor_a.wait_for_workers()
         executor_b.wait_for_workers()
-        assert second_started.is_set() is True
 
         done1 = _wait_for_phase(svc_a, run1.id, RunPhase.completed)
         done2 = _wait_for_phase(svc_b, run2.id, RunPhase.completed)
@@ -494,9 +556,9 @@ def test_per_user_active_cap_enforced_across_service_instances(
         assert second_started.is_set() is False
 
         allow_first_finish.set()
+        assert second_started.wait(timeout=RUNNER_START_TIMEOUT_SEC) is True
         executor_a.wait_for_workers()
         executor_b.wait_for_workers()
-        assert second_started.is_set() is True
 
         done1 = _wait_for_phase(svc_a, run1.id, RunPhase.completed)
         done2 = _wait_for_phase(svc_b, run2.id, RunPhase.completed)

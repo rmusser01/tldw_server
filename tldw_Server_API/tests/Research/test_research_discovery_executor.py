@@ -8,6 +8,7 @@ import gc
 import inspect
 import weakref
 from dataclasses import FrozenInstanceError, replace
+from typing import Any
 from urllib.parse import urlencode
 
 import pytest
@@ -66,6 +67,40 @@ from tldw_Server_API.app.core.Research.discovery.registry import (
 from tldw_Server_API.app.core.Security.http_hop import HTTPHopLimits
 
 pytestmark = pytest.mark.unit
+ASYNC_HANDSHAKE_TIMEOUT_SEC = 5.0
+
+
+async def _wait_for_task_completion(task: asyncio.Task[Any]) -> None:
+    done, _pending = await asyncio.wait(
+        {task},
+        timeout=ASYNC_HANDSHAKE_TIMEOUT_SEC,
+    )
+    assert task in done, "async test task did not finish within the handshake deadline"
+
+
+async def _cleanup_test_tasks(
+    *tasks: asyncio.Task[Any] | None,
+    release: asyncio.Event | None = None,
+) -> None:
+    """Bound test cleanup without replacing the primary test failure."""
+    if release is not None:
+        release.set()
+    tracked = {task for task in tasks if task is not None}
+    pending = {task for task in tracked if not task.done()}
+    for task in pending:
+        task.cancel()
+    if pending:
+        finished, pending = await asyncio.wait(
+            pending,
+            timeout=ASYNC_HANDSHAKE_TIMEOUT_SEC,
+        )
+    else:
+        finished = set()
+    for task in (tracked - pending) | finished:
+        if not task.cancelled():
+            task.exception()
+    for task in pending:
+        task.cancel()
 
 
 def _semantic_scholar_plan():
@@ -1536,13 +1571,20 @@ async def test_real_task_cancellation_during_gateway_retains_debit_and_original_
             journal=journal,
         )
     )
-    await gateway_entered.wait()
-    if corrupt_lineage:
-        journal._records.clear()
-    execution.cancel("original-cancel")
+    try:
+        await asyncio.wait_for(
+            gateway_entered.wait(),
+            timeout=ASYNC_HANDSHAKE_TIMEOUT_SEC,
+        )
+        if corrupt_lineage:
+            journal._records.clear()
+        execution.cancel("original-cancel")
+        await _wait_for_task_completion(execution)
 
-    with pytest.raises(asyncio.CancelledError) as caught:
-        await execution
+        with pytest.raises(asyncio.CancelledError) as caught:
+            await execution
+    finally:
+        await _cleanup_test_tasks(execution, release=blocker)
 
     assert caught.value.args == ("original-cancel",)
     if corrupt_lineage:
@@ -1575,11 +1617,18 @@ async def test_real_task_cancellation_outside_dispatch_re_raises_without_record(
             journal=journal,
         )
     )
-    await adapter_entered.wait()
-    execution.cancel("outer-adapter-cancel")
+    try:
+        await asyncio.wait_for(
+            adapter_entered.wait(),
+            timeout=ASYNC_HANDSHAKE_TIMEOUT_SEC,
+        )
+        execution.cancel("outer-adapter-cancel")
+        await _wait_for_task_completion(execution)
 
-    with pytest.raises(asyncio.CancelledError) as caught:
-        await execution
+        with pytest.raises(asyncio.CancelledError) as caught:
+            await execution
+    finally:
+        await _cleanup_test_tasks(execution, release=blocker)
 
     assert caught.value.args == ("outer-adapter-cancel",)
     assert journal.records == ()
@@ -1703,21 +1752,35 @@ async def test_outer_cancellation_during_timeout_child_cleanup_remains_indetermi
             monotonic_clock=lambda: 0.0,
         )
     )
-    await cleanup_started.wait()
-    execution.cancel("cancel-during-timeout-cleanup")
+    try:
+        await asyncio.wait_for(
+            cleanup_started.wait(),
+            timeout=ASYNC_HANDSHAKE_TIMEOUT_SEC,
+        )
+        execution.cancel("cancel-during-timeout-cleanup")
+        await _wait_for_task_completion(execution)
 
-    with pytest.raises(asyncio.CancelledError) as caught:
-        await execution
+        with pytest.raises(asyncio.CancelledError) as caught:
+            await execution
 
-    assert caught.value.args == ("cancel-during-timeout-cleanup",)
-    assert child_finished.is_set()
-    assert gateway_task is not None and gateway_task.done()
-    assert journal.records[0].state is PhysicalDispatchState.INDETERMINATE_AFTER_DISPATCH
-    assert journal.accounting.debited == 1
+        assert caught.value.args == ("cancel-during-timeout-cleanup",)
+        assert child_finished.is_set()
+        assert gateway_task is not None and gateway_task.done()
+        assert journal.records[0].state is PhysicalDispatchState.INDETERMINATE_AFTER_DISPATCH
+        assert journal.accounting.debited == 1
+    finally:
+        await _cleanup_test_tasks(execution, gateway_task, release=blocker)
 
 
 @pytest.mark.asyncio
-async def test_repeated_outer_cancellation_still_drains_timeout_child() -> None:
+async def test_repeated_outer_cancellation_still_drains_timeout_child(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        executor_module,
+        "_GATEWAY_CANCEL_DRAIN_SECONDS",
+        ASYNC_HANDSHAKE_TIMEOUT_SEC,
+    )
     registry, plan = _semantic_scholar_plan()
     object.__setattr__(plan.ceilings, "max_wall_time_ms", 1)
     group = plan.dispatch_groups[0]
@@ -1753,18 +1816,28 @@ async def test_repeated_outer_cancellation_still_drains_timeout_child() -> None:
             monotonic_clock=lambda: 0.0,
         )
     )
-    await cancellations_seen[0].wait()
-    execution.cancel("first-outer-cancel")
-    await cancellations_seen[1].wait()
-    execution.cancel("second-outer-cancel")
+    try:
+        await asyncio.wait_for(
+            cancellations_seen[0].wait(),
+            timeout=ASYNC_HANDSHAKE_TIMEOUT_SEC,
+        )
+        execution.cancel("first-outer-cancel")
+        await asyncio.wait_for(
+            cancellations_seen[1].wait(),
+            timeout=ASYNC_HANDSHAKE_TIMEOUT_SEC,
+        )
+        execution.cancel("second-outer-cancel")
+        await _wait_for_task_completion(execution)
 
-    with pytest.raises(asyncio.CancelledError) as caught:
-        await execution
+        with pytest.raises(asyncio.CancelledError) as caught:
+            await execution
 
-    assert caught.value.args == ("first-outer-cancel",)
-    assert gateway_task is not None and gateway_task.done()
-    assert journal.records[0].state is PhysicalDispatchState.INDETERMINATE_AFTER_DISPATCH
-    assert journal.accounting.debited == 1
+        assert caught.value.args == ("first-outer-cancel",)
+        assert gateway_task is not None and gateway_task.done()
+        assert journal.records[0].state is PhysicalDispatchState.INDETERMINATE_AFTER_DISPATCH
+        assert journal.accounting.debited == 1
+    finally:
+        await _cleanup_test_tasks(execution, gateway_task, release=blocker)
 
 
 def test_executor_avoids_python_311_only_task_cancellation_apis() -> None:

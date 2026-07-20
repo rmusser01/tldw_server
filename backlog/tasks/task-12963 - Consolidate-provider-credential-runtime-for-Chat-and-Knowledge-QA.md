@@ -42,13 +42,16 @@ modified_files:
 - apps/tldw-frontend/e2e/workflows/chat-cockpit.real-server.spec.ts
 - apps/tldw-frontend/lib/api/openapi.fingerprint.json
 - pyproject.toml
+- tldw_Server_API/app/api/v1/API_Deps/DB_Deps.py
 - tldw_Server_API/app/api/v1/endpoints/audio/audio_streaming.py
+- tldw_Server_API/app/api/v1/endpoints/auth.py
 - tldw_Server_API/app/api/v1/endpoints/rag_unified.py
 - tldw_Server_API/app/api/v1/endpoints/workflows.py
 - tldw_Server_API/app/core/AuthNZ/byok_config.py
 - tldw_Server_API/app/core/AuthNZ/byok_runtime.py
 - tldw_Server_API/app/core/AuthNZ/byok_testing.py
 - tldw_Server_API/app/core/AuthNZ/llm_provider_overrides.py
+- tldw_Server_API/app/core/AuthNZ/password_service.py
 - tldw_Server_API/app/core/Chat/chat_service.py
 - tldw_Server_API/app/core/DB_Management/db_path_utils.py
 - tldw_Server_API/app/core/Embeddings/Embeddings_Server/Embeddings_Create.py
@@ -80,6 +83,8 @@ modified_files:
 - tldw_Server_API/tests/Audio/test_ws_audio_chat_stream.py
 - tldw_Server_API/tests/Audiobooks/integration/test_audiobook_alignment_flow.py
 - tldw_Server_API/tests/AuthNZ/test_websocket_cookie_route_contract.py
+- tldw_Server_API/tests/AuthNZ/unit/test_db_deps_test_mode_truthiness.py
+- tldw_Server_API/tests/AuthNZ_Federation/test_oidc_login_flow.py
 - tldw_Server_API/tests/AuthNZ_Unit/test_byok_runtime.py
 - tldw_Server_API/tests/AuthNZ_Unit/test_byok_validation_boundary.py
 - tldw_Server_API/tests/AuthNZ_Unit/test_llm_provider_overrides.py
@@ -130,6 +135,7 @@ modified_files:
 - tldw_Server_API/tests/TTS_NEW/unit/adapters/test_qwen3_remote_runtime.py
 - tldw_Server_API/tests/TTS_NEW/unit/adapters/test_streaming_status_classification.py
 - tldw_Server_API/tests/Utils/test_release_helper.py
+- tldw_Server_API/tests/VectorStores/integration/test_vector_stores_real_db.py
 - tldw_Server_API/tests/Visual_Identities/test_visual_identities_api.py
 - tldw_Server_API/tests/Web_Scraping/test_ingest_cookie_parsing.py
 - tldw_Server_API/tests/Web_Scraping/test_persistence_crawl_metadata.py
@@ -148,6 +154,11 @@ modified_files:
 - tldw_Server_API/tests/sandbox/test_session_store_durability.py
 - tldw_Server_API/tests/sandbox/test_session_upload.py
 - tldw_Server_API/tests/sandbox/test_ws_signed_validation.py
+- tldw_Server_API/app/api/v1/endpoints/embeddings_v5_production_enhanced.py
+- tldw_Server_API/tests/API_Deps/test_phase3_3_sanitizers.py
+- tldw_Server_API/tests/Research/test_research_discovery_executor.py
+- tldw_Server_API/tests/Embeddings/test_media_embeddings_storage_scope.py
+- tldw_Server_API/tests/CI/test_required_workflow_contracts.py
 ---
 
 ## Description
@@ -343,4 +354,11 @@ Hosted sandbox follow-up is test-harness drift: configure the deletion regressio
 2026-07-18: Final hosted-follow-up stabilization completed locally. Corrected the actual bounded RAG evaluation seam; normalized absent/blank workflow tenants across definition, saved-run, ad-hoc, event, step, control, and rejection writes; regenerated the official Web Scraping inventory artifacts; added a fail-closed 64-level metadata JSON pre-decode guard with escaped-string and public-method boundary coverage; and made Windows audio plus sandbox concurrency/auth/deletion regressions deterministic without weakening production timeouts, egress, root containment, or signed-token validation. Independent final re-review found no remaining P0-P3 issue after executor Future propagation and snapshot-lock cleanup were corrected.
 
 Fresh high-risk results: product Workflows API 85 passed; Workflows storage 37; Evaluations core 284 passed/5 skipped; Integrations 961/2; Media/Audio 2,241 passed/39 skipped/1 expected xfail/1 existing xpass; Sandbox combined 335/6 plus the final corrected five-test concurrency/durability subset 5/5; Resource Governance 202 passed/2 expected xfails. Earlier affected Prompt Studio, Character, Chat, Embeddings, LLM, ingestion, research, workflow-adapter, database, and monitoring suites also remained green. Fatal Ruff passed; Python 3.10/3.12/3.13 py_compile passed; full Ruff found zero issues on added lines (116 historical full-file findings); final production Bandit reported 0 findings/0 errors over 9,633 LOC; test Bandit reported 0 findings/0 errors after excluding two verified unchanged baseline findings (B106/B112, plus standard intentional test exclusions); git diff --check passed. The task remains In Progress pending exact-new-head hosted CI and the requester-authored Change summary required by policy. The unrelated PID and two untracked watchlist templates remain untouched and must not be staged.
+2026-07-18: Exact-head CI on 60ce244fb6 finished before any further push. Four underlying hosted failures are under focused TDD follow-up: federation JIT generated-password validation, VectorStores existing-embedding path isolation, a macOS sandbox state-store regression, and a Windows research-websearch timeout. Production fixes will remain fail closed; test-only fixes will preserve real adapter, egress, concurrency, and storage boundaries.
+VectorStores root cause confirmed: DB_Deps synthesized and exported a second USER_DB_BASE_DIR during request resolution in TESTING mode. Environment-first canonical path resolution then correctly moved the endpoint adapter away from the already-seeded Chroma stub. Centralize all test and production path selection in DatabasePaths; do not revert production env-over-config precedence.
+2026-07-18: Old-head CI on 60ce244fb6 is fully terminal before this follow-up push (764 success, 10 failure, 4 skipped, 1 cancelled, zero pending/running). Addressed all four hosted defects: JIT/magic-link generated passwords now validate against the active username-aware policy with bounded retries and fail closed before registration; DB_Deps and the embeddings endpoint now share canonical DatabasePaths storage resolution without process-env mutation or stale fallback; the sandbox deterministic executor retains/surfaces Future failures once and the queued-claim regression uses explicit adapter-boundary handshakes; research cancellation regressions use bounded hard completion/cleanup handshakes, and only the Windows research-websearch shard receives a 120-second pytest-timeout guard.
+
+Fresh post-fix evidence: final research executor 270/270 passed (including the strengthened pre-cleanup child-drain assertions); complete Research/ResearchWorkspace/WebSearch shard 2,256 passed/11 skipped; macOS-equivalent sandbox state/store shard 245 passed/6 skipped; OIDC JIT, magic-link, and password backend 23 passed; VectorStores/Embeddings storage/API dependency/DB path scope 113 passed/5 skipped; embeddings v5 unit 70 passed; workflow contracts 41 passed. The modified workflow passes pinned actionlint 1.7.12. All changed Python files py_compile under 3.10/3.11/3.12/3.13. Ruff has zero new findings versus committed HEAD (15 exact historical full-file findings); Bandit has zero high findings and zero findings on changed lines (remaining B106/B108 reports are exact unchanged baselines); git diff --check passes. Two independent final re-reviews found no actionable issue after the fail-closed storage and pre-cleanup drain-assertion corrections.
+
+TASK-12963 remains In Progress and PR #2727 remains draft pending exact-new-head hosted CI and the requester-authored Change summary required by policy. server-ux-smoke.pid and both unrelated untracked watchlist templates remain untouched and must not be staged.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
