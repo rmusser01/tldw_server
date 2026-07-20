@@ -119,3 +119,4 @@
 - Baseline verification: 19/19 focused workflow, release, Docker, and OpenAPI cache tests passed; two existing environment/config warnings were emitted.
 - Task 1: complete (commits fee1783..26ed722, review clean)
 - Task 2: complete (commits e835efb..624896d, review clean)
+- Task 3: complete (commits 4501e10..99fdd18, review clean)
