@@ -99,6 +99,18 @@ def test_public_copy_distinguishes_server_and_frontend_terms() -> None:
     assert "Open source under GPL v2.0" not in landing
 
 
+def test_extension_contribution_copy_obeys_temporary_gate() -> None:
+    extension_readme = _read("apps/extension/README.md")
+    assert "extension code contributions are temporarily paused" in extension_readme
+    assert "Contributions are welcome! Please open an issue or PR." not in extension_readme
+
+
+def test_landing_links_to_current_repository() -> None:
+    landing = _read("apps/tldw-frontend/components/landing/LandingLayout.tsx")
+    assert 'href="https://github.com/rmusser01/tldw_server"' in landing
+    assert 'href="https://github.com/rmusser01/tldw"' not in landing
+
+
 def test_third_party_notices_preserve_frontend_upstream_terms() -> None:
     notices = _read("THIRD_PARTY_NOTICES.txt")
     assert "Host project: multi-license; see LICENSE" in notices

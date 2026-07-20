@@ -174,7 +174,8 @@ See `docs/Testing-Guide.md` for Playwright E2E/manual smoke guidance, including 
 
 ## Contributing
 
-Contributions are welcome! Please open an issue or PR. Follow conventional commits (feat:, fix:, docs:, chore:, etc.) and include steps to test and screenshots for UI changes.
+Issues remain welcome, but extension code contributions are temporarily paused
+under the [root contribution policy](../../CONTRIBUTING.md).
 
 ## License
 

@@ -47,7 +47,7 @@ export function LandingLayout({ children, title, description, segment }: Landing
                 OSINT
               </Link>
               <a
-                href="https://github.com/rmusser01/tldw"
+                href="https://github.com/rmusser01/tldw_server"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-sm hover:text-primary transition-colors"
@@ -99,7 +99,7 @@ export function LandingLayout({ children, title, description, segment }: Landing
               <div>
                 <h4 className="font-medium mb-4">Source & Community</h4>
                 <ul className="space-y-2 text-sm text-text-muted">
-                  <li><a href="https://github.com/rmusser01/tldw" className="hover:text-primary">GitHub</a></li>
+                  <li><a href="https://github.com/rmusser01/tldw_server" className="hover:text-primary">GitHub</a></li>
                   <li><Link href="/docs/self-hosting" className="hover:text-primary">Self-Hosting Guide</Link></li>
                   <li><Link href="/docs/contributing" className="hover:text-primary">Contributing</Link></li>
                 </ul>
