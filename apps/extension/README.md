@@ -178,7 +178,12 @@ Contributions are welcome! Please open an issue or PR. Follow conventional commi
 
 ## License
 
-AGPL
+Repository-authored extension code is source-available under PolyForm Perimeter 1.0.1.
+Tagged releases may add a release-specific, time-delayed
+AGPL-3.0-only option. See [LICENSE](LICENSE), the repository root `LICENSE`, and
+`LICENSES/releases/` for the terms that apply to a specific version.
+
+Third-party material retains its upstream terms.
 
 ## Acknowledgements
 

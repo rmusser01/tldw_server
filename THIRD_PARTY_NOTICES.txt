@@ -7,8 +7,7 @@ authors, license types, and pointers to the
 original license text.  It does not cover transitive dependencies installed at
 build time via pip or npm; consult pyproject.toml and package.json for those.
 
-Host project: tldw_server
-Host project license: GNU General Public License v3.0 (GPL-3.0-or-later)
+Host project: multi-license; see LICENSE
 
 All bundled components below are listed with their own licenses and are used in
 a manner compatible with the project license.
@@ -49,11 +48,18 @@ a manner compatible with the project license.
 5. PDF.js 4.10.38
    Author/Year : Mozilla Foundation, 2024
    License      : Apache License 2.0
-   Files        : apps/packages/ui/src/public/pdf.worker.min.mjs
+   Files        : apps/extension/public/pdf.worker.min.mjs
    License text : https://www.apache.org/licenses/LICENSE-2.0
    URL          : https://mozilla.github.io/pdf.js/
 
-6. TinySegmenter 0.1
+6. Page Assist
+   Author/Year : Page Assist contributors
+   License      : MIT
+   Files        : apps/packages/ui/src/ and apps/extension/ portions derived from Page Assist
+   License file : apps/packages/ui/src/Licenses/Page-Assist-LICENCE
+   URL          : https://github.com/n4ze3m/page-assist
+
+7. TinySegmenter 0.1
    Author/Year : Taku Kudo, 2008
    License      : BSD (new BSD licence)
    Files        : Docs/Docs/site/assets/javascripts/lunr/tinyseg.js
@@ -61,7 +67,7 @@ a manner compatible with the project license.
    License text : http://chasen.org/~taku/software/TinySegmenter/LICENCE.txt
    URL          : http://chasen.org/~taku/software/TinySegmenter/
 
-7. wordcut (lunr-languages Thai tokeniser bundle)
+8. wordcut (lunr-languages Thai tokeniser bundle)
    Author/Year : Vee Satayamas and contributors
    License      : MIT (includes bundled Underscore.js 1.8.3 by Jeremy Ashkenas, also MIT)
    Files        : Docs/Docs/site/assets/javascripts/lunr/wordcut.js
@@ -69,7 +75,7 @@ a manner compatible with the project license.
    License text : https://opensource.org/licenses/MIT
    URL          : https://github.com/veer66/wordcut
 
-8. Material for MkDocs (generated site bundle)
+9. Material for MkDocs (generated site bundle)
    Author/Year : Martin Donath (squidfunk)
    License      : MIT
    Files        : Docs/Docs/site/assets/javascripts/bundle.f55a23d4.min.js
@@ -78,7 +84,7 @@ a manner compatible with the project license.
    License text : https://opensource.org/licenses/MIT
    URL          : https://github.com/squidfunk/mkdocs-material
 
-9. repo2txt (ported/adapted modules)
+10. repo2txt (ported/adapted modules)
    Author/Year : Abin Thomas and repo2txt contributors
    License      : MIT
    Files        : apps/packages/ui/src/components/Option/Repo2Txt/

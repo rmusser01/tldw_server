@@ -3,6 +3,27 @@ Contributing
 
 Contributions are welcome, and they are greatly appreciated! Every  little bit helps, and credit will always be given.
 
+Temporary licensing contribution gate
+---------------------------------------
+
+Until the counsel-reviewed frontend CLA and API contract contribution grant are
+published, pull requests authored by anyone other than Robert Benjamin Jake
+Musser cannot modify:
+
+- `admin-ui/**`
+- `apps/tldw-frontend/**`
+- `apps/extension/**`
+- `apps/packages/ui/**`
+- root licensing governance files; or
+- the public API declaration boundary under `tldw_Server_API/app/api/v1/**`
+  and `tldw_Server_API/app/main.py`.
+
+This is a temporary, conservative intake pause. Backend and documentation
+contributions outside those boundaries remain welcome under the normal GPL
+process. Do not place an exception in an issue, review comment, commit message,
+or pull request; only a published contributor agreement can reopen a paused
+boundary.
+
 You can contribute in many ways:
 
 Types of Contributions

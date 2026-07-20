@@ -2,6 +2,7 @@
   "name": "tldw-assistant",
   "displayName": "tldw Assistant - Browser Extension for tldw_server",
   "version": "0.1.0",
+  "license": "SEE LICENSE IN LICENSE",
   "description": "A browser extension frontend for tldw_server - your unified AI assistant with RAG, media processing, and more.",
   "author": "tldw-team",
   "scripts": {

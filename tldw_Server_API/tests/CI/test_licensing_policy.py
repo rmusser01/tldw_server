@@ -18,6 +18,12 @@ PROTECTED_PATHS = [
     "apps/extension/**",
     "apps/packages/ui/**",
 ]
+PROTECTED_PACKAGES = [
+    "admin-ui",
+    "apps/tldw-frontend",
+    "apps/extension",
+    "apps/packages/ui",
+]
 
 
 def _read(path: str) -> str:
@@ -65,3 +71,36 @@ def test_countdown_template_is_not_misrepresented_as_an_active_grant() -> None:
         child.is_dir()
         for child in Path("LICENSES/releases").iterdir()
     )
+
+
+def test_protected_packages_use_local_license_notices() -> None:
+    for package in PROTECTED_PACKAGES:
+        manifest = json.loads(_read(f"{package}/package.json"))
+        assert manifest["license"] == "SEE LICENSE IN LICENSE"
+        notice = _read(f"{package}/LICENSE")
+        assert "PolyForm Perimeter License 1.0.1" in notice
+        assert "Required Notice:" in notice
+        assert "LICENSES/releases" in notice
+        assert "No trademark rights are granted" in notice
+
+
+def test_public_copy_distinguishes_server_and_frontend_terms() -> None:
+    root_readme = _read("README.md")
+    extension_readme = _read("apps/extension/README.md")
+    landing = _read("apps/tldw-frontend/components/landing/LandingLayout.tsx")
+    contributing = _read("CONTRIBUTING.md")
+
+    assert "Frontend: source-available" in root_readme
+    assert "Server: GPL-3.0-only" in root_readme
+    assert "source-available under PolyForm Perimeter 1.0.1" in extension_readme
+    assert "Frontend source-available" in landing
+    assert "Temporary licensing contribution gate" in contributing
+    assert "apps/packages/ui/**" in contributing
+    assert "Open source under GPL v2.0" not in landing
+
+
+def test_third_party_notices_preserve_frontend_upstream_terms() -> None:
+    notices = _read("THIRD_PARTY_NOTICES.txt")
+    assert "Host project: multi-license; see LICENSE" in notices
+    assert "apps/packages/ui/src/Licenses/Page-Assist-LICENCE" in notices
+    assert "apps/extension/public/pdf.worker.min.mjs" in notices
