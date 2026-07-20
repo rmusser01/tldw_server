@@ -111,6 +111,12 @@ def test_landing_links_to_current_repository() -> None:
     assert 'href="https://github.com/rmusser01/tldw"' not in landing
 
 
+def test_contributing_links_to_current_issue_tracker() -> None:
+    contributing = _read("CONTRIBUTING.md")
+    assert "https://github.com/rmusser01/tldw_server/issues" in contributing
+    assert "https://github.com/rmusser01/tldw/issues" not in contributing
+
+
 def test_third_party_notices_preserve_frontend_upstream_terms() -> None:
     notices = _read("THIRD_PARTY_NOTICES.txt")
     assert "Host project: multi-license; see LICENSE" in notices

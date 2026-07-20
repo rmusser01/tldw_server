@@ -31,7 +31,7 @@ Types of Contributions
 
 ### Report Bugs
 
-Report bugs at <https://github.com/rmusser01/tldw/issues>.
+Report bugs at <https://github.com/rmusser01/tldw_server/issues>.
 
 If you are reporting a bug, please include:
 
@@ -59,7 +59,7 @@ in docstrings, or even on the web in blog posts, articles, and such.
 ### Submit Feedback
 
 The best way to send feedback is to file an issue at
-<https://github.com/rmusser01/tldw/issues>.
+<https://github.com/rmusser01/tldw_server/issues>.
 
 If you are proposing a feature:
 
