@@ -56,10 +56,27 @@ jobs:
         run: echo "No frontend paths changed; frontend-required passed by policy."
 
       - name: Checkout
-        if: needs.changes.outputs.frontend_changed == 'true'
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
+          fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Enforce temporary frontend licensing contribution freeze
+        if: github.event_name == 'pull_request'
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          set -euo pipefail
+          if [[ "${PR_AUTHOR,,}" == "rmusser01" ]]; then
+            exit 0
+          fi
+          gate_script="$(mktemp)"
+          git show "${BASE_SHA}:Helper_Scripts/ci/check_frontend_license_gate.py" > "${gate_script}"
+          git diff --name-only "${BASE_SHA}" "${HEAD_SHA}" |
+            python3 "${gate_script}" --author "${PR_AUTHOR}" --owner "rmusser01"
 
       - name: Setup Node.js
         if: needs.changes.outputs.frontend_changed == 'true'

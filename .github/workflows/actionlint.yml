@@ -48,6 +48,7 @@ jobs:
             .github/workflows/actionlint.yml \
             .github/workflows/codeql.yml \
             .github/workflows/container-build-check.yml \
+            .github/workflows/frontend-required.yml \
             .github/workflows/frontend-ux-gates.yml \
             .github/workflows/publish-ghcr-main.yml \
             .github/workflows/publish-docker.yml \
