@@ -32,9 +32,13 @@ def test_verbatim_license_corpus_matches_reviewed_upstream_bytes() -> None:
 
 def test_root_license_maps_only_the_approved_protected_paths() -> None:
     text = _read("LICENSE")
-    for path in PROTECTED_PATHS:
-        assert f"`{path}`" in text
-    assert "`apps/**`" not in text
+    protected_section = text.split("## Protected Frontend Material", 1)[1].split("\n## ", 1)[0]
+    protected_paths = [
+        line.removeprefix("- `").removesuffix("`")
+        for line in protected_section.splitlines()
+        if line.startswith("- ")
+    ]
+    assert protected_paths == PROTECTED_PATHS
     assert "PolyForm Perimeter License 1.0.1" in text
     assert "GPL-3.0-only" in text
     assert "Apache-2.0" in text
