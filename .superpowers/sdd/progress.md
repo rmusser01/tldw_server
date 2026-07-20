@@ -117,3 +117,4 @@
 - Branch baseline after Backlog ID repair: `4ac5e2a1ebe8dedc7cf3cdc263157d2126f93929`.
 - Re-verified public refs: `main` `7a23be3202e360f2d8e7cfe208e13ba406cf0507`; `dev` `29acaca8c781213e27b12066372df13855e2e7a6`; draft PR #2727 head `60ce244fb6a65a79489b3f77299340afa501be24`.
 - Baseline verification: 19/19 focused workflow, release, Docker, and OpenAPI cache tests passed; two existing environment/config warnings were emitted.
+- Task 1: complete (commits fee1783..26ed722, review clean)
