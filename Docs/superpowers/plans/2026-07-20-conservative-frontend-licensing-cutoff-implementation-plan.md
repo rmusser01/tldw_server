@@ -41,7 +41,7 @@ grant before publication.
 
 ## Global Constraints
 
-- Set TASK-12120 to In Progress before repository edits; it is the pre-created
+- Set TASK-12976 to In Progress before repository edits; it is the pre-created
   execution task linked to this plan and the approved design spec.
 - Execute in a worktree created from the latest `origin/dev` with
   `superpowers:using-git-worktrees`; do not reuse the current dirty worktree.
@@ -1169,7 +1169,7 @@ git commit -m "ci: suspend protected frontend image publishing"
 
 **Files:**
 
-- Modify: `backlog/tasks/task-12120 - Implement-conservative-frontend-licensing-cutoff.md`
+- Modify: `backlog/tasks/task-12976 - Implement-conservative-frontend-licensing-cutoff.md`
 
 **Interfaces:**
 
@@ -1269,7 +1269,7 @@ Done only after every required check passes.
 - [ ] **Step 8: Commit the finalized task record**
 
 ```bash
-git add 'backlog/tasks/task-12120 - Implement-conservative-frontend-licensing-cutoff.md'
+git add 'backlog/tasks/task-12976 - Implement-conservative-frontend-licensing-cutoff.md'
 git commit -m "chore: complete frontend licensing cutoff task"
 ```
 

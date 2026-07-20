@@ -1,7 +1,7 @@
 # Time-Delayed Source-Available Frontend Licensing Design
 
 - **Date:** 2026-07-19
-- **Backlog task:** TASK-12118
+- **Backlog task:** TASK-12974
 - **Status:** Approved product and engineering design; license implementation and
   counsel review remain separate gates
 - **Licensor:** Robert Benjamin Jake Musser

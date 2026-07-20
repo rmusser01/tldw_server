@@ -1,7 +1,7 @@
 ---
-id: TASK-12120
+id: TASK-12976
 title: Implement conservative frontend licensing cutoff
-status: To Do
+status: In Progress
 labels:
 - licensing
 - frontend
@@ -15,7 +15,7 @@ documentation:
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Execute the approved pre-counsel licensing cutoff using Docs/superpowers/plans/2026-07-20-conservative-frontend-licensing-cutoff-implementation-plan.md. Establish the prospective Perimeter path boundary, preserve public history and third-party notices, declare the OpenAPI contract Apache-2.0, pause unlicensed contribution paths, isolate the GPL API image, and suspend protected artifact publishing. Do not add custom post-counsel grants or publish protected binaries.
+Execute the approved pre-counsel licensing cutoff. Establish the prospective Perimeter path boundary, preserve public history and third-party notices, declare the OpenAPI contract Apache-2.0, pause unlicensed contribution paths, isolate the GPL API image, and suspend protected artifact publishing. Do not add custom post-counsel grants or publish protected binaries.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
@@ -25,7 +25,7 @@ Execute the approved pre-counsel licensing cutoff using Docs/superpowers/plans/2
 - [ ] #3 The generated OpenAPI contract declares Apache-2.0 while the server implementation remains GPL-3.0-only.
 - [ ] #4 The required PR workflow blocks third-party protected, legal-governance, and conservative API declaration changes until later grants exist.
 - [ ] #5 The GPL API image excludes protected frontend material and rolling protected image publishing is suspended.
-- [ ] #6 All plan verification gates pass and the result is submitted as a license-only PR into dev before PR #2727.
+- [ ] #6 All verification gates pass and the result is submitted as a license-only PR into dev before PR #2727.
 <!-- AC:END -->
 
 ## Implementation Notes
