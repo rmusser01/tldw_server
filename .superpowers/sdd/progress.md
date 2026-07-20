@@ -109,3 +109,11 @@
 - Task 3 self-review RED exposed missing full public hop ceilings and a malformed injected-header tuple escaping as raw `ValueError` (2 failed, 12 passed); both regressions are GREEN at 14/14 after the response boundary was hardened.
 - Task 3 final verification passed 286/286 gateway, TASK-12971, contract, planner, registry, and legacy tests. Compileall, Ruff, Black, Python 3.10 AST parsing, and `git diff --check` passed; Bandit reported zero findings and zero errors across 253 gateway production LOC.
 - Task 3 / Stage 3 is Complete; overall TASK-12968.2 remains In Progress for Tasks 4-9.
+
+## 2026-07-20 — TASK-12976 conservative frontend licensing cutoff
+
+- Execution worktree: `.worktrees/frontend-licensing-cutoff` on `codex/frontend-licensing-cutoff`.
+- Approved plan: `Docs/superpowers/plans/2026-07-20-conservative-frontend-licensing-cutoff-implementation-plan.md`.
+- Branch baseline after Backlog ID repair: `4ac5e2a1ebe8dedc7cf3cdc263157d2126f93929`.
+- Re-verified public refs: `main` `7a23be3202e360f2d8e7cfe208e13ba406cf0507`; `dev` `29acaca8c781213e27b12066372df13855e2e7a6`; draft PR #2727 head `60ce244fb6a65a79489b3f77299340afa501be24`.
+- Baseline verification: 19/19 focused workflow, release, Docker, and OpenAPI cache tests passed; two existing environment/config warnings were emitted.
