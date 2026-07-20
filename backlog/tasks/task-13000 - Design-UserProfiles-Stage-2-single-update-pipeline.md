@@ -1,7 +1,7 @@
 ---
 id: TASK-13000
 title: Design UserProfiles Stage 2 single-update pipeline
-status: In Progress
+status: Done
 created_date: 2026-07-20 18:48
 labels:
 - userprofiles
@@ -15,7 +15,7 @@ documentation:
 - Docs/superpowers/specs/2026-07-20-userprofiles-single-update-pipeline-stage2-design.md
 modified_files:
 - Docs/superpowers/specs/2026-07-20-userprofiles-single-update-pipeline-stage2-design.md
-updated_date: 2026-07-20 18:57
+updated_date: 2026-07-20 18:58
 ---
 
 ## Description
@@ -37,18 +37,19 @@ Capture the approved Stage 2 architecture for replacing the transitional UserPro
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Design decisions were developed and approved interactively. Work is isolated in .worktrees/userprofiles-stage2-design on branch codex/userprofiles-stage2-design. Baseline focused tests passed: 19 tests across planner, command-service, and v2 compatibility suites. The Backlog allocator reused a completed ID, and the historical UserProfiles parent ID now belongs to an active Embeddings task after tracker cleanup. Those uncommitted invalid records were removed; this standalone explicit ID is authoritative.
 Written-spec self-review completed. The review corrected stale Backlog/document references, constrained the temporary connection bridge so post-commit effects cannot run before commit confirmation, documented composite-version linearizability limits, required one monotonic user-row version touch per non-empty plan, required transaction-time membership authorization rechecks, and made the legacy runtime-failure compatibility conflict explicit. The narrow correction rolls back all database mutations and returns an empty applied list rather than reporting rolled-back writes. Structural checks passed: no placeholders, balanced Markdown fences/inline backticks, ASCII-only content, required files present, and git diff --check clean.
+Design checkpoint committed as 3b37995fac (docs: design UserProfiles stage 2 pipeline). The final handoff asks the requester to review the written specification before any implementation plan is created.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Wrote and self-reviewed the UserProfiles Stage 2 single-update pipeline design. The specification defines typed planning, transaction-owned execution, storage-bound executors, same-transaction membership writes, required and post-commit effects, caller-specific compatibility mapping, deterministic migration and verification gates, and explicit cross-system/version limitations. Review also resolved unsafe bridge timing and the conflict between all-or-nothing rollback and legacy mixed runtime-failure applied lists.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Approved design is written to Docs/superpowers/specs/2026-07-20-userprofiles-single-update-pipeline-stage2-design.md.
 - [x] #2 The written specification is self-reviewed for contradictions, missing compatibility behavior, unsafe transaction assumptions, and scope creep.
-- [ ] #3 Documentation and Backlog.md records are committed on the isolated design branch.
-- [ ] #4 The requester is asked to review the written specification before implementation planning begins.
+- [x] #3 Documentation and Backlog.md records are committed on the isolated design branch.
+- [x] #4 The requester is asked to review the written specification before implementation planning begins.
 <!-- DOD:END -->
