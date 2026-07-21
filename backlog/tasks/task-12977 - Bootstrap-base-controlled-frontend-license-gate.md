@@ -1,7 +1,7 @@
 ---
 id: TASK-12977
 title: Bootstrap base-controlled frontend license gate
-status: In Progress
+status: Done
 assignee: []
 created_date: ''
 updated_date: '2026-07-21 03:59'
@@ -37,7 +37,7 @@ Replace the PR-controlled temporary frontend contribution gate with a base-contr
 - [x] #2 The gate workflow runs from the default branch with contents: read, never checks out or executes pull-request code, and evaluates immutable pull-request identity and changed paths.
 - [x] #3 Changed paths are transported and parsed NUL-safely with adversarial filename coverage and exact protected/governance/API boundaries.
 - [x] #4 The bootstrap workflow lands on main before the dev licensing cutoff and the gate status becomes required on both dev and main without weakening existing rules.
-- [ ] #5 Owner-authored cutoff changes pass while external protected or governance changes fail, and all workflow, security, and focused tests pass.
+- [x] #5 Owner-authored cutoff changes pass while external protected or governance changes fail, and all workflow, security, and focused tests pass.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -63,21 +63,22 @@ Review of Task 4 in TASK-12976 proved that a pull_request workflow is PR-control
 - Draft licensing PR #2755 proved `frontend-license-policy/trusted/dev` on head `064ab2569632f55ad057fd1c02bc0c94709e1d18` in successful workflow run `29810555026` / job `88570361051`. Both successful audit checks were created by `github-actions[bot]` through GitHub Actions App integration `15368` and workflow ID `317148516`.
 - Main ruleset `5653432` remains active with its exact prior conditions, no bypass actors, deletion rule, non-fast-forward rule, and pull-request rule; the sole addition is source-bound `frontend-license-policy/trusted/main` with `strict=false`. Active dev ruleset `19362594` targets only `refs/heads/dev`, has no bypass actors, copies the pull-request rule, and requires only source-bound `frontend-license-policy/trusted/dev` with `strict=false`. Effective-rules readback confirmed both contexts, and PR #2727 is blocked because its head lacks the required `/dev` status.
 - Public ruleset snapshots are recorded under `Docs/superpowers/evidence/TASK-12977/`. Main was activated at `2026-07-21T00:43:19.243-07:00`; dev was activated at `2026-07-21T00:43:49.962-07:00`.
-- Stage 5 reconciliation replaced the rejected PR-controlled step in `frontend-required.yml` with a negative regression contract and carried the reviewed trusted workflow, classifier, tests, and actionlint target from merged `main`. RED failed because the rejected workflow lacked the conditional checkout; GREEN passed 2/2 after restoring the workflow from `origin/dev`. Fresh final verification passed 40/40 focused tests with six pre-existing warnings; pinned actionlint 1.7.12, Ruff, Black, Bandit with zero findings/errors across 74 classifier LOC, deterministic owner/external cases, evidence assertions, marker integrity, and `git diff --check` all passed. Independent code/security review was CLEAN on the base-control and NUL/rename findings. Its documentation finding was resolved by replacing the stale rejected Task 4 instructions, and the plan re-review was CLEAN. AC #5 and task closure await a successful source-bound `/dev` result on the committed reconciliation head.
+- Stage 5 reconciliation replaced the rejected PR-controlled step in `frontend-required.yml` with a negative regression contract and carried the reviewed trusted workflow, classifier, tests, and actionlint target from merged `main`. RED failed because the rejected workflow lacked the conditional checkout; GREEN passed 2/2 after restoring the workflow from `origin/dev`. Fresh final verification passed 40/40 focused tests with six pre-existing warnings; pinned actionlint 1.7.12, Ruff, Black, Bandit with zero findings/errors across 74 classifier LOC, deterministic owner/external cases, evidence assertions, marker integrity, and `git diff --check` all passed. Independent code/security review was CLEAN on the base-control and NUL/rename findings. Its documentation finding was resolved by replacing the stale rejected Task 4 instructions, and the plan re-review was CLEAN.
+- Reconciled commit `f7c635d34749663fcb52a5ee93561d8013bad022` passed source-bound `frontend-license-policy/trusted/dev`. Replacement run `29813192487` / job `88578513698` completed successfully through workflow `317148516` and GitHub Actions App `15368`; PR #2755 remained draft and PR #2727 remained held behind the cutoff.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Implemented and activated the base-controlled frontend license gate. The trusted workflow is on `main`; branch-specific source-bound rules protect `main` and `dev`; public ruleset evidence is committed; and the licensing branch now uses the reviewed NUL-safe classifier while `frontend-required.yml` has no licensing authority. Local verification and independent security review are clean, and the reconciled PR #2755 head passed the required `/dev` gate. Bootstrap PR #2753's missing human-written Change summary remains documented repository-policy noncompliance.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

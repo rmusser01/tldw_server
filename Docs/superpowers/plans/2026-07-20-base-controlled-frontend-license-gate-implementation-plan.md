@@ -85,7 +85,7 @@ pytest, PyYAML, actionlint, Bandit, Backlog.md CLI/MCP.
 | 2 | Harden the classifier | Exact protected boundaries and NUL-safe parsing fail closed | Focused pytest + Bandit | Complete |
 | 3 | Add the trusted workflow | Base-controlled workflow publishes only a trusted, fail-closed status and passes contract linting | Workflow contract pytest + actionlint | Complete |
 | 4 | Land and activate | The bootstrap is on `main`, temporary `/main` validation and the licensing PR proved both source-bound contexts, and branch-specific rules protect `main` and `dev`; PR #2753's missing human-written Change summary remains recorded policy noncompliance | Live run/status/ruleset evidence | Complete (technical rollout; policy noncompliance recorded) |
-| 5 | Reconcile licensing branch | Rejected PR-controlled gate is replaced and TASK-12976 resumes on the trusted contract | Focused policy/workflow tests + Bandit + diff review | In Progress |
+| 5 | Reconcile licensing branch | Rejected PR-controlled gate is replaced and TASK-12976 resumes on the trusted contract | Focused policy/workflow tests + Bandit + diff review | Complete |
 
 ## Task 1: Prepare the `main` Bootstrap Worktree
 
@@ -1000,9 +1000,9 @@ license-only PR to `dev`. The merge order remains:
 - [x] Main ruleset `5653432` retains every prior rule and condition.
 - [x] Dev ruleset targets only `refs/heads/dev`, requires PR plus
       `frontend-license-policy/trusted/dev`, and has no bypass actors.
-- [ ] Focused pytest suites, actionlint, Bandit, and `git diff --check` pass.
-- [ ] Public before/after ruleset evidence and rollback IDs are recorded.
-- [ ] TASK-12977 and TASK-12976 statuses accurately reflect live state.
+- [x] Focused pytest suites, actionlint, Bandit, and `git diff --check` pass.
+- [x] Public before/after ruleset evidence and rollback IDs are recorded.
+- [x] TASK-12977 and TASK-12976 statuses accurately reflect live state.
 
 ## Primary References
 
