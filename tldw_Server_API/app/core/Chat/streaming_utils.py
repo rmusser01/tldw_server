@@ -1212,6 +1212,12 @@ async def _async_iter_sync_stream(
             if kind == "data":
                 yield payload
             elif kind == "error":
+                # The worker queues a terminal error only after provider
+                # iteration and close have finished. Preserve that ownership
+                # boundary through the pool's lease-release epilogue so an
+                # immediate retry cannot fail admission on the prior attempt.
+                while not worker_released.is_set():
+                    await asyncio.sleep(0)
                 raise payload
             elif kind == "done":
                 break

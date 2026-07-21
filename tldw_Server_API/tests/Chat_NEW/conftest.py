@@ -7,7 +7,6 @@ of unit, integration, and property tests. Focuses on the OpenAI-compatible
 """
 
 import os
-import time
 from contextlib import contextmanager
 
 # Set test environment variables before any imports
@@ -427,38 +426,28 @@ def _test_openai_server_credential() -> Generator[None, None, None]:
     from tldw_Server_API.app.core.AuthNZ import llm_provider_overrides
     from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import LLMProviderOverride
 
-    state_fields = (
-        "_OVERRIDE_CACHE_HEALTHY",
-        "_OVERRIDE_CACHE_REFRESHED_AT",
-        "_OVERRIDE_CACHE_TTL_DISABLED_FOR_TESTS",
-        "_OVERRIDE_REFRESH_GENERATION",
-        "_OVERRIDE_COMPLETED_GENERATION",
-        "_OVERRIDE_RECOVERY_IN_FLIGHT",
-        "_OVERRIDE_RECOVERY_TASK",
-        "_OVERRIDE_REFRESH_SERVICE_TASK",
-        "_OVERRIDE_RECOVERY_FAILURES",
-        "_OVERRIDE_RECOVERY_NEXT_RETRY_AT",
-    )
     with llm_provider_overrides._OVERRIDE_LOCK:
         original_cache = dict(llm_provider_overrides._OVERRIDE_CACHE)
-        original_state = {
-            name: getattr(llm_provider_overrides, name) for name in state_fields
-        }
-        llm_provider_overrides._OVERRIDE_CACHE["openai"] = LLMProviderOverride(
-            provider="openai",
-            api_key="test-openai-key",
+        original_healthy = llm_provider_overrides._OVERRIDE_CACHE_HEALTHY
+        original_ttl_enabled = (
+            not llm_provider_overrides._OVERRIDE_CACHE_TTL_DISABLED_FOR_TESTS
         )
-        llm_provider_overrides._OVERRIDE_CACHE_HEALTHY = True
-        llm_provider_overrides._OVERRIDE_CACHE_REFRESHED_AT = time.monotonic()
-        llm_provider_overrides._OVERRIDE_CACHE_TTL_DISABLED_FOR_TESTS = True
+    llm_provider_overrides.set_llm_provider_overrides_cache_for_tests(
+        {
+            "openai": LLMProviderOverride(
+                provider="openai",
+                api_key="test-openai-key",
+            )
+        }
+    )
     try:
         yield
     finally:
-        with llm_provider_overrides._OVERRIDE_LOCK:
-            llm_provider_overrides._OVERRIDE_CACHE.clear()
-            llm_provider_overrides._OVERRIDE_CACHE.update(original_cache)
-            for name, value in original_state.items():
-                setattr(llm_provider_overrides, name, value)
+        llm_provider_overrides.set_llm_provider_overrides_cache_for_tests(
+            original_cache,
+            healthy=original_healthy,
+            ttl_enabled=original_ttl_enabled,
+        )
 
 
 @contextmanager

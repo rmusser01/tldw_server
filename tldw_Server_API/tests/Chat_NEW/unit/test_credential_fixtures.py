@@ -1,5 +1,7 @@
+import asyncio
 from contextlib import asynccontextmanager
 
+import pytest
 from fastapi import FastAPI
 
 from tldw_Server_API.app.core.AuthNZ import llm_provider_overrides
@@ -42,30 +44,19 @@ def _restore_override_state(snapshot) -> None:
     assert llm_provider_overrides._OVERRIDE_CACHE is cache
 
 
-def test_test_credential_restores_unhealthy_ttl_enabled_state_exactly():
+def test_test_credential_restores_unhealthy_ttl_enabled_snapshot():
     baseline = _snapshot_override_state()
-    recovery_task = object()
-    refresh_service_task = object()
     original_override = LLMProviderOverride(
         provider="anthropic",
         api_key="original-key",
     )
 
     try:
-        with llm_provider_overrides._OVERRIDE_LOCK:
-            llm_provider_overrides._OVERRIDE_CACHE.clear()
-            llm_provider_overrides._OVERRIDE_CACHE["anthropic"] = original_override
-            llm_provider_overrides._OVERRIDE_CACHE_HEALTHY = False
-            llm_provider_overrides._OVERRIDE_CACHE_REFRESHED_AT = 123.5
-            llm_provider_overrides._OVERRIDE_CACHE_TTL_DISABLED_FOR_TESTS = False
-            llm_provider_overrides._OVERRIDE_REFRESH_GENERATION = 41
-            llm_provider_overrides._OVERRIDE_COMPLETED_GENERATION = 37
-            llm_provider_overrides._OVERRIDE_RECOVERY_IN_FLIGHT = True
-            llm_provider_overrides._OVERRIDE_RECOVERY_TASK = recovery_task
-            llm_provider_overrides._OVERRIDE_REFRESH_SERVICE_TASK = refresh_service_task
-            llm_provider_overrides._OVERRIDE_RECOVERY_FAILURES = 5
-            llm_provider_overrides._OVERRIDE_RECOVERY_NEXT_RETRY_AT = 789.25
-        expected = _snapshot_override_state()
+        llm_provider_overrides.set_llm_provider_overrides_cache_for_tests(
+            {"anthropic": original_override},
+            healthy=False,
+            ttl_enabled=True,
+        )
 
         with chat_new_conftest._test_openai_server_credential():
             assert llm_provider_overrides._OVERRIDE_CACHE["openai"].api_key == (
@@ -77,12 +68,56 @@ def test_test_credential_restores_unhealthy_ttl_enabled_state_exactly():
                 is True
             )
 
-        restored = _snapshot_override_state()
-        assert restored == expected
-        assert restored[0] is expected[0]
-        assert restored[2]["_OVERRIDE_RECOVERY_TASK"] is recovery_task
-        assert restored[2]["_OVERRIDE_REFRESH_SERVICE_TASK"] is refresh_service_task
+        with llm_provider_overrides._OVERRIDE_LOCK:
+            assert set(llm_provider_overrides._OVERRIDE_CACHE) == {"anthropic"}
+            assert (
+                llm_provider_overrides._OVERRIDE_CACHE["anthropic"].api_key
+                == "original-key"
+            )
+            assert llm_provider_overrides._OVERRIDE_CACHE_HEALTHY is False
+            assert (
+                llm_provider_overrides._OVERRIDE_CACHE_TTL_DISABLED_FOR_TESTS
+                is False
+            )
+            assert llm_provider_overrides._OVERRIDE_RECOVERY_TASK is None
+            assert llm_provider_overrides._OVERRIDE_REFRESH_SERVICE_TASK is None
     finally:
+        _restore_override_state(baseline)
+
+
+@pytest.mark.asyncio
+async def test_test_credential_retires_active_refresh_service_before_seeding():
+    """A late periodic refresh cannot erase the fixture's test credential."""
+    baseline = _snapshot_override_state()
+    refresh_started = asyncio.Event()
+    release_refresh = asyncio.Event()
+    refresh_finished = asyncio.Event()
+
+    async def publish_empty_snapshot() -> None:
+        refresh_started.set()
+        try:
+            await release_refresh.wait()
+            with llm_provider_overrides._OVERRIDE_LOCK:
+                llm_provider_overrides._OVERRIDE_CACHE.clear()
+        finally:
+            refresh_finished.set()
+
+    refresh_task = asyncio.create_task(publish_empty_snapshot())
+    await asyncio.wait_for(refresh_started.wait(), timeout=1)
+    try:
+        with llm_provider_overrides._OVERRIDE_LOCK:
+            llm_provider_overrides._OVERRIDE_REFRESH_SERVICE_TASK = refresh_task
+
+        with chat_new_conftest._test_openai_server_credential():
+            release_refresh.set()
+            await asyncio.wait_for(refresh_finished.wait(), timeout=1)
+            snapshot = llm_provider_overrides.get_llm_provider_overrides_snapshot()
+            assert snapshot["openai"].api_key == "test-openai-key"
+    finally:
+        release_refresh.set()
+        if not refresh_task.done():
+            refresh_task.cancel()
+        await asyncio.gather(refresh_task, return_exceptions=True)
         _restore_override_state(baseline)
 
 

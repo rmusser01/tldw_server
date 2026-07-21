@@ -20,14 +20,14 @@ from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import LLMProviderOv
 pytestmark = pytest.mark.integration
 
 
-@pytest.fixture(autouse=True)
-def healthy_override_cache_between_tests():
-    original = overrides_module.get_llm_provider_overrides_snapshot()
-    overrides_module.set_llm_provider_overrides_cache_for_tests(original)
+@pytest.fixture(scope="module", autouse=True)
+def _simulate_incoming_unhealthy_override_cache():
+    """Reproduce an unhealthy cache inherited from an earlier RAG test shard."""
+    overrides_module.set_llm_provider_overrides_cache_for_tests({}, healthy=False)
     try:
         yield
     finally:
-        overrides_module.set_llm_provider_overrides_cache_for_tests(original)
+        overrides_module.set_llm_provider_overrides_cache_for_tests({})
 
 
 def _request() -> Request:
@@ -40,6 +40,11 @@ def _request() -> Request:
             "query_string": b"",
         }
     )
+
+
+def test_rag_provider_override_fixture_starts_healthy_and_empty() -> None:
+    """A failed lifespan refresh cannot poison the next RAG test."""
+    assert overrides_module.get_llm_provider_overrides_snapshot() == {}
 
 
 @pytest.mark.asyncio

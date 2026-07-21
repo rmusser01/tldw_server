@@ -3843,6 +3843,7 @@ def test_real_openai_401_refreshes_oauth_once_before_stream_output(
     )
 
     with (
+        patch.dict(os.environ, {"STREAMS_UNIFIED": "1"}),
         patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
         patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
         patch.object(chat_endpoint, "get_request_queue", return_value=None),

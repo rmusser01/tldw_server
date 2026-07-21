@@ -1371,6 +1371,52 @@ class TestSafeStreamGenerator:
             {"success": False, "cancelled": False, "error": True}
         ]
 
+    async def test_sync_bridge_error_waits_for_capacity_release_before_propagating(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        target_returned = threading.Event()
+        allow_release = threading.Event()
+
+        class GatedReleasePool(BoundedDaemonPool):
+            def start(self, target, **kwargs):
+                def gated_target() -> None:
+                    try:
+                        target()
+                    finally:
+                        target_returned.set()
+                        allow_release.wait()
+
+                return super().start(gated_target, **kwargs)
+
+        class FailingIterator:
+            def __iter__(self):
+                return self
+
+            def __next__(self):
+                raise RuntimeError("untrusted provider failure")
+
+        pool = GatedReleasePool(capacity=1)
+        monkeypatch.setattr(bounded_daemon_module, "STREAM_DAEMON_POOL", pool)
+        monkeypatch.setattr(
+            streaming_utils,
+            "STREAM_CLEANUP_TIMEOUT_SECONDS",
+            0.0,
+        )
+        stream = streaming_utils._async_iter_sync_stream(FailingIterator())
+        next_task = asyncio.create_task(stream.__anext__())
+        try:
+            assert await asyncio.to_thread(target_returned.wait, 1.0)
+            await asyncio.sleep(0)
+            assert pool.active_count == 1
+            assert next_task.done() is False
+        finally:
+            allow_release.set()
+
+        with pytest.raises(streaming_utils.SanitizedProviderStreamError):
+            await asyncio.wait_for(next_task, timeout=1.0)
+        assert pool.active_count == 0
+
     async def test_sync_bridge_completion_waits_for_close_handoff(
         self,
         monkeypatch: pytest.MonkeyPatch,

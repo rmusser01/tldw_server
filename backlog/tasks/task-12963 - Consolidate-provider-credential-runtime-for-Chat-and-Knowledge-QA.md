@@ -159,6 +159,17 @@ modified_files:
 - tldw_Server_API/tests/Research/test_research_discovery_executor.py
 - tldw_Server_API/tests/Embeddings/test_media_embeddings_storage_scope.py
 - tldw_Server_API/tests/CI/test_required_workflow_contracts.py
+- tldw_Server_API/tests/RAG_NEW/integration/test_rag_provider_override_store_boundary.py
+- tldw_Server_API/tests/RAG_NEW/conftest.py
+- tldw_Server_API/tests/Chat_NEW/unit/test_credential_fixtures.py
+- tldw_Server_API/app/api/v1/endpoints/chat.py
+- tldw_Server_API/tests/Chat/integration/test_chat_endpoint_simplified.py
+- tldw_Server_API/app/core/Sandbox/service.py
+- tldw_Server_API/app/core/Chat/streaming_utils.py
+- tldw_Server_API/tests/Chat/unit/test_streaming_utils.py
+- tldw_Server_API/app/core/Sandbox/orchestrator.py
+- tldw_Server_API/tests/Chat_NEW/conftest.py
+- tldw_Server_API/tests/sandbox/test_execution_store_boundaries.py
 ---
 
 ## Description
@@ -361,4 +372,8 @@ VectorStores root cause confirmed: DB_Deps synthesized and exported a second USE
 Fresh post-fix evidence: final research executor 270/270 passed (including the strengthened pre-cleanup child-drain assertions); complete Research/ResearchWorkspace/WebSearch shard 2,256 passed/11 skipped; macOS-equivalent sandbox state/store shard 245 passed/6 skipped; OIDC JIT, magic-link, and password backend 23 passed; VectorStores/Embeddings storage/API dependency/DB path scope 113 passed/5 skipped; embeddings v5 unit 70 passed; workflow contracts 41 passed. The modified workflow passes pinned actionlint 1.7.12. All changed Python files py_compile under 3.10/3.11/3.12/3.13. Ruff has zero new findings versus committed HEAD (15 exact historical full-file findings); Bandit has zero high findings and zero findings on changed lines (remaining B106/B108 reports are exact unchanged baselines); git diff --check passes. Two independent final re-reviews found no actionable issue after the fail-closed storage and pre-cleanup drain-assertion corrections.
 
 TASK-12963 remains In Progress and PR #2727 remains draft pending exact-new-head hosted CI and the requester-authored Change summary required by policy. server-ux-smoke.pid and both unrelated untracked watchlist templates remain untouched and must not be staged.
+2026-07-18: Exact-head Windows/Python 3.12 rag-new-integration-core exposed six setup errors in the new RAG provider-override boundary module. The module fixture consulted the production fail-closed getter before establishing test state, so a preceding lifespan refresh failure could poison collection order. Production fail-closed behavior remains correct; follow-up is limited to deterministic test-state isolation plus an incoming-unhealthy regression.
+2026-07-18: Exact-head Windows/Python 3.12 chat-new-integration-property exposed a real test-fixture race: credentialed_test_client manually inserted an OpenAI override but left the 5-second startup refresh worker alive; the 6.23-second Windows setup let that worker publish the empty DB snapshot before adapter dispatch, producing the intended production 503. Follow-up is test-only: prove the race deterministically, then seed through the task-aware override reset hook so production remains fail closed.
+2026-07-18: Exact-head Ubuntu/Python 3.13 legacy Chat failure was traced to a terminal sync-stream error becoming observable before its bounded daemon lease-release epilogue. The capacity-one OAuth retry can therefore fail admission under load. Follow-up will add an event-gated unit regression at the sync bridge plus retain the real OpenAI adapter-boundary integration regression; general disconnect cleanup remains bounded.
+2026-07-21: Exact-head CI follow-up hardening addressed deterministic RAG and Chat_NEW credential-fixture isolation, the legacy Chat sync-stream lease-release race, and Sandbox background dispatch hazards (pre-dispatch claim expiry, competing-owner stale writes, queued policy-hash durability, submission-failure fencing, and queued idempotent replay callback amplification). Added orchestrator/service and SQLite/Memory/PostgreSQL adapter/concurrency regressions, including a pre-dispatch cross-node hash assertion and simultaneous replay calls. Evidence before the required dev merge: legacy Chat shard 450 passed/30 skipped; streaming plus real adapter retry 88 passed/1 skipped; macOS-equivalent sandbox state/store shard 253 passed/6 skipped; focused SQLite/Memory/real isolated PostgreSQL matrix 24 passed; Python 3.10-3.13 py_compile clean; Bandit 0 findings/0 errors over 6,409 touched production LOC; new sandbox tests Ruff-clean with only the two reproduced service.py baseline findings. Independent re-reviews found no blocker. No push has occurred. origin/dev is 8ed612c7e0335ab922b6abd5f5c11ba1407d552d and remains 25 commits ahead; local commit, merge, conflict review, and full post-merge high-risk reruns are pending. Unrelated server-ux-smoke.pid and both watchlist templates remain untouched.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
