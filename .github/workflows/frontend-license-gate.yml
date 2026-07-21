@@ -3,7 +3,7 @@ name: Frontend License Gate Audit
 on:
   pull_request_target:
     branches: [main, dev]
-    types: [opened, reopened, synchronize, ready_for_review]
+    types: [opened, reopened, synchronize, ready_for_review, edited]
 
 permissions:
   contents: read
@@ -19,7 +19,7 @@ jobs:
     timeout-minutes: 5
     env:
       GH_TOKEN: ${{ github.token }}
-      STATUS_CONTEXT: frontend-license-policy/trusted
+      STATUS_CONTEXT: frontend-license-policy/trusted/${{ github.event.pull_request.base.ref }}
       STATUS_REPOSITORY: ${{ github.repository }}
       HEAD_SHA: ${{ github.event.pull_request.head.sha }}
       BASE_SHA: ${{ github.event.pull_request.base.sha }}

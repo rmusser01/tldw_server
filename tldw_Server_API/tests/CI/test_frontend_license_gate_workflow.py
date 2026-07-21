@@ -13,7 +13,13 @@ WORKFLOW_PATH = REPO_ROOT / ".github/workflows/frontend-license-gate.yml"
 ACTIONLINT_PATH = REPO_ROOT / ".github/workflows/actionlint.yml"
 CHECKOUT_ACTION = "actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd"
 JOB_ID = "frontend-license-gate-audit"
-STATUS_CONTEXT = "frontend-license-policy/trusted"
+SUPPORTED_BASE_REFS = ("main", "dev")
+STATUS_CONTEXT_PREFIX = "frontend-license-policy/trusted"
+STATUS_CONTEXT_EXPRESSION = "frontend-license-policy/trusted/${{ github.event.pull_request.base.ref }}"
+EXPECTED_STATUS_CONTEXTS = {
+    "main": "frontend-license-policy/trusted/main",
+    "dev": "frontend-license-policy/trusted/dev",
+}
 CLASSIFIER = "Helper_Scripts/ci/check_frontend_license_gate.py"
 EXPECTED_STEP_IDENTITIES = (
     ("Mark trusted policy pending", None, None),
@@ -33,6 +39,17 @@ COMMON_METADATA_VALIDATIONS = (
     '[[ "${BASE_REF}" == main || "${BASE_REF}" == dev ]]',
     '[[ -n "${PR_AUTHOR}" && -n "${REPOSITORY_OWNER}" ]]',
 )
+EXPECTED_JOB_ENV = {
+    "GH_TOKEN": "${{ github.token }}",
+    "STATUS_CONTEXT": STATUS_CONTEXT_EXPRESSION,
+    "STATUS_REPOSITORY": "${{ github.repository }}",
+    "HEAD_SHA": "${{ github.event.pull_request.head.sha }}",
+    "BASE_SHA": "${{ github.event.pull_request.base.sha }}",
+    "BASE_REF": "${{ github.event.pull_request.base.ref }}",
+    "PR_NUMBER": "${{ github.event.pull_request.number }}",
+    "PR_AUTHOR": "${{ github.event.pull_request.user.login }}",
+    "REPOSITORY_OWNER": "${{ github.repository_owner }}",
+}
 
 
 def load_yaml(path: Path) -> dict[str, Any]:
@@ -60,6 +77,32 @@ def assert_trusted_run_bodies(steps: list[dict[str, Any]]) -> None:
     digests = {step["name"]: sha256(step["run"].encode()).hexdigest() for step in steps if "run" in step}
 
     assert digests == TRUSTED_RUN_SHA256
+
+
+def assert_branch_specific_status_context(job: dict[str, Any], triggers: dict[str, Any]) -> None:
+    base_refs = tuple(triggers["pull_request_target"]["branches"])
+    selected_contexts = {base_ref: f"{STATUS_CONTEXT_PREFIX}/{base_ref}" for base_ref in base_refs}
+
+    assert base_refs == SUPPORTED_BASE_REFS
+    assert job["env"]["STATUS_CONTEXT"] == STATUS_CONTEXT_EXPRESSION
+    assert selected_contexts == EXPECTED_STATUS_CONTEXTS
+    assert len(set(selected_contexts.values())) == len(SUPPORTED_BASE_REFS)
+
+
+def assert_exact_privileged_job_surface(data: dict[str, Any]) -> None:
+    trigger_key = "on" if "on" in data else True
+    job = data["jobs"][JOB_ID]
+
+    assert set(data) == {"name", trigger_key, "permissions", "concurrency", "jobs"}
+    assert data["name"] == "Frontend License Gate Audit"
+    assert data["concurrency"] == {
+        "group": "frontend-license-gate-${{ github.event.pull_request.number }}",
+        "cancel-in-progress": True,
+    }
+    assert set(job) == {"runs-on", "timeout-minutes", "env", "steps"}
+    assert job["runs-on"] == "ubuntu-latest"
+    assert job["timeout-minutes"] == 5
+    assert job["env"] == EXPECTED_JOB_ENV
 
 
 def assert_common_validations_precede_owner(script: str) -> None:
@@ -105,8 +148,34 @@ def test_workflow_uses_the_base_controlled_trigger_and_minimum_permissions() -> 
 
     assert set(triggers) == {"pull_request_target"}
     assert triggers["pull_request_target"]["branches"] == ["main", "dev"]
+    assert triggers["pull_request_target"]["types"] == [
+        "opened",
+        "reopened",
+        "synchronize",
+        "ready_for_review",
+        "edited",
+    ]
     assert data["permissions"] == {"contents": "read", "statuses": "write"}
     assert set(data["jobs"]) == {JOB_ID}
+
+
+def test_workflow_locks_the_complete_privileged_job_surface() -> None:
+    assert_exact_privileged_job_surface(load_yaml(WORKFLOW_PATH))
+
+
+def test_supported_bases_select_distinct_contexts_and_shared_context_is_rejected() -> None:
+    data = load_yaml(WORKFLOW_PATH)
+    triggers = data.get("on", data.get(True))
+    job = data["jobs"][JOB_ID]
+
+    assert_branch_specific_status_context(job, triggers)
+
+    shared_context_job = {
+        **job,
+        "env": {**job["env"], "STATUS_CONTEXT": STATUS_CONTEXT_PREFIX},
+    }
+    with pytest.raises(AssertionError):
+        assert_branch_specific_status_context(shared_context_job, triggers)
 
 
 def test_workflow_checks_out_only_the_trusted_base_revision() -> None:
@@ -176,8 +245,8 @@ def test_workflow_posts_pending_before_a_fail_closed_evaluation() -> None:
     assert '"repos/${STATUS_REPOSITORY}/statuses/${HEAD_SHA}"' in pending_script
     assert "-f state=pending" in pending_script
     assert '-f context="${STATUS_CONTEXT}"' in pending_script
-    assert job["env"]["STATUS_CONTEXT"] == STATUS_CONTEXT
-    assert JOB_ID != STATUS_CONTEXT
+    assert job["env"]["STATUS_CONTEXT"] == STATUS_CONTEXT_EXPRESSION
+    assert JOB_ID not in EXPECTED_STATUS_CONTEXTS.values()
 
     evaluate_script = steps[evaluate_index]["run"]
     normalized = " ".join(evaluate_script.replace("\\\n", " ").split())
