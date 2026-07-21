@@ -1,0 +1,114 @@
+name: Frontend License Gate Audit
+
+on:
+  pull_request_target:
+    branches: [main, dev]
+    types: [opened, reopened, synchronize, ready_for_review, edited]
+
+permissions:
+  contents: read
+  statuses: write
+
+concurrency:
+  group: frontend-license-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  frontend-license-gate-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      STATUS_CONTEXT: frontend-license-policy/trusted/${{ github.event.pull_request.base.ref }}
+      STATUS_REPOSITORY: ${{ github.repository }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      BASE_REF: ${{ github.event.pull_request.base.ref }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+      REPOSITORY_OWNER: ${{ github.repository_owner }}
+    steps:
+      - name: Mark trusted policy pending
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api --method POST \
+            "repos/${STATUS_REPOSITORY}/statuses/${HEAD_SHA}" \
+            -f state=pending \
+            -f context="${STATUS_CONTEXT}" \
+            -f description='Trusted frontend license policy is evaluating this exact commit'
+
+      - name: Checkout trusted policy
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - id: evaluate
+        name: Evaluate immutable pull request metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          verdict=failure
+          emit_verdict() {
+            printf 'verdict=%s\n' "${verdict}" >> "${GITHUB_OUTPUT}"
+          }
+          trap emit_verdict EXIT
+
+          [[ "${PR_NUMBER}" =~ ^[1-9][0-9]*$ ]]
+          [[ "${BASE_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          [[ "${HEAD_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          [[ "${BASE_REF}" == main || "${BASE_REF}" == dev ]]
+          [[ -n "${PR_AUTHOR}" && -n "${REPOSITORY_OWNER}" ]]
+
+          if [[ "${PR_AUTHOR,,}" == "${REPOSITORY_OWNER,,}" ]]; then
+            python3 Helper_Scripts/ci/check_frontend_license_gate.py \
+              --author "${PR_AUTHOR}" --owner "${REPOSITORY_OWNER}" --null \
+              </dev/null
+            verdict=success
+            exit 0
+          fi
+
+          readonly public_remote="https://github.com/${STATUS_REPOSITORY}.git"
+          git fetch --no-tags --depth=1 "${public_remote}" \
+            "+refs/heads/${BASE_REF}:refs/remotes/license-gate/base"
+          git fetch --no-tags --depth=1 "${public_remote}" \
+            "+refs/pull/${PR_NUMBER}/head:refs/remotes/license-gate/pr-head"
+
+          readonly fetched_base="$(git rev-parse refs/remotes/license-gate/base)"
+          readonly fetched_head="$(git rev-parse refs/remotes/license-gate/pr-head)"
+          [[ "${fetched_base}" == "${BASE_SHA}" ]]
+          [[ "${fetched_head}" == "${HEAD_SHA}" ]]
+
+          set +e
+          git --no-pager diff --name-only -z --no-renames \
+            --no-ext-diff --no-textconv "${BASE_SHA}" "${HEAD_SHA}" -- | \
+            python3 Helper_Scripts/ci/check_frontend_license_gate.py \
+              --author "${PR_AUTHOR}" --owner "${REPOSITORY_OWNER}" --null
+          readonly pipeline_status=("${PIPESTATUS[@]}")
+          set -e
+
+          [[ "${pipeline_status[0]}" -eq 0 ]]
+          [[ "${pipeline_status[1]}" -eq 0 ]]
+          verdict=success
+
+      - name: Publish trusted policy result
+        if: always()
+        shell: bash
+        env:
+          VERDICT: ${{ steps.evaluate.outputs.verdict }}
+        run: |
+          set -euo pipefail
+          state=failure
+          description='Trusted frontend license policy failed closed'
+          if [[ "${VERDICT}" == success ]]; then
+            state=success
+            description='Trusted frontend license policy authorized this exact commit'
+          fi
+          gh api --method POST \
+            "repos/${STATUS_REPOSITORY}/statuses/${HEAD_SHA}" \
+            -f state="${state}" \
+            -f context="${STATUS_CONTEXT}" \
+            -f description="${description}"
+          [[ "${state}" == success ]]
