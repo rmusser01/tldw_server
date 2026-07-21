@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
@@ -20,22 +21,17 @@ EXPECTED_STEP_IDENTITIES = (
     ("Evaluate immutable pull request metadata", "evaluate", None),
     ("Publish trusted policy result", None, None),
 )
-FORBIDDEN_COMMANDS = (
-    "git checkout",
-    "git switch",
-    "git reset",
-    "git restore",
-    "git worktree",
-    "git show",
-    "pip install",
-    "python -m pip",
-    "npm install",
-    "pnpm install",
-    "yarn install",
-    "bun install",
-    "uv sync",
-    "poetry install",
-    "gh run download",
+TRUSTED_RUN_SHA256 = {
+    "Mark trusted policy pending": "1b5183216aea43486d99cc8c03cc82348b19027c4e4b4d3ebc501de047b5fc85",
+    "Evaluate immutable pull request metadata": "dd667ebf4091850b7d580e9febdec4e77f1e815532984b4f726326868d2126c4",
+    "Publish trusted policy result": "9c87202af24574b840c93116b72efa431fd1d7fc458b9c7f8ca7bbb41a56c525",
+}
+COMMON_METADATA_VALIDATIONS = (
+    '[[ "${PR_NUMBER}" =~ ^[1-9][0-9]*$ ]]',
+    '[[ "${BASE_SHA}" =~ ^[0-9a-f]{40}$ ]]',
+    '[[ "${HEAD_SHA}" =~ ^[0-9a-f]{40}$ ]]',
+    '[[ "${BASE_REF}" == main || "${BASE_REF}" == dev ]]',
+    '[[ -n "${PR_AUTHOR}" && -n "${REPOSITORY_OWNER}" ]]',
 )
 
 
@@ -49,6 +45,24 @@ def assert_exact_step_structure(steps: list[dict[str, Any]]) -> None:
     identities = [(step.get("name"), step.get("id"), step.get("uses")) for step in steps]
 
     assert identities == list(EXPECTED_STEP_IDENTITIES)
+
+
+def assert_trusted_run_bodies(steps: list[dict[str, Any]]) -> None:
+    digests = {step["name"]: sha256(step["run"].encode()).hexdigest() for step in steps if "run" in step}
+
+    assert digests == TRUSTED_RUN_SHA256
+
+
+def assert_common_validations_precede_owner(script: str) -> None:
+    positions = []
+    for validation in COMMON_METADATA_VALIDATIONS:
+        assert script.count(validation) == 1
+        positions.append(script.index(validation))
+
+    owner_branch = script.index('if [[ "${PR_AUTHOR,,}" == "${REPOSITORY_OWNER,,}" ]]; then')
+    external_fetch = script.index("git fetch --no-tags")
+    external_diff = script.index("git --no-pager diff")
+    assert max(positions) < owner_branch < external_fetch < external_diff
 
 
 def assert_success_follows_prerequisites(script: str) -> None:
@@ -92,6 +106,7 @@ def test_workflow_checks_out_only_the_trusted_base_revision() -> None:
     action_steps = [step for step in steps if "uses" in step]
 
     assert_exact_step_structure(steps)
+    assert_trusted_run_bodies(steps)
     assert action_steps == [
         {
             "name": "Checkout trusted policy",
@@ -104,21 +119,26 @@ def test_workflow_checks_out_only_the_trusted_base_revision() -> None:
         }
     ]
 
-    run_scripts = "\n".join(step.get("run", "") for step in steps)
-    assert not any(command in run_scripts for command in FORBIDDEN_COMMANDS)
-    assert "artifact" not in run_scripts.casefold()
-    assert not any(str(step.get("uses", "")).startswith("./") for step in steps)
-    assert not any("cache" in str(step.get("uses", "")).casefold() for step in steps)
-    assert not any("artifact" in str(step.get("uses", "")).casefold() for step in steps)
-
 
 def test_step_contract_rejects_an_appended_privileged_run_step() -> None:
     steps = load_yaml(WORKFLOW_PATH)["jobs"][JOB_ID]["steps"]
     unsafe_step = {"name": "Execute untrusted head", "shell": "bash", "run": "./pr-head/payload"}
 
-    assert not any(command in unsafe_step["run"] for command in FORBIDDEN_COMMANDS)
     with pytest.raises(AssertionError):
         assert_exact_step_structure([*steps, unsafe_step])
+
+
+def test_run_body_contract_rejects_an_unsafe_evaluator_command() -> None:
+    steps = load_yaml(WORKFLOW_PATH)["jobs"][JOB_ID]["steps"]
+    evaluate_index = next(index for index, step in enumerate(steps) if step.get("id") == "evaluate")
+    mutated_steps = [*steps]
+    evaluator = {**steps[evaluate_index], "run": f'{steps[evaluate_index]["run"]}\n./pr-head/payload\n'}
+    mutated_steps[evaluate_index] = evaluator
+
+    assert_exact_step_structure(mutated_steps)
+    assert_success_follows_prerequisites(evaluator["run"])
+    with pytest.raises(AssertionError):
+        assert_trusted_run_bodies(mutated_steps)
 
 
 def test_workflow_posts_pending_before_a_fail_closed_evaluation() -> None:
@@ -162,6 +182,7 @@ def test_workflow_posts_pending_before_a_fail_closed_evaluation() -> None:
     assert diff_arguments.endswith('"${BASE_SHA}" "${HEAD_SHA}" --')
     assert normalized.count(f"python3 {CLASSIFIER}") == 2
     assert normalized.count("--null") == 2
+    assert_common_validations_precede_owner(evaluate_script)
     assert_success_follows_prerequisites(evaluate_script)
 
 
@@ -176,6 +197,20 @@ def test_evaluator_contract_rejects_external_success_before_sha_checks() -> None
 
     with pytest.raises(AssertionError):
         assert_success_follows_prerequisites(mutated)
+
+
+def test_evaluator_contract_rejects_common_validation_after_owner_branch() -> None:
+    steps = load_yaml(WORKFLOW_PATH)["jobs"][JOB_ID]["steps"]
+    script = next(step for step in steps if step.get("id") == "evaluate")["run"]
+    validation = COMMON_METADATA_VALIDATIONS[0]
+    mutated = script.replace(f"{validation}\n", "", 1)
+    external_anchor = "fi\n\nreadonly public_remote="
+    mutated = mutated.replace(external_anchor, f"fi\n\n{validation}\n\nreadonly public_remote=", 1)
+
+    assert mutated.count(validation) == 1
+    assert_success_follows_prerequisites(mutated)
+    with pytest.raises(AssertionError):
+        assert_common_validations_precede_owner(mutated)
 
 
 def test_workflow_publishes_success_only_for_an_explicit_success_verdict() -> None:
