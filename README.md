@@ -6,8 +6,8 @@
     <a href="https://github.com/rmusser01/tldw_server">
       <img alt="Made with love" src="https://img.shields.io/badge/made_with-love-red?style=for-the-badge&labelColor=orange" />
     </a>
-    <a href="https://www.gnu.org/licenses/old-licenses/gpl-3.0.en.html">
-      <img alt="License: GPLv3" src="https://img.shields.io/badge/license-GPLv3-blue.svg" />
+    <a href="LICENSE">
+      <img alt="License: multi-license" src="https://img.shields.io/badge/license-multi--license-blue.svg" />
     </a>
     <a href="https://github.com/rmusser01/tldw_server/actions/workflows/e2e-smoke.yml">
       <img alt="E2E Critical Smoke" src="https://github.com/rmusser01/tldw_server/actions/workflows/e2e-smoke.yml/badge.svg" />
@@ -16,7 +16,13 @@
 
   <p>Process media with 16+ LLM providers and OpenAI-compatible APIs for Chat, Embeddings, and Evals.</p>
   <p>Browser extension support is included in-repo; hosted deployment tooling is still evolving.</p>
-  <p><strong>Your local open-source platform for media analysis, knowledge work, and LLM-backed creation.</strong></p>
+  <p><strong>Your local platform for media analysis, knowledge work, and LLM-backed creation.</strong></p>
+  <p>
+    Server: GPL-3.0-only<br />
+    Frontend: source-available under PolyForm Perimeter 1.0.1<br />
+    OpenAPI contract: Apache-2.0<br />
+    <a href="LICENSE">Detailed licensing scope and terms</a>
+  </p>
 </div>
 
 ---
@@ -70,7 +76,7 @@
 </details>
 
 ## Overview
-**tldw_server** is an open-source, API-first platform for ingesting media, transcribing, analyzing, and retrieving knowledge from video, audio, documents, websites, and more.
+**tldw_server** is an API-first platform for ingesting media, transcribing, analyzing, and retrieving knowledge from video, audio, documents, websites, and more.
 It runs a FastAPI server with OpenAI-compatible Chat, Audio, Embeddings, and Evals APIs, a unified RAG pipeline, and integrations with local or hosted LLM providers.
 The primary clients are the Next.js WebUI and Admin UI, with browser-extension support in the repo as well.
 Long-term vision: a personal research assistant inspired by "The Young Lady's Illustrated Primer" that helps people learn, reason about, and retain what they watch or read.
@@ -1831,7 +1837,11 @@ None of these companies exist to provide AI services in 2024. They’re only doi
 
 ## License
 
-GNU General Public License v3.0 - see `LICENSE` for details.
+- Server: GPL-3.0-only
+- Frontend: source-available under PolyForm Perimeter 1.0.1
+- OpenAPI contract: Apache-2.0
+
+See the root [LICENSE](LICENSE) for the authoritative scope map and detailed terms.
 
 ---
 
