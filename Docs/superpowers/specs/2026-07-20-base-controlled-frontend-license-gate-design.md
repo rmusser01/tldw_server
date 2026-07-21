@@ -26,6 +26,13 @@ base's success satisfy the later base's required-status rule. Retriggering on
 an edited pull request refreshes evaluation, but only branch-qualified contexts
 give the two base-specific decisions distinct identities.
 
+A commit status cannot encode a pull-request number or author in a static
+required context. The gate therefore authorizes one exact immutable head
+commit SHA for one selected base branch; it does not prove that the author of
+every pull request pointing at that SHA is Robert. Reusing the authorization
+from another pull request is safe only when its head SHA and base context are
+identical, which means the authorized Git history and content are identical.
+
 The live repository state confirms that enforcement cannot be delegated to an
 existing branch rule:
 
@@ -42,9 +49,10 @@ existing branch rule:
 2. Never check out or execute pull-request code in the privileged workflow.
 3. Evaluate exact old and new paths for every change, including adversarial
    filenames and renames.
-4. Allow Robert Benjamin Jake Musser's changes while blocking other authors'
-   changes to protected frontend, license-governance, and conservative API
-   declaration paths.
+4. Let Robert Benjamin Jake Musser authorize exact commits while blocking an
+   external author's protected frontend, license-governance, and conservative
+   API declaration changes unless that identical commit/base pair was already
+   authorized.
 5. Make the trusted result required on both `dev` and `main` without weakening
    existing repository rules.
 6. Bootstrap safely through a small `main` PR before the licensing cutoff PR is
@@ -137,6 +145,14 @@ The trigger restricts the base ref to `main` or `dev`, and the evaluator
 validates the same GitHub-supplied ref before it can publish success. The only
 possible final contexts are therefore `frontend-license-policy/trusted/main`
 and `frontend-license-policy/trusted/dev`.
+
+The authorization identity is repository plus immutable head SHA plus the
+branch-qualified context. A successful owner-authored run authorizes that
+exact commit for that exact base branch. Another pull request may rely on the
+same success only if it points to the identical SHA and base; the status does
+not establish the current pull request's author. Robert must therefore never
+authorize a protected-path commit he has not audited and is not prepared to
+license.
 
 Using a commit status rather than requiring the ordinary job check matters:
 a fork pull request can declare a GitHub Actions job with the same check name,
@@ -237,7 +253,17 @@ because the default branch does not contain it yet. The existing `main`
 ruleset still requires a PR. Repository policy also requires Robert to write
 the AI-generated PR's `Change summary` in his own words before merge.
 
-### Phase 2: Observe the `/dev` trusted status
+### Phase 2: Validate the `/main` trusted status
+
+After the bootstrap merges, create an owner-controlled validation branch from
+the new `main`, add an empty commit, and open a temporary draft pull request to
+`main`. Verify that `frontend-license-policy/trusted/main` succeeds for the
+validation head SHA and that the successful audit run identifies the expected
+GitHub Actions source. Record the evidence, then close the draft pull request
+and delete the temporary branch. Do not add the main required-status rule
+until this real `/main` result exists.
+
+### Phase 3: Observe the `/dev` trusted status
 
 After the bootstrap merges to `main`, open or synchronize the licensing cutoff
 PR targeting `dev`. Verify that:
@@ -251,7 +277,7 @@ PR targeting `dev`. Verify that:
 Required statuses must have completed recently before GitHub permits selecting
 them as ruleset requirements.
 
-### Phase 3: Activate rulesets
+### Phase 4: Activate rulesets
 
 Preserve ruleset `5653432` exactly and add a required-status-check rule for
 only `frontend-license-policy/trusted/main`, bound to the observed GitHub
@@ -268,7 +294,7 @@ If GitHub cannot bind the commit status to the expected source, keep the
 ruleset disabled and stop. Do not silently fall back to `any source` without a
 new user decision.
 
-### Phase 4: Resume the licensing cutoff
+### Phase 5: Resume the licensing cutoff
 
 Replace the rejected PR-controlled gate commit in the `dev` licensing branch
 with the NUL-safe classifier contract expected by the trusted workflow. Then
@@ -305,11 +331,12 @@ Workflow contract tests cover:
   and separation from the audit-job name; and
 - actionlint coverage.
 
-Live verification records the workflow run URL, check/status source, head SHA,
-ruleset JSON, and owner allow result. The external protected-path deny result
-is recorded from the deterministic event/workflow harness; the first real
-external protected-path PR is also audited when one occurs, but a second
-GitHub identity is not an activation prerequisite.
+Live verification records separate `/main` validation and `/dev` licensing PR
+workflow run URLs, check/status sources, head SHAs, ruleset JSON, and owner
+allow results. The external protected-path deny result is recorded from the
+deterministic event/workflow harness; the first real external protected-path
+PR is also audited when one occurs, but a second GitHub identity is not an
+activation prerequisite.
 
 ## Rollback
 
@@ -335,6 +362,13 @@ If the trusted workflow malfunctions after activation:
 - This gate prevents accidental acceptance through configured repository
   controls; it cannot prevent an administrator from intentionally disabling
   those controls.
+- Authorization is transferable between pull requests that use the same exact
+  head SHA and base-specific context. This cannot authorize different code or
+  history because any such difference changes the commit SHA.
+- Another pull request for the same SHA/base pair can rerun the shared context
+  and overwrite success with failure. That is a denial-of-service or freshness
+  limitation, not a path for authorizing different code; resolve it by
+  rerunning the audited owner-controlled pull request before merge.
 
 ## References
 

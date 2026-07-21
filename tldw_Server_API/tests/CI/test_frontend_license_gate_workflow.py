@@ -28,9 +28,9 @@ EXPECTED_STEP_IDENTITIES = (
     ("Publish trusted policy result", None, None),
 )
 TRUSTED_RUN_SHA256 = {
-    "Mark trusted policy pending": "1b5183216aea43486d99cc8c03cc82348b19027c4e4b4d3ebc501de047b5fc85",
+    "Mark trusted policy pending": "1d7e75459f8d398a821dd7987e2a2dcfa73a7a34d0535ef7cd786f93251074f0",
     "Evaluate immutable pull request metadata": "dd667ebf4091850b7d580e9febdec4e77f1e815532984b4f726326868d2126c4",
-    "Publish trusted policy result": "9c87202af24574b840c93116b72efa431fd1d7fc458b9c7f8ca7bbb41a56c525",
+    "Publish trusted policy result": "314715f909e05c812a2d63ce6eb13afee2b69811809f0cc037d1fc3eb6c4f388",
 }
 COMMON_METADATA_VALIDATIONS = (
     '[[ "${PR_NUMBER}" =~ ^[1-9][0-9]*$ ]]',
@@ -245,7 +245,9 @@ def test_workflow_posts_pending_before_a_fail_closed_evaluation() -> None:
     assert '"repos/${STATUS_REPOSITORY}/statuses/${HEAD_SHA}"' in pending_script
     assert "-f state=pending" in pending_script
     assert '-f context="${STATUS_CONTEXT}"' in pending_script
+    assert "Trusted frontend license policy is evaluating this exact commit" in pending_script
     assert job["env"]["STATUS_CONTEXT"] == STATUS_CONTEXT_EXPRESSION
+    assert job["env"]["HEAD_SHA"] == "${{ github.event.pull_request.head.sha }}"
     assert JOB_ID not in EXPECTED_STATUS_CONTEXTS.values()
 
     evaluate_script = steps[evaluate_index]["run"]
@@ -315,6 +317,8 @@ def test_workflow_publishes_success_only_for_an_explicit_success_verdict() -> No
     assert "state=failure" in script
     assert script.count("state=success") == 1
     assert re.search(r'if \[\[ "\$\{VERDICT\}" == success \]\]; then\s+state=success', script)
+    assert "Trusted frontend license policy authorized this exact commit" in script
+    assert '"repos/${STATUS_REPOSITORY}/statuses/${HEAD_SHA}"' in script
     assert '-f context="${STATUS_CONTEXT}"' in script
     assert '[[ "${state}" == success ]]' in script
 

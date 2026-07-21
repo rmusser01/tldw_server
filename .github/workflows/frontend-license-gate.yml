@@ -36,7 +36,7 @@ jobs:
             "repos/${STATUS_REPOSITORY}/statuses/${HEAD_SHA}" \
             -f state=pending \
             -f context="${STATUS_CONTEXT}" \
-            -f description='Trusted frontend license policy is evaluating'
+            -f description='Trusted frontend license policy is evaluating this exact commit'
 
       - name: Checkout trusted policy
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
@@ -104,7 +104,7 @@ jobs:
           description='Trusted frontend license policy failed closed'
           if [[ "${VERDICT}" == success ]]; then
             state=success
-            description='Trusted frontend license policy allowed this change'
+            description='Trusted frontend license policy authorized this exact commit'
           fi
           gh api --method POST \
             "repos/${STATUS_REPOSITORY}/statuses/${HEAD_SHA}" \

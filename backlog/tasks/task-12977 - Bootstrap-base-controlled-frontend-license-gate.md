@@ -4,7 +4,7 @@ title: Bootstrap base-controlled frontend license gate
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-07-21 00:15'
+updated_date: '2026-07-21 03:59'
 labels:
   - licensing
   - security
@@ -53,6 +53,10 @@ Review of Task 4 in TASK-12976 proved that a pull_request workflow is PR-control
 - Commit `e1b84cbcf0` derives `STATUS_CONTEXT` from GitHub's base ref, adds `edited`, rejects a shared context, proves `/main` and `/dev` are distinct, and locks the exact workflow, concurrency, job, runner, timeout, environment, and step surfaces. Focused GREEN was 12/12; the combined classifier/workflow/frontend-required set was 29/29.
 - Commit `ae71b9310b` synchronizes the approved design and plan: main ruleset `5653432` requires only `/main`, the dev ruleset requires only `/dev`, licensing-PR observation queries `/dev`, rollback/evidence covers both contexts, and the classifier inventory correctly says six protected prefixes. Plan Stages 1-3 remain Complete; Stages 4-5 remain Not Started.
 - Final verification passed 29/29 focused tests with 6 pre-existing warnings; controller-owned actionlint 1.7.12 exited 0 with no findings for `frontend-license-gate.yml` and `actionlint.yml`; Ruff and Black were clean; Bandit reported 0 errors and 0 findings; marker counts were one for each notes/final-summary boundary; the stale shared-context scan and `git diff --check` were clean. AC #3 remains checked while live AC #2, #4, and #5 remain open.
+- Final full-branch review then clarified that a required commit status is identified by repository, head SHA, and branch-specific context rather than by pull-request author. Robert approved the exact-commit authorization model on 2026-07-20: an owner-authored run authorizes that immutable SHA for the selected base; another PR may use the authorization only with the identical SHA/base pair; and a third-party rerun can fail the shared identity only as denial of service, not authorize different code.
+- The approved rollout correction keeps plan Stages 1-3 Complete and Stages 4-5 Not Started. After Robert supplies his own bootstrap PR Change summary and the bootstrap merges, Stage 4 first opens a harmless owner-controlled empty-commit validation PR to `main`, records a real source-bound `/main` result, closes the draft, and removes the temporary branch. It separately records the licensing PR's `/dev` result before either matching required-status rule is activated; a missing or mismatched expected source stops the rollout without an any-source fallback.
+- Exact-commit wording was implemented test-first: the focused workflow contract failed 2/12 against the old change-scoped descriptions, then passed 12/12 after the two status descriptions and their pinned script digests were updated. The status publisher still targets `${{ github.event.pull_request.head.sha }}` and the branch-qualified base context; permissions, triggers, checkout, and execution surfaces are unchanged. Live AC #2, #4, and #5 remain open.
+- Post-correction verification passed the full 29/29 licensing-gate matrix with 6 pre-existing warnings; actionlint 1.7.12 reported no findings for both targeted workflow files; Ruff and Black were clean for the changed test. No production Python changed, so a new Bandit run was not applicable. Marker counts remained 1/1/1/1, and stale wording plus correction-range/full-bootstrap `git diff --check` scans were clean.
 - Backlog MCP/CLI was unavailable despite repeated attempts. Robert approved this narrowly scoped direct-edit exception on 2026-07-20, including the marker-preserving final-review update.
 <!-- SECTION:NOTES:END -->
 
