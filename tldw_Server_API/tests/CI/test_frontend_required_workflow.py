@@ -8,11 +8,7 @@ def test_frontend_required_runs_family_guardrails_e2e_for_targeted_changes() -> 
     data = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
     steps = data["jobs"]["frontend-required"]["steps"]
 
-    matching_steps = [
-        step
-        for step in steps
-        if step.get("name") == "Run family guardrails e2e"
-    ]
+    matching_steps = [step for step in steps if step.get("name") == "Run family guardrails e2e"]
 
     assert len(matching_steps) == 1
     step = matching_steps[0]
@@ -21,21 +17,17 @@ def test_frontend_required_runs_family_guardrails_e2e_for_targeted_changes() -> 
     assert step["run"] == "bun run e2e:family-guardrails"
 
 
-def test_frontend_required_uses_base_branch_licensing_gate() -> None:
+def test_frontend_required_does_not_publish_or_enforce_license_policy() -> None:
     workflow_path = Path(".github/workflows/frontend-required.yml")
     data = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
     steps = data["jobs"]["frontend-required"]["steps"]
 
     checkout = next(step for step in steps if step.get("name") == "Checkout")
-    gate = next(
-        step
-        for step in steps
-        if step.get("name")
-        == "Enforce temporary frontend licensing contribution freeze"
-    )
+    step_names = {step.get("name") for step in steps}
+    workflow_text = workflow_path.read_text(encoding="utf-8")
 
-    assert checkout["with"]["fetch-depth"] == 0
-    assert "github.event.pull_request.user.login" in str(gate["env"])
-    assert "git show" in gate["run"]
-    assert ":Helper_Scripts/ci/check_frontend_license_gate.py" in gate["run"]
-    assert "git diff --name-only" in gate["run"]
+    assert checkout["if"] == "needs.changes.outputs.frontend_changed == 'true'"
+    assert "fetch-depth" not in checkout.get("with", {})
+    assert "Enforce temporary frontend licensing contribution freeze" not in step_names
+    assert "check_frontend_license_gate.py" not in workflow_text
+    assert "frontend-license-policy/trusted/" not in workflow_text

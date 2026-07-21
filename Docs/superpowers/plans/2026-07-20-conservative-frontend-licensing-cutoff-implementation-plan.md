@@ -12,9 +12,10 @@ publishing until the later legal and release gates exist.
 
 **Architecture:** Keep licensing authority in a root path-scope map plus a
 verbatim legal corpus under `LICENSES/`. Add small static tests and one
-standard-library CI classifier instead of a licensing framework. Reuse the
-existing required frontend workflow and container tests so the temporary freeze
-cannot be bypassed merely by changing a script in the pull request.
+standard-library CI classifier instead of a licensing framework. Enforce the
+freeze from a base-controlled trusted workflow whose branch-qualified statuses
+are source-bound in the `main` and `dev` rulesets, so a pull request cannot
+replace the workflow or classifier that evaluates it.
 
 **Tech Stack:** Markdown and plain-text legal records, JSON, Python 3 standard
 library, pytest, FastAPI/OpenAPI 3.1 metadata, GitHub Actions YAML, Docker.
@@ -79,7 +80,7 @@ public refs and expressly preserves all earlier grants.
 
 **Tests:** `tldw_Server_API/tests/CI/test_licensing_policy.py`.
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Stage 2: Public metadata and API contract
 
@@ -93,21 +94,22 @@ GPL-3.0-only for the implementation.
 **Tests:** Licensing policy tests, About component test, and targeted OpenAPI
 contract test.
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Stage 3: Temporary enforcement and publication freeze
 
 **Goal:** Prevent unlicensed third-party protected changes and protected binary
 publishing until counsel and artifact follow-ups are complete.
 
-**Success Criteria:** The existing required workflow blocks external protected
-or contract-boundary changes using its base-branch gate; rolling GHCR publishing
-contains backend images only; the API image contains no protected frontend.
+**Success Criteria:** The base-controlled trusted workflow blocks external
+protected or contract-boundary changes through source-bound required statuses;
+rolling GHCR publishing contains backend images only; the API image contains
+no protected frontend.
 
 **Tests:** CI classifier, workflow contract, release workflow, and Dockerfile
 contract tests.
 
-**Status:** Not Started
+**Status:** In Progress
 
 ### Stage 4: Verification and handoff
 
@@ -781,260 +783,66 @@ git add tldw_Server_API/app/main.py tldw_Server_API/tests/Services/test_openapi_
 git commit -m "fix: declare OpenAPI contract Apache license"
 ```
 
-### Task 4: Enforce the temporary contribution freeze in the existing required check
+### Task 4: Enforce the temporary contribution freeze with the trusted gate
+
+**Canonical implementation:** TASK-12977 and
+`Docs/superpowers/plans/2026-07-20-base-controlled-frontend-license-gate-implementation-plan.md`.
 
 **Files:**
 
-- Create: `Helper_Scripts/ci/check_frontend_license_gate.py`
-- Create: `tldw_Server_API/tests/CI/test_frontend_license_gate.py`
-- Modify: `.github/workflows/frontend-required.yml`
-- Modify: `.github/workflows/actionlint.yml`
-- Modify: `tldw_Server_API/tests/CI/test_frontend_required_workflow.py`
+- `Helper_Scripts/ci/check_frontend_license_gate.py`
+- `.github/workflows/frontend-license-gate.yml`
+- `.github/workflows/actionlint.yml`
+- `.github/workflows/frontend-required.yml` (restored to its pre-gate behavior)
+- `tldw_Server_API/tests/CI/test_frontend_license_gate.py`
+- `tldw_Server_API/tests/CI/test_frontend_license_gate_workflow.py`
+- `tldw_Server_API/tests/CI/test_frontend_required_workflow.py`
+- `Docs/superpowers/evidence/TASK-12977/*.json`
 
 **Interfaces:**
 
-- Consumes: Newline-separated changed paths on standard input, PR author login,
-  and owner login.
-- Produces: Exit code `0` for owner or unaffected external changes; exit code
-  `1` with classified paths for protected, governance, or conservative API
-  boundary changes.
+- Consumes GitHub-supplied immutable pull-request metadata and bounded,
+  NUL-delimited changed paths from `git diff --name-only -z --no-renames`.
+- Produces branch-qualified exact-head statuses
+  `frontend-license-policy/trusted/main` and
+  `frontend-license-policy/trusted/dev`.
+- Runs only the trusted workflow and classifier from the base-controlled
+  `main` revision; never checks out or executes pull-request content.
 
-- [ ] **Step 1: Write failing classifier tests**
+- [x] **Step 1: Reject the original PR-controlled/newline design**
 
-Create `tldw_Server_API/tests/CI/test_frontend_license_gate.py`:
+  Independent review proved that a mutable `pull_request` workflow and
+  line-delimited filenames were not an adequate trust boundary. The replacement
+  design and rollout plan are recorded in TASK-12977.
 
-```python
-from __future__ import annotations
+- [x] **Step 2: Land the base-controlled workflow and NUL-safe classifier**
 
-from Helper_Scripts.ci.check_frontend_license_gate import blocked_changes, evaluate
+  Bootstrap PR #2753 placed the reviewed `pull_request_target` workflow,
+  standard-library classifier, and exact contract tests on `main`. The missing
+  human-written Change summary on that PR remains recorded policy
+  noncompliance.
 
+- [x] **Step 3: Prove and require source-bound branch contexts**
 
-def test_owner_changes_are_allowed() -> None:
-    result = evaluate(
-        author="rmusser01",
-        owner="rmusser01",
-        paths=["apps/extension/entrypoints/popup.tsx", "tldw_Server_API/app/main.py"],
-    )
+  Temporary PR #2754 proved `/main` and was closed unmerged with its branch
+  removed. Draft licensing PR #2755 proved `/dev`. Main ruleset `5653432`
+  and dev ruleset `19362594` require only their matching contexts from GitHub
+  Actions App `15368`, with no bypass actors.
 
-    assert result == []
+- [x] **Step 4: Reconcile the licensing branch**
 
+  The trusted implementation was carried byte-for-byte from merged `main`;
+  `frontend-required.yml` was restored byte-for-byte from `origin/dev`; and
+  a negative regression test forbids licensing enforcement or status
+  publication in that PR-controlled workflow.
 
-def test_external_protected_and_governance_changes_are_blocked() -> None:
-    paths = [
-        "apps/packages/ui/src/index.ts",
-        "admin-ui/package.json",
-        "LICENSES/README.md",
-        "THIRD_PARTY_NOTICES.txt",
-    ]
+- [x] **Step 5: Verify the trusted contract**
 
-    assert blocked_changes(paths) == paths
-
-
-def test_external_api_declaration_changes_are_conservatively_blocked() -> None:
-    paths = [
-        "tldw_Server_API/app/main.py",
-        "tldw_Server_API/app/api/v1/endpoints/chat.py",
-        "tldw_Server_API/app/api/v1/schemas/chat.py",
-    ]
-
-    assert blocked_changes(paths) == paths
-
-
-def test_external_unrelated_backend_and_docs_changes_remain_allowed() -> None:
-    result = evaluate(
-        author="contributor",
-        owner="rmusser01",
-        paths=[
-            "tldw_Server_API/app/core/RAG/service.py",
-            "Docs/Development/RAG.md",
-        ],
-    )
-
-    assert result == []
-```
-
-- [ ] **Step 2: Extend the workflow contract test before implementation**
-
-Append to `test_frontend_required_workflow.py`:
-
-```python
-def test_frontend_required_uses_base_branch_licensing_gate() -> None:
-    workflow_path = Path(".github/workflows/frontend-required.yml")
-    data = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
-    steps = data["jobs"]["frontend-required"]["steps"]
-
-    checkout = next(step for step in steps if step.get("name") == "Checkout")
-    gate = next(
-        step
-        for step in steps
-        if step.get("name") == "Enforce temporary frontend licensing contribution freeze"
-    )
-
-    assert checkout["with"]["fetch-depth"] == 0
-    assert "github.event.pull_request.user.login" in str(gate["env"])
-    assert "git show" in gate["run"]
-    assert ":Helper_Scripts/ci/check_frontend_license_gate.py" in gate["run"]
-    assert "git diff --name-only" in gate["run"]
-```
-
-- [ ] **Step 3: Run the tests to verify they fail**
-
-Run:
-
-```bash
-source .venv/bin/activate
-python -m pytest tldw_Server_API/tests/CI/test_frontend_license_gate.py tldw_Server_API/tests/CI/test_frontend_required_workflow.py -q
-```
-
-Expected: collection fails because the classifier does not exist and the
-workflow has no gate.
-
-- [ ] **Step 4: Implement the minimal standard-library classifier**
-
-Create `Helper_Scripts/ci/check_frontend_license_gate.py`:
-
-```python
-#!/usr/bin/env python3
-from __future__ import annotations
-
-import argparse
-from collections.abc import Iterable
-import sys
-
-
-PROTECTED_PREFIXES = (
-    "admin-ui/",
-    "apps/tldw-frontend/",
-    "apps/extension/",
-    "apps/packages/ui/",
-)
-GOVERNANCE_PREFIXES = ("LICENSES/",)
-GOVERNANCE_PATHS = {
-    "LICENSE",
-    "THIRD_PARTY_NOTICES.txt",
-    "Helper_Scripts/ci/check_frontend_license_gate.py",
-    ".github/workflows/frontend-required.yml",
-}
-CONTRACT_PREFIXES = ("tldw_Server_API/app/api/v1/",)
-CONTRACT_PATHS = {"tldw_Server_API/app/main.py"}
-
-
-def _matches(path: str) -> bool:
-    return (
-        path in GOVERNANCE_PATHS
-        or path in CONTRACT_PATHS
-        or path.startswith(PROTECTED_PREFIXES)
-        or path.startswith(GOVERNANCE_PREFIXES)
-        or path.startswith(CONTRACT_PREFIXES)
-    )
-
-
-def blocked_changes(paths: Iterable[str]) -> list[str]:
-    return [path for path in paths if path and _matches(path)]
-
-
-def evaluate(*, author: str, owner: str, paths: Iterable[str]) -> list[str]:
-    if author.casefold() == owner.casefold():
-        return []
-    return blocked_changes(paths)
-
-
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--author", required=True)
-    parser.add_argument("--owner", required=True)
-    args = parser.parse_args(argv)
-    blocked = evaluate(
-        author=args.author,
-        owner=args.owner,
-        paths=(line.strip() for line in sys.stdin),
-    )
-    if not blocked:
-        return 0
-    print(
-        "Temporary licensing gate: this PR author cannot modify these paths "
-        "until the required contributor grants are active:",
-        file=sys.stderr,
-    )
-    for path in blocked:
-        print(f"- {path}", file=sys.stderr)
-    return 1
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
-```
-
-The broad `tldw_Server_API/app/api/v1/` match is an intentional two-week
-fail-closed approximation. Replace it with generated-contract diffing only in
-the counsel-approved API contribution follow-up.
-
-- [ ] **Step 5: Wire the gate into the stable required workflow**
-
-Make the existing `Checkout` step in job `frontend-required` unconditional,
-retain its existing PR-head `ref`, and add `fetch-depth: 0`. Remove the later
-conditional duplicate Checkout step.
-
-Immediately after checkout, add:
-
-```yaml
-      - name: Enforce temporary frontend licensing contribution freeze
-        if: github.event_name == 'pull_request'
-        shell: bash
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
-        run: |
-          set -euo pipefail
-          if [[ "${PR_AUTHOR,,}" == "rmusser01" ]]; then
-            exit 0
-          fi
-          gate_script="$(mktemp)"
-          git show "${BASE_SHA}:Helper_Scripts/ci/check_frontend_license_gate.py" > "${gate_script}"
-          git diff --name-only "${BASE_SHA}" "${HEAD_SHA}" |
-            python3 "${gate_script}" --author "${PR_AUTHOR}" --owner "rmusser01"
-```
-
-The owner short-circuit lets the initial license-only PR pass before the base
-branch contains the new script. For every external PR, loading the classifier
-from the base commit is mandatory. Running the script from the pull-request
-checkout would let an external author weaken the same script they are being
-checked by.
-
-Add `.github/workflows/frontend-required.yml` to the existing targeted
-`actionlint` command in `.github/workflows/actionlint.yml`.
-
-- [ ] **Step 6: Run classifier and workflow tests**
-
-Run:
-
-```bash
-source .venv/bin/activate
-python -m pytest tldw_Server_API/tests/CI/test_frontend_license_gate.py tldw_Server_API/tests/CI/test_frontend_required_workflow.py -q
-```
-
-Expected: PASS.
-
-- [ ] **Step 7: Exercise the CLI allow and deny paths**
-
-Run:
-
-```bash
-source .venv/bin/activate
-printf '%s\n' 'Docs/Development/RAG.md' | python Helper_Scripts/ci/check_frontend_license_gate.py --author contributor --owner rmusser01
-printf '%s\n' 'apps/extension/package.json' | python Helper_Scripts/ci/check_frontend_license_gate.py --author contributor --owner rmusser01
-```
-
-Expected: the first command exits `0`; the second prints the blocked path and
-exits `1`.
-
-- [ ] **Step 8: Commit the contribution gate**
-
-```bash
-git add Helper_Scripts/ci/check_frontend_license_gate.py .github/workflows/frontend-required.yml .github/workflows/actionlint.yml tldw_Server_API/tests/CI/test_frontend_license_gate.py tldw_Server_API/tests/CI/test_frontend_required_workflow.py
-git commit -m "ci: block unlicensed frontend contributions"
-```
+  The focused matrix passed 40/40; pinned actionlint 1.7.12, Ruff, Black,
+  Bandit, deterministic owner/external cases, evidence assertions, and diff
+  hygiene passed. Independent security review found no code or security
+  findings. Public ruleset snapshots are stored under
+  `Docs/superpowers/evidence/TASK-12977/`.
 
 ### Task 5: Remove protected code from the API image and suspend protected publishing
 
@@ -1186,6 +994,7 @@ source .venv/bin/activate
 python -m pytest \
   tldw_Server_API/tests/CI/test_licensing_policy.py \
   tldw_Server_API/tests/CI/test_frontend_license_gate.py \
+  tldw_Server_API/tests/CI/test_frontend_license_gate_workflow.py \
   tldw_Server_API/tests/CI/test_frontend_required_workflow.py \
   tldw_Server_API/tests/CI/test_release_workflow_contracts.py \
   tldw_Server_API/tests/Utils/test_docker_quickstart_hardening.py \
@@ -1221,13 +1030,15 @@ rg -n "Open source under GPL v2.0|Host project license: GNU General Public Licen
 Expected: Bandit exits `0`; `git diff --check` has no output; the stale-language
 scan has no matches. Do not suppress a new Bandit finding.
 
-- [ ] **Step 4: Lint the two changed workflows**
+- [ ] **Step 4: Lint the changed workflows**
 
 Run the same pinned `actionlint` installer used by
 `.github/workflows/actionlint.yml`, then run:
 
 ```bash
 ./actionlint -color -config-file .github/actionlint.yaml \
+  .github/workflows/actionlint.yml \
+  .github/workflows/frontend-license-gate.yml \
   .github/workflows/frontend-required.yml \
   .github/workflows/publish-ghcr-main.yml
 ```
@@ -1254,10 +1065,11 @@ git diff --name-status origin/dev...HEAD
 git log --oneline --decorate origin/dev..HEAD
 ```
 
-Expected: only the files listed in Tasks 1–5 plus the execution Backlog task
-are present. There must be no feature implementation from PR #2727, no active
-Community or Dedicated Customer grant, no frontend CLA, no completed Countdown
-grant, and no protected binary artifact.
+Expected: only the files listed in Tasks 1–5, the execution Backlog task, and
+TASK-12977's reviewed plan, design, task, public ruleset evidence, and append-only
+progress record are present. There must be no feature implementation from PR
+#2727, no active Community or Dedicated Customer grant, no frontend CLA, no
+completed Countdown grant, and no protected binary artifact.
 
 - [ ] **Step 7: Finalize the execution Backlog task**
 

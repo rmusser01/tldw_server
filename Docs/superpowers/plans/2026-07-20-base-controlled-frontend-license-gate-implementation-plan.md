@@ -8,17 +8,25 @@
 > `superpowers:verification-before-completion` before any completion claim.
 
 **Goal:** Bootstrap a default-branch-controlled, metadata-only frontend
-licensing gate on `main`; publish a source-bound trusted status for pull
-requests to `main` and `dev`; activate fail-closed rulesets; then replace the
-rejected PR-controlled gate on the licensing branch.
+licensing gate on `main`; publish source-bound `/main` and `/dev` trusted
+statuses for pull requests to those bases; activate fail-closed rulesets; then
+replace the rejected PR-controlled gate on the licensing branch.
 
 **Architecture:** A `pull_request_target` workflow stored on `main` checks out
 only `${{ github.sha }}`, reads GitHub-supplied PR metadata, fetches base and PR
 Git objects without checking out the head, streams `git diff --name-only -z
---no-renames` into a standard-library classifier, and publishes the distinct
-commit-status context `frontend-license-policy/trusted`. Rulesets require that
+--no-renames` into a standard-library classifier, and publishes
+`frontend-license-policy/trusted/${{ github.event.pull_request.base.ref }}`.
+The only supported results are `frontend-license-policy/trusted/main` and
+`frontend-license-policy/trusted/dev`; each ruleset requires only its matching
 context from the observed GitHub Actions App integration. The workflow never
 imports, builds, caches, or executes pull-request content.
+
+Each success authorizes the exact immutable pull-request head SHA for its
+branch-specific context. It is intentionally usable by another pull request
+with the identical head SHA and base, because that pair cannot contain
+different code or history. The required status does not prove the current pull
+request author; Robert must audit every protected-path commit he authorizes.
 
 **Tech Stack:** Git, GitHub Actions, GitHub REST API through `gh`, Python 3,
 pytest, PyYAML, actionlint, Bandit, Backlog.md CLI/MCP.
@@ -41,12 +49,20 @@ pytest, PyYAML, actionlint, Bandit, Backlog.md CLI/MCP.
 - Treat PR metadata, refs, SHAs, author login, and filenames as untrusted until
   validated. A validation, fetch, diff, classifier, or API error must never
   publish success.
-- Keep `frontend-license-gate-audit` and
-  `frontend-license-policy/trusted` distinct. Only the commit status is a
-  ruleset requirement.
+- Keep `frontend-license-gate-audit`,
+  `frontend-license-policy/trusted/main`, and
+  `frontend-license-policy/trusted/dev` distinct. Only the branch-matching
+  commit status is a ruleset requirement.
+- Treat a successful status as authorization of the exact head SHA/base pair,
+  not proof of the current pull-request author. Same-SHA transfer cannot carry
+  different content or history. A third-party rerun may overwrite that shared
+  identity with failure; treat this as fail-safe denial of service and rerun
+  the audited owner-controlled pull request before merge.
 - Do not activate any required-status rule until the workflow is merged to
-  `main`, a real trusted status has been observed, and its source integration
-  has been identified.
+  `main`, a harmless owner-controlled validation PR has produced a real
+  `frontend-license-policy/trusted/main` result, the licensing PR has produced
+  a real `frontend-license-policy/trusted/dev` result, and both expected source
+  integrations have been identified and matched.
 - Bind every required status to the observed integration ID. If GitHub rejects
   or drops the binding, roll back/leave disabled and stop; do not use an
   any-source requirement without a new user decision.
@@ -65,11 +81,11 @@ pytest, PyYAML, actionlint, Bandit, Backlog.md CLI/MCP.
 
 | Stage | Goal | Success criteria | Tests | Status |
 |---|---|---|---|---|
-| 1 | Prepare isolated `main` bootstrap | Exact current refs/state captured; clean bootstrap worktree contains the approved design, plan, and task | Baseline focused CI-policy tests | Not Started |
-| 2 | Harden the classifier | Exact protected boundaries and NUL-safe parsing fail closed | Focused pytest + Bandit | Not Started |
-| 3 | Add the trusted workflow | Base-controlled workflow publishes only a trusted, fail-closed status and passes contract linting | Workflow contract pytest + actionlint | Not Started |
-| 4 | Land and activate | Human-reviewed bootstrap merges, trusted status is observed, and source-bound rules protect `main` and `dev` | Live run/status/ruleset evidence | Not Started |
-| 5 | Reconcile licensing branch | Rejected PR-controlled gate is replaced and TASK-12976 resumes on the trusted contract | Focused policy/workflow tests + Bandit + diff review | Not Started |
+| 1 | Prepare isolated `main` bootstrap | Exact current refs/state captured; clean bootstrap worktree contains the approved design, plan, and task | Baseline focused CI-policy tests | Complete |
+| 2 | Harden the classifier | Exact protected boundaries and NUL-safe parsing fail closed | Focused pytest + Bandit | Complete |
+| 3 | Add the trusted workflow | Base-controlled workflow publishes only a trusted, fail-closed status and passes contract linting | Workflow contract pytest + actionlint | Complete |
+| 4 | Land and activate | The bootstrap is on `main`, temporary `/main` validation and the licensing PR proved both source-bound contexts, and branch-specific rules protect `main` and `dev`; PR #2753's missing human-written Change summary remains recorded policy noncompliance | Live run/status/ruleset evidence | Complete (technical rollout; policy noncompliance recorded) |
+| 5 | Reconcile licensing branch | Rejected PR-controlled gate is replaced and TASK-12976 resumes on the trusted contract | Focused policy/workflow tests + Bandit + diff review | In Progress |
 
 ## Task 1: Prepare the `main` Bootstrap Worktree
 
@@ -381,9 +397,14 @@ This avoids PyYAML 1.1 treating `on` as Boolean `True`. Assert all of the
 following before the workflow exists:
 
 - only `pull_request_target` is used for PR automation and its branches are
-  exactly `main` and `dev`;
+  exactly `main` and `dev`, with activity types exactly `opened`, `reopened`,
+  `synchronize`, `ready_for_review`, and `edited`;
 - top-level permissions equal `{"contents": "read", "statuses": "write"}`;
 - the only job ID is `frontend-license-gate-audit`;
+- top-level keys, concurrency, job keys, `runs-on`, timeout, and every job
+  environment key/value are exact, so `container`, `services`, `environment`,
+  `strategy`, defaults, and all other execution-affecting additions fail the
+  contract;
 - checkout is pinned to
   `actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd`, uses
   `ref: ${{ github.sha }}`, `fetch-depth: 0`, and
@@ -400,8 +421,10 @@ following before the workflow exists:
 - unknown/missing evaluation output maps to `failure`;
 - the final status publisher uses `if: always()` and success is possible only
   when the evaluator output is exactly `success`;
-- the status context is `frontend-license-policy/trusted`, distinct from the
-  job ID; and
+- the workflow expression selects `frontend-license-policy/trusted/main` or
+  `frontend-license-policy/trusted/dev` from the GitHub-supplied base ref, the
+  two supported bases select distinct contexts, a shared context is rejected,
+  and both contexts are distinct from the job ID; and
 - actionlint's explicit target list includes the new workflow.
 
 Run RED:
@@ -422,7 +445,7 @@ name: Frontend License Gate Audit
 on:
   pull_request_target:
     branches: [main, dev]
-    types: [opened, reopened, synchronize, ready_for_review]
+    types: [opened, reopened, synchronize, ready_for_review, edited]
 
 permissions:
   contents: read
@@ -438,7 +461,7 @@ jobs:
     timeout-minutes: 5
     env:
       GH_TOKEN: ${{ github.token }}
-      STATUS_CONTEXT: frontend-license-policy/trusted
+      STATUS_CONTEXT: frontend-license-policy/trusted/${{ github.event.pull_request.base.ref }}
       STATUS_REPOSITORY: ${{ github.repository }}
       HEAD_SHA: ${{ github.event.pull_request.head.sha }}
       BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -455,7 +478,7 @@ jobs:
             "repos/${STATUS_REPOSITORY}/statuses/${HEAD_SHA}" \
             -f state=pending \
             -f context="${STATUS_CONTEXT}" \
-            -f description='Trusted frontend license policy is evaluating'
+            -f description='Trusted frontend license policy is evaluating this exact commit'
 
       - name: Checkout trusted policy
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
@@ -523,7 +546,7 @@ jobs:
           description='Trusted frontend license policy failed closed'
           if [[ "${VERDICT}" == success ]]; then
             state=success
-            description='Trusted frontend license policy allowed this change'
+            description='Trusted frontend license policy authorized this exact commit'
           fi
           gh api --method POST \
             "repos/${STATUS_REPOSITORY}/statuses/${HEAD_SHA}" \
@@ -620,12 +643,83 @@ before merge`. Stop and ask Robert to write that section in his own words.
 Do not merge, ready, or activate rules until Robert confirms the human summary
 is present and the PR review/checks are acceptable.
 
-### Step 2: Merge the bootstrap and produce a real status
+### Step 2: Merge the bootstrap and validate `/main`
 
-After Robert's confirmation, merge through the existing main ruleset. Then
-open or synchronize an owner-authored PR targeting `dev`—normally the licensing
-cutoff PR—to produce the trusted status from the now-base-controlled workflow.
-Record:
+After Robert supplies and confirms his own human `Change summary`, merge the
+bootstrap through the existing main ruleset. Fetch the new main, create a
+temporary owner-controlled validation branch from that exact revision, add an
+empty commit, push it, and open a draft pull request to `main`:
+
+```bash
+git fetch origin main
+task12977_validation_branch='codex/frontend-license-gate-main-validation'
+task12977_validation_worktree='../frontend-license-gate-main-validation'
+git worktree add -b "${task12977_validation_branch}" \
+  "${task12977_validation_worktree}" origin/main
+git -C "${task12977_validation_worktree}" commit --allow-empty \
+  -m 'ci: validate trusted frontend license status (TASK-12977)'
+git -C "${task12977_validation_worktree}" push -u origin \
+  "${task12977_validation_branch}"
+gh pr create --repo rmusser01/tldw_server \
+  --base main \
+  --head "${task12977_validation_branch}" \
+  --draft \
+  --title 'ci: validate trusted frontend license status' \
+  --body $'Temporary empty-commit validation of the source-bound `frontend-license-policy/trusted/main` context for TASK-12977. This PR will not be merged.'
+```
+
+Resolve the PR number and immutable head SHA from live GitHub state. Observe
+the branch-qualified status and audit check, and record their complete public
+responses before cleanup:
+
+```bash
+gh pr view "${task12977_validation_branch}" \
+  --repo rmusser01/tldw_server \
+  --json number,headRefOid,url \
+  > /tmp/task-12977-main-validation-pr.json
+task12977_main_pr_number="$(jq -er '.number' /tmp/task-12977-main-validation-pr.json)"
+task12977_main_head_sha="$(jq -er '.headRefOid' /tmp/task-12977-main-validation-pr.json)"
+gh pr checks "${task12977_main_pr_number}" --repo rmusser01/tldw_server
+gh api \
+  "repos/rmusser01/tldw_server/commits/${task12977_main_head_sha}/status" \
+  > /tmp/task-12977-main-validation-status.json
+gh api \
+  "repos/rmusser01/tldw_server/commits/${task12977_main_head_sha}/check-runs" \
+  > /tmp/task-12977-main-validation-check-runs.json
+task12977_main_integration_id="$(jq -er '
+  [.check_runs[]
+    | select(.name == "frontend-license-gate-audit" and .conclusion == "success")
+    | .app.id]
+  | unique
+  | if length == 1 then .[0]
+    else error("expected exactly one successful /main source app")
+    end
+' /tmp/task-12977-main-validation-check-runs.json)"
+[[ "${task12977_main_integration_id}" =~ ^[1-9][0-9]*$ ]]
+```
+
+Confirm that the status SHA is the live validation head SHA, the context is
+exactly `frontend-license-policy/trusted/main`, its state is `success`, its
+creator is the expected GitHub Actions source, and the workflow run references
+the merged default-branch workflow. If the context or expected-source evidence
+is missing, record the failed observation, perform the cleanup below, and stop
+without changing either ruleset.
+
+After the evidence is recorded, close the temporary draft without merging and
+remove its remote branch and dedicated worktree:
+
+```bash
+gh pr close "${task12977_main_pr_number}" \
+  --repo rmusser01/tldw_server --delete-branch
+git worktree remove "${task12977_validation_worktree}"
+git branch -D "${task12977_validation_branch}"
+```
+
+### Step 3: Produce and observe the real `/dev` status
+
+Open or synchronize an owner-authored PR targeting `dev`—normally the licensing
+cutoff PR—to produce `frontend-license-policy/trusted/dev` from the
+now-base-controlled workflow. Record:
 
 ```bash
 gh pr view codex/frontend-licensing-cutoff \
@@ -637,29 +731,33 @@ task12977_head_sha="$(jq -er '.headRefOid' /tmp/task-12977-licensing-pr.json)"
 gh pr checks "${task12977_pr_number}" --repo rmusser01/tldw_server
 gh api \
   "repos/rmusser01/tldw_server/commits/${task12977_head_sha}/status" \
-  --jq '.statuses[] | select(.context == "frontend-license-policy/trusted")'
+  --jq '.statuses[] | select(.context == "frontend-license-policy/trusted/dev")'
 gh api \
   "repos/rmusser01/tldw_server/commits/${task12977_head_sha}/check-runs" \
   --jq '.check_runs[] | select(.name == "frontend-license-gate-audit") | {id, name, conclusion, app}'
-task12977_integration_id="$(gh api \
+task12977_dev_integration_id="$(gh api \
   "repos/rmusser01/tldw_server/commits/${task12977_head_sha}/check-runs" \
   --jq '[.check_runs[] | select(.name == "frontend-license-gate-audit" and .conclusion == "success") | .app.id] | unique | if length == 1 then .[0] else error("expected exactly one successful source app") end')"
-[[ "${task12977_integration_id}" =~ ^[1-9][0-9]*$ ]]
+[[ "${task12977_dev_integration_id}" =~ ^[1-9][0-9]*$ ]]
+[[ "${task12977_dev_integration_id}" == "${task12977_main_integration_id}" ]]
+task12977_integration_id="${task12977_main_integration_id}"
 ```
 
 Never infer the PR number, head SHA, or source from a stale local branch.
 Confirm:
 
 - the status SHA equals the current PR head SHA;
+- the status context is exactly `frontend-license-policy/trusted/dev`;
 - status state is `success`;
 - status creator is the GitHub Actions bot/source;
 - the audit check's `app.id` is a positive integer; and
 - the workflow run references the merged default-branch workflow.
 
-Keep the observed `app.id` in `task12977_integration_id`. Do not assume a
-hard-coded GitHub Actions App ID.
+Keep the matching observed `app.id` in `task12977_integration_id`. Do not
+assume a hard-coded GitHub Actions App ID. If the `/main` and `/dev` source
+identities differ, stop without changing either ruleset.
 
-### Step 3: Build a source-bound main ruleset payload from live state
+### Step 4: Build a source-bound main ruleset payload from live state
 
 Immediately recheck direct collaborators. Then save the complete live main
 ruleset response and derive an update payload from it:
@@ -667,7 +765,7 @@ ruleset response and derive an update payload from it:
 ```bash
 gh api repos/rmusser01/tldw_server/rulesets/5653432 \
   > /tmp/task-12977-main-ruleset-before.json
-jq --arg context 'frontend-license-policy/trusted' \
+jq --arg context 'frontend-license-policy/trusted/main' \
   --argjson integration_id "${task12977_integration_id}" '
     if any(.rules[]; .type == "required_status_checks") then
       error("main ruleset already has required_status_checks; stop")
@@ -711,18 +809,20 @@ gh api repos/rmusser01/tldw_server/rulesets/5653432 \
 
 Use `jq` to assert that every old rule, condition, bypass actor, target,
 enforcement value, and name remains present and unchanged, with exactly one
-new status rule whose context and `integration_id` match the observed values.
-If the PUT or assertion fails, PUT a sanitized payload derived from the saved
-before JSON, verify restoration, and stop.
+new status rule whose context is exactly
+`frontend-license-policy/trusted/main` and whose `integration_id` matches the
+observed source. If the PUT or assertion fails, PUT a sanitized payload derived
+from the saved before JSON, verify that the `/main` requirement was removed,
+and stop.
 
-### Step 4: Create and verify the `dev` ruleset
+### Step 5: Create and verify the `dev` ruleset
 
 Create a payload with no bypass actors, targeting only `refs/heads/dev`. Copy
 the existing main pull-request rule from the saved live response instead of
 retyping its evolving parameter schema:
 
 ```bash
-jq --arg context 'frontend-license-policy/trusted' \
+jq --arg context 'frontend-license-policy/trusted/dev' \
   --argjson integration_id "${task12977_integration_id}" '
     [.rules[] | select(.type == "pull_request")] as $pull_request_rules
     | if ($pull_request_rules | length) != 1 then
@@ -773,19 +873,22 @@ Read the returned ruleset by its new ID and assert:
 - bypass actors are empty;
 - PR merge methods and zero-approval policy match the current repository
   choice; and
-- required status context and `integration_id` match the observed status.
+- required status context is exactly `frontend-license-policy/trusted/dev` and
+  its `integration_id` matches the observed source.
 
 If the expected-source binding is absent or differs, disable the new dev
-ruleset, restore main from the saved before payload, verify both changes, and
-stop.
+ruleset (removing the `/dev` requirement), restore main from the saved before
+payload (removing the `/main` requirement), verify both changes, record the
+latest observations for both contexts, and stop.
 
-### Step 5: Record evidence without secrets
+### Step 6: Record evidence without secrets
 
 Copy the three public JSON responses into the evidence directory on the
 licensing branch, removing only volatile `_links` fields if they make review
 noisy. Record workflow run URL, PR number, exact head SHA, status creator,
-integration ID, main ruleset ID, dev ruleset ID, and activation timestamps in
-TASK-12977. Never record tokens or request headers.
+integration ID, both exact branch contexts, main ruleset ID, dev ruleset ID,
+and activation timestamps in TASK-12977. Never record tokens or request
+headers.
 
 ## Task 5: Reconcile and Resume TASK-12976
 
@@ -849,8 +952,14 @@ findings:
 Complete acceptance criteria 2–5 and the Definition of Done only when:
 
 - the bootstrap commit is on `main`;
-- a real owner-authored dev PR has a successful source-bound trusted status;
-- main and dev rulesets return the expected `integration_id`;
+- a real owner-authored dev PR has a successful source-bound
+  `frontend-license-policy/trusted/dev` status;
+- a temporary owner-controlled empty-commit PR proved the source-bound
+  `frontend-license-policy/trusted/main` status and was then closed without
+  merge, with its temporary branch removed;
+- main and dev rulesets return the expected `integration_id` and require only
+  `frontend-license-policy/trusted/main` and
+  `frontend-license-policy/trusted/dev`, respectively;
 - external protected/unprotected deterministic cases pass locally;
 - focused tests, actionlint, Bandit, and diff checks are recorded; and
 - rollback artifacts/IDs are documented.
@@ -871,19 +980,26 @@ license-only PR to `dev`. The merge order remains:
 
 ## Final Verification Checklist
 
-- [ ] Bootstrap diff contains only TASK-12977 trust-root files.
+- [x] Bootstrap diff contains only TASK-12977 trust-root files.
 - [ ] Robert supplied the bootstrap PR `Change summary` in his own words.
-- [ ] Workflow exists on `main` before ruleset activation.
-- [ ] Privileged workflow checks out only `${{ github.sha }}`.
-- [ ] PR head is fetched as Git objects and never checked out/executed.
-- [ ] Classifier input is NUL-delimited, bounded, and decoded with
+- [x] Workflow exists on `main` before ruleset activation.
+- [x] Temporary empty-commit validation records a successful source-bound
+      `frontend-license-policy/trusted/main` result before the main rule is
+      added; the draft PR is then closed and its branch removed.
+- [x] Privileged workflow checks out only `${{ github.sha }}`.
+- [x] PR head is fetched as Git objects and never checked out/executed.
+- [x] Classifier input is NUL-delimited, bounded, and decoded with
       `surrogateescape` without trimming.
-- [ ] Owner allow and external protected deny cases pass.
-- [ ] Pending is posted first; only an explicit allow publishes success.
-- [ ] `frontend-license-policy/trusted` is bound to the observed integration.
-- [ ] Main ruleset `5653432` retains every prior rule and condition.
-- [ ] Dev ruleset targets only `refs/heads/dev`, requires PR + trusted status,
-      and has no bypass actors.
+- [x] Owner allow and external protected deny cases pass.
+- [x] Pending is posted first; only an explicit allow publishes success.
+- [x] The trusted status is documented and tested as exact head-SHA/base
+      authorization, not proof of the current pull-request author.
+- [x] `frontend-license-policy/trusted/main` and
+      `frontend-license-policy/trusted/dev` are each bound to the observed
+      integration and required only by their matching base ruleset.
+- [x] Main ruleset `5653432` retains every prior rule and condition.
+- [x] Dev ruleset targets only `refs/heads/dev`, requires PR plus
+      `frontend-license-policy/trusted/dev`, and has no bypass actors.
 - [ ] Focused pytest suites, actionlint, Bandit, and `git diff --check` pass.
 - [ ] Public before/after ruleset evidence and rollback IDs are recorded.
 - [ ] TASK-12977 and TASK-12976 statuses accurately reflect live state.
