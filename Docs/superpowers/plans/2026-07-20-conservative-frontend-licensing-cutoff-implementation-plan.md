@@ -122,7 +122,7 @@ unmerged until the cutoff lands.
 
 **Tests:** Commands in Task 6.
 
-**Status:** Not Started
+**Status:** Complete
 
 ---
 
@@ -149,7 +149,7 @@ unmerged until the cutoff lands.
 - Produces: The authoritative path map, immutable upstream legal texts, and
   `pre-source-available.json` consumed by all later tasks.
 
-- [ ] **Step 1: Re-verify the public pre-cutoff refs and fail on drift**
+- [x] **Step 1: Re-verify the public pre-cutoff refs and fail on drift**
 
 Run:
 
@@ -160,7 +160,8 @@ gh pr view 2727 --repo rmusser01/tldw_server \
   --json state,isDraft,headRefOid,updatedAt,url
 ```
 
-Expected as of 2026-07-20:
+Initial observation as of 2026-07-20 (superseded by the final pre-push refresh
+recorded in Step 6):
 
 ```text
 refs/heads/dev	29acaca8c781213e27b12066372df13855e2e7a6
@@ -172,7 +173,7 @@ If any SHA differs, stop before editing, record the newly observed public refs
 in both the test and JSON record, and note the drift in the execution Backlog
 task. Never preserve a stale SHA merely to match this plan.
 
-- [ ] **Step 2: Write the failing legal-boundary tests**
+- [x] **Step 2: Write the failing legal-boundary tests**
 
 Create `tldw_Server_API/tests/CI/test_licensing_policy.py`:
 
@@ -224,10 +225,11 @@ def test_root_license_maps_only_the_approved_protected_paths() -> None:
 def test_historical_record_preserves_public_refs_and_prior_grants() -> None:
     record = json.loads(_read("LICENSES/history/pre-source-available.json"))
     assert record["schema_version"] == 1
+    assert record["recorded_on"] == "2026-07-21"
     assert record["repository"] == "https://github.com/rmusser01/tldw_server"
     assert record["public_refs"]["refs/heads/main"] == "7a23be3202e360f2d8e7cfe208e13ba406cf0507"
     assert record["public_refs"]["refs/heads/dev"] == "29acaca8c781213e27b12066372df13855e2e7a6"
-    assert record["public_refs"]["refs/pull/2727/head"] == "60ce244fb6a65a79489b3f77299340afa501be24"
+    assert record["public_refs"]["refs/pull/2727/head"] == "e8bcc4c8b705df50a5f7e6299335ba8001ff4811"
     assert record["prior_grants_preserved"] is True
     assert record["ref_snapshot_is_exhaustive"] is False
 
@@ -242,7 +244,7 @@ def test_countdown_template_is_not_misrepresented_as_an_active_grant() -> None:
     )
 ```
 
-- [ ] **Step 3: Run the test to verify it fails**
+- [x] **Step 3: Run the test to verify it fails**
 
 Run:
 
@@ -253,7 +255,7 @@ python -m pytest tldw_Server_API/tests/CI/test_licensing_policy.py -q
 
 Expected: FAIL because `LICENSES/` and the new root scope map do not exist.
 
-- [ ] **Step 4: Add the five verbatim upstream legal texts**
+- [x] **Step 4: Add the five verbatim upstream legal texts**
 
 Fetch the exact plain-text bodies from these primary URLs, verify the listed
 SHA-256 values, and add the verified bytes without project-authored headers or
@@ -271,7 +273,7 @@ Store Countdown under the filename ending in `-template.txt`. It remains the
 official uncompleted template, not an active grant. The fixed digest test is
 the guard against accidental edits.
 
-- [ ] **Step 5: Replace root `LICENSE` with the exact scope map**
+- [x] **Step 5: Replace root `LICENSE` with the exact scope map**
 
 Use this content:
 
@@ -338,7 +340,7 @@ right to use tldw names, logos, icons, domains, signing identities, or store
 identities as branding.
 ```
 
-- [ ] **Step 6: Add the legal-corpus README and historical JSON**
+- [x] **Step 6: Add the legal-corpus README and historical JSON**
 
 Create `LICENSES/README.md`:
 
@@ -363,19 +365,19 @@ Do not edit a verbatim license file. Add a new versioned file when a different
 upstream license version is intentionally adopted.
 ```
 
-Create `LICENSES/history/pre-source-available.json` with the refs verified in
-Step 1:
+Create `LICENSES/history/pre-source-available.json` with the refs refreshed
+immediately before the final cutoff push:
 
 ```json
 {
   "schema_version": 1,
   "record_type": "pre_source_available_history",
-  "recorded_on": "2026-07-20",
+  "recorded_on": "2026-07-21",
   "repository": "https://github.com/rmusser01/tldw_server",
   "public_refs": {
     "refs/heads/dev": "29acaca8c781213e27b12066372df13855e2e7a6",
     "refs/heads/main": "7a23be3202e360f2d8e7cfe208e13ba406cf0507",
-    "refs/pull/2727/head": "60ce244fb6a65a79489b3f77299340afa501be24"
+    "refs/pull/2727/head": "e8bcc4c8b705df50a5f7e6299335ba8001ff4811"
   },
   "pull_request": "https://github.com/rmusser01/tldw_server/pull/2727",
   "prior_grants_preserved": true,
@@ -402,7 +404,7 @@ release records are append-only; corrections use a new release ID and a
 superseding record.
 ```
 
-- [ ] **Step 7: Run the legal-boundary tests**
+- [x] **Step 7: Run the legal-boundary tests**
 
 Run:
 
@@ -413,7 +415,7 @@ python -m pytest tldw_Server_API/tests/CI/test_licensing_policy.py -q
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit the legal boundary**
+- [x] **Step 8: Commit the legal boundary**
 
 ```bash
 git add LICENSE LICENSES tldw_Server_API/tests/CI/test_licensing_policy.py
@@ -447,7 +449,7 @@ git commit -m "chore: establish prospective frontend license boundary"
 - Produces: Consistent human- and package-visible source-available notices;
   later artifact work will reuse the four local `LICENSE` files.
 
-- [ ] **Step 1: Extend the failing policy tests for package and public copy**
+- [x] **Step 1: Extend the failing policy tests for package and public copy**
 
 Append:
 
@@ -493,7 +495,7 @@ def test_third_party_notices_preserve_frontend_upstream_terms() -> None:
     assert "apps/extension/public/pdf.worker.min.mjs" in notices
 ```
 
-- [ ] **Step 2: Add a failing About/Legal component test**
+- [x] **Step 2: Add a failing About/Legal component test**
 
 Append inside the existing `describe("AboutApp")` block:
 
@@ -524,7 +526,7 @@ Append inside the existing `describe("AboutApp")` block:
   })
 ```
 
-- [ ] **Step 3: Run the targeted tests to verify they fail**
+- [x] **Step 3: Run the targeted tests to verify they fail**
 
 Run:
 
@@ -538,7 +540,7 @@ bunx vitest run src/components/Option/Settings/__tests__/about.test.tsx
 Expected: policy assertions fail on missing package notices and stale wording;
 the About test fails because both links are absent or stale.
 
-- [ ] **Step 4: Add identical local protected-package notices and metadata**
+- [x] **Step 4: Add identical local protected-package notices and metadata**
 
 Each local `LICENSE` must contain this text, with only the relative root path
 adjusted when useful:
@@ -546,9 +548,12 @@ adjusted when useful:
 ```text
 tldw Protected Frontend Licensing Notice
 
-Repository-authored material in this package is source-available under the
-PolyForm Perimeter License 1.0.1:
+Repository-authored code, tests, build definitions, and original assets in this
+package are source-available under the PolyForm Perimeter License 1.0.1:
 https://polyformproject.org/licenses/perimeter/1.0.1/
+
+Markdown documentation in this package remains GPL-3.0-only unless a more
+specific notice expressly classifies it as protected release material.
 
 Required Notice: Copyright (c) 2026 Robert Benjamin Jake Musser.
 
@@ -570,7 +575,7 @@ Set this exact field in all four package manifests:
 
 Do not change either voice SDK manifest in this task.
 
-- [ ] **Step 5: Correct repository, contribution, extension, and landing copy**
+- [x] **Step 5: Correct repository, contribution, extension, and landing copy**
 
 Update the root README badge/intro and License section to use these exact
 labels:
@@ -629,7 +634,7 @@ and the bottom line to:
 <p>Server GPL-3.0-only. Frontend source-available. No telemetry. No data collection.</p>
 ```
 
-- [ ] **Step 6: Correct About/Legal links with the smallest UI change**
+- [x] **Step 6: Correct About/Legal links with the smallest UI change**
 
 In `about.tsx`, keep the current component and query. Rename the returned
 `ollama` field to `serverVersion`, change the displayed repository link to
@@ -656,7 +661,7 @@ Change the fallback version label to `tldw Assistant Version`. Do not add a
 new legal component or runtime configuration system; the future artifact plan
 will add release-specific values.
 
-- [ ] **Step 7: Correct third-party notices without changing upstream files**
+- [x] **Step 7: Correct third-party notices without changing upstream files**
 
 Change the host line to `Host project: multi-license; see LICENSE`. Correct the
 PDF.js path to `apps/extension/public/pdf.worker.min.mjs`. Add this separate
@@ -673,7 +678,7 @@ URL          : https://github.com/n4ze3m/page-assist
 
 Do not add Perimeter or AGPL headers to either upstream file.
 
-- [ ] **Step 8: Run the metadata and UI tests**
+- [x] **Step 8: Run the metadata and UI tests**
 
 Run:
 
@@ -686,7 +691,7 @@ bunx vitest run src/components/Option/Settings/__tests__/about.test.tsx
 
 Expected: PASS.
 
-- [ ] **Step 9: Commit the metadata disclosure**
+- [x] **Step 9: Commit the metadata disclosure**
 
 ```bash
 git add README.md CONTRIBUTING.md THIRD_PARTY_NOTICES.txt admin-ui/LICENSE admin-ui/package.json apps/tldw-frontend/LICENSE apps/tldw-frontend/package.json apps/tldw-frontend/components/landing/LandingLayout.tsx apps/extension/LICENSE apps/extension/package.json apps/extension/README.md apps/packages/ui/LICENSE apps/packages/ui/package.json apps/packages/ui/src/components/Option/Settings/about.tsx apps/packages/ui/src/components/Option/Settings/__tests__/about.test.tsx tldw_Server_API/tests/CI/test_licensing_policy.py
@@ -707,7 +712,7 @@ git commit -m "docs: disclose source-available frontend terms"
 - Produces: `/openapi.json` fields `info.license.identifier` and
   `info.x-server-code-license` used by clients and policy tests.
 
-- [ ] **Step 1: Write the failing OpenAPI license test**
+- [x] **Step 1: Write the failing OpenAPI license test**
 
 Add after the `openapi_spec` fixture helpers:
 
@@ -725,7 +730,7 @@ def test_openapi_contract_declares_contract_and_code_licenses(
     assert info["x-server-code-license"] == "GPL-3.0-only"
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run:
 
@@ -737,7 +742,7 @@ python -m pytest tldw_Server_API/tests/Services/test_openapi_contracts.py::test_
 Expected: FAIL because the generated schema omits the app's stale GPLv2
 `license_info` and has no server-code extension.
 
-- [ ] **Step 3: Update the FastAPI and custom OpenAPI metadata**
+- [x] **Step 3: Update the FastAPI and custom OpenAPI metadata**
 
 Replace the stale license block with:
 
@@ -765,7 +770,7 @@ After `_ensure_openapi_operation_tags_declared(openapi_schema)`, add:
 Also correct the adjacent repository URLs from the obsolete `cpacker` location
 to `https://github.com/rmusser01/tldw_server` and its `/issues` page.
 
-- [ ] **Step 4: Run the targeted OpenAPI tests**
+- [x] **Step 4: Run the targeted OpenAPI tests**
 
 Run:
 
@@ -776,7 +781,7 @@ python -m pytest tldw_Server_API/tests/Services/test_openapi_contracts.py::test_
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit the API contract metadata**
+- [x] **Step 5: Commit the API contract metadata**
 
 ```bash
 git add tldw_Server_API/app/main.py tldw_Server_API/tests/Services/test_openapi_contracts.py
@@ -970,7 +975,7 @@ python -m pytest tldw_Server_API/tests/Utils/test_docker_quickstart_hardening.py
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit image isolation and publishing freeze**
+- [x] **Step 8: Commit image isolation and publishing freeze**
 
 ```bash
 git add Dockerfiles/Dockerfile.prod Dockerfiles/README.md Docs/Development/Container_Image_Lifecycle.md .github/workflows/publish-ghcr-main.yml tldw_Server_API/tests/Utils/test_docker_quickstart_hardening.py tldw_Server_API/tests/CI/test_release_workflow_contracts.py
@@ -989,7 +994,7 @@ git commit -m "ci: suspend protected frontend image publishing"
 - Produces: Verification evidence and a license-only PR ready for human review
   and human-authored change summary.
 
-- [ ] **Step 1: Run the complete targeted test set**
+- [x] **Step 1: Run the complete targeted test set**
 
 Run:
 
@@ -1009,7 +1014,7 @@ python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 2: Run the protected About test**
+- [x] **Step 2: Run the protected About test**
 
 Run:
 
@@ -1020,7 +1025,7 @@ bunx vitest run src/components/Option/Settings/__tests__/about.test.tsx
 
 Expected: PASS.
 
-- [ ] **Step 3: Run security and static integrity checks**
+- [x] **Step 3: Run security and static integrity checks**
 
 Run:
 
@@ -1034,7 +1039,7 @@ rg -n "Open source under GPL v2.0|Host project license: GNU General Public Licen
 Expected: Bandit exits `0`; `git diff --check` has no output; the stale-language
 scan has no matches. Do not suppress a new Bandit finding.
 
-- [ ] **Step 4: Lint the changed workflows**
+- [x] **Step 4: Lint the changed workflows**
 
 Run the same pinned `actionlint` installer used by
 `.github/workflows/actionlint.yml`, then run:
@@ -1049,18 +1054,18 @@ Run the same pinned `actionlint` installer used by
 
 Expected: exit `0` with no errors.
 
-- [ ] **Step 5: Build and inspect the API image**
+- [x] **Step 5: Build and inspect the API image**
 
 Run:
 
 ```bash
 docker build -f Dockerfiles/Dockerfile.prod -t tldw-server:license-cutoff .
-docker run --rm --entrypoint sh tldw-server:license-cutoff -c 'test ! -e /app/apps/tldw-frontend && test -f /app/LICENSE && test -f /app/LICENSES/GPL-3.0-only.txt && test -f /app/THIRD_PARTY_NOTICES.txt'
+docker run --rm --entrypoint sh tldw-server:license-cutoff -c 'set -eu; test ! -e /app/admin-ui; test ! -e /app/apps/tldw-frontend; test ! -e /app/apps/extension; test ! -e /app/apps/packages/ui; test -f /app/LICENSE; test -f /app/LICENSES/GPL-3.0-only.txt; test -f /app/LICENSES/AGPL-3.0-only.txt; test -f /app/LICENSES/PolyForm-Perimeter-1.0.1.txt; test -f /app/THIRD_PARTY_NOTICES.txt'
 ```
 
 Expected: build succeeds and the inspection command exits `0`.
 
-- [ ] **Step 6: Review the diff for scope and legal-record integrity**
+- [x] **Step 6: Review the diff for scope and legal-record integrity**
 
 Run:
 
@@ -1075,21 +1080,21 @@ progress record are present. There must be no feature implementation from PR
 #2727, no active Community or Dedicated Customer grant, no frontend CLA, no
 completed Countdown grant, and no protected binary artifact.
 
-- [ ] **Step 7: Finalize the execution Backlog task**
+- [x] **Step 7: Finalize the execution Backlog task**
 
 Record the exact test, Bandit, actionlint, and image-inspection results; list
 modified files; link the approved spec and this plan; state that full protected
 artifact publishing and custom grants are intentionally deferred. Mark the task
 Done only after every required check passes.
 
-- [ ] **Step 8: Commit the finalized task record**
+- [x] **Step 8: Commit the finalized task record**
 
 ```bash
 git add 'backlog/tasks/task-12976 - Implement-conservative-frontend-licensing-cutoff.md'
 git commit -m "chore: complete frontend licensing cutoff task"
 ```
 
-- [ ] **Step 9: Open the license-only pull request into `dev`**
+- [x] **Step 9: Open the license-only pull request into `dev`**
 
 Push the worktree branch and open a draft PR targeting `dev`. The human
 requester must write the required `Change summary` explaining what changed and

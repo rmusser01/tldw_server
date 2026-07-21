@@ -1,8 +1,11 @@
 tldw Protected Frontend Licensing Notice
 
-Repository-authored material in this package is source-available under the
-PolyForm Perimeter License 1.0.1:
+Repository-authored code, tests, build definitions, and original assets in this
+package are source-available under the PolyForm Perimeter License 1.0.1:
 https://polyformproject.org/licenses/perimeter/1.0.1/
+
+Markdown documentation in this package remains GPL-3.0-only unless a more
+specific notice expressly classifies it as protected release material.
 
 Required Notice: Copyright (c) 2026 Robert Benjamin Jake Musser.
 

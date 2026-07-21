@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from hashlib import sha256
 import json
+from hashlib import sha256
 from pathlib import Path
-
 
 LICENSE_DIGESTS = {
     "LICENSES/PolyForm-Perimeter-1.0.1.txt": "5c7a5ccd847fcc285dda039e511ba013693fe979dfc5faee47f6fb59c7add337",
@@ -40,9 +39,7 @@ def test_root_license_maps_only_the_approved_protected_paths() -> None:
     text = _read("LICENSE")
     protected_section = text.split("## Protected Frontend Material", 1)[1].split("\n## ", 1)[0]
     protected_paths = [
-        line.removeprefix("- `").removesuffix("`")
-        for line in protected_section.splitlines()
-        if line.startswith("- ")
+        line.removeprefix("- `").removesuffix("`") for line in protected_section.splitlines() if line.startswith("- ")
     ]
     assert protected_paths == PROTECTED_PATHS
     assert "PolyForm Perimeter License 1.0.1" in text
@@ -55,10 +52,11 @@ def test_root_license_maps_only_the_approved_protected_paths() -> None:
 def test_historical_record_preserves_public_refs_and_prior_grants() -> None:
     record = json.loads(_read("LICENSES/history/pre-source-available.json"))
     assert record["schema_version"] == 1
+    assert record["recorded_on"] == "2026-07-21"
     assert record["repository"] == "https://github.com/rmusser01/tldw_server"
     assert record["public_refs"]["refs/heads/main"] == "7a23be3202e360f2d8e7cfe208e13ba406cf0507"
     assert record["public_refs"]["refs/heads/dev"] == "29acaca8c781213e27b12066372df13855e2e7a6"
-    assert record["public_refs"]["refs/pull/2727/head"] == "60ce244fb6a65a79489b3f77299340afa501be24"
+    assert record["public_refs"]["refs/pull/2727/head"] == "e8bcc4c8b705df50a5f7e6299335ba8001ff4811"
     assert record["prior_grants_preserved"] is True
     assert record["ref_snapshot_is_exhaustive"] is False
 
@@ -67,10 +65,7 @@ def test_countdown_template_is_not_misrepresented_as_an_active_grant() -> None:
     readme = _read("LICENSES/releases/README.md")
     assert "No protected frontend release may be published" in readme
     assert "completed release-specific Countdown grant" in readme
-    assert not any(
-        child.is_dir()
-        for child in Path("LICENSES/releases").iterdir()
-    )
+    assert not any(child.is_dir() for child in Path("LICENSES/releases").iterdir())
 
 
 def test_protected_packages_use_local_license_notices() -> None:
@@ -78,7 +73,14 @@ def test_protected_packages_use_local_license_notices() -> None:
         manifest = json.loads(_read(f"{package}/package.json"))
         assert manifest["license"] == "SEE LICENSE IN LICENSE"
         notice = _read(f"{package}/LICENSE")
+        normalized_notice = " ".join(notice.split())
         assert "PolyForm Perimeter License 1.0.1" in notice
+        assert (
+            "Repository-authored code, tests, build definitions, and original assets in this package"
+            in normalized_notice
+        )
+        assert "Markdown documentation in this package remains GPL-3.0-only" in normalized_notice
+        assert "Repository-authored material in this package" not in normalized_notice
         assert "Required Notice:" in notice
         assert "LICENSES/releases" in notice
         assert "No trademark rights are granted" in notice
