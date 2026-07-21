@@ -2,20 +2,27 @@
 id: TASK-12977
 title: Bootstrap base-controlled frontend license gate
 status: In Progress
+assignee: []
+created_date: ''
+updated_date: '2026-07-21 00:15'
 labels:
-- licensing
-- security
-- ci
-- frontend
-priority: high
-documentation:
-- Docs/superpowers/specs/2026-07-20-base-controlled-frontend-license-gate-design.md
+  - licensing
+  - security
+  - ci
+  - frontend
+dependencies: []
 references:
-- https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows
-- https://docs.github.com/en/actions/reference/security/secure-use
-- https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets
-modified_files:
-- Docs/superpowers/specs/2026-07-20-base-controlled-frontend-license-gate-design.md
+  - >-
+    https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows
+  - 'https://docs.github.com/en/actions/reference/security/secure-use'
+  - >-
+    https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets
+documentation:
+  - >-
+    Docs/superpowers/specs/2026-07-20-base-controlled-frontend-license-gate-design.md
+  - >-
+    Docs/superpowers/plans/2026-07-20-base-controlled-frontend-license-gate-implementation-plan.md
+priority: high
 ---
 
 ## Description
@@ -26,7 +33,7 @@ Replace the PR-controlled temporary frontend contribution gate with a base-contr
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A reviewed design documents why the pull_request gate is insufficient and defines the default-branch trust root, two-PR rollout, ruleset bootstrap, and rollback behavior.
+- [x] #1 A reviewed design documents why the pull_request gate is insufficient and defines the default-branch trust root, two-PR rollout, ruleset bootstrap, and rollback behavior.
 - [ ] #2 The gate workflow runs from the default branch with contents: read, never checks out or executes pull-request code, and evaluates immutable pull-request identity and changed paths.
 - [ ] #3 Changed paths are transported and parsed NUL-safely with adversarial filename coverage and exact protected/governance/API boundaries.
 - [ ] #4 The bootstrap workflow lands on main before the dev licensing cutoff and the gate status becomes required on both dev and main without weakening existing rules.
@@ -35,9 +42,9 @@ Replace the PR-controlled temporary frontend contribution gate with a base-contr
 
 ## Implementation Notes
 
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Review of Task 4 in TASK-12976 proved that a pull_request workflow is PR-controlled and that line-oriented changed paths are not exact. Live GitHub inspection found dev unprotected, ruleset 5653432 active only on the default branch without required checks, and rmusser01 as the only direct collaborator. The approved replacement uses a default-branch pull_request_target workflow, NUL-safe metadata-only diffing, a distinct trusted commit-status context, and staged ruleset activation. No implementation or external ruleset mutation proceeds until the written spec is reviewed.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
+<!-- SECTION:NOTES:BEGIN -->
+Review of Task 4 in TASK-12976 proved that a pull_request workflow is PR-controlled and that line-oriented changed paths are not exact. Live GitHub inspection found dev unprotected, ruleset 5653432 active only on the default branch without required checks, and rmusser01 as the only direct collaborator. The approved replacement uses a default-branch pull_request_target workflow, NUL-safe metadata-only diffing, a distinct trusted commit-status context, and staged ruleset activation. Robert Benjamin Jake Musser approved the written design on 2026-07-20. The implementation plan stages a main bootstrap, live expected-source verification, guarded ruleset activation, and reconciliation back into TASK-12976. External ruleset mutation remains a post-bootstrap step.
+<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 

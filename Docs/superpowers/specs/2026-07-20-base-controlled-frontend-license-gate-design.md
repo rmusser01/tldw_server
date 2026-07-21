@@ -1,6 +1,6 @@
 # Base-Controlled Frontend License Gate Design
 
-- **Status:** Proposed; architecture approved, written-spec review pending
+- **Status:** Approved by Robert Benjamin Jake Musser on 2026-07-20
 - **Date:** 2026-07-20
 - **Backlog task:** TASK-12977
 - **Related execution task:** TASK-12976
