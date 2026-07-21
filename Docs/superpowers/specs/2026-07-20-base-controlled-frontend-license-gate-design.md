@@ -18,6 +18,14 @@ The original line-oriented `git diff --name-only` pipe also C-quotes or splits
 unusual filenames. A protected path containing Unicode, tabs, or newlines could
 therefore be classified incorrectly.
 
+A single commit-status context is also unsafe across the two supported base
+branches. GitHub commit statuses are identified by repository, head SHA, and
+context; the same pull-request head SHA can be evaluated first against one base
+and then retargeted to the other. Reusing one context would let the earlier
+base's success satisfy the later base's required-status rule. Retriggering on
+an edited pull request refreshes evaluation, but only branch-qualified contexts
+give the two base-specific decisions distinct identities.
+
 The live repository state confirms that enforcement cannot be delegated to an
 existing branch rule:
 
@@ -110,7 +118,9 @@ dedicated GitHub App or another identity-isolated policy service.
 
 Create `.github/workflows/frontend-license-gate.yml` on `main` with:
 
-- trigger `pull_request_target` for pull requests targeting `main` or `dev`;
+- trigger `pull_request_target` for `opened`, `reopened`, `synchronize`,
+  `ready_for_review`, and `edited` activity on pull requests targeting `main`
+  or `dev`;
 - workflow permissions limited to `contents: read` and `statuses: write`;
 - no secrets other than the ephemeral `GITHUB_TOKEN`;
 - no cache, artifact download, dependency install, or pull-request checkout;
@@ -120,8 +130,13 @@ Create `.github/workflows/frontend-license-gate.yml` on `main` with:
 - one audit job named `frontend-license-gate-audit`.
 
 The job's ordinary Actions check is diagnostic only. The ruleset trust signal
-is the commit-status context `frontend-license-policy/trusted` posted to the
-pull-request head SHA through the base repository's statuses API.
+is the branch-qualified commit-status context
+`frontend-license-policy/trusted/${{ github.event.pull_request.base.ref }}`
+posted to the pull-request head SHA through the base repository's statuses API.
+The trigger restricts the base ref to `main` or `dev`, and the evaluator
+validates the same GitHub-supplied ref before it can publish success. The only
+possible final contexts are therefore `frontend-license-policy/trusted/main`
+and `frontend-license-policy/trusted/dev`.
 
 Using a commit status rather than requiring the ordinary job check matters:
 a fork pull request can declare a GitHub Actions job with the same check name,
@@ -189,11 +204,12 @@ does not allow in a path.
 
 ## Status Publication and Failure Handling
 
-The workflow posts `frontend-license-policy/trusted` as `pending` before
-evaluation. It posts `success` only for an explicit allow result. A blocked
-path, SHA mismatch, fetch failure, missing trusted classifier, malformed input,
-oversized path stream, API failure, or unexpected exception results in
-`failure` or leaves the status pending. Both outcomes block the ruleset.
+The workflow posts the branch-qualified context selected from the
+GitHub-supplied base ref as `pending` before evaluation. It posts `success` only
+for an explicit allow result. A blocked path, SHA mismatch, fetch failure,
+missing trusted classifier, malformed input, oversized path stream, API
+failure, or unexpected exception results in `failure` or leaves that context
+pending. Both outcomes block the matching ruleset.
 
 The final status-publishing step may use `if: always()` only to publish the
 already-computed result. It must not fetch or execute source. Missing or unknown
@@ -221,13 +237,13 @@ because the default branch does not contain it yet. The existing `main`
 ruleset still requires a PR. Repository policy also requires Robert to write
 the AI-generated PR's `Change summary` in his own words before merge.
 
-### Phase 2: Observe the trusted status
+### Phase 2: Observe the `/dev` trusted status
 
 After the bootstrap merges to `main`, open or synchronize the licensing cutoff
 PR targeting `dev`. Verify that:
 
 - the workflow run source is the default branch;
-- the trusted status is posted to the current head SHA;
+- `frontend-license-policy/trusted/dev` is posted to the current head SHA;
 - the owner-authored PR succeeds; and
 - the committed event/workflow harness proves that an external author with a
   protected path fails without executing head code.
@@ -238,12 +254,14 @@ them as ruleset requirements.
 ### Phase 3: Activate rulesets
 
 Preserve ruleset `5653432` exactly and add a required-status-check rule for
-`frontend-license-policy/trusted`, bound to the observed GitHub Actions source,
-without changing its existing pull-request, deletion, or non-fast-forward
-rules.
+only `frontend-license-policy/trusted/main`, bound to the observed GitHub
+Actions source, without changing its existing pull-request, deletion, or
+non-fast-forward rules.
 
 Create a separate active `dev` ruleset targeting only `refs/heads/dev`. It
-requires a pull request and the same trusted status, with no bypass actors.
+requires a pull request and only `frontend-license-policy/trusted/dev`, with no
+bypass actors. A success for one branch context must never satisfy the other
+branch's rule.
 Record the complete before/after JSON and ruleset IDs in TASK-12977.
 
 If GitHub cannot bind the commit status to the expected source, keep the
@@ -261,7 +279,7 @@ complete Tasks 5 and 6 of TASK-12976 and open the license-only PR to `dev`.
 Classifier tests cover:
 
 - owner casefolding;
-- all four protected prefixes;
+- all six protected prefixes;
 - governance and API boundaries;
 - unrelated and near-prefix paths;
 - leading/trailing whitespace;
@@ -273,14 +291,18 @@ Classifier tests cover:
 
 Workflow contract tests cover:
 
-- `pull_request_target` on `main` and `dev`;
+- `pull_request_target` on `main` and `dev`, including retargeting through the
+  `edited` activity;
 - exact permissions;
+- the exact workflow keys, concurrency mapping, job keys, runner, timeout, and
+  job environment, excluding any extra execution-affecting surface;
 - pinned trusted checkout at `github.sha`;
 - absence of pull-request checkout, caches, installs, or head-code execution;
 - validated event values;
 - NUL-delimited, no-rename, no-external-diff collection;
 - pending then fail-closed final status publication;
-- distinct audit-job and trusted-status names; and
+- distinct `/main` and `/dev` status contexts, rejection of a shared context,
+  and separation from the audit-job name; and
 - actionlint coverage.
 
 Live verification records the workflow run URL, check/status source, head SHA,
@@ -294,9 +316,10 @@ GitHub identity is not an activation prerequisite.
 If the trusted workflow malfunctions after activation:
 
 1. disable, but do not delete, the new `dev` ruleset;
-2. remove only the added required-status rule from `5653432`, preserving its
-   other rules byte-for-byte;
-3. record the before/after API responses in TASK-12977;
+2. remove only the added `frontend-license-policy/trusted/main` requirement
+   from `5653432`, preserving its other rules byte-for-byte;
+3. record the before/after API responses plus the latest `/main` and `/dev`
+   context observations in TASK-12977;
 4. keep the contribution freeze documented and enforce it manually; and
 5. do not resume protected contribution intake until a corrected trusted gate
    is reviewed and active.
