@@ -17,8 +17,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Copy packaging metadata and source to build/install python deps.
-COPY pyproject.toml README.md /app/
+# Copy packaging metadata, legal corpus, and source to build/install python deps.
+COPY pyproject.toml README.md LICENSE /app/
+COPY LICENSES /app/LICENSES
 COPY tldw_Server_API /app/tldw_Server_API
 COPY apps/mcp-unified/src /app/apps/mcp-unified/src
 
@@ -49,9 +50,11 @@ RUN useradd -m -u 10001 appuser
 
 # Runtime source/docs/scripts expected by server routes and helpers.
 COPY --chown=appuser:appuser tldw_Server_API /app/tldw_Server_API
-COPY --chown=appuser:appuser apps/tldw-frontend /app/apps/tldw-frontend
 COPY --chown=appuser:appuser Docs /app/Docs
 COPY --chown=appuser:appuser Helper_Scripts /app/Helper_Scripts
+COPY --chown=appuser:appuser LICENSE /app/LICENSE
+COPY --chown=appuser:appuser LICENSES /app/LICENSES
+COPY --chown=appuser:appuser THIRD_PARTY_NOTICES.txt /app/THIRD_PARTY_NOTICES.txt
 COPY Dockerfiles/entrypoints/tldw-app-first-run.sh /usr/local/bin/tldw-app-first-run
 
 # Create writable runtime DB directory without copying host runtime data.

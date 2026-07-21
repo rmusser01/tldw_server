@@ -24,7 +24,7 @@ Execute the approved pre-counsel licensing cutoff. Establish the prospective Per
 - [ ] #2 Protected package, repository, UI, contribution, and third-party notices consistently describe the frontend as source-available.
 - [ ] #3 The generated OpenAPI contract declares Apache-2.0 while the server implementation remains GPL-3.0-only.
 - [x] #4 The required base-controlled workflow blocks third-party protected, legal-governance, and conservative API declaration changes until later grants exist.
-- [ ] #5 The GPL API image excludes protected frontend material and rolling protected image publishing is suspended.
+- [x] #5 The GPL API image excludes protected frontend material and rolling protected image publishing is suspended.
 - [ ] #6 All verification gates pass and the result is submitted as a license-only PR into dev before PR #2727.
 <!-- AC:END -->
 
@@ -36,6 +36,8 @@ Execute the approved pre-counsel licensing cutoff. Establish the prospective Per
 - The licensing branch now carries the reviewed trusted files byte-for-byte from merged `main`, restores `frontend-required.yml` byte-for-byte from `origin/dev`, and adds a negative regression contract forbidding license enforcement or status publication in that PR-controlled workflow. Changed paths use bounded NUL transport, `surrogateescape`, no trimming, and `--no-renames` so rename old/new paths are both examined.
 - Task 4 RED failed on the rejected checkout/gate behavior; GREEN passed 2/2 after reconciliation. Final local verification passed 40/40 focused tests with six pre-existing warnings, pinned actionlint 1.7.12, Ruff, Black, Bandit with zero findings/errors across 74 classifier LOC, deterministic owner/external allow/deny cases, public ruleset evidence assertions, marker integrity, and `git diff --check`. Independent code/security review and the corrected-plan re-review were CLEAN.
 - Bootstrap PR #2753's required human-written `Change summary` remained empty when it merged. That repository-policy requirement was not satisfied and remains explicitly recorded as known noncompliance.
+- Task 5 removed all protected roots from the production API image, added the root legal corpus and third-party notices to the runtime image, and reduced `publish-ghcr-main` to the backend `app` image without changing its tags, cache, push, or attestation controls. WebUI and Admin UI remain build-checked but are not published during the licensing freeze.
+- Task 5 TDD reproduced both intended failures before implementation. Final verification passed 20/20 Docker and release-workflow contract tests, Ruff, Black, pinned actionlint 1.7.12, documentation consistency review, and `git diff --check`. Independent final review was CLEAN and separately reproduced 20/20 passing tests.
 
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 

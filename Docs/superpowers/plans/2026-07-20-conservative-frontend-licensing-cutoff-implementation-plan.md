@@ -109,7 +109,7 @@ no protected frontend.
 **Tests:** CI classifier, workflow contract, release workflow, and Dockerfile
 contract tests.
 
-**Status:** In Progress
+**Status:** Complete
 
 ### Stage 4: Verification and handoff
 
@@ -852,6 +852,10 @@ git commit -m "fix: declare OpenAPI contract Apache license"
 - Modify: `.github/workflows/publish-ghcr-main.yml`
 - Modify: `Dockerfiles/README.md`
 - Modify: `Docs/Development/Container_Image_Lifecycle.md`
+- Modify: `Docs/Development/Packaging_and_Distribution_Strategy.md`
+- Modify: `Docs/Development/PyPI_Publishing.md`
+- Modify: `Docs/Development/Release_Process.md`
+- Modify: `Docs/Release_Checklist.md`
 - Modify: `tldw_Server_API/tests/Utils/test_docker_quickstart_hardening.py`
 - Modify: `tldw_Server_API/tests/CI/test_release_workflow_contracts.py`
 
@@ -861,7 +865,7 @@ git commit -m "fix: declare OpenAPI contract Apache license"
 - Produces: A GPL backend image with bundled notices and a rolling publish matrix
   that contains only the backend `app` image.
 
-- [ ] **Step 1: Write failing API-image isolation assertions**
+- [x] **Step 1: Write failing API-image isolation assertions**
 
 Append to `test_docker_quickstart_hardening.py`:
 
@@ -881,7 +885,7 @@ def test_api_dockerfile_excludes_protected_frontend_and_bundles_legal_files():
         _require(required_copy in text, f"Expected API image legal copy: {required_copy}")
 ```
 
-- [ ] **Step 2: Change the failing rolling-publish contract test**
+- [x] **Step 2: Change the failing rolling-publish contract test**
 
 Replace `test_publish_ghcr_main_matrix_remains_app_webui_admin_ui` with:
 
@@ -894,7 +898,7 @@ def test_publish_ghcr_main_matrix_is_backend_only_during_frontend_freeze() -> No
     assert matrix[0]["dockerfile"] == "Dockerfiles/Dockerfile.prod"
 ```
 
-- [ ] **Step 3: Run the container policy tests to verify they fail**
+- [x] **Step 3: Run the container policy tests to verify they fail**
 
 Run:
 
@@ -906,7 +910,7 @@ python -m pytest tldw_Server_API/tests/Utils/test_docker_quickstart_hardening.py
 Expected: FAIL because the API image copies the WebUI and the workflow publishes
 all three images.
 
-- [ ] **Step 4: Isolate the API Dockerfile**
+- [x] **Step 4: Isolate the API Dockerfile**
 
 Delete:
 
@@ -932,14 +936,14 @@ COPY --chown=appuser:appuser THIRD_PARTY_NOTICES.txt /app/THIRD_PARTY_NOTICES.tx
 
 Do not copy any of the four protected path families into the API image.
 
-- [ ] **Step 5: Make rolling GHCR publishing backend-only**
+- [x] **Step 5: Make rolling GHCR publishing backend-only**
 
 Keep the existing matrix structure but remove its `webui` and `admin-ui`
 entries. Keep the `app` entry, `main` and SHA tags, cache, and attestations
 unchanged. Build-only validation in `container-build-check.yml` stays enabled
 for all three images because building a PR artifact is not publishing it.
 
-- [ ] **Step 6: Update container lifecycle documentation**
+- [x] **Step 6: Update container lifecycle documentation**
 
 Update both container docs to state:
 
@@ -955,7 +959,7 @@ In the coverage matrix, set WebUI and admin UI `publish-ghcr-main` entries to
 `No (licensing freeze)`. Remove claims that their `main` or SHA tags are
 currently published.
 
-- [ ] **Step 7: Run container policy and release workflow tests**
+- [x] **Step 7: Run container policy and release workflow tests**
 
 Run:
 

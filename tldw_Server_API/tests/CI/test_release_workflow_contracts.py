@@ -79,8 +79,58 @@ def test_publish_ghcr_main_workflow_remains_push_to_main_driven() -> None:
     assert "workflow_dispatch" not in on
 
 
-def test_publish_ghcr_main_matrix_remains_app_webui_admin_ui() -> None:
+def test_publish_ghcr_main_matrix_is_backend_only_during_frontend_freeze() -> None:
     workflow = _load(".github/workflows/publish-ghcr-main.yml")
     matrix = workflow["jobs"]["publish-ghcr-main"]["strategy"]["matrix"]["include"]
 
+    assert matrix == [
+        {
+            "name": "app",
+            "dockerfile": "Dockerfiles/Dockerfile.prod",
+            "image_suffix": "",
+            "build_args": "",
+        }
+    ]
+
+
+def test_publish_ghcr_main_preserves_backend_publish_controls() -> None:
+    workflow = _load(".github/workflows/publish-ghcr-main.yml")
+    steps = workflow["jobs"]["publish-ghcr-main"]["steps"]
+    metadata = _get_step(steps, "Extract metadata (tags, labels) for GHCR")
+    publish = _get_step(steps, "Build and push Docker images")
+    attestation = _get_step(steps, "Generate artifact attestation (GHCR)")
+
+    assert metadata["with"]["tags"].splitlines() == [
+        "type=raw,value=main",
+        "type=sha,format=short",
+    ]
+    assert publish["with"] == {
+        "context": ".",
+        "file": "${{ matrix.dockerfile }}",
+        "push": True,
+        "build-args": "${{ matrix.build_args }}",
+        "tags": "${{ steps.meta.outputs.tags }}",
+        "labels": "${{ steps.meta.outputs.labels }}",
+        "cache-from": "type=gha",
+        "cache-to": "type=gha,mode=max",
+    }
+    assert attestation["with"] == {
+        "subject-name": "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}${{ matrix.image_suffix }}",
+        "subject-digest": "${{ steps.push.outputs.digest }}",
+        "push-to-registry": True,
+    }
+
+
+def test_container_build_check_remains_three_image_build_only_validation() -> None:
+    workflow = _load(".github/workflows/container-build-check.yml")
+    job = workflow["jobs"]["build"]
+    matrix = job["strategy"]["matrix"]["include"]
+    build = _get_step(job["steps"], "Build container images")
+
     assert [entry["name"] for entry in matrix] == ["app", "webui", "admin-ui"]
+    assert [entry["dockerfile"] for entry in matrix] == [
+        "Dockerfiles/Dockerfile.prod",
+        "Dockerfiles/Dockerfile.webui",
+        "Dockerfiles/Dockerfile.admin-ui",
+    ]
+    assert build["with"]["push"] is False
