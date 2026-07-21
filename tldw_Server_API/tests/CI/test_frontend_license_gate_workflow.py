@@ -45,6 +45,15 @@ def assert_exact_step_structure(steps: list[dict[str, Any]]) -> None:
     identities = [(step.get("name"), step.get("id"), step.get("uses")) for step in steps]
 
     assert identities == list(EXPECTED_STEP_IDENTITIES)
+    assert [set(step) for step in steps] == [
+        {"name", "shell", "run"},
+        {"name", "uses", "with"},
+        {"id", "name", "shell", "run"},
+        {"name", "if", "shell", "env", "run"},
+    ]
+    assert [step.get("shell") for step in steps] == ["bash", None, "bash", "bash"]
+    assert steps[3]["if"] == "always()"
+    assert steps[3]["env"] == {"VERDICT": "${{ steps.evaluate.outputs.verdict }}"}
 
 
 def assert_trusted_run_bodies(steps: list[dict[str, Any]]) -> None:
@@ -126,6 +135,20 @@ def test_step_contract_rejects_an_appended_privileged_run_step() -> None:
 
     with pytest.raises(AssertionError):
         assert_exact_step_structure([*steps, unsafe_step])
+
+
+def test_step_contract_rejects_a_custom_evaluator_shell() -> None:
+    steps = load_yaml(WORKFLOW_PATH)["jobs"][JOB_ID]["steps"]
+    evaluate_index = next(index for index, step in enumerate(steps) if step.get("id") == "evaluate")
+    mutated_steps = [*steps]
+    mutated_steps[evaluate_index] = {**steps[evaluate_index], "shell": "./pr-head/shell {0}"}
+
+    assert [(step.get("name"), step.get("id"), step.get("uses")) for step in mutated_steps] == list(
+        EXPECTED_STEP_IDENTITIES
+    )
+    assert_trusted_run_bodies(mutated_steps)
+    with pytest.raises(AssertionError):
+        assert_exact_step_structure(mutated_steps)
 
 
 def test_run_body_contract_rejects_an_unsafe_evaluator_command() -> None:
