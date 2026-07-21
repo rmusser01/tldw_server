@@ -87,6 +87,40 @@ def test_api_dockerfile_avoids_expensive_copy_and_recursive_chown_layers():
     _require("RUN mkdir -p /app/Databases" in text, "Expected Dockerfile.prod to create /app/Databases")
 
 
+def test_api_dockerfile_excludes_protected_frontend_and_bundles_legal_files():
+    """The GPL API image must not bundle protected frontend source."""
+    text = _read_text("Dockerfiles/Dockerfile.prod")
+
+    transfer_lines = tuple(
+        line.strip() for line in text.splitlines() if line.lstrip().upper().startswith(("COPY ", "ADD "))
+    )
+    _require(
+        transfer_lines
+        == (
+            "COPY pyproject.toml README.md LICENSE /app/",
+            "COPY LICENSES /app/LICENSES",
+            "COPY tldw_Server_API /app/tldw_Server_API",
+            "COPY apps/mcp-unified/src /app/apps/mcp-unified/src",
+            "COPY --from=builder /install /usr/local",
+            "COPY --chown=appuser:appuser tldw_Server_API /app/tldw_Server_API",
+            "COPY --chown=appuser:appuser Docs /app/Docs",
+            "COPY --chown=appuser:appuser Helper_Scripts /app/Helper_Scripts",
+            "COPY --chown=appuser:appuser LICENSE /app/LICENSE",
+            "COPY --chown=appuser:appuser LICENSES /app/LICENSES",
+            "COPY --chown=appuser:appuser THIRD_PARTY_NOTICES.txt /app/THIRD_PARTY_NOTICES.txt",
+            "COPY Dockerfiles/entrypoints/tldw-app-first-run.sh /usr/local/bin/tldw-app-first-run",
+        ),
+        "Expected Dockerfile.prod to use only the reviewed explicit COPY allowlist and no ADD",
+    )
+    runtime = text.split("FROM python:3.12-slim AS runtime", maxsplit=1)[1]
+    for required_copy in (
+        "LICENSE /app/LICENSE",
+        "LICENSES /app/LICENSES",
+        "THIRD_PARTY_NOTICES.txt /app/THIRD_PARTY_NOTICES.txt",
+    ):
+        _require(required_copy in runtime, f"Expected runtime API image legal copy: {required_copy}")
+
+
 def test_api_dockerfile_uses_runtime_env_for_uvicorn_workers_and_log_level():
     """The API Dockerfile should let compose override uvicorn worker and log settings."""
     text = _read_text("Dockerfiles/Dockerfile.prod")
@@ -169,7 +203,8 @@ def test_webui_dockerfile_copies_only_required_workspace_sources():
         "Expected Dockerfile.webui to copy only the extension prepare shim needed for install scripts",
     )
     _require(
-        "COPY apps/packages/voice-assistant-sdk/package.json /app/apps/packages/voice-assistant-sdk/package.json" in text,
+        "COPY apps/packages/voice-assistant-sdk/package.json /app/apps/packages/voice-assistant-sdk/package.json"
+        in text,
         "Expected Dockerfile.webui to copy the voice assistant package manifest for frozen lockfile workspace resolution",
     )
     _require(

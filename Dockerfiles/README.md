@@ -101,14 +101,16 @@ This folder contains the base Compose stack for tldw_server, optional overlays, 
 
 For the full CI/CD pipeline details (workflow triggers, tagging conventions, attestation, and how to add new images), see [Docs/Development/Container_Image_Lifecycle.md](../Docs/Development/Container_Image_Lifecycle.md).
 
-- The release workflow publishes release artifacts separately from the rolling `main` snapshot workflow.
-- `publish-ghcr-main` publishes `main` and `sha-<shortsha>` snapshots for the API, WebUI, and Admin UI images:
-  - API: `ghcr.io/<owner>/<repo>:main`
-  - WebUI: `ghcr.io/<owner>/<repo>-webui:main`
-  - Admin UI: `ghcr.io/<owner>/<repo>-admin-ui:main`
-- `sha-<shortsha>` is the cross-image-consistent tag for pinning all three images to the same revision.
+- During the pre-counsel frontend licensing freeze, WebUI and Admin UI images
+  are build-checked on pull requests but are not pushed by `publish-ghcr-main`
+  or `publish-docker`.
+- `publish-ghcr-main` publishes only the GPL backend API image with `main` and
+  `sha-<shortsha>` tags: `ghcr.io/<owner>/<repo>:main`.
+- Protected image publishing resumes only through a release-specific licensing
+  workflow after artifact notices and image separation pass their later gate.
 - The API image is direct-run friendly.
-- The WebUI and Admin UI images are compose-first in v1 unless the operator supplies compatible runtime wiring.
+- WebUI and Admin UI remain locally buildable and compose-first unless the
+  operator supplies compatible runtime wiring.
 - `BYOK_ENCRYPTION_KEY` is only auto-generated for fresh auth databases. When reusing an existing auth DB or volume with encrypted provider secrets, keep the prior key (or rotate via `BYOK_SECONDARY_ENCRYPTION_KEY`) instead of starting with a blank placeholder.
 
 ## Notes
