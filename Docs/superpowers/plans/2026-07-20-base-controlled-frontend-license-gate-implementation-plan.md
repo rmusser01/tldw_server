@@ -65,9 +65,9 @@ pytest, PyYAML, actionlint, Bandit, Backlog.md CLI/MCP.
 
 | Stage | Goal | Success criteria | Tests | Status |
 |---|---|---|---|---|
-| 1 | Prepare isolated `main` bootstrap | Exact current refs/state captured; clean bootstrap worktree contains the approved design, plan, and task | Baseline focused CI-policy tests | Not Started |
-| 2 | Harden the classifier | Exact protected boundaries and NUL-safe parsing fail closed | Focused pytest + Bandit | Not Started |
-| 3 | Add the trusted workflow | Base-controlled workflow publishes only a trusted, fail-closed status and passes contract linting | Workflow contract pytest + actionlint | Not Started |
+| 1 | Prepare isolated `main` bootstrap | Exact current refs/state captured; clean bootstrap worktree contains the approved design, plan, and task | Baseline focused CI-policy tests | Complete |
+| 2 | Harden the classifier | Exact protected boundaries and NUL-safe parsing fail closed | Focused pytest + Bandit | Complete |
+| 3 | Add the trusted workflow | Base-controlled workflow publishes only a trusted, fail-closed status and passes contract linting | Workflow contract pytest + actionlint | Complete |
 | 4 | Land and activate | Human-reviewed bootstrap merges, trusted status is observed, and source-bound rules protect `main` and `dev` | Live run/status/ruleset evidence | Not Started |
 | 5 | Reconcile licensing branch | Rejected PR-controlled gate is replaced and TASK-12976 resumes on the trusted contract | Focused policy/workflow tests + Bandit + diff review | Not Started |
 
