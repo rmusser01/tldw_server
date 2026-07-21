@@ -4,6 +4,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+import pytest
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -13,12 +14,66 @@ CHECKOUT_ACTION = "actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd"
 JOB_ID = "frontend-license-gate-audit"
 STATUS_CONTEXT = "frontend-license-policy/trusted"
 CLASSIFIER = "Helper_Scripts/ci/check_frontend_license_gate.py"
+EXPECTED_STEP_IDENTITIES = (
+    ("Mark trusted policy pending", None, None),
+    ("Checkout trusted policy", None, CHECKOUT_ACTION),
+    ("Evaluate immutable pull request metadata", "evaluate", None),
+    ("Publish trusted policy result", None, None),
+)
+FORBIDDEN_COMMANDS = (
+    "git checkout",
+    "git switch",
+    "git reset",
+    "git restore",
+    "git worktree",
+    "git show",
+    "pip install",
+    "python -m pip",
+    "npm install",
+    "pnpm install",
+    "yarn install",
+    "bun install",
+    "uv sync",
+    "poetry install",
+    "gh run download",
+)
 
 
 def load_yaml(path: Path) -> dict[str, Any]:
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
     assert isinstance(data, dict)
     return data
+
+
+def assert_exact_step_structure(steps: list[dict[str, Any]]) -> None:
+    identities = [(step.get("name"), step.get("id"), step.get("uses")) for step in steps]
+
+    assert identities == list(EXPECTED_STEP_IDENTITIES)
+
+
+def assert_success_follows_prerequisites(script: str) -> None:
+    success_positions = [
+        match.start(1) for match in re.finditer(r"^[ \t]*(verdict=success)[ \t]*$", script, re.MULTILINE)
+    ]
+    classifier_positions = [match.start() for match in re.finditer(f"python3 {re.escape(CLASSIFIER)}", script)]
+
+    assert len(success_positions) == 2
+    assert len(classifier_positions) == 2
+    assert classifier_positions[0] < success_positions[0] < script.index("exit 0")
+
+    prerequisites = (
+        '[[ "${fetched_base}" == "${BASE_SHA}" ]]',
+        '[[ "${fetched_head}" == "${HEAD_SHA}" ]]',
+        "git --no-pager diff",
+        f"python3 {CLASSIFIER}",
+        'readonly pipeline_status=("${PIPESTATUS[@]}")',
+        '[[ "${pipeline_status[0]}" -eq 0 ]]',
+        '[[ "${pipeline_status[1]}" -eq 0 ]]',
+    )
+    positions = [script.index(prerequisite, classifier_positions[0] + 1) for prerequisite in prerequisites]
+    assert positions == sorted(positions)
+    assert positions[-1] < success_positions[1]
+    assert success_positions[1] == script.rfind("verdict=success")
 
 
 def test_workflow_uses_the_base_controlled_trigger_and_minimum_permissions() -> None:
@@ -36,6 +91,7 @@ def test_workflow_checks_out_only_the_trusted_base_revision() -> None:
     steps = job["steps"]
     action_steps = [step for step in steps if "uses" in step]
 
+    assert_exact_step_structure(steps)
     assert action_steps == [
         {
             "name": "Checkout trusted policy",
@@ -49,28 +105,20 @@ def test_workflow_checks_out_only_the_trusted_base_revision() -> None:
     ]
 
     run_scripts = "\n".join(step.get("run", "") for step in steps)
-    forbidden_commands = (
-        "git checkout",
-        "git switch",
-        "git reset",
-        "git restore",
-        "git worktree",
-        "git show",
-        "pip install",
-        "python -m pip",
-        "npm install",
-        "pnpm install",
-        "yarn install",
-        "bun install",
-        "uv sync",
-        "poetry install",
-        "gh run download",
-    )
-    assert not any(command in run_scripts for command in forbidden_commands)
+    assert not any(command in run_scripts for command in FORBIDDEN_COMMANDS)
     assert "artifact" not in run_scripts.casefold()
     assert not any(str(step.get("uses", "")).startswith("./") for step in steps)
     assert not any("cache" in str(step.get("uses", "")).casefold() for step in steps)
     assert not any("artifact" in str(step.get("uses", "")).casefold() for step in steps)
+
+
+def test_step_contract_rejects_an_appended_privileged_run_step() -> None:
+    steps = load_yaml(WORKFLOW_PATH)["jobs"][JOB_ID]["steps"]
+    unsafe_step = {"name": "Execute untrusted head", "shell": "bash", "run": "./pr-head/payload"}
+
+    assert not any(command in unsafe_step["run"] for command in FORBIDDEN_COMMANDS)
+    with pytest.raises(AssertionError):
+        assert_exact_step_structure([*steps, unsafe_step])
 
 
 def test_workflow_posts_pending_before_a_fail_closed_evaluation() -> None:
@@ -114,6 +162,20 @@ def test_workflow_posts_pending_before_a_fail_closed_evaluation() -> None:
     assert diff_arguments.endswith('"${BASE_SHA}" "${HEAD_SHA}" --')
     assert normalized.count(f"python3 {CLASSIFIER}") == 2
     assert normalized.count("--null") == 2
+    assert_success_follows_prerequisites(evaluate_script)
+
+
+def test_evaluator_contract_rejects_external_success_before_sha_checks() -> None:
+    steps = load_yaml(WORKFLOW_PATH)["jobs"][JOB_ID]["steps"]
+    script = next(step for step in steps if step.get("id") == "evaluate")["run"]
+    external_success = script.rfind("verdict=success")
+    assert external_success > 0
+    mutated = script[:external_success] + script[external_success + len("verdict=success") :]
+    first_sha_check = '[[ "${fetched_base}" == "${BASE_SHA}" ]]'
+    mutated = mutated.replace(first_sha_check, f"verdict=success\n{first_sha_check}", 1)
+
+    with pytest.raises(AssertionError):
+        assert_success_follows_prerequisites(mutated)
 
 
 def test_workflow_publishes_success_only_for_an_explicit_success_verdict() -> None:
