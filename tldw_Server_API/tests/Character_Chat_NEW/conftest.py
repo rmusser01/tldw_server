@@ -47,6 +47,29 @@ def pytest_configure(config):
 # Environment Configuration
 # =====================================================================
 
+@pytest.fixture(autouse=True)
+def stable_provider_override_snapshot():
+    """Keep production override-cache TTLs from making long test runs order-dependent."""
+    from tldw_Server_API.app.core.AuthNZ import llm_provider_overrides
+
+    with llm_provider_overrides._OVERRIDE_LOCK:
+        original_overrides = dict(llm_provider_overrides._OVERRIDE_CACHE)
+        original_healthy = llm_provider_overrides._OVERRIDE_CACHE_HEALTHY
+        original_ttl_disabled = (
+            llm_provider_overrides._OVERRIDE_CACHE_TTL_DISABLED_FOR_TESTS
+        )
+
+    llm_provider_overrides.set_llm_provider_overrides_cache_for_tests({})
+    try:
+        yield
+    finally:
+        llm_provider_overrides.set_llm_provider_overrides_cache_for_tests(
+            original_overrides,
+            healthy=original_healthy,
+            ttl_enabled=not original_ttl_disabled,
+        )
+
+
 @pytest.fixture(scope="session")
 def test_env_vars():
     """Set up test environment variables."""

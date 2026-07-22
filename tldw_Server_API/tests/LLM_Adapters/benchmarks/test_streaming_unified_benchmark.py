@@ -11,7 +11,7 @@ To compare parity, you can re-run with STREAMS_UNIFIED=0 to exercise the
 non-unified path and compare benchmark results across runs.
 """
 
-from typing import Iterator
+from collections.abc import Iterator
 
 import pytest
 from _pytest.fixtures import FixtureLookupError
@@ -54,16 +54,14 @@ def test_streaming_unified_throughput_benchmark(monkeypatch, request):
     except FixtureLookupError:
         pytest.skip("pytest-benchmark fixture is not available")
     authenticated_client = request.getfixturevalue("authenticated_client")
-
-    import tldw_Server_API.app.api.v1.endpoints.chat as chat_endpoint
-    chat_endpoint.API_KEYS = {**(chat_endpoint.API_KEYS or {}), "openai": "sk-openai-test"}
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-test")
 
     # Patch OpenAIAdapter.stream to emit N chunks quickly
     import tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter as openai_mod
     N = 300
 
     def _fast_stream(*args, **kwargs) -> Iterator[str]:
-        for i in range(N):
+        for _i in range(N):
             yield "data: {\"choices\":[{\"delta\":{\"content\":\"x\"}}]}\n\n"
         yield "data: [DONE]\n\n"
 

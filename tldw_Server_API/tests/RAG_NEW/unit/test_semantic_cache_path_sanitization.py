@@ -3,7 +3,6 @@ import pytest
 from tldw_Server_API.app.core import config as config_module
 from tldw_Server_API.app.core.RAG.rag_service import semantic_cache
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -54,6 +53,54 @@ def test_shared_cache_anchors_relative_persist_path(tmp_path, monkeypatch):
     assert cache.persist_path == str(expected_path)
 
 
+def test_long_namespace_persist_paths_include_collision_resistant_suffix(
+    tmp_path,
+    monkeypatch,
+):
+    base_dir = tmp_path / "cache_root"
+    base_dir.mkdir()
+    monkeypatch.setenv("RAG_SEMANTIC_CACHE_DIR", str(base_dir))
+    monkeypatch.delenv("RAG_CACHE_DIR", raising=False)
+    monkeypatch.setattr(semantic_cache, "_DEFAULT_CACHE_DIR", None)
+
+    common_prefix = "tenant-" + ("a" * 80)
+    first = semantic_cache._default_persist_path(common_prefix + "-first")
+    second = semantic_cache._default_persist_path(common_prefix + "-second")
+
+    assert first is not None
+    assert second is not None
+    assert first != second
+    assert len(semantic_cache.Path(first).name) <= 100
+    assert len(semantic_cache.Path(second).name) <= 100
+
+
+@pytest.mark.parametrize(
+    ("first_namespace", "second_namespace"),
+    [
+        ("tenant/a", "tenant?a"),
+        ("Tenant-A", "tenant-a"),
+    ],
+)
+def test_persist_paths_preserve_raw_namespace_identity_on_case_insensitive_filesystems(
+    tmp_path,
+    monkeypatch,
+    first_namespace,
+    second_namespace,
+):
+    base_dir = tmp_path / "cache_root"
+    base_dir.mkdir()
+    monkeypatch.setenv("RAG_SEMANTIC_CACHE_DIR", str(base_dir))
+    monkeypatch.delenv("RAG_CACHE_DIR", raising=False)
+    monkeypatch.setattr(semantic_cache, "_DEFAULT_CACHE_DIR", None)
+
+    first = semantic_cache._default_persist_path(first_namespace)
+    second = semantic_cache._default_persist_path(second_namespace)
+
+    assert first is not None
+    assert second is not None
+    assert semantic_cache.Path(first).name.lower() != semantic_cache.Path(second).name.lower()
+
+
 def test_shared_cache_rejects_absolute_persist_path_outside_base(tmp_path, monkeypatch):
 
 
@@ -76,7 +123,8 @@ def test_shared_cache_rejects_absolute_persist_path_outside_base(tmp_path, monke
         namespace="tenant",
     )
 
-    expected_path = (base_dir / "semantic_cache_tenant.json").resolve()
+    expected_path = semantic_cache._default_persist_path("tenant")
+    assert expected_path is not None
     assert cache.persist_path == str(expected_path)
 
 
@@ -144,9 +192,12 @@ def test_default_persist_path_resolves_failure_logs_sanitized_exception(
     monkeypatch.delenv("RAG_CACHE_DIR", raising=False)
     monkeypatch.setattr(semantic_cache, "_DEFAULT_CACHE_DIR", None)
     original_resolve = semantic_cache.Path.resolve
+    target_name = (
+        f"semantic_cache_{semantic_cache._normalize_namespace_key_for_filename('tenant')}.json"
+    )
 
     def fail_default_persist_path(self, *args, **kwargs):
-        if str(self).endswith("semantic_cache_tenant.json"):
+        if str(self).endswith(target_name):
             raise OSError("default path failed for /private/cache/secret-token")
         return original_resolve(self, *args, **kwargs)
 
@@ -174,10 +225,13 @@ def test_default_persist_path_rejects_out_of_root_resolved_path_with_sanitized_l
     monkeypatch.delenv("RAG_CACHE_DIR", raising=False)
     monkeypatch.setattr(semantic_cache, "_DEFAULT_CACHE_DIR", None)
     original_resolve = semantic_cache.Path.resolve
+    target_name = (
+        f"semantic_cache_{semantic_cache._normalize_namespace_key_for_filename('tenant')}.json"
+    )
 
     def resolve_outside_root(self, *args, **kwargs):
-        if str(self).endswith("semantic_cache_tenant.json"):
-            return semantic_cache.Path("/private/outside/secret-token/semantic_cache_tenant.json")
+        if str(self).endswith(target_name):
+            return semantic_cache.Path("/private/outside/secret-token") / target_name
         return original_resolve(self, *args, **kwargs)
 
     monkeypatch.setattr(semantic_cache.Path, "resolve", resolve_outside_root)
@@ -216,7 +270,10 @@ def test_sanitize_persist_path_resolves_failure_logs_sanitized_exception_and_fal
         "tenant",
     )
 
-    expected_path = (base_dir / "semantic_cache_tenant.json").resolve()
+    target_name = (
+        f"semantic_cache_{semantic_cache._normalize_namespace_key_for_filename('tenant')}.json"
+    )
+    expected_path = (base_dir / target_name).resolve()
     assert result == str(expected_path)
     assert logger_capture.messages == [
         "Semantic cache: failed to resolve persist_path: OSError",

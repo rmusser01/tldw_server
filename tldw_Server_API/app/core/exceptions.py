@@ -4,7 +4,7 @@ import email.utils
 import re
 import weakref
 from collections.abc import Mapping
-from typing import Any, Literal
+from typing import Any, Literal, NoReturn
 
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse
@@ -32,7 +32,16 @@ class EgressPolicyError(Exception):
 
 
 class NetworkError(Exception):
-    """Raised for network transport errors (connect/read timeouts, DNS, TLS, etc.)."""
+    """Raised for sanitized transport failures, optionally with an HTTP status."""
+
+    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+        if status_code is not None:
+            if type(status_code) is not int:
+                raise TypeError("status_code must be an integer")
+            if not 100 <= status_code <= 599:
+                raise ValueError("status_code must be a valid HTTP status")
+        self.status_code = status_code
+        super().__init__(message)
 
 
 HTTPHopErrorCode = Literal[
@@ -271,6 +280,158 @@ class TokenizerUnavailable(Exception):
 
 class BadRequestError(ValueError):
     """Raised when a caller provides invalid arguments for an operation."""
+
+
+class ChatAPIError(Exception):
+    """Base exception for chat API call errors."""
+
+    def __init__(
+        self,
+        message: str = "An error occurred during the chat API call.",
+        status_code: int = 500,
+        provider: str | None = None,
+    ) -> None:
+        self.message = message
+        self.status_code = status_code
+        self.provider = provider
+        super().__init__(self.message)
+
+
+class ChatAuthenticationError(ChatAPIError):
+    """Raised when a chat provider rejects request credentials."""
+
+    def __init__(
+        self,
+        message: str = "Authentication failed with the chat provider.",
+        provider: str | None = None,
+        status_code: int = 401,
+    ) -> None:
+        preserved_status = 403 if status_code == 403 else 401
+        super().__init__(message, status_code=preserved_status, provider=provider)
+
+
+class ChatConfigurationError(ChatAPIError):
+    """Raised for missing or invalid chat-provider configuration."""
+
+    _ERROR_CODES = frozenset(
+        {
+            "provider_configuration_invalid",
+            "missing_provider_credentials",
+        }
+    )
+
+    def __init__(
+        self,
+        message: str = "Chat provider configuration error.",
+        provider: str | None = None,
+        error_code: str = "provider_configuration_invalid",
+    ) -> None:
+        self.error_code = (
+            error_code
+            if error_code in self._ERROR_CODES
+            else "provider_configuration_invalid"
+        )
+        super().__init__(message, status_code=500, provider=provider)
+
+
+class ChatBadRequestError(ChatAPIError):
+    """Raised when a chat provider rejects request parameters."""
+
+    def __init__(
+        self,
+        message: str = "Invalid request sent to the chat provider.",
+        provider: str | None = None,
+    ) -> None:
+        super().__init__(message, status_code=400, provider=provider)
+
+
+class ChatRateLimitError(ChatAPIError):
+    """Raised when a chat provider rate-limits a request."""
+
+    def __init__(
+        self,
+        message: str = "Rate limit exceeded with the chat provider.",
+        provider: str | None = None,
+    ) -> None:
+        super().__init__(message, status_code=429, provider=provider)
+
+
+class ChatProviderError(ChatAPIError):
+    """Raised for a general upstream chat-provider error."""
+
+    def __init__(
+        self,
+        message: str = "Error received from the chat provider API.",
+        status_code: int = 502,
+        provider: str | None = None,
+        details: Any = None,
+    ) -> None:
+        self.details = details
+        super().__init__(message, status_code=status_code, provider=provider)
+
+
+class ProviderCredentialTerminalError(RuntimeError):
+    """Carry one bounded credential code through chat execution layers."""
+
+    _ERROR_CODES = frozenset(
+        {
+            "provider_authentication_failed",
+            "invalid_provider_credentials",
+            "missing_provider_credentials",
+            "credential_store_unavailable",
+            "credential_scope_revoked",
+            "provider_configuration_invalid",
+            "provider_unavailable",
+            "provider_disabled",
+            "model_not_allowed",
+        }
+    )
+
+    def __init__(self, code: str) -> None:
+        self.code = code if code in self._ERROR_CODES else "provider_configuration_invalid"
+        super().__init__(self.code)
+
+
+class SanitizedProviderStreamError(ChatAPIError):
+    """Safe provider-stream signal with explicit, fail-closed replay metadata."""
+
+    def __init__(
+        self,
+        *,
+        code: str,
+        message: str,
+        status_code: int,
+        replay_certified: bool = False,
+        credential_refresh_retry_certified: bool = False,
+    ) -> None:
+        self.code = code
+        self.upstream_dispatched = replay_certified is not True
+        self.output_emitted = False
+        self.allow_non_stream_fallback = replay_certified is True
+        self.credential_refresh_retry_safe = credential_refresh_retry_certified is True
+        super().__init__(message=message, status_code=status_code)
+
+
+class TTSPublicHTTPException(HTTPException):
+    """Marker for TTS errors whose traceback must be dropped at serialization."""
+
+
+def raise_detached_error(error: BaseException) -> NoReturn:
+    """Raise a safe replacement without retaining an active private exception.
+
+    ``raise ... from None`` suppresses display of an exception chain but Python
+    still stores the handled exception in ``__context__``.  Public adapter
+    boundaries use this helper so tracing and audit consumers cannot recover a
+    provider response, credential, or endpoint detail from the safe error.
+    """
+
+    try:
+        raise error from None
+    except BaseException as detached:
+        detached.__cause__ = None
+        detached.__context__ = None
+        detached.__suppress_context__ = True
+        raise
 
 
 class InvalidMetadataOrderKeyError(ValueError):

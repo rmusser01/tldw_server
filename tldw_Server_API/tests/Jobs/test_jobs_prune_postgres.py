@@ -1,13 +1,14 @@
-import os
-from datetime import timedelta
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
 psycopg = pytest.importorskip("psycopg")
 pytestmark = pytest.mark.pg_jobs
 
-from tldw_Server_API.app.core.Jobs.pg_migrations import ensure_jobs_tables_pg
 from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.Jobs.pg_migrations import ensure_jobs_tables_pg
 
 
 def _backdate_pg(dsn: str, job_id: int, days: int = 2):
@@ -67,6 +68,7 @@ def test_jobs_prune_dry_run_and_filters_postgres(monkeypatch, jobs_pg_dsn):
     )
 
     from fastapi.testclient import TestClient
+
     from tldw_Server_API.app.core.AuthNZ.settings import get_settings, reset_settings
     reset_settings()
     from tldw_Server_API.app.main import app
@@ -115,6 +117,7 @@ def test_jobs_prune_filters_scope_postgres(monkeypatch, jobs_pg_dsn):
     _backdate_pg(jobs_pg_dsn, int(acq["id"]))
 
     from fastapi.testclient import TestClient
+
     from tldw_Server_API.app.core.AuthNZ.settings import get_settings, reset_settings
     reset_settings()
     from tldw_Server_API.app.main import app
@@ -136,3 +139,138 @@ def test_jobs_prune_filters_scope_postgres(monkeypatch, jobs_pg_dsn):
         r = client.post("/api/v1/jobs/prune", json=body)
         assert r.status_code == 200
         assert r.json()["deleted"] == 0
+
+
+def test_pg_prune_waits_for_inflight_payload_replacement_before_archiving(
+    monkeypatch,
+    jobs_pg_dsn,
+):
+    monkeypatch.setenv("JOBS_DB_URL", jobs_pg_dsn)
+    monkeypatch.setenv("JOBS_ARCHIVE_BEFORE_DELETE", "true")
+    jm = JobManager(None, backend="postgres", db_url=jobs_pg_dsn)
+    job = jm.create_job(
+        domain="prompt_studio",
+        queue="default",
+        job_type="optimization",
+        payload={"version": "original"},
+        owner_user_id="1",
+    )
+    acquired = jm.acquire_next_job(
+        domain="prompt_studio",
+        queue="default",
+        lease_seconds=30,
+        worker_id="worker-a",
+    )
+    assert acquired is not None
+    assert jm.complete_job(
+        int(acquired["id"]),
+        worker_id="worker-a",
+        lease_id=str(acquired["lease_id"]),
+        enforce=True,
+    )
+    _backdate_pg(jobs_pg_dsn, int(job["id"]), days=2)
+
+    replacement_manager = JobManager(
+        None,
+        backend="postgres",
+        db_url=jobs_pg_dsn,
+    )
+    prune_manager = JobManager(None, backend="postgres", db_url=jobs_pg_dsn)
+    entered_serialization = threading.Event()
+    release_serialization = threading.Event()
+    prune_connection_ready = threading.Event()
+    prune_backend_pid: list[int] = []
+    original_encrypt = replacement_manager._maybe_encrypt_json
+    original_replacement_connect = replacement_manager._connect
+    original_prune_connect = prune_manager._connect
+
+    def _replacement_connect_without_idle_timeout():
+        conn = original_replacement_connect()
+        with conn.cursor() as cur:
+            cur.execute("SET idle_in_transaction_session_timeout = 0")
+        conn.commit()
+        return conn
+
+    def _tracked_prune_connect():
+        conn = original_prune_connect()
+        with conn.cursor() as cur:
+            cur.execute("SET lock_timeout = '10s'")
+            cur.execute("SELECT pg_backend_pid()")
+            prune_backend_pid.append(int(cur.fetchone()[0]))
+        conn.commit()
+        prune_connection_ready.set()
+        return conn
+
+    def _blocking_encrypt(payload, domain):
+        entered_serialization.set()
+        assert release_serialization.wait(timeout=5)
+        return original_encrypt(payload, domain)
+
+    monkeypatch.setattr(
+        replacement_manager,
+        "_maybe_encrypt_json",
+        _blocking_encrypt,
+    )
+    monkeypatch.setattr(
+        replacement_manager,
+        "_connect",
+        _replacement_connect_without_idle_timeout,
+    )
+    monkeypatch.setattr(
+        prune_manager,
+        "_connect",
+        _tracked_prune_connect,
+    )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        replace_future = executor.submit(
+            replacement_manager.replace_job_payload,
+            int(job["id"]),
+            payload={"version": "replacement"},
+            expected_uuid=str(job["uuid"]),
+            expected_domain="prompt_studio",
+        )
+        assert entered_serialization.wait(timeout=5)
+        prune_future = executor.submit(
+            prune_manager.prune_jobs,
+            statuses=["completed"],
+            older_than_days=0,
+            domain="prompt_studio",
+        )
+        assert prune_connection_ready.wait(timeout=5)
+
+        observer = psycopg.connect(jobs_pg_dsn, autocommit=True)
+        try:
+            deadline = time.monotonic() + 5
+            prune_is_waiting = False
+            while time.monotonic() < deadline:
+                with observer.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT 1
+                        FROM pg_stat_activity
+                        WHERE pid = %s
+                          AND wait_event_type = 'Lock'
+                        LIMIT 1
+                        """,
+                        (prune_backend_pid[0],),
+                    )
+                    prune_is_waiting = cur.fetchone() is not None
+                if prune_is_waiting:
+                    break
+                time.sleep(0.02)
+            assert prune_is_waiting
+        finally:
+            observer.close()
+            release_serialization.set()
+
+        assert replace_future.result(timeout=5) is True
+        assert prune_future.result(timeout=5) == 1
+
+    archived = jm.get_job_or_archived(
+        int(job["id"]),
+        domain="prompt_studio",
+    )
+    assert archived is not None
+    assert archived["archived"] is True
+    assert archived["payload"] == {"version": "replacement"}

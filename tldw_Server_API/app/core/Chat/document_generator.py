@@ -33,6 +33,10 @@ from typing import Any, Optional, Union
 
 from loguru import logger
 
+from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+    ProviderCallCredentials,
+)
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
 from tldw_Server_API.app.core.Chat.chat_helpers import extract_response_content
 from tldw_Server_API.app.core.Chat.chat_service import perform_chat_api_call as chat_api_call
@@ -544,7 +548,9 @@ class DocumentGeneratorService:
         app_config: Optional[dict[str, Any]] = None,
         specific_message: Optional[str] = None,
         custom_prompt: Optional[str] = None,
-        stream: bool = False
+        stream: bool = False,
+        credentials_resolved: bool = False,
+        provider_credentials: Optional[ProviderCallCredentials] = None,
     ) -> Union[str, dict[str, Any]]:
         """
         Generate a document from conversation.
@@ -558,6 +564,8 @@ class DocumentGeneratorService:
             specific_message: Optional specific message to focus on
             custom_prompt: Optional custom prompt override
             stream: Whether to stream the response
+            credentials_resolved: Whether the supplied key/config snapshot is authoritative
+            provider_credentials: Opaque in-memory credential snapshot for this call
 
         Returns:
             Generated document content or job info for async generation
@@ -623,7 +631,9 @@ class DocumentGeneratorService:
                 user_prompt=user_prompt,
                 temperature=prompt_config.get('temperature', 0.7),
                 max_tokens=prompt_config.get('max_tokens', 2000),
-                stream=stream
+                stream=stream,
+                credentials_resolved=credentials_resolved,
+                provider_credentials=provider_credentials,
             )
 
             if not stream:
@@ -657,7 +667,9 @@ class DocumentGeneratorService:
         app_config: Optional[dict[str, Any]] = None,
         temperature: float = 0.7,
         max_tokens: int = 2000,
-        stream: bool = False
+        stream: bool = False,
+        credentials_resolved: bool = False,
+        provider_credentials: Optional[ProviderCallCredentials] = None,
     ) -> Union[str, Any]:
         """
         Call the appropriate LLM provider using the chat abstraction layer.
@@ -671,6 +683,8 @@ class DocumentGeneratorService:
             temperature: Generation temperature
             max_tokens: Maximum tokens
             stream: Whether to stream
+            credentials_resolved: Whether the supplied key/config snapshot is authoritative
+            provider_credentials: Opaque in-memory credential snapshot for this call
 
         Returns:
             Generated content or stream generator
@@ -690,6 +704,12 @@ class DocumentGeneratorService:
             max_tokens=max_tokens,
             stream=stream,
             app_config=app_config,
+            credentials_resolved=credentials_resolved,
+            **(
+                {PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY: provider_credentials}
+                if provider_credentials is not None
+                else {}
+            ),
         )
         if stream:
             return response

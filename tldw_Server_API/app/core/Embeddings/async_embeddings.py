@@ -8,6 +8,7 @@ import hashlib
 import threading
 import time
 import weakref
+from collections.abc import Awaitable, Callable
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Optional
 
@@ -21,6 +22,11 @@ from tldw_Server_API.app.core.Embeddings.multi_tier_cache import get_multi_tier_
 from tldw_Server_API.app.core.Embeddings.rate_limiter import get_async_rate_limiter
 from tldw_Server_API.app.core.Embeddings.request_batching import get_batcher
 from tldw_Server_API.app.core.Embeddings.simplified_config import get_config
+from tldw_Server_API.app.core.Embeddings.vector_validation import (
+    validated_embedding_vectors,
+)
+from tldw_Server_API.app.core.exceptions import NetworkError, RetryExhaustedError
+from tldw_Server_API.app.core.LLM_Calls.payload_utils import encode_huggingface_model_path
 from tldw_Server_API.app.core.Utils.tokenizer import count_tokens as _count_tokens
 
 _ASYNC_EMBEDDINGS_NONCRITICAL_EXCEPTIONS = (
@@ -40,6 +46,105 @@ _ASYNC_EMBEDDINGS_NONCRITICAL_EXCEPTIONS = (
     UnicodeDecodeError,
     ValueError,
 )
+_ASYNC_EMBEDDINGS_PROVIDER_EXCEPTIONS = _ASYNC_EMBEDDINGS_NONCRITICAL_EXCEPTIONS + (
+    NetworkError,
+    RetryExhaustedError,
+)
+
+
+class EmbeddingCredentialError(ValueError):
+    """Sanitized error for a missing execution-scoped embedding credential."""
+
+    def __init__(self, provider: str) -> None:
+        normalized = "".join(
+            char for char in str(provider or "").strip().lower() if char.isalnum() or char in ".-_"
+        )[:64]
+        self.provider = normalized or "unknown"
+        super().__init__(f"Embedding credential is required for provider '{self.provider}'")
+
+
+class EmbeddingEndpointError(ValueError):
+    """Sanitized error for a missing execution-scoped embedding endpoint."""
+
+    def __init__(self, provider: str) -> None:
+        normalized = "".join(
+            char for char in str(provider or "").strip().lower() if char.isalnum() or char in ".-_"
+        )[:64]
+        self.provider = normalized or "unknown"
+        super().__init__(f"Embedding endpoint is required for provider '{self.provider}'")
+
+
+class EmbeddingProviderError(RuntimeError):
+    """Sanitized failure returned by an execution-scoped embedding provider."""
+
+    _CODES = frozenset({"authentication", "malformed_response", "provider_failure"})
+
+    def __init__(self, provider: str, *, code: str, status_code: int | None = None) -> None:
+        normalized = "".join(
+            char for char in str(provider or "").strip().lower() if char.isalnum() or char in ".-_"
+        )[:64]
+        self.provider = normalized or "unknown"
+        self.code = code if code in self._CODES else "provider_failure"
+        self.status_code = status_code if isinstance(status_code, int) and 100 <= status_code <= 599 else None
+        status_suffix = f", status={self.status_code}" if self.status_code is not None else ""
+        super().__init__(f"Embedding provider error: {self.code} ({self.provider}{status_suffix})")
+
+
+def _validate_runtime_embedding_vector(value: Any, provider: str) -> list[float]:
+    """Return one finite numeric vector or raise a sanitized provider error."""
+    validated = validated_embedding_vectors([value], expected=1)
+    if validated is None:
+        raise EmbeddingProviderError(provider, code="malformed_response") from None
+    return validated[0]
+
+
+def _validate_runtime_embedding_batch(
+    values: object,
+    *,
+    expected: int,
+    provider: str,
+) -> list[list[float]]:
+    """Return a complete, finite, consistently sized embedding batch."""
+    validated = validated_embedding_vectors(values, expected=expected)
+    if validated is None:
+        raise EmbeddingProviderError(provider, code="malformed_response") from None
+    return validated
+
+
+def _embedding_error_status(value: Any) -> int | None:
+    """Extract only a bounded HTTP status from an exception or provider payload."""
+    if isinstance(value, dict):
+        for key in ("status_code", "status"):
+            try:
+                status = int(value.get(key))
+            except (TypeError, ValueError):
+                continue
+            if 100 <= status <= 599:
+                return status
+        nested = value.get("error")
+        if isinstance(nested, dict):
+            return _embedding_error_status(nested)
+        return None
+
+    status = getattr(value, "status_code", None)
+    response = getattr(value, "response", None)
+    if status is None and response is not None:
+        status = getattr(response, "status_code", None)
+    try:
+        parsed = int(status)
+    except (TypeError, ValueError):
+        parsed = None
+    if isinstance(parsed, int) and 100 <= parsed <= 599:
+        return parsed
+    message = str(value)
+    for candidate in (401, 403, 429):
+        if f"HTTP {candidate}" in message:
+            return candidate
+    return None
+
+
+def _is_auth_failure(exc: Exception) -> bool:
+    return _embedding_error_status(exc) in {401, 403}
 
 
 def _normalize_embedding_response(payload: Any) -> list[float]:
@@ -84,7 +189,12 @@ class AsyncEmbeddingProvider:
         self,
         text: str,
         model: str,
-        user_id: Optional[str] = None
+        user_id: Optional[str] = None,
+        api_key_override: Optional[str] = None,
+        base_url_override: Optional[str] = None,
+        credentials_resolved: bool = False,
+        _provider_call_credentials: object | None = None,
+        _require_provider_call_credentials: bool = False,
     ) -> list[float]:
         """Create embedding asynchronously"""
         raise NotImplementedError
@@ -93,11 +203,43 @@ class AsyncEmbeddingProvider:
         self,
         texts: list[str],
         model: str,
-        user_id: Optional[str] = None
+        user_id: Optional[str] = None,
+        api_key_override: Optional[str] = None,
+        base_url_override: Optional[str] = None,
+        credentials_resolved: bool = False,
+        _provider_call_credentials: object | None = None,
+        _require_provider_call_credentials: bool = False,
     ) -> list[list[float]]:
         """Create embeddings for multiple texts"""
+        runtime_boundary_requested = (
+            _provider_call_credentials is not None
+            or _require_provider_call_credentials is True
+        )
+        if runtime_boundary_requested and self.provider_name != "openai":
+            from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
+
+            raise ChatConfigurationError(
+                provider=self.provider_name,
+                message="Provider credentials do not match the embedding provider.",
+            )
+        runtime_kwargs: dict[str, Any] = {}
+        if self.provider_name == "openai":
+            if _provider_call_credentials is not None:
+                runtime_kwargs["_provider_call_credentials"] = (
+                    _provider_call_credentials
+                )
+            if _require_provider_call_credentials:
+                runtime_kwargs["_require_provider_call_credentials"] = True
         tasks = [
-            self.create_embedding(text, model, user_id)
+            self.create_embedding(
+                text,
+                model,
+                user_id,
+                api_key_override=api_key_override,
+                base_url_override=base_url_override,
+                credentials_resolved=credentials_resolved,
+                **runtime_kwargs,
+            )
             for text in texts
         ]
         return await asyncio.gather(*tasks)
@@ -108,10 +250,11 @@ class AsyncOpenAIProvider(AsyncEmbeddingProvider):
 
     def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None):
         super().__init__("openai", api_key)
-        self.base_url = base_url or "https://api.openai.com/v1/embeddings"
+        self.default_base_url = "https://api.openai.com/v1/embeddings"
+        self.base_url = base_url or self.default_base_url
 
-    def _resolve_url(self, base_url_override: Optional[str]) -> str:
-        url = base_url_override or self.base_url
+    def _resolve_url(self, base_url_override: Optional[str], credentials_resolved: bool = False) -> str:
+        url = base_url_override or (self.default_base_url if credentials_resolved is True else self.base_url)
         if url.endswith("/embeddings"):
             return url
         return f"{url.rstrip('/')}/embeddings"
@@ -122,6 +265,10 @@ class AsyncOpenAIProvider(AsyncEmbeddingProvider):
         model: str = "text-embedding-3-small",
         user_id: Optional[str] = None,
         base_url_override: Optional[str] = None,
+        api_key_override: Optional[str] = None,
+        credentials_resolved: bool = False,
+        _provider_call_credentials: object | None = None,
+        _require_provider_call_credentials: bool = False,
     ) -> list[float]:
         """Create embedding using OpenAI API"""
         import time as _time
@@ -155,9 +302,38 @@ class AsyncOpenAIProvider(AsyncEmbeddingProvider):
 
         # Get connection pool for this provider
         pool = self.pool_manager.get_pool(self.provider_name)
-        headers = {"Content-Type": "application/json"}
-        if self.api_key:
-            headers["Authorization"] = f"Bearer {self.api_key}"
+        explicit_credentials = (
+            credentials_resolved is True
+            or _provider_call_credentials is not None
+            or _require_provider_call_credentials is True
+        )
+        runtime_bound_credentials = (
+            _provider_call_credentials is not None
+            or _require_provider_call_credentials is True
+        )
+        runtime_config: dict[str, Any] = {}
+        if runtime_bound_credentials:
+            from tldw_Server_API.app.core.LLM_Calls.openai_credentials import (
+                bind_openai_embedding_credentials,
+            )
+
+            api_key, base_url_override, runtime_config = bind_openai_embedding_credentials(
+                provider_credentials=_provider_call_credentials,
+                credentials_resolved=credentials_resolved,
+                api_key_override=api_key_override,
+                base_url_override=base_url_override,
+            )
+        else:
+            api_key = api_key_override if credentials_resolved is True else self.api_key
+        from tldw_Server_API.app.core.LLM_Calls.openai_credentials import (
+            openai_credential_headers,
+        )
+
+        headers = openai_credential_headers(api_key, runtime_config)
+        if explicit_credentials and not (isinstance(api_key, str) and api_key.strip()):
+            raise EmbeddingCredentialError(self.provider_name)
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
 
         payload = {
             "input": text,
@@ -167,13 +343,27 @@ class AsyncOpenAIProvider(AsyncEmbeddingProvider):
         try:
             data = await pool.request(
                 method="POST",
-                url=self._resolve_url(base_url_override),
+                url=self._resolve_url(base_url_override, explicit_credentials),
                 headers=headers,
                 json_data=payload,
+                sensitive_observability=(
+                    explicit_credentials
+                    and isinstance(base_url_override, str)
+                    and bool(base_url_override.strip())
+                ),
+                bypass_circuit_breaker=explicit_credentials,
             )
             if isinstance(data, dict) and "error" in data:
                 status = "failure"
                 self.metrics.log_error(self.provider_name, "APIError")
+                if explicit_credentials:
+                    error_status = _embedding_error_status(data)
+                    error_code = "authentication" if error_status in {401, 403} else "provider_failure"
+                    raise EmbeddingProviderError(
+                        self.provider_name,
+                        code=error_code,
+                        status_code=error_status,
+                    ) from None
                 raise ValueError(str(data.get("error")))
             if isinstance(data, dict) and data.get("data"):
                 return data["data"][0]["embedding"]
@@ -195,7 +385,8 @@ class AsyncHuggingFaceProvider(AsyncEmbeddingProvider):
 
     def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None):
         super().__init__("huggingface", api_key)
-        self.base_url = base_url or "https://api-inference.huggingface.co/models"
+        self.default_base_url = "https://api-inference.huggingface.co/models"
+        self.base_url = base_url or self.default_base_url
         self.executor = ThreadPoolExecutor(max_workers=4)
 
     async def create_embedding(
@@ -204,8 +395,12 @@ class AsyncHuggingFaceProvider(AsyncEmbeddingProvider):
         model: str = "sentence-transformers/all-MiniLM-L6-v2",
         user_id: Optional[str] = None,
         base_url_override: Optional[str] = None,
+        api_key_override: Optional[str] = None,
+        credentials_resolved: bool = False,
     ) -> list[float]:
         """Create embedding using HuggingFace API"""
+
+        model_path = encode_huggingface_model_path(model)
 
         # Check rate limit
         if user_id:
@@ -231,14 +426,17 @@ class AsyncHuggingFaceProvider(AsyncEmbeddingProvider):
                 )
                 raise Exception(f"Rate limit exceeded.{retry_after_msg}")
 
-        base_url = base_url_override or self.base_url
-        url = f"{base_url.rstrip('/')}/{model}"
+        base_url = base_url_override or (self.default_base_url if credentials_resolved is True else self.base_url)
+        url = f"{base_url.rstrip('/')}/{model_path}"
 
         # Get connection pool for this provider
         pool = self.pool_manager.get_pool(self.provider_name)
         headers = {"Content-Type": "application/json"}
-        if self.api_key:
-            headers["Authorization"] = f"Bearer {self.api_key}"
+        api_key = api_key_override if credentials_resolved is True else self.api_key
+        if credentials_resolved is True and not (isinstance(api_key, str) and api_key.strip()):
+            raise EmbeddingCredentialError(self.provider_name)
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
 
         payload = {
             "inputs": text,
@@ -251,8 +449,22 @@ class AsyncHuggingFaceProvider(AsyncEmbeddingProvider):
                 url=url,
                 headers=headers,
                 json_data=payload,
+                sensitive_observability=(
+                    credentials_resolved is True
+                    and isinstance(base_url_override, str)
+                    and bool(base_url_override.strip())
+                ),
+                bypass_circuit_breaker=credentials_resolved is True,
             )
             # Usage is already recorded in check_rate_limit_async
+            if credentials_resolved is True and isinstance(data, dict) and "error" in data:
+                error_status = _embedding_error_status(data)
+                error_code = "authentication" if error_status in {401, 403} else "provider_failure"
+                raise EmbeddingProviderError(
+                    self.provider_name,
+                    code=error_code,
+                    status_code=error_status,
+                ) from None
             return _normalize_embedding_response(data)
         except _ASYNC_EMBEDDINGS_NONCRITICAL_EXCEPTIONS as e:
             self.metrics.log_error(self.provider_name, str(type(e).__name__))
@@ -271,10 +483,18 @@ class AsyncLocalAPIProvider(AsyncEmbeddingProvider):
         text: str,
         model: str,
         user_id: Optional[str] = None,
+        api_key_override: Optional[str] = None,
+        base_url_override: Optional[str] = None,
+        credentials_resolved: bool = False,
     ) -> list[float]:
         import time as _time
         t0 = _time.perf_counter()
         status = "success"
+
+        if credentials_resolved is True and not (
+            isinstance(base_url_override, str) and base_url_override.strip()
+        ):
+            raise EmbeddingEndpointError(self.provider_name)
 
         if user_id:
             try:
@@ -302,17 +522,24 @@ class AsyncLocalAPIProvider(AsyncEmbeddingProvider):
 
         pool = self.pool_manager.get_pool(self.provider_name)
         headers = {"Content-Type": "application/json"}
-        if self.api_key:
-            headers["Authorization"] = f"Bearer {self.api_key}"
+        api_key = api_key_override if credentials_resolved is True else self.api_key
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
 
         payload = {"texts": [text], "model": model}
 
         try:
             data = await pool.request(
                 method="POST",
-                url=self.api_url,
+                url=base_url_override or self.api_url,
                 headers=headers,
                 json_data=payload,
+                sensitive_observability=(
+                    credentials_resolved is True
+                    and isinstance(base_url_override, str)
+                    and bool(base_url_override.strip())
+                ),
+                bypass_circuit_breaker=credentials_resolved is True,
             )
             return _normalize_embedding_response(data)
         except _ASYNC_EMBEDDINGS_NONCRITICAL_EXCEPTIONS as e:
@@ -433,9 +660,13 @@ class AsyncLocalProvider(AsyncEmbeddingProvider):
         self,
         text: str,
         model: str = "all-MiniLM-L6-v2",
-        user_id: Optional[str] = None
+        user_id: Optional[str] = None,
+        api_key_override: Optional[str] = None,
+        base_url_override: Optional[str] = None,
+        credentials_resolved: bool = False,
     ) -> list[float]:
         """Create embedding using local model"""
+        del api_key_override, base_url_override, credentials_resolved
 
         # Load model if needed
         await self._load_model(model)
@@ -535,7 +766,13 @@ class AsyncEmbeddingService:
         provider: Optional[str] = None,
         user_id: Optional[str] = None,
         use_cache: bool = True,
-        use_batching: bool = True
+        use_batching: bool = True,
+        api_key_override: Optional[str] = None,
+        base_url_override: Optional[str] = None,
+        credentials_resolved: bool = False,
+        on_provider_success: Callable[[], Awaitable[None]] | None = None,
+        _provider_call_credentials: object | None = None,
+        _require_provider_call_credentials: bool = False,
     ) -> list[float]:
         """
         Create embedding with full async pipeline.
@@ -547,6 +784,8 @@ class AsyncEmbeddingService:
             user_id: User identifier for rate limiting
             use_cache: Whether to use caching
             use_batching: Whether to use batching
+            on_provider_success: Zero-argument callback awaited only after direct
+                primary-provider success; skipped on cache hit, failure, or fallback.
 
         Returns:
             Embedding vector
@@ -558,28 +797,68 @@ class AsyncEmbeddingService:
         provider = self._resolve_provider_alias(provider)
         actual_provider = provider
         actual_model = model
-        provider_config = self.config.get_provider(provider)
-        base_url_override: Optional[str] = None
-        if provider_config and provider in {"openai", "huggingface"} and provider_config.api_url:
-            base_url_override = provider_config.api_url
+        provider_config = self._get_provider_config(provider)
+        runtime_boundary_requested = (
+            _provider_call_credentials is not None
+            or _require_provider_call_credentials is True
+        )
+        if runtime_boundary_requested and provider != "openai":
+            from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
+
+            raise ChatConfigurationError(
+                provider=provider,
+                message="Provider credentials do not match the embedding provider.",
+            )
+        explicit_credentials = (
+            credentials_resolved is True
+            or runtime_boundary_requested
+        )
+        cache_enabled = use_cache and not explicit_credentials
+        effective_base_url = base_url_override if explicit_credentials else None
+        if (
+            not explicit_credentials
+            and provider_config
+            and provider in {"openai", "huggingface", "local_api"}
+            and provider_config.api_url
+        ):
+            effective_base_url = provider_config.api_url
             # Ensure explicit provider overrides reach the async providers directly.
-            if explicit_provider:
+            if explicit_provider and provider in {"openai", "huggingface"}:
                 use_batching = False
+            if provider == "local_api":
+                use_batching = False
+        if explicit_credentials:
+            use_batching = False
+            if (
+                provider in {"openai", "huggingface"}
+                and _provider_call_credentials is None
+                and not (
+                isinstance(api_key_override, str) and api_key_override.strip()
+                )
+            ):
+                raise EmbeddingCredentialError(provider)
+            if provider == "local_api" and not (
+                isinstance(effective_base_url, str) and effective_base_url.strip()
+            ):
+                raise EmbeddingEndpointError(provider)
+        if on_provider_success is not None:
+            use_batching = False
 
         # Create deterministic cache key across processes
         text_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
         cache_key = f"{provider}:{model}:{text_hash}"
-        if base_url_override:
-            cache_key = f"{cache_key}:{base_url_override}"
+        if effective_base_url:
+            cache_key = f"{cache_key}:{hashlib.sha256(effective_base_url.encode('utf-8')).hexdigest()}"
 
         # Check cache
-        if use_cache:
+        if cache_enabled:
             cached_embedding = await self.cache.get_async(cache_key)
             if cached_embedding is not None:
                 self.metrics.log_cache_hit(model)
                 return cached_embedding
 
         # Use batching if enabled
+        primary_provider_dispatched = False
         if use_batching and self.batcher.enabled:
             embedding = await self.batcher.submit_request(
                 text=text,
@@ -596,24 +875,57 @@ class AsyncEmbeddingService:
 
             try:
                 call_kwargs = {"text": text, "model": model, "user_id": user_id}
-                if base_url_override and provider in {"openai", "huggingface"}:
-                    call_kwargs["base_url_override"] = base_url_override
+                if explicit_credentials and provider in {"openai", "huggingface", "local_api"}:
+                    call_kwargs.update(
+                        api_key_override=api_key_override,
+                        base_url_override=effective_base_url,
+                        credentials_resolved=explicit_credentials,
+                    )
+                    if provider == "openai" and _provider_call_credentials is not None:
+                        call_kwargs["_provider_call_credentials"] = (
+                            _provider_call_credentials
+                        )
+                    if provider == "openai" and _require_provider_call_credentials:
+                        call_kwargs["_require_provider_call_credentials"] = True
+                elif effective_base_url and provider in {"openai", "huggingface"}:
+                    call_kwargs["base_url_override"] = effective_base_url
                 embedding = await provider_instance.create_embedding(**call_kwargs)
-            except _ASYNC_EMBEDDINGS_NONCRITICAL_EXCEPTIONS as e:
+                primary_provider_dispatched = True
+            except _ASYNC_EMBEDDINGS_PROVIDER_EXCEPTIONS as e:
+                if isinstance(e, EmbeddingProviderError):
+                    raise
+                if explicit_credentials:
+                    error_status = _embedding_error_status(e)
+                    error_code = "authentication" if error_status in {401, 403} else "provider_failure"
+                    raise EmbeddingProviderError(
+                        provider,
+                        code=error_code,
+                        status_code=error_status,
+                    ) from None
+                if _is_auth_failure(e):
+                    raise
                 # Try fallback provider
                 embedding, actual_provider, actual_model = await self._try_fallback_providers(
                     text, model, provider, user_id, e
                 )
 
+        embedding = _validate_runtime_embedding_vector(embedding, actual_provider)
+        if primary_provider_dispatched and on_provider_success is not None:
+            await on_provider_success()
+
         # Cache the result
-        if use_cache:
+        if cache_enabled:
             cache_key = f"{actual_provider}:{actual_model}:{text_hash}"
-            actual_provider_config = self.config.get_provider(actual_provider)
-            actual_base_url = None
-            if actual_provider_config and actual_provider in {"openai", "huggingface"}:
+            actual_base_url = effective_base_url if explicit_credentials else None
+            actual_provider_config = self._get_provider_config(actual_provider)
+            if (
+                not explicit_credentials
+                and actual_provider_config
+                and actual_provider in {"openai", "huggingface", "local_api"}
+            ):
                 actual_base_url = actual_provider_config.api_url
             if actual_base_url:
-                cache_key = f"{cache_key}:{actual_base_url}"
+                cache_key = f"{cache_key}:{hashlib.sha256(actual_base_url.encode('utf-8')).hexdigest()}"
             await self.cache.set_async(cache_key, embedding)
 
         return embedding
@@ -628,13 +940,26 @@ class AsyncEmbeddingService:
             return "local"
         return provider
 
+    def _get_provider_config(self, provider: str) -> Any:
+        """Return configuration for an effective provider alias."""
+        provider_config = self.config.get_provider(provider)
+        if provider_config is None and provider == "local_api":
+            provider_config = self.config.get_provider("local")
+        return provider_config
+
     async def create_embeddings_batch(
         self,
         texts: list[str],
         model: Optional[str] = None,
         provider: Optional[str] = None,
         user_id: Optional[str] = None,
-        parallel: bool = True
+        parallel: bool = True,
+        api_key_override: Optional[str] = None,
+        base_url_override: Optional[str] = None,
+        credentials_resolved: bool = False,
+        on_provider_success: Callable[[], Awaitable[None]] | None = None,
+        _provider_call_credentials: object | None = None,
+        _require_provider_call_credentials: bool = False,
     ) -> list[list[float]]:
         """
         Create embeddings for multiple texts.
@@ -645,26 +970,53 @@ class AsyncEmbeddingService:
             provider: Provider to use
             user_id: User identifier
             parallel: Whether to process in parallel
+            on_provider_success: Zero-argument callback awaited once per direct
+                primary-provider success; skipped on cache hit, failure, or fallback.
 
         Returns:
             List of embedding vectors
         """
+        effective_provider = self._resolve_provider_alias(provider or self.config.default_provider)
         if parallel:
             # Process in parallel
             tasks = [
-                self.create_embedding(text, model, provider, user_id)
+                self.create_embedding(
+                    text,
+                    model,
+                    provider,
+                    user_id,
+                    api_key_override=api_key_override,
+                    base_url_override=base_url_override,
+                    credentials_resolved=credentials_resolved,
+                    on_provider_success=on_provider_success,
+                    _provider_call_credentials=_provider_call_credentials,
+                    _require_provider_call_credentials=_require_provider_call_credentials,
+                )
                 for text in texts
             ]
-            return await asyncio.gather(*tasks)
+            embeddings = await asyncio.gather(*tasks)
         else:
             # Process sequentially
             embeddings = []
             for text in texts:
                 embedding = await self.create_embedding(
-                    text, model, provider, user_id
+                    text,
+                    model,
+                    provider,
+                    user_id,
+                    api_key_override=api_key_override,
+                    base_url_override=base_url_override,
+                    credentials_resolved=credentials_resolved,
+                    on_provider_success=on_provider_success,
+                    _provider_call_credentials=_provider_call_credentials,
+                    _require_provider_call_credentials=_require_provider_call_credentials,
                 )
                 embeddings.append(embedding)
-            return embeddings
+        return _validate_runtime_embedding_batch(
+            embeddings,
+            expected=len(texts),
+            provider=effective_provider,
+        )
 
     async def _try_fallback_providers(
         self,

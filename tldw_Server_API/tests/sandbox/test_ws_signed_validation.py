@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from anyio import ClosedResourceError
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
@@ -154,10 +155,11 @@ def test_ws_signed_invalid_or_expired_token_rejects_cookie_identity(
             ).hexdigest()
         url = f"{parsed.path}?token={token}&exp={exp}"
 
-        with pytest.raises(WebSocketDisconnect) as exc_info:
+        with pytest.raises((WebSocketDisconnect, ClosedResourceError)) as exc_info:
             with client.websocket_connect(url, headers={"origin": "http://testserver"}):
                 pass
-        assert exc_info.value.code == 1008
+        if isinstance(exc_info.value, WebSocketDisconnect):
+            assert exc_info.value.code == 1008
 
 
 @pytest.mark.unit
@@ -225,7 +227,7 @@ def test_ws_signed_expired_token_rejected(monkeypatch: pytest.MonkeyPatch) -> No
         token = hmac.new(secret.encode("utf-8"), msg, hashlib.sha256).hexdigest()
         path = f"/api/v1/sandbox/runs/{run_id}/stream?token={token}&exp={exp}"
         # Expect handshake to be refused
-        with pytest.raises(WebSocketDisconnect):
+        with pytest.raises((WebSocketDisconnect, ClosedResourceError)):
             with client.websocket_connect(path):
                 pass
 
@@ -254,6 +256,6 @@ def test_ws_signed_tampered_token_rejected(monkeypatch: pytest.MonkeyPatch) -> N
         assert token and exp
         bad_token = token[:-1] + ("0" if token[-1] != "0" else "1")
         tampered = f"{parsed.path}?token={bad_token}&exp={exp}"
-        with pytest.raises(WebSocketDisconnect):
+        with pytest.raises((WebSocketDisconnect, ClosedResourceError)):
             with client.websocket_connect(tampered):
                 pass

@@ -85,6 +85,7 @@ BASE_FIELDS: set[str] = {
     "api_key",
     "base_url",
     "app_config",
+    "credentials_resolved",
     "custom_prompt_arg",
     "extra_headers",
     "extra_body",

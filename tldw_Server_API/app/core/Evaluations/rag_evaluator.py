@@ -11,6 +11,9 @@ Implements metrics:
 """
 
 import asyncio
+import contextlib
+from collections.abc import Awaitable, Callable
+from functools import partial
 from typing import Any, Optional
 
 import numpy as np
@@ -18,6 +21,16 @@ from loguru import logger
 from sklearn.metrics.pairwise import cosine_similarity
 
 import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as sgl
+from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+    ProviderCallCredentials,
+)
+from tldw_Server_API.app.core.Chat.bounded_daemon import (
+    SYNC_ADAPTER_CALL_POOL,
+    DaemonCapacityError,
+    await_bounded_daemon_with_timeout,
+    await_bounded_sync_call,
+    await_owned_worker,
+)
 from tldw_Server_API.app.core.testing import is_test_mode
 
 _RAG_EVAL_NONCRITICAL_EXCEPTIONS = (
@@ -38,6 +51,8 @@ _RAG_EVAL_NONCRITICAL_EXCEPTIONS = (
     ValueError,
     np.linalg.LinAlgError,
 )
+
+RAG_EVALUATION_CALL_TIMEOUT_SECONDS = 60.0
 
 # Safe import of embeddings helpers to avoid heavy deps during app import
 try:
@@ -62,17 +77,51 @@ except ImportError:
                 setattr(self, key, value)
 
     OpenAIModelCfg = _FallbackOpenAIModelCfg  # type: ignore[assignment]
-import contextlib
 
 from tldw_Server_API.app.core.Claims_Extraction.claims_engine import ClaimsEngine
 from tldw_Server_API.app.core.Evaluations.circuit_breaker import CircuitOpenError, llm_circuit_breaker
+from tldw_Server_API.app.core.exceptions import raise_detached_error
+from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import (
+    SummaryProviderError,
+)
 from tldw_Server_API.app.core.RAG.rag_service.types import Document
 
 
 # Module-level alias and helpers
 def analyze(api_name: str, input_data: Any, custom_prompt_arg: Optional[str] = None, api_key: Optional[str] = None, system_message: Optional[str] = None, temp: Optional[float] = None, **kwargs) -> Any:
-    """Alias wrapper for sgl.analyze to enable test monkeypatching."""
+    """Alias wrapper for sgl.analyze to enable test monkeypatching.
+
+    ClaimsEngine can supply a structured-output hint that the legacy SGL
+    boundary does not accept. Its prompts already require JSON, so discard the
+    unsupported hint instead of turning claim evaluation into a ``TypeError``.
+    """
+    kwargs.pop("response_format", None)
+    kwargs.setdefault("raise_on_error", True)
     return sgl.analyze(api_name, input_data, custom_prompt_arg, api_key, system_message, temp, **kwargs)
+
+
+async def _run_bounded_rag_analyze(*args: Any, **kwargs: Any) -> Any:
+    """Run one sync evaluation call with process-local capacity and a deadline."""
+    return await await_owned_worker(
+        await_bounded_daemon_with_timeout(
+            partial(analyze, *args, **kwargs),
+            pool=SYNC_ADAPTER_CALL_POOL,
+            name="rag-evaluation-analyze",
+            timeout_seconds=RAG_EVALUATION_CALL_TIMEOUT_SECONDS,
+            timeout_message="RAG evaluation provider call timed out",
+            drain_after_timeout=True,
+        )
+    )
+
+
+async def _run_circuit_bounded_rag_analyze(*args: Any, **kwargs: Any) -> Any:
+    """Run a sync RAG adapter inside the breaker's single deadline."""
+    return await await_bounded_sync_call(
+        partial(analyze, *args, **kwargs),
+        pool=SYNC_ADAPTER_CALL_POOL,
+        exhaustion_message="RAG evaluation provider capacity is exhausted",
+    )
+
 
 def _simple_tokens(text: str) -> list[str]:
     """Lightweight tokenizer with basic stopword filtering for heuristics."""
@@ -91,7 +140,16 @@ def _simple_tokens(text: str) -> list[str]:
 class RAGEvaluator:
     """Evaluator for RAG system performance"""
 
-    def __init__(self, embedding_provider: Optional[str] = "openai", embedding_model: Optional[str] = "text-embedding-3-small", api_key: Optional[str] = None):
+    def __init__(
+        self,
+        embedding_provider: Optional[str] = "openai",
+        embedding_model: Optional[str] = "text-embedding-3-small",
+        api_key: Optional[str] = None,
+        *,
+        app_config: Optional[dict[str, Any]] = None,
+        credentials_resolved: bool = False,
+        provider_credentials: ProviderCallCredentials | None = None,
+    ):
         """
         Initialize RAG evaluator with production embeddings.
 
@@ -99,10 +157,18 @@ class RAGEvaluator:
             embedding_provider: Provider for embeddings (openai, huggingface, cohere)
             embedding_model: Model to use for embeddings
             api_key: Optional API key for the embedding provider
+            app_config: Provider configuration captured with the API key
+            credentials_resolved: Whether the key/config snapshot is authoritative
         """
         self.embedding_provider = embedding_provider
         self.embedding_model = embedding_model
         self.api_key = api_key
+        self.app_config = app_config
+        self.credentials_resolved = (
+            provider_credentials is not None
+            or credentials_resolved
+        )
+        self.provider_credentials = provider_credentials
 
         # If either provider or model is not specified (None/empty), treat embeddings as disabled.
         if not self.embedding_provider or not self.embedding_model:
@@ -178,7 +244,7 @@ class RAGEvaluator:
             result = create_embedding("test", self.embedding_config, model_id_override=self.embedding_model)
             return result is not None and len(result) > 0
         except _RAG_EVAL_NONCRITICAL_EXCEPTIONS as e:
-            logger.debug(f"Embeddings test failed: {e}")
+            logger.debug("Embeddings test failed error_type={}", type(e).__name__)
             return False
 
     async def evaluate(
@@ -216,42 +282,85 @@ class RAGEvaluator:
         }
 
         # Evaluate each metric
-        tasks = []
+        task_factories: list[Callable[[], Awaitable[tuple]]] = []
         metric_names = []  # Track which metrics we're actually evaluating
 
         if "relevance" in metrics or "answer_relevance" in metrics:
-            tasks.append(self._evaluate_relevance(query, response, api_name, model))
+            task_factories.append(
+                lambda: self._evaluate_relevance(query, response, api_name, model)
+            )
             metric_names.append("relevance")
 
         if "faithfulness" in metrics or "answer_faithfulness" in metrics:
-            tasks.append(self._evaluate_faithfulness(response, contexts, api_name, model))
+            task_factories.append(
+                lambda: self._evaluate_faithfulness(response, contexts, api_name, model)
+            )
             metric_names.append("faithfulness")
 
         if "answer_similarity" in metrics and ground_truth:
-            tasks.append(self._evaluate_answer_similarity(response, ground_truth, api_name=api_name, model=model))
+            task_factories.append(
+                lambda: self._evaluate_answer_similarity(
+                    response,
+                    ground_truth,
+                    api_name=api_name,
+                    model=model,
+                )
+            )
             metric_names.append("answer_similarity")
 
         if "context_relevance" in metrics:
-            tasks.append(self._evaluate_context_relevance(query, contexts, api_name, model))
+            task_factories.append(
+                lambda: self._evaluate_context_relevance(query, contexts, api_name, model)
+            )
             metric_names.append("context_relevance")
 
         if "context_precision" in metrics:
-            tasks.append(self._evaluate_context_precision(query, contexts, api_name, model))
+            task_factories.append(
+                lambda: self._evaluate_context_precision(query, contexts, api_name, model)
+            )
             metric_names.append("context_precision")
 
         if "context_recall" in metrics and ground_truth:
-            tasks.append(self._evaluate_context_recall(ground_truth, contexts, api_name, model))
+            task_factories.append(
+                lambda: self._evaluate_context_recall(ground_truth, contexts, api_name, model)
+            )
             metric_names.append("context_recall")
 
         # Optional: claim-level faithfulness using claim extraction + verification
         if "claim_faithfulness" in metrics:
-            tasks.append(self._evaluate_claim_faithfulness(response, contexts, api_name, model))
+            task_factories.append(
+                lambda: self._evaluate_claim_faithfulness(response, contexts, api_name, model)
+            )
             metric_names.append("claim_faithfulness")
 
         # Run evaluations in parallel with error handling
         try:
-            # Use return_exceptions=True to handle individual failures
-            metric_results = await asyncio.gather(*tasks, return_exceptions=True)
+            metric_results: list[Any] = []
+            if task_factories:
+                # Prefer an adapter-backed metric as a single credential probe.
+                # Answer similarity can complete heuristically without an LLM.
+                probe_index = next(
+                    (
+                        index
+                        for index, name in enumerate(metric_names)
+                        if name != "answer_similarity"
+                    ),
+                    0,
+                )
+                probe_factory = task_factories.pop(probe_index)
+                probe_name = metric_names.pop(probe_index)
+                try:
+                    probe_result: Any = await probe_factory()
+                except (SummaryProviderError, DaemonCapacityError):
+                    raise
+                except Exception as exc:  # noqa: BLE001 - preserve per-metric partial results
+                    probe_result = exc
+                remaining = await asyncio.gather(
+                    *(factory() for factory in task_factories),
+                    return_exceptions=True,
+                )
+                metric_results = [probe_result, *remaining]
+                metric_names = [probe_name, *metric_names]
 
             # Compile results and handle exceptions
             failed_metrics = []
@@ -264,9 +373,15 @@ class RAGEvaluator:
             )
             for i, result in enumerate(metric_results):
                 if isinstance(result, Exception):
+                    if isinstance(result, (SummaryProviderError, DaemonCapacityError)):
+                        raise result
                     # Log the failure but continue with other metrics
                     metric_name = metric_names[i] if i < len(metric_names) else f"metric_{i}"
-                    logger.error(f"Metric {metric_name} failed: {result}")
+                    logger.error(
+                        "Metric {} failed error_type={}",
+                        metric_name,
+                        type(result).__name__,
+                    )
                     failed_metrics.append(metric_name)
                 else:
                     metric_name, metric_result = result
@@ -297,9 +412,11 @@ class RAGEvaluator:
                 if "answer_faithfulness" in results["metrics"] and "faithfulness" in results["metrics"]:
                     with contextlib.suppress(_RAG_EVAL_NONCRITICAL_EXCEPTIONS):
                         results["metrics"].pop("faithfulness", None)
+        except (SummaryProviderError, DaemonCapacityError):
+            raise
         except _RAG_EVAL_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"Critical failure in evaluation: {e}")
-            raise ValueError(f"Evaluation failed: {str(e)}") from e
+            logger.error("Critical evaluation failure error_type={}", type(e).__name__)
+            raise_detached_error(ValueError("Evaluation failed"))
 
         # Calculate overall score if we have metrics
         if results["metrics"]:
@@ -326,10 +443,43 @@ class RAGEvaluator:
                     # Minimal fallback if Document import shape changes
                     docs.append(Document(id=f"ctx_{i+1}", content=str(ctx or ""), metadata={}))
 
-            analyze_fn = analyze
-            if model:
-                def analyze_fn(*args, **kwargs):
-                    return analyze(*args, model_override=model, **kwargs)
+            def analyze_fn(
+                _claims_provider,
+                input_data,
+                custom_prompt_arg,
+                _claims_api_key=None,
+                system_message=None,
+                temp=None,
+                streaming=False,
+                recursive_summarization=False,
+                chunked_summarization=False,
+                chunk_options=None,
+                model_override=None,
+                **kwargs,
+            ):
+                """Bind ClaimsEngine calls to this evaluation's resolved snapshot."""
+                del _claims_provider, _claims_api_key, model_override
+                kwargs.pop("app_config", None)
+                kwargs.pop("credentials_resolved", None)
+                kwargs.pop("provider_credentials", None)
+                kwargs.pop("_provider_call_credentials", None)
+                return analyze(
+                    api_name=api_name,
+                    input_data=input_data,
+                    custom_prompt_arg=custom_prompt_arg,
+                    api_key=self.api_key,
+                    system_message=system_message,
+                    temp=temp,
+                    streaming=streaming,
+                    recursive_summarization=recursive_summarization,
+                    chunked_summarization=chunked_summarization,
+                    chunk_options=chunk_options,
+                    model_override=model,
+                    app_config=self.app_config,
+                    credentials_resolved=self.credentials_resolved,
+                    provider_credentials=self.provider_credentials,
+                    **kwargs,
+                )
             engine = ClaimsEngine(analyze_fn)
             claims_result = await engine.run(
                 answer=response or "",
@@ -356,8 +506,8 @@ class RAGEvaluator:
                 "explanation": "Fraction of claims supported by contexts (APS extraction + hybrid verification)"
             })
         except _RAG_EVAL_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"Claim faithfulness evaluation failed: {e}")
-            raise ValueError(f"Claim faithfulness evaluation failed: {str(e)}") from e
+            logger.error("Claim faithfulness failed error_type={}", type(e).__name__)
+            raise_detached_error(ValueError("Claim faithfulness evaluation failed"))
 
     async def _evaluate_relevance(self, query: str, response: str, api_name: str, model: Optional[str] = None) -> tuple:
         """Evaluate relevance of response to query"""
@@ -390,7 +540,7 @@ class RAGEvaluator:
             # Use circuit breaker for LLM call via local alias
             score_str = await llm_circuit_breaker.call_with_breaker(
                 api_name,
-                analyze,
+                _run_circuit_bounded_rag_analyze,
                 api_name,  # First param to analyze
                 query,     # input_data
                 prompt,    # custom_prompt_arg
@@ -398,6 +548,9 @@ class RAGEvaluator:
                 "You are an evaluation expert. Provide only numeric scores.",  # system_message
                 0.1,       # temp
                 model_override=model,
+                app_config=self.app_config,
+                credentials_resolved=self.credentials_resolved,
+                provider_credentials=self.provider_credentials,
             )
 
             raw = float(score_str.strip())
@@ -420,13 +573,17 @@ class RAGEvaluator:
             })
 
         except CircuitOpenError as e:
-            logger.warning(f"Circuit breaker open for relevance evaluation: {e}")
+            logger.warning("Relevance circuit breaker open error_type={}", type(e).__name__)
             # Re-raise with more context
-            raise ValueError(f"Service temporarily unavailable for relevance evaluation: {str(e)}") from e
+            raise_detached_error(
+                ValueError("Service temporarily unavailable for relevance evaluation")
+            )
+        except DaemonCapacityError:
+            raise
         except _RAG_EVAL_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"Relevance evaluation failed: {e}")
+            logger.error("Relevance evaluation failed error_type={}", type(e).__name__)
             # Raise exception instead of returning 0.0
-            raise ValueError(f"Relevance evaluation failed: {str(e)}") from e
+            raise_detached_error(ValueError("Relevance evaluation failed"))
 
     async def _evaluate_faithfulness(self, response: str, contexts: list[str], api_name: str, model: Optional[str] = None) -> tuple:
         """Evaluate if response is grounded in contexts"""
@@ -462,7 +619,7 @@ class RAGEvaluator:
 
             score_str = await llm_circuit_breaker.call_with_breaker(
                 api_name,
-                analyze,
+                _run_circuit_bounded_rag_analyze,
                 api_name,  # First param
                 response,  # input_data
                 prompt,    # custom_prompt_arg
@@ -470,6 +627,9 @@ class RAGEvaluator:
                 "You are an evaluation expert. Provide only numeric scores.",  # system_message
                 0.1,       # temp
                 model_override=model,
+                app_config=self.app_config,
+                credentials_resolved=self.credentials_resolved,
+                provider_credentials=self.provider_credentials,
             )
 
             raw = float(score_str.strip())
@@ -489,10 +649,12 @@ class RAGEvaluator:
                 "explanation": "Measures if response is grounded in retrieved contexts"
             })
 
+        except DaemonCapacityError:
+            raise
         except _RAG_EVAL_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"Faithfulness evaluation failed: {e}")
+            logger.error("Faithfulness evaluation failed error_type={}", type(e).__name__)
             # Raise exception instead of returning 0.0
-            raise ValueError(f"Faithfulness evaluation failed: {str(e)}") from e
+            raise_detached_error(ValueError("Faithfulness evaluation failed"))
 
     async def _evaluate_answer_similarity(self, response: str, ground_truth: str, api_name: str = "openai", model: Optional[str] = None) -> tuple:
         """Evaluate similarity between response and ground truth"""
@@ -536,7 +698,10 @@ class RAGEvaluator:
                 })
 
             except _RAG_EVAL_NONCRITICAL_EXCEPTIONS as e:
-                logger.warning(f"Embedding-based similarity failed: {e}. Falling back.")
+                logger.warning(
+                    "Embedding-based similarity failed error_type={}; using fallback",
+                    type(e).__name__,
+                )
                 # Only synthesize embeddings in TEST_MODE when an API key was explicitly provided
                 if is_test_mode() and self.api_key and (self.embedding_provider == "openai"):
                     import hashlib
@@ -631,8 +796,7 @@ class RAGEvaluator:
 
         try:
             # Use thread offload for deterministic unit-test mocking
-            score_str = await asyncio.to_thread(
-                analyze,
+            score_str = await _run_bounded_rag_analyze(
                 api_name,  # api_name - first param
                 response,   # input_data
                 prompt,     # custom_prompt_arg
@@ -640,6 +804,9 @@ class RAGEvaluator:
                 "You are an evaluation expert. Provide only numeric scores.",  # system_message
                 0.1,        # temp
                 model_override=model,
+                app_config=self.app_config,
+                credentials_resolved=self.credentials_resolved,
+                provider_credentials=self.provider_credentials,
             )
 
             score = float((score_str or "").strip()) / 5.0
@@ -652,10 +819,12 @@ class RAGEvaluator:
                 "method": "llm"
             })
 
+        except DaemonCapacityError:
+            raise
         except _RAG_EVAL_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"Answer similarity evaluation failed: {e}")
+            logger.error("Answer similarity failed error_type={}", type(e).__name__)
             # Raise exception instead of returning 0.0 (fixing error handling issue)
-            raise ValueError(f"Answer similarity evaluation failed: {str(e)}") from e
+            raise_detached_error(ValueError("Answer similarity evaluation failed"))
 
     async def _evaluate_context_precision(self, query: str, contexts: list[str], api_name: str, model: Optional[str] = None) -> tuple:
         """Evaluate precision of retrieved contexts"""
@@ -674,8 +843,7 @@ class RAGEvaluator:
             """
 
             try:
-                score_str = await asyncio.to_thread(
-                    analyze,
+                score_str = await _run_bounded_rag_analyze(
                     api_name,  # First param
                     context,   # input_data
                     prompt,    # custom_prompt_arg
@@ -683,12 +851,20 @@ class RAGEvaluator:
                     "You are an evaluation expert. Provide only numeric scores.",  # system_message
                     0.1,       # temp
                     model_override=model,
+                    app_config=self.app_config,
+                    credentials_resolved=self.credentials_resolved,
+                    provider_credentials=self.provider_credentials,
                 )
 
                 relevance_scores.append(float(score_str.strip()) / 5.0)
 
+            except DaemonCapacityError:
+                raise
             except _RAG_EVAL_NONCRITICAL_EXCEPTIONS as e:
-                logger.debug(f"Failed to parse LLM-provided relevance score; defaulting to 0. error={e}")
+                logger.debug(
+                    "Context precision score failed error_type={}; defaulting to 0",
+                    type(e).__name__,
+                )
                 relevance_scores.append(0.0)
 
         # Calculate precision as average relevance
@@ -722,8 +898,7 @@ class RAGEvaluator:
 
             try:
                 # Use thread offload for deterministic unit-test mocking
-                score_str = await asyncio.to_thread(
-                    analyze,
+                score_str = await _run_bounded_rag_analyze(
                     api_name,  # First param
                     context,   # input_data
                     prompt,    # custom_prompt_arg
@@ -731,6 +906,9 @@ class RAGEvaluator:
                     "You are an evaluation expert. Provide only numeric scores.",  # system_message
                     0.1,       # temp
                     model_override=model,
+                    app_config=self.app_config,
+                    credentials_resolved=self.credentials_resolved,
+                    provider_credentials=self.provider_credentials,
                 )
 
                 # Parse score and handle invalid responses
@@ -739,11 +917,16 @@ class RAGEvaluator:
                     relevance_scores.append(score / 5.0)
                 except (ValueError, AttributeError):
                     # Invalid response format - treat as 0.0
-                    logger.warning(f"Invalid score format from LLM: {score_str}")
+                    logger.warning("Invalid score format from evaluation provider")
                     relevance_scores.append(0.0)
 
+            except DaemonCapacityError:
+                raise
             except _RAG_EVAL_NONCRITICAL_EXCEPTIONS as e:
-                logger.debug(f"Context relevance evaluation failed for a context: {e}")
+                logger.debug(
+                    "Context relevance failed error_type={}; defaulting to 0",
+                    type(e).__name__,
+                )
                 relevance_scores.append(0.0)
 
         # Calculate average relevance
@@ -783,7 +966,7 @@ class RAGEvaluator:
         try:
             score_str = await llm_circuit_breaker.call_with_breaker(
                 api_name,
-                analyze,
+                _run_circuit_bounded_rag_analyze,
                 api_name,  # First param
                 combined_context,  # input_data
                 prompt,    # custom_prompt_arg
@@ -791,6 +974,9 @@ class RAGEvaluator:
                 "You are an evaluation expert. Provide only numeric scores.",  # system_message
                 0.1,       # temp
                 model_override=model,
+                app_config=self.app_config,
+                credentials_resolved=self.credentials_resolved,
+                provider_credentials=self.provider_credentials,
             )
 
             score = float(score_str.strip()) / 5.0
@@ -802,10 +988,12 @@ class RAGEvaluator:
                 "explanation": "Coverage of necessary information in contexts"
             })
 
+        except DaemonCapacityError:
+            raise
         except _RAG_EVAL_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"Context recall evaluation failed: {e}")
+            logger.error("Context recall failed error_type={}", type(e).__name__)
             # Raise exception instead of returning 0.0
-            raise ValueError(f"Context recall evaluation failed: {str(e)}") from e
+            raise_detached_error(ValueError("Context recall evaluation failed"))
 
     def _generate_suggestions(self, metrics: dict[str, dict]) -> list[str]:
         """Generate improvement suggestions based on metrics"""

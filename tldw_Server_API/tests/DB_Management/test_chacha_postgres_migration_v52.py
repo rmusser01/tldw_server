@@ -39,6 +39,10 @@ class _FakeBackend:
         self.executed_statements.append(str(statement))
         return None
 
+    @staticmethod
+    def escape_identifier(identifier: str) -> str:
+        return '"' + identifier.replace('"', '""') + '"'
+
 
 def test_sqlite_v52_to_v53_preserves_existing_group_column_and_is_rerunnable(tmp_path: Path) -> None:
     db_path = tmp_path / "chacha-v52.db"

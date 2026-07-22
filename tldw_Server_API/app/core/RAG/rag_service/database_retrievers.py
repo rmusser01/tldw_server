@@ -9,7 +9,6 @@ including media database, notes, prompts, and character cards.
 import asyncio
 import contextlib
 import copy
-from difflib import SequenceMatcher
 import json
 import os
 import re
@@ -19,11 +18,20 @@ import urllib.parse as _urlparse
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, replace
 from datetime import datetime
+from difflib import SequenceMatcher
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Optional
 
 from loguru import logger
 
+from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
+from tldw_Server_API.app.core.Chat.Chat_Deps import (
+    ChatAPIError,
+    ChatAuthenticationError,
+    ChatConfigurationError,
+    ChatProviderError,
+)
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.backends.fts_translator import FTSQueryTranslator
 from tldw_Server_API.app.core.DB_Management.Kanban_DB import KanbanDB
@@ -35,8 +43,16 @@ from tldw_Server_API.app.core.DB_Management.media_db.errors import (
     DatabaseError as MediaDatabaseError,
 )
 
-from .types import DataSource, Document
+from .hyde import (
+    _embedding_model_from_config,
+    _embedding_provider_from_config,
+    _mark_runtime_used_for_embeddings,
+    _resolve_runtime_embedding_call,
+    _run_sync_embedding_call,
+    _runtime_local_embedding_call_kwargs,
+)
 from .retrieval_plan import RetrievalPlan
+from .types import DataSource, Document
 from .utils import get_float_env as _get_float_env
 from .utils import normalize_scores as _normalize_scores
 from .vector_stores import (
@@ -328,7 +344,6 @@ def _score_media_chunk_text(
     *,
     title: Optional[str] = None,
 ) -> float:
-    lowered = chunk_text.lower()
     if not query_terms:
         return 0.0
 
@@ -749,7 +764,8 @@ class MediaDBRetriever(BaseRetriever):
         db_path: Optional[str],
         config: Optional[RetrievalConfig] = None,
         user_id: str = "0",
-        media_db: Optional[Any] = None
+        media_db: Optional[Any] = None,
+        credential_runtime: Any = None,
     ) -> None:
         """Initialize MediaDBRetriever with optional vector store."""
         super().__init__(db_path, config, db_adapter=media_db)
@@ -763,6 +779,7 @@ class MediaDBRetriever(BaseRetriever):
         self._db_adapter = self.media_db
         self._own_media_db = own
         self.user_id = user_id
+        self.credential_runtime = credential_runtime
         self.vector_store: Optional[VectorStoreAdapter] = None
         self._initialize_vector_store()
 
@@ -1013,7 +1030,7 @@ class MediaDBRetriever(BaseRetriever):
 
         try:
             chunker = Chunker()
-        except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
+        except (AttributeError, RuntimeError, ValueError) as exc:
             logger.debug(f"Late chunk media retrieval skipped because Chunker could not initialize: {exc}")
             return []
 
@@ -1660,7 +1677,7 @@ class MediaDBRetriever(BaseRetriever):
                     exc,
                 )
                 return None
-        except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
+        except (AttributeError, RuntimeError, ValueError) as exc:
             logger.debug(
                 "Vector metadata lookup failed for collection '{}': {}",
                 collection_name,
@@ -1753,6 +1770,7 @@ class MediaDBRetriever(BaseRetriever):
             if provided_vector is not None:
                 query_vector = provided_vector
             else:
+                provider: str | None = None
                 try:
                     # Import only when we actually need to generate embeddings to avoid
                     # side effects (e.g., duplicate Prometheus collectors in tests)
@@ -1765,23 +1783,128 @@ class MediaDBRetriever(BaseRetriever):
                         collection_name=collection_name,
                         allowed_media_ids=kwargs.get("allowed_media_ids"),
                     )
-                    embeddings = await asyncio.get_event_loop().run_in_executor(
-                        None,
-                        create_embeddings_batch,
-                        [query],  # texts
+                    provider = _embedding_provider_from_config(
                         user_app_config,
                         model_id_override,
                     )
+                    credential_runtime = getattr(self, "credential_runtime", None)
+                    handle = None
+                    call_kwargs: dict[str, Any] = {}
+                    if credential_runtime is not None:
+                        if provider == "openai":
+                            handle, call_kwargs = await _resolve_runtime_embedding_call(
+                                credential_runtime,
+                                provider,
+                                _embedding_model_from_config(
+                                    user_app_config,
+                                    model_id_override,
+                                ),
+                            )
+                        else:
+                            call_kwargs = _runtime_local_embedding_call_kwargs(
+                                user_app_config,
+                                provider,
+                                model_id_override,
+                            )
+                    embeddings = await _run_sync_embedding_call(
+                        partial(
+                            create_embeddings_batch,
+                            [query],
+                            user_app_config,
+                            model_id_override,
+                            **call_kwargs,
+                        ),
+                        on_success=(
+                            partial(
+                                _mark_runtime_used_for_embeddings,
+                                credential_runtime=credential_runtime,
+                                handle=handle,
+                            )
+                            if handle is not None
+                            else None
+                        ),
+                    )
 
                     if not embeddings or not embeddings[0]:
+                        if handle is not None:
+                            raise ChatProviderError(
+                                "Embedding provider returned no query vector.",
+                                provider=provider,
+                            )
                         logger.error("Failed to generate query embedding")
                         return []
 
                     query_vector = embeddings[0]
                     if hasattr(query_vector, 'tolist'):
                         query_vector = query_vector.tolist()
-                except (ImportError, AttributeError, RuntimeError, TypeError, ValueError) as e:
-                    logger.error(f"Failed to generate query embedding: {e}")
+                except (ByokResolutionError, ChatAPIError):
+                    if getattr(self, "credential_runtime", None) is not None:
+                        raise
+                    logger.error("Failed to generate query embedding")
+                    return []
+                except (
+                    ImportError,
+                    AttributeError,
+                    ConnectionError,
+                    OSError,
+                    RuntimeError,
+                    TimeoutError,
+                    TypeError,
+                    ValueError,
+                ) as exc:
+                    from tldw_Server_API.app.core.Embeddings.async_embeddings import (
+                        EmbeddingCredentialError,
+                        EmbeddingEndpointError,
+                        EmbeddingProviderError,
+                    )
+
+                    if (
+                        getattr(self, "credential_runtime", None) is not None
+                        and isinstance(exc, EmbeddingCredentialError)
+                    ):
+                        raise ChatConfigurationError(
+                            "Embedding provider credentials are not configured.",
+                            provider=exc.provider or provider or "unknown",
+                            error_code="missing_provider_credentials",
+                        ) from None
+                    if (
+                        getattr(self, "credential_runtime", None) is not None
+                        and isinstance(exc, EmbeddingEndpointError)
+                    ):
+                        raise ChatConfigurationError(
+                            "Embedding provider endpoint is not configured.",
+                            provider=exc.provider or provider or "unknown",
+                            error_code="provider_configuration_invalid",
+                        ) from None
+                    if (
+                        getattr(self, "credential_runtime", None) is not None
+                        and isinstance(exc, EmbeddingProviderError)
+                    ):
+                        provider_name = exc.provider or provider or "unknown"
+                        if exc.code == "authentication":
+                            raise ChatAuthenticationError(
+                                "Embedding provider authentication failed.",
+                                provider=provider_name,
+                            ) from exc
+                        raise ChatProviderError(
+                            "Embedding provider request failed.",
+                            provider=provider_name,
+                        ) from exc
+                    if (
+                        getattr(self, "credential_runtime", None) is not None
+                        and provider == "openai"
+                        and isinstance(exc, (ImportError, AttributeError, TypeError, ValueError))
+                    ):
+                        raise ChatConfigurationError(
+                            "Embedding provider configuration is invalid.",
+                            provider=provider,
+                        ) from exc
+                    if getattr(self, "credential_runtime", None) is not None and provider == "openai":
+                        raise ChatProviderError(
+                            "Embedding provider request failed.",
+                            provider=provider,
+                        ) from exc
+                    logger.error("Failed to generate query embedding")
                     return []
 
             # Build filter for vector search
@@ -2012,6 +2135,11 @@ class MediaDBRetriever(BaseRetriever):
             logger.debug(f"Retrieved {len(documents)} documents from vector search (HYDE merged, chunk-level)")
             return _finalize_docs(documents)
 
+        except (ByokResolutionError, ChatAPIError):
+            if getattr(self, "credential_runtime", None) is not None:
+                raise
+            logger.error("Vector search failed")
+            return await self._retrieve_fts(query, media_type, **kwargs)
         except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError) as e:
             logger.error(f"Vector search failed: {e}")
             # Fallback to FTS
@@ -3619,6 +3747,7 @@ class MultiDatabaseRetriever:
         chacha_db: Optional[Any] = None,
         prompts_db: Optional[Any] = None,
         sql_retriever: Optional[BaseRetriever] = None,
+        credential_runtime: Any = None,
     ):
         """
         Initialize multi-database retriever.
@@ -3628,6 +3757,7 @@ class MultiDatabaseRetriever:
             user_id: User ID for vector store access
         """
         self.retrievers: dict[DataSource, BaseRetriever] = {}
+        self.credential_runtime = credential_runtime
 
         # Initialize retrievers for available databases
         media_db_path = db_paths.get("media_db")
@@ -3636,6 +3766,7 @@ class MultiDatabaseRetriever:
                 media_db_path,
                 user_id=user_id,
                 media_db=media_db,
+                credential_runtime=credential_runtime,
             )
 
         if "notes_db" in db_paths:
@@ -3868,6 +3999,11 @@ class MultiDatabaseRetriever:
 
         # Flatten and filter out failures
         for res in results:
+            if (
+                getattr(self, "credential_runtime", None) is not None
+                and isinstance(res, (ByokResolutionError, ChatAPIError))
+            ):
+                raise res
             if isinstance(res, Exception):
                 # Skip failed sources (partial success expected)
                 continue

@@ -1,17 +1,18 @@
 """
-Endpoint SSE error-path tests for Google (Gemini) and Mistral when adapters are enabled.
+Endpoint pre-output error-path tests for Google (Gemini) and Mistral.
 
-Asserts that a provider-side error during streaming emits exactly one structured
-SSE error frame and a single terminal [DONE].
+Provider failures raised before any stream output must be returned as a bounded
+HTTP error before the response is handed off as SSE.
 """
 
 from __future__ import annotations
 
-from typing import Iterator
-import json
+from threading import Event
+
+import pytest
+
 # Ensure chat fixtures (client/auth) are registered as pytest fixtures
 from tldw_Server_API.tests._plugins import chat_fixtures as _chat_pl  # noqa: F401
-import pytest
 
 
 @pytest.fixture(autouse=True)
@@ -35,51 +36,53 @@ def _payload(provider: str, *, stream: bool) -> dict:
 
 @pytest.mark.integration
 def test_chat_endpoint_streaming_error_google(monkeypatch, authenticated_client):
-    """Adapter stream raises -> endpoint emits SSE error and [DONE]."""
-    # Supply API key at endpoint module
-    import tldw_Server_API.app.api.v1.endpoints.chat as chat_endpoint
-    chat_endpoint.API_KEYS = {**(chat_endpoint.API_KEYS or {}), "google": "sk-gemini-test"}
+    """An eager Google stream failure is mapped before response handoff."""
+    monkeypatch.setenv("GOOGLE_API_KEY", "sk-gemini-test")
+    adapter_called = Event()
 
     # Patch GoogleAdapter.stream to raise a ChatBadRequestError (normalized provider error)
-    from tldw_Server_API.app.core.Chat.Chat_Deps import ChatBadRequestError
     import tldw_Server_API.app.core.LLM_Calls.providers.google_adapter as google_mod
+    from tldw_Server_API.app.core.Chat.Chat_Deps import ChatBadRequestError
 
     def _stream_raises(*args, **kwargs):
+        adapter_called.set()
         raise ChatBadRequestError(provider="google", message="bad prompt")
 
     monkeypatch.setattr(google_mod.GoogleAdapter, "stream", _stream_raises, raising=True)
 
-    client = authenticated_client
-    with client.stream("POST", "/api/v1/chat/completions", json=_payload("google", stream=True)) as resp:
-        assert resp.status_code == 200
-        lines = list(resp.iter_lines())
-        saw_error = any((ln.startswith("data:") and '"error"' in ln) for ln in lines)
-        saw_done = sum(1 for ln in lines if ln.strip().lower() == "data: [done]") == 1
-        assert saw_error, f"Expected SSE error, got: {lines[:5]}"
-        assert saw_done, "Expected a single [DONE] sentinel"
+    response = authenticated_client.post(
+        "/api/v1/chat/completions",
+        json=_payload("google", stream=True),
+    )
+
+    assert response.status_code == 502
+    assert response.json()["detail"]["error_code"] == "provider_unavailable"
+    assert "bad prompt" not in response.text
+    assert adapter_called.is_set()
 
 
 @pytest.mark.integration
 def test_chat_endpoint_streaming_error_mistral(monkeypatch, authenticated_client):
-    """Adapter stream raises -> endpoint emits SSE error and [DONE]."""
-    # Supply API key at endpoint module
-    import tldw_Server_API.app.api.v1.endpoints.chat as chat_endpoint
-    chat_endpoint.API_KEYS = {**(chat_endpoint.API_KEYS or {}), "mistral": "sk-mistral-test"}
+    """An eager Mistral stream failure is mapped before response handoff."""
+    monkeypatch.setenv("MISTRAL_API_KEY", "sk-mistral-test")
+    adapter_called = Event()
 
     # Patch MistralAdapter.stream to raise a ChatProviderError (server-side)
-    from tldw_Server_API.app.core.Chat.Chat_Deps import ChatProviderError
     import tldw_Server_API.app.core.LLM_Calls.providers.mistral_adapter as mistral_mod
+    from tldw_Server_API.app.core.Chat.Chat_Deps import ChatProviderError
 
     def _stream_raises(*args, **kwargs):
+        adapter_called.set()
         raise ChatProviderError(provider="mistral", message="upstream 502", status_code=502)
 
     monkeypatch.setattr(mistral_mod.MistralAdapter, "stream", _stream_raises, raising=True)
 
-    client = authenticated_client
-    with client.stream("POST", "/api/v1/chat/completions", json=_payload("mistral", stream=True)) as resp:
-        assert resp.status_code == 200
-        lines = list(resp.iter_lines())
-        saw_error = any((ln.startswith("data:") and '"error"' in ln) for ln in lines)
-        saw_done = sum(1 for ln in lines if ln.strip().lower() == "data: [done]") == 1
-        assert saw_error, f"Expected SSE error, got: {lines[:5]}"
-        assert saw_done, "Expected a single [DONE] sentinel"
+    response = authenticated_client.post(
+        "/api/v1/chat/completions",
+        json=_payload("mistral", stream=True),
+    )
+
+    assert response.status_code == 502
+    assert response.json()["detail"]["error_code"] == "provider_unavailable"
+    assert "upstream 502" not in response.text
+    assert adapter_called.is_set()

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from loguru import logger
@@ -17,22 +17,23 @@ from tldw_Server_API.app.core.Jobs.operations.contracts import (
 
 _MAX_QUEUED_MESSAGE = "Quota exceeded: max queued per user/domain"
 _SUBMITS_PER_MINUTE_MESSAGE = "Quota exceeded: submits per minute"
-_COUNTER_NONCRITICAL_ERRORS: tuple[type[BaseException], ...] = (
-    AttributeError,
-    RuntimeError,
-    TypeError,
-    ValueError,
-    sqlite3.Error,
-)
-
-
 def _sqlite_timestamp(value: datetime) -> str:
     """Return the SQLite timestamp representation used by the Jobs table."""
 
     normalized = value
     if value.tzinfo is not None:
-        normalized = value.astimezone(UTC).replace(tzinfo=None)
+        normalized = value.astimezone(timezone.utc).replace(tzinfo=None)
     return normalized.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _future_available_at(value: datetime | None, *, now: datetime) -> datetime | None:
+    """Keep only future schedule times; immediate jobs use a NULL ready marker."""
+
+    if value is None:
+        return None
+    normalized_value = value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+    normalized_now = now.replace(tzinfo=timezone.utc) if now.tzinfo is None else now.astimezone(timezone.utc)
+    return normalized_value if normalized_value > normalized_now else None
 
 
 def _row_to_dict(row: Any) -> dict[str, Any]:
@@ -126,24 +127,6 @@ def _bump_counters(
             1 if is_scheduled else 0,
         ),
     )
-
-
-def _bump_counters_best_effort(
-    conn: sqlite3.Connection,
-    *,
-    command: CreateJobCommand,
-    available_at_sql: str | None,
-) -> None:
-    try:
-        _bump_counters(conn, command=command, available_at_sql=available_at_sql)
-    except _COUNTER_NONCRITICAL_ERRORS as exc:
-        logger.warning(
-            "Non-critical SQLite jobs counter update failed for {}:{}:{}: {}",
-            command.domain,
-            command.queue,
-            command.job_type,
-            exc,
-        )
 
 
 def _quota_rejection(
@@ -264,7 +247,8 @@ def create_job_admission(
 
     payload_json = json.dumps(command.payload)
     now_sql = _sqlite_timestamp(now)
-    available_at_sql = _sqlite_timestamp(command.available_at) if command.available_at else None
+    available_at = _future_available_at(command.available_at, now=now)
+    available_at_sql = _sqlite_timestamp(available_at) if available_at else None
 
     with conn:
         quota_result = _quota_rejection(
@@ -303,7 +287,7 @@ def create_job_admission(
                     "job_type": command.job_type,
                 }
             if inserted and counters_enabled:
-                _bump_counters_best_effort(conn, command=command, available_at_sql=available_at_sql)
+                _bump_counters(conn, command=command, available_at_sql=available_at_sql)
             event = _insert_created_event(
                 conn,
                 row=row,
@@ -335,7 +319,7 @@ def create_job_admission(
                 "job_type": command.job_type,
             }
         if counters_enabled:
-            _bump_counters_best_effort(conn, command=command, available_at_sql=available_at_sql)
+            _bump_counters(conn, command=command, available_at_sql=available_at_sql)
         event = _insert_created_event(
             conn,
             row=row,

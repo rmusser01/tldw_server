@@ -261,4 +261,112 @@ describe("background effective extension auth", () => {
     expect(port.messages).toContainEqual({ event: "done" })
     expect(storageState.persistent.get("tldwConfig")).not.toHaveProperty("apiKey")
   })
+
+  it("isolates opted-in RAG stream errors from a concurrent public stream", async () => {
+    let releaseBarrier: (() => void) | undefined
+    const barrier = new Promise<void>((resolve) => {
+      releaseBarrier = resolve
+    })
+    let started = 0
+    const fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
+      started += 1
+      if (started === 2) releaseBarrier?.()
+      await barrier
+
+      if (String(input).includes("/api/v1/rag/search/stream")) {
+        return new Response(
+          JSON.stringify({
+            detail: {
+              error_code: "credential_scope_revoked",
+              message: "RAW_WORKER_RAG_BODY",
+              api_key: "RAW_WORKER_RAG_KEY",
+              debug_path: "/RAW_WORKER_RAG_PATH/provider.json"
+            },
+            upstream_url: "https://RAW_WORKER_RAG_URL.example/v1"
+          }),
+          {
+            status: 503,
+            headers: { "content-type": "application/json" }
+          }
+        )
+      }
+
+      return new Response(
+        JSON.stringify({
+          detail: {
+            message: "PUBLIC_STREAM_MESSAGE",
+            public_detail: "PUBLIC_STREAM_DETAIL"
+          }
+        }),
+        {
+          status: 418,
+          headers: { "content-type": "application/json" }
+        }
+      )
+    })
+    vi.stubGlobal("fetch", fetchSpy as any)
+    const ragPort = connectRuntimePort("tldw:stream")
+    const publicPort = connectRuntimePort("tldw:stream")
+
+    ragPort.postMessage({
+      path: "/api/v1/rag/search/stream",
+      method: "POST",
+      body: { query: "provider failure" },
+      sanitizeRagProviderStreamError: true
+    })
+    publicPort.postMessage({
+      path: "/api/v1/chat/completions",
+      method: "POST",
+      body: { stream: true }
+    })
+
+    await vi.waitFor(() => {
+      expect(
+        ragPort.messages.some(
+          (message: any) => message?.event === "error"
+        )
+      ).toBe(true)
+      expect(
+        publicPort.messages.some(
+          (message: any) => message?.event === "error"
+        )
+      ).toBe(true)
+    })
+
+    const ragError = ragPort.messages.find(
+      (message: any) => message?.event === "error"
+    )
+    const publicError = publicPort.messages.find(
+      (message: any) => message?.event === "error"
+    )
+    expect(ragError).toMatchObject({
+      event: "error",
+      status: 503,
+      code: "credential_scope_revoked",
+      message:
+        "The selected provider credential scope is no longer available.",
+      details: {
+        detail: {
+          error_code: "credential_scope_revoked",
+          message:
+            "The selected provider credential scope is no longer available."
+        }
+      }
+    })
+    expect(JSON.stringify(ragError)).not.toMatch(
+      /RAW_WORKER_RAG_(?:BODY|KEY|PATH|URL)/
+    )
+    expect(publicError).toMatchObject({
+      event: "error",
+      status: 418,
+      message: "PUBLIC_STREAM_MESSAGE",
+      details: {
+        detail: {
+          message: "PUBLIC_STREAM_MESSAGE",
+          public_detail: "PUBLIC_STREAM_DETAIL"
+        }
+      }
+    })
+    expect(fetchSpy).toHaveBeenCalledTimes(2)
+  })
 })

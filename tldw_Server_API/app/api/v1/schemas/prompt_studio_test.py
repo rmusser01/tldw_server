@@ -6,6 +6,10 @@ from typing import Any, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from tldw_Server_API.app.core.LLM_Calls.provider_identity import (
+    canonical_provider_name,
+)
+
 from .prompt_studio_base import EvaluationStatus, TimestampMixin, UUIDMixin
 
 ########################################################################################################################
@@ -83,6 +87,7 @@ class RunTestCasesSimpleRequest(BaseModel):
 
     prompt_id: int
     test_case_ids: list[Union[int, str]] = Field(default_factory=list)
+    provider: str = "openai"
     model: Optional[str] = None
     # Back-compat: allow ignored project_id
     project_id: Optional[int] = None
@@ -101,6 +106,14 @@ class RunTestCasesSimpleRequest(BaseModel):
                     raise ValueError(f"test_case_ids must contain only integers, got: {t}") from None
             return out
         return v
+
+    @field_validator("provider")
+    @classmethod
+    def _normalize_provider(cls, value: str) -> str:
+        provider = canonical_provider_name(value)
+        if not provider:
+            raise ValueError("provider must be a non-empty string")
+        return provider
 
 ########################################################################################################################
 # Test Run Schemas

@@ -1,6 +1,7 @@
 import pytest
+
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.main import app
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user, User
 
 
 @pytest.fixture(autouse=True)
@@ -20,8 +21,19 @@ def test_batch_dimensions_allowed_for_non_openai(test_client, monkeypatch):
     import tldw_Server_API.app.api.v1.endpoints.embeddings_v5_production_enhanced as emb_mod
 
     monkeypatch.setattr(emb_mod, "_should_enforce_policy", lambda _user=None: False)
+    cache_scope_values: list[bool] = []
 
-    async def fake_batch_async(texts, provider, model_id=None, dimensions=None, api_key=None, api_url=None, metadata=None):
+    async def fake_batch_async(
+        texts,
+        provider,
+        model_id=None,
+        dimensions=None,
+        api_key=None,
+        api_url=None,
+        metadata=None,
+        cache_scope_sensitive=False,
+    ):
+        cache_scope_values.append(cache_scope_sensitive)
         return [[float(i) for i in range(256)] for _ in texts]
 
     monkeypatch.setattr(emb_mod, "create_embeddings_batch_async", fake_batch_async, raising=True)
@@ -38,6 +50,7 @@ def test_batch_dimensions_allowed_for_non_openai(test_client, monkeypatch):
     assert resp.status_code == 200
     body = resp.json()
     assert len(body["embeddings"][0]) == 128
+    assert cache_scope_values == [False]
 
 
 @pytest.mark.unit

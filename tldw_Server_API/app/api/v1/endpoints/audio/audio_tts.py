@@ -5,14 +5,21 @@ import contextlib
 import inspect
 import json
 import time
+from collections.abc import Mapping
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from loguru import logger
 from starlette import status
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_request_user, RequireRole, TokenScopeGuard, User
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    RequireRole,
+    TokenScopeGuard,
+    User,
+    check_rate_limit,
+    get_request_user,
+)
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import try_get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import (
     UsageEventLogger,
@@ -20,31 +27,41 @@ from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import (
 )
 from tldw_Server_API.app.api.v1.schemas.audio_schemas import OpenAISpeechRequest
 from tldw_Server_API.app.core.Audio.error_payloads import _http_error_detail
-from tldw_Server_API.app.core.Audio.tts_service import _raise_for_tts_error
-from tldw_Server_API.app.core.Audio.tts_service import _sanitize_speech_request
+from tldw_Server_API.app.core.Audio.tts_service import _raise_for_tts_error, _sanitize_speech_request
+from tldw_Server_API.app.core.AuthNZ.byok_helpers import derive_trusted_credential_scope
+from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
 from tldw_Server_API.app.core.AuthNZ.exceptions import QuotaExceededError, StorageError
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Logging.log_context import ensure_request_id
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
+from tldw_Server_API.app.core.Storage.generated_file_helpers import (
+    save_and_register_tts_audio,
+)
 from tldw_Server_API.app.core.TTS.tts_exceptions import (
-    TTSError,
     TTSAuthenticationError,
+    TTSError,
+    TTSInvalidVoiceReferenceError,
+    TTSModelNotFoundError,
+    TTSNetworkError,
     TTSProviderBusyError,
     TTSProviderNotConfiguredError,
+    TTSProviderUnavailableError,
+    TTSQuotaExceededError,
+    TTSRateLimitError,
+    TTSTimeoutError,
+    TTSValidationError,
 )
 from tldw_Server_API.app.core.TTS.tts_service_v2 import TTSServiceV2, get_tts_service_v2
 from tldw_Server_API.app.core.TTS.utils import (
     build_tts_segments_payload,
     compute_tts_history_text_hash,
+    contains_tts_credential_fields,
     parse_bool,
     tts_history_text_length,
 )
 from tldw_Server_API.app.core.Utils.pydantic_compat import model_dump_compat
-from tldw_Server_API.app.core.Storage.generated_file_helpers import (
-    save_and_register_tts_audio,
-)
 
 _AUDIO_TTS_NONCRITICAL_EXCEPTIONS = (
     OSError,
@@ -314,15 +331,148 @@ def _build_provider_model_info(
 
 
 def _tts_history_error_message(exc: Exception) -> str:
+    """Return a bounded failure category safe for durable history storage."""
     if isinstance(exc, HTTPException):
-        detail = exc.detail
-        if isinstance(detail, (dict, list)):
-            try:
-                return json.dumps(detail, separators=(",", ":"), ensure_ascii=True)
-            except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS:
-                return str(detail)
-        return str(detail)
-    return str(exc)
+        status_messages = {
+            status.HTTP_400_BAD_REQUEST: "TTS validation failed",
+            status.HTTP_402_PAYMENT_REQUIRED: "TTS quota exceeded",
+            status.HTTP_404_NOT_FOUND: "Requested TTS resource not found",
+            status.HTTP_422_UNPROCESSABLE_ENTITY: "TTS validation failed",
+            status.HTTP_429_TOO_MANY_REQUESTS: "TTS provider rate limit exceeded",
+            status.HTTP_502_BAD_GATEWAY: "TTS provider request failed",
+            status.HTTP_503_SERVICE_UNAVAILABLE: "TTS service unavailable",
+            status.HTTP_504_GATEWAY_TIMEOUT: "TTS provider timed out",
+        }
+        return status_messages.get(exc.status_code, "TTS request failed")
+    if isinstance(exc, (TTSInvalidVoiceReferenceError, TTSValidationError)):
+        return "TTS validation failed"
+    if isinstance(exc, TTSModelNotFoundError):
+        return "Requested TTS resource not found"
+    if isinstance(exc, TTSQuotaExceededError):
+        return "TTS quota exceeded"
+    if isinstance(exc, TTSRateLimitError):
+        return "TTS provider rate limit exceeded"
+    if isinstance(exc, TTSTimeoutError):
+        return "TTS provider timed out"
+    if isinstance(exc, (TTSAuthenticationError, TTSNetworkError)):
+        return "TTS provider request failed"
+    if isinstance(
+        exc,
+        (TTSProviderNotConfiguredError, TTSProviderUnavailableError),
+    ):
+        return "TTS service unavailable"
+    return "TTS generation failed"
+
+
+_TTS_JOB_CREDENTIAL_SOURCES = frozenset(
+    {"user", "team", "org", "server_default", "none"}
+)
+_TTS_JOB_BYOK_SOURCES = frozenset({"user", "team", "org"})
+_TTS_JOB_REVALIDATABLE_PRINCIPAL_KINDS = frozenset({"user", "api_key"})
+
+
+def _credential_scope_revoked() -> HTTPException:
+    """Return the bounded error used when a job cannot retain its auth scope."""
+    return HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail={
+            "error_code": "credential_scope_revoked",
+            "message": "The active credential scope is no longer available.",
+        },
+    )
+
+
+def _tts_job_credential_scope(
+    request: Request,
+    current_user: User,
+) -> tuple[dict[str, Any], bool]:
+    """Capture active, credential-free authorization inputs for a queued job."""
+    request_state = getattr(request, "state", None)
+    auth_context = getattr(request_state, "auth", None)
+    principal = getattr(auth_context, "principal", None)
+    principal_kind = getattr(principal, "kind", None)
+    if (
+        principal_kind is not None
+        and principal_kind not in _TTS_JOB_REVALIDATABLE_PRINCIPAL_KINDS
+    ):
+        raise _credential_scope_revoked()
+
+    try:
+        owner_user_id, team_ids, org_ids, trusted_base_url = (
+            derive_trusted_credential_scope(request, current_user)
+        )
+        current_user_id = int(current_user.id)
+    except (AttributeError, ByokResolutionError, TypeError, ValueError):
+        raise _credential_scope_revoked() from None
+
+    scope_ids = [*team_ids, *org_ids]
+    if (
+        type(owner_user_id) is not int
+        or owner_user_id <= 0
+        or owner_user_id != current_user_id
+        or any(type(item) is not int or item <= 0 for item in scope_ids)
+        or type(trusted_base_url) is not bool
+    ):
+        raise _credential_scope_revoked()
+
+    return (
+        {
+            "owner_user_id": owner_user_id,
+            "team_ids": list(team_ids),
+            "org_ids": list(org_ids),
+        },
+        trusted_base_url,
+    )
+
+
+def _finalize_tts_job_credential_scope(
+    scope: dict[str, Any],
+    *,
+    trusted_base_url_capable: bool,
+    resolved_user_id: Any,
+    resolution: Any,
+) -> dict[str, Any]:
+    """Bind queued-job authorization to the exact resolved credential source."""
+    owner_user_id = scope["owner_user_id"]
+    if type(resolved_user_id) is not int or resolved_user_id != owner_user_id:
+        raise _credential_scope_revoked()
+
+    if resolution is None:
+        credential_source = "none"
+        credential_fields: Mapping[str, Any] = {}
+    else:
+        credential_source = getattr(resolution, "source", None)
+        credential_fields = getattr(resolution, "credential_fields", None)
+
+    if (
+        credential_source not in _TTS_JOB_CREDENTIAL_SOURCES
+        or not isinstance(credential_fields, Mapping)
+    ):
+        raise _credential_scope_revoked()
+
+    team_ids = scope["team_ids"] if credential_source == "team" else []
+    org_ids = scope["org_ids"] if credential_source == "org" else []
+    if (
+        credential_source == "team" and len(team_ids) != 1
+    ) or (
+        credential_source == "org" and len(org_ids) != 1
+    ):
+        raise _credential_scope_revoked()
+
+    base_url = credential_fields.get("base_url")
+    trusted_base_url_requested = bool(
+        trusted_base_url_capable
+        and credential_source in _TTS_JOB_BYOK_SOURCES
+        and isinstance(base_url, str)
+        and base_url.strip()
+    )
+    return {
+        "owner_user_id": owner_user_id,
+        "team_ids": team_ids,
+        "org_ids": org_ids,
+        "credential_source": credential_source,
+        "trusted_base_url_requested": trusted_base_url_requested,
+    }
 
 
 @router.post(
@@ -342,18 +492,37 @@ async def create_speech_job(
     """Submit a long-form TTS job and return job id."""
     request_id = ensure_request_id(request)
     provider_hint = _audio_shim_attr("_sanitize_speech_request")(request_data, request_id=request_id)
+    speech_request_payload = model_dump_compat(request_data)
+    if contains_tts_credential_fields(speech_request_payload):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error_code": "credential_fields_not_allowed",
+                "message": "Credential fields are not accepted in TTS job requests.",
+            },
+        )
+    credential_scope, trusted_base_url_capable = _tts_job_credential_scope(
+        request,
+        current_user,
+    )
 
-    user_id_int, tts_overrides, _byok = await _audio_shim_attr("_resolve_tts_byok")(
+    resolved_user_id, _, resolution = await _audio_shim_attr("_resolve_tts_byok")(
         provider_hint=provider_hint,
+        model=request_data.model,
         current_user=current_user,
         request=request,
     )
+    credential_scope = _finalize_tts_job_credential_scope(
+        credential_scope,
+        trusted_base_url_capable=trusted_base_url_capable,
+        resolved_user_id=resolved_user_id,
+        resolution=resolution,
+    )
 
     payload = {
-        "speech_request": model_dump_compat(request_data),
+        "speech_request": speech_request_payload,
         "provider_hint": provider_hint,
-        "provider_overrides": tts_overrides,
-        "user_id": user_id_int,
+        "credential_scope": credential_scope,
     }
     # Force non-streaming in jobs worker.
     payload["speech_request"]["stream"] = False
@@ -485,10 +654,23 @@ async def create_speech(
     tts_provider_hint = provider_hint
     user_id_int, tts_overrides, byok_tts_resolution = await _audio_shim_attr("_resolve_tts_byok")(
         provider_hint=tts_provider_hint,
+        model=request_data.model,
         current_user=current_user,
         request=request,
     )
     oauth_retry_attempted = False
+    credential_usage_marked = False
+
+    async def _mark_credential_usage() -> None:
+        """Touch the request's resolved credential snapshot at most once."""
+        nonlocal credential_usage_marked
+        if credential_usage_marked or byok_tts_resolution is None:
+            return
+        credential_usage_marked = True
+        try:
+            await byok_tts_resolution.touch_last_used()
+        except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS:
+            logger.debug("Failed to update BYOK last_used timestamp")
 
     def _is_openai_oauth_request() -> bool:
         return (
@@ -698,17 +880,15 @@ async def create_speech(
 
     async def _refresh_openai_oauth_and_rebuild_iter() -> None:
         nonlocal user_id_int, tts_overrides, byok_tts_resolution, speech_iter
-        try:
-            user_id_int, tts_overrides, byok_tts_resolution = await _audio_shim_attr("_resolve_tts_byok")(
-                provider_hint=tts_provider_hint,
-                current_user=current_user,
-                request=request,
-                force_oauth_refresh=True,
-            )
-        except HTTPException:
-            raise
-        except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS:
-            raise
+        rejected_credentials = byok_tts_resolution
+        user_id_int, tts_overrides, byok_tts_resolution = await _audio_shim_attr("_resolve_tts_byok")(
+            provider_hint=tts_provider_hint,
+            model=request_data.model,
+            current_user=current_user,
+            request=request,
+            force_oauth_refresh=True,
+            rejected_credentials=rejected_credentials,
+        )
 
         if byok_tts_resolution is None:
             raise TTSAuthenticationError("OpenAI OAuth refresh did not return credentials")
@@ -801,11 +981,6 @@ async def create_speech(
             stream_failed = _tts_history_error_message(exc)
             _raise_for_tts_error(exc, request_id)
         finally:
-            if byok_tts_resolution is not None:
-                try:
-                    await byok_tts_resolution.touch_last_used()
-                except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS:
-                    logger.debug("Failed to update BYOK last_used timestamp")
             status = "success"
             error_message = None
             if stream_failed:
@@ -834,6 +1009,7 @@ async def create_speech(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Audio generation failed to produce data.",
             )
+        await _mark_credential_usage()
         response_content_type = _resolve_response_content_type(request_data)
         stream_headers = {
             "Content-Disposition": f"attachment; filename=speech.{request_data.response_format}",
@@ -859,9 +1035,12 @@ async def create_speech(
     all_audio_bytes = b""
     if first_chunk:
         all_audio_bytes += first_chunk
+        await _mark_credential_usage()
     try:
         async for chunk in speech_iter:
             all_audio_bytes += chunk
+            if chunk:
+                await _mark_credential_usage()
     except HTTPException as exc:
         _record_tts_history("failed", error_message=_tts_history_error_message(exc))
         raise
@@ -878,12 +1057,6 @@ async def create_speech(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Audio generation failed to produce data."
         )
-
-    if byok_tts_resolution is not None:
-        try:
-            await byok_tts_resolution.touch_last_used()
-        except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS:
-            logger.debug("Failed to update BYOK last_used timestamp")
 
     headers = {
         "Content-Disposition": f"attachment; filename=speech.{request_data.response_format}",
@@ -987,10 +1160,24 @@ async def create_speech_metadata(
     tts_provider_hint = provider_hint
     user_id_int, tts_overrides, byok_tts_resolution = await _audio_shim_attr("_resolve_tts_byok")(
         provider_hint=tts_provider_hint,
+        model=request_data.model,
         current_user=current_user,
         request=request,
     )
     oauth_retry_attempted = False
+    credential_usage_marked = False
+    metadata_generation_succeeded = False
+
+    async def _mark_credential_usage() -> None:
+        """Touch the request's resolved credential snapshot at most once."""
+        nonlocal credential_usage_marked
+        if credential_usage_marked or byok_tts_resolution is None:
+            return
+        credential_usage_marked = True
+        try:
+            await byok_tts_resolution.touch_last_used()
+        except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS:
+            logger.debug("Failed to update BYOK last_used timestamp")
 
     def _is_openai_oauth_request() -> bool:
         return (
@@ -1059,19 +1246,30 @@ async def create_speech_metadata(
 
     speech_iter = None
 
+    async def _advance_metadata_generation() -> bool:
+        """Return whether this iterator produced explicit completion evidence."""
+        metadata_before = getattr(request_data, "_tts_metadata", None)
+        try:
+            await speech_iter.__anext__()
+        except StopAsyncIteration:
+            metadata_after = getattr(request_data, "_tts_metadata", None)
+            return metadata_after is not metadata_before and isinstance(
+                metadata_after,
+                Mapping,
+            )
+        return True
+
     async def _refresh_openai_oauth_and_rebuild_iter() -> None:
         nonlocal user_id_int, tts_overrides, byok_tts_resolution, speech_iter
-        try:
-            user_id_int, tts_overrides, byok_tts_resolution = await _audio_shim_attr("_resolve_tts_byok")(
-                provider_hint=tts_provider_hint,
-                current_user=current_user,
-                request=request,
-                force_oauth_refresh=True,
-            )
-        except HTTPException:
-            raise
-        except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS:
-            raise
+        rejected_credentials = byok_tts_resolution
+        user_id_int, tts_overrides, byok_tts_resolution = await _audio_shim_attr("_resolve_tts_byok")(
+            provider_hint=tts_provider_hint,
+            model=request_data.model,
+            current_user=current_user,
+            request=request,
+            force_oauth_refresh=True,
+            rejected_credentials=rejected_credentials,
+        )
 
         if byok_tts_resolution is None:
             raise TTSAuthenticationError("OpenAI OAuth refresh did not return credentials")
@@ -1090,8 +1288,7 @@ async def create_speech_metadata(
         _raise_for_tts_error(exc, request_id)
 
     try:
-        with contextlib.suppress(StopAsyncIteration):
-            await speech_iter.__anext__()
+        metadata_generation_succeeded = await _advance_metadata_generation()
     except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS as exc:
         if (
             not oauth_retry_attempted
@@ -1108,8 +1305,7 @@ async def create_speech_metadata(
                 _record_oauth_401_retry("refresh_failed")
                 _raise_for_tts_error(exc, request_id)
             try:
-                with contextlib.suppress(StopAsyncIteration):
-                    await speech_iter.__anext__()
+                metadata_generation_succeeded = await _advance_metadata_generation()
             except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS as retry_exc:
                 if _is_tts_auth_failure(retry_exc):
                     _record_oauth_401_retry("retry_auth_failed")
@@ -1120,15 +1316,12 @@ async def create_speech_metadata(
         else:
             _raise_for_tts_error(exc, request_id)
     finally:
-        if byok_tts_resolution is not None:
-            try:
-                await byok_tts_resolution.touch_last_used()
-            except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS:
-                logger.debug("Failed to update BYOK last_used timestamp")
+        if metadata_generation_succeeded:
+            await _mark_credential_usage()
 
     metadata = getattr(request_data, "_tts_metadata", None)
     alignment_payload = None
-    if isinstance(metadata, dict):
+    if isinstance(metadata, Mapping):
         alignment_payload = metadata.get("alignment")
     if not alignment_payload:
         return Response(status_code=status.HTTP_204_NO_CONTENT, headers={"X-Request-Id": request_id})

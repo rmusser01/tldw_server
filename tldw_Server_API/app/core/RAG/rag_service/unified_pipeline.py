@@ -18,25 +18,45 @@ import calendar
 import copy
 import hashlib
 import inspect
+import json
+import math
 import os
 import re
 import sqlite3
 import time
 import uuid
+from collections.abc import Iterator
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
+from functools import partial
+from numbers import Real
 from types import SimpleNamespace
 from typing import Any, Callable, Literal, Optional, cast
 
 from loguru import logger
 
+from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
+from tldw_Server_API.app.core.Chat.bounded_daemon import (
+    SYNC_ADAPTER_CALL_POOL,
+    await_bounded_sync_call,
+    await_owned_worker,
+)
+from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
 from tldw_Server_API.app.core.DB_Management.media_db.api import (
     managed_media_database,
+)
+from tldw_Server_API.app.core.DB_Management.scope_context import (
+    ScopeContext,
+    content_authorization_cache_scope,
+    get_scope,
 )
 from tldw_Server_API.app.core.LLM_Calls.structured_output import (
     StructuredOutputOptions,
     StructuredOutputParseError,
     parse_structured_output,
+)
+from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import (
+    SummaryProviderError,
 )
 from tldw_Server_API.app.core.testing import (
     is_test_mode as _shared_is_test_mode,
@@ -45,11 +65,47 @@ from tldw_Server_API.app.core.testing import (
     is_truthy as _shared_is_truthy,
 )
 
-from .retrieval_executor import execute_retrieval_phase
 from .generation_executor import execute_generation_phase
+from .hyde import (
+    _embedding_model_from_config,
+    _embedding_provider_from_config,
+    _mark_runtime_used_for_embeddings,
+    _resolve_runtime_embedding_call,
+    _run_sync_embedding_call,
+    _runtime_local_embedding_call_kwargs,
+)
+from .retrieval_executor import execute_retrieval_phase
 from .retrieval_plan import RetrievalPlan
 
 _RERANK_DEBUG_DOCUMENT_CONTENT_MAX_CHARS = 500
+_RAG_PROVIDER_FAILURES = (ByokResolutionError, ChatAPIError)
+
+
+class _ProviderFailureBypass(BaseException):
+    """Carry a typed provider failure across retry/circuit accounting unchanged."""
+
+    __slots__ = ("failure",)
+
+    def __init__(self, failure: BaseException) -> None:
+        self.failure = failure
+        super().__init__()
+
+
+def _bounded_provider_failure_code(exc: BaseException) -> str:
+    """Map a typed provider failure to an allowlisted metadata code."""
+    allowed = {
+        "invalid_provider_credentials",
+        "missing_provider_credentials",
+        "provider_configuration_invalid",
+        "credential_store_unavailable",
+        "credential_scope_revoked",
+    }
+    code = str(getattr(exc, "code", "") or getattr(exc, "error_code", "") or "")
+    if code in allowed:
+        return code
+    if getattr(exc, "status_code", None) in {401, 403}:
+        return "invalid_provider_credentials"
+    return "provider_unavailable"
 
 
 def _serialize_result_document(doc: Any) -> dict[str, Any]:
@@ -126,6 +182,96 @@ def _clone_cached_document(doc: Any) -> Any:
 def _clone_cached_documents(documents: list[Any]) -> list[Any]:
     """Return independent document instances for cache store/load boundaries."""
     return [_clone_cached_document(doc) for doc in documents]
+
+
+def _restore_cached_document(document: Any) -> Optional["Document"]:
+    """Restore one supported cache wire document to the pipeline document type."""
+    if isinstance(document, Document):
+        return _clone_cached_document(document)
+    if not isinstance(document, dict):
+        return None
+    content = document.get("content")
+    document_id = document.get("id")
+    if not isinstance(content, str) or not isinstance(document_id, (str, int)):
+        return None
+    metadata = copy.deepcopy(document.get("metadata") or {})
+    if not isinstance(metadata, dict):
+        metadata = {}
+    source_value = document.get("source", metadata.get("source"))
+    if isinstance(source_value, DataSource):
+        source = source_value
+    else:
+        try:
+            source = DataSource(str(source_value))
+        except (TypeError, ValueError):
+            source = DataSource.MEDIA_DB
+    try:
+        score = float(document.get("score", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        score = 0.0
+    return Document(
+        id=str(document_id),
+        content=content,
+        metadata=metadata,
+        source=source,
+        score=score,
+    )
+
+
+def _extract_cached_documents(value: Any) -> list["Document"]:
+    """Extract only non-empty retrieval documents from a cache payload."""
+    if callable(_sanitize_cache_payload):
+        value = _sanitize_cache_payload(value)
+        if value is None:
+            return []
+    if isinstance(value, dict):
+        raw_documents = value.get("documents")
+    elif isinstance(value, list):
+        raw_documents = value
+    else:
+        return []
+    if not isinstance(raw_documents, list) or not raw_documents:
+        return []
+    return [
+        restored
+        for document in raw_documents
+        if (restored := _restore_cached_document(document)) is not None
+    ]
+
+
+_MAX_CACHED_QUERY_CHARS = 4096
+
+
+def _validate_semantic_cache_match(value: Any) -> Optional[tuple[str, float]]:
+    """Validate and bound the untrusted result returned by ``find_similar``."""
+    if not isinstance(value, tuple) or len(value) not in {2, 3}:
+        return None
+    cached_query, similarity = value[-2:]
+    if not isinstance(cached_query, str):
+        return None
+    cached_query = cached_query.strip()
+    if not cached_query or len(cached_query) > _MAX_CACHED_QUERY_CHARS:
+        return None
+    if isinstance(similarity, bool) or not isinstance(similarity, Real):
+        return None
+    similarity_value = float(similarity)
+    if not math.isfinite(similarity_value) or not 0.0 <= similarity_value <= 1.0:
+        return None
+    return cached_query, similarity_value
+
+
+async def _invoke_cache_callable(callable_obj: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+    """Invoke a cache callable once and await wrapped awaitable results."""
+    value = callable_obj(*args, **kwargs)
+    if inspect.isawaitable(value):
+        return await value
+    return value
+
+
+def _cache_identity_digest(value: dict[str, Any]) -> str:
+    """Return a deterministic short digest for cache identity components."""
+    encoded = json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()[:20]
 
 
 def _resolve_security_user_id(user_id: Any, feedback_user_id: Any) -> str:
@@ -245,6 +391,7 @@ _QueryIntent: Any = None
 _QueryRouter: Any = None
 _QueryRewriter: Any = None
 _generate_hypothetical_answer: Any = None
+_generate_hypothetical_answer_async: Any = None
 _hyde_embed_text: Any = None
 _expand_acronyms: Any = None
 _expand_synonyms: Any = None
@@ -365,8 +512,8 @@ def otel_span(name: str, *args, **kwargs):
 # Core types
 import contextlib
 
-from .metrics_collector import MetricsCollector, QueryMetrics
 from .evidence_models import RetrievedEvidence
+from .metrics_collector import MetricsCollector, QueryMetrics
 from .post_retrieval_coordinator import coordinate_standard_result_evidence
 from .request_resolution import (
     ResolvedRAGRequest,
@@ -375,6 +522,32 @@ from .request_resolution import (
 from .result_model import RAGResult
 from .retrieval_plan import build_retrieval_plan
 from .types import DataSource, Document
+
+
+def _consume_bound_sgl_response(
+    response: Any,
+    provider: str,
+    on_content: Callable[[], None] | None = None,
+    fail_closed: bool = False,
+) -> Any:
+    """Consume a bound SGL response and reject its legacy error-string form."""
+    if isinstance(response, Iterator):
+        from .generation import _classify_stream_content, _extract_stream_text
+
+        chunks: list[str] = []
+        for chunk in response:
+            chunks.append(str(chunk))
+            has_content, has_error = _classify_stream_content(
+                _extract_stream_text(chunk)
+            )
+            if on_content is not None and has_content:
+                on_content()
+            if fail_closed and has_error:
+                raise SummaryProviderError(code="provider_failure", provider=provider)
+        response = "".join(chunks)
+    if fail_closed and isinstance(response, str) and response.startswith("Error:"):
+        raise SummaryProviderError(code="provider_failure", provider=provider)
+    return response
 
 try:
     from tldw_Server_API.app.core.Text2SQL.source_registry import (
@@ -518,11 +691,16 @@ try:
     from .hyde import (
         generate_hypothetical_answer as _generate_hypothetical_answer,
     )
+    from .hyde import (
+        generate_hypothetical_answer_async as _generate_hypothetical_answer_async,
+    )
 except ImportError:
     _generate_hypothetical_answer = None
+    _generate_hypothetical_answer_async = None
     _hyde_embed_text = None
 
 generate_hypothetical_answer = _generate_hypothetical_answer
+generate_hypothetical_answer_async = _generate_hypothetical_answer_async
 hyde_embed_text = _hyde_embed_text
 
 try:
@@ -562,12 +740,16 @@ try:
         SemanticCache as _SemanticCache,
     )
     from .semantic_cache import (
+        _sanitize_retrieval_payload as _sanitize_cache_payload,
+    )
+    from .semantic_cache import (
         get_shared_cache as _get_shared_cache,
     )
 except ImportError:
     _SemanticCache = None
     _AdaptiveCache = None
     _get_shared_cache = None
+    _sanitize_cache_payload = None
 
 SemanticCache = _SemanticCache
 AdaptiveCache = _AdaptiveCache
@@ -1086,16 +1268,36 @@ try:
     from tldw_Server_API.app.core.Claims_Extraction.budget_guard import (
         resolve_claims_job_budget as _resolve_claims_job_budget,
     )
+except ImportError:
+    _ClaimsJobContext = None
+    _resolve_claims_job_budget = None
 
+try:
     from .claims import ClaimsEngine as _ClaimsEngine
 except ImportError:
     _ClaimsEngine = None
-    _ClaimsJobContext = None
-    _resolve_claims_job_budget = None
 
 ClaimsEngine = _ClaimsEngine
 ClaimsJobContext = _ClaimsJobContext
 resolve_claims_job_budget = _resolve_claims_job_budget
+
+
+def _resolve_claims_engine() -> Any:
+    """Recover the real claims engine after an import-order cycle completes."""
+    global ClaimsEngine
+    if ClaimsEngine is not None:
+        return ClaimsEngine
+    try:
+        from tldw_Server_API.app.core.Claims_Extraction.claims_engine import (
+            ClaimsEngine as _RealClaimsEngine,
+        )
+
+        from .claims import ClaimsEngine as _CandidateClaimsEngine
+    except ImportError:
+        return None
+    if _CandidateClaimsEngine is _RealClaimsEngine:
+        ClaimsEngine = _RealClaimsEngine
+    return _CandidateClaimsEngine
 
 
 @dataclass
@@ -1328,11 +1530,13 @@ def _filter_workspace_artifacts(
             or visibility == "workspace"
         )
 
-        should_filter = False
-        if is_workspace_artifact and not requested_workspace:
-            should_filter = True
-        elif requested_workspace and doc_workspace and doc_workspace != requested_workspace:
-            should_filter = True
+        should_filter = (
+            is_workspace_artifact and not requested_workspace
+        ) or (
+            bool(requested_workspace)
+            and bool(doc_workspace)
+            and doc_workspace != requested_workspace
+        )
 
         if should_filter:
             source = _document_canonical_source(doc)
@@ -1441,6 +1645,20 @@ def _resolve_sqlite_rag_db_path(
     if backend_name == "POSTGRESQL" and normalized in {":memory:", "/:memory:"}:
         return None
     return normalized
+
+
+def _should_restore_classification_local_retrieval(
+    *,
+    skip_retrieval_stack: bool,
+    skip_local_retrieval: bool,
+    classification_local_retrieval: Any,
+) -> bool:
+    """Return whether research failure may re-enable classification-disabled local retrieval."""
+    return (
+        not skip_retrieval_stack
+        and skip_local_retrieval
+        and classification_local_retrieval == "disabled"
+    )
 
 
 async def unified_rag_pipeline(
@@ -1625,6 +1843,7 @@ async def unified_rag_pipeline(
     index_namespace: Optional[str] = None,
     retrieval_plan: Optional[RetrievalPlan] = None,
     resolved_request: Optional[ResolvedRAGRequest] = None,
+    credential_runtime: Any = None,
 
     # ========== QUICK WINS ==========
     highlight_results: bool = False,
@@ -1814,6 +2033,36 @@ async def unified_rag_pipeline(
             reranking_strategy="hybrid"
         )
     """
+
+    ambient_scope = get_scope()
+    authorization_cache_scope: dict[str, object] | None = None
+    authorization_cache_error: str | None = None
+    if ambient_scope is not None:
+        if isinstance(ambient_scope, ScopeContext):
+            try:
+                authorization_cache_scope = content_authorization_cache_scope(
+                    ambient_scope
+                )
+            except (TypeError, ValueError):
+                authorization_cache_error = "malformed"
+        else:
+            authorization_cache_error = "malformed"
+
+    runtime_user_id = (
+        getattr(credential_runtime, "_user_id", None)
+        if credential_runtime is not None
+        else None
+    )
+    if runtime_user_id is not None:
+        if ambient_scope is None:
+            authorization_cache_error = "missing"
+        elif authorization_cache_scope is None:
+            authorization_cache_error = "malformed"
+        elif (
+            type(authorization_cache_scope["user_id"]) is not type(runtime_user_id)
+            or authorization_cache_scope["user_id"] != runtime_user_id
+        ):
+            authorization_cache_error = "user_mismatch"
 
     request_metadata: dict[str, Any] = {}
     inbound_metadata = kwargs.get("metadata")
@@ -2104,6 +2353,32 @@ async def unified_rag_pipeline(
         query=query,
         metadata={"original_query": query}
     )
+    optional_provider_failure_code: str | None = None
+
+    def _latch_optional_provider_failure(
+        component: str,
+        exc: BaseException,
+    ) -> str:
+        """Latch the first optional retrieval provider failure for this request."""
+        nonlocal optional_provider_failure_code
+        if optional_provider_failure_code is None:
+            optional_provider_failure_code = _bounded_provider_failure_code(exc)
+        result.metadata.setdefault("retrieval_coverage", {})[component] = {
+            "coverage": "degraded",
+            "failure_code": optional_provider_failure_code,
+        }
+        return optional_provider_failure_code
+
+    def _latched_optional_provider_failure(component: str) -> str | None:
+        """Return and record the request's latched optional provider failure."""
+        if credential_runtime is None or optional_provider_failure_code is None:
+            return None
+        result.metadata.setdefault("retrieval_coverage", {})[component] = {
+            "coverage": "degraded",
+            "failure_code": optional_provider_failure_code,
+        }
+        return optional_provider_failure_code
+
     standard_evidence_coordinated = False
     claims_payload = None
     factuality_payload = None
@@ -2114,6 +2389,39 @@ async def unified_rag_pipeline(
             result.metadata.update(inbound_meta)
     except TypeError:
         pass
+    result.metadata["retrieval_cache_hit"] = False
+    result.metadata["generation_executed"] = False
+    cache_bypass_modes = [
+        mode
+        for enabled, mode in (
+            (expand_query, "query_expansion"),
+            (enable_hyde, "hyde"),
+            (enable_prf, "prf"),
+            (enable_query_decomposition, "query_decomposition"),
+            (enable_gap_analysis, "gap_analysis"),
+        )
+        if enabled
+    ]
+    retrieval_cache_eligible = bool(
+        enable_cache
+        and not cache_bypass_modes
+        and not auto_temporal_filters
+    )
+    if enable_cache and cache_bypass_modes:
+        result.metadata["cache_bypassed"] = {
+            "reason": "secondary_retrieval_mode",
+            "modes": cache_bypass_modes,
+        }
+    elif enable_cache and auto_temporal_filters:
+        result.metadata["cache_bypassed"] = {
+            "reason": "auto_temporal_window",
+        }
+    if enable_cache and authorization_cache_error is not None:
+        retrieval_cache_eligible = False
+        result.metadata["cache_bypassed"] = {
+            "reason": "content_authorization_scope_unavailable",
+            "code": authorization_cache_error,
+        }
 
     def _ensure_profile_resolution_metadata() -> dict[str, Any]:
         profile_resolution = result.metadata.get("profile_resolution")
@@ -2151,6 +2459,9 @@ async def unified_rag_pipeline(
     _ensure_profile_resolution_metadata()
 
     cache_instance = None
+    cache_setup_attempted = False
+    cache_retrieval_snapshot: Optional[list[Any]] = None
+    base_retrieval_executed = False
     cache_max_size = 1000
     try:
         from tldw_Server_API.app.core.config import RAG_SERVICE_CONFIG
@@ -2158,25 +2469,97 @@ async def unified_rag_pipeline(
         cache_max_size = int((cfg.get("cache") or {}).get("max_cache_size", cache_max_size))
     except (ImportError, TypeError, ValueError):
         pass
-    cache_namespace = retrieval_index_namespace or (user_id or None)
-    if cache_namespace is None:
-        try:
-            parts = [media_db_path, notes_db_path, character_db_path, kanban_db_path, prompts_db_path]
-            if any(parts):
-                joined = "|".join([str(p or "") for p in parts])
-                cache_namespace = f"db:{hashlib.sha256(joined.encode('utf-8')).hexdigest()[:12]}"
-        except (TypeError, ValueError):
-            cache_namespace = None
-    workspace_cache_component = workspace_id or "global"
-    if cache_namespace is not None:
-        cache_namespace = f"{cache_namespace}|workspace:{workspace_cache_component}"
-    elif workspace_id is not None:
-        cache_namespace = f"workspace:{workspace_cache_component}"
+    def _build_cache_namespace() -> str:
+        def _cache_path_value(value: Any) -> Optional[str]:
+            if isinstance(value, (str, os.PathLike)):
+                return os.fspath(value)
+            return None
+
+        authorization_user_id = (
+            authorization_cache_scope.get("user_id")
+            if authorization_cache_scope is not None
+            else None
+        )
+        if authorization_user_id is not None:
+            owner_scope = {"kind": "user", "id": str(authorization_user_id)}
+        elif runtime_user_id is not None:
+            owner_scope = {
+                "kind": "user",
+                "id": str(runtime_user_id),
+            }
+        elif credential_runtime is None and user_id is not None:
+            owner_scope = {"kind": "user", "id": str(user_id)}
+        else:
+            owner_paths = {
+                "media": _cache_path_value(media_db_path)
+                or _cache_path_value(getattr(media_db, "db_path", None)),
+                "notes": _cache_path_value(notes_db_path),
+                "characters": _cache_path_value(character_db_path),
+                "kanban": _cache_path_value(kanban_db_path),
+                "prompts": _cache_path_value(prompts_db_path),
+                "world_books": _cache_path_value(world_books_db_path),
+                "dictionaries": _cache_path_value(chat_dictionaries_db_path),
+            }
+            owner_scope = {
+                "kind": "database" if any(owner_paths.values()) else "server",
+                "paths": owner_paths,
+            }
+
+        collection_scope = (
+            {
+                str(key): str(value)
+                for key, value in sorted(retrieval_plan.collection_names.items())
+            }
+            if retrieval_plan is not None
+            else {}
+        )
+        normalized_search_mode = str(retrieval_search_mode or "").strip().lower()
+        effective_date_range = None
+        if enable_date_filter and isinstance(date_range, dict):
+            effective_date_range = {
+                "start": str(date_range.get("start") or ""),
+                "end": str(date_range.get("end") or ""),
+            }
+        retrieval_scope = {
+            "sources": sorted(
+                _normalize_pipeline_sources(
+                    list(retrieval_sources) if retrieval_sources is not None else None
+                )
+            ),
+            "search_mode": normalized_search_mode,
+            "use_fts": normalized_search_mode in {"fts", "hybrid"},
+            "use_vector": normalized_search_mode in {"vector", "hybrid"},
+            "top_k": int(retrieval_top_k),
+            "min_score": float(retrieval_min_score),
+            "fts_level": str(fts_level),
+            "date_range": effective_date_range,
+            "late_chunking": {
+                "enabled": bool(enable_text_late_chunking),
+                "method": chunk_method,
+                "size": chunk_size,
+                "overlap": chunk_overlap,
+                "language": chunk_language,
+            },
+            "index_namespace": str(retrieval_index_namespace or ""),
+            "collection_names": collection_scope,
+        }
+        namespace_parts = [
+            f"owner:{_cache_identity_digest(owner_scope)}",
+            f"workspace:{_cache_identity_digest({'id': 'global' if workspace_id is None else str(workspace_id)})}",
+            f"retrieval:{_cache_identity_digest(retrieval_scope)}",
+        ]
+        if authorization_cache_scope is not None:
+            namespace_parts.insert(
+                1,
+                f"authorization:{_cache_identity_digest(authorization_cache_scope)}",
+            )
+        return "|".join(namespace_parts)
 
     def _get_cache_instance():
-        nonlocal cache_instance
-        if cache_instance is not None:
+        nonlocal cache_instance, cache_setup_attempted
+        if cache_setup_attempted:
             return cache_instance
+        cache_setup_attempted = True
         cache_cls = None
         if adaptive_cache and AdaptiveCache:
             cache_cls = AdaptiveCache
@@ -2185,6 +2568,7 @@ async def unified_rag_pipeline(
 
         if cache_cls:
             try:
+                cache_namespace = _build_cache_namespace()
                 if get_shared_cache:
                     cache_instance = get_shared_cache(
                         cache_cls=cache_cls,
@@ -2199,8 +2583,13 @@ async def unified_rag_pipeline(
                         ttl=cache_ttl,
                         namespace=cache_namespace,
                     )
-            except TypeError:
-                cache_instance = cache_cls(similarity_threshold=cache_threshold)
+            except (OSError, RuntimeError, TypeError, ValueError) as exc:
+                cache_instance = None
+                logger.warning(
+                    "Semantic cache disabled after scoped setup failure "
+                    "(error_type={})",
+                    type(exc).__name__,
+                )
         # Register with the RAGCache facade so health endpoints see real stats
         if cache_instance is not None:
             try:
@@ -2216,7 +2605,13 @@ async def unified_rag_pipeline(
             return await asyncio.wait_for(coro, timeout=timeout)
         return await coro
 
-    async def _resilient_call(component: str, func, *args, **kwargs):
+    async def _resilient_call(
+        component: str,
+        func,
+        *args,
+        bypass_provider_failures: bool = False,
+        **kwargs,
+    ):
         """Apply circuit breaker, retries, and timeout around async operations when enabled."""
         breaker = None
         if enable_resilience and circuit_breaker and get_coordinator and CircuitBreakerConfig:
@@ -2228,12 +2623,20 @@ async def unified_rag_pipeline(
             except (AttributeError, KeyError, TypeError):
                 breaker = None
 
+        async def _invoke():
+            try:
+                if asyncio.iscoroutinefunction(func):
+                    return await func(*args, **kwargs)
+                return func(*args, **kwargs)
+            except _RAG_PROVIDER_FAILURES as exc:
+                if bypass_provider_failures:
+                    raise _ProviderFailureBypass(exc) from None
+                raise
+
         async def _attempt():
             if breaker is not None:
-                return await breaker.call(func, *args, **kwargs)
-            if asyncio.iscoroutinefunction(func):
-                return await func(*args, **kwargs)
-            return func(*args, **kwargs)
+                return await breaker.call(_invoke)
+            return await _invoke()
 
         if enable_resilience and (retry_attempts or 0) > 1 and RetryPolicy and RetryConfig:
             policy = RetryPolicy(RetryConfig(max_attempts=int(retry_attempts or 1)))
@@ -2241,7 +2644,10 @@ async def unified_rag_pipeline(
         else:
             call_coro = _attempt()
 
-        return await _with_timeout(call_coro, timeout_seconds)
+        try:
+            return await _with_timeout(call_coro, timeout_seconds)
+        except _ProviderFailureBypass as bypass:
+            raise bypass.failure from None
 
     # Initialize monitoring if requested
     metrics = None
@@ -2302,6 +2708,7 @@ async def unified_rag_pipeline(
                 cache_disabled_for_scope = bool(enable_cache)
                 if cache_disabled_for_scope:
                     enable_cache = False
+                    retrieval_cache_eligible = False
                     result.metadata["cache_bypassed"] = {
                         "reason": "explicit_source_selection",
                     }
@@ -2329,7 +2736,7 @@ async def unified_rag_pipeline(
         except ValueError as exc:
             result.errors.append(f"invalid_source: {exc}")
             result.metadata["source_validation_error"] = str(exc)
-            raise _EarlyReturn()
+            raise _EarlyReturn() from exc
 
         if (
             sql_retriever is None
@@ -2355,6 +2762,8 @@ async def unified_rag_pipeline(
 
         def _build_multi_retriever(db_paths: dict[str, str]):
             base_kwargs: dict[str, Any] = {"user_id": user_id or "0", "media_db": media_db}
+            if credential_runtime is not None:
+                base_kwargs["credential_runtime"] = credential_runtime
             if chacha_db is not None:
                 base_kwargs["chacha_db"] = chacha_db
             prompts_db = kwargs.get("prompts_db")
@@ -2383,6 +2792,8 @@ async def unified_rag_pipeline(
                     return MultiDatabaseRetriever(db_paths, **variant)
                 except TypeError:
                     continue
+            if credential_runtime is not None:
+                raise TypeError("MultiDatabaseRetriever does not accept credential runtime")
             try:
                 return MultiDatabaseRetriever(db_paths, user_id=user_id or "0")
             except TypeError:
@@ -2615,11 +3026,20 @@ async def unified_rag_pipeline(
                 _cls_start = time.time()
                 _cls_provider = classifier_provider or generation_provider or "openai"
                 _cls_model = classifier_model or generation_model
+                _classification_stage_metadata: dict[str, Any] = {}
                 _classification = await classify_and_reformulate(
                     query=query,
                     chat_history=chat_history,
                     llm_provider=_cls_provider,
                     llm_model=_cls_model,
+                    **(
+                        {
+                            "credential_runtime": credential_runtime,
+                            "stage_metadata": _classification_stage_metadata,
+                        }
+                        if credential_runtime is not None
+                        else {}
+                    ),
                 )
                 result.timings["query_classification"] = time.time() - _cls_start
                 result.metadata["query_classification"] = {
@@ -2631,6 +3051,7 @@ async def unified_rag_pipeline(
                     "detected_intent": _classification.detected_intent,
                     "confidence": _classification.confidence,
                     "reasoning": _classification.reasoning,
+                    **_classification_stage_metadata,
                 }
 
                 # Apply classification decisions
@@ -2702,15 +3123,28 @@ async def unified_rag_pipeline(
                 _ref_start = time.time()
                 _ref_provider = classifier_provider or generation_provider or "openai"
                 _ref_model = classifier_model or generation_model
+                _reformulation_stage_metadata: dict[str, Any] = {}
                 reformulated = await _reformulate_q(
                     query=query,
                     chat_history=chat_history,
                     llm_provider=_ref_provider,
                     llm_model=_ref_model,
+                    **(
+                        {
+                            "credential_runtime": credential_runtime,
+                            "stage_metadata": _reformulation_stage_metadata,
+                        }
+                        if credential_runtime is not None
+                        else {}
+                    ),
                 )
                 if reformulated and reformulated != query:
                     result.metadata["reformulated_query"] = reformulated
                     _sync_effective_query(reformulated)
+                if _reformulation_stage_metadata:
+                    result.metadata["query_reformulation"] = dict(
+                        _reformulation_stage_metadata
+                    )
                 result.timings["query_reformulation"] = time.time() - _ref_start
             except Exception as _ref_exc:
                 logger.warning(f"Query reformulation failed: {_ref_exc!r}")
@@ -2728,6 +3162,7 @@ async def unified_rag_pipeline(
                 _research_start = time.time()
                 _research_mode = search_depth_mode or "balanced"
                 _db_ctx = {
+                    "user_id": user_id or "0",
                     "media_db_path": media_db_path,
                     "notes_db_path": notes_db_path,
                     "character_db_path": character_db_path,
@@ -2769,6 +3204,11 @@ async def unified_rag_pipeline(
                             enable_image_search=bool(enable_image_search),
                             enable_video_search=bool(enable_video_search),
                             on_progress=_progress_cb,
+                            **(
+                                {"credential_runtime": credential_runtime}
+                                if credential_runtime is not None
+                                else {}
+                            ),
                         )
 
                 _research_output = await research_loop(
@@ -2786,6 +3226,11 @@ async def unified_rag_pipeline(
                     enable_action_dedup=bool(enable_research_action_dedup),
                     enable_image_search=bool(enable_image_search),
                     enable_video_search=bool(enable_video_search),
+                    **(
+                        {"credential_runtime": credential_runtime}
+                        if credential_runtime is not None
+                        else {}
+                    ),
                 )
 
                 # Convert research results to Document objects
@@ -2818,6 +3263,14 @@ async def unified_rag_pipeline(
                     "action_dedup": _research_output.metadata.get("action_dedup", {}),
                     "discussion_platforms": discussion_platforms or ["reddit", "stackoverflow", "hackernews"],
                     "url_dedup": _research_output.metadata.get("url_dedup", {}),
+                    **(
+                        dict(_research_output.metadata.get("provider_stage") or {})
+                        if isinstance(
+                            _research_output.metadata.get("provider_stage"),
+                            dict,
+                        )
+                        else {}
+                    ),
                     "steps": [
                         {
                             "iteration": s.iteration,
@@ -2834,17 +3287,52 @@ async def unified_rag_pipeline(
                 if enable_image_search or enable_video_search:
                     _images = []
                     _videos = []
+                    _media_provider_stage: dict[str, Any] = {}
                     for _step in _research_output.steps:
-                        if _step.output and _step.output.success and _step.output.results:
-                            _step_type = (_step.output.metadata or {}).get("type", "")
+                        if not _step.output or not _step.output.success:
+                            continue
+                        _step_metadata = (
+                            _step.output.metadata
+                            if isinstance(_step.output.metadata, dict)
+                            else {}
+                        )
+                        _step_type = _step_metadata.get("type", "")
+                        if _step_type not in {"images", "videos"}:
+                            continue
+                        if _step.output.results:
                             if _step_type == "images":
                                 _images.extend(_step.output.results)
-                            elif _step_type == "videos":
+                            else:
                                 _videos.extend(_step.output.results)
+                        _verification_available = _step_metadata.get(
+                            "verification_available"
+                        )
+                        if isinstance(_verification_available, bool):
+                            _bounded_stage = {
+                                "verification_available": _verification_available
+                            }
+                            if (
+                                _verification_available is False
+                                and _step_metadata.get("failure_code")
+                                == "provider_unavailable"
+                            ):
+                                _bounded_stage["failure_code"] = "provider_unavailable"
+                            if (
+                                _verification_available is False
+                                or _media_provider_stage.get(
+                                    "verification_available"
+                                )
+                                is not False
+                            ):
+                                _media_provider_stage = _bounded_stage
                     if _images:
                         result.metadata["images"] = _images
                     if _videos:
                         result.metadata["videos"] = _videos
+                    if _media_provider_stage:
+                        result.metadata["research"]["media_provider_stage"] = (
+                            _media_provider_stage
+                        )
 
                 logger.info(
                     f"Research loop completed: {_research_output.total_iterations} iterations, "
@@ -2854,9 +3342,26 @@ async def unified_rag_pipeline(
 
                 # Skip cache/retrieval after a successful research loop so the
                 # assembled research evidence remains the source of truth.
-                _skip_retrieval_stack = True
-                _skip_retrieval_reason = "research_loop"
-                result.metadata["research_retrieval_bypassed"] = True
+                _research_provider_stage = _research_output.metadata.get("provider_stage")
+                _research_available = not (
+                    isinstance(_research_provider_stage, dict)
+                    and _research_provider_stage.get("verification_available") is False
+                )
+                if _research_available:
+                    _skip_retrieval_stack = True
+                    _skip_retrieval_reason = "research_loop"
+                    result.metadata["research_retrieval_bypassed"] = True
+                elif _should_restore_classification_local_retrieval(
+                    skip_retrieval_stack=_skip_retrieval_stack,
+                    skip_local_retrieval=_skip_local_retrieval,
+                    classification_local_retrieval=result.metadata.get(
+                        "classification_local_retrieval"
+                    ),
+                ):
+                    _skip_local_retrieval = False
+                    result.metadata["classification_local_retrieval"] = (
+                        "fallback_after_research_unavailable"
+                    )
 
             except Exception as _res_exc:
                 logger.warning(f"Research loop failed, falling back to standard pipeline: {_res_exc!r}")
@@ -3126,97 +3631,6 @@ async def unified_rag_pipeline(
             prefer_current_scalars=retrieval_scalar_overrides_applied,
         )
 
-        # ========== CACHE CHECK ==========
-        cached_documents = None
-        if enable_cache and not _skip_retrieval_stack and not _skip_local_retrieval:
-            cache_start = time.time()
-            cache = _get_cache_instance()
-
-            if cache:
-                # First try direct get on the main query (support sync or async)
-                try:
-                    get_fn = cache.get
-                    if asyncio.iscoroutinefunction(get_fn):
-                        direct = await get_fn(query)
-                    else:
-                        direct = get_fn(query)
-                except (AttributeError, OSError, RuntimeError, TypeError):
-                    direct = None
-                if direct:
-                    cached_documents = direct
-                    result.cache_hit = True
-                else:
-                    # Check cache for all query variations
-                    for q in expanded_queries:
-                        try:
-                            find_fn = getattr(cache, 'find_similar', None)
-                            if find_fn is None:
-                                break
-                            if asyncio.iscoroutinefunction(find_fn):
-                                cached_result = await find_fn(q)
-                            else:
-                                cached_result = find_fn(q)
-                        except (AttributeError, OSError, RuntimeError, TypeError):
-                            cached_result = None
-                        if cached_result:
-                            # find_similar returns (key, query, sim) or (query, sim)
-                            if len(cached_result) == 3:
-                                _, cached_query, similarity = cached_result
-                            else:
-                                cached_query, similarity = cached_result
-                            try:
-                                if asyncio.iscoroutinefunction(get_fn):
-                                    cached_documents = await get_fn(cached_query)
-                                else:
-                                    cached_documents = get_fn(cached_query)
-                            except (AttributeError, OSError, RuntimeError, TypeError):
-                                cached_documents = None
-                            if cached_documents:
-                                result.cache_hit = True
-                                result.metadata["cache_similarity"] = similarity
-                                result.metadata["cached_query"] = cached_query
-                                break
-
-                if result.cache_hit:
-                    empty_cached_docs = False
-                    if isinstance(cached_documents, dict):
-                        docs = cached_documents.get("documents")
-                        if isinstance(docs, list) and not docs:
-                            empty_cached_docs = True
-                    elif isinstance(cached_documents, list) and not cached_documents:
-                        empty_cached_docs = True
-                    if empty_cached_docs:
-                        # Treat empty cached results as a miss to avoid stale false negatives.
-                        result.cache_hit = False
-                        cached_documents = None
-
-                if result.cache_hit:
-                    if isinstance(cached_documents, dict):
-                        ans = cached_documents.get("answer")
-                        if ans is not None:
-                            result.generated_answer = ans
-                        docs = cached_documents.get("documents")
-                        if isinstance(docs, list):
-                            result.documents = _clone_cached_documents(docs)
-                        if cached_documents.get("cached") is True:
-                            result.metadata["cached_flag"] = True
-                    elif isinstance(cached_documents, list):
-                        # Backward compatibility: older cache entries stored document lists directly
-                        result.documents = _clone_cached_documents(cached_documents)
-                    result.metadata.setdefault("cached_flag", True)
-
-            result.timings["cache_check"] = time.time() - cache_start
-            if metrics:
-                metrics.cache_lookup_time = result.timings["cache_check"]
-        elif _skip_retrieval_stack or _skip_local_retrieval:
-            result.metadata["cache_bypassed"] = {
-                "reason": (
-                    _skip_retrieval_reason
-                    if _skip_retrieval_stack
-                    else "classification_local_disabled"
-                )
-            }
-
         # ========== INTENT-BASED WEIGHTING (optional) ==========
         if adaptive_hybrid_weights and search_mode == "hybrid":
             try:
@@ -3264,8 +3678,25 @@ async def unified_rag_pipeline(
                     hyde_model = hyde_model or (str(raw_model).strip() if raw_model else None)
                 except (ImportError, AttributeError, OSError, TypeError, ValueError):
                     pass
-                hypo = generate_hypothetical_answer(query, hyde_provider, hyde_model)
-                vec = await hyde_embed_text(hypo)
+                hyde_embedding_metadata: dict[str, Any] = {}
+                if credential_runtime is None:
+                    hypo = generate_hypothetical_answer(query, hyde_provider, hyde_model)
+                    vec = await hyde_embed_text(hypo)
+                else:
+                    hypo = await generate_hypothetical_answer_async(
+                        query,
+                        hyde_provider,
+                        hyde_model,
+                        credential_runtime=credential_runtime,
+                        stage_metadata=hyde_embedding_metadata,
+                    )
+                    vec = await hyde_embed_text(
+                        hypo,
+                        credential_runtime=credential_runtime,
+                        stage_metadata=hyde_embedding_metadata,
+                    )
+                if hyde_embedding_metadata:
+                    result.metadata["hyde_embedding"] = hyde_embedding_metadata
                 if vec:
                     hyde_vector = vec
                     result.metadata["hyde_applied"] = True
@@ -3353,6 +3784,70 @@ async def unified_rag_pipeline(
             except (AttributeError, TypeError, ValueError, RuntimeError):
                 pass
 
+        # ========== CACHE CHECK ==========
+        # Resolve auto-temporal scope before deriving the retrieval cache identity.
+        if retrieval_cache_eligible and not _skip_retrieval_stack and not _skip_local_retrieval:
+            cache_start = time.time()
+            cache = _get_cache_instance()
+
+            if cache:
+                get_fn = getattr(cache, "get", None)
+                try:
+                    direct = (
+                        await _invoke_cache_callable(get_fn, query)
+                        if callable(get_fn)
+                        else None
+                    )
+                except (AttributeError, OSError, RuntimeError, TypeError):
+                    direct = None
+                cached_documents = _extract_cached_documents(direct)
+                if cached_documents:
+                    result.cache_hit = True
+                else:
+                    for q in expanded_queries:
+                        try:
+                            find_fn = getattr(cache, "find_similar", None)
+                            if not callable(find_fn):
+                                break
+                            cached_result = await _invoke_cache_callable(find_fn, q)
+                        except (AttributeError, OSError, RuntimeError, TypeError):
+                            cached_result = None
+                        validated_match = _validate_semantic_cache_match(cached_result)
+                        if validated_match is None:
+                            continue
+                        cached_query, similarity = validated_match
+                        try:
+                            similar_payload = (
+                                await _invoke_cache_callable(get_fn, cached_query)
+                                if callable(get_fn)
+                                else None
+                            )
+                        except (AttributeError, OSError, RuntimeError, TypeError):
+                            similar_payload = None
+                        cached_documents = _extract_cached_documents(similar_payload)
+                        if cached_documents:
+                            result.cache_hit = True
+                            result.metadata["cache_similarity"] = similarity
+                            break
+
+                if result.cache_hit:
+                    result.documents = cached_documents
+                    result.generated_answer = None
+                    result.metadata["retrieval_cache_hit"] = True
+                    result.metadata["cached_flag"] = True
+
+            result.timings["cache_check"] = time.time() - cache_start
+            if metrics:
+                metrics.cache_lookup_time = result.timings["cache_check"]
+        elif _skip_retrieval_stack or _skip_local_retrieval:
+            result.metadata["cache_bypassed"] = {
+                "reason": (
+                    _skip_retrieval_reason
+                    if _skip_retrieval_stack
+                    else "classification_local_disabled"
+                )
+            }
+
         # ========== DOCUMENT RETRIEVAL ==========
         if not result.cache_hit and not _skip_retrieval_stack and not _skip_local_retrieval:
             retrieval_start = time.time()
@@ -3379,7 +3874,6 @@ async def unified_rag_pipeline(
                         _otel_cm = None
                         _otel_span = None
                 if MultiDatabaseRetriever and RetrievalConfig:
-
                     # Set up database paths
                     db_paths = _build_pipeline_db_paths()
 
@@ -3469,19 +3963,28 @@ async def unified_rag_pipeline(
                         retrieval_cfg: Optional[Any] = None,
                         top_k_override: Optional[int] = None,
                     ) -> list[Document]:
-                        evidence = await _resilient_call(
-                            component,
-                            execute_retrieval_phase,
-                            resolved_request=resolved_request,
-                            retrieval_plan=_effective_retrieval_plan_for_query(
-                                query_text,
-                                top_k_override=top_k_override,
-                            ),
-                            retriever=retriever,
-                            retrieval_config=retrieval_cfg or config,
-                            allowed_media_ids=include_media_ids,
-                            allowed_note_ids=include_note_ids,
-                        )
+                        if _latched_optional_provider_failure(component) is not None:
+                            return []
+                        try:
+                            evidence = await _resilient_call(
+                                component,
+                                execute_retrieval_phase,
+                                resolved_request=resolved_request,
+                                retrieval_plan=_effective_retrieval_plan_for_query(
+                                    query_text,
+                                    top_k_override=top_k_override,
+                                ),
+                                retriever=retriever,
+                                retrieval_config=retrieval_cfg or config,
+                                allowed_media_ids=include_media_ids,
+                                allowed_note_ids=include_note_ids,
+                                bypass_provider_failures=credential_runtime is not None,
+                            )
+                        except _RAG_PROVIDER_FAILURES as exc:
+                            if credential_runtime is None:
+                                raise
+                            _latch_optional_provider_failure(component, exc)
+                            return []
                         evidence_docs = getattr(evidence, "documents", None)
                         return list(evidence_docs or [])
 
@@ -3496,7 +3999,9 @@ async def unified_rag_pipeline(
                         retrieval_config=config,
                         allowed_media_ids=include_media_ids,
                         allowed_note_ids=include_note_ids,
+                        bypass_provider_failures=credential_runtime is not None,
                     )
+                    base_retrieval_executed = True
                     documents = list(retrieved_evidence.documents)
 
                     # Fallback: if no documents were retrieved via MultiDatabaseRetriever,
@@ -3806,7 +4311,14 @@ async def unified_rag_pipeline(
                                     return res if isinstance(res, list) else []
 
                                 subquery_results: dict[str, Any] = {}
-                                subqueries_to_run = list(subqueries[1:])
+                                subqueries_to_run = (
+                                    []
+                                    if _latched_optional_provider_failure(
+                                        "retrieval_decomposition"
+                                    )
+                                    is not None
+                                    else list(subqueries[1:])
+                                )
                                 try:
                                     max_workers = max(1, int(subquery_max_concurrency or 1))
                                 except (TypeError, ValueError):
@@ -3951,8 +4463,10 @@ async def unified_rag_pipeline(
                 asyncio.TimeoutError,
                 sqlite3.Error,
             ) as e:
-                result.errors.append(f"Document retrieval failed: {str(e)}")
-                logger.error(f"Retrieval error: {e}")
+                if credential_runtime is not None and isinstance(e, _RAG_PROVIDER_FAILURES):
+                    raise
+                result.errors.append("document_retrieval_failed")
+                logger.error("Document retrieval failed")
                 # Sample payload exemplar on retrieval failure
                 try:
                     from .payload_exemplars import maybe_record_exemplar
@@ -4013,8 +4527,9 @@ async def unified_rag_pipeline(
                         ValueError,
                         asyncio.TimeoutError,
                         sqlite3.Error,
-                    ) as _fb_err:
-                        result.errors.append(f"Media DB fallback retrieval on error failed: {str(_fb_err)}")
+                    ):
+                        result.errors.append("media_db_fallback_failed")
+                        logger.error("Media DB fallback retrieval failed")
             finally:
                 # Ensure OTEL span is closed
                 if _otel_cm is not None:
@@ -4032,6 +4547,19 @@ async def unified_rag_pipeline(
                 "reason": "classification_local_disabled",
                 "documents_preserved": int(len(result.documents or [])),
             }
+
+        if (
+            retrieval_cache_eligible
+            and base_retrieval_executed
+            and not result.cache_hit
+            and not _skip_retrieval_stack
+            and not _skip_local_retrieval
+            and result.documents
+        ):
+            _apply_workspace_filtering_to_result()
+            cache_retrieval_snapshot = _clone_cached_documents(
+                list(result.documents)
+            )
 
         # ========== MULTI-VECTOR PASSAGES (optional, pre-rerank) ==========
         if enable_multi_vector_passages and result.documents:
@@ -4067,12 +4595,23 @@ async def unified_rag_pipeline(
                         max_spans_per_doc=int(mv_max_spans or 8),
                         flatten_to_spans=bool(mv_flatten_to_spans or False),
                     )
-                    mv_docs = await apply_multi_vector_passages(
-                        query=query,
-                        documents=result.documents,
-                        config=cfg,
-                        user_id=user_id,
-                    )
+                    multi_vector_embedding_metadata: dict[str, Any] = {}
+                    multi_vector_kwargs: dict[str, Any] = {
+                        "query": query,
+                        "documents": result.documents,
+                        "config": cfg,
+                        "user_id": user_id,
+                    }
+                    if credential_runtime is not None:
+                        multi_vector_kwargs.update(
+                            credential_runtime=credential_runtime,
+                            stage_metadata=multi_vector_embedding_metadata,
+                        )
+                    mv_docs = await apply_multi_vector_passages(**multi_vector_kwargs)
+                    if multi_vector_embedding_metadata:
+                        result.metadata.setdefault("multi_vector", {}).update(
+                            multi_vector_embedding_metadata
+                        )
                     if mv_docs:
                         result.documents = mv_docs[: top_k]
                         result.metadata.setdefault("multi_vector", {})
@@ -4160,7 +4699,60 @@ async def unified_rag_pipeline(
                         snippet = (d.content or "")[:300].replace("\n", " ")
                         prompt += f"- {snippet}\n"
                     prompt += "\nJSON:"
-                    llm_out = llm_analyze(api_name=_prov, input_data="", custom_prompt_arg=prompt, model_override=_model)
+                    gap_handle = None
+                    if credential_runtime is not None:
+                        gap_handle = await credential_runtime.resolve(
+                            _prov,
+                            model=_model,
+                        )
+                    gap_stream_state = {"content": False}
+
+                    def _call_gap_analyzer() -> Any:
+                        response = llm_analyze(
+                            api_name=_prov,
+                            input_data=prompt,
+                            custom_prompt_arg=None,
+                            model_override=_model,
+                            api_key=(gap_handle.api_key if gap_handle is not None else None),
+                            app_config=(gap_handle.app_config if gap_handle is not None else None),
+                            credentials_resolved=gap_handle is not None,
+                            provider_credentials=gap_handle,
+                            raise_on_error=gap_handle is not None,
+                        )
+                        return _consume_bound_sgl_response(
+                            response,
+                            _prov,
+                            on_content=lambda: gap_stream_state.__setitem__(
+                                "content",
+                                True,
+                            ),
+                            fail_closed=gap_handle is not None,
+                        )
+
+                    async def _run_gap_analyzer() -> Any:
+                        gap_completed = False
+                        try:
+                            value = await await_bounded_sync_call(
+                                _call_gap_analyzer,
+                                pool=SYNC_ADAPTER_CALL_POOL,
+                                exhaustion_message=(
+                                    "RAG optional adapter capacity is exhausted"
+                                ),
+                            )
+                            gap_completed = True
+                            return value
+                        finally:
+                            if gap_handle is not None and (
+                                gap_completed or gap_stream_state["content"]
+                            ):
+                                await credential_runtime.mark_used(gap_handle)
+
+                    gap_operation = _run_gap_analyzer()
+                    llm_out = (
+                        await await_owned_worker(gap_operation)
+                        if gap_handle is not None
+                        else await gap_operation
+                    )
                     if isinstance(llm_out, str):
                         try:
                             parsed = parse_structured_output(
@@ -4175,6 +4767,16 @@ async def unified_rag_pipeline(
                                     followups = [q for q in wrapped_followups if isinstance(q, str) and q.strip()]
                         except (StructuredOutputParseError, TypeError, ValueError):
                             followups = [s.strip("- ") for s in llm_out.splitlines() if s.strip()]
+                except (ByokResolutionError, SummaryProviderError) as exc:
+                    result.metadata["gap_analysis"] = {
+                        "failure_code": (
+                            exc.code
+                            if isinstance(exc, ByokResolutionError)
+                            else "provider_unavailable"
+                        ),
+                        "verification_available": False,
+                    }
+                    followups = []
                 except (
                     AttributeError,
                     ConnectionError,
@@ -4184,26 +4786,34 @@ async def unified_rag_pipeline(
                     ValueError,
                     asyncio.TimeoutError,
                 ):
-                    # Fallback
+                    if credential_runtime is not None:
+                        result.metadata["gap_analysis"] = {
+                            "failure_code": "provider_unavailable",
+                            "verification_available": False,
+                        }
                     followups = [f"detailed {query}", f"examples {query}"]
                 followups = [q for q in followups if isinstance(q, str) and q.strip()][:max_followup_searches]
                 if followups:
-                    # Run in parallel
-                    tasks = [
-                        _execute_retrieval_variant("retrieval_followup", fq)
-                        for fq in followups
-                    ]
-                    try:
-                        follow_results = await asyncio.gather(*tasks)
-                    except (
-                        ConnectionError,
-                        OSError,
-                        RuntimeError,
-                        TypeError,
-                        ValueError,
-                        asyncio.TimeoutError,
-                    ):
+                    if _latched_optional_provider_failure("retrieval_followup") is not None:
                         follow_results = []
+                    else:
+                        # Calls already running when one fails finish normally; later
+                        # optional callbacks observe the request-scoped latch.
+                        tasks = [
+                            _execute_retrieval_variant("retrieval_followup", fq)
+                            for fq in followups
+                        ]
+                        try:
+                            follow_results = await asyncio.gather(*tasks)
+                        except (
+                            ConnectionError,
+                            OSError,
+                            RuntimeError,
+                            TypeError,
+                            ValueError,
+                            asyncio.TimeoutError,
+                        ):
+                            follow_results = []
                     # Merge by id, keep higher score
                     merged = {d.id: d for d in result.documents}
                     for lst in follow_results:
@@ -4653,10 +5263,17 @@ async def unified_rag_pipeline(
                 accumulator = EvidenceAccumulator(
                     max_rounds=accumulation_max_rounds,
                     enable_gap_assessment=True,
+                    **(
+                        {"credential_runtime": credential_runtime}
+                        if credential_runtime is not None
+                        else {}
+                    ),
                 )
 
                 # Create retrieval function for additional rounds
                 async def _additional_retrieval(gap_query: str, exclude_ids: set):
+                    if _latched_optional_provider_failure("evidence_accumulation") is not None:
+                        return []
                     if not (MultiDatabaseRetriever and RetrievalConfig):
                         return []
                     try:
@@ -4691,6 +5308,11 @@ async def unified_rag_pipeline(
                         )
                         # Filter out already-seen documents
                         return [d for d in new_docs if d.id not in exclude_ids]
+                    except _RAG_PROVIDER_FAILURES as exc:
+                        if credential_runtime is None:
+                            raise
+                        _latch_optional_provider_failure("evidence_accumulation", exc)
+                        return []
                     except (
                         AttributeError,
                         ConnectionError,
@@ -4719,6 +5341,13 @@ async def unified_rag_pipeline(
                     "initial_docs": accumulation_result.metadata.get("initial_docs", 0),
                     "final_docs": len(accumulation_result.documents),
                     "docs_added": accumulation_result.metadata.get("docs_added", 0),
+                    **(
+                        {
+                            key: accumulation_result.metadata[key]
+                            for key in ("verification_available", "failure_code")
+                            if key in accumulation_result.metadata
+                        }
+                    ),
                 }
                 result.timings["evidence_accumulation"] = time.time() - accumulation_start
 
@@ -4758,7 +5387,10 @@ async def unified_rag_pipeline(
                     fallback_to_score=grading_fallback_to_score,
                     fallback_min_score=grading_fallback_min_score,
                 )
-                grader = DocumentGrader(config=grading_config)
+                grader = DocumentGrader(
+                    config=grading_config,
+                    credential_runtime=credential_runtime,
+                )
 
                 filtered_docs, grading_metadata = await grader.filter_relevant(
                     query=query,
@@ -4779,6 +5411,16 @@ async def unified_rag_pipeline(
                     "avg_relevance": grading_metadata.get("avg_relevance", 0.0),
                     "grading_latency_ms": grading_metadata.get("total_latency_ms", 0),
                 }
+                if grading_metadata.get("verification_available") is False:
+                    result.metadata["document_grading"].update(
+                        {
+                            "failure_code": grading_metadata.get(
+                                "failure_code",
+                                "provider_unavailable",
+                            ),
+                            "verification_available": False,
+                        }
+                    )
 
                 # Check if we should trigger query rewriting loop (Stage 2)
                 avg_relevance = grading_metadata.get("avg_relevance", 0.0)
@@ -4869,6 +5511,13 @@ async def unified_rag_pipeline(
 
                     # Re-run retrieval with rewritten query
                     if MultiDatabaseRetriever and RetrievalConfig:
+                        latched_code = _latched_optional_provider_failure("query_rewrite")
+                        if latched_code is not None:
+                            rewrite_attempts[-1].update(
+                                retrieval_coverage="degraded",
+                                failure_code=latched_code,
+                            )
+                            break
                         try:
                             db_paths = _build_pipeline_db_paths()
 
@@ -4907,7 +5556,10 @@ async def unified_rag_pipeline(
                                         fallback_to_score=grading_fallback_to_score,
                                         fallback_min_score=grading_fallback_min_score,
                                     )
-                                    grader = DocumentGrader(config=grading_config)
+                                    grader = DocumentGrader(
+                                        config=grading_config,
+                                        credential_runtime=credential_runtime,
+                                    )
                                     _, new_grading_metadata = await grader.filter_relevant(
                                         query=rewritten_query,
                                         documents=new_docs,
@@ -4934,6 +5586,18 @@ async def unified_rag_pipeline(
                                     current_query = rewritten_query
                                     break
 
+                        except _RAG_PROVIDER_FAILURES as ret_err:
+                            if credential_runtime is None:
+                                raise
+                            failure_code = _latch_optional_provider_failure(
+                                "query_rewrite",
+                                ret_err,
+                            )
+                            rewrite_attempts[-1].update(
+                                retrieval_coverage="degraded",
+                                failure_code=failure_code,
+                            )
+                            break
                         except (
                             AttributeError,
                             ConnectionError,
@@ -5026,7 +5690,11 @@ async def unified_rag_pipeline(
                     # Determine LLM reranker provider/model from config when requested
                     selected_strategy = strategy_map[reranking_strategy]
                     llm_client = None
-                    if selected_strategy == RerankingStrategy.LLM_SCORING:
+                    reranker_credential_handle = None
+                    if selected_strategy in {
+                        RerankingStrategy.LLM_SCORING,
+                        RerankingStrategy.TWO_TIER,
+                    }:
                         try:
                             import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as sgl
                             from tldw_Server_API.app.core.config import load_and_log_configs
@@ -5037,26 +5705,75 @@ async def unified_rag_pipeline(
                             model = (cfg.get('RAG_LLM_RERANKER_MODEL') or '').strip()
                             if not model:
                                 # No model set -> fallback to FlashRank
-                                selected_strategy = RerankingStrategy.FLASHRANK
+                                if selected_strategy == RerankingStrategy.LLM_SCORING:
+                                    selected_strategy = RerankingStrategy.FLASHRANK
                             else:
+                                if credential_runtime is not None:
+                                    try:
+                                        reranker_credential_handle = await credential_runtime.resolve(
+                                            prov or "openai",
+                                            model=model,
+                                        )
+                                    except ByokResolutionError as exc:
+                                        result.metadata["reranking"] = {
+                                            "degraded": True,
+                                            "failure_code": exc.code,
+                                            "verification_available": False,
+                                        }
+                                        result.metadata.pop(
+                                            "reranking_calibration",
+                                            None,
+                                        )
+
                                 class _LLMClient:
-                                    def __init__(self, provider: str, model_name: str):
+                                    def __init__(self, provider: str, model_name: str, handle: Any):
                                         self.provider = provider or 'openai'
                                         self.model_name = model_name
+                                        self.handle = handle
+                                        self.credentials_resolved = handle is not None
+                                        self.used = False
+
                                     def analyze(self, prompt_text: str):
                                         # Use analyze with prompt as custom_prompt_arg
-                                        return sgl.analyze(
+                                        response = sgl.analyze(
                                             api_name=self.provider,
-                                            input_data="",
-                                            custom_prompt_arg=prompt_text,
-                                            api_key=None,
+                                            input_data=prompt_text,
+                                            custom_prompt_arg=None,
+                                            api_key=(
+                                                self.handle.api_key
+                                                if self.handle is not None
+                                                else None
+                                            ),
                                             system_message=None,
                                             temp=None,
                                             model_override=self.model_name,
+                                            app_config=(
+                                                self.handle.app_config
+                                                if self.handle is not None
+                                                else None
+                                            ),
+                                            credentials_resolved=self.handle is not None,
+                                            provider_credentials=self.handle,
+                                            raise_on_error=self.handle is not None,
                                         )
-                                llm_client = _LLMClient(prov, model)
+                                        response = _consume_bound_sgl_response(
+                                            response,
+                                            self.provider,
+                                            on_content=lambda: setattr(self, "used", True),
+                                            fail_closed=self.handle is not None,
+                                        )
+                                        self.used = True
+                                        return response
+
+                                if credential_runtime is None or reranker_credential_handle is not None:
+                                    llm_client = _LLMClient(
+                                        prov,
+                                        model,
+                                        reranker_credential_handle,
+                                    )
                         except (ImportError, AttributeError, OSError, RuntimeError, TypeError, ValueError):
-                            selected_strategy = RerankingStrategy.FLASHRANK
+                            if selected_strategy == RerankingStrategy.LLM_SCORING:
+                                selected_strategy = RerankingStrategy.FLASHRANK
 
                     # Determine model for reranker when applicable
                     model_name_for_reranker = None
@@ -5100,7 +5817,23 @@ async def unified_rag_pipeline(
                                 limit=rerank_debug_limit,
                             )
                         reranker = create_reranker(selected_strategy, rerank_config, llm_client=llm_client)
-                        reranked = await _resilient_call("reranking", reranker.rerank, query, result.documents)
+                        try:
+                            reranked = await _resilient_call(
+                                "reranking",
+                                reranker.rerank,
+                                query,
+                                result.documents,
+                            )
+                        finally:
+                            if (
+                                credential_runtime is not None
+                                and reranker_credential_handle is not None
+                                and llm_client is not None
+                                and llm_client.used
+                            ):
+                                await credential_runtime.mark_used(
+                                    reranker_credential_handle
+                                )
                     except Exception as rerank_exc:
                         if reranking_strategy != "two_tier":
                             raise
@@ -5153,20 +5886,49 @@ async def unified_rag_pipeline(
                     # If reranker exposes calibration metadata (e.g., TwoTier), record it
                     try:
                         if hasattr(reranker, 'last_metadata') and isinstance(reranker.last_metadata, dict):
-                            result.metadata.setdefault("reranking_calibration", {})
-                            result.metadata["reranking_calibration"].update(reranker.last_metadata)
-                            # Attach learned-fusion specific decoration when applicable
-                            _decorate_calibration_metadata()
+                            if reranker.last_metadata.get("degraded"):
+                                result.metadata.pop("reranking_calibration", None)
+                                reranking_metadata = result.metadata.setdefault(
+                                    "reranking",
+                                    {},
+                                )
+                                reranking_metadata.update(
+                                    {
+                                        "degraded": True,
+                                        "failure_code": reranking_metadata.get(
+                                            "failure_code"
+                                        )
+                                        or reranker.last_metadata.get(
+                                            "failure_code",
+                                            "provider_unavailable",
+                                        ),
+                                        "verification_available": False,
+                                    }
+                                )
+                            else:
+                                result.metadata.setdefault("reranking_calibration", {})
+                                result.metadata["reranking_calibration"].update(reranker.last_metadata)
+                                # Attach learned-fusion specific decoration when applicable
+                                _decorate_calibration_metadata()
                     except (AttributeError, RuntimeError, TypeError, ValueError):
                         pass
 
-                    # For non Two-Tier strategies, if learned fusion is requested but no
-                    # calibrator metadata exists, compute a simple fused probability from
-                    # the top document score so that downstream gating can still use a
-                    # calibrated signal.
+                    # If learned fusion is requested but no calibrator metadata exists,
+                    # compute a simple fused probability from the top document score.
+                    # A credential-degraded reranker has no trustworthy verification
+                    # signal, so it must not synthesize calibration or gate generation.
                     if enable_learned_fusion:
                         try:
-                            if isinstance(result.metadata, dict) and "reranking_calibration" not in result.metadata:
+                            reranking_status = result.metadata.get("reranking", {})
+                            verification_unavailable = (
+                                isinstance(reranking_status, dict)
+                                and reranking_status.get("verification_available") is False
+                            )
+                            if (
+                                isinstance(result.metadata, dict)
+                                and "reranking_calibration" not in result.metadata
+                                and not verification_unavailable
+                            ):
                                 top_doc = result.documents[0] if result.documents else None
                                 if top_doc is not None:
                                     import math as _math_lf
@@ -5488,6 +6250,15 @@ async def unified_rag_pipeline(
                             style=style_enum if style_enum is not None else CitationStyle.MLA if CitationStyle else None,
                             include_chunks=bool(enable_chunk_citations),
                             max_citations=min(len(result.documents), (rerank_top_k or top_k or 10)),
+                            **(
+                                {
+                                    "credential_runtime": credential_runtime,
+                                    "llm_provider": generation_provider,
+                                    "llm_model": generation_model,
+                                }
+                                if credential_runtime is not None
+                                else {}
+                            ),
                         )
                         if chain_result:
                             evidence_chain_result = chain_result
@@ -5539,6 +6310,17 @@ async def unified_rag_pipeline(
                     min_relevance=strip_min_relevance,
                     max_strips=max_strips,
                     use_llm_grading=False,  # Use heuristic for speed by default
+                    **(
+                        {
+                            "llm_provider": classifier_provider
+                            or generation_provider
+                            or "openai",
+                            "llm_model": classifier_model or generation_model,
+                            "credential_runtime": credential_runtime,
+                        }
+                        if credential_runtime is not None
+                        else {}
+                    ),
                 )
 
                 if filtered_docs:
@@ -5553,6 +6335,13 @@ async def unified_rag_pipeline(
                     "strip_size_tokens": strip_size_tokens,
                     "min_relevance": strip_min_relevance,
                     "resulting_docs": len(filtered_docs) if filtered_docs else 0,
+                    **(
+                        {
+                            key: strips_metadata[key]
+                            for key in ("verification_available", "failure_code")
+                            if key in strips_metadata
+                        }
+                    ),
                 }
 
                 result.timings["knowledge_strips"] = time.time() - strips_start
@@ -5589,6 +6378,13 @@ async def unified_rag_pipeline(
                 if evidence_chain_result is None:
                     chain_builder = EvidenceChainBuilder(
                         enable_llm_extraction=True,
+                        llm_provider=generation_provider,
+                        llm_model=generation_model,
+                        **(
+                            {"credential_runtime": credential_runtime}
+                            if credential_runtime is not None
+                            else {}
+                        ),
                     )
 
                     # Build chains - note: we don't have the answer yet, so chains are built from docs
@@ -5605,6 +6401,13 @@ async def unified_rag_pipeline(
                         "overall_confidence": evidence_chain_result.overall_confidence,
                         "multi_hop_detected": evidence_chain_result.multi_hop_detected,
                         "total_nodes": evidence_chain_result.metadata.get("total_nodes", 0),
+                        **(
+                            {
+                                key: evidence_chain_result.metadata[key]
+                                for key in ("verification_available", "failure_code")
+                                if key in evidence_chain_result.metadata
+                            }
+                        ),
                     }
 
                 result.timings["evidence_chains"] = time.time() - chain_start
@@ -5624,7 +6427,15 @@ async def unified_rag_pipeline(
         # ========== ANSWER GENERATION ==========
         # Honor reranking calibration gating if present (e.g., TwoTier strategy)
         try:
-            _cal = result.metadata.get("reranking_calibration") if isinstance(result.metadata, dict) else None
+            _reranking_status = result.metadata.get("reranking", {})
+            if (
+                isinstance(_reranking_status, dict)
+                and _reranking_status.get("verification_available") is False
+            ):
+                result.metadata.pop("reranking_calibration", None)
+                _cal = None
+            else:
+                _cal = result.metadata.get("reranking_calibration")
             gated_generation = bool(_cal.get("gated")) if isinstance(_cal, dict) else False
             # When calibration metadata is present, ensure fused_score/version/decision
             # are wired for observability.
@@ -5670,7 +6481,8 @@ async def unified_rag_pipeline(
             result.documents = list(retrieval_only_result.documents)
             result.metadata.update(dict(retrieval_only_result.metadata or {}))
 
-        if effective_enable_generation and not gated_generation and not result.cache_hit:
+        if effective_enable_generation and not gated_generation:
+            result.metadata["generation_executed"] = True
             generation_start = time.time()
             try:
                 # --- OTEL: generation span ---
@@ -5728,6 +6540,7 @@ async def unified_rag_pipeline(
                     generator = AnswerGenerator(
                         model=generation_model,
                         provider=generation_provider,
+                        credential_runtime=credential_runtime,
                     )
 
                     # Prepare base context from top documents
@@ -5820,9 +6633,91 @@ async def unified_rag_pipeline(
                                 f"Query: {query}\nSnippets:\n" + "\n".join(snippets) + f"\n\nDraft:\n{d_ans_text}\n\nIssues:"
                             )
                             c_start = time.time()
-                            c_text = sgl.analyze(api_name="openai", input_data="", custom_prompt_arg=crit_prompt, model_override=None)
+                            critique_handle = None
+                            if credential_runtime is not None:
+                                critique_handle = await credential_runtime.resolve("openai")
+                            critique_stream_state = {"content": False}
+
+                            def _call_critique() -> Any:
+                                response = sgl.analyze(
+                                    api_name="openai",
+                                    input_data=crit_prompt,
+                                    custom_prompt_arg=None,
+                                    model_override=None,
+                                    api_key=(
+                                        critique_handle.api_key
+                                        if critique_handle is not None
+                                        else None
+                                    ),
+                                    app_config=(
+                                        critique_handle.app_config
+                                        if critique_handle is not None
+                                        else None
+                                    ),
+                                    credentials_resolved=critique_handle is not None,
+                                    provider_credentials=critique_handle,
+                                    raise_on_error=critique_handle is not None,
+                                )
+                                return _consume_bound_sgl_response(
+                                    response,
+                                    "openai",
+                                    on_content=lambda: critique_stream_state.__setitem__(
+                                        "content",
+                                        True,
+                                    ),
+                                    fail_closed=critique_handle is not None,
+                                )
+
+                            async def _run_critique() -> Any:
+                                critique_completed = False
+                                try:
+                                    value = await await_bounded_sync_call(
+                                        _call_critique,
+                                        pool=SYNC_ADAPTER_CALL_POOL,
+                                        exhaustion_message=(
+                                            "RAG optional adapter capacity is exhausted"
+                                        ),
+                                    )
+                                    critique_completed = True
+                                    return value
+                                finally:
+                                    if critique_handle is not None and (
+                                        critique_completed
+                                        or critique_stream_state["content"]
+                                    ):
+                                        await credential_runtime.mark_used(
+                                            critique_handle
+                                        )
+
+                            critique_operation = _run_critique()
+                            c_text = (
+                                await await_owned_worker(critique_operation)
+                                if critique_handle is not None
+                                else await critique_operation
+                            )
                             c_dt = time.time() - c_start
+                        except (ByokResolutionError, SummaryProviderError) as exc:
+                            result.metadata.setdefault("synthesis", {})
+                            result.metadata["synthesis"].update(
+                                {
+                                    "failure_code": (
+                                        exc.code
+                                        if isinstance(exc, ByokResolutionError)
+                                        else "provider_unavailable"
+                                    ),
+                                    "verification_available": False,
+                                }
+                            )
+                            c_text = "- Ensure claims are supported by provided snippets."
                         except (ImportError, ConnectionError, OSError, RuntimeError, TypeError, ValueError, asyncio.TimeoutError):
+                            if credential_runtime is not None:
+                                result.metadata.setdefault("synthesis", {})
+                                result.metadata["synthesis"].update(
+                                    {
+                                        "failure_code": "provider_unavailable",
+                                        "verification_available": False,
+                                    }
+                                )
                             c_text = "- Ensure claims are supported by provided snippets.\n- Add missing specifics.\n- Clarify ambiguous statements."
                         if isinstance(c_text, str):
                             c_text_val = c_text
@@ -5946,6 +6841,7 @@ async def unified_rag_pipeline(
                     if enable_suggestions and generate_suggestions is not None and result.generated_answer:
                         try:
                             _suggestions_start = time.time()
+                            _suggestion_stage_metadata: dict[str, Any] = {}
                             _suggestions = await generate_suggestions(
                                 query=query,
                                 response_text=str(result.generated_answer),
@@ -5954,8 +6850,20 @@ async def unified_rag_pipeline(
                                 llm_model=classifier_model or generation_model,
                                 num_suggestions=num_suggestions,
                                 llm_timeout_sec=3.0,
+                                **(
+                                    {
+                                        "credential_runtime": credential_runtime,
+                                        "stage_metadata": _suggestion_stage_metadata,
+                                    }
+                                    if credential_runtime is not None
+                                    else {}
+                                ),
                             )
                             result.metadata["suggestions"] = _suggestions
+                            if _suggestion_stage_metadata:
+                                result.metadata["suggestion_generation"] = dict(
+                                    _suggestion_stage_metadata
+                                )
                             result.timings["suggestions"] = time.time() - _suggestions_start
                         except Exception as _sug_exc:
                             logger.debug(f"Suggestion generation failed: {_sug_exc!r}")
@@ -5971,9 +6879,9 @@ async def unified_rag_pipeline(
                 TypeError,
                 ValueError,
                 asyncio.TimeoutError,
-            ) as e:
-                result.errors.append(f"Answer generation failed: {str(e)}")
-                logger.error(f"Generation error: {e}")
+            ):
+                result.errors.append("answer_generation_failed")
+                logger.error("Answer generation failed")
                 try:
                     from .payload_exemplars import maybe_record_exemplar
                     maybe_record_exemplar(
@@ -6116,6 +7024,7 @@ async def unified_rag_pipeline(
                         provider=fast_hallucination_provider,
                         model=fast_hallucination_model,
                         timeout_sec=fast_hallucination_timeout_sec,
+                        credential_runtime=credential_runtime,
                     )
                     fast_grounded = fg_result.is_grounded
                     fast_groundedness_confidence = fg_result.confidence
@@ -6148,17 +7057,111 @@ async def unified_rag_pipeline(
                 # Import shared analyze function for LLM calls
                 import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as sgl
 
+                claims_handle = None
+                claims_provider = None
+                claims_state = {"used": False, "marked": False}
+                if credential_runtime is not None:
+                    from tldw_Server_API.app.core.Claims_Extraction.claims_engine import (
+                        _resolve_claims_llm_config,
+                    )
+
+                    claims_provider, claims_model, _ = _resolve_claims_llm_config()
+                    claims_handle = await credential_runtime.resolve(
+                        claims_provider,
+                        model=claims_model,
+                    )
+
                 def _analyze(api_name: str, input_data: Any, custom_prompt_arg: Optional[str] = None,
                              api_key: Optional[str] = None, system_message: Optional[str] = None,
                              temp: Optional[float] = None, **kwargs):
-                    return sgl.analyze(api_name, input_data, custom_prompt_arg, api_key, system_message, temp, **kwargs)
+                    if claims_handle is None:
+                        return sgl.analyze(
+                            api_name,
+                            input_data,
+                            custom_prompt_arg,
+                            api_key,
+                            system_message,
+                            temp,
+                            **kwargs,
+                        )
+                    for key in (
+                        "app_config",
+                        "credentials_resolved",
+                        "provider_credentials",
+                        "_provider_call_credentials",
+                        "raise_on_error",
+                    ):
+                        kwargs.pop(key, None)
+                    response = sgl.analyze(
+                        claims_provider or claims_handle.provider,
+                        input_data,
+                        custom_prompt_arg,
+                        claims_handle.api_key,
+                        system_message,
+                        temp,
+                        app_config=claims_handle.app_config,
+                        credentials_resolved=True,
+                        provider_credentials=claims_handle,
+                        raise_on_error=True,
+                        **kwargs,
+                    )
+                    if isinstance(response, Iterator):
+                        from .generation import (
+                            _classify_stream_content,
+                            _extract_stream_text,
+                        )
 
-                if ClaimsEngine:
-                    engine = ClaimsEngine(_analyze)
+                        chunks = []
+                        for chunk in response:
+                            chunks.append(str(chunk))
+                            has_content, has_error = _classify_stream_content(
+                                _extract_stream_text(chunk)
+                            )
+                            if has_content:
+                                claims_state["used"] = True
+                            if has_error:
+                                raise SummaryProviderError(
+                                    code="provider_failure",
+                                    provider=claims_provider or claims_handle.provider,
+                                )
+                        response = "".join(chunks)
+                    if isinstance(response, str) and response.startswith("Error:"):
+                        raise SummaryProviderError(
+                            code="provider_failure",
+                            provider=claims_provider or claims_handle.provider,
+                        )
+                    claims_state["used"] = True
+                    return response
+
+                claims_engine_type = _resolve_claims_engine()
+                if claims_engine_type is not None:
+                    engine = claims_engine_type(_analyze)
+
+                    async def _mark_claims_used() -> None:
+                        if (
+                            claims_handle is not None
+                            and claims_state["used"]
+                            and not claims_state["marked"]
+                        ):
+                            await credential_runtime.mark_used(claims_handle)
+                            claims_state["marked"] = True
+
+                    async def _run_claims_engine(**run_kwargs: Any) -> dict[str, Any]:
+                        async def _run_and_mark() -> dict[str, Any]:
+                            try:
+                                return await engine.run(**run_kwargs)
+                            finally:
+                                await _mark_claims_used()
+
+                        operation = _run_and_mark()
+                        if claims_handle is not None:
+                            return await await_owned_worker(operation)
+                        return await operation
+
                     # Default NLI model from environment if not provided
                     if not nli_model:
-                        import os
-                        nli_model = os.environ.get("RAG_NLI_MODEL") or os.environ.get("RAG_NLI_MODEL_PATH")
+                        import os as _os
+                        nli_model = _os.environ.get("RAG_NLI_MODEL") or _os.environ.get("RAG_NLI_MODEL_PATH")
                     job_context = None
                     if ClaimsJobContext is not None:
                         user_id_val = None
@@ -6203,6 +7206,8 @@ async def unified_rag_pipeline(
                         )
                     # Build a per-claim retrieval that uses MultiDatabaseRetriever and hybrid search when available
                     async def _retrieve_for_claim(c_text: str, top_k: int = 5):
+                        if _latched_optional_provider_failure("per_claim") is not None:
+                            return result.documents[:top_k] if result.documents else []
                         try:
                             if MultiDatabaseRetriever and RetrievalConfig:
                                 db_paths = _build_pipeline_db_paths()
@@ -6233,6 +7238,8 @@ async def unified_rag_pipeline(
                                         try:
                                             more = await retr.retrieve(query=c_text)
                                             docs.extend(more)
+                                        except _RAG_PROVIDER_FAILURES:
+                                            raise
                                         except (
                                             AttributeError,
                                             ConnectionError,
@@ -6246,6 +7253,11 @@ async def unified_rag_pipeline(
                                 # Sort and cap
                                 docs = sorted(docs, key=lambda d: getattr(d, 'score', 0.0), reverse=True)
                                 return docs[:top_k]
+                        except _RAG_PROVIDER_FAILURES as exc:
+                            if credential_runtime is None:
+                                raise
+                            _latch_optional_provider_failure("per_claim", exc)
+                            return result.documents[:top_k] if result.documents else []
                         except (
                             AttributeError,
                             ConnectionError,
@@ -6298,21 +7310,24 @@ async def unified_rag_pipeline(
                             # Verify these claims directly, skipping extraction
                             from tldw_Server_API.app.core.Claims_Extraction.claims_engine import Claim as _Claim
                             verifications = []
-                            for i, ctext in enumerate(pre_claims[:claims_max]):
-                                cv = await engine.verifier.verify(
-                                    claim=_Claim(id=f"pc{i+1}", text=ctext),
-                                    query=query,
-                                    base_documents=result.documents or [],
-                                    retrieve_fn=_retrieve_for_claim,
-                                    top_k=claims_top_k,
-                                    conf_threshold=claims_conf_threshold,
-                                    mode=(claim_verifier or "hybrid").strip().lower(),
-                                    budget=job_budget,
-                                    job_context=job_context,
-                                    doc_only_mode=doc_only_verification,
-                                    numeric_precision_mode=numeric_precision_mode,
-                                )
-                                verifications.append(cv)
+                            try:
+                                for i, ctext in enumerate(pre_claims[:claims_max]):
+                                    cv = await engine.verifier.verify(
+                                        claim=_Claim(id=f"pc{i+1}", text=ctext),
+                                        query=query,
+                                        base_documents=result.documents or [],
+                                        retrieve_fn=_retrieve_for_claim,
+                                        top_k=claims_top_k,
+                                        conf_threshold=claims_conf_threshold,
+                                        mode=(claim_verifier or "hybrid").strip().lower(),
+                                        budget=job_budget,
+                                        job_context=job_context,
+                                        doc_only_mode=doc_only_verification,
+                                        numeric_precision_mode=numeric_precision_mode,
+                                    )
+                                    verifications.append(cv)
+                            finally:
+                                await _mark_claims_used()
                             supported = sum(1 for v in verifications if v.label == "supported")
                             refuted = sum(1 for v in verifications if v.label == "refuted")
                             nei = sum(1 for v in verifications if v.label == "nei")
@@ -6355,7 +7370,7 @@ async def unified_rag_pipeline(
                             }
                         else:
                             # Fall back to on-the-fly extraction from the generated answer
-                            claims_run = await engine.run(
+                            claims_run = await _run_claims_engine(
                                 answer=result.generated_answer,
                                 query=query,
                                 documents=result.documents or [],
@@ -6382,8 +7397,13 @@ async def unified_rag_pipeline(
                         ValueError,
                         asyncio.TimeoutError,
                     ) as _eclaims:
-                        logger.debug(f"Pre-extracted claims path failed: {_eclaims}")
-                        claims_run = await engine.run(
+                        if credential_runtime is not None:
+                            logger.debug(
+                                "Pre-extracted claims path failed; using on-the-fly fallback"
+                            )
+                        else:
+                            logger.debug(f"Pre-extracted claims path failed: {_eclaims}")
+                        claims_run = await _run_claims_engine(
                             answer=result.generated_answer,
                             query=query,
                             documents=result.documents or [],
@@ -6402,6 +7422,7 @@ async def unified_rag_pipeline(
                         factuality_payload = claims_run.get("summary")
                         verifications = claims_run.get("verifications", [])
                     # Also store in metadata for debugging/analytics
+                    await _mark_claims_used()
                     result.metadata["claims"] = claims_payload
                     result.metadata["factuality"] = factuality_payload
 
@@ -6421,6 +7442,16 @@ async def unified_rag_pipeline(
                             result.metadata["verification_report"] = report.to_dict()
                         except (ImportError, RuntimeError, TypeError, ValueError) as _ereport:
                             logger.debug(f"Verification report generation failed: {_ereport}")
+            except (ByokResolutionError, SummaryProviderError) as exc:
+                result.metadata["claims"] = {
+                    "failure_code": (
+                        exc.code
+                        if isinstance(exc, ByokResolutionError)
+                        else "provider_unavailable"
+                    ),
+                    "verification_available": False,
+                }
+                logger.warning("Claims analysis provider unavailable")
             except (
                 AttributeError,
                 ConnectionError,
@@ -6430,8 +7461,15 @@ async def unified_rag_pipeline(
                 ValueError,
                 asyncio.TimeoutError,
             ) as e:
-                result.errors.append(f"Claims analysis failed: {str(e)}")
-                logger.error(f"Claims analysis error: {e}")
+                if credential_runtime is not None:
+                    result.metadata["claims"] = {
+                        "failure_code": "provider_unavailable",
+                        "verification_available": False,
+                    }
+                    logger.warning("Claims analysis provider unavailable")
+                else:
+                    result.errors.append(f"Claims analysis failed: {str(e)}")
+                    logger.error(f"Claims analysis error: {e}")
 
         # ========== NUMERIC FIDELITY (verify numeric tokens) ==========
         try:
@@ -6465,8 +7503,29 @@ async def unified_rag_pipeline(
                                         conf = RetrievalConfig(max_results=min(10, top_k), min_score=min_score, use_fts=True, use_vector=True, include_metadata=True, fts_level=fts_level, enable_text_late_chunking=enable_text_late_chunking, chunk_method=chunk_method, chunk_size=chunk_size, chunk_overlap=chunk_overlap, chunk_language=chunk_language)
                                         numeric_added: list[Document] = []
                                         for tok in list(nf.missing)[:3]:
+                                            latched_code = _latched_optional_provider_failure(
+                                                "numeric_fidelity"
+                                            )
+                                            if latched_code is not None:
+                                                result.metadata.setdefault("numeric_fidelity", {}).update(
+                                                    embedding_coverage="degraded",
+                                                    failure_code=latched_code,
+                                                )
+                                                break
                                             try:
                                                 numeric_added.extend(await mdr.retrieve(query=f"{query} {tok}", sources=[DataSource.MEDIA_DB], config=conf, index_namespace=index_namespace))
+                                            except _RAG_PROVIDER_FAILURES as exc:
+                                                if credential_runtime is None:
+                                                    raise
+                                                failure_code = _latch_optional_provider_failure(
+                                                    "numeric_fidelity",
+                                                    exc,
+                                                )
+                                                result.metadata.setdefault("numeric_fidelity", {}).update(
+                                                    embedding_coverage="degraded",
+                                                    failure_code=failure_code,
+                                                )
+                                                break
                                             except (
                                                 AttributeError,
                                                 ConnectionError,
@@ -6493,6 +7552,7 @@ async def unified_rag_pipeline(
                                                     generator = AnswerGenerator(
                                                         model=generation_model,
                                                         provider=generation_provider,
+                                                        credential_runtime=credential_runtime,
                                                     )
                                                     context = "\n\n".join([getattr(d, 'content', str(d)) for d in (result.documents[:5] if result.documents else [])])
                                                     regen = await generator.generate(query=query, context=context, prompt_template=generation_prompt, max_tokens=max_generation_tokens)
@@ -6534,8 +7594,8 @@ async def unified_rag_pipeline(
             # Allow env defaults if parameters not explicitly set
             if adaptive_time_budget_sec is None:
                 try:
-                    import os
-                    adaptive_time_budget_sec = float(os.getenv("RAG_ADAPTIVE_TIME_BUDGET_SEC", "0")) or None
+                    import os as _os
+                    adaptive_time_budget_sec = float(_os.getenv("RAG_ADAPTIVE_TIME_BUDGET_SEC", "0")) or None
                 except (TypeError, ValueError):
                     adaptive_time_budget_sec = None
             if enable_post_verification and result.generated_answer and PostGenerationVerifier:
@@ -6545,6 +7605,7 @@ async def unified_rag_pipeline(
                     max_claims=adaptive_max_claims,
                     time_budget_sec=adaptive_time_budget_sec,
                     use_advanced_rewrites=adaptive_advanced_rewrites,
+                    credential_runtime=credential_runtime,
                 )
                 vres = await verifier.verify_and_maybe_fix(
                     query=query,
@@ -6570,7 +7631,29 @@ async def unified_rag_pipeline(
                     "unsupported_count": vres.unsupported_count,
                     "fixed": vres.fixed,
                     "reason": vres.reason,
+                    "verification_available": getattr(
+                        vres,
+                        "verification_available",
+                        True,
+                    ),
                 })
+                failure_code = getattr(vres, "failure_code", None)
+                if failure_code:
+                    result.metadata["post_verification"]["failure_code"] = failure_code
+                if getattr(vres, "embedding_coverage", None) == "degraded":
+                    result.metadata["post_verification"]["embedding_coverage"] = "degraded"
+                embedding_failure_code = getattr(vres, "embedding_failure_code", None)
+                if embedding_failure_code in {
+                    "invalid_provider_credentials",
+                    "missing_provider_credentials",
+                    "provider_configuration_invalid",
+                    "credential_store_unavailable",
+                    "credential_scope_revoked",
+                    "provider_unavailable",
+                }:
+                    result.metadata["post_verification"]["embedding_failure_code"] = (
+                        embedding_failure_code
+                    )
                 # Gauge for NLI unsupported ratio
                 try:
                     from tldw_Server_API.app.core.Metrics.metrics_manager import set_gauge
@@ -6697,6 +7780,7 @@ async def unified_rag_pipeline(
                             enable_monitoring=enable_monitoring,
                             enable_observability=enable_observability,
                             trace_id=trace_id,
+                            credential_runtime=credential_runtime,
                             enable_performance_analysis=enable_performance_analysis,
                             timeout_seconds=timeout_seconds,
                             highlight_results=highlight_results,
@@ -6708,7 +7792,11 @@ async def unified_rag_pipeline(
                         # Quick verify the new answer without repairs to compare factuality
                         new_ratio = None
                         if PostGenerationVerifier and (new_result.generated_answer or "").strip():
-                            v2 = await PostGenerationVerifier(max_retries=0, max_claims=min(10, adaptive_max_claims)).verify_and_maybe_fix(
+                            v2 = await PostGenerationVerifier(
+                                max_retries=0,
+                                max_claims=min(10, adaptive_max_claims),
+                                credential_runtime=credential_runtime,
+                            ).verify_and_maybe_fix(
                                 query=query,
                                 answer=new_result.generated_answer,
                                 base_documents=(new_result.documents[:int(adaptive_rerun_doc_budget)] if (adaptive_rerun_doc_budget and isinstance(adaptive_rerun_doc_budget, int)) else (new_result.documents or [])),
@@ -6816,6 +7904,8 @@ async def unified_rag_pipeline(
                     ValueError,
                     asyncio.TimeoutError,
                 ) as _er:
+                    if isinstance(_er, _RAG_PROVIDER_FAILURES):
+                        raise
                     result.errors.append(f"Adaptive rerun failed: {str(_er)}")
                     logger.debug(f"Adaptive rerun error: {_er}")
         except (
@@ -6835,7 +7925,16 @@ async def unified_rag_pipeline(
         # Now that we have the generated answer, rebuild evidence chains with claim extraction
         if enable_evidence_chains and result.generated_answer and result.documents and EvidenceChainBuilder:
             try:
-                chain_builder = EvidenceChainBuilder(enable_llm_extraction=True)
+                chain_builder = EvidenceChainBuilder(
+                    enable_llm_extraction=True,
+                    llm_provider=generation_provider,
+                    llm_model=generation_model,
+                    **(
+                        {"credential_runtime": credential_runtime}
+                        if credential_runtime is not None
+                        else {}
+                    ),
+                )
 
                 # Rebuild chains with the generated answer for claim extraction
                 evidence_chain_result = await chain_builder.build_chains(
@@ -6863,6 +7962,13 @@ async def unified_rag_pipeline(
                         "total_claims": evidence_chain_result.metadata.get("total_claims", 0),
                         "supported_claims": evidence_chain_result.metadata.get("supported_claims", 0),
                         "chains": chains_data[:5],  # Include top 5 chains
+                        **(
+                            {
+                                key: evidence_chain_result.metadata[key]
+                                for key in ("verification_available", "failure_code")
+                                if key in evidence_chain_result.metadata
+                            }
+                        ),
                     }
 
                     # Optionally include full chain data for debugging
@@ -6892,6 +7998,7 @@ async def unified_rag_pipeline(
                         provider=utility_grading_provider,
                         model=utility_grading_model,
                         timeout_sec=utility_grading_timeout_sec,
+                        credential_runtime=credential_runtime,
                     )
                     result.metadata["utility_grade"] = ug_meta
         except (
@@ -6991,7 +8098,11 @@ async def unified_rag_pipeline(
         _apply_workspace_filtering_to_result()
 
         # ========== CACHE STORAGE ==========
-        if enable_cache and not result.cache_hit and result.documents:
+        if (
+            retrieval_cache_eligible
+            and not result.cache_hit
+            and cache_retrieval_snapshot
+        ):
             try:
                 # Store in cache for future use
                 cache = _get_cache_instance()
@@ -7000,11 +8111,10 @@ async def unified_rag_pipeline(
                     # Support both async/sync and set/add method names
                     set_fn = getattr(cache, 'set', None) or getattr(cache, 'add', None)
                     if set_fn:
-                        cache_payload = {
-                            "documents": _clone_cached_documents(list(result.documents)),
-                            "answer": result.generated_answer,
-                            "cached": True,
-                        }
+                        wire_documents = [
+                            _serialize_result_document(document)
+                            for document in cache_retrieval_snapshot
+                        ]
                         cache_queries = [query]
                         cache_queries.extend(
                             [q for q in (result.expanded_queries or []) if isinstance(q, str)]
@@ -7017,12 +8127,28 @@ async def unified_rag_pipeline(
                             if not cq or cq in seen:
                                 continue
                             seen.add(cq)
-                            if asyncio.iscoroutinefunction(set_fn):
-                                await set_fn(cq, cache_payload, ttl=cache_ttl)
-                            else:
-                                set_fn(cq, cache_payload, ttl=cache_ttl)
-            except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
-                logger.error(f"Cache storage error: {e}")
+                            cache_payload = {
+                                "documents": _clone_cached_documents(wire_documents),
+                                "metadata": {
+                                    "kind": "retrieval_documents",
+                                    "schema_version": 1,
+                                },
+                            }
+                            if callable(_sanitize_cache_payload):
+                                cache_payload = _sanitize_cache_payload(cache_payload)
+                            if cache_payload is None:
+                                continue
+                            await _invoke_cache_callable(
+                                set_fn,
+                                cq,
+                                cache_payload,
+                                ttl=cache_ttl,
+                            )
+            except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as exc:
+                logger.error(
+                    "Cache storage failed (error_type={})",
+                    type(exc).__name__,
+                )
 
         # ========== OBSERVABILITY ==========
         if enable_observability:
@@ -7058,6 +8184,8 @@ async def unified_rag_pipeline(
 
     except _EarlyReturn:
         pass
+    except _RAG_PROVIDER_FAILURES:
+        raise
     except (
         AttributeError,
         ConnectionError,
@@ -7066,16 +8194,16 @@ async def unified_rag_pipeline(
         TypeError,
         ValueError,
         asyncio.TimeoutError,
-    ) as e:
-        result.errors.append(f"Pipeline error: {str(e)}")
-        logger.exception("Unified pipeline error: {}", e)
+    ):
+        result.errors.append("pipeline_failed")
+        logger.error("Unified pipeline failed")
         if fallback_on_error:
             return {
                 "query": query,
                 "documents": [],
                 "answer": "",
                 "cached": False,
-                "error": str(e),
+                "error": "pipeline_failed",
                 "metadata": result.metadata,
                 "timings": result.timings,
             }
@@ -7155,20 +8283,81 @@ async def unified_rag_pipeline(
                                 or "openai"
                             ).strip()
                             _f_model = generation_model or _f_cfg.get("RAG_DEFAULT_LLM_MODEL")
+                            _f_handle = None
+                            if credential_runtime is not None:
+                                _f_handle = await credential_runtime.resolve(
+                                    _f_prov,
+                                    model=_f_model,
+                                )
+                            _f_state = {"marked": False, "content": False}
 
                             class _FaithfulnessLLMAdapter:
                                 """Wraps analyze() to satisfy the LLMCallable protocol."""
 
                                 async def generate(self, prompt: str) -> str:
-                                    import asyncio as _aio
-                                    result_text = await _aio.get_running_loop().run_in_executor(
-                                        None,
-                                        lambda: _sgl_analyze(
+                                    def _call_faithfulness() -> Any:
+                                        response = _sgl_analyze(
                                             api_name=_f_prov,
-                                            input_data="",
-                                            custom_prompt_arg=prompt,
+                                            input_data=prompt,
+                                            custom_prompt_arg=None,
                                             model_override=_f_model,
-                                        ),
+                                            api_key=(
+                                                _f_handle.api_key
+                                                if _f_handle is not None
+                                                else None
+                                            ),
+                                            app_config=(
+                                                _f_handle.app_config
+                                                if _f_handle is not None
+                                                else None
+                                            ),
+                                            credentials_resolved=_f_handle is not None,
+                                            provider_credentials=_f_handle,
+                                            raise_on_error=_f_handle is not None,
+                                        )
+                                        return _consume_bound_sgl_response(
+                                            response,
+                                            _f_prov,
+                                            on_content=lambda: _f_state.__setitem__(
+                                                "content",
+                                                True,
+                                            ),
+                                            fail_closed=_f_handle is not None,
+                                        )
+
+                                    async def _run_faithfulness() -> Any:
+                                        faithfulness_completed = False
+                                        try:
+                                            value = await await_bounded_sync_call(
+                                                _call_faithfulness,
+                                                pool=SYNC_ADAPTER_CALL_POOL,
+                                                exhaustion_message=(
+                                                    "RAG optional adapter capacity is exhausted"
+                                                ),
+                                            )
+                                            faithfulness_completed = True
+                                            return value
+                                        finally:
+                                            if (
+                                                _f_handle is not None
+                                                and not _f_state["marked"]
+                                                and (
+                                                    faithfulness_completed
+                                                    or _f_state["content"]
+                                                )
+                                            ):
+                                                await credential_runtime.mark_used(
+                                                    _f_handle
+                                                )
+                                                _f_state["marked"] = True
+
+                                    faithfulness_operation = _run_faithfulness()
+                                    result_text = (
+                                        await await_owned_worker(
+                                            faithfulness_operation
+                                        )
+                                        if _f_handle is not None
+                                        else await faithfulness_operation
                                     )
                                     return str(result_text) if result_text else ""
 
@@ -7179,7 +8368,10 @@ async def unified_rag_pipeline(
                             )
 
                     if _llm_obj is not None:
-                        _faith_eval = _FaithEval(_llm_obj)
+                        _faith_eval = _FaithEval(
+                            _llm_obj,
+                            propagate_errors=credential_runtime is not None,
+                        )
                         _faith_result = await _faith_eval.evaluate_detailed(
                             result.generated_answer, _ctx_text
                         )
@@ -7196,9 +8388,26 @@ async def unified_rag_pipeline(
                         logger.debug(
                             "Faithfulness eval requested but no LLM available"
                         )
+            except (ByokResolutionError, SummaryProviderError) as exc:
+                result.metadata["faithfulness"] = {
+                    "failure_code": (
+                        exc.code
+                        if isinstance(exc, ByokResolutionError)
+                        else "provider_unavailable"
+                    ),
+                    "verification_available": False,
+                }
+                logger.warning("Faithfulness evaluation provider unavailable")
             except Exception as _fe_err:
-                logger.warning(f"Faithfulness evaluation failed: {_fe_err}")
-                result.errors.append(f"Faithfulness eval failed: {_fe_err}")
+                if credential_runtime is not None:
+                    result.metadata["faithfulness"] = {
+                        "failure_code": "provider_unavailable",
+                        "verification_available": False,
+                    }
+                    logger.warning("Faithfulness evaluation provider unavailable")
+                else:
+                    logger.warning(f"Faithfulness evaluation failed: {_fe_err}")
+                    result.errors.append(f"Faithfulness eval failed: {_fe_err}")
 
         # Debug output if requested
         if debug_mode:
@@ -7268,6 +8477,7 @@ async def unified_batch_pipeline(
     on_progress: Optional[Callable[[int, int], Any]] = None,
     on_query_done: Optional[Callable[[int, str, Optional[UnifiedPipelineResult], Optional[BaseException]], Any]] = None,
     query_indices: Optional[list[int]] = None,
+    credential_runtime: Any = None,
     **kwargs
 ) -> list[UnifiedPipelineResult]:
     """
@@ -7287,6 +8497,8 @@ async def unified_batch_pipeline(
     Returns:
         List of results in the same order as queries
     """
+    if credential_runtime is not None:
+        kwargs["credential_runtime"] = credential_runtime
     semaphore = asyncio.Semaphore(max_concurrent)
 
     # Lightweight normalizer to dedupe/cluster identical queries
@@ -7331,12 +8543,36 @@ async def unified_batch_pipeline(
             )
             # Get embeddings for representative texts
             cfg = get_embedding_config()
-            vectors = await asyncio.get_running_loop().run_in_executor(
-                None,
-                create_embeddings_batch,
-                rep_texts,
-                cfg,
-                None,
+            provider = _embedding_provider_from_config(cfg)
+            effective_model = _embedding_model_from_config(cfg)
+            handle = None
+            call_kwargs: dict[str, Any] = {}
+            if credential_runtime is not None:
+                if provider == "openai":
+                    handle, call_kwargs = await _resolve_runtime_embedding_call(
+                        credential_runtime,
+                        provider,
+                        effective_model,
+                    )
+                else:
+                    call_kwargs = _runtime_local_embedding_call_kwargs(cfg, provider)
+            vectors = await _run_sync_embedding_call(
+                partial(
+                    create_embeddings_batch,
+                    rep_texts,
+                    cfg,
+                    None,
+                    **call_kwargs,
+                ),
+                on_success=(
+                    partial(
+                        _mark_runtime_used_for_embeddings,
+                        credential_runtime=credential_runtime,
+                        handle=handle,
+                    )
+                    if handle is not None
+                    else None
+                ),
             )
             # Normalize vectors to unit length for cosine
             def _norm(v):
@@ -7377,8 +8613,10 @@ async def unified_batch_pipeline(
                     if _cos(vi, vj) >= thr:
                         clusters[i].append(j)
                         used.add(j)
-        except Exception as exc:  # noqa: BLE001 - best-effort clustering; never fail batch
-            logger.warning(f"Batch query clustering disabled due to error: {exc}")
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - best-effort clustering; never fail batch
+            logger.warning("Batch query clustering disabled due to embedding failure")
             # Fallback: each unique becomes its own cluster
             clusters = {i: [i] for i in range(len(unique_keys))}
 
@@ -7454,36 +8692,45 @@ async def unified_batch_pipeline(
             tasks[task] = idx
 
         pending = set(tasks.keys())
-        while pending:
-            done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
-            for task in done:
-                head_idx = tasks.get(task)
-                if head_idx is None:
-                    continue
-                result: Optional[UnifiedPipelineResult] = None
-                err: Optional[BaseException] = None
-                try:
-                    result = await task
-                    head_results[head_idx] = result
-                except BaseException as exc:  # noqa: BLE001 - surface as error
-                    err = exc
-                    head_results[head_idx] = exc
+        try:
+            while pending:
+                done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+                for task in done:
+                    head_idx = tasks.get(task)
+                    if head_idx is None:
+                        continue
+                    result: Optional[UnifiedPipelineResult] = None
+                    err: Optional[BaseException] = None
+                    try:
+                        result = await task
+                        head_results[head_idx] = result
+                    except BaseException as exc:  # noqa: BLE001 - surface as error
+                        if isinstance(exc, _RAG_PROVIDER_FAILURES):
+                            raise
+                        err = exc
+                        head_results[head_idx] = exc
 
-                head_key = heads[head_idx]
-                members = clusters.get(head_key, [])
-                for i_uq in members:
-                    orig_indices = normalized_map.get(unique_keys[i_uq], [])
-                    for local_idx in orig_indices:
-                        global_idx = _resolve_index(local_idx)
-                        query_text = queries[local_idx] if local_idx < len(queries) else ""
-                        if on_query_done:
-                            try:
-                                callback_result = on_query_done(global_idx, query_text, result, err)
-                                if asyncio.iscoroutine(callback_result):
-                                    await callback_result
-                            except Exception as cb_err:  # noqa: BLE001 - callbacks must not fail pipeline
-                                logger.warning(f"Batch on_query_done callback failed: {cb_err}")
-                        await _notify_progress(1)
+                    head_key = heads[head_idx]
+                    members = clusters.get(head_key, [])
+                    for i_uq in members:
+                        orig_indices = normalized_map.get(unique_keys[i_uq], [])
+                        for local_idx in orig_indices:
+                            global_idx = _resolve_index(local_idx)
+                            query_text = queries[local_idx] if local_idx < len(queries) else ""
+                            if on_query_done:
+                                try:
+                                    callback_result = on_query_done(global_idx, query_text, result, err)
+                                    if asyncio.iscoroutine(callback_result):
+                                        await callback_result
+                                except Exception as cb_err:  # noqa: BLE001 - callbacks must not fail pipeline
+                                    logger.warning(f"Batch on_query_done callback failed: {cb_err}")
+                            await _notify_progress(1)
+        except BaseException:
+            for child_task in tasks:
+                if not child_task.done():
+                    child_task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            raise
     else:
         try:
             from .batch_utils import run_batch as _run_batch
@@ -7515,6 +8762,10 @@ async def unified_batch_pipeline(
 
             tasks = [process_with_semaphore(q) for q in head_queries]
             head_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    for head_result in head_results:
+        if isinstance(head_result, _RAG_PROVIDER_FAILURES):
+            raise head_result
 
     # Build final results in original order, reusing unique results
     final_results: list[Optional[UnifiedPipelineResult]] = [None] * len(queries)
@@ -7589,6 +8840,7 @@ async def simple_search(
     character_db_path: Optional[str] = None,
     kanban_db_path: Optional[str] = None,
     user_id: Optional[str] = None,
+    credential_runtime: Any = None,
 ) -> list[Document]:
     """
     Simple search wrapper for basic use cases.
@@ -7600,20 +8852,25 @@ async def simple_search(
     Returns:
         List of documents
     """
+    pipeline_kwargs = {
+        "query": query,
+        "top_k": top_k,
+        "expand_query": False,
+        "enable_cache": True,
+        "enable_reranking": True,
+        "sources": sources,
+        "media_db": media_db,
+        "chacha_db": chacha_db,
+        "media_db_path": media_db_path,
+        "notes_db_path": notes_db_path,
+        "character_db_path": character_db_path,
+        "kanban_db_path": kanban_db_path,
+        "user_id": user_id,
+    }
+    if credential_runtime is not None:
+        pipeline_kwargs["credential_runtime"] = credential_runtime
     result = await unified_rag_pipeline(
-        query=query,
-        top_k=top_k,
-        expand_query=False,
-        enable_cache=True,
-        enable_reranking=True,
-        sources=sources,
-        media_db=media_db,
-        chacha_db=chacha_db,
-        media_db_path=media_db_path,
-        notes_db_path=notes_db_path,
-        character_db_path=character_db_path,
-        kanban_db_path=kanban_db_path,
-        user_id=user_id,
+        **pipeline_kwargs,
     )
     if isinstance(result, UnifiedSearchResult):
         return result.documents

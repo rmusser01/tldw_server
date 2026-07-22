@@ -20,7 +20,7 @@ Security
 import contextlib
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Request, status
 from loguru import logger
 from pydantic import ValidationError
 
@@ -34,31 +34,53 @@ from tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps import (
     require_project_write_access,
 )
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_page_pagination_meta
-from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
+from tldw_Server_API.app.api.v1.endpoints.prompt_studio.resource_binding import (
+    authoritative_prompt_project,
+)
 
 # Local imports
 from tldw_Server_API.app.api.v1.schemas.prompt_studio_base import (
-    ListResponse,
     PageListResponse,
     StandardResponse,
 )
 from tldw_Server_API.app.api.v1.schemas.prompt_studio_project import (
     PromptCreate,
+    PromptResponse,
+    PromptUpdate,
+    PromptVersion,
     StructuredPromptConvertRequest,
     StructuredPromptConvertResponse,
     StructuredPromptPreviewRequest,
     StructuredPromptPreviewResponse,
-    PromptResponse,
-    PromptUpdate,
-    PromptVersion,
 )
 from tldw_Server_API.app.api.v1.schemas.prompt_studio_schemas import ExecutePromptSimpleRequest
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
+from tldw_Server_API.app.core.AuthNZ.byok_helpers import derive_trusted_credential_scope
+from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
+    ByokResolutionError,
+    record_byok_missing_credentials,
+)
+from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
+    capture_provider_override_call_snapshot,
+)
+from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+    ProviderCredentialRuntime,
+    configured_provider_model_from_snapshot,
+    mark_provider_credential_used,
+)
+from tldw_Server_API.app.core.Chat.bounded_daemon import await_owned_worker
 from tldw_Server_API.app.core.DB_Management.PromptStudioDatabase import (
     ConflictError,
     DatabaseError,
     InputError,
     _prepare_prompt_record_fields,
 )
+from tldw_Server_API.app.core.exceptions import raise_detached_error
+from tldw_Server_API.app.core.LLM_Calls.adapter_registry import (
+    canonical_builtin_llm_provider_name,
+)
+from tldw_Server_API.app.core.LLM_Calls.adapter_utils import provider_auth_is_resolved
+from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
 from tldw_Server_API.app.core.Prompt_Management.structured_prompts import (
     PromptDefinition,
     StructuredPromptAssemblyError,
@@ -85,6 +107,27 @@ router = APIRouter(
 )
 ########################################################################################################################
 # Prompt CRUD Endpoints
+
+
+def _credential_http_exception(exc: ByokResolutionError) -> HTTPException:
+    """Map credential policy/storage failures to the shared bounded envelope."""
+    code = str(getattr(exc, "policy_code", None) or exc.code)
+    return HTTPException(
+        status_code=(
+            status.HTTP_403_FORBIDDEN
+            if code
+            in {
+                "credential_scope_revoked",
+                "model_not_allowed",
+                "provider_disabled",
+            }
+            else status.HTTP_503_SERVICE_UNAVAILABLE
+        ),
+        detail={
+            "error_code": code,
+            "message": "Provider credentials are unavailable.",
+        },
+    )
 
 
 def _render_definition_legacy_fields(definition: PromptDefinition) -> tuple[str, str]:
@@ -605,30 +648,174 @@ async def list_prompts_simple(
 @router.post("/execute")
 async def execute_prompt_simple(
     payload: ExecutePromptSimpleRequest,
-    db: PromptStudioDatabase = Depends(get_prompt_studio_db)
+    request: Request,
+    db: PromptStudioDatabase = Depends(get_prompt_studio_db),
+    user_context: dict = Depends(get_prompt_studio_user),
 ) -> dict[str, Any]:
     from tldw_Server_API.app.core.Prompt_Management.prompt_studio.prompt_executor import PromptExecutor
-    executor = PromptExecutor(db)
+
     prompt_id = int(payload.prompt_id)
-    inputs = payload.inputs or {}
-    provider = payload.provider or "openai"
-    model = payload.model or "gpt-3.5-turbo"
-    # Support both async executor (normal) and sync mocks in tests
-    maybe = executor.execute(prompt_id, inputs=inputs, provider=provider, model=model)
+    _, project_id = authoritative_prompt_project(db, prompt_id)
+    await require_project_access(project_id, user_context=user_context, db=db)
+
     try:
+        normalized_payload = ExecutePromptSimpleRequest.model_validate(
+            {
+                "prompt_id": prompt_id,
+                "inputs": payload.inputs,
+                "provider": payload.provider,
+                "model": payload.model,
+            }
+        )
+        provider = canonical_builtin_llm_provider_name(
+            normalized_payload.provider or "openai"
+        )
+    except (TypeError, ValueError, ValidationError):
+        raise_detached_error(
+            HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "error_code": "provider_request_invalid",
+                    "message": "The selected provider or model is invalid.",
+                },
+            )
+        )
+
+    executor = PromptExecutor(db)
+    inputs = normalized_payload.inputs or {}
+    requested_model = normalized_payload.model
+
+    try:
+        runtime_user_id, team_ids, org_ids, trusted_base_url_override = (
+            derive_trusted_credential_scope(request, None)
+        )
+    except ByokResolutionError as exc:
+        raise_detached_error(_credential_http_exception(exc))
+    except (RuntimeError, TypeError, ValueError):
+        raise_detached_error(
+            HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={
+                    "error_code": "credential_store_unavailable",
+                    "message": "Provider credentials are unavailable.",
+                },
+            )
+        )
+    if runtime_user_id is None:
+        try:
+            runtime_user_id = int(user_context.get("user_id"))
+        except (AttributeError, TypeError, ValueError):
+            runtime_user_id = None
+
+    try:
+        credential_runtime = ProviderCredentialRuntime(
+            user_id=runtime_user_id,
+            team_ids=team_ids,
+            org_ids=org_ids,
+            trusted_base_url_override=trusted_base_url_override,
+            override_snapshot_resolver=capture_provider_override_call_snapshot,
+        )
+    except (RuntimeError, ValueError):
+        raise_detached_error(
+            HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={
+                    "error_code": "credential_store_unavailable",
+                    "message": "Provider credentials are unavailable.",
+                },
+            )
+        )
+
+    try:
+        try:
+            credentials = await credential_runtime.resolve(
+                provider,
+                model=requested_model,
+            )
+        except ByokResolutionError as exc:
+            raise_detached_error(_credential_http_exception(exc))
+        except (RuntimeError, ValueError):
+            raise_detached_error(
+                HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail={
+                        "error_code": "credential_store_unavailable",
+                        "message": "Provider credentials are unavailable.",
+                    },
+                )
+            )
+
+        app_config = credentials.app_config or {}
+        model = requested_model or configured_provider_model_from_snapshot(
+            provider,
+            app_config,
+        )
+        if not model:
+            raise_detached_error(
+                HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "error_code": "provider_configuration_invalid",
+                        "message": "The selected provider configuration is invalid.",
+                    },
+                )
+            )
+        if provider_requires_api_key(provider) and not provider_auth_is_resolved(
+            provider,
+            api_key=credentials.api_key,
+            app_config=app_config,
+            credentials_resolved=credentials.credentials_resolved,
+        ):
+            record_byok_missing_credentials(
+                provider,
+                operation="prompt_studio.prompts.execute",
+            )
+            raise_detached_error(
+                HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail={
+                        "error_code": "missing_provider_credentials",
+                        "message": "The selected provider credentials are not configured.",
+                    },
+                )
+            )
+
+        async def _mark_provider_success() -> None:
+            await mark_provider_credential_used(credential_runtime, credentials)
+
+        maybe = executor.execute(
+            prompt_id,
+            inputs=inputs,
+            provider=provider,
+            model=model,
+            api_key_override=credentials.api_key,
+            app_config=app_config,
+            credentials_resolved=True,
+            provider_credentials=credentials,
+            on_provider_success=_mark_provider_success,
+        )
         import inspect as _inspect
-        if _inspect.isawaitable(maybe):
-            result = await maybe
-        else:
-            result = maybe  # test mocks may return plain dict
-    except Exception:
-        # Fallback to awaiting; if it fails, raise for better visibility
-        result = await maybe  # type: ignore[func-returns-value]
-    return {
-        "output": result.get("raw_output") or result.get("parsed_output") or "",
-        "tokens_used": result.get("tokens_used", 0),
-        "execution_time": result.get("execution_time_ms", 0) / 1000.0
-    }
+
+        result = await maybe if _inspect.isawaitable(maybe) else maybe
+        if not isinstance(result, dict) or result.get("success") is False:
+            raise_detached_error(
+                HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail="Upstream provider request failed.",
+                )
+            )
+        return {
+            "output": (
+                result.get("output")
+                or result.get("raw_output")
+                or result.get("parsed_output")
+                or ""
+            ),
+            "tokens_used": result.get("tokens_used", 0),
+            "execution_time": result.get("execution_time_ms", 0) / 1000.0,
+        }
+    finally:
+        await await_owned_worker(credential_runtime.close())
 
 
 @router.post("/preview", response_model=StandardResponse)

@@ -12,6 +12,7 @@ Note: This implementation requires psycopg (v3) to be installed:
 """
 
 import os
+import threading
 import time
 from collections.abc import Generator
 from contextlib import contextmanager, suppress
@@ -125,6 +126,8 @@ class PostgreSQLConnectionPool(ConnectionPool):
         self._connections: list[Any] = []
         self._free: list[Any] = []
         self._max = max(1, int(config.pool_size or 10))
+        self._fallback_lock = threading.Lock()
+        self._managed_connecting = 0
 
         # Prefer an explicit connection string when provided (e.g. DATABASE_URL)
         # Fall back to composing a DSN from individual pg_* fields
@@ -155,12 +158,13 @@ class PostgreSQLConnectionPool(ConnectionPool):
                     timeout=timeout,
                     max_lifetime=recycle,
                     max_idle=recycle,
+                    open=True,
                     # Ensure JSON is parsed into Python objects consistently
                     configure=lambda conn: setattr(conn, 'row_factory', dict_row),
                 )
             except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS:
                 # Fallback to defaults if parameters unsupported
-                self._pool = psycopg_pool.ConnectionPool(self._dsn)
+                self._pool = psycopg_pool.ConnectionPool(self._dsn, open=True)
         else:
             self._pool = None
 
@@ -171,9 +175,9 @@ class PostgreSQLConnectionPool(ConnectionPool):
         return conn
 
     def get_connection(self) -> Any:
-        if self._closed:
-            raise DatabaseError("Connection pool is closed")
         if self._use_psycopg_pool:
+            if self._closed:
+                raise DatabaseError("Connection pool is closed")
             # Standardize on getconn/putconn for clarity
             conn = self._pool.getconn()
             if hasattr(conn, 'row_factory'):
@@ -184,23 +188,38 @@ class PostgreSQLConnectionPool(ConnectionPool):
                 logger.debug(f"Scope config failed for pooled connection: {scope_exc}")
             return conn
         # Fallback minimal pool
-        if self._free:
-            conn = self._free.pop()
+        managed_slot = False
+        with self._fallback_lock:
+            if self._closed:
+                raise DatabaseError("Connection pool is closed")
+            if self._free:
+                conn = self._free.pop()
+            else:
+                conn = None
+                if len(self._connections) + self._managed_connecting < self._max:
+                    self._managed_connecting += 1
+                    managed_slot = True
+
+        if conn is None:
             try:
-                self._apply_scope_settings(conn)
-            except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS as scope_exc:
-                logger.debug(f"Scope config failed for pooled connection: {scope_exc}")
-            return conn
-        if len(self._connections) < self._max:
-            conn = self._new_connection()
-            self._connections.append(conn)
-            try:
-                self._apply_scope_settings(conn)
-            except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS as scope_exc:
-                logger.debug(f"Scope config failed for new connection: {scope_exc}")
-            return conn
-        # As a last resort, create a new connection (no hard block)
-        conn = self._new_connection()
+                conn = self._new_connection()
+            except BaseException:  # noqa: BLE001 - always release the reserved slot
+                if managed_slot:
+                    with self._fallback_lock:
+                        self._managed_connecting -= 1
+                raise
+
+            with self._fallback_lock:
+                if managed_slot:
+                    self._managed_connecting -= 1
+                    if not self._closed:
+                        self._connections.append(conn)
+                pool_closed = self._closed
+            if pool_closed:
+                with suppress(_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
+                    conn.close()
+                raise DatabaseError("Connection pool is closed")
+
         try:
             self._apply_scope_settings(conn)
         except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS as scope_exc:
@@ -223,10 +242,77 @@ class PostgreSQLConnectionPool(ConnectionPool):
         # Minimal pool:
         # - keep only managed connections in the reusable free list
         # - close overflow/fallback connections immediately to avoid growth
-        is_managed = connection in self._connections
-        if is_managed and len(self._free) < self._max:
-            self._free.append(connection)
+        with self._fallback_lock:
+            if self._closed:
+                is_managed = False
+            elif any(conn is connection for conn in self._free):
+                return
+            else:
+                is_managed = any(
+                    conn is connection for conn in self._connections
+                )
+
+        if not is_managed:
+            with suppress(_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
+                connection.close()
             return
+
+        status = getattr(
+            getattr(connection, "info", None),
+            "transaction_status",
+            None,
+        )
+        status_name = str(getattr(status, "name", status) or "").upper()
+        if status_name in {"INTRANS", "INERROR"}:
+            try:
+                connection.rollback()
+            except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS:
+                self.discard_connection(connection)
+                return
+            status = getattr(
+                getattr(connection, "info", None),
+                "transaction_status",
+                None,
+            )
+            status_name = str(getattr(status, "name", status) or "").upper()
+        if bool(getattr(connection, "closed", False)) or status_name != "IDLE":
+            self.discard_connection(connection)
+            return
+
+        with self._fallback_lock:
+            if not self._closed:
+                if any(conn is connection for conn in self._free):
+                    return
+                if any(conn is connection for conn in self._connections):
+                    self._free.append(connection)
+                    return
+
+        with suppress(_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
+            connection.close()
+
+    def discard_connection(self, connection: Any) -> None:
+        """Remove a poisoned checkout without making it reusable."""
+
+        if connection is None:
+            return
+        if self._use_psycopg_pool:
+            # psycopg_pool must receive every checkout back for bookkeeping.
+            # A closed connection is recognized as broken and replaced.
+            try:
+                with suppress(_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
+                    connection.close()
+            finally:
+                with suppress(_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
+                    self._pool.putconn(connection)
+            return
+
+        with self._fallback_lock:
+            self._free[:] = [
+                conn for conn in self._free if conn is not connection
+            ]
+            self._connections[:] = [
+                conn for conn in self._connections if conn is not connection
+            ]
         with suppress(_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
             connection.close()
 
@@ -239,22 +325,25 @@ class PostgreSQLConnectionPool(ConnectionPool):
             self.return_connection(conn)
 
     def close_all(self) -> None:
-        self._closed = True
         if self._use_psycopg_pool:
+            self._closed = True
             with suppress(_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
                 self._pool.close()
             return
         # Close all tracked connections (both managed and currently free).
+        with self._fallback_lock:
+            self._closed = True
+            connections = [*self._connections, *self._free]
+            self._connections.clear()
+            self._free.clear()
         seen_ids: set[int] = set()
-        for conn in [*self._connections, *self._free]:
+        for conn in connections:
             conn_id = id(conn)
             if conn_id in seen_ids:
                 continue
             seen_ids.add(conn_id)
             with suppress(_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
                 conn.close()
-        self._connections.clear()
-        self._free.clear()
 
     def get_stats(self) -> dict[str, Any]:
         return {"closed": self._closed, "backend": "postgresql"}

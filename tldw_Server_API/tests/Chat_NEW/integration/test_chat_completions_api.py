@@ -283,14 +283,14 @@ class TestErrorHandling:
         assert 429 in statuses
 
     @pytest.mark.integration
-    def test_auth_error_handling(self, test_client, auth_headers):
+    def test_auth_error_handling(self, credentialed_test_client, auth_headers):
         """Test handling of authentication errors by forcing provider to raise ChatAuthenticationError."""
         from unittest.mock import patch
         from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAuthenticationError
         def raise_auth(*args, **kwargs):
             raise ChatAuthenticationError("Invalid API key", provider="openai")
         with patch('tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call', new=raise_auth):
-            response = test_client.post(
+            response = credentialed_test_client.post(
                 "/api/v1/chat/completions",
                 json={
                     "model": "gpt-5-mini",
@@ -298,19 +298,20 @@ class TestErrorHandling:
                 },
                 headers=auth_headers
             )
-            # Authentication failures should map to 401
-            assert response.status_code == status.HTTP_401_UNAUTHORIZED
+            # Provider authentication is a downstream failure, not client auth.
+            assert response.status_code == status.HTTP_502_BAD_GATEWAY
             data = response.json()
-            assert "detail" in data or "error" in data
+            assert data["detail"]["error_code"] == "provider_authentication_failed"
+            assert "Invalid API key" not in response.text
 
     @pytest.mark.unit
-    def test_general_error_handling(self, test_client, auth_headers):
+    def test_general_error_handling(self, credentialed_test_client, auth_headers):
         """Test handling of general errors by forcing provider call to raise."""
         from unittest.mock import patch
         def boom(*args, **kwargs):
             raise Exception("Unexpected error")
         with patch('tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call', new=boom):
-            response = test_client.post(
+            response = credentialed_test_client.post(
                 "/api/v1/chat/completions",
                 json={
                     "model": "gpt-5-mini",
@@ -318,9 +319,10 @@ class TestErrorHandling:
                 },
                 headers=auth_headers
             )
-            assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+            assert response.status_code == status.HTTP_502_BAD_GATEWAY
             data = response.json()
-            assert "error" in data or "detail" in data
+            assert data["detail"] == "The chat service provider is currently unavailable."
+            assert "Unexpected error" not in response.text
 
 # ========================================================================
 # Request Queue Admission (queued execution disabled)
@@ -379,7 +381,12 @@ class TestRequestQueueAdmission:
     """Validate queue gating behaviour when queued execution is disabled."""
 
     @pytest.mark.integration
-    def test_inactive_queue_is_bypassed(self, test_client, auth_headers, monkeypatch):
+    def test_inactive_queue_is_bypassed(
+        self,
+        credentialed_test_client,
+        auth_headers,
+        monkeypatch,
+    ):
         """Requests skip enqueue when queue reports inactive state."""
         from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
 
@@ -387,7 +394,7 @@ class TestRequestQueueAdmission:
         monkeypatch.setattr(chat_endpoint, "get_request_queue", lambda: queue_stub)
         monkeypatch.setattr(chat_endpoint, "QUEUED_EXECUTION", False, raising=False)
 
-        response = test_client.post(
+        response = credentialed_test_client.post(
             "/api/v1/chat/completions",
             json={
                 "model": "gpt-5-mini",
@@ -400,7 +407,12 @@ class TestRequestQueueAdmission:
         assert queue_stub.enqueue_calls == 0
 
     @pytest.mark.integration
-    def test_active_queue_admission(self, test_client, auth_headers, monkeypatch):
+    def test_active_queue_admission(
+        self,
+        credentialed_test_client,
+        auth_headers,
+        monkeypatch,
+    ):
         """Active queue gates admission without delaying the response."""
         from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
 
@@ -408,7 +420,7 @@ class TestRequestQueueAdmission:
         monkeypatch.setattr(chat_endpoint, "get_request_queue", lambda: queue_stub)
         monkeypatch.setattr(chat_endpoint, "QUEUED_EXECUTION", False, raising=False)
 
-        response = test_client.post(
+        response = credentialed_test_client.post(
             "/api/v1/chat/completions",
             json={
                 "model": "gpt-5-mini",

@@ -27,6 +27,9 @@ from tldw_Server_API.app.core.Embeddings.request_types import (
     NormalizedEmbeddingInput,
     ProviderModelIntent,
 )
+from tldw_Server_API.app.core.Embeddings.vector_validation import (
+    validated_embedding_vectors,
+)
 
 
 class EmbeddingCache(Protocol):
@@ -45,7 +48,7 @@ class EmbeddingExecutor(Protocol):
         provider: str,
         model: str,
         dimensions: int | None,
-    ) -> list[list[float]] | "EmbeddingExecutorOutput":
+    ) -> list[list[float]] | EmbeddingExecutorOutput:
         raise NotImplementedError
 
 
@@ -57,7 +60,7 @@ class EmbeddingAdapterExecutor(Protocol):
         provider: str,
         model: str,
         dimensions: int | None,
-    ) -> "EmbeddingExecutorOutput" | None:
+    ) -> EmbeddingExecutorOutput | None:
         raise NotImplementedError
 
 
@@ -239,10 +242,15 @@ class EmbeddingRequestOrchestrator:
         for index, text in enumerate(prepared.normalized_input.texts):
             key = self._cache_key(text, plan.provider, plan.model, plan.dimensions, primary_backend_identity)
             cached = await self._cache.get(key)
-            if cached is not None:
+            validated_cached = (
+                validated_embedding_vectors([cached], expected=1)
+                if cached is not None
+                else None
+            )
+            if validated_cached is not None:
                 results.append(
                     self._postprocess_cached_vector(
-                        cached,
+                        validated_cached[0],
                         plan.provider,
                         plan.model,
                         plan.dimensions,
@@ -258,6 +266,7 @@ class EmbeddingRequestOrchestrator:
         actual_model = plan.model
         fallback_from: str | None = None
         embeddings_from_adapter = False
+        pending_cache_writes: list[tuple[str, list[float]]] = []
         if miss_texts:
             execution = await self._execute_misses(prepared, miss_texts)
             actual_provider = execution.provider
@@ -280,14 +289,21 @@ class EmbeddingRequestOrchestrator:
                     results[index] = vector
                     if not execution.embeddings_from_adapter:
                         key = self._cache_key(text, actual_provider, actual_model, plan.dimensions, backend_identity)
-                        await self._cache.set(key, cache_vector)
+                        pending_cache_writes.append((key, cache_vector))
                 cache_hits = len(results) - len(miss_indices)
                 cache_misses = len(miss_indices)
         else:
             cache_hits = len(results)
             cache_misses = 0
 
-        vectors = [_require_vector(vector, index) for index, vector in enumerate(results)]
+        vectors = self._validate_vector_count(
+            results,
+            expected=len(prepared.normalized_input.texts),
+            provider=actual_provider,
+            model=actual_model,
+        )
+        for key, cache_vector in pending_cache_writes:
+            await self._cache.set(key, cache_vector)
         headers = self._response_headers(
             actual_provider=actual_provider,
             fallback_from=fallback_from,
@@ -348,7 +364,12 @@ class EmbeddingRequestOrchestrator:
                     raise
                 continue
 
-            self._validate_vector_count(vectors, expected=len(miss_texts), provider=provider, model=model)
+            vectors = self._validate_vector_count(
+                vectors,
+                expected=len(miss_texts),
+                provider=provider,
+                model=model,
+            )
             cache_vectors = [_canonical_vector(vector) for vector in vectors]
             canonical_vectors = self._postprocess_vectors(
                 cache_vectors,
@@ -393,10 +414,15 @@ class EmbeddingRequestOrchestrator:
         for index, text in enumerate(prepared.normalized_input.texts):
             key = self._cache_key(text, provider, model, plan.dimensions, backend_identity)
             cached = await self._cache.get(key)
-            if cached is not None:
+            validated_cached = (
+                validated_embedding_vectors([cached], expected=1)
+                if cached is not None
+                else None
+            )
+            if validated_cached is not None:
                 results.append(
                     self._postprocess_cached_vector(
-                        cached,
+                        validated_cached[0],
                         provider,
                         model,
                         plan.dimensions,
@@ -409,6 +435,7 @@ class EmbeddingRequestOrchestrator:
             miss_texts.append(text)
 
         embeddings_from_adapter = False
+        pending_cache_writes: list[tuple[str, list[float]]] = []
         if miss_texts:
             output = await self._executor.create(
                 miss_texts,
@@ -417,7 +444,12 @@ class EmbeddingRequestOrchestrator:
                 dimensions=plan.dimensions,
             )
             vectors, embeddings_from_adapter = _coerce_executor_output(output)
-            self._validate_vector_count(vectors, expected=len(miss_texts), provider=provider, model=model)
+            vectors = self._validate_vector_count(
+                vectors,
+                expected=len(miss_texts),
+                provider=provider,
+                model=model,
+            )
             cache_vectors = [_canonical_vector(vector) for vector in vectors]
             canonical_vectors = self._postprocess_vectors(
                 cache_vectors,
@@ -435,10 +467,19 @@ class EmbeddingRequestOrchestrator:
                 results[index] = vector
                 if not embeddings_from_adapter:
                     key = self._cache_key(text, provider, model, plan.dimensions, backend_identity)
-                    await self._cache.set(key, cache_vector)
+                    pending_cache_writes.append((key, cache_vector))
+
+        vectors = self._validate_vector_count(
+            results,
+            expected=len(prepared.normalized_input.texts),
+            provider=provider,
+            model=model,
+        )
+        for key, cache_vector in pending_cache_writes:
+            await self._cache.set(key, cache_vector)
 
         return _ProviderExecution(
-            vectors=[_require_vector(vector, index) for index, vector in enumerate(results)],
+            vectors=vectors,
             provider=provider,
             model=model,
             fallback_from=plan.provider,
@@ -467,7 +508,7 @@ class EmbeddingRequestOrchestrator:
         vectors, embeddings_from_adapter = _coerce_executor_output(output)
         if not embeddings_from_adapter:
             return None
-        self._validate_vector_count(
+        vectors = self._validate_vector_count(
             vectors,
             expected=len(prepared.normalized_input.texts),
             provider=plan.provider,
@@ -533,15 +574,22 @@ class EmbeddingRequestOrchestrator:
         expected: int,
         provider: str,
         model: str,
-    ) -> None:
-        if not isinstance(vectors, list) or len(vectors) != expected:
+    ) -> list[list[float]]:
+        validated = validated_embedding_vectors(vectors, expected=expected)
+        if validated is None:
             count: int | str = len(vectors) if isinstance(vectors, list) else "invalid"
+            message = (
+                f"Embedding provider returned {count} embeddings, expected {expected}"
+                if count != expected
+                else "Embedding provider returned malformed embedding vectors"
+            )
             raise EmbeddingProviderError(
                 "provider_malformed_response",
-                f"Embedding provider returned {count} embeddings, expected {expected}",
+                message,
                 provider=provider,
                 model=model,
             )
+        return validated
 
     def _cache_key(
         self,
@@ -595,15 +643,6 @@ def _coerce_executor_output(
     if isinstance(output, EmbeddingExecutorOutput):
         return output.vectors, output.embeddings_from_adapter
     return output, False
-
-
-def _require_vector(vector: list[float] | None, index: int) -> list[float]:
-    if vector is None:
-        raise EmbeddingExecutionError(
-            "provider_malformed_response",
-            f"Missing embedding vector at index {index}",
-        )
-    return vector
 
 
 def _no_backend_identity(provider: str, model: str) -> str | None:

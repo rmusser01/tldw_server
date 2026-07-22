@@ -1,8 +1,11 @@
+import asyncio
 import base64
+import contextlib
 import json
 import sys
 import types
 import uuid
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
@@ -81,18 +84,18 @@ async def _setup_byok_sqlite(tmp_path, monkeypatch):
         pyotp_stub.random_base32 = lambda *_args, **_kwargs: "A" * 32
         monkeypatch.setitem(sys.modules, "pyotp", pyotp_stub)
 
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
     from tldw_Server_API.app.core.AuthNZ.jwt_service import reset_jwt_service
-    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool, get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
-    from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
-    from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB, reset_users_db
     from tldw_Server_API.app.core.AuthNZ.orgs_teams import (
-        create_organization,
-        create_team,
         add_org_member,
         add_team_member,
+        create_organization,
+        create_team,
     )
+    from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
+    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+    from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB, reset_users_db
 
     reset_settings()
     reset_jwt_service()
@@ -146,6 +149,74 @@ async def _setup_byok_sqlite(tmp_path, monkeypatch):
     }
 
 
+def _raw_encrypted_blob(api_key: str) -> str:
+    from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
+        build_secret_payload,
+        dumps_envelope,
+        encrypt_byok_payload,
+    )
+
+    return dumps_envelope(encrypt_byok_payload(build_secret_payload(api_key)))
+
+
+async def _insert_raw_user_key(
+    pool,
+    *,
+    user_id: int,
+    provider: str,
+    api_key: str,
+    revoked_at: str | None = None,
+) -> None:
+    now = datetime.now(timezone.utc).isoformat()
+    await pool.execute(
+        """
+        INSERT INTO user_provider_secrets (
+            user_id, provider, encrypted_blob, key_hint,
+            created_at, updated_at, revoked_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            user_id,
+            provider,
+            _raw_encrypted_blob(api_key),
+            api_key[-4:],
+            now,
+            now,
+            revoked_at,
+        ),
+    )
+
+
+async def _insert_raw_shared_key(
+    pool,
+    *,
+    scope_type: str,
+    scope_id: int,
+    provider: str,
+    api_key: str,
+    revoked_at: str | None = None,
+) -> None:
+    now = datetime.now(timezone.utc).isoformat()
+    await pool.execute(
+        """
+        INSERT INTO org_provider_secrets (
+            scope_type, scope_id, provider, encrypted_blob, key_hint,
+            created_at, updated_at, revoked_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            scope_type,
+            scope_id,
+            provider,
+            _raw_encrypted_blob(api_key),
+            api_key[-4:],
+            now,
+            now,
+            revoked_at,
+        ),
+    )
+
+
 @pytest.mark.asyncio
 async def test_byok_endpoints_sqlite(tmp_path, monkeypatch):
     state = await _setup_byok_sqlite(tmp_path, monkeypatch)
@@ -159,8 +230,13 @@ async def test_byok_endpoints_sqlite(tmp_path, monkeypatch):
         active_org_id=org_id,
         active_team_id=team_id,
     )
+    org_only_token = await _issue_access_token(
+        state["user"],
+        active_org_id=org_id,
+    )
     admin_token = await _issue_access_token(state["admin"])
     user_headers = _auth_headers(user_token)
+    org_only_headers = _auth_headers(org_only_token)
     admin_headers = _auth_headers(admin_token)
 
     with TestClient(app) as client:
@@ -184,7 +260,7 @@ async def test_byok_endpoints_sqlite(tmp_path, monkeypatch):
 
         r = client.post(
             "/api/v1/users/keys",
-            json={"provider": "openai", "api_key": "sk-user-openai-1234"},
+            json={"provider": "oai", "api_key": "sk-user-openai-1234"},
             headers=user_headers,
         )
         assert r.status_code == 200, r.text
@@ -207,7 +283,10 @@ async def test_byok_endpoints_sqlite(tmp_path, monkeypatch):
             json={"provider": "openai", "api_key": "invalid-test-key"},
             headers=user_headers,
         )
-        assert r.status_code == 401
+        assert r.status_code == 502
+        assert r.json() == {
+            "detail": "The selected provider credentials could not be authenticated."
+        }
 
         r = client.post(
             "/api/v1/users/keys/test",
@@ -252,6 +331,14 @@ async def test_byok_endpoints_sqlite(tmp_path, monkeypatch):
         assert r.json()["key_hint"] == "4321"
 
         r = client.post(
+            f"/api/v1/orgs/{org_id}/keys/shared",
+            json={"provider": "oai", "api_key": "sk-org-alias-2468"},
+            headers=user_headers,
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["provider"] == "openai"
+
+        r = client.post(
             f"/api/v1/orgs/{org_id}/keys/shared/test",
             json={"provider": "anthropic"},
             headers=user_headers,
@@ -267,10 +354,19 @@ async def test_byok_endpoints_sqlite(tmp_path, monkeypatch):
         assert r.status_code == 200, r.text
         assert r.json()["status"] == "valid"
 
+        r = client.post(
+            f"/api/v1/orgs/{org_id}/keys/shared/test",
+            json={"provider": "oai"},
+            headers=user_headers,
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["provider"] == "openai"
+
         r = client.get(f"/api/v1/orgs/{org_id}/keys/shared", headers=user_headers)
         assert r.status_code == 200
         org_items = {item["provider"]: item for item in r.json()["items"]}
         assert "anthropic" in org_items
+        assert org_items["openai"]["last_used_at"] is not None
 
         r = client.get(f"/api/v1/teams/{team_id}/keys/shared", headers=user_headers)
         assert r.status_code == 200
@@ -282,6 +378,15 @@ async def test_byok_endpoints_sqlite(tmp_path, monkeypatch):
         assert items["anthropic"]["source"] == "org"
         assert items["anthropic"]["has_key"] is False
         assert items["openrouter"]["source"] == "team"
+
+        org_only_listing = client.get(
+            "/api/v1/users/keys",
+            headers=org_only_headers,
+        )
+        assert org_only_listing.status_code == 200
+        org_only_items = {item["provider"]: item for item in org_only_listing.json()["items"]}
+        assert org_only_items["anthropic"]["source"] == "org"
+        assert org_only_items["openrouter"]["source"] != "team"
 
         admin_list = client.get(f"/api/v1/admin/keys/users/{user_id}", headers=admin_headers)
         assert admin_list.status_code == 200
@@ -331,12 +436,116 @@ async def test_byok_endpoints_sqlite(tmp_path, monkeypatch):
         r = client.delete(f"/api/v1/orgs/{org_id}/keys/shared/anthropic", headers=user_headers)
         assert r.status_code == 204
 
+        r = client.delete(f"/api/v1/orgs/{org_id}/keys/shared/oai", headers=user_headers)
+        assert r.status_code == 204
+
         r = client.delete(f"/api/v1/teams/{team_id}/keys/shared/openrouter", headers=user_headers)
         assert r.status_code == 204
 
         listing = client.get("/api/v1/users/keys", headers=user_headers)
         items = {item["provider"]: item for item in listing.json()["items"]}
         assert items["openai"]["source"] != "user"
+
+
+@pytest.mark.asyncio
+async def test_user_key_listing_folds_aliases_and_honors_shared_tombstones(tmp_path, monkeypatch):
+    state = await _setup_byok_sqlite(tmp_path, monkeypatch)
+    pool = state["pool"]
+    user_id = int(state["user"]["id"])
+    org_id = int(state["org"]["id"])
+    team_id = int(state["team"]["id"])
+    revoked_at = datetime.now(timezone.utc).isoformat()
+
+    await _insert_raw_user_key(
+        pool,
+        user_id=user_id,
+        provider="openai",
+        api_key="sk-user-canonical-1111",
+    )
+    await _insert_raw_user_key(
+        pool,
+        user_id=user_id,
+        provider="oai",
+        api_key="sk-user-legacy-2222",
+    )
+    await _insert_raw_user_key(
+        pool,
+        user_id=user_id,
+        provider="openai-compatible",
+        api_key="sk-user-single-3333",
+    )
+    await _insert_raw_shared_key(
+        pool,
+        scope_type="team",
+        scope_id=team_id,
+        provider="custom-openai-api-2",
+        api_key="sk-team-revoked-4444",
+        revoked_at=revoked_at,
+    )
+    await _insert_raw_shared_key(
+        pool,
+        scope_type="team",
+        scope_id=team_id,
+        provider="openai-compatible-2",
+        api_key="sk-team-legacy-5555",
+    )
+    await _insert_raw_shared_key(
+        pool,
+        scope_type="org",
+        scope_id=org_id,
+        provider="custom-openai-api-2",
+        api_key="sk-org-lower-6666",
+    )
+
+    from tldw_Server_API.app.main import app
+
+    token = await _issue_access_token(
+        state["user"],
+        active_org_id=org_id,
+        active_team_id=team_id,
+    )
+    with TestClient(app) as client:
+        response = client.get("/api/v1/users/keys", headers=_auth_headers(token))
+
+    assert response.status_code == 200, response.text
+    items = response.json()["items"]
+    by_provider = {item["provider"]: item for item in items}
+    assert sum(item["provider"] == "openai" for item in items) == 1
+    assert by_provider["openai"]["source"] == "user"
+    assert by_provider["openai"]["key_hint"] == "1111"
+    assert sum(item["provider"] == "custom-openai-api" for item in items) == 1
+    assert by_provider["custom-openai-api"]["source"] == "user"
+    assert by_provider["custom-openai-api-2"]["source"] == "none"
+    assert by_provider["custom-openai-api-2"]["has_key"] is False
+
+
+@pytest.mark.asyncio
+async def test_user_key_listing_rejects_conflicting_legacy_alias_rows(tmp_path, monkeypatch):
+    state = await _setup_byok_sqlite(tmp_path, monkeypatch)
+    pool = state["pool"]
+    user_id = int(state["user"]["id"])
+    org_id = int(state["org"]["id"])
+    team_id = int(state["team"]["id"])
+    for provider, suffix in (("custom-openai", "7777"), ("openai-compatible", "8888")):
+        await _insert_raw_user_key(
+            pool,
+            user_id=user_id,
+            provider=provider,
+            api_key=f"sk-user-conflict-{suffix}",
+        )
+
+    from tldw_Server_API.app.main import app
+
+    token = await _issue_access_token(
+        state["user"],
+        active_org_id=org_id,
+        active_team_id=team_id,
+    )
+    with TestClient(app) as client:
+        response = client.get("/api/v1/users/keys", headers=_auth_headers(token))
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Conflicting provider credential aliases"
 
 
 @pytest.mark.asyncio
@@ -357,8 +566,8 @@ async def test_openai_oauth_endpoints_sqlite(tmp_path, monkeypatch):
     org_id = int(state["org"]["id"])
     team_id = int(state["team"]["id"])
 
-    from tldw_Server_API.app.main import app
     from tldw_Server_API.app.api.v1.endpoints import user_keys as user_keys_endpoints
+    from tldw_Server_API.app.main import app
 
     user_token = await _issue_access_token(
         state["user"],
@@ -590,15 +799,790 @@ async def test_openai_oauth_endpoints_sqlite(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.concurrent
+async def test_openai_oauth_refresh_disconnect_race_preserves_revocation_sqlite(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("OPENAI_OAUTH_ENABLED", "1")
+    monkeypatch.setenv("OPENAI_OAUTH_CLIENT_ID", "oauth-client-id")
+    monkeypatch.setenv("OPENAI_OAUTH_CLIENT_SECRET", "oauth-client-secret")
+    monkeypatch.setenv("OPENAI_OAUTH_AUTH_URL", "https://oauth.example.com/authorize")
+    monkeypatch.setenv("OPENAI_OAUTH_TOKEN_URL", "https://oauth.example.com/token")
+    monkeypatch.setenv(
+        "OPENAI_OAUTH_REDIRECT_URI",
+        "https://app.example.com/api/v1/users/keys/openai/oauth/callback",
+    )
+    state = await _setup_byok_sqlite(tmp_path, monkeypatch)
+    user_id = int(state["user"]["id"])
+
+    from fastapi import HTTPException
+    from starlette.requests import Request
+
+    from tldw_Server_API.app.api.v1.endpoints import user_keys as user_keys_endpoints
+    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+    from tldw_Server_API.app.core.AuthNZ.repos.user_provider_secrets_repo import (
+        AuthnzUserProviderSecretsRepo,
+    )
+    from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
+        decrypt_byok_payload,
+        dumps_envelope,
+        encrypt_byok_payload,
+        loads_envelope,
+    )
+
+    repo = AuthnzUserProviderSecretsRepo(state["pool"])
+    now = datetime.now(timezone.utc)
+    original_payload = {
+        "credential_version": 2,
+        "active_auth_source": "oauth",
+        "credentials": {
+            "oauth": {
+                "access_token": "stale-access-token",
+                "refresh_token": "refresh-token-race",
+                "expires_at": (now + timedelta(seconds=30)).isoformat(),
+            }
+        },
+    }
+    await repo.upsert_secret(
+        user_id=user_id,
+        provider="openai",
+        encrypted_blob=dumps_envelope(encrypt_byok_payload(original_payload)),
+        key_hint="oauth",
+        metadata=None,
+        updated_at=now,
+        created_by=user_id,
+        updated_by=user_id,
+    )
+
+    token_request_started = asyncio.Event()
+    release_token_response = asyncio.Event()
+    issued_token = "issued-token-must-not-be-stored"
+
+    async def _token_exchange(**_kwargs):
+        token_request_started.set()
+        await release_token_response.wait()
+        return {"access_token": issued_token, "expires_in": 3600}
+
+    async def _get_user_repo():
+        return repo
+
+    async def _ignore_audit_event(**_kwargs):
+        return None
+
+    monkeypatch.setattr(user_keys_endpoints, "_get_user_repo", _get_user_repo)
+    monkeypatch.setattr(user_keys_endpoints, "_openai_oauth_token_exchange", _token_exchange)
+    monkeypatch.setattr(
+        user_keys_endpoints,
+        "_emit_openai_oauth_audit_event",
+        _ignore_audit_event,
+    )
+
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/api/v1/users/keys/openai/oauth/refresh",
+            "headers": [],
+        }
+    )
+    refresh_task = asyncio.create_task(
+        user_keys_endpoints.refresh_openai_oauth(
+            request,
+            AuthPrincipal(kind="user", user_id=user_id),
+        )
+    )
+    token_started_waiter = asyncio.create_task(token_request_started.wait())
+    completed, _pending = await asyncio.wait(
+        {refresh_task, token_started_waiter},
+        return_when=asyncio.FIRST_COMPLETED,
+    )
+    assert token_started_waiter in completed
+    assert await repo.delete_secret(user_id, "openai", revoked_by=user_id)
+    release_token_response.set()
+
+    with pytest.raises(HTTPException) as exc_info:
+        await refresh_task
+
+    assert exc_info.value.status_code == 404
+    stored_row = await repo.fetch_secret_for_user(user_id, "openai", include_revoked=True)
+    assert stored_row is not None
+    assert stored_row["revoked_at"] is not None
+    stored_payload = decrypt_byok_payload(loads_envelope(stored_row["encrypted_blob"]))
+    assert stored_payload == original_payload
+    assert issued_token not in json.dumps(stored_payload)
+
+
+@pytest.mark.asyncio
+@pytest.mark.concurrent
+@pytest.mark.parametrize(
+    "runtime_access_token",
+    ["runtime-winning-access-token", "stale-access-token"],
+    ids=["rotated-access-token", "same-access-new-refresh-token"],
+)
+async def test_manual_and_runtime_openai_refresh_share_one_token_request_sqlite(
+    tmp_path,
+    monkeypatch,
+    runtime_access_token,
+):
+    """Manual and runtime refreshes coalesce by opaque access-token generation."""
+    monkeypatch.setenv("OPENAI_OAUTH_ENABLED", "1")
+    monkeypatch.setenv("OPENAI_OAUTH_CLIENT_ID", "oauth-client-id")
+    monkeypatch.setenv("OPENAI_OAUTH_CLIENT_SECRET", "oauth-client-secret")
+    monkeypatch.setenv("OPENAI_OAUTH_AUTH_URL", "https://oauth.example.com/authorize")
+    monkeypatch.setenv("OPENAI_OAUTH_TOKEN_URL", "https://oauth.example.com/token")
+    monkeypatch.setenv("OPENAI_OAUTH_REDIRECT_URI", "https://app.example.com/oauth/callback")
+    state = await _setup_byok_sqlite(tmp_path, monkeypatch)
+    user_id = int(state["user"]["id"])
+
+    from starlette.requests import Request
+
+    from tldw_Server_API.app.api.v1.endpoints import user_keys as user_keys_endpoints
+    from tldw_Server_API.app.core.AuthNZ import byok_runtime
+    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+    from tldw_Server_API.app.core.AuthNZ.repos.user_provider_secrets_repo import (
+        AuthnzUserProviderSecretsRepo,
+    )
+    from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
+        decrypt_byok_payload,
+        dumps_envelope,
+        encrypt_byok_payload,
+        loads_envelope,
+    )
+
+    repo = AuthnzUserProviderSecretsRepo(state["pool"])
+    now = datetime.now(timezone.utc)
+    original_payload = {
+        "credential_version": 2,
+        "active_auth_source": "oauth",
+        "credentials": {
+            "oauth": {
+                "access_token": "stale-access-token",
+                "refresh_token": "single-use-refresh-token",
+                "expires_at": (now - timedelta(seconds=5)).isoformat(),
+            }
+        },
+    }
+    await repo.upsert_secret(
+        user_id=user_id,
+        provider="openai",
+        encrypted_blob=dumps_envelope(encrypt_byok_payload(original_payload)),
+        key_hint="oauth",
+        metadata=None,
+        updated_at=now,
+        created_by=user_id,
+        updated_by=user_id,
+    )
+
+    runtime_started = asyncio.Event()
+    manual_started = asyncio.Event()
+    release_runtime = asyncio.Event()
+    token_calls: list[str] = []
+
+    async def runtime_token_refresh(**_kwargs):
+        token_calls.append("runtime")
+        runtime_started.set()
+        await release_runtime.wait()
+        return {
+            "access_token": runtime_access_token,
+            "refresh_token": "runtime-winning-refresh-token",
+            "expires_in": 3600,
+        }
+
+    async def manual_token_exchange(**_kwargs):
+        token_calls.append("manual")
+        manual_started.set()
+        return {
+            "access_token": "manual-losing-access-token",
+            "refresh_token": "manual-losing-refresh-token",
+            "expires_in": 3600,
+        }
+
+    async def get_user_repo():
+        return repo
+
+    async def ignore_audit_event(**_kwargs):
+        return None
+
+    monkeypatch.setattr(byok_runtime, "_openai_oauth_token_refresh", runtime_token_refresh)
+    monkeypatch.setattr(user_keys_endpoints, "_get_user_repo", get_user_repo)
+    monkeypatch.setattr(user_keys_endpoints, "_openai_oauth_token_exchange", manual_token_exchange)
+    monkeypatch.setattr(user_keys_endpoints, "_emit_openai_oauth_audit_event", ignore_audit_event)
+
+    runtime_task = asyncio.create_task(
+        byok_runtime.resolve_byok_credentials(
+            "openai",
+            user_id=user_id,
+            force_oauth_refresh=True,
+        )
+    )
+    await asyncio.wait_for(runtime_started.wait(), timeout=10)
+
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/api/v1/users/keys/openai/oauth/refresh",
+            "headers": [],
+        }
+    )
+    manual_task = asyncio.create_task(
+        user_keys_endpoints.refresh_openai_oauth(
+            request,
+            AuthPrincipal(kind="user", user_id=user_id),
+        )
+    )
+    try:
+        await asyncio.wait_for(manual_started.wait(), timeout=0.2)
+    except asyncio.TimeoutError:
+        pass
+    release_runtime.set()
+
+    runtime_result, manual_result = await asyncio.gather(runtime_task, manual_task)
+
+    assert runtime_result.api_key == runtime_access_token
+    assert manual_result.status == "refreshed"
+    assert token_calls == ["runtime"]
+    stored_row = await repo.fetch_secret_for_user(user_id, "openai")
+    stored_payload = decrypt_byok_payload(loads_envelope(stored_row["encrypted_blob"]))
+    assert stored_payload["credentials"]["oauth"]["refresh_token"] == "runtime-winning-refresh-token"
+
+
+@pytest.mark.asyncio
+@pytest.mark.concurrent
+@pytest.mark.parametrize(
+    "mutation_kind",
+    ["api_key", "disconnect", "source_switch", "generic_delete"],
+)
+async def test_runtime_openai_refresh_serializes_user_row_mutations_sqlite(
+    tmp_path,
+    monkeypatch,
+    mutation_kind,
+):
+    """A refresh winner is not resurrected or overwritten by user mutations."""
+    monkeypatch.setenv("OPENAI_OAUTH_ENABLED", "1")
+    monkeypatch.setenv("OPENAI_OAUTH_CLIENT_ID", "oauth-client-id")
+    monkeypatch.setenv("OPENAI_OAUTH_CLIENT_SECRET", "oauth-client-secret")
+    monkeypatch.setenv("OPENAI_OAUTH_AUTH_URL", "https://oauth.example.com/authorize")
+    monkeypatch.setenv("OPENAI_OAUTH_TOKEN_URL", "https://oauth.example.com/token")
+    monkeypatch.setenv("OPENAI_OAUTH_REDIRECT_URI", "https://app.example.com/oauth/callback")
+    state = await _setup_byok_sqlite(tmp_path, monkeypatch)
+    user_id = int(state["user"]["id"])
+
+    from starlette.requests import Request
+
+    from tldw_Server_API.app.api.v1.endpoints import user_keys as user_keys_endpoints
+    from tldw_Server_API.app.api.v1.schemas.user_keys import (
+        OpenAICredentialSourceSwitchRequest,
+        UserProviderKeyUpsertRequest,
+    )
+    from tldw_Server_API.app.core.AuthNZ import byok_runtime
+    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+    from tldw_Server_API.app.core.AuthNZ.repos.user_provider_secrets_repo import (
+        AuthnzUserProviderSecretsRepo,
+    )
+    from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
+        decrypt_byok_payload,
+        dumps_envelope,
+        encrypt_byok_payload,
+        loads_envelope,
+    )
+
+    repo = AuthnzUserProviderSecretsRepo(state["pool"])
+    now = datetime.now(timezone.utc)
+    await repo.upsert_secret(
+        user_id=user_id,
+        provider="openai",
+        encrypted_blob=dumps_envelope(
+            encrypt_byok_payload(
+                {
+                    "credential_version": 2,
+                    "active_auth_source": "oauth",
+                    "credentials": {
+                        "api_key": {"api_key": "sk-original-api-key"},
+                        "oauth": {
+                            "access_token": "stale-access-token",
+                            "refresh_token": "single-use-refresh-token",
+                            "expires_at": (now - timedelta(seconds=5)).isoformat(),
+                        },
+                    },
+                }
+            )
+        ),
+        key_hint="oauth",
+        metadata=None,
+        updated_at=now,
+        created_by=user_id,
+        updated_by=user_id,
+    )
+
+    refresh_started = asyncio.Event()
+    release_refresh = asyncio.Event()
+    mutation_lock_attempted = asyncio.Event()
+    original_mutation_lock = user_keys_endpoints.openai_credential_mutation_lock
+
+    @contextlib.asynccontextmanager
+    async def tracked_mutation_lock(**kwargs):
+        mutation_lock_attempted.set()
+        async with original_mutation_lock(**kwargs) as locked_repo:
+            yield locked_repo
+
+    async def runtime_token_refresh(**_kwargs):
+        refresh_started.set()
+        await release_refresh.wait()
+        return {
+            "access_token": "runtime-winning-access-token",
+            "refresh_token": "runtime-winning-refresh-token",
+            "expires_in": 3600,
+        }
+
+    async def get_user_repo():
+        return repo
+
+    async def accept_provider_credentials(**_kwargs):
+        return "gpt-test"
+
+    async def ignore_audit_event(**_kwargs):
+        return None
+
+    monkeypatch.setattr(byok_runtime, "_openai_oauth_token_refresh", runtime_token_refresh)
+    monkeypatch.setattr(user_keys_endpoints, "_get_user_repo", get_user_repo)
+    monkeypatch.setattr(user_keys_endpoints, "test_provider_credentials", accept_provider_credentials)
+    monkeypatch.setattr(user_keys_endpoints, "_emit_openai_oauth_audit_event", ignore_audit_event)
+    monkeypatch.setattr(
+        user_keys_endpoints,
+        "openai_credential_mutation_lock",
+        tracked_mutation_lock,
+    )
+
+    principal = AuthPrincipal(kind="user", user_id=user_id)
+    runtime_task = asyncio.create_task(
+        byok_runtime.resolve_byok_credentials(
+            "openai",
+            user_id=user_id,
+            force_oauth_refresh=True,
+        )
+    )
+    await asyncio.wait_for(refresh_started.wait(), timeout=10)
+
+    if mutation_kind == "api_key":
+        mutation = user_keys_endpoints.upsert_user_provider_key(
+            UserProviderKeyUpsertRequest(provider="openai", api_key="sk-edited-api-key"),
+            Request({"type": "http", "method": "POST", "path": "/api/v1/users/keys", "headers": []}),
+            principal,
+        )
+    elif mutation_kind == "disconnect":
+        mutation = user_keys_endpoints.disconnect_openai_oauth(
+            Request(
+                {
+                    "type": "http",
+                    "method": "DELETE",
+                    "path": "/api/v1/users/keys/openai/oauth",
+                    "headers": [],
+                }
+            ),
+            principal,
+        )
+    elif mutation_kind == "source_switch":
+        mutation = user_keys_endpoints.switch_openai_credential_source(
+            OpenAICredentialSourceSwitchRequest(auth_source="api_key"),
+            Request(
+                {
+                    "type": "http",
+                    "method": "POST",
+                    "path": "/api/v1/users/keys/openai/source",
+                    "headers": [],
+                }
+            ),
+            principal,
+        )
+    else:
+        mutation = user_keys_endpoints.delete_user_provider_key("OPENAI", principal)
+
+    mutation_task = asyncio.create_task(mutation)
+    await asyncio.wait_for(mutation_lock_attempted.wait(), timeout=10)
+    assert not mutation_task.done()
+    release_refresh.set()
+    runtime_result, mutation_result = await asyncio.gather(runtime_task, mutation_task)
+
+    assert runtime_result.api_key == "runtime-winning-access-token"
+    assert mutation_result is not None
+
+    row = await repo.fetch_secret_for_user(
+        user_id,
+        "openai",
+        include_revoked=mutation_kind == "generic_delete",
+    )
+    assert row is not None
+    if mutation_kind == "generic_delete":
+        assert row["revoked_at"] is not None
+        return
+
+    stored_payload = decrypt_byok_payload(loads_envelope(row["encrypted_blob"]))
+    if mutation_kind == "disconnect":
+        assert "oauth" not in stored_payload["credentials"]
+        assert stored_payload["active_auth_source"] == "api_key"
+    else:
+        assert stored_payload["credentials"]["oauth"]["access_token"] == "runtime-winning-access-token"
+        assert stored_payload["credentials"]["oauth"]["refresh_token"] == "runtime-winning-refresh-token"
+        assert stored_payload["active_auth_source"] == "api_key"
+        if mutation_kind == "api_key":
+            assert stored_payload["credentials"]["api_key"]["api_key"] == "sk-edited-api-key"
+
+
+@pytest.mark.asyncio
+@pytest.mark.concurrent
+async def test_openai_callback_final_merge_serializes_with_api_key_edit_sqlite(
+    tmp_path,
+    monkeypatch,
+):
+    """The callback final write preserves an API-key edit racing its token exchange."""
+    monkeypatch.setenv("OPENAI_OAUTH_ENABLED", "1")
+    monkeypatch.setenv("OPENAI_OAUTH_CLIENT_ID", "oauth-client-id")
+    monkeypatch.setenv("OPENAI_OAUTH_CLIENT_SECRET", "oauth-client-secret")
+    monkeypatch.setenv("OPENAI_OAUTH_AUTH_URL", "https://oauth.example.com/authorize")
+    monkeypatch.setenv("OPENAI_OAUTH_TOKEN_URL", "https://oauth.example.com/token")
+    monkeypatch.setenv("OPENAI_OAUTH_REDIRECT_URI", "https://app.example.com/oauth/callback")
+    state = await _setup_byok_sqlite(tmp_path, monkeypatch)
+    user_id = int(state["user"]["id"])
+
+    from starlette.requests import Request
+
+    from tldw_Server_API.app.api.v1.endpoints import user_keys as user_keys_endpoints
+    from tldw_Server_API.app.api.v1.schemas.user_keys import UserProviderKeyUpsertRequest
+    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+    from tldw_Server_API.app.core.AuthNZ.repos.user_provider_secrets_repo import (
+        AuthnzUserProviderSecretsRepo,
+    )
+    from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
+        decrypt_byok_payload,
+        dumps_envelope,
+        encrypt_byok_payload,
+        loads_envelope,
+    )
+
+    repo = AuthnzUserProviderSecretsRepo(state["pool"])
+    now = datetime.now(timezone.utc)
+    await repo.upsert_secret(
+        user_id=user_id,
+        provider="openai",
+        encrypted_blob=dumps_envelope(
+            encrypt_byok_payload(
+                {
+                    "credential_version": 2,
+                    "active_auth_source": "api_key",
+                    "credentials": {"api_key": {"api_key": "sk-original-api-key"}},
+                }
+            )
+        ),
+        key_hint="-key",
+        metadata=None,
+        updated_at=now,
+        created_by=user_id,
+        updated_by=user_id,
+    )
+
+    state_secret = dumps_envelope(encrypt_byok_payload({"pkce_verifier": "pkce-verifier"}))
+
+    class OAuthStateRepo:
+        async def consume_state(self, **_kwargs):
+            return {
+                "user_id": user_id,
+                "redirect_uri": "https://app.example.com/oauth/callback",
+                "pkce_verifier_encrypted": state_secret,
+                "auth_session_id": "auth-session",
+                "return_path": "/settings",
+            }
+
+    callback_persist_started = asyncio.Event()
+    release_callback_persist = asyncio.Event()
+    edit_lock_attempted = asyncio.Event()
+    callback_blocked = False
+    mutation_lock_calls = 0
+    original_mutation_lock = user_keys_endpoints.openai_credential_mutation_lock
+
+    @contextlib.asynccontextmanager
+    async def tracked_mutation_lock(**kwargs):
+        nonlocal mutation_lock_calls
+        mutation_lock_calls += 1
+        if mutation_lock_calls == 2:
+            edit_lock_attempted.set()
+        async with original_mutation_lock(**kwargs) as locked_repo:
+            yield locked_repo
+
+    class BlockingRepo:
+        def __getattr__(self, name):
+            return getattr(repo, name)
+
+        async def upsert_secret(self, **kwargs):
+            nonlocal callback_blocked
+            candidate = decrypt_byok_payload(loads_envelope(kwargs["encrypted_blob"]))
+            oauth = candidate.get("credentials", {}).get("oauth", {})
+            if not callback_blocked and oauth.get("access_token") == "callback-access-token":
+                callback_blocked = True
+                callback_persist_started.set()
+                await release_callback_persist.wait()
+            return await repo.upsert_secret(**kwargs)
+
+    blocking_repo = BlockingRepo()
+
+    async def get_user_repo():
+        return blocking_repo
+
+    async def get_state_repo():
+        return OAuthStateRepo()
+
+    async def exchange_token(**_kwargs):
+        return {
+            "access_token": "callback-access-token",
+            "refresh_token": "callback-refresh-token",
+            "expires_in": 3600,
+        }
+
+    async def accept_provider_credentials(**_kwargs):
+        return "gpt-test"
+
+    async def ignore_audit_event(**_kwargs):
+        return None
+
+    monkeypatch.setattr(user_keys_endpoints, "_get_user_repo", get_user_repo)
+    monkeypatch.setattr(user_keys_endpoints, "_get_oauth_state_repo", get_state_repo)
+    monkeypatch.setattr(user_keys_endpoints, "_openai_oauth_token_exchange", exchange_token)
+    monkeypatch.setattr(user_keys_endpoints, "test_provider_credentials", accept_provider_credentials)
+    monkeypatch.setattr(user_keys_endpoints, "_emit_openai_oauth_audit_event", ignore_audit_event)
+    monkeypatch.setattr(
+        user_keys_endpoints,
+        "openai_credential_mutation_lock",
+        tracked_mutation_lock,
+    )
+
+    callback_task = asyncio.create_task(
+        user_keys_endpoints.callback_openai_oauth(
+            Request(
+                {
+                    "type": "http",
+                    "method": "GET",
+                    "path": "/api/v1/users/keys/openai/oauth/callback",
+                    "headers": [],
+                }
+            ),
+            code="authorization-code",
+            state="oauth-state",
+        )
+    )
+    await asyncio.wait_for(callback_persist_started.wait(), timeout=10)
+
+    edit_task = asyncio.create_task(
+        user_keys_endpoints.upsert_user_provider_key(
+            UserProviderKeyUpsertRequest(provider="openai", api_key="sk-edited-api-key"),
+            Request({"type": "http", "method": "POST", "path": "/api/v1/users/keys", "headers": []}),
+            AuthPrincipal(kind="user", user_id=user_id),
+        )
+    )
+    await asyncio.wait_for(edit_lock_attempted.wait(), timeout=10)
+    assert not edit_task.done()
+    release_callback_persist.set()
+    callback_result, edit_result = await asyncio.gather(callback_task, edit_task)
+
+    assert callback_result.auth_source == "oauth"
+    assert edit_result.key_hint == "-key"
+    stored_row = await repo.fetch_secret_for_user(user_id, "openai")
+    stored_payload = decrypt_byok_payload(loads_envelope(stored_row["encrypted_blob"]))
+    assert stored_payload["credentials"]["oauth"]["access_token"] == "callback-access-token"
+    assert stored_payload["credentials"]["api_key"]["api_key"] == "sk-edited-api-key"
+    assert stored_payload["active_auth_source"] == "api_key"
+
+
+@pytest.mark.asyncio
+@pytest.mark.concurrent
+async def test_runtime_openai_refresh_serializes_with_admin_revoke_sqlite(
+    tmp_path,
+    monkeypatch,
+):
+    """An admin revoke waits for refresh and leaves a durable tombstone."""
+    monkeypatch.setenv("OPENAI_OAUTH_ENABLED", "1")
+    monkeypatch.setenv("OPENAI_OAUTH_CLIENT_ID", "oauth-client-id")
+    monkeypatch.setenv("OPENAI_OAUTH_CLIENT_SECRET", "oauth-client-secret")
+    monkeypatch.setenv("OPENAI_OAUTH_TOKEN_URL", "https://oauth.example.com/token")
+    state = await _setup_byok_sqlite(tmp_path, monkeypatch)
+    user_id = int(state["user"]["id"])
+
+    from tldw_Server_API.app.core.AuthNZ import byok_runtime
+    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+    from tldw_Server_API.app.core.AuthNZ.repos.user_provider_secrets_repo import (
+        AuthnzUserProviderSecretsRepo,
+    )
+    from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
+        dumps_envelope,
+        encrypt_byok_payload,
+    )
+    from tldw_Server_API.app.services import admin_byok_service
+
+    repo = AuthnzUserProviderSecretsRepo(state["pool"])
+    now = datetime.now(timezone.utc)
+    await repo.upsert_secret(
+        user_id=user_id,
+        provider="openai",
+        encrypted_blob=dumps_envelope(
+            encrypt_byok_payload(
+                {
+                    "credential_version": 2,
+                    "active_auth_source": "oauth",
+                    "credentials": {
+                        "oauth": {
+                            "access_token": "stale-access-token",
+                            "refresh_token": "single-use-refresh-token",
+                            "expires_at": (now - timedelta(seconds=5)).isoformat(),
+                        }
+                    },
+                }
+            )
+        ),
+        key_hint="oauth",
+        metadata=None,
+        updated_at=now,
+        created_by=user_id,
+        updated_by=user_id,
+    )
+
+    refresh_started = asyncio.Event()
+    release_refresh = asyncio.Event()
+    revoke_lock_attempted = asyncio.Event()
+
+    async def runtime_token_refresh(**_kwargs):
+        refresh_started.set()
+        await release_refresh.wait()
+        return {
+            "access_token": "runtime-winning-access-token",
+            "refresh_token": "runtime-winning-refresh-token",
+            "expires_in": 3600,
+        }
+
+    async def get_user_repo():
+        return repo
+
+    async def allow_admin_scope(*_args, **_kwargs):
+        return None
+
+    original_revoke_lock = admin_byok_service.openai_credential_mutation_lock
+
+    @contextlib.asynccontextmanager
+    async def tracked_revoke_lock(**kwargs):
+        revoke_lock_attempted.set()
+        async with original_revoke_lock(**kwargs) as locked_repo:
+            yield locked_repo
+
+    monkeypatch.setattr(byok_runtime, "_openai_oauth_token_refresh", runtime_token_refresh)
+    monkeypatch.setattr(admin_byok_service, "get_user_byok_repo", get_user_repo)
+    monkeypatch.setattr(
+        admin_byok_service,
+        "openai_credential_mutation_lock",
+        tracked_revoke_lock,
+    )
+    monkeypatch.setattr(
+        admin_byok_service.admin_scope_service,
+        "enforce_admin_user_scope",
+        allow_admin_scope,
+    )
+
+    runtime_task = asyncio.create_task(
+        byok_runtime.resolve_byok_credentials(
+            "openai",
+            user_id=user_id,
+            force_oauth_refresh=True,
+        )
+    )
+    await asyncio.wait_for(refresh_started.wait(), timeout=10)
+
+    revoke_task = asyncio.create_task(
+        admin_byok_service.revoke_user_key(
+            AuthPrincipal(kind="user", user_id=int(state["admin"]["id"]), roles=("admin",)),
+            user_id,
+            "OpenAI",
+        )
+    )
+    await asyncio.wait_for(revoke_lock_attempted.wait(), timeout=10)
+    assert not revoke_task.done()
+    release_refresh.set()
+    runtime_result, revoke_result = await asyncio.gather(runtime_task, revoke_task)
+
+    assert runtime_result.api_key == "runtime-winning-access-token"
+    assert revoke_result is None
+    stored_row = await repo.fetch_secret_for_user(user_id, "openai", include_revoked=True)
+    assert stored_row is not None
+    assert stored_row["revoked_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_legacy_user_alias_row_can_be_touched_and_revoked_sqlite(
+    tmp_path,
+    monkeypatch,
+):
+    state = await _setup_byok_sqlite(tmp_path, monkeypatch)
+    user_id = int(state["user"]["id"])
+    pool = state["pool"]
+
+    from tldw_Server_API.app.core.AuthNZ.repos.user_provider_secrets_repo import (
+        AuthnzUserProviderSecretsRepo,
+    )
+
+    created_at = datetime.now(timezone.utc)
+    await pool.execute(
+        """
+        INSERT INTO user_provider_secrets (
+            user_id, provider, encrypted_blob, key_hint, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (
+            user_id,
+            "oai",
+            "legacy-encrypted-blob",
+            "legacy",
+            created_at.isoformat(),
+            created_at.isoformat(),
+        ),
+    )
+    repo = AuthnzUserProviderSecretsRepo(pool)
+
+    legacy_row = await repo.fetch_secret_for_user(user_id, "openai")
+    assert legacy_row is not None
+    assert legacy_row["provider"] == "oai"
+
+    used_at = created_at + timedelta(seconds=1)
+    await repo.touch_last_used(user_id, "openai", used_at)
+    touched_row = await pool.fetchone(
+        "SELECT last_used_at FROM user_provider_secrets WHERE user_id = ? AND provider = ?",
+        (user_id, "oai"),
+    )
+    assert touched_row is not None
+    assert touched_row["last_used_at"] == used_at.isoformat()
+
+    assert await repo.delete_secret(user_id, "openai", revoked_by=user_id)
+    assert await repo.fetch_secret_for_user(user_id, "openai") is None
+    revoked_row = await repo.fetch_secret_for_user(
+        user_id,
+        "openai",
+        include_revoked=True,
+    )
+    assert revoked_row is not None
+    assert revoked_row["provider"] == "openai"
+    assert revoked_row["revoked_at"] is not None
+    assert await pool.fetchone(
+        "SELECT 1 FROM user_provider_secrets WHERE user_id = ? AND provider = ?",
+        (user_id, "oai"),
+    ) is None
+
+
+@pytest.mark.asyncio
 async def test_shared_keys_scoped_requires_manager_sqlite(tmp_path, monkeypatch):
     state = await _setup_byok_sqlite(tmp_path, monkeypatch)
     pool = state["pool"]
     org_id = int(state["org"]["id"])
     team_id = int(state["team"]["id"])
 
-    from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
     from tldw_Server_API.app.core.AuthNZ.orgs_teams import add_org_member, add_team_member
     from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
+    from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
 
     users_db = UsersDB(pool)
     await users_db.initialize()

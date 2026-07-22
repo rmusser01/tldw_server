@@ -6,6 +6,7 @@ import asyncio
 import os
 import re
 import sqlite3
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Any, Optional
@@ -35,13 +36,13 @@ from tldw_Server_API.app.core.AuthNZ.exceptions import (
     WeakPasswordError,
 )
 from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
-from tldw_Server_API.app.core.DB_Management.sqlite_policy import (
-    configure_sqlite_connection_async,
-)
 
 #
 # Local imports
 from tldw_Server_API.app.core.AuthNZ.settings import Settings, get_settings
+from tldw_Server_API.app.core.DB_Management.sqlite_policy import (
+    configure_sqlite_connection_async,
+)
 from tldw_Server_API.app.core.testing import is_explicit_pytest_runtime, is_test_mode
 
 _AUTHNZ_DB_NONCRITICAL_EXCEPTIONS = (
@@ -55,6 +56,8 @@ _AUTHNZ_DB_NONCRITICAL_EXCEPTIONS = (
     TimeoutError,
     asyncpg.PostgresError,
 )
+
+OPENAI_CREDENTIAL_LOCK_POOL_MAX_SIZE = 4
 
 SQLITE_REQUIRED_API_KEYS_COLUMNS = frozenset(
     {
@@ -93,6 +96,31 @@ SQLITE_REQUIRED_API_KEYS_COLUMNS = frozenset(
         "llm_allowed_models",
     }
 )
+
+
+async def _await_connection_release(awaitable: Any) -> Any:
+    """Finish returning a pooled connection before propagating cancellation."""
+    release_task = asyncio.create_task(awaitable)
+    try:
+        return await asyncio.shield(release_task)
+    except asyncio.CancelledError:
+        while not release_task.done():
+            try:
+                await asyncio.shield(release_task)
+            except asyncio.CancelledError:
+                continue
+        try:
+            release_task.result()
+        except asyncio.CancelledError:
+            logger.error("PostgreSQL pool release task was cancelled")
+        except Exception as exc:  # noqa: BLE001 - preserve cancellation after cleanup
+            logger.error(
+                "PostgreSQL pool release failed during cancellation: {}",
+                type(exc).__name__,
+            )
+        raise
+
+
 SQLITE_REQUIRED_API_KEY_AUDIT_COLUMNS = frozenset(
     {
         "id",
@@ -238,9 +266,7 @@ def should_enforce_sqlite_schema_strictness(sqlite_fs_path: Optional[str]) -> bo
     """Return True when persisted SQLite schema drift should fail fast."""
     if not sqlite_fs_path or sqlite_fs_path == ":memory:":
         return False
-    if is_test_mode() or is_explicit_pytest_runtime():
-        return False
-    return True
+    return not (is_test_mode() or is_explicit_pytest_runtime())
 
 
 def _sqlite_missing_required_columns(
@@ -315,6 +341,7 @@ class DatabasePool:
         """Initialize database pool manager"""
         self.settings = settings or get_settings()
         self.pool: Optional[asyncpg.Pool] = None
+        self._openai_credential_lock_pool: Optional[asyncpg.Pool] = None
         self.db_path: Optional[str] = None
         self._sqlite_fs_path: Optional[str] = None
         self._sqlite_uri: bool = False
@@ -344,6 +371,14 @@ class DatabasePool:
                         max_queries=self.settings.DATABASE_MAX_QUERIES,
                         max_inactive_connection_lifetime=self.settings.DATABASE_MAX_INACTIVE_CONNECTION_LIFETIME,
                         command_timeout=60
+                    )
+                    self._openai_credential_lock_pool = await asyncpg.create_pool(
+                        self.settings.DATABASE_URL,
+                        min_size=0,
+                        max_size=OPENAI_CREDENTIAL_LOCK_POOL_MAX_SIZE,
+                        max_queries=self.settings.DATABASE_MAX_QUERIES,
+                        max_inactive_connection_lifetime=self.settings.DATABASE_MAX_INACTIVE_CONNECTION_LIFETIME,
+                        command_timeout=60,
                     )
                     # Remember loop for compatibility checks
                     try:
@@ -385,7 +420,11 @@ class DatabasePool:
                 self._initialized = True
                 logger.info("Database pool initialized successfully")
 
+            except asyncio.CancelledError:
+                await self._close_postgres_pools()
+                raise
             except _AUTHNZ_DB_NONCRITICAL_EXCEPTIONS as e:
+                await self._close_postgres_pools()
                 logger.error(f"Failed to initialize database pool: {e}")
                 raise DatabaseError(f"Database initialization failed: {e}") from e
 
@@ -569,10 +608,11 @@ class DatabasePool:
         if not self._initialized:
             await self.initialize()
 
-        if self.pool:
+        postgres_pool = self.pool
+        if postgres_pool is not None:
             # PostgreSQL transaction
             try:
-                async with self.pool.acquire() as conn, conn.transaction():
+                async with postgres_pool.acquire() as conn, conn.transaction():
                     yield conn
                 logger.debug("PostgreSQL transaction committed successfully")
             except asyncpg.exceptions.TooManyConnectionsError:
@@ -586,7 +626,9 @@ class DatabasePool:
                 # Re-raise registration exceptions unchanged
                 raise
             except _AUTHNZ_DB_NONCRITICAL_EXCEPTIONS as e:
-                logger.error(f"PostgreSQL transaction error: {e}")
+                logger.bind(error_type=type(e).__name__).error(
+                    "PostgreSQL transaction failed"
+                )
                 raise TransactionError("PostgreSQL transaction", str(e)) from e
         else:
             # SQLite transaction
@@ -633,29 +675,40 @@ class DatabasePool:
                 # Re-raise registration exceptions unchanged
                 raise
             except _AUTHNZ_DB_NONCRITICAL_EXCEPTIONS as e:
-                logger.error(f"SQLite transaction error: {e}")
+                logger.bind(error_type=type(e).__name__).error(
+                    "SQLite transaction failed"
+                )
                 raise TransactionError("SQLite transaction", str(e)) from e
             finally:
                 if conn:
                     await conn.close()
 
     @asynccontextmanager
-    async def acquire(self):
-        """Acquire a database connection (for queries without transaction)"""
+    async def acquire(self, *, timeout: float | None = None):
+        """Acquire a connection, optionally bounding PostgreSQL pool wait time."""
         if not self._initialized:
             await self.initialize()
 
-        if self.pool:
+        postgres_pool = self.pool
+        if postgres_pool is not None:
             # PostgreSQL connection
             conn = None
             try:
-                conn = await self.pool.acquire()
+                if timeout is None:
+                    conn = await postgres_pool.acquire()
+                else:
+                    conn = await postgres_pool.acquire(timeout=timeout)
                 yield conn
             except asyncpg.exceptions.TooManyConnectionsError:
                 raise ConnectionPoolExhaustedError() from None
             finally:
                 if conn:
-                    await self.pool.release(conn)
+                    release = (
+                        postgres_pool.release(conn)
+                        if timeout is None
+                        else postgres_pool.release(conn, timeout=timeout)
+                    )
+                    await _await_connection_release(release)
         else:
             # SQLite connection
             conn = None
@@ -686,7 +739,8 @@ class DatabasePool:
     async def execute(self, query: str, *args) -> Any:
         """Execute a query without returning results"""
         async with self.acquire() as conn:
-            if self.pool:
+            is_postgres = self.pool is not None
+            if is_postgres:
                 # PostgreSQL
                 params = _flatten_params(args)
                 pg_query = _convert_question_mark_to_dollar(query, params)
@@ -703,7 +757,8 @@ class DatabasePool:
     async def fetchone(self, query: str, *args) -> Optional[dict[str, Any]]:
         """Fetch a single row"""
         async with self.acquire() as conn:
-            if self.pool:
+            is_postgres = self.pool is not None
+            if is_postgres:
                 # PostgreSQL
                 params = _flatten_params(args)
                 pg_query = _convert_question_mark_to_dollar(query, params)
@@ -720,7 +775,10 @@ class DatabasePool:
                     if isinstance(row, dict):
                         return row
                     with suppress(Exception):
-                        return {key: row[key] for key in row.keys()}  # type: ignore[call-arg]
+                        # Row iteration yields values; keys() is required here.
+                        return {
+                            key: row[key] for key in row.keys()  # noqa: SIM118
+                        }
                     with suppress(Exception):
                         return dict(row)
                     values = tuple(row)
@@ -746,7 +804,8 @@ class DatabasePool:
         or key access (r['col']).
         """
         async with self.acquire() as conn:
-            if self.pool:
+            is_postgres = self.pool is not None
+            if is_postgres:
                 # PostgreSQL
                 params = _flatten_params(args)
                 pg_query = _convert_question_mark_to_dollar(query, params)
@@ -768,7 +827,8 @@ class DatabasePool:
     async def fetchval(self, query: str, *args) -> Any:
         """Fetch a single value"""
         async with self.acquire() as conn:
-            if self.pool:
+            is_postgres = self.pool is not None
+            if is_postgres:
                 # PostgreSQL
                 params = _flatten_params(args)
                 pg_query = _convert_question_mark_to_dollar(query, params)
@@ -781,29 +841,100 @@ class DatabasePool:
                 row = await cursor.fetchone()
                 return row[0] if row else None
 
+    @asynccontextmanager
+    async def acquire_openai_credential_lock_connection(
+        self,
+        *,
+        timeout: float | None = None,
+    ) -> AsyncIterator[Any]:
+        """Acquire a PostgreSQL session dedicated to OpenAI credential locking."""
+        if not self._initialized:
+            await self.initialize()
+
+        lock_pool = self._openai_credential_lock_pool
+        if lock_pool is None:
+            raise DatabaseError("OpenAI credential lock pool unavailable")
+
+        conn = None
+        try:
+            if timeout is None:
+                conn = await lock_pool.acquire()
+            else:
+                conn = await lock_pool.acquire(timeout=timeout)
+            yield conn
+        except asyncpg.exceptions.TooManyConnectionsError:
+            raise ConnectionPoolExhaustedError() from None
+        finally:
+            if conn is not None:
+                release = (
+                    lock_pool.release(conn)
+                    if timeout is None
+                    else lock_pool.release(conn, timeout=timeout)
+                )
+                await _await_connection_release(release)
+
+    async def _close_postgres_pools(self) -> bool:
+        """Close both PostgreSQL pools and report caller cancellation."""
+        cancelled = False
+
+        async def _drain(pool: asyncpg.Pool) -> None:
+            nonlocal cancelled
+            close_task = asyncio.create_task(pool.close())
+            while True:
+                try:
+                    await asyncio.shield(close_task)
+                    return
+                except asyncio.CancelledError:
+                    if close_task.cancelled():
+                        raise
+                    cancelled = True
+
+        lock_pool = self._openai_credential_lock_pool
+        if lock_pool is not None:
+            try:
+                await _drain(lock_pool)
+            except _AUTHNZ_DB_NONCRITICAL_EXCEPTIONS as exc:
+                logger.debug(
+                    "Ignoring OpenAI credential lock pool close error during shutdown: {}",
+                    exc,
+                )
+            finally:
+                if self._openai_credential_lock_pool is lock_pool:
+                    self._openai_credential_lock_pool = None
+
+        main_pool = self.pool
+        if main_pool is not None:
+            try:
+                await _drain(main_pool)
+            except _AUTHNZ_DB_NONCRITICAL_EXCEPTIONS as exc:
+                logger.debug(
+                    "Ignoring pool.close() error during shutdown: {}",
+                    exc,
+                )
+            finally:
+                if self.pool is main_pool:
+                    self.pool = None
+                    self._loop = None
+        return cancelled
+
     async def close(self):
         """Close database connections"""
-        if self.pool:
-            try:
-                await self.pool.close()
-            except _AUTHNZ_DB_NONCRITICAL_EXCEPTIONS as e:
-                # In test teardown, the loop bound to the pool may already be closed.
-                logger.debug(f"Ignoring pool.close() error during shutdown: {e}")
-            finally:
-                self.pool = None
-                self._loop = None
+        cancelled = await self._close_postgres_pools()
         self._initialized = False
         logger.info("Database pool closed")
+        if cancelled:
+            raise asyncio.CancelledError
 
     async def health_check(self) -> dict[str, Any]:
         """Perform database health check"""
         try:
-            if self.pool:
+            postgres_pool = self.pool
+            if postgres_pool is not None:
                 # PostgreSQL health check
-                async with self.pool.acquire() as conn:
+                async with postgres_pool.acquire() as conn:
                     await conn.fetchval("SELECT 1")
-                    pool_size = self.pool.get_size()
-                    idle_size = self.pool.get_idle_size()
+                    pool_size = postgres_pool.get_size()
+                    idle_size = postgres_pool.get_idle_size()
 
                     return {
                         "status": "healthy",
@@ -922,13 +1053,16 @@ async def reset_db_pool():
             cfg.reset()
     except _AUTHNZ_DB_NONCRITICAL_EXCEPTIONS as e:
         logger.debug(f"reset_db_pool: ignoring AuthDatabaseConfig reset error: {e}")
-    if _db_pool:
+    pool_to_close = _db_pool
+    if pool_to_close:
         try:
-            await _db_pool.close()
+            await pool_to_close.close()
         except _AUTHNZ_DB_NONCRITICAL_EXCEPTIONS as e:
             # The loop might already be closed by a TestClient; best-effort cleanup.
             logger.debug(f"reset_db_pool: ignoring close error: {e}")
-    _db_pool = None
+        finally:
+            if _db_pool is pool_to_close:
+                _db_pool = None
     try:
         from tldw_Server_API.app.core.MCP_unified.auth.authnz_rbac import reset_rbac_policy as _reset_rbac_policy
         _reset_rbac_policy()

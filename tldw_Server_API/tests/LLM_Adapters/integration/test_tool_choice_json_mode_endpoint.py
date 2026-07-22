@@ -1,5 +1,5 @@
 import os
-from typing import Any, Dict, List
+from typing import Any
 
 import pytest
 
@@ -12,10 +12,14 @@ def _enable_adapters(monkeypatch):
 
 
 NETWORK_TESTS_ENABLED = os.getenv("ENABLE_NETWORK_TESTS", "").lower() in {"1", "true", "yes", "y", "on"}
+_API_KEY_ENV = {
+    "mistral": "MISTRAL_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
+}
 
 
 class _FakeResponse:
-    def __init__(self, status_code: int = 200, json_obj: Dict[str, Any] | None = None):
+    def __init__(self, status_code: int = 200, json_obj: dict[str, Any] | None = None):
         self.status_code = status_code
         self._json = json_obj or {
             "id": "cmpl-test",
@@ -24,7 +28,7 @@ class _FakeResponse:
         }
 
     def raise_for_status(self):
-        if 400 <= self.status_code:
+        if self.status_code >= 400:
             import httpx
             req = httpx.Request("POST", "https://api.openai.com/v1/chat/completions")
             resp = httpx.Response(self.status_code, request=req)
@@ -35,7 +39,7 @@ class _FakeResponse:
 
 
 class _FakeClient:
-    def __init__(self, capture: Dict[str, Any]):
+    def __init__(self, capture: dict[str, Any]):
         self._capture = capture
 
     def __enter__(self):
@@ -44,7 +48,7 @@ class _FakeClient:
     def __exit__(self, exc_type, exc, tb):
         return False
 
-    def post(self, url: str, json: Dict[str, Any], headers: Dict[str, str]):
+    def post(self, url: str, json: dict[str, Any], headers: dict[str, str]):
         self._capture["json"] = json
         return _FakeResponse()
 
@@ -64,7 +68,7 @@ def _payload(provider: str, stream: bool = False):
 def _env_key_for(provider: str) -> str | None:
     mapping = {
         "mistral": ["MISTRAL_API_KEY"],
-        "openrouter": ["OPENROUTER_API_KEY", "OPENROUTER_API_KEY_READ"],
+        "openrouter": ["OPENROUTER_API_KEY"],
     }
     for k in mapping.get(provider, []):
         v = os.getenv(k)
@@ -78,16 +82,9 @@ def _env_key_for(provider: str) -> str | None:
     "openrouter",
 ])
 def test_endpoint_passes_tool_choice_and_json_mode(monkeypatch, client, auth_token, provider: str):
-    import tldw_Server_API.app.api.v1.endpoints.chat as chat_endpoint
-
     real_key = _env_key_for(provider) if NETWORK_TESTS_ENABLED else None
     if real_key:
         # Real key present: exercise live adapter path.
-        # Use monkeypatch to isolate mutations to API_KEYS and ensure cleanup.
-        base = chat_endpoint.API_KEYS if isinstance(chat_endpoint.API_KEYS, dict) else {}
-        copied = dict(base)
-        monkeypatch.setattr(chat_endpoint, "API_KEYS", copied, raising=False)
-        monkeypatch.setitem(chat_endpoint.API_KEYS, provider, real_key)
         r = client.post_with_auth("/api/v1/chat/completions", auth_token, json=_payload(provider, stream=False))
         assert r.status_code == 200, f"Body: {r.text}"
         data = r.json()
@@ -95,11 +92,8 @@ def test_endpoint_passes_tool_choice_and_json_mode(monkeypatch, client, auth_tok
         assert data.get("object") == "chat.completion"
         assert isinstance(data.get("choices"), list)
     else:
-        base = chat_endpoint.API_KEYS if isinstance(chat_endpoint.API_KEYS, dict) else {}
-        copied = dict(base)
-        monkeypatch.setattr(chat_endpoint, "API_KEYS", copied, raising=False)
-        monkeypatch.setitem(chat_endpoint.API_KEYS, provider, f"sk-{provider}-test")
-        capture: Dict[str, Any] = {}
+        monkeypatch.setenv(_API_KEY_ENV[provider], f"sk-{provider}-test")
+        capture: dict[str, Any] = {}
         if provider == "mistral":
             import tldw_Server_API.app.core.LLM_Calls.providers.mistral_adapter as provider_mod
         else:

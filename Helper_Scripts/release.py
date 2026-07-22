@@ -2,17 +2,19 @@
 from __future__ import annotations
 
 import argparse
-from collections import Counter
-from datetime import datetime, timezone
-from difflib import SequenceMatcher
 import json
 import os
-from pathlib import Path
 import re
 import shutil
+
 # Bandit B404 is expected here because the helper shells out to fixed git/gh commands.
 import subprocess  # nosec B404
-from typing import Any, Mapping, Protocol, Sequence
+from collections import Counter
+from collections.abc import Mapping, Sequence
+from datetime import datetime, timezone
+from difflib import SequenceMatcher
+from pathlib import Path
+from typing import Any, Protocol
 
 try:  # Python 3.11+
     import tomllib
@@ -259,7 +261,10 @@ def promote_changelog_unreleased_section(
     if prefix:
         prefix += "\n\n"
 
-    reset_unreleased = _render_changelog_section("Unreleased", {section: () for section in ALLOWED_CHANGELOG_SECTIONS})
+    reset_unreleased = _render_changelog_section(
+        "Unreleased",
+        dict.fromkeys(ALLOWED_CHANGELOG_SECTIONS, ()),
+    )
     promoted_section = _render_changelog_section(version, subsections, date=release_date)
     suffix = "\n".join(lines[section_end:]).lstrip("\n")
 

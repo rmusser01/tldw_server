@@ -13,8 +13,11 @@ from tldw_Server_API.app.core.Context_Integrity.canonicalization import (
 )
 from tldw_Server_API.app.core.Context_Integrity.resolver import (
     ContextIntegrityBlocked,
+    ContextIntegrityResolver,
     get_global_context_integrity_resolver,
 )
+
+_USE_GLOBAL_INTEGRITY_RESOLVER = object()
 
 
 def _prompts_dir() -> str:
@@ -82,7 +85,12 @@ def _read_regular_file_bytes_no_follow(path: Path) -> bytes:
             os.close(fd)
 
 
-def _read_prompt_file_text(path: str, *, source_label: str | None = None) -> str:
+def _read_prompt_file_text(
+    path: str,
+    *,
+    source_label: str | None = None,
+    integrity_resolver: Any = _USE_GLOBAL_INTEGRITY_RESOLVER,
+) -> str:
     prompt_path = Path(path)
     asset_id = _prompt_asset_id(path, source_label=source_label)
     raw = _read_regular_file_bytes_no_follow(prompt_path)
@@ -99,7 +107,13 @@ def _read_prompt_file_text(path: str, *, source_label: str | None = None) -> str
         files={prompt_path.name: raw},
         metadata=metadata,
     )
-    resolver = get_global_context_integrity_resolver()
+    resolver = (
+        get_global_context_integrity_resolver()
+        if integrity_resolver is _USE_GLOBAL_INTEGRITY_RESOLVER
+        else integrity_resolver
+    )
+    if resolver is not None and not isinstance(resolver, ContextIntegrityResolver):
+        raise TypeError("integrity_resolver must be a ContextIntegrityResolver or None")
     if resolver is not None:
         resolver.require_digest_allowed(
             asset_id,
@@ -111,7 +125,12 @@ def _read_prompt_file_text(path: str, *, source_label: str | None = None) -> str
     return raw.decode("utf-8")
 
 
-def _load_env_prompt_file(module: str, key: str) -> Optional[str]:
+def _load_env_prompt_file(
+    module: str,
+    key: str,
+    *,
+    integrity_resolver: Any = _USE_GLOBAL_INTEGRITY_RESOLVER,
+) -> Optional[str]:
     env_name = _prompt_env_file_key(module, key)
     raw_path = os.getenv(env_name)
     if not raw_path or not str(raw_path).strip():
@@ -119,7 +138,11 @@ def _load_env_prompt_file(module: str, key: str) -> Optional[str]:
 
     path = os.path.expanduser(str(raw_path).strip())
     try:
-        return _read_prompt_file_text(path, source_label=f"env:{env_name}").strip()
+        return _read_prompt_file_text(
+            path,
+            source_label=f"env:{env_name}",
+            integrity_resolver=integrity_resolver,
+        ).strip()
     except (OSError, UnicodeDecodeError, ContextIntegrityBlocked) as exc:
         logger.warning(
             "Prompt override file read failed for env '{}' (module='{}', key='{}', error_type='{}')",
@@ -131,13 +154,17 @@ def _load_env_prompt_file(module: str, key: str) -> Optional[str]:
         return None
 
 
-def _load_yaml(path: str) -> Optional[dict[str, Any]]:
+def _load_yaml(
+    path: str,
+    *,
+    integrity_resolver: Any = _USE_GLOBAL_INTEGRITY_RESOLVER,
+) -> Optional[dict[str, Any]]:
     try:
         import yaml  # type: ignore
     except ImportError:
         return None
     try:
-        raw = _read_prompt_file_text(path)
+        raw = _read_prompt_file_text(path, integrity_resolver=integrity_resolver)
         data = yaml.safe_load(raw)
         if isinstance(data, dict):
             return data
@@ -146,9 +173,13 @@ def _load_yaml(path: str) -> Optional[dict[str, Any]]:
         return None
 
 
-def _load_json(path: str) -> Optional[dict[str, Any]]:
+def _load_json(
+    path: str,
+    *,
+    integrity_resolver: Any = _USE_GLOBAL_INTEGRITY_RESOLVER,
+) -> Optional[dict[str, Any]]:
     try:
-        raw = _read_prompt_file_text(path)
+        raw = _read_prompt_file_text(path, integrity_resolver=integrity_resolver)
         data = json.loads(raw)
         if isinstance(data, dict):
             return data
@@ -157,13 +188,22 @@ def _load_json(path: str) -> Optional[dict[str, Any]]:
         return None
 
 
-def load_prompt(module: str, key: str) -> Optional[str]:
+def load_prompt(
+    module: str,
+    key: str,
+    *,
+    integrity_resolver: Any = _USE_GLOBAL_INTEGRITY_RESOLVER,
+) -> Optional[str]:
     """Load a named prompt snippet from Prompts folder.
 
     Searches for a markdown heading containing the key, then returns the
     first fenced code block following that heading. If not found, returns None.
     """
-    env_override = _load_env_prompt_file(module, key)
+    env_override = _load_env_prompt_file(
+        module,
+        key,
+        integrity_resolver=integrity_resolver,
+    )
     if env_override is not None:
         return env_override
 
@@ -175,7 +215,7 @@ def load_prompt(module: str, key: str) -> Optional[str]:
     yaml_path_2 = base + ".yml"
     for ypath in (yaml_path_1, yaml_path_2):
         if os.path.exists(ypath):
-            ydata = _load_yaml(ypath)
+            ydata = _load_yaml(ypath, integrity_resolver=integrity_resolver)
             if isinstance(ydata, dict):
                 # two shapes supported: {key: str} or {templates: {name: {template:..., type:...}}}
                 # Try flat map first
@@ -197,7 +237,7 @@ def load_prompt(module: str, key: str) -> Optional[str]:
     # Try JSON
     json_path = base + ".json"
     if os.path.exists(json_path):
-        jdata = _load_json(json_path)
+        jdata = _load_json(json_path, integrity_resolver=integrity_resolver)
         if isinstance(jdata, dict):
             for k, v in jdata.items():
                 if _norm_key(k) == norm and isinstance(v, str):
@@ -210,7 +250,10 @@ def load_prompt(module: str, key: str) -> Optional[str]:
     md_path = base + ".md"
     if os.path.exists(md_path):
         try:
-            text = _read_prompt_file_text(md_path)
+            text = _read_prompt_file_text(
+                md_path,
+                integrity_resolver=integrity_resolver,
+            )
         except (OSError, UnicodeDecodeError, ContextIntegrityBlocked):
             text = ""
         if text:

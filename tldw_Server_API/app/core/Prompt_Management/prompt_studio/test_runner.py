@@ -3,11 +3,28 @@
 
 import asyncio
 import time
+from collections.abc import Awaitable, Callable
 from typing import Any, Optional
 
 from loguru import logger
 
+from ....core.AuthNZ.provider_credential_runtime import (
+    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+    ProviderCallCredentials,
+    is_runtime_issued_provider_call_credentials,
+)
+from ....core.Chat.bounded_daemon import (
+    SYNC_ADAPTER_CALL_POOL,
+    await_bounded_sync_call,
+    await_owned_worker,
+)
 from ....core.Chat.Chat_Deps import ChatConfigurationError
+from ....core.Chat.streaming_utils import (
+    normalize_provider_stream_error,
+    provider_result_contains_error,
+    sanitized_provider_stream_exception,
+)
+from ....core.exceptions import raise_detached_error
 from ....core.LLM_Calls.adapter_utils import (
     ensure_app_config,
     get_adapter_or_raise,
@@ -16,8 +33,16 @@ from ....core.LLM_Calls.adapter_utils import (
     resolve_provider_model,
     split_system_message,
 )
-from .prompt_executor import PromptExecutor
 from .program_evaluator import ProgramEvaluator
+from .prompt_executor import PromptExecutor
+
+
+class _BoundedProviderResponseError(RuntimeError):
+    """Carry one canonical provider code through the legacy RuntimeError seam."""
+
+    def __init__(self, code: str) -> None:
+        self.code = code
+        super().__init__("Provider returned an error response")
 
 
 class TestRunner:
@@ -45,11 +70,38 @@ class TestRunner:
         max_tokens: int,
         app_config: Optional[dict[str, Any]] = None,
         api_key_override: Optional[str] = None,
+        credentials_resolved: bool = False,
+        provider_credentials: ProviderCallCredentials | None = None,
+        timeout_seconds: Optional[float] = None,
     ) -> Any:
         provider_name = normalize_provider(provider)
         if not provider_name:
             raise ChatConfigurationError(provider=provider, message="LLM provider is required.")
-        cfg = ensure_app_config(app_config)
+        if provider_credentials is not None:
+            if not is_runtime_issued_provider_call_credentials(
+                provider_credentials,
+                provider=provider_name,
+            ):
+                raise ChatConfigurationError(
+                    provider=provider_name,
+                    message="Provider credential context is invalid.",
+                )
+            cfg = provider_credentials.app_config or {}
+            resolved_api_key = provider_credentials.api_key
+            resolved_credentials = True
+        else:
+            cfg = (
+                (app_config or {})
+                if credentials_resolved
+                else ensure_app_config(app_config)
+            )
+            resolved_api_key = (
+                api_key_override
+                if credentials_resolved
+                else api_key_override
+                or resolve_provider_api_key_from_config(provider_name, cfg)
+            )
+            resolved_credentials = credentials_resolved
         resolved_model = model or resolve_provider_model(provider_name, cfg)
         if not resolved_model:
             raise ChatConfigurationError(provider=provider_name, message="Model is required for provider.")
@@ -61,12 +113,18 @@ class TestRunner:
             "messages": cleaned_messages,
             "system_message": sys_msg,
             "model": resolved_model,
-            "api_key": api_key_override or resolve_provider_api_key_from_config(provider_name, cfg),
+            "api_key": resolved_api_key,
             "temperature": temperature,
             "max_tokens": max_tokens,
             "app_config": cfg,
+            "credentials_resolved": resolved_credentials,
         }
-        return get_adapter_or_raise(provider_name).chat(request)
+        if provider_credentials is not None:
+            request[PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY] = provider_credentials
+        return get_adapter_or_raise(provider_name).chat(
+            request,
+            timeout=timeout_seconds,
+        )
 
     async def run_test_case(
         self,
@@ -78,7 +136,12 @@ class TestRunner:
         provider: str = "openai",
         app_config: Optional[dict[str, Any]] = None,
         api_key_override: Optional[str] = None,
+        credentials_resolved: bool = False,
+        provider_credentials: ProviderCallCredentials | None = None,
+        timeout_seconds: Optional[float] = None,
         persist_run: bool = True,
+        on_provider_success: Callable[[], Awaitable[None]] | None = None,
+        strict_provider_errors: bool = False,
     ) -> dict[str, Any]:
         """
         Run a single test case against a prompt.
@@ -119,24 +182,52 @@ class TestRunner:
             messages_payload = prompt_request.get("messages") or [
                 {"role": "user", "content": prompt_request.get("prompt", "")}
             ]
-            response = await asyncio.to_thread(
-                self._call_adapter,
-                provider=provider,
-                model=model,
-                messages_payload=messages_payload,
-                system_message=prompt_request.get("system_prompt"),
-                temperature=temperature,
-                max_tokens=max_tokens,
-                app_config=app_config,
-                api_key_override=api_key_override,
-            )
 
-            actual_output = {"response": self._extract_response_text(response)}
+            async def _dispatch_and_extract() -> str:
+                adapter_kwargs: dict[str, Any] = {
+                    "provider": provider,
+                    "model": model,
+                    "messages_payload": messages_payload,
+                    "system_message": prompt_request.get("system_prompt"),
+                    "temperature": temperature,
+                    "max_tokens": max_tokens,
+                    "app_config": app_config,
+                    "api_key_override": api_key_override,
+                    "credentials_resolved": credentials_resolved,
+                    "timeout_seconds": timeout_seconds,
+                }
+                if provider_credentials is not None:
+                    adapter_kwargs["provider_credentials"] = provider_credentials
+                response = await await_bounded_sync_call(
+                    lambda: self._call_adapter(**adapter_kwargs),
+                    pool=SYNC_ADAPTER_CALL_POOL,
+                    exhaustion_message="Prompt Studio adapter capacity is exhausted",
+                )
+                return self._extract_response_text(response)
+
+            response_text = await await_owned_worker(
+                _dispatch_and_extract(),
+                on_cancel_success=on_provider_success,
+            )
+            if on_provider_success is not None:
+                await await_owned_worker(on_provider_success())
+
+            actual_output = {"response": response_text}
             _log.info("PS testrun.llm.done time_ms={}", int((time.time() - start_time) * 1000))
 
         except Exception as e:
-            _log.error("PS testrun.llm.error error={} time_ms={}", e, int((time.time() - start_time) * 1000))
-            actual_output = {"error": str(e)}
+            safe_error = sanitized_provider_stream_exception(e)
+            _log.error(
+                "PS testrun.llm.error error_code={} time_ms={}",
+                safe_error.code,
+                int((time.time() - start_time) * 1000),
+            )
+            if strict_provider_errors:
+                raise_detached_error(safe_error)
+            actual_output = {
+                "error": str(safe_error),
+                "error_code": safe_error.code,
+            }
 
         execution_time_ms = int((time.time() - start_time) * 1000)
         tokens_used = None
@@ -187,40 +278,128 @@ class TestRunner:
         return value
 
     @staticmethod
+    def _provider_response_error(response: Any) -> BaseException | None:
+        if not provider_result_contains_error(response, legacy_error_prefix=True):
+            return None
+
+        seen: set[int] = set()
+
+        def find_normalized(item: Any) -> Any:
+            normalized = normalize_provider_stream_error(item)
+            if normalized is not None:
+                return normalized
+            if isinstance(item, (list, tuple)):
+                identity = id(item)
+                if identity in seen:
+                    return None
+                seen.add(identity)
+                for nested_item in item:
+                    nested = find_normalized(nested_item)
+                    if nested is not None:
+                        return nested
+                return None
+            if not isinstance(item, dict):
+                return None
+
+            identity = id(item)
+            if identity in seen:
+                return None
+            seen.add(identity)
+            for field in ("choices", "message", "delta", "content"):
+                if field in item:
+                    nested = find_normalized(item[field])
+                    if nested is not None:
+                        return nested
+            if item.get("type") in {"text", "output_text"} and "text" in item:
+                return find_normalized(item["text"])
+            return None
+
+        normalized = find_normalized(response)
+        return _BoundedProviderResponseError(
+            normalized.code if normalized is not None else "provider_unavailable"
+        )
+
+    @staticmethod
+    def _is_sse_framed_response(value: str) -> bool:
+        return any(
+            line.lstrip("\ufeff\u200b\u200c\u200d\u2060").strip().startswith(
+                ("data:", "event:", "id:", "retry:", ":")
+            )
+            for line in value.splitlines()
+            if line.strip()
+        )
+
+    @staticmethod
     def _extract_response_text(response: Any) -> str:
-        if response is None:
-            return ""
+        provider_error = TestRunner._provider_response_error(response)
+        if provider_error is not None:
+            raise provider_error from None
+
+        text: str | None = None
         if isinstance(response, str):
-            return response
+            if response.lstrip().lower().startswith("error:"):
+                raise _BoundedProviderResponseError("provider_unavailable")
+            if TestRunner._is_sse_framed_response(response):
+                raise _BoundedProviderResponseError("provider_unavailable")
+            text = response
         if isinstance(response, list) and response:
-            if isinstance(response[0], str):
-                return response[0]
-            if isinstance(response[0], dict):
+            if isinstance(response[0], (str, dict)):
                 return TestRunner._extract_response_text(response[0])
         if isinstance(response, dict):
+            if response.get("error") not in (None, False, ""):
+                raise _BoundedProviderResponseError("provider_unavailable")
             choices = response.get("choices")
             if isinstance(choices, list):
                 for choice in choices:
                     if not isinstance(choice, dict):
                         continue
-                    message = choice.get("message") or {}
+                    message = choice.get("message")
+                    if not isinstance(message, dict):
+                        message = {}
                     content = message.get("content")
                     if isinstance(content, list):
-                        parts = [part.get("text", "") for part in content if isinstance(part, dict)]
+                        parts = [
+                            part["text"]
+                            for part in content
+                            if isinstance(part, dict) and isinstance(part.get("text"), str)
+                        ]
                         content = "".join(parts)
                     if isinstance(content, str):
-                        return content
-                    delta = choice.get("delta") or {}
+                        text = content
+                        break
+                    delta = choice.get("delta")
+                    if not isinstance(delta, dict):
+                        delta = {}
                     delta_content = delta.get("content")
                     if isinstance(delta_content, list):
-                        parts = [part.get("text", "") for part in delta_content if isinstance(part, dict)]
+                        parts = [
+                            part["text"]
+                            for part in delta_content
+                            if isinstance(part, dict) and isinstance(part.get("text"), str)
+                        ]
                         delta_content = "".join(parts)
                     if isinstance(delta_content, str):
-                        return delta_content
-            content = response.get("content")
-            if isinstance(content, str):
-                return content
-        return str(response)
+                        text = delta_content
+                        break
+            if text is None:
+                content = response.get("content")
+                if isinstance(content, list):
+                    parts = [
+                        part["text"]
+                        for part in content
+                        if isinstance(part, dict) and isinstance(part.get("text"), str)
+                    ]
+                    content = "".join(parts)
+                if isinstance(content, str):
+                    text = content
+        if isinstance(text, str) and text.strip():
+            if (
+                normalize_provider_stream_error(text) is not None
+                or text.lstrip().lower().startswith("error:")
+            ):
+                raise _BoundedProviderResponseError("provider_unavailable")
+            return text
+        raise RuntimeError("Provider returned an empty or malformed response")
 
     async def run_single_test(
         self,
@@ -229,6 +408,9 @@ class TestRunner:
         test_case_id: int,
         model_config: dict[str, Any],
         metrics: Optional[list[Any]] = None,
+        provider_credentials: ProviderCallCredentials | None = None,
+        on_provider_success: Callable[[], Awaitable[None]] | None = None,
+        strict_provider_errors: bool = False,
     ) -> dict[str, Any]:
         """Compatibility wrapper used by optimizers.
 
@@ -240,6 +422,10 @@ class TestRunner:
         provider = (model_config or {}).get("provider") or (model_config or {}).get("api_name") or "openai"
         api_key_override = (model_config or {}).get("api_key")
         app_config = (model_config or {}).get("app_config")
+        credentials_resolved = (model_config or {}).get("credentials_resolved") is True
+        timeout_seconds = (model_config or {}).get("timeout_seconds") or params.get(
+            "timeout_seconds"
+        )
         temperature = float(params.get("temperature", 0.7)) if params is not None else 0.7
         max_tokens = int(params.get("max_tokens", 1000)) if params is not None else 1000
 
@@ -255,7 +441,12 @@ class TestRunner:
             provider=provider,
             app_config=app_config,
             api_key_override=api_key_override,
+            credentials_resolved=credentials_resolved,
+            provider_credentials=provider_credentials,
+            timeout_seconds=timeout_seconds,
             persist_run=False,
+            on_provider_success=on_provider_success,
+            strict_provider_errors=strict_provider_errors,
         )
         # Determine if this is a program test case and if evaluator is enabled
         try:
@@ -391,7 +582,15 @@ class TestRunner:
         model: str = "gpt-3.5-turbo",
         temperature: float = 0.7,
         max_tokens: int = 1000,
-        parallel: bool = False
+        parallel: bool = False,
+        provider: str = "openai",
+        app_config: Optional[dict[str, Any]] = None,
+        api_key_override: Optional[str] = None,
+        credentials_resolved: bool = False,
+        provider_credentials: ProviderCallCredentials | None = None,
+        timeout_seconds: Optional[float] = None,
+        strict_provider_errors: bool = False,
+        on_provider_success: Callable[[], Awaitable[None]] | None = None,
     ) -> list[dict[str, Any]]:
         """
         Run multiple test cases.
@@ -412,7 +611,22 @@ class TestRunner:
             _log = logger.bind(ps_component="test_runner", prompt_id=prompt_id, total_tests=len(test_case_ids))
             _log.info("PS testrun.multi.start mode=parallel total_tests={}", len(test_case_ids))
             tasks = [
-                self.run_test_case(prompt_id, test_id, model, temperature, max_tokens)
+                self.run_test_case(
+                    prompt_id=prompt_id,
+                    test_case_id=test_id,
+                    model=model,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    provider=provider,
+                    app_config=app_config,
+                    api_key_override=api_key_override,
+                    credentials_resolved=credentials_resolved,
+                    provider_credentials=provider_credentials,
+                    timeout_seconds=timeout_seconds,
+                    persist_run=True,
+                    on_provider_success=on_provider_success,
+                    strict_provider_errors=strict_provider_errors,
+                )
                 for test_id in test_case_ids
             ]
             results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -421,6 +635,8 @@ class TestRunner:
             processed_results = []
             for i, result in enumerate(results):
                 if isinstance(result, Exception):
+                    if strict_provider_errors:
+                        raise result
                     logger.error(f"Test case {test_case_ids[i]} failed: {result}")
                     processed_results.append({
                         "test_case_id": test_case_ids[i],
@@ -439,10 +655,25 @@ class TestRunner:
             for test_id in test_case_ids:
                 try:
                     result = await self.run_test_case(
-                        prompt_id, test_id, model, temperature, max_tokens
+                        prompt_id=prompt_id,
+                        test_case_id=test_id,
+                        model=model,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                        provider=provider,
+                        app_config=app_config,
+                        api_key_override=api_key_override,
+                        credentials_resolved=credentials_resolved,
+                        provider_credentials=provider_credentials,
+                        timeout_seconds=timeout_seconds,
+                        persist_run=True,
+                        on_provider_success=on_provider_success,
+                        strict_provider_errors=strict_provider_errors,
                     )
                     results.append(result)
                 except Exception as e:
+                    if strict_provider_errors:
+                        raise
                     _log.error("PS testrun.multi.error test_case_id={} error={}", test_id, e)
                     results.append({
                         "test_case_id": test_id,

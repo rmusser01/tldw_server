@@ -4,7 +4,11 @@ import time
 
 import pytest
 
-from tldw_Server_API.app.core.Chat.request_queue import RequestQueue, RequestPriority
+from tldw_Server_API.app.core.Chat.request_queue import (
+    QueueStreamTerminalError,
+    RequestPriority,
+    RequestQueue,
+)
 
 
 @pytest.mark.asyncio
@@ -106,7 +110,7 @@ async def test_streaming_job_pumps_and_done():
 
 
 @pytest.mark.asyncio
-async def test_streaming_processor_error_emits_error_and_done():
+async def test_streaming_processor_error_emits_one_terminal_signal():
     q = RequestQueue(max_queue_size=10, max_concurrent=1, timeout=5)
     await q.start(num_workers=1)
 
@@ -126,21 +130,15 @@ async def test_streaming_processor_error_emits_error_and_done():
         stream_channel=ch,
     )
 
-    # Expect error frames then done; future should raise
-    items = []
-    while True:
-        item = await ch.get()
-        items.append(item)
-        if item is None:
-            break
+    try:
+        terminal = await asyncio.wait_for(ch.get(), timeout=1.0)
+        assert isinstance(terminal, QueueStreamTerminalError)
+        assert terminal.code == "provider_unavailable"
 
-    assert any((isinstance(x, str) and "error" in x) for x in items if x is not None)
-    assert any((isinstance(x, str) and "data: [DONE]" in x) for x in items if x is not None)
-
-    with pytest.raises(Exception):
-        await fut
-
-    await q.stop()
+        with pytest.raises(RuntimeError, match="boom"):
+            await asyncio.wait_for(asyncio.shield(fut), timeout=1.0)
+    finally:
+        await asyncio.wait_for(q.stop(), timeout=1.0)
 
 
 @pytest.mark.asyncio
@@ -186,8 +184,8 @@ async def test_priority_preempts_backlog():
     # Let first low start
     await asyncio.sleep(0.05)
     high = await submit_high()
-    l1 = await low1
-    l2 = await low2
+    await low1
+    await low2
     l3 = await low3
 
     # High should finish before the tail of the low backlog

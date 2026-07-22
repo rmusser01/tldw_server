@@ -119,9 +119,11 @@ class QwenAdapter(ChatProvider):
         override = (request or {}).get("base_url")
         if isinstance(override, str) and override.strip():
             return override.strip().rstrip("/")
-        env_base = os.getenv("QWEN_BASE_URL")
-        if isinstance(env_base, str) and env_base.strip():
-            return env_base.strip().rstrip("/")
+        credentials_resolved = (request or {}).get("credentials_resolved") is True
+        if not credentials_resolved:
+            env_base = os.getenv("QWEN_BASE_URL")
+            if isinstance(env_base, str) and env_base.strip():
+                return env_base.strip().rstrip("/")
 
         qwen_cfg: dict[str, Any] = {}
         if cfg:
@@ -131,9 +133,12 @@ class QwenAdapter(ChatProvider):
         if isinstance(api_base, str) and api_base.strip():
             return api_base.strip().rstrip("/")
 
-        env_region = str(os.getenv("QWEN_REGION") or "").strip().lower()
         cfg_region = str(qwen_cfg.get("region") or "").strip().lower()
-        region = env_region or cfg_region or _QWEN_DEFAULT_REGION
+        if credentials_resolved:
+            region = cfg_region or _QWEN_DEFAULT_REGION
+        else:
+            env_region = str(os.getenv("QWEN_REGION") or "").strip().lower()
+            region = env_region or cfg_region or _QWEN_DEFAULT_REGION
 
         return _QWEN_REGION_BASE_URLS.get(region, _QWEN_DEFAULT_BASE_URL).rstrip("/")
 
@@ -196,6 +201,7 @@ class QwenAdapter(ChatProvider):
         return payload
 
     def chat(self, request: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
+        request = self._bind_request_credentials(request)
         request = self._apply_config_defaults(request or {})
         request = validate_payload(self.name, request or {})
         api_key = request.get("api_key")
@@ -214,11 +220,14 @@ class QwenAdapter(ChatProvider):
             with http_client_factory(timeout=resolved_timeout) as client:
                 resp = client.post(url, headers=headers, json=payload)
                 resp.raise_for_status()
-                return resp.json()
+                data = resp.json()
+                self._raise_if_in_band_provider_error(data, phase="chat_response")
+                return data
         except Exception as e:
-            raise self.normalize_error(e) from e
+            self._raise_sanitized_provider_failure(e, phase="chat")
 
     def stream(self, request: dict[str, Any], *, timeout: float | None = None) -> Iterable[str]:
+        request = self._bind_request_credentials(request)
         request = self._apply_config_defaults(request or {})
         request = validate_payload(self.name, request or {})
         api_key = request.get("api_key")
@@ -245,6 +254,10 @@ class QwenAdapter(ChatProvider):
                             line = raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else str(raw)
                         except Exception:
                             line = str(raw)
+                        self._raise_if_in_band_provider_error(
+                            line,
+                            phase="stream_response",
+                        )
                         if is_done_line(line):
                             if not seen_done:
                                 seen_done = True
@@ -256,9 +269,12 @@ class QwenAdapter(ChatProvider):
                     yield from finalize_stream(response=resp, done_already=seen_done)
             return
         except Exception as e:
-            raise self.normalize_error(e) from e
+            self._raise_sanitized_provider_failure(e, phase="stream")
 
     def normalize_error(self, exc: Exception):  # type: ignore[override]
+        """Delegate to the shared bounded error policy."""
+        return super().normalize_error(exc)
+
         from tldw_Server_API.app.core.LLM_Calls.error_utils import (
             get_http_error_text,
             get_http_status_from_exception,

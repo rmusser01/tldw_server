@@ -126,6 +126,25 @@ _KNOWN_API_KEY_PLACEHOLDERS = {
     "CHANGEME",
 }
 
+_KNOWN_CONFIG_PLACEHOLDERS = {
+    "CHANGE_ME",
+    "CHANGEME",
+    "REPLACE_ME",
+    "REPLACEME",
+    "YOUR_API_KEY",
+    "YOUR_API_KEY_HERE",
+    "YOUR_ENDPOINT",
+    "YOUR_MODEL",
+    "YOUR_VALUE",
+}
+
+
+def _placeholder_token(value: str) -> str:
+    """Normalize a whole-value placeholder without changing real config data."""
+    return "_".join(
+        part for part in value.strip().upper().replace("-", "_").split("_") if part
+    )
+
 
 def valid_provider_config_value(value: Optional[str]) -> Optional[str]:
     """Return a non-placeholder config value after trimming, otherwise None."""
@@ -135,6 +154,9 @@ def valid_provider_config_value(value: Optional[str]) -> Optional[str]:
     if not trimmed:
         return None
     if trimmed.startswith("<") and trimmed.endswith(">"):
+        return None
+    placeholder = _placeholder_token(trimmed)
+    if placeholder.startswith("CHANGE_ME") or placeholder in _KNOWN_CONFIG_PLACEHOLDERS:
         return None
     return trimmed
 
@@ -155,6 +177,15 @@ def first_env_provider_value(env_keys: tuple[str, ...]) -> Optional[str]:
     """Return the first non-placeholder value from the requested environment keys."""
     for env_key in env_keys:
         value = valid_provider_config_value(os.getenv(env_key))
+        if value:
+            return value
+    return None
+
+
+def _first_env_provider_api_key(env_keys: tuple[str, ...]) -> str | None:
+    """Return the first usable API key from the requested environment keys."""
+    for env_key in env_keys:
+        value = valid_provider_api_key(os.getenv(env_key))
         if value:
             return value
     return None
@@ -219,8 +250,8 @@ def resolve_provider_api_key_value(
     """Resolve the API key for a provider while ignoring placeholders."""
     custom_number = custom_openai_provider_number(provider_name)
     if custom_number is not None:
-        env_api_key = valid_provider_api_key(
-            first_env_provider_value(custom_openai_api_key_env_keys(custom_number))
+        env_api_key = _first_env_provider_api_key(
+            custom_openai_api_key_env_keys(custom_number)
         )
         if env_api_key:
             return env_api_key
@@ -237,7 +268,5 @@ def has_custom_openai_env_configuration(provider_name: str) -> bool:
     return bool(
         first_env_provider_value(custom_openai_endpoint_env_keys(custom_number))
         or first_env_provider_value(custom_openai_model_env_keys(custom_number))
-        or valid_provider_api_key(
-            first_env_provider_value(custom_openai_api_key_env_keys(custom_number))
-        )
+        or _first_env_provider_api_key(custom_openai_api_key_env_keys(custom_number))
     )

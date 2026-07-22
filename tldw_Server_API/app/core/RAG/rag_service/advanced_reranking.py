@@ -24,6 +24,10 @@ from typing import Any, Optional
 import numpy as np
 from loguru import logger
 
+from tldw_Server_API.app.core.Chat.bounded_daemon import (
+    SYNC_ADAPTER_CALL_POOL,
+    await_bounded_daemon_with_timeout,
+)
 from tldw_Server_API.app.core.Utils.prompt_loader import load_prompt
 
 from .types import DataSource, Document
@@ -1261,6 +1265,7 @@ class LLMReranker(BaseReranker):
         """
         super().__init__(config)
         self.llm_client = llm_client
+        self.last_metadata: dict[str, Any] = {}
 
     async def rerank(
         self,
@@ -1269,8 +1274,15 @@ class LLMReranker(BaseReranker):
         original_scores: Optional[list[float]] = None
     ) -> list[ScoredDocument]:
         """Rerank using LLM for relevance scoring."""
-        if not self.llm_client or not documents:
-            # Fallback to original scores
+        self.last_metadata = {}
+        if not documents:
+            return []
+        if not self.llm_client:
+            self.last_metadata = {
+                "degraded": True,
+                "failure_code": "provider_unavailable",
+                "verification_available": False,
+            }
             return [
                 ScoredDocument(
                     document=doc,
@@ -1287,6 +1299,38 @@ class LLMReranker(BaseReranker):
         for i in range(0, len(documents), batch_size):
             batch = documents[i:i + batch_size]
             batch_scores = await self._score_batch(query, batch)
+
+            if self.last_metadata.get("degraded"):
+                return [
+                    ScoredDocument(
+                        document=doc,
+                        original_score=(
+                            original_scores[index] if original_scores else doc.score
+                        ),
+                        rerank_score=(
+                            original_scores[index] if original_scores else doc.score
+                        ),
+                    )
+                    for index, doc in enumerate(documents[: self.config.top_k])
+                ]
+            if len(batch_scores) != len(batch):
+                self.last_metadata = {
+                    "degraded": True,
+                    "failure_code": "provider_unavailable",
+                    "verification_available": False,
+                }
+                return [
+                    ScoredDocument(
+                        document=doc,
+                        original_score=(
+                            original_scores[index] if original_scores else doc.score
+                        ),
+                        rerank_score=(
+                            original_scores[index] if original_scores else doc.score
+                        ),
+                    )
+                    for index, doc in enumerate(documents[: self.config.top_k])
+                ]
 
             for j, doc in enumerate(batch):
                 scored_docs.append(ScoredDocument(
@@ -1373,14 +1417,58 @@ class LLMReranker(BaseReranker):
             score_val: float = 0.5
             if self.llm_client and hasattr(self.llm_client, 'analyze'):
                 try:
-                    out = await asyncio.wait_for(asyncio.to_thread(self.llm_client.analyze, prompt), timeout=per_call_timeout)
+                    if getattr(self.llm_client, "credentials_resolved", False):
+                        def analyze_with_usage(
+                            _prompt: str = prompt,
+                            _client: Any = self.llm_client,
+                        ) -> Any:
+                            response = _client.analyze(_prompt)
+                            if _has_reranker_score(response):
+                                _client.used = True
+                            return response
+
+                        out = await await_bounded_daemon_with_timeout(
+                            analyze_with_usage,
+                            pool=SYNC_ADAPTER_CALL_POOL,
+                            name="rag-llm-reranker",
+                            timeout_seconds=per_call_timeout,
+                            timeout_message="LLM reranker timed out",
+                            drain_after_timeout=True,
+                        )
+                    else:
+                        out = await asyncio.wait_for(
+                            asyncio.to_thread(self.llm_client.analyze, prompt),
+                            timeout=per_call_timeout,
+                        )
+                    if (
+                        getattr(self.llm_client, "credentials_resolved", False)
+                        and not _has_reranker_score(out)
+                    ):
+                        self.last_metadata = {
+                            "degraded": True,
+                            "failure_code": "provider_unavailable",
+                            "verification_available": False,
+                        }
+                        return [doc.score for doc in documents]
                     score_val = _parse_float_score(out, default=0.5)
-                except asyncio.TimeoutError:
+                except (asyncio.TimeoutError, TimeoutError):
                     _inc_counter("reranker.llm.timeouts")
+                    if getattr(self.llm_client, "credentials_resolved", False):
+                        self.last_metadata = {
+                            "degraded": True,
+                            "failure_code": "provider_unavailable",
+                            "verification_available": False,
+                        }
+                        return [doc.score for doc in documents]
                     score_val = 0.5
-                except Exception:  # noqa: BLE001 - LLM scoring best-effort
+                except Exception:  # noqa: BLE001 - optional stage degrades safely
                     _inc_counter("reranker.llm.exceptions")
-                    score_val = 0.5
+                    self.last_metadata = {
+                        "degraded": True,
+                        "failure_code": "provider_unavailable",
+                        "verification_available": False,
+                    }
+                    return [doc.score for doc in documents]
             elif sgl is not None:
                 try:
                     # Use default provider from env/config inside analyze
@@ -1442,6 +1530,16 @@ def _parse_float_score(text: Any, default: float = 0.5) -> float:
         # Clamp to [0,1]
         return max(0.0, min(1.0, val))
     return default
+
+
+def _has_reranker_score(response: Any) -> bool:
+    """Return whether a provider response contains a usable relevance score."""
+    text = str(response).strip()
+    try:
+        score = float(text)
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(score) and 0.0 <= score <= 1.0
 
 
 def create_reranker(strategy: RerankingStrategy, config: Optional[RerankingConfig] = None, llm_client=None) -> BaseReranker:
@@ -1625,6 +1723,24 @@ class TwoTierReranker(BaseReranker):
         llm_t0 = time.time()
         llm_results: list[ScoredDocument] = await llm.rerank(query, llm_input, original_scores=None)
         llm_dt = time.time() - llm_t0
+        llm_metadata = getattr(llm, "last_metadata", {})
+        if isinstance(llm_metadata, dict) and llm_metadata.get("degraded"):
+            self.last_metadata = {"strategy": "two_tier", **llm_metadata}
+            return [
+                ScoredDocument(
+                    document=doc,
+                    original_score=(
+                        original_scores[index] if original_scores else doc.score
+                    ),
+                    rerank_score=(
+                        original_scores[index] if original_scores else doc.score
+                    ),
+                    relevance_score=(
+                        original_scores[index] if original_scores else doc.score
+                    ),
+                )
+                for index, doc in enumerate(documents[: self.config.top_k])
+            ]
         try:
             from tldw_Server_API.app.core.Metrics.metrics_manager import observe_histogram
             observe_histogram("rag_phase_duration_seconds", llm_dt, labels={"phase": "rerank_llm", "difficulty": "na"})

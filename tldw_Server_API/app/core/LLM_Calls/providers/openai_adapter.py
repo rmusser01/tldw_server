@@ -13,11 +13,14 @@ except ImportError:  # pragma: no cover - optional for static analysis
 from tldw_Server_API.app.core.http_client import (
     create_client as _hc_create_client,
 )
-from tldw_Server_API.app.core.LLM_Calls.capability_registry import normalize_payload, validate_payload
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import _safe_cast
 from tldw_Server_API.app.core.LLM_Calls.cache_intents import (
     apply_billing_prompt_cache_intent,
     attach_cache_intent_metadata,
+)
+from tldw_Server_API.app.core.LLM_Calls.capability_registry import normalize_payload, validate_payload
+from tldw_Server_API.app.core.LLM_Calls.openai_credentials import (
+    openai_credential_headers,
 )
 from tldw_Server_API.app.core.LLM_Calls.payload_utils import merge_extra_body, merge_extra_headers
 from tldw_Server_API.app.core.LLM_Calls.sse import (
@@ -241,6 +244,8 @@ class OpenAIAdapter(ChatProvider):
                 return base.strip()
         except (AttributeError, LookupError, TypeError):
             pass
+        if request.get("credentials_resolved") is True:
+            return "https://api.openai.com/v1"
         return self._openai_base_url()
 
     def _resolve_timeout(self, request: dict[str, Any], fallback: float | None) -> float:
@@ -259,13 +264,19 @@ class OpenAIAdapter(ChatProvider):
             return float(fallback)
         return float(self.capabilities().get("default_timeout_seconds", 60))
 
-    def _openai_headers(self, api_key: str | None) -> dict[str, str]:
-        headers = {"Content-Type": "application/json"}
-        if api_key:
-            headers["Authorization"] = f"Bearer {api_key}"
-        return headers
+    def _openai_headers(
+        self,
+        api_key: str | None,
+        request: dict[str, Any],
+    ) -> dict[str, str]:
+        return openai_credential_headers(
+            api_key,
+            request.get("app_config"),
+            provider=self.name,
+        )
 
     def chat(self, request: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
+        request = self._bind_request_credentials(request)
         request = normalize_payload(self.name, request or {})
         request = self._apply_config_defaults(request)
         request = validate_payload(self.name, request)
@@ -276,20 +287,23 @@ class OpenAIAdapter(ChatProvider):
             url = f"{self._resolve_base_url(request).rstrip('/')}/chat/completions"
             payload, cache_intent_diagnostic = apply_billing_prompt_cache_intent(self.name, payload, request)
             payload = merge_extra_body(payload, request)
-            headers = merge_extra_headers(self._openai_headers(api_key), request)
+            headers = merge_extra_headers(self._openai_headers(api_key, request), request)
             try:
                 resolved_timeout = self._resolve_timeout(request, timeout)
                 with http_client_factory(timeout=resolved_timeout) as client:
                     resp = client.post(url, headers=headers, json=payload)
                     resp.raise_for_status()
-                    return attach_cache_intent_metadata(resp.json(), cache_intent_diagnostic)
+                    data = resp.json()
+                    self._raise_if_in_band_provider_error(data, phase="chat_response")
+                    return attach_cache_intent_metadata(data, cache_intent_diagnostic)
             except _OPENAI_ADAPTER_NONCRITICAL_EXCEPTIONS as e:
-                raise self.normalize_error(e) from e
+                self._raise_sanitized_provider_failure(e, phase="chat")
 
         # If disabled explicitly, raise clear error rather than falling back
         raise RuntimeError("OpenAIAdapter native HTTP disabled by configuration")
 
     def stream(self, request: dict[str, Any], *, timeout: float | None = None) -> Iterable[str]:
+        request = self._bind_request_credentials(request)
         request = normalize_payload(self.name, request or {})
         request = self._apply_config_defaults(request)
         request = validate_payload(self.name, request)
@@ -300,7 +314,7 @@ class OpenAIAdapter(ChatProvider):
             url = f"{self._resolve_base_url(request).rstrip('/')}/chat/completions"
             payload, _cache_intent_diagnostic = apply_billing_prompt_cache_intent(self.name, payload, request)
             payload = merge_extra_body(payload, request)
-            headers = merge_extra_headers(self._openai_headers(api_key), request)
+            headers = merge_extra_headers(self._openai_headers(api_key, request), request)
             try:
                 resolved_timeout = self._resolve_timeout(request, timeout)
                 with http_client_factory(timeout=resolved_timeout) as client:
@@ -314,6 +328,10 @@ class OpenAIAdapter(ChatProvider):
                                 line = raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else str(raw)
                             except (AttributeError, TypeError, UnicodeError):
                                 line = str(raw)
+                            self._raise_if_in_band_provider_error(
+                                line,
+                                phase="stream_response",
+                            )
                             # Canonicalize provider lines to OpenAI-style SSE
                             if is_done_line(line):
                                 if not seen_done:
@@ -327,7 +345,11 @@ class OpenAIAdapter(ChatProvider):
                         yield from finalize_stream(response=resp, done_already=seen_done)
                 return
             except _OPENAI_ADAPTER_NONCRITICAL_EXCEPTIONS as e:
-                raise self.normalize_error(e) from e
+                self._raise_sanitized_provider_failure(
+                    e,
+                    phase="stream",
+                    credential_refresh_retry_safe=True,
+                )
 
         # If disabled explicitly, raise clear error rather than falling back
         raise RuntimeError("OpenAIAdapter native HTTP disabled by configuration")
@@ -340,44 +362,5 @@ class OpenAIAdapter(ChatProvider):
             yield item
 
     def normalize_error(self, exc: Exception):  # type: ignore[override]
-        from tldw_Server_API.app.core.LLM_Calls.error_utils import (
-            get_http_error_text,
-            get_http_status_from_exception,
-            is_http_status_error,
-            log_http_400_body,
-        )
-        if is_http_status_error(exc):
-            from tldw_Server_API.app.core.Chat.Chat_Deps import (
-                ChatAPIError,
-                ChatAuthenticationError,
-                ChatBadRequestError,
-                ChatProviderError,
-                ChatRateLimitError,
-            )
-            resp = getattr(exc, "response", None)
-            status = get_http_status_from_exception(exc)
-            body = None
-            try:
-                body = resp.json()
-            except (AttributeError, TypeError, ValueError):
-                body = None
-            log_http_400_body(self.name, exc, body)
-            detail = None
-            if isinstance(body, dict) and isinstance(body.get("error"), dict):
-                eobj = body["error"]
-                msg = (eobj.get("message") or "").strip()
-                typ = (eobj.get("type") or "").strip()
-                eobj.get("code")
-                detail = (f"{typ} {msg}" if typ else msg) or str(exc)
-            else:
-                detail = get_http_error_text(exc)
-            if status in (400, 404, 422):
-                return ChatBadRequestError(provider=self.name, message=str(detail))
-            if status in (401, 403):
-                return ChatAuthenticationError(provider=self.name, message=str(detail))
-            if status == 429:
-                return ChatRateLimitError(provider=self.name, message=str(detail))
-            if status and 500 <= status < 600:
-                return ChatProviderError(provider=self.name, message=str(detail), status_code=status)
-            return ChatAPIError(provider=self.name, message=str(detail), status_code=status or 500)
+        """Delegate to the shared bounded error policy."""
         return super().normalize_error(exc)

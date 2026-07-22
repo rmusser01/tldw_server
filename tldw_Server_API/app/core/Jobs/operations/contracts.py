@@ -91,6 +91,11 @@ class AdmissionResult:
             raise ValueError("only no-transition admission results may include a no-transition reason")
         if self.outcome is not OperationOutcome.ADMISSION_REJECTED and self.admission_rejection_reason is not None:
             raise ValueError("only rejected admission results may include a rejection reason")
+        if (
+            self.no_transition_reason is NoTransitionReason.IDEMPOTENT_EXISTING
+            and self.row is None
+        ):
+            raise ValueError("idempotent-existing admission results require a row")
         can_include_durable_events = self.outcome is OperationOutcome.APPLIED or (
             self.outcome is OperationOutcome.NO_TRANSITION
             and self.no_transition_reason is NoTransitionReason.IDEMPOTENT_EXISTING

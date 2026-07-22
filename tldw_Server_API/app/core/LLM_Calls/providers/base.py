@@ -15,23 +15,107 @@ and yield OpenAI-compatible SSE lines for streaming.
 
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Iterable
-from typing import Any
+from typing import Any, NoReturn
 
 from loguru import logger
 
-from tldw_Server_API.app.core.Chat.Chat_Deps import (
-    ChatAPIError,
-    ChatAuthenticationError,
-    ChatBadRequestError,
-    ChatProviderError,
-    ChatRateLimitError,
-)
+from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
+
+
+def raise_if_in_band_provider_error(
+    provider: str,
+    value: Any,
+    *,
+    phase: str,
+) -> None:
+    """Reject structured HTTP-200 and SSE error envelopes safely."""
+
+    from tldw_Server_API.app.core.Chat.streaming_utils import (
+        normalize_provider_stream_error,
+    )
+    from tldw_Server_API.app.core.exceptions import raise_detached_error
+    from tldw_Server_API.app.core.LLM_Calls.error_utils import (
+        build_sanitized_chat_error,
+        log_provider_failure,
+    )
+
+    normalized = normalize_provider_stream_error(value)
+    if normalized is None:
+        return
+    error = build_sanitized_chat_error(
+        provider,
+        status_code=normalized.status_code,
+    )
+    log_provider_failure(
+        provider,
+        error,
+        phase=phase,
+        status_code=normalized.status_code,
+    )
+    raise_detached_error(error)
 
 
 class ChatProvider(ABC):
     """Abstract base for LLM chat providers."""
 
     name: str = "provider"
+    async_chat_is_native: bool = False
+
+    def _bind_request_credentials(
+        self,
+        request: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        """Consume one authentic runtime capability before payload validation."""
+
+        bound, _credentials = self._bind_request_credentials_with_handle(request)
+        return bound
+
+    def _bind_request_credentials_with_handle(
+        self,
+        request: dict[str, Any] | None,
+    ) -> tuple[dict[str, Any], Any | None]:
+        """Bind credentials while retaining the handle for scoped transports."""
+
+        from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
+            bind_provider_call_credentials,
+        )
+
+        return bind_provider_call_credentials(self.name, request, consume=True)
+
+    def _raise_sanitized_provider_failure(
+        self,
+        exc: Exception,
+        *,
+        phase: str,
+        credential_refresh_retry_safe: bool = False,
+    ) -> NoReturn:
+        """Raise one detached typed error without upstream body, URL, or cause."""
+
+        from tldw_Server_API.app.core.exceptions import raise_detached_error
+        from tldw_Server_API.app.core.LLM_Calls.error_utils import (
+            build_sanitized_chat_error,
+            get_http_status_from_exception,
+            log_provider_failure,
+        )
+
+        status = get_http_status_from_exception(exc)
+        log_provider_failure(self.name, exc, phase=phase, status_code=status)
+        error = build_sanitized_chat_error(self.name, status_code=status)
+        if status is not None:
+            error.upstream_status_code = status
+        if credential_refresh_retry_safe and status == 401:
+            error.credential_refresh_retry_safe = True
+        raise_detached_error(error)
+
+    def _raise_if_in_band_provider_error(
+        self,
+        value: Any,
+        *,
+        phase: str,
+    ) -> None:
+        """Reject structured HTTP-200 and SSE error envelopes safely."""
+
+        raise_if_in_band_provider_error(self.name, value, phase=phase)
 
     @abstractmethod
     def capabilities(self) -> dict[str, Any]:
@@ -60,7 +144,8 @@ class ChatProvider(ABC):
     async def achat(self, request: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
         """Async variant; adapters may override for native async paths.
 
-        Default raises NotImplementedError to avoid silent sync-in-async fallbacks.
+        Native async implementations must also set ``async_chat_is_native`` to
+        true. The default raises instead of silently running sync work inline.
         """
         raise NotImplementedError("Async chat not implemented for this provider")
 
@@ -76,27 +161,29 @@ class ChatProvider(ABC):
         falling back to ChatProviderError.
         """
         from tldw_Server_API.app.core.LLM_Calls.error_utils import (
-            get_http_error_text,
+            build_sanitized_chat_error,
             get_http_status_from_exception,
             is_http_status_error,
+            log_provider_failure,
         )
 
         if is_http_status_error(exc):
             status = get_http_status_from_exception(exc)
-            detail = get_http_error_text(exc)
-            if status in (400, 404, 422):
-                return ChatBadRequestError(provider=self.name, message=str(detail))
-            if status in (401, 403):
-                return ChatAuthenticationError(provider=self.name, message=str(detail))
-            if status == 429:
-                return ChatRateLimitError(provider=self.name, message=str(detail))
-            if status and 500 <= status < 600:
-                return ChatProviderError(provider=self.name, message=str(detail), status_code=status)
-            return ChatAPIError(provider=self.name, message=str(detail), status_code=status or 500)
+            log_provider_failure(
+                self.name,
+                exc,
+                phase="normalize_http_error",
+                status_code=status,
+            )
+            return build_sanitized_chat_error(self.name, status_code=status)
 
         # Fallback
-        logger.debug(f"{self.name}: normalizing generic error: {exc}")
-        return ChatProviderError(provider=self.name, message=str(exc))
+        log_provider_failure(
+            self.name,
+            exc,
+            phase="normalize_generic_error",
+        )
+        return build_sanitized_chat_error(self.name)
 
 
 def apply_tool_choice(payload: dict[str, Any], tools: list | None, tool_choice: Any | None) -> None:
@@ -112,7 +199,14 @@ def apply_tool_choice(payload: dict[str, Any], tools: list | None, tool_choice: 
             payload["tool_choice"] = tool_choice
     except Exception as payload_error:
         # Never fail due to helper
-        logger.debug("Provider payload helper failed while attaching tool metadata", exc_info=payload_error)
+        logger.debug(
+            "Provider payload helper failed while attaching tool metadata error_type={}",
+            type(payload_error).__name__,
+        )
+
+
+class EmbeddingsAdapterUnavailableError(NotImplementedError):
+    """Signal that an embedding adapter declined before any provider dispatch."""
 
 
 class EmbeddingsProvider(ABC):

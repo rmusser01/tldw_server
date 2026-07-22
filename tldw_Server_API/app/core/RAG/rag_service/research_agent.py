@@ -22,6 +22,8 @@ from typing import Any, Callable, Literal
 
 from loguru import logger
 
+from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
+from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
 from tldw_Server_API.app.core.LLM_Calls.structured_output import (
     StructuredOutputOptions,
     StructuredOutputParseError,
@@ -29,6 +31,10 @@ from tldw_Server_API.app.core.LLM_Calls.structured_output import (
 )
 
 from .query_classifier import QueryClassification
+from .runtime_provider_call import (
+    attach_runtime_provider_credentials,
+    await_runtime_bound_provider_call,
+)
 
 # ---------------------------------------------------------------------------
 # Data structures
@@ -83,6 +89,60 @@ class ResearchAction:
     schema: dict[str, Any]  # JSON schema for parameters
     enabled: Callable[[QueryClassification], bool]  # Whether available
     execute: Callable[..., Any]  # Async callable: (params) -> ActionOutput
+
+
+_ACTION_FAILURE_CODES = frozenset(
+    {
+        "action_failed",
+        "credential_scope_revoked",
+        "credential_store_unavailable",
+        "invalid_provider_credentials",
+        "missing_provider_credentials",
+        "provider_configuration_invalid",
+        "provider_unavailable",
+    }
+)
+
+_LOCAL_SOURCE_ALIASES = {
+    "media": "media_db",
+    "media_db": "media_db",
+    "notes": "notes",
+    "notes_db": "notes",
+    "character": "character_cards",
+    "characters": "character_cards",
+    "character_cards": "character_cards",
+    "chat": "chat_history",
+    "chats": "chat_history",
+    "chat_history": "chat_history",
+    "kanban": "kanban",
+    "kanban_db": "kanban",
+}
+
+
+def _action_failure_code(exc: BaseException) -> str:
+    """Map action failures to a bounded, detail-free taxonomy."""
+    if isinstance(exc, ByokResolutionError):
+        code = exc.code
+    elif isinstance(exc, ChatAPIError):
+        code = str(getattr(exc, "error_code", "") or "")
+        if getattr(exc, "status_code", None) in {401, 403}:
+            code = "invalid_provider_credentials"
+        elif code not in _ACTION_FAILURE_CODES:
+            code = "provider_unavailable"
+    else:
+        code = "action_failed"
+    return code if code in _ACTION_FAILURE_CODES else "provider_unavailable"
+
+
+def _action_failure_output(action_name: str, exc: BaseException) -> ActionOutput:
+    """Build a sanitized action failure without serializing the exception."""
+    code = _action_failure_code(exc)
+    return ActionOutput(
+        action_name=action_name,
+        success=False,
+        error=code,
+        metadata={"failure_code": code},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -149,13 +209,15 @@ class ActionRegistry:
                     metadata=result,
                 )
             return ActionOutput(action_name=name, success=True, results=[], result_count=0)
+        except asyncio.CancelledError:
+            raise
         except Exception as exc:
-            logger.warning(f"Research action '{name}' failed: {exc!r}")
-            return ActionOutput(
-                action_name=name,
-                success=False,
-                error=str(exc),
+            logger.warning(
+                "Research action failed",
+                action=name,
+                error_type=type(exc).__name__,
             )
+            return _action_failure_output(name, exc)
 
     def get_actions_description(self, classification: QueryClassification) -> str:
         """Get a formatted description of available actions for the LLM prompt."""
@@ -204,7 +266,7 @@ def _normalize_web_results(
     return [item for item in processed_results if isinstance(item, dict)]
 
 
-def _create_local_db_search_action() -> ResearchAction:
+def _create_local_db_search_action(credential_runtime: Any = None) -> ResearchAction:
     """Create action that wraps the existing MultiDatabaseRetriever."""
 
     async def _execute(params: dict[str, Any]) -> ActionOutput:
@@ -212,26 +274,50 @@ def _create_local_db_search_action() -> ResearchAction:
             from .database_retrievers import MultiDatabaseRetriever, RetrievalConfig
 
             query = params.get("query", "")
-            top_k = params.get("top_k", 10)
+            try:
+                top_k = max(1, int(params.get("top_k", 10)))
+            except (TypeError, ValueError):
+                top_k = 10
             sources = params.get("sources", ["media_db"])
 
             config = RetrievalConfig(
-                search_mode="hybrid",
-                top_k=top_k,
+                max_results=top_k,
+                use_fts=True,
+                use_vector=True,
             )
-            retriever = MultiDatabaseRetriever(config=config)
-
-            # Build kwargs from available DB paths
-            retrieve_kwargs: dict[str, Any] = {
-                "query": query,
-                "sources": sources,
+            path_aliases = {
+                "media_db_path": "media_db",
+                "notes_db_path": "notes_db",
+                "character_db_path": "character_cards_db",
+                "kanban_db_path": "kanban_db",
+                "prompts_db_path": "prompts_db",
+                "world_books_db_path": "world_books_db",
+                "chat_dictionaries_db_path": "chat_dictionaries_db",
             }
-            for key in ("media_db_path", "notes_db_path", "character_db_path",
-                         "kanban_db_path", "media_db", "chacha_db"):
-                if key in params and params[key] is not None:
-                    retrieve_kwargs[key] = params[key]
+            db_paths: dict[str, str] = {}
+            supplied_paths = params.get("db_paths")
+            if isinstance(supplied_paths, dict):
+                for canonical_key in set(path_aliases.values()) | {"claims_db"}:
+                    value = supplied_paths.get(canonical_key)
+                    if value is not None and str(value).strip():
+                        db_paths[canonical_key] = str(value).strip()
+            for source_key, canonical_key in path_aliases.items():
+                value = params.get(source_key)
+                if value is not None and str(value).strip():
+                    db_paths[canonical_key] = str(value).strip()
 
-            results = await retriever.retrieve(**retrieve_kwargs)
+            retriever = MultiDatabaseRetriever(
+                db_paths,
+                user_id=str(params.get("user_id") or "0"),
+                media_db=params.get("media_db"),
+                chacha_db=params.get("chacha_db"),
+                credential_runtime=credential_runtime,
+            )
+            results = await retriever.retrieve(
+                query=query,
+                sources=sources,
+                config=config,
+            )
 
             docs = []
             for doc in results:
@@ -258,12 +344,10 @@ def _create_local_db_search_action() -> ResearchAction:
                 results=docs,
                 result_count=len(docs),
             )
+        except asyncio.CancelledError:
+            raise
         except Exception as exc:
-            return ActionOutput(
-                action_name="local_db_search",
-                success=False,
-                error=str(exc),
-            )
+            return _action_failure_output("local_db_search", exc)
 
     return ResearchAction(
         name="local_db_search",
@@ -609,7 +693,7 @@ def _create_reasoning_preamble_action(
     )
 
 
-def _create_image_search_action() -> ResearchAction:
+def _create_image_search_action(credential_runtime: Any = None) -> ResearchAction:
     """Create the 'image_search' action for finding relevant images."""
 
     async def _execute(params: dict[str, Any]) -> ActionOutput:
@@ -624,19 +708,29 @@ def _create_image_search_action() -> ResearchAction:
 
         try:
             from .media_search import search_images
+            stage_metadata: dict[str, Any] = {}
+            runtime_kwargs = (
+                {
+                    "credential_runtime": credential_runtime,
+                    "stage_metadata": stage_metadata,
+                }
+                if credential_runtime is not None
+                else {}
+            )
             images = await search_images(
                 query=query,
                 llm_provider=llm_provider,
                 llm_model=llm_model,
                 max_results=max_results,
                 search_engine=search_engine,
+                **runtime_kwargs,
             )
             return ActionOutput(
                 action_name="image_search",
                 success=True,
                 results=images,
                 result_count=len(images),
-                metadata={"type": "images"},
+                metadata={"type": "images", **stage_metadata},
             )
         except Exception as exc:
             return ActionOutput(action_name="image_search", success=False, error=str(exc))
@@ -657,7 +751,7 @@ def _create_image_search_action() -> ResearchAction:
     )
 
 
-def _create_video_search_action() -> ResearchAction:
+def _create_video_search_action(credential_runtime: Any = None) -> ResearchAction:
     """Create the 'video_search' action for finding relevant videos."""
 
     async def _execute(params: dict[str, Any]) -> ActionOutput:
@@ -672,19 +766,29 @@ def _create_video_search_action() -> ResearchAction:
 
         try:
             from .media_search import search_videos
+            stage_metadata: dict[str, Any] = {}
+            runtime_kwargs = (
+                {
+                    "credential_runtime": credential_runtime,
+                    "stage_metadata": stage_metadata,
+                }
+                if credential_runtime is not None
+                else {}
+            )
             videos = await search_videos(
                 query=query,
                 llm_provider=llm_provider,
                 llm_model=llm_model,
                 max_results=max_results,
                 search_engine=search_engine,
+                **runtime_kwargs,
             )
             return ActionOutput(
                 action_name="video_search",
                 success=True,
                 results=videos,
                 result_count=len(videos),
-                metadata={"type": "videos"},
+                metadata={"type": "videos", **stage_metadata},
             )
         except Exception as exc:
             return ActionOutput(action_name="video_search", success=False, error=str(exc))
@@ -743,14 +847,21 @@ def create_default_registry(
     enable_image_search: bool = False,
     enable_video_search: bool = False,
     on_progress: Callable[[ResearchProgressEvent], Any] | None = None,
+    credential_runtime: Any = None,
 ) -> ActionRegistry:
     """Create an ActionRegistry with built-in actions registered."""
+    runtime_kwargs = (
+        {"credential_runtime": credential_runtime}
+        if credential_runtime is not None
+        else {}
+    )
     return create_configured_registry(
         discussion_platforms=discussion_platforms,
         enable_url_scraping=enable_url_scraping,
         enable_image_search=enable_image_search,
         enable_video_search=enable_video_search,
         on_progress=on_progress,
+        **runtime_kwargs,
     )
 
 
@@ -761,6 +872,7 @@ def create_configured_registry(
     enable_image_search: bool = False,
     enable_video_search: bool = False,
     on_progress: Callable[[ResearchProgressEvent], Any] | None = None,
+    credential_runtime: Any = None,
 ) -> ActionRegistry:
     """Create an ActionRegistry with built-in actions and runtime toggles.
 
@@ -771,9 +883,10 @@ def create_configured_registry(
         enable_image_search: Whether to register image_search action.
         enable_video_search: Whether to register video_search action.
         on_progress: Optional progress callback for reasoning preamble events.
+        credential_runtime: Optional request-scoped provider credential runtime.
     """
     registry = ActionRegistry()
-    registry.register(_create_local_db_search_action())
+    registry.register(_create_local_db_search_action(credential_runtime))
     registry.register(_create_web_search_action())
     registry.register(_create_academic_search_action())
     registry.register(_create_discussion_search_action(default_platforms=discussion_platforms))
@@ -781,9 +894,9 @@ def create_configured_registry(
         registry.register(_create_scrape_url_action())
     registry.register(_create_reasoning_preamble_action(on_progress=on_progress))
     if enable_image_search:
-        registry.register(_create_image_search_action())
+        registry.register(_create_image_search_action(credential_runtime))
     if enable_video_search:
-        registry.register(_create_video_search_action())
+        registry.register(_create_video_search_action(credential_runtime))
     registry.register(_create_done_action())
     return registry
 
@@ -1022,6 +1135,7 @@ async def research_loop(
     enable_action_dedup: bool = True,
     enable_image_search: bool = False,
     enable_video_search: bool = False,
+    credential_runtime: Any = None,
 ) -> ResearchOutput:
     """Run the iterative agentic research loop.
 
@@ -1040,6 +1154,7 @@ async def research_loop(
         enable_action_dedup: Whether to skip repeated equivalent actions and reuse prior results.
         enable_image_search: Whether image_search action is available.
         enable_video_search: Whether video_search action is available.
+        credential_runtime: Optional request-scoped provider credential runtime.
 
     Returns:
         ResearchOutput with all steps, results, and metadata.
@@ -1048,12 +1163,18 @@ async def research_loop(
     standalone_query = classification.standalone_query or query
 
     if registry is None:
+        registry_kwargs = (
+            {"credential_runtime": credential_runtime}
+            if credential_runtime is not None
+            else {}
+        )
         registry = create_configured_registry(
             discussion_platforms=discussion_platforms,
             enable_url_scraping=enable_url_scraping,
             enable_image_search=enable_image_search,
             enable_video_search=enable_video_search,
             on_progress=on_progress,
+            **registry_kwargs,
         )
 
     if max_iterations is None:
@@ -1098,9 +1219,28 @@ async def research_loop(
 
     def _normalized_tuple(values: Any) -> tuple[str, ...]:
         if not isinstance(values, (list, tuple, set)):
-            return tuple()
+            return ()
         normalized = sorted(_normalize_query(v) for v in values if str(v or "").strip())
         return tuple(v for v in normalized if v)
+
+    def _normalize_local_sources(values: Any) -> list[str]:
+        if not isinstance(values, (list, tuple, set)):
+            return []
+        sources: list[str] = []
+        for value in values:
+            if not isinstance(value, str):
+                continue
+            source = _LOCAL_SOURCE_ALIASES.get(value.strip().lower())
+            if source and source not in sources:
+                sources.append(source)
+        return sources
+
+    def _bounded_int(value: Any, default: int) -> int:
+        try:
+            normalized = int(value)
+        except (TypeError, ValueError, OverflowError):
+            normalized = default
+        return max(1, min(normalized, 25))
 
     def _action_signature(action_name: str, params: dict[str, Any]) -> tuple[Any, ...]:
         q = _normalize_query(params.get("query", ""))
@@ -1109,27 +1249,39 @@ async def research_loop(
                 action_name,
                 q,
                 _normalize_query(params.get("engine", "duckduckgo")),
-                int(params.get("result_count", 5)),
+                params.get("result_count", 5),
             )
         if action_name == "academic_search":
             return (
                 action_name,
                 q,
-                int(params.get("result_count", 5)),
+                params.get("result_count", 5),
             )
         if action_name == "discussion_search":
             return (
                 action_name,
                 q,
                 _normalized_tuple(params.get("platforms") or []),
-                int(params.get("max_results", 10)),
+                params.get("max_results", 10),
             )
         if action_name == "local_db_search":
             return (
                 action_name,
                 q,
                 _normalized_tuple(params.get("sources") or []),
-                int(params.get("top_k", 10)),
+                params.get("top_k", 10),
+            )
+        if action_name == "image_search":
+            return (
+                action_name,
+                q,
+                params.get("max_results", 10),
+            )
+        if action_name == "video_search":
+            return (
+                action_name,
+                q,
+                params.get("max_results", 10),
             )
         return (action_name,)
 
@@ -1174,9 +1326,22 @@ async def research_loop(
             }
             if model:
                 call_kwargs["model"] = model
+            credential_handle = None
+            if credential_runtime is not None:
+                credential_handle = await credential_runtime.resolve(provider, model=model)
+                call_kwargs.update(
+                    api_key=credential_handle.api_key,
+                    app_config=credential_handle.app_config,
+                    credentials_resolved=True,
+                )
+                attach_runtime_provider_credentials(call_kwargs, credential_handle)
 
             raw_response = await asyncio.wait_for(
-                perform_chat_api_call_async(**call_kwargs),
+                await_runtime_bound_provider_call(
+                    perform_chat_api_call_async(**call_kwargs),
+                    credential_runtime=credential_runtime,
+                    credential_handle=credential_handle,
+                ),
                 timeout=30.0,
             )
 
@@ -1203,12 +1368,83 @@ async def research_loop(
             action_dict = _parse_research_action(response_text)
 
         except Exception as exc:
-            logger.warning(f"Research loop LLM call failed at iteration {iteration}: {exc!r}")
+            if credential_runtime is not None:
+                logger.warning("Research loop provider unavailable")
+                output.metadata["provider_stage"] = {
+                    "failure_code": "provider_unavailable",
+                    "verification_available": False,
+                }
+            else:
+                logger.warning(f"Research loop LLM call failed at iteration {iteration}: {exc!r}")
             break
 
-        action_name = action_dict.get("action", "done")
-        action_params = action_dict.get("params", {})
-        reasoning = action_dict.get("reasoning", "")
+        raw_action_name = action_dict.get("action")
+        action_name = raw_action_name.strip().lower() if isinstance(raw_action_name, str) else ""
+        raw_action_params = action_dict.get("params")
+        if not action_name or (action_name != "done" and registry.get(action_name) is None):
+            action_name = "done"
+            raw_action_params = {}
+        action_params = dict(raw_action_params) if isinstance(raw_action_params, dict) else {}
+        raw_reasoning = action_dict.get("reasoning")
+        reasoning = raw_reasoning[:4000] if isinstance(raw_reasoning, str) else ""
+
+        if action_name in {
+            "local_db_search",
+            "web_search",
+            "academic_search",
+            "discussion_search",
+            "image_search",
+            "video_search",
+        }:
+            raw_action_query = action_params.get("query")
+            action_query = (
+                raw_action_query.strip()
+                if isinstance(raw_action_query, str) and raw_action_query.strip()
+                else standalone_query
+            )[:4000]
+
+        if action_name == "local_db_search":
+            action_params = {
+                "query": action_query,
+                "sources": _normalize_local_sources(
+                    action_params.get("sources", ["media_db"])
+                ),
+                "top_k": _bounded_int(action_params.get("top_k", 10), 10),
+            }
+        elif action_name == "web_search":
+            normalized_params: dict[str, Any] = {
+                "query": action_query,
+                "result_count": _bounded_int(action_params.get("result_count", 5), 5),
+            }
+            engine = action_params.get("engine")
+            if isinstance(engine, str) and engine.strip():
+                normalized_params["engine"] = engine.strip()
+            action_params = normalized_params
+        elif action_name == "academic_search":
+            action_params = {
+                "query": action_query,
+                "result_count": _bounded_int(action_params.get("result_count", 5), 5),
+            }
+        elif action_name == "discussion_search":
+            normalized_params = {
+                "query": action_query,
+                "max_results": _bounded_int(action_params.get("max_results", 10), 10),
+            }
+            platforms = action_params.get("platforms")
+            if isinstance(platforms, list):
+                normalized_platforms = [
+                    platform.strip()
+                    for platform in platforms
+                    if isinstance(platform, str) and platform.strip()
+                ]
+                if normalized_platforms:
+                    normalized_params["platforms"] = normalized_platforms
+            action_params = normalized_params
+        elif action_name in {"image_search", "video_search"}:
+            action_params = {
+                "query": action_query,
+                "max_results": _bounded_int(action_params.get("max_results", 10), 10),
+            }
 
         # Emit reasoning event
         await _emit("research_reasoning", {
@@ -1258,11 +1494,23 @@ async def research_loop(
             )
 
         # Inject DB context into local_db_search params
-        if action_name == "local_db_search" and db_context:
-            for key in ("media_db_path", "notes_db_path", "character_db_path",
-                         "kanban_db_path", "media_db", "chacha_db"):
-                if key in db_context and key not in action_params:
-                    action_params[key] = db_context[key]
+        if action_name == "local_db_search":
+            if db_context:
+                for key in (
+                    "db_paths",
+                    "media_db_path",
+                    "notes_db_path",
+                    "character_db_path",
+                    "kanban_db_path",
+                    "prompts_db_path",
+                    "world_books_db_path",
+                    "chat_dictionaries_db_path",
+                    "media_db",
+                    "chacha_db",
+                    "user_id",
+                ):
+                    if key in db_context:
+                        action_params[key] = db_context[key]
 
         action_signature = _action_signature(action_name, action_params)
         if (

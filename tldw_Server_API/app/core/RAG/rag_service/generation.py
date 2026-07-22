@@ -18,9 +18,20 @@ from typing import TYPE_CHECKING, Any, Optional, Protocol, Union, cast
 
 from loguru import logger
 
+from tldw_Server_API.app.core.Context_Integrity.resolver import (
+    ContextIntegrityResolver,
+    get_global_context_integrity_resolver,
+)
 from tldw_Server_API.app.core.Utils.prompt_loader import load_prompt
 
+from .runtime_provider_call import (
+    attach_runtime_provider_credentials,
+    await_runtime_bound_provider_call,
+    close_provider_stream,
+)
 from .types import Document
+
+_STREAM_CONTROL_TOKENS = frozenset({"keepalive", "ping", "pong", "heartbeat"})
 
 if TYPE_CHECKING:
     from .claims import ClaimsEngine as ClaimsEngineType
@@ -33,6 +44,24 @@ try:
     ClaimsEngine = cast(Optional[type[ClaimsEngineType]], getattr(_claims_mod, "ClaimsEngine", None))
 except ImportError:
     ClaimsEngine = None
+
+
+def _resolve_claims_engine() -> Optional[type[ClaimsEngineType]]:
+    """Recover the real claims engine after an import-order cycle completes."""
+    global ClaimsEngine
+    if ClaimsEngine is not None:
+        return ClaimsEngine
+    try:
+        from tldw_Server_API.app.core.Claims_Extraction.claims_engine import (
+            ClaimsEngine as _RealClaimsEngine,
+        )
+
+        from .claims import ClaimsEngine as _CandidateClaimsEngine
+    except ImportError:
+        return None
+    if _CandidateClaimsEngine is _RealClaimsEngine:
+        ClaimsEngine = _RealClaimsEngine
+    return _CandidateClaimsEngine
 
 
 class GenerationStrategy(Protocol):
@@ -140,17 +169,40 @@ Your question: {question}
 Let me explain:"""
 
     @staticmethod
-    @lru_cache(maxsize=64)
-    def _load_rag_prompt_cached(name: str) -> Optional[str]:
-        """Load prompt snippets from rag.prompts.* with a small process cache."""
+    def _load_rag_prompt(
+        name: str,
+        integrity_resolver: ContextIntegrityResolver | None,
+    ) -> Optional[str]:
+        """Load one prompt against the resolver captured by the caller."""
         try:
-            prompt_text = load_prompt("rag", name)
+            prompt_text = load_prompt(
+                "rag",
+                name,
+                integrity_resolver=integrity_resolver,
+            )
         except Exception:  # noqa: BLE001 - prompt loading must remain best-effort
             logger.debug("Prompt loader failed for rag prompt '{}'", name)
             return None
         if isinstance(prompt_text, str) and prompt_text.strip():
             return prompt_text.strip()
         return None
+
+    @staticmethod
+    @lru_cache(maxsize=64)
+    def _load_rag_prompt_cached(name: str) -> Optional[str]:
+        """Cache prompts only while context-integrity enforcement is absent."""
+        return PromptTemplates._load_rag_prompt(name, None)
+
+    @classmethod
+    def _load_rag_prompt_for_resolver(
+        cls,
+        name: str,
+        integrity_resolver: ContextIntegrityResolver | None,
+    ) -> Optional[str]:
+        """Load without retaining a mutable integrity resolver in the cache."""
+        if integrity_resolver is None:
+            return cls._load_rag_prompt_cached(name)
+        return cls._load_rag_prompt(name, integrity_resolver)
 
     @classmethod
     async def warm_template_async(cls, name: str) -> None:
@@ -160,8 +212,13 @@ Let me explain:"""
         normalized_name = name.strip()
         if not normalized_name:
             return
+        integrity_resolver = get_global_context_integrity_resolver()
         try:
-            await asyncio.to_thread(cls._load_rag_prompt_cached, normalized_name)
+            await asyncio.to_thread(
+                cls._load_rag_prompt_for_resolver,
+                normalized_name,
+                integrity_resolver,
+            )
         except Exception as exc:  # noqa: BLE001 - warmup remains best-effort
             logger.debug(
                 "Prompt warmup failed for rag prompt '{}': {}",
@@ -172,7 +229,10 @@ Let me explain:"""
     @classmethod
     def get_template(cls, name: str) -> str:
         """Get a template by name."""
-        external = cls._load_rag_prompt_cached(name)
+        external = cls._load_rag_prompt_for_resolver(
+            name,
+            get_global_context_integrity_resolver(),
+        )
         if external is not None:
             return external
 
@@ -241,24 +301,61 @@ def _extract_stream_text(chunk: Any) -> Optional[str]:
         stripped = chunk.strip()
         if not stripped:
             return None
-        if stripped.lower().startswith("data:"):
-            data = stripped[5:].strip()
-            if data.lower() == "[done]":
-                return None
-            try:
-                payload = json.loads(data)
-            except json.JSONDecodeError:
-                return data or None
-            if isinstance(payload, dict):
-                return _extract_openai_text_content(payload)
-            if isinstance(payload, str):
-                return payload or None
-            return None
-        return stripped
+        text_parts: list[str] = []
+        for line in stripped.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            lowered = line.lower()
+            if (
+                line.startswith(":")
+                or lowered.startswith(("event:", "id:", "retry:"))
+                or lowered in _STREAM_CONTROL_TOKENS
+            ):
+                continue
+            if lowered.startswith("data:"):
+                data = line[5:].strip()
+                if not data or data.lower() == "[done]":
+                    continue
+                try:
+                    payload = json.loads(data)
+                except json.JSONDecodeError:
+                    if data.lower() not in _STREAM_CONTROL_TOKENS:
+                        text_parts.append(data)
+                    continue
+                if isinstance(payload, dict):
+                    text = _extract_openai_text_content(payload)
+                    if text:
+                        text_parts.append(text)
+                elif (
+                    isinstance(payload, str)
+                    and payload
+                    and payload.strip().lower() not in _STREAM_CONTROL_TOKENS
+                ):
+                    text_parts.append(payload)
+                continue
+            text_parts.append(line)
+        return "\n".join(text_parts) or None
     try:
         return str(chunk)
     except (TypeError, ValueError):
         return None
+
+
+def _classify_stream_content(content: Optional[str]) -> tuple[bool, bool]:
+    """Return whether valid content precedes a legacy Error sentinel."""
+    if not content:
+        return False, False
+
+    has_valid_content = False
+    for line in content.splitlines():
+        normalized = line.strip()
+        if not normalized:
+            continue
+        if normalized.startswith("Error:"):
+            return has_valid_content, True
+        has_valid_content = True
+    return has_valid_content, False
 
 
 class BaseGenerator(ABC):
@@ -374,6 +471,9 @@ class LLMGenerator(BaseGenerator):
         except Exception:
             logger.error("Error generating response")
 
+            if kwargs.get("credential_runtime") is not None:
+                raise
+
             # Try fallback if enabled
             if self.config.fallback_enabled:
                 logger.info("Attempting fallback generation")
@@ -393,6 +493,8 @@ class LLMGenerator(BaseGenerator):
         api_key = kwargs.get("api_key", self.config.api_key)
         temperature = kwargs.get("temperature", self.config.temperature)
         max_tokens = kwargs.get("max_tokens", self.config.max_tokens)
+        credential_runtime = kwargs.get("credential_runtime")
+        credential_handle = None
 
         call_kwargs: dict[str, Any] = {
             "api_provider": provider,
@@ -402,10 +504,60 @@ class LLMGenerator(BaseGenerator):
             "max_tokens": max_tokens,
             "stream": streaming,
         }
-        if api_key:
+        if credential_runtime is not None:
+            credential_handle = await credential_runtime.resolve(provider, model=model)
+            call_kwargs.update(
+                api_key=credential_handle.api_key,
+                app_config=credential_handle.app_config,
+                credentials_resolved=True,
+            )
+            attach_runtime_provider_credentials(call_kwargs, credential_handle)
+        elif api_key:
             call_kwargs["api_key"] = api_key
 
-        return await perform_chat_api_call_async(**call_kwargs)
+        response = await await_runtime_bound_provider_call(
+            perform_chat_api_call_async(**call_kwargs),
+            credential_runtime=credential_runtime,
+            credential_handle=credential_handle,
+            mark_success=not streaming,
+        )
+        if credential_handle is None:
+            return response
+        if not streaming:
+            return response
+
+        async def _tracked_stream() -> AsyncIterator[Any]:
+            output_emitted = False
+            completed = False
+            try:
+                if hasattr(response, "__aiter__"):
+                    async for chunk in response:
+                        if not output_emitted:
+                            output_emitted, _ = _classify_stream_content(
+                                _extract_stream_text(chunk)
+                            )
+                            if output_emitted:
+                                await credential_runtime.mark_used(credential_handle)
+                        yield chunk
+                else:
+                    for chunk in response:
+                        if not output_emitted:
+                            output_emitted, _ = _classify_stream_content(
+                                _extract_stream_text(chunk)
+                            )
+                            if output_emitted:
+                                await credential_runtime.mark_used(credential_handle)
+                        yield chunk
+                        await asyncio.sleep(0)
+                completed = True
+            finally:
+                try:
+                    if completed and not output_emitted:
+                        await credential_runtime.mark_used(credential_handle)
+                finally:
+                    await close_provider_stream(response)
+
+        return _tracked_stream()
 
 
 class StreamingGenerator(LLMGenerator):
@@ -421,6 +573,7 @@ class StreamingGenerator(LLMGenerator):
         # Enable streaming in config
         original_streaming = self.config.streaming
         self.config.streaming = True
+        response: Any = None
 
         try:
             # Extract documents from context
@@ -463,8 +616,12 @@ class StreamingGenerator(LLMGenerator):
                     await asyncio.sleep(0.01)  # Small delay for streaming effect
 
         finally:
-            # Restore original streaming setting
-            self.config.streaming = original_streaming
+            try:
+                if response is not None:
+                    await close_provider_stream(response)
+            finally:
+                # Restore original streaming setting
+                self.config.streaming = original_streaming
 
 
 class FallbackGenerator(BaseGenerator):
@@ -569,7 +726,11 @@ async def generate_response(context: Any, **kwargs) -> Any:
     generator = create_generator(_sanitize_generation_config(config_dict))
 
     # Generate response
-    result = await generator.generate(context, context.query)
+    result = await generator.generate(
+        context,
+        context.query,
+        credential_runtime=getattr(context, "credential_runtime", None),
+    )
 
     # Add to context
     context.response = result.response
@@ -592,7 +753,13 @@ class AnswerGenerator:
     Returns a plain string or a dict with an `answer` key for backward compatibility.
     """
 
-    def __init__(self, model: Optional[str] = None, provider: Optional[str] = None, system_prompt: Optional[str] = None):
+    def __init__(
+        self,
+        model: Optional[str] = None,
+        provider: Optional[str] = None,
+        system_prompt: Optional[str] = None,
+        credential_runtime: Any = None,
+    ):
         # Lazy-configure provider/model from env/config when not provided
         try:
             from tldw_Server_API.app.core.config import load_and_log_configs
@@ -602,6 +769,7 @@ class AnswerGenerator:
         self.provider = (provider or cfg.get("RAG_DEFAULT_LLM_PROVIDER") or "openai").strip()
         self.model = (model or cfg.get("RAG_DEFAULT_LLM_MODEL") or "gpt-4o-mini").strip()
         self.system_prompt = system_prompt or cfg.get("RAG_DEFAULT_SYSTEM_PROMPT")
+        self.credential_runtime = credential_runtime
 
     async def generate(
         self,
@@ -632,7 +800,11 @@ class AnswerGenerator:
         # Convert raw context string into a single Document to preserve downstream formatting
         doc = Document(id="ctx", content=context or "", metadata={"source": "context", "title": "Context"})
         ctx = _Ctx([doc], query)
-        res = await gen.generate(ctx, query)
+        res = await gen.generate(
+            ctx,
+            query,
+            credential_runtime=self.credential_runtime,
+        )
         # Normalize to simple shape
         return {"answer": res.response, "provider": res.provider, "model": res.model, "tokens_used": res.tokens_used, "generation_time": res.generation_time}
 
@@ -653,7 +825,11 @@ async def generate_streaming_response(context: Any, **kwargs) -> Any:
     generator = create_generator(_sanitize_generation_config(config_dict))
 
     # Store generator in context for streaming
-    base_stream = generator.generate_stream(context, context.query)
+    stream_kwargs: dict[str, Any] = {}
+    credential_runtime = getattr(context, "credential_runtime", None)
+    if credential_runtime is not None:
+        stream_kwargs["credential_runtime"] = credential_runtime
+    base_stream = generator.generate_stream(context, context.query, **stream_kwargs)
 
     # Optional: streaming claims overlay with slight buffer
     enable_claims = bool(kwargs.get("enable_claims", False))
@@ -664,7 +840,8 @@ async def generate_streaming_response(context: Any, **kwargs) -> Any:
     except (TypeError, ValueError):
         claims_concurrency = 8
 
-    if enable_claims and ClaimsEngine is not None:
+    claims_engine_type = _resolve_claims_engine() if enable_claims else None
+    if claims_engine_type is not None:
         try:
 
             def _analyze(api_name: str, input_data: Any, custom_prompt_arg: Optional[str] = None,
@@ -673,45 +850,46 @@ async def generate_streaming_response(context: Any, **kwargs) -> Any:
                 # For streaming overlay, avoid heavy LLM calls; use heuristic path via empty analyze
                 return "{\"claims\": []}"
 
-            engine = ClaimsEngine(_analyze)
+            engine = claims_engine_type(_analyze)
 
             async def _wrapped_stream():
                 buffer = ""
                 last_emit = 0
                 last_emit_time = 0.0
                 sentence_re = re.compile(r"(?<=[\.!?])\s+")
-                async for chunk in base_stream:
-                    buffer += chunk
-                    # Yield original chunk immediately
-                    yield chunk
-                    # When buffer has at least two sentences, run lightweight claim extraction
-                    parts = sentence_re.split(buffer)
-                    if len(parts) >= 2 and len(buffer) - last_emit > 200:
-                        # Debounce: limit overlay extraction rate
-                        now = time.time()
-                        if now - last_emit_time < 0.4:
-                            continue
-                        tail = " ".join(parts[-2:])
-                        try:
-                            claims_out = await engine.run(
-                                answer=tail,
-                                query=context.query,
-                                documents=getattr(context, 'documents', []) or [],
-                                claim_extractor="auto",
-                                claim_verifier="hybrid",
-                                claims_top_k=claims_top_k,
-                                claims_conf_threshold=0.75,
-                                claims_max=min(5, claims_max),
-                                retrieve_fn=None,
-                                claims_concurrency=claims_concurrency,
-                            )
-                            context.metadata["claims_overlay"] = claims_out
-                            last_emit = len(buffer)
-                            last_emit_time = now
-                        except Exception:  # noqa: BLE001 - claims overlay best-effort
-                            logger.debug("Claims overlay enrichment failed during streaming generation")
-                # done
-                return
+                try:
+                    async for chunk in base_stream:
+                        buffer += chunk
+                        # Yield original chunk immediately
+                        yield chunk
+                        # When buffer has at least two sentences, run lightweight claim extraction
+                        parts = sentence_re.split(buffer)
+                        if len(parts) >= 2 and len(buffer) - last_emit > 200:
+                            # Debounce: limit overlay extraction rate
+                            now = time.time()
+                            if now - last_emit_time < 0.4:
+                                continue
+                            tail = " ".join(parts[-2:])
+                            try:
+                                claims_out = await engine.run(
+                                    answer=tail,
+                                    query=context.query,
+                                    documents=getattr(context, 'documents', []) or [],
+                                    claim_extractor="auto",
+                                    claim_verifier="hybrid",
+                                    claims_top_k=claims_top_k,
+                                    claims_conf_threshold=0.75,
+                                    claims_max=min(5, claims_max),
+                                    retrieve_fn=None,
+                                    claims_concurrency=claims_concurrency,
+                                )
+                                context.metadata["claims_overlay"] = claims_out
+                                last_emit = len(buffer)
+                                last_emit_time = now
+                            except Exception:  # noqa: BLE001 - claims overlay best-effort
+                                logger.debug("Claims overlay enrichment failed during streaming generation")
+                finally:
+                    await close_provider_stream(base_stream)
 
             context.stream_generator = _wrapped_stream()
         except Exception:  # noqa: BLE001 - fallback to base stream

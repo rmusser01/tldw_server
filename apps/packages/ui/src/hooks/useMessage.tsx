@@ -18,7 +18,6 @@ import {
 } from "@/db/dexie/helpers";
 import { useTranslation } from "react-i18next";
 import { usePageAssist } from "@/context";
-import { formatDocs } from "@/utils/format-docs";
 import { buildAssistantErrorContent } from "@/utils/chat-error-message";
 import { buildCharacterChatAssistantErrorContent } from "@/hooks/chat/useCharacterChatMode";
 import { createCharacterEmoteStream } from "@/hooks/chat/character-emote-stream";
@@ -34,6 +33,7 @@ import {
   tldwClient,
   type ConversationState,
 } from "@/services/tldw/TldwApiClient";
+import { resolveWebsiteChatContext } from "@/hooks/useMessage.website-context";
 import { getScreenshotFromCurrentTab } from "@/libs/get-screenshot";
 import {
   isReasoningEnded,
@@ -653,64 +653,17 @@ export const useMessage = () => {
       }[] = [];
 
       if (chatWithWebsiteEmbedding) {
-        try {
-          await tldwClient.initialize();
-          // Optionally ensure server has the page content in the media index
-          if (embedURL) {
-            try {
-              await tldwClient.addMedia(embedURL);
-            } catch {}
-          }
-          const ragRes = await tldwClient.ragSearch(query, {
-            top_k: 4,
-            filters: { url: embedURL },
-          });
-          const docs =
-            ragRes?.results || ragRes?.documents || ragRes?.docs || [];
-          context = formatDocs(
-            docs.map((d: any) => ({
-              pageContent: d.content || d.text || d.chunk || "",
-              metadata: d.metadata || {},
-            })),
-          );
-          source = docs.map((d: any) => ({
-            name: d.metadata?.source || d.metadata?.title || "untitled",
-            type: d.metadata?.type || "unknown",
-            mode: "chat",
-            url: d.metadata?.url || "",
-            pageContent: d.content || d.text || d.chunk || "",
-            metadata: d.metadata || {},
-          }));
-        } catch (e) {
-          console.error(
-            "tldw ragSearch failed, falling back to inline context",
-            e,
-          );
-        }
-      }
-      if (!context && chatWithWebsiteEmbedding) {
-        if (embedType === "html") {
-          context = embedHTML.slice(0, maxWebsiteContext);
-        } else {
-          context = embedPDF
-            .map((pdf) => pdf.content)
-            .join(" ")
-            .slice(0, maxWebsiteContext);
-        }
-
-        source = [
-          {
-            name: embedURL,
-            type: embedType,
-            mode: "chat",
-            url: embedURL,
-            pageContent: context,
-            metadata: {
-              source: embedURL,
-              url: embedURL,
-            },
-          },
-        ];
+        const websiteContext = await resolveWebsiteChatContext({
+          client: tldwClient,
+          embedURL,
+          embedType,
+          embedHTML,
+          embedPDF,
+          maxWebsiteContext,
+          query,
+        });
+        context = websiteContext.context;
+        source = websiteContext.source;
       }
 
       let humanMessage = await humanMessageFormatter({

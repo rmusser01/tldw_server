@@ -2,6 +2,7 @@
 # Description: ElevenLabs TTS adapter implementation
 #
 # Imports
+import contextlib
 import os
 from collections.abc import AsyncGenerator
 from typing import Any, Optional
@@ -10,21 +11,23 @@ from typing import Any, Optional
 # Third-party Imports
 from loguru import logger
 
-try:
-    import httpx
-except ImportError:  # pragma: no cover - optional import guard
-    httpx = None
+from tldw_Server_API.app.core.exceptions import (
+    NetworkError as CoreNetworkError,
+)
+from tldw_Server_API.app.core.exceptions import (
+    RetryExhaustedError,
+    raise_detached_error,
+)
 
 #
 # Local Imports
-import contextlib
-
 from tldw_Server_API.app.core.http_client import afetch, astream_bytes
 
 from ..tts_exceptions import (
     TTSAuthenticationError,
     TTSError,
     TTSGenerationError,
+    TTSNetworkError,
     TTSProviderError,
     TTSProviderInitializationError,
     TTSProviderNotConfiguredError,
@@ -59,21 +62,49 @@ def _safe_exception_label(exc: BaseException) -> str:
     return type(exc).__name__
 
 
-_ELEVENLABS_HTTP_EXCEPTIONS: tuple[type[BaseException], ...] = ()
-if httpx is not None:
-    _ELEVENLABS_HTTP_EXCEPTIONS = (httpx.HTTPError,)
+def _is_timeout_error(exc: Exception) -> bool:
+    if isinstance(exc, (TimeoutError,)):
+        return True
+    return "timeout" in type(exc).__name__.lower()
 
-_ELEVENLABS_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
-    AttributeError,
-    ConnectionError,
-    LookupError,
-    OSError,
-    RuntimeError,
-    TimeoutError,
-    TypeError,
-    UnicodeError,
-    ValueError,
-) + _ELEVENLABS_HTTP_EXCEPTIONS
+
+def _bounded_network_error(provider: str, exc: Exception) -> TTSNetworkError:
+    """Map transport failures without retaining credential-derived URLs."""
+    return TTSNetworkError(
+        f"Network request to {provider} failed",
+        provider=provider,
+        error_code="NETWORK_ERROR",
+        details={"error_type": type(exc).__name__},
+    )
+
+
+def _bounded_existing_tts_error(provider: str, exc: TTSError) -> TTSProviderError:
+    """Replace an already-typed error without retaining untrusted content."""
+    if isinstance(exc, TTSAuthenticationError):
+        return TTSAuthenticationError(
+            f"{provider} authentication failed",
+            provider=provider,
+        )
+    if isinstance(exc, TTSRateLimitError):
+        return rate_limit_error(provider)
+    if isinstance(exc, TTSQuotaExceededError):
+        return TTSQuotaExceededError(
+            f"{provider} quota exceeded",
+            provider=provider,
+        )
+    if isinstance(exc, TTSTimeoutError):
+        return TTSTimeoutError(
+            f"{provider} timeout",
+            provider=provider,
+        )
+    if isinstance(exc, TTSNetworkError):
+        return _bounded_network_error(provider, exc)
+    return TTSProviderError(
+        f"{provider} request failed",
+        provider=provider,
+        details={"error_type": type(exc).__name__},
+    )
+
 
 class ElevenLabsAdapter(TTSAdapter):
     """Adapter for ElevenLabs TTS API"""
@@ -183,7 +214,10 @@ class ElevenLabsAdapter(TTSAdapter):
         super().__init__(config)
 
         # API configuration
-        self.api_key = self.config.get("elevenlabs_api_key") or os.getenv("ELEVENLABS_API_KEY")
+        credentials_resolved = self.config.get("credentials_resolved") is True
+        self.api_key = self.config.get("elevenlabs_api_key")
+        if not credentials_resolved:
+            self.api_key = self.api_key or os.getenv("ELEVENLABS_API_KEY")
         # Normalize placeholder/empty values to None so unit tests can detect "not configured"
         if isinstance(self.api_key, str):
             _raw = self.api_key.strip()
@@ -217,6 +251,7 @@ class ElevenLabsAdapter(TTSAdapter):
 
     async def initialize(self) -> bool:
         """Initialize the ElevenLabs adapter"""
+        initialization_error: Optional[TTSProviderInitializationError] = None
         try:
             if not self.api_key:
                 error_msg = f"{self.provider_name}: No API key provided"
@@ -243,17 +278,19 @@ class ElevenLabsAdapter(TTSAdapter):
 
         except TTSProviderNotConfiguredError:
             return False
-        except _ELEVENLABS_NONCRITICAL_EXCEPTIONS as e:
+        except Exception as e:  # noqa: BLE001 - sanitize every provider initialization failure
             logger.error(
                 f"{self.provider_name}: Initialization failed; "
                 f"exception_type={_safe_exception_label(e)}"
             )
             self._status = ProviderStatus.ERROR
-            raise TTSProviderInitializationError(
+            initialization_error = TTSProviderInitializationError(
                 f"Failed to initialize {self.provider_name}",
                 provider=self.provider_name,
-                details={"error": str(e)}
-            ) from e
+                details={"error_type": type(e).__name__},
+            )
+        if initialization_error is not None:
+            raise_detached_error(initialization_error)
 
     async def _fetch_user_voices(self):
         """Fetch available voices from ElevenLabs API"""
@@ -264,6 +301,7 @@ class ElevenLabsAdapter(TTSAdapter):
                 url=f"{self.base_url}/voices",
                 client=self.client,
                 headers=headers,
+                sensitive_observability=True,
             )
 
             if response.status_code == 200:
@@ -285,7 +323,7 @@ class ElevenLabsAdapter(TTSAdapter):
             else:
                 logger.warning(f"{self.provider_name}: Failed to fetch voices: {response.status_code}")
 
-        except _ELEVENLABS_NONCRITICAL_EXCEPTIONS as e:
+        except Exception as e:  # noqa: BLE001 - voice discovery is noncritical
             logger.error(
                 f"{self.provider_name}: Error fetching voices; "
                 f"exception_type={_safe_exception_label(e)}"
@@ -355,6 +393,7 @@ class ElevenLabsAdapter(TTSAdapter):
             f"model={model_id}, format={request.format.value}"
         )
 
+        generation_error: Optional[TTSGenerationError] = None
         try:
             if request.stream:
                 return TTSResponse(
@@ -387,18 +426,20 @@ class ElevenLabsAdapter(TTSAdapter):
                     provider=self.provider_name
                 )
 
-        except (TTSProviderNotConfiguredError, TTSAuthenticationError, TTSRateLimitError, TTSQuotaExceededError, TTSValidationError):
+        except (TTSProviderNotConfiguredError, TTSProviderError, TTSValidationError):
             raise
-        except _ELEVENLABS_NONCRITICAL_EXCEPTIONS as e:
+        except Exception as e:  # noqa: BLE001 - sanitize every provider generation failure
             logger.error(
                 f"{self.provider_name} generation error; "
                 f"exception_type={_safe_exception_label(e)}"
             )
-            raise TTSGenerationError(
+            generation_error = TTSGenerationError(
                 f"Failed to generate speech with {self.provider_name}",
                 provider=self.provider_name,
-                details={"error": str(e), "error_type": type(e).__name__}
-            ) from e
+                details={"error_type": type(e).__name__},
+            )
+        if generation_error is not None:
+            raise_detached_error(generation_error)
 
     async def _stream_audio_elevenlabs(
         self,
@@ -430,36 +471,42 @@ class ElevenLabsAdapter(TTSAdapter):
             "voice_settings": voice_settings
         }
 
+        stream_error: Optional[Exception] = None
         try:
             chunk_count = 0
-            async for chunk in astream_bytes(
-                method="POST",
-                url=url,
-                client=self.client,
-                headers=headers,
-                json=payload,
-                chunk_size=1024,
-            ):
-                if chunk:
-                    chunk_count += 1
-                    yield chunk
+            async with contextlib.aclosing(
+                astream_bytes(
+                    method="POST",
+                    url=url,
+                    client=self.client,
+                    headers=headers,
+                    json=payload,
+                    chunk_size=1024,
+                    sensitive_observability=True,
+                )
+            ) as stream:
+                async for chunk in stream:
+                    if chunk:
+                        chunk_count += 1
+                        yield chunk
 
-                    if chunk_count % 10 == 0:
-                        logger.debug(f"{self.provider_name}: Streamed {chunk_count} chunks")
+                        if chunk_count % 10 == 0:
+                            logger.debug(f"{self.provider_name}: Streamed {chunk_count} chunks")
 
             logger.info(f"{self.provider_name}: Successfully streamed {chunk_count} chunks")
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - sanitize every provider failure at this boundary
             if _is_http_status_error(e):
                 response = getattr(e, "response", None)
                 status = getattr(response, "status_code", None)
                 logger.error(f"{self.provider_name} HTTP error: {status} - response body redacted")
-                self._raise_mapped_http_error(e)
             logger.error(
                 f"{self.provider_name} streaming error; "
                 f"exception_type={_safe_exception_label(e)}"
             )
-            raise
+            stream_error = self._normalized_transport_error(e)
+        if stream_error is not None:
+            raise_detached_error(stream_error)
 
     async def _generate_complete_elevenlabs(
         self,
@@ -485,6 +532,8 @@ class ElevenLabsAdapter(TTSAdapter):
             "model_id": model_id,
             "voice_settings": voice_settings
         }
+        complete_error: Optional[Exception] = None
+        audio_data: Optional[bytes] = None
         try:
             response = await afetch(
                 method="POST",
@@ -492,25 +541,19 @@ class ElevenLabsAdapter(TTSAdapter):
                 client=self.client,
                 headers=headers,
                 json=payload,
+                sensitive_observability=True,
             )
-            try:
-                response.raise_for_status()
-            except Exception as e:
-                if _is_http_status_error(e):
-                    self._raise_mapped_http_error(e)
-                raise
-            return response.content or b""
-        except TTSError:
-            # Propagate mapped TTS exceptions without wrapping/logging
-            raise
-        except Exception as e:
-            if _is_http_status_error(e):
-                self._raise_mapped_http_error(e)
+            response.raise_for_status()
+            audio_data = response.content or b""
+        except Exception as e:  # noqa: BLE001 - sanitize every provider failure at this boundary
             logger.error(
                 f"{self.provider_name} non-stream error; "
                 f"exception_type={_safe_exception_label(e)}"
             )
-            raise
+            complete_error = self._normalized_transport_error(e)
+        if complete_error is not None:
+            raise_detached_error(complete_error)
+        return audio_data or b""
 
     def _get_voice_id(self, voice_name: str) -> str:
         """Get ElevenLabs voice ID from voice name"""
@@ -564,24 +607,71 @@ class ElevenLabsAdapter(TTSAdapter):
         # Default to 44100 for mp3/wav/pcm/ulaw
         return 44100
 
-    def _raise_mapped_http_error(self, e: Exception) -> None:
-        """Map HTTP errors to TTS exceptions for consistent handling upstream."""
+    def _normalized_mapped_http_status(self, status: int | None) -> Exception:
+        """Build a bounded TTS exception for one upstream HTTP status."""
+
+        if status in (401, 403):
+            return TTSAuthenticationError(
+                f"{self.provider_name} authentication failed",
+                provider=self.provider_name,
+                details={"status": status},
+            )
+        if status == 429:
+            return TTSRateLimitError(f"{self.provider_name} rate limit exceeded", provider=self.provider_name, details={"status": status})
+        if status in (408, 504):
+            return TTSTimeoutError(f"{self.provider_name} timeout", provider=self.provider_name, details={"status": status})
+        if status and 500 <= status < 600:
+            return TTSProviderError(f"{self.provider_name} upstream error", provider=self.provider_name, details={"status": status})
+        # Generic mapping for other 4xx
+        return TTSProviderError(
+            f"{self.provider_name} request failed ({status})",
+            provider=self.provider_name,
+            details={"status": status},
+        )
+
+    def _normalized_mapped_http_error(self, e: Exception) -> Exception:
+        """Build a bounded TTS exception from an upstream HTTP response."""
+
         response = getattr(e, "response", None)
         status = getattr(response, "status_code", None) if response is not None else None
-        try:
-            text = response.text if response is not None else None
-        except (AttributeError, RuntimeError, TypeError, ValueError):
-            text = None
-        if status in (401, 403):
-            raise TTSAuthenticationError(f"{self.provider_name} authentication failed", provider=self.provider_name, details={"status": status, "body": text})
-        if status == 429:
-            raise TTSRateLimitError(f"{self.provider_name} rate limit exceeded", provider=self.provider_name, details={"status": status})
-        if status in (408, 504):
-            raise TTSTimeoutError(f"{self.provider_name} timeout", provider=self.provider_name, details={"status": status})
-        if status and 500 <= status < 600:
-            raise TTSProviderError(f"{self.provider_name} upstream error", provider=self.provider_name, details={"status": status})
-        # Generic mapping for other 4xx
-        raise TTSProviderError(f"{self.provider_name} request failed ({status})", provider=self.provider_name, details={"status": status, "body": text})
+        return self._normalized_mapped_http_status(status)
+
+    def _raise_mapped_http_error(self, e: Exception) -> None:
+        """Raise a bounded HTTP error without retaining the upstream object."""
+        normalized = self._normalized_mapped_http_error(e)
+        e = None  # type: ignore[assignment]
+        raise_detached_error(normalized)
+
+    def _normalized_transport_error(self, exc: Exception) -> Exception:
+        """Build a bounded transport failure without retaining raw details."""
+        if isinstance(exc, TTSError):
+            return _bounded_existing_tts_error(self.provider_name, exc)
+        if _is_http_status_error(exc):
+            return self._normalized_mapped_http_error(exc)
+        if isinstance(exc, CoreNetworkError) and exc.status_code is not None:
+            return self._normalized_mapped_http_status(exc.status_code)
+        if _is_timeout_error(exc):
+            return TTSTimeoutError(
+                f"{self.provider_name} timeout",
+                provider=self.provider_name,
+                details={"error_type": type(exc).__name__},
+            )
+        if (
+            isinstance(exc, (CoreNetworkError, RetryExhaustedError, ConnectionError, OSError))
+            or _is_httpx_exception(exc)
+        ):
+            return _bounded_network_error(self.provider_name, exc)
+        return TTSProviderError(
+            f"Unexpected error in {self.provider_name}",
+            provider=self.provider_name,
+            details={"error_type": type(exc).__name__},
+        )
+
+    def _raise_transport_error(self, exc: Exception) -> None:
+        """Raise a normalized transport error for compatibility callers."""
+        normalized = self._normalized_transport_error(exc)
+        exc = None  # type: ignore[assignment]
+        raise_detached_error(normalized)
 
     async def _cleanup_resources(self):
         """Clean up ElevenLabs adapter resources"""
@@ -635,15 +725,23 @@ class ElevenLabsTTSAdapter(ElevenLabsAdapter):
         cfg = config.copy() if isinstance(config, dict) else {}
         # Map generic keys to adapter-specific keys used by the base class
         mapped_cfg: dict[str, Any] = {}
-        if "api_key" in cfg:
+        if "elevenlabs_api_key" in cfg:
+            mapped_cfg["elevenlabs_api_key"] = cfg.get("elevenlabs_api_key")
+        elif "api_key" in cfg:
             mapped_cfg["elevenlabs_api_key"] = cfg.get("api_key")
-        if "base_url" in cfg:
+        if "elevenlabs_base_url" in cfg:
+            mapped_cfg["elevenlabs_base_url"] = cfg.get("elevenlabs_base_url")
+        elif "base_url" in cfg:
             mapped_cfg["elevenlabs_base_url"] = cfg.get("base_url")
         if "timeout" in cfg:
             mapped_cfg["timeout"] = cfg.get("timeout")
+        if "credentials_resolved" in cfg:
+            mapped_cfg["credentials_resolved"] = cfg.get("credentials_resolved")
 
         # If API key isn't provided via config or env, tests expect an error at construction time
-        temp_key = mapped_cfg.get("elevenlabs_api_key") or os.getenv("ELEVENLABS_API_KEY")
+        temp_key = mapped_cfg.get("elevenlabs_api_key")
+        if cfg.get("credentials_resolved") is not True:
+            temp_key = temp_key or os.getenv("ELEVENLABS_API_KEY")
         if not temp_key:
             raise TTSProviderNotConfiguredError("ElevenLabs API key not configured", provider="elevenlabs")
 
@@ -677,6 +775,7 @@ class ElevenLabsTTSAdapter(ElevenLabsAdapter):
             url=f"{self.base_url}/voices",
             client=self.client,
             headers=headers,
+            sensitive_observability=True,
         )
         resp.raise_for_status()
         data = resp.json() or {}
@@ -692,6 +791,7 @@ class ElevenLabsTTSAdapter(ElevenLabsAdapter):
             url=f"{self.base_url}/voices/{voice_id}",
             client=self.client,
             headers=headers,
+            sensitive_observability=True,
         )
         resp.raise_for_status()
         return resp.json() or {}
@@ -708,6 +808,7 @@ class ElevenLabsTTSAdapter(ElevenLabsAdapter):
             client=self.client,
             headers=headers,
             json=payload,
+            sensitive_observability=True,
         )
         resp.raise_for_status()
         data = resp.json() or {}
@@ -723,6 +824,7 @@ class ElevenLabsTTSAdapter(ElevenLabsAdapter):
             url=f"{self.base_url}/user",
             client=self.client,
             headers=headers,
+            sensitive_observability=True,
         )
         resp.raise_for_status()
         data = resp.json() or {}
@@ -817,23 +919,40 @@ class ElevenLabsTTSAdapter(ElevenLabsAdapter):
         }
         payload = {"text": request.text, "model_id": model_id, "voice_settings": voice_settings}
 
+        stream_error: Optional[Exception] = None
         try:
-            async for chunk in astream_bytes(
-                method="POST",
-                url=url,
-                client=self.client,
-                headers=headers,
-                json=payload,
-            ):
-                if chunk:
-                    yield chunk
-        except _ELEVENLABS_NONCRITICAL_EXCEPTIONS as e:
-            if _is_http_status_error(e):
-                self._raise_mapped_http_error(e)
-            raise
+            async with contextlib.aclosing(
+                astream_bytes(
+                    method="POST",
+                    url=url,
+                    client=self.client,
+                    headers=headers,
+                    json=payload,
+                    sensitive_observability=True,
+                )
+            ) as stream:
+                async for chunk in stream:
+                    if chunk:
+                        yield chunk
+        except Exception as e:  # noqa: BLE001 - sanitize every provider stream failure
+            stream_error = self._normalized_transport_error(e)
+        if stream_error is not None:
+            raise_detached_error(stream_error)
 
     # Override error mapping to align with tests (invalid voice -> validation error, 429 cases)
-    def _raise_mapped_http_error(self, e: Exception) -> None:
+    def _normalized_mapped_http_status(self, status: int | None) -> Exception:
+        """Preserve the compatibility adapter's public provider identity."""
+
+        if status in (401, 403):
+            return TTSAuthenticationError(
+                "elevenlabs authentication failed",
+                provider=self._provider_simple,
+            )
+        if status == 429:
+            return rate_limit_error(self._provider_simple)
+        return super()._normalized_mapped_http_status(status)
+
+    def _normalized_mapped_http_error(self, e: Exception) -> Exception:
         response = getattr(e, "response", None)
         status = getattr(response, "status_code", None) if response is not None else None
         try:
@@ -841,14 +960,16 @@ class ElevenLabsTTSAdapter(ElevenLabsAdapter):
         except (AttributeError, TypeError, ValueError):
             data = {}
         detail = data.get("detail", {}) if isinstance(data, dict) else {}
+        if not isinstance(detail, dict):
+            detail = {}
         code = detail.get("status") or detail.get("code")
 
         if status in (401, 403):
-            raise TTSAuthenticationError("elevenlabs authentication failed", provider=self._provider_simple)
+            return self._normalized_mapped_http_status(status)
         if status == 429:
             # Distinguish quota vs. rate limit when possible
             if code == "quota_exceeded":
-                raise TTSQuotaExceededError("elevenlabs quota exceeded", provider=self._provider_simple)
+                return TTSQuotaExceededError("elevenlabs quota exceeded", provider=self._provider_simple)
             retry = None
             try:
                 retry = int((response.headers or {}).get("retry-after", "0")) if response is not None else None
@@ -858,18 +979,17 @@ class ElevenLabsTTSAdapter(ElevenLabsAdapter):
             # Expose retry_after directly for tests
             with contextlib.suppress(AttributeError, TypeError):
                 err.retry_after = retry
-            raise err
+            return err
         if status and 400 <= status < 500 and code == "invalid_voice_id":
             from ..tts_exceptions import TTSValidationError
-            message = None
-            try:
-                message = (detail.get("message") if isinstance(detail, dict) else None) or "Invalid voice id"
-            except (AttributeError, TypeError):
-                message = "Invalid voice id"
-            raise TTSValidationError(message, provider=self._provider_simple, details={"status": status})
+            return TTSValidationError(
+                "Invalid voice id",
+                provider=self._provider_simple,
+                details={"status": status},
+            )
 
         # Fallback to base behavior
-        return super()._raise_mapped_http_error(e)
+        return super()._normalized_mapped_http_error(e)
 
 #
 # End of elevenlabs_adapter.py

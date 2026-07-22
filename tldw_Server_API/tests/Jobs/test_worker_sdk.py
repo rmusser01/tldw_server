@@ -1,11 +1,26 @@
 import asyncio
-from types import SimpleNamespace
+import gc
+import sqlite3
 
 import pytest
 
-from tldw_Server_API.app.core.Jobs.migrations import ensure_jobs_tables
 from tldw_Server_API.app.core.Jobs.manager import JobManager
-from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerSDK, WorkerConfig
+from tldw_Server_API.app.core.Jobs.migrations import ensure_jobs_tables
+from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
+
+try:
+    import psycopg
+except ImportError:  # pragma: no cover - exercised in minimal SQLite installs
+    psycopg = None
+
+
+_BACKEND_ADAPTER_ERRORS = [
+    pytest.param(sqlite3.OperationalError, id="sqlite"),
+]
+if psycopg is not None:
+    _BACKEND_ADAPTER_ERRORS.append(
+        pytest.param(psycopg.OperationalError, id="postgres"),
+    )
 
 
 class DummySleep:
@@ -73,7 +88,7 @@ async def test_auto_renew_jitter_and_progress(monkeypatch, tmp_path):
     db_path = tmp_path / "jobs_wsdk.db"
     ensure_jobs_tables(db_path)
     jm = JobManager(db_path)
-    j = jm.create_job(domain="chatbooks", queue="default", job_type="t", payload={}, owner_user_id="u")
+    jm.create_job(domain="chatbooks", queue="default", job_type="t", payload={}, owner_user_id="u")
     acq = jm.acquire_next_job(domain="chatbooks", queue="default", lease_seconds=20, worker_id="w1")
     assert acq is not None
 
@@ -102,12 +117,9 @@ async def test_auto_renew_jitter_and_progress(monkeypatch, tmp_path):
 
     task = asyncio.create_task(sdk._auto_renew(acq, progress_cb=progress_cb))
     await asyncio.wait_for(renewed.wait(), timeout=1)
-    sdk.stop()
-    try:
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
         await asyncio.wait_for(task, timeout=1)
-    except asyncio.TimeoutError:
-        task.cancel()
-        raise
 
     # Verify sleep durations are lease - threshold (no jitter)
     assert any(abs(s - 15) < 0.1 for s in sleep_stub.calls)
@@ -117,11 +129,95 @@ async def test_auto_renew_jitter_and_progress(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("adapter_error", _BACKEND_ADAPTER_ERRORS)
+async def test_run_treats_backend_acquire_errors_as_transient(adapter_error):
+    class FailingManager:
+        def should_enforce_leases(self):
+            return True
+
+        def acquire_next_job(self, **_kwargs):
+            sdk.stop()
+            raise adapter_error("adapter unavailable")
+
+    sdk = WorkerSDK(
+        FailingManager(),
+        WorkerConfig(domain="jobs", queue="default", worker_id="worker"),
+    )
+
+    async def handler(_job):
+        pytest.fail("handler must not run after an acquire adapter error")
+
+    await asyncio.wait_for(sdk.run(handler=handler), timeout=1)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("adapter_error", _BACKEND_ADAPTER_ERRORS)
+async def test_auto_renew_contains_backend_adapter_errors(adapter_error):
+    class FailingManager:
+        def renew_job_lease(self, **_kwargs):
+            raise adapter_error("adapter unavailable")
+
+    sdk = WorkerSDK(
+        FailingManager(),
+        WorkerConfig(
+            domain="jobs",
+            queue="default",
+            worker_id="worker",
+            lease_seconds=2,
+            renew_threshold_seconds=1,
+            renew_jitter_seconds=0,
+        ),
+    )
+    sdk._sleep = DummySleep(asyncio.sleep)
+
+    await asyncio.wait_for(
+        sdk._auto_renew(
+            {
+                "id": 7,
+                "lease_id": "lease-7",
+            }
+        ),
+        timeout=1,
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_contains_finished_renew_task_adapter_error(tmp_path):
+    jm = JobManager(tmp_path / "jobs-renew-task-error.db")
+    created = jm.create_job(
+        domain="jobs",
+        queue="default",
+        job_type="renew-error",
+        payload={},
+        owner_user_id="owner",
+    )
+    sdk = WorkerSDK(
+        jm,
+        WorkerConfig(domain="jobs", queue="default", worker_id="worker"),
+    )
+
+    async def failing_renew(_job, progress_cb=None):
+        del progress_cb
+        raise sqlite3.OperationalError("renew adapter unavailable")
+
+    sdk._auto_renew = failing_renew
+
+    async def handler(_job):
+        await asyncio.sleep(0)
+        sdk.stop()
+        return {"ok": True}
+
+    await asyncio.wait_for(sdk.run(handler=handler), timeout=1)
+
+    assert jm.get_job(int(created["id"]))["status"] == "completed"
+
+
+@pytest.mark.asyncio
 async def test_run_retryable_exception_and_backoff(monkeypatch, tmp_path):
     db_path = tmp_path / "jobs_wsdk2.db"
     ensure_jobs_tables(db_path)
     jm = JobManager(db_path)
-    j = jm.create_job(domain="chatbooks", queue="default", job_type="t", payload={}, owner_user_id="u")
+    jm.create_job(domain="chatbooks", queue="default", job_type="t", payload={}, owner_user_id="u")
 
     acq = jm.acquire_next_job(domain="chatbooks", queue="default", lease_seconds=10, worker_id="w2")
     assert acq is not None
@@ -148,17 +244,22 @@ async def test_run_retryable_exception_and_backoff(monkeypatch, tmp_path):
     # Capture and use original sleep inside the stub
     _orig_sleep = asyncio.sleep
     sleep_stub = DummySleep(_orig_sleep)
+    backoff_sleep_started = asyncio.Event()
+
+    async def tracked_sleep(seconds: float) -> None:
+        if int(seconds) in (2, 4, 8):
+            backoff_sleep_started.set()
+        await sleep_stub(seconds)
+
     monkeypatch.setattr(jm, "acquire_next_job", lambda **kwargs: fake_acquire(**kwargs))
     monkeypatch.setattr(jm, "fail_job", lambda job_id, **kwargs: fake_fail(job_id, **kwargs))
-    sdk._sleep = sleep_stub
+    sdk._sleep = tracked_sleep
 
     async def handler(job):
         raise RetryErr("boom")
 
     run_task = asyncio.create_task(sdk.run(handler=handler))
-    # Allow a few loop iterations then stop
-    await _orig_sleep(0)
-    await _orig_sleep(0)
+    await asyncio.wait_for(backoff_sleep_started.wait(), timeout=1)
     sdk.stop()
     await asyncio.wait_for(run_task, timeout=1)
 
@@ -202,23 +303,156 @@ async def test_run_stop_interrupts_idle_backoff_sleep(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
+@pytest.mark.concurrent
+async def test_stop_keeps_active_job_renewed_until_handler_finishes(
+    monkeypatch,
+    tmp_path,
+):
+    db_path = tmp_path / "jobs_wsdk_stop_active.db"
+    ensure_jobs_tables(db_path)
+    jm = JobManager(db_path)
+    job = jm.create_job(
+        domain="chatbooks",
+        queue="default",
+        job_type="t",
+        payload={},
+        owner_user_id="u",
+    )
+    sdk = WorkerSDK(
+        jm,
+        WorkerConfig(
+            domain="chatbooks",
+            queue="default",
+            worker_id="w-stop-active",
+            lease_seconds=30,
+            renew_threshold_seconds=29,
+            renew_jitter_seconds=0,
+        ),
+    )
+    handler_started = asyncio.Event()
+    release_handler = asyncio.Event()
+    renew_sleep_started = asyncio.Event()
+    allow_renew_interval = asyncio.Event()
+    renewed = asyncio.Event()
+    next_renew_sleep_started = asyncio.Event()
+    renew_cancel_received = asyncio.Event()
+    allow_renew_cleanup = asyncio.Event()
+    completion_succeeded = asyncio.Event()
+    worker_acquisitions: list[str] = []
+    sleep_calls = 0
+    original_acquire = jm.acquire_next_job
+    original_renew = jm.renew_job_lease
+    original_complete = jm.complete_job
+
+    def tracked_acquire(**kwargs):
+        worker_acquisitions.append(str(kwargs["worker_id"]))
+        return original_acquire(**kwargs)
+
+    def tracked_renew(**kwargs):
+        result = original_renew(**kwargs)
+        if result:
+            renewed.set()
+        return result
+
+    def tracked_complete(job_id, **kwargs):
+        result = original_complete(job_id, **kwargs)
+        if result:
+            completion_succeeded.set()
+        return result
+
+    async def controlled_sleep(_seconds: float) -> None:
+        nonlocal sleep_calls
+        sleep_calls += 1
+        if sleep_calls == 1:
+            renew_sleep_started.set()
+            await allow_renew_interval.wait()
+            return
+        next_renew_sleep_started.set()
+        try:
+            await asyncio.Future()
+        except asyncio.CancelledError:
+            renew_cancel_received.set()
+            await allow_renew_cleanup.wait()
+            raise
+
+    async def handler(_job_row):
+        handler_started.set()
+        await release_handler.wait()
+        return {"ok": True}
+
+    monkeypatch.setattr(jm, "acquire_next_job", tracked_acquire)
+    monkeypatch.setattr(jm, "renew_job_lease", tracked_renew)
+    monkeypatch.setattr(jm, "complete_job", tracked_complete)
+    sdk._sleep = controlled_sleep
+
+    run_task = asyncio.create_task(sdk.run(handler=handler))
+    try:
+        await asyncio.wait_for(handler_started.wait(), timeout=1)
+        await asyncio.wait_for(renew_sleep_started.wait(), timeout=1)
+        sdk.stop()
+
+        connection = jm._connect()
+        try:
+            with connection:
+                connection.execute(
+                    "UPDATE jobs SET leased_until=DATETIME('now', '-10 seconds') WHERE id=?",
+                    (int(job["id"]),),
+                )
+        finally:
+            connection.close()
+
+        allow_renew_interval.set()
+        await asyncio.wait_for(renewed.wait(), timeout=1)
+        await asyncio.wait_for(next_renew_sleep_started.wait(), timeout=1)
+
+        competitor = JobManager(db_path)
+        assert competitor.acquire_next_job(
+            domain="chatbooks",
+            queue="default",
+            lease_seconds=30,
+            worker_id="w-competitor",
+        ) is None
+
+        release_handler.set()
+        await asyncio.wait_for(completion_succeeded.wait(), timeout=1)
+        await asyncio.wait_for(renew_cancel_received.wait(), timeout=1)
+        assert not run_task.done()
+
+        allow_renew_cleanup.set()
+        await asyncio.wait_for(run_task, timeout=1)
+    finally:
+        release_handler.set()
+        allow_renew_interval.set()
+        allow_renew_cleanup.set()
+        if not run_task.done():
+            run_task.cancel()
+        await asyncio.gather(run_task, return_exceptions=True)
+
+    assert worker_acquisitions == ["w-stop-active"]
+    assert (jm.get_job(int(job["id"])) or {})["status"] == "completed"
+
+
+@pytest.mark.asyncio
 async def test_run_cancellation_check(monkeypatch, tmp_path):
     db_path = tmp_path / "jobs_wsdk3.db"
     ensure_jobs_tables(db_path)
     jm = JobManager(db_path)
-    j = jm.create_job(domain="chatbooks", queue="default", job_type="t", payload={}, owner_user_id="u")
+    jm.create_job(domain="chatbooks", queue="default", job_type="t", payload={}, owner_user_id="u")
     acq = jm.acquire_next_job(domain="chatbooks", queue="default", lease_seconds=10, worker_id="w3")
     assert acq is not None
 
     cfg = WorkerConfig(domain="chatbooks", queue="default", worker_id="w3")
     sdk = WorkerSDK(jm, cfg)
 
-    cancel_called = {"count": 0}
-    def fake_cancel(job_id, **kwargs):
-        cancel_called["count"] += 1
+    finalize_calls = []
+
+    def fake_finalize(job_id, **kwargs):
+        finalize_calls.append({"job_id": job_id, **kwargs})
+        sdk.stop()
+        return True
 
     monkeypatch.setattr(jm, "acquire_next_job", lambda **kwargs: acq)
-    monkeypatch.setattr(jm, "cancel_job", lambda job_id, **kwargs: fake_cancel(job_id, **kwargs))
+    monkeypatch.setattr(jm, "finalize_cancelled", fake_finalize)
 
     async def handler(job):
         pytest.fail("Handler should not run when cancel_check returns True")
@@ -226,12 +460,20 @@ async def test_run_cancellation_check(monkeypatch, tmp_path):
     async def cancel_check(job):
         return True
 
-    run_task = asyncio.create_task(sdk.run(handler=handler, cancel_check=cancel_check))
-    await asyncio.sleep(0)
-    sdk.stop()
-    await asyncio.wait_for(run_task, timeout=1)
+    await asyncio.wait_for(
+        sdk.run(handler=handler, cancel_check=cancel_check),
+        timeout=1,
+    )
 
-    assert cancel_called["count"] >= 1
+    assert finalize_calls == [
+        {
+            "job_id": int(acq["id"]),
+            "reason": "requested",
+            "expected_uuid": acq["uuid"],
+            "worker_id": "w3",
+            "lease_id": acq["lease_id"],
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -268,6 +510,333 @@ async def test_run_success_completes_job(monkeypatch, tmp_path):
     assert calls and int(calls[0]["job_id"]) == int(job["id"])
     stored = jm.get_job(int(job["id"]))
     assert stored["status"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_run_calls_on_completed_after_durable_completion(tmp_path):
+    db_path = tmp_path / "jobs_wsdk_post_complete.db"
+    ensure_jobs_tables(db_path)
+    jm = JobManager(db_path)
+    job = jm.create_job(
+        domain="chatbooks",
+        queue="default",
+        job_type="t",
+        payload={},
+        owner_user_id="u",
+    )
+    sdk = WorkerSDK(
+        jm,
+        WorkerConfig(
+            domain="chatbooks",
+            queue="default",
+            worker_id="w-post-complete",
+            lease_seconds=5,
+            renew_threshold_seconds=1,
+            renew_jitter_seconds=0,
+        ),
+    )
+    observed: list[tuple[int, dict[str, object], str]] = []
+
+    async def handler(_job_row):
+        return {"ok": True}
+
+    async def on_completed(job_row, result):
+        stored = jm.get_job(int(job_row["id"])) or {}
+        observed.append((int(job_row["id"]), result, str(stored.get("status"))))
+        sdk.stop()
+
+    await asyncio.wait_for(
+        sdk.run(handler=handler, on_completed=on_completed),
+        timeout=1,
+    )
+
+    assert observed == [(int(job["id"]), {"ok": True}, "completed")]
+
+
+@pytest.mark.asyncio
+async def test_run_calls_rejection_callback_when_completion_cas_loses(
+    monkeypatch,
+    tmp_path,
+):
+    db_path = tmp_path / "jobs_wsdk_completion_rejected.db"
+    ensure_jobs_tables(db_path)
+    jm = JobManager(db_path)
+    job = jm.create_job(
+        domain="chatbooks",
+        queue="default",
+        job_type="t",
+        payload={},
+        owner_user_id="u",
+    )
+    sdk = WorkerSDK(
+        jm,
+        WorkerConfig(
+            domain="chatbooks",
+            queue="default",
+            worker_id="w-completion-rejected",
+            lease_seconds=5,
+            renew_threshold_seconds=1,
+            renew_jitter_seconds=0,
+        ),
+    )
+    completed: list[int] = []
+    rejected: list[tuple[int, dict[str, object]]] = []
+
+    monkeypatch.setattr(jm, "complete_job", lambda *_args, **_kwargs: False)
+
+    async def handler(_job_row):
+        return {"ok": True}
+
+    async def on_completed(job_row, _result):
+        completed.append(int(job_row["id"]))
+
+    async def on_completion_rejected(job_row, result):
+        rejected.append((int(job_row["id"]), result))
+        sdk.stop()
+
+    await asyncio.wait_for(
+        sdk.run(
+            handler=handler,
+            on_completed=on_completed,
+            on_completion_rejected=on_completion_rejected,
+        ),
+        timeout=1,
+    )
+
+    assert completed == []
+    assert rejected == [(int(job["id"]), {"ok": True})]
+
+
+@pytest.mark.asyncio
+async def test_post_completion_callback_error_does_not_refinalize_job(
+    monkeypatch,
+    tmp_path,
+):
+    db_path = tmp_path / "jobs_wsdk_post_complete_callback_error.db"
+    ensure_jobs_tables(db_path)
+    jm = JobManager(db_path)
+    job = jm.create_job(
+        domain="chatbooks",
+        queue="default",
+        job_type="t",
+        payload={},
+        owner_user_id="u",
+    )
+    sdk = WorkerSDK(
+        jm,
+        WorkerConfig(
+            domain="chatbooks",
+            queue="default",
+            worker_id="w-post-complete-error",
+            lease_seconds=5,
+            renew_threshold_seconds=1,
+            renew_jitter_seconds=0,
+        ),
+    )
+    fail_calls: list[int] = []
+    original_fail = jm.fail_job
+
+    def spy_fail(job_id, **kwargs):
+        fail_calls.append(int(job_id))
+        return original_fail(job_id, **kwargs)
+
+    monkeypatch.setattr(jm, "fail_job", spy_fail)
+
+    async def handler(_job_row):
+        return {"ok": True}
+
+    async def on_completed(_job_row, _result):
+        sdk.stop()
+        raise RuntimeError("event sink unavailable")
+
+    await asyncio.wait_for(
+        sdk.run(handler=handler, on_completed=on_completed),
+        timeout=1,
+    )
+
+    assert fail_calls == []
+    assert (jm.get_job(int(job["id"])) or {})["status"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_stuck_completion_callback_does_not_block_later_jobs(
+    monkeypatch,
+    tmp_path,
+):
+    db_path = tmp_path / "jobs_wsdk_post_complete_callback_timeout.db"
+    ensure_jobs_tables(db_path)
+    jm = JobManager(db_path)
+    first = jm.create_job(
+        domain="chatbooks",
+        queue="default",
+        job_type="t",
+        payload={},
+        owner_user_id="u",
+    )
+    second = jm.create_job(
+        domain="chatbooks",
+        queue="default",
+        job_type="t",
+        payload={},
+        owner_user_id="u",
+    )
+    sdk = WorkerSDK(
+        jm,
+        WorkerConfig(
+            domain="chatbooks",
+            queue="default",
+            worker_id="w-post-complete-timeout",
+            lease_seconds=5,
+            renew_threshold_seconds=1,
+            renew_jitter_seconds=0,
+            completion_callback_timeout_seconds=0.01,
+            completion_callback_max_detached_tasks=1,
+        ),
+    )
+    fail_calls: list[int] = []
+    completion_callback_job_ids: list[int] = []
+    completed_job_ids: list[int] = []
+    callback_started = asyncio.Event()
+    callback_cancelled = asyncio.Event()
+    callback_finished = asyncio.Event()
+    later_job_completed = asyncio.Event()
+    release_callback = asyncio.Event()
+    loop_errors: list[dict[str, object]] = []
+    blocked_job_id: int | None = None
+    original_fail = jm.fail_job
+    original_complete = jm.complete_job
+    loop = asyncio.get_running_loop()
+    previous_exception_handler = loop.get_exception_handler()
+    loop.set_exception_handler(
+        lambda _loop, context: loop_errors.append(context)
+    )
+
+    def spy_fail(job_id, **kwargs):
+        fail_calls.append(int(job_id))
+        return original_fail(job_id, **kwargs)
+
+    def spy_complete(job_id, **kwargs):
+        completed = original_complete(job_id, **kwargs)
+        if completed:
+            completed_job_ids.append(int(job_id))
+            if len(completed_job_ids) == 2:
+                later_job_completed.set()
+                sdk.stop()
+        return completed
+
+    monkeypatch.setattr(jm, "fail_job", spy_fail)
+    monkeypatch.setattr(jm, "complete_job", spy_complete)
+
+    async def handler(job_row):
+        return {"job_id": int(job_row["id"])}
+
+    async def on_completed(job_row, _result):
+        nonlocal blocked_job_id
+        completion_callback_job_ids.append(int(job_row["id"]))
+        if blocked_job_id is None:
+            blocked_job_id = int(job_row["id"])
+            callback_started.set()
+            try:
+                await release_callback.wait()
+            except asyncio.CancelledError:
+                callback_cancelled.set()
+                await release_callback.wait()
+            finally:
+                callback_finished.set()
+            raise RuntimeError("late completion callback failure")
+
+    run_task = asyncio.create_task(
+        sdk.run(handler=handler, on_completed=on_completed)
+    )
+    later_job_waiter = asyncio.create_task(later_job_completed.wait())
+    try:
+        await asyncio.wait_for(callback_cancelled.wait(), timeout=1)
+        done, _pending = await asyncio.wait({later_job_waiter}, timeout=0.5)
+
+        assert later_job_waiter in done
+        assert not release_callback.is_set()
+        assert (jm.get_job(int(first["id"])) or {})["status"] == "completed"
+        assert (jm.get_job(int(second["id"])) or {})["status"] == "completed"
+    finally:
+        release_callback.set()
+        try:
+            await asyncio.wait_for(callback_finished.wait(), timeout=1)
+            await asyncio.wait_for(run_task, timeout=1)
+            await asyncio.sleep(0)
+            assert not sdk._detached_completion_callbacks
+            gc.collect()
+            await asyncio.sleep(0)
+        finally:
+            loop.set_exception_handler(previous_exception_handler)
+            if not later_job_waiter.done():
+                later_job_waiter.cancel()
+            await asyncio.gather(later_job_waiter, return_exceptions=True)
+
+    assert callback_started.is_set()
+    assert completion_callback_job_ids == [blocked_job_id]
+    assert not any(
+        context.get("message") == "Task exception was never retrieved"
+        for context in loop_errors
+    )
+    assert fail_calls == []
+    assert (jm.get_job(int(first["id"])) or {})["status"] == "completed"
+    assert (jm.get_job(int(second["id"])) or {})["status"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_rejection_callback_error_does_not_fail_unowned_job(
+    monkeypatch,
+    tmp_path,
+):
+    db_path = tmp_path / "jobs_wsdk_rejection_callback_error.db"
+    ensure_jobs_tables(db_path)
+    jm = JobManager(db_path)
+    job = jm.create_job(
+        domain="chatbooks",
+        queue="default",
+        job_type="t",
+        payload={},
+        owner_user_id="u",
+    )
+    sdk = WorkerSDK(
+        jm,
+        WorkerConfig(
+            domain="chatbooks",
+            queue="default",
+            worker_id="w-rejection-error",
+            lease_seconds=5,
+            renew_threshold_seconds=1,
+            renew_jitter_seconds=0,
+        ),
+    )
+    fail_calls: list[int] = []
+    original_fail = jm.fail_job
+
+    monkeypatch.setattr(jm, "complete_job", lambda *_args, **_kwargs: False)
+
+    def spy_fail(job_id, **kwargs):
+        fail_calls.append(int(job_id))
+        return original_fail(job_id, **kwargs)
+
+    monkeypatch.setattr(jm, "fail_job", spy_fail)
+
+    async def handler(_job_row):
+        return {"ok": True}
+
+    async def on_completion_rejected(_job_row, _result):
+        sdk.stop()
+        raise RuntimeError("reconciliation sink unavailable")
+
+    await asyncio.wait_for(
+        sdk.run(
+            handler=handler,
+            on_completion_rejected=on_completion_rejected,
+        ),
+        timeout=1,
+    )
+
+    assert fail_calls == []
+    assert (jm.get_job(int(job["id"])) or {})["status"] == "processing"
 
 
 @pytest.mark.asyncio

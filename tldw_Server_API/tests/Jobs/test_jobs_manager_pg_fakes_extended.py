@@ -1,5 +1,6 @@
 import base64
 import json
+
 import pytest
 
 from tldw_Server_API.app.core.Jobs.manager import JobManager
@@ -286,11 +287,12 @@ def test_pg_idempotent_replay_side_effects_use_current_event_context(monkeypatch
     emitted: list[dict] = []
     audited: list[dict] = []
 
-    def _emit(_event_type, **kwargs):
-        emitted.append(dict(kwargs))
-
     def _audit(_event_type, **kwargs):
         audited.append(dict(kwargs))
+
+    def _emit(event_type, **kwargs):
+        emitted.append(dict(kwargs))
+        _audit(event_type, **kwargs)
 
     monkeypatch.setattr(mgr, "emit_job_event", _emit)
     monkeypatch.setattr(mgr, "submit_job_audit_event", _audit)
@@ -331,10 +333,10 @@ def test_pg_idempotent_replay_side_effects_use_current_event_context(monkeypatch
 
     assert row["request_id"] == "old-request"
     assert row["trace_id"] == "old-trace"
-    assert emitted
+    assert len(emitted) == 1
     assert emitted[-1]["job"]["request_id"] == "new-request"
     assert emitted[-1]["job"]["trace_id"] == "new-trace"
-    assert audited
+    assert len(audited) == 1
     assert audited[-1]["job"]["request_id"] == "new-request"
     assert audited[-1]["job"]["trace_id"] == "new-trace"
 

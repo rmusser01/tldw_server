@@ -55,6 +55,8 @@ jobs:
       PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION: python
       SINGLE_USER_API_KEY: test-api-key-for-e2e-testing-12345
       SINGLE_USER_TEST_API_KEY: test-api-key-for-e2e-testing-12345
+      # TEST_MODE returns a deterministic completion after credential resolution.
+      OPENAI_API_KEY: sk-test-e2e-required-not-a-real-key
       REDIS_URL: redis://127.0.0.1:6379/0
       EMBEDDINGS_REDIS_URL: redis://127.0.0.1:6379/0
       WORKFLOWS_EGRESS_ALLOWLIST: "93.184.216.34,does-not-resolve.invalid,example.com"

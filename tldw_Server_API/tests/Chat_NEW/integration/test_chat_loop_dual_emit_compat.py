@@ -15,7 +15,7 @@ def _mock_provider_stream():
 
 @pytest.mark.integration
 def test_dual_emit_preserves_legacy_and_loop_events(
-    test_client,
+    credentialed_test_client,
     auth_headers,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -25,7 +25,7 @@ def test_dual_emit_preserves_legacy_and_loop_events(
         "tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call",
         return_value=_mock_provider_stream(),
     ):
-        with test_client.stream(
+        with credentialed_test_client.stream(
             "POST",
             "/api/v1/chat/completions",
             headers={**auth_headers, "X-TLDW-Loop-Compat": "1"},

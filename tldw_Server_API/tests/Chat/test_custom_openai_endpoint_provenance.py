@@ -1,22 +1,34 @@
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import ResolvedByokCredentials
+from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
+    ByokResolutionStatus,
+    ResolvedByokCredentials,
+)
+from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+    ProviderCallCredentials,
+    ProviderCredentialRuntime,
+)
 
 
 def _credentials(
     source: str,
     *,
     base_url: str | None = None,
-) -> ResolvedByokCredentials:
-    return ResolvedByokCredentials(
+) -> ProviderCallCredentials:
+    return ProviderCallCredentials(
         provider="custom-openai-api",
         api_key="key",
         app_config=None,
-        credential_fields={"base_url": base_url} if base_url else {},
-        source=source,
-        allowlisted=True,
+        auth_source=source,
+        runtime_generation=0,
+        runtime_identity=object(),
+        credential_identity=object(),
+        endpoint_provenance="byok" if base_url else "server_config",
     )
 
 
@@ -30,7 +42,7 @@ def _credentials(
         ("fallback", "server_config"),
     ],
 )
-def test_endpoint_provenance_is_url_free_and_derived_from_byok_source(
+def test_endpoint_provenance_is_url_free_and_read_from_runtime_handle(
     source: str,
     expected: str,
 ) -> None:
@@ -84,6 +96,54 @@ def test_chat_service_only_accepts_endpoint_owned_private_provenance() -> None:
     assert internal == {}
 
 
+@pytest.mark.asyncio
+async def test_non_custom_provider_filters_only_private_endpoint_provenance() -> None:
+    from tldw_Server_API.app.core.Chat import chat_service
+
+    async def resolve(provider: str, **_kwargs: Any) -> ResolvedByokCredentials:
+        return ResolvedByokCredentials(
+            provider=provider,
+            api_key="stored-hf-key",
+            app_config={},
+            credential_fields={},
+            source="user",
+            allowlisted=True,
+            status=ByokResolutionStatus.RESOLVED,
+            auth_source="api_key",
+        )
+
+    runtime = ProviderCredentialRuntime(
+        user_id=1,
+        team_ids=(),
+        org_ids=(),
+        trusted_base_url_override=False,
+        server_config_snapshot={},
+        resolver=resolve,
+    )
+    try:
+        provider_credentials = await runtime.resolve("huggingface")
+        args = {
+            "api_provider": "huggingface",
+            "messages": [{"role": "user", "content": "hi"}],
+            "model": "org/runtime-model",
+            PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY: provider_credentials,
+            "_endpoint_provenance": "server_config",
+            "extra_headers": {"X-Provider-Extension": "allowed"},
+            "extra_body": {"declared_extension": "kept"},
+        }
+
+        provider, request, internal = chat_service._build_adapter_request_from_chat_args(args)
+    finally:
+        await runtime.close()
+
+    assert provider == "huggingface"
+    assert "_endpoint_provenance" not in request
+    assert request["credentials_resolved"] is True
+    assert request["extra_headers"] == args["extra_headers"]
+    assert request["extra_body"] == args["extra_body"]
+    assert internal == {}
+
+
 def test_untrusted_private_provenance_value_is_discarded() -> None:
     from tldw_Server_API.app.core.Chat import chat_service
 
@@ -101,15 +161,13 @@ def test_untrusted_private_provenance_value_is_discarded() -> None:
 
 
 @pytest.mark.parametrize(
-    ("source", "byok_base_url", "override_key", "expected"),
+    ("source", "byok_base_url", "expected"),
     [
-        ("user", None, None, "server_config"),
-        ("team", None, None, "server_config"),
-        ("org", None, None, "server_config"),
-        ("user", "http://user-owned:18080/v1", None, "byok"),
-        ("server", None, None, "server_config"),
-        ("user", None, "base_url", "request_override"),
-        ("server", None, "api_base_url", "request_override"),
+        ("user", None, "server_config"),
+        ("team", None, "server_config"),
+        ("org", None, "server_config"),
+        ("user", "http://user-owned:18080/v1", "byok"),
+        ("server", None, "server_config"),
     ],
 )
 def test_chat_endpoint_sets_post_parse_url_free_provenance(
@@ -119,7 +177,6 @@ def test_chat_endpoint_sets_post_parse_url_free_provenance(
     monkeypatch: pytest.MonkeyPatch,
     source: str,
     byok_base_url: str | None,
-    override_key: str | None,
     expected: str,
 ) -> None:
     from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
@@ -133,6 +190,15 @@ def test_chat_endpoint_sets_post_parse_url_free_provenance(
             source=source,
             allowlisted=True,
         )
+
+    class _Runtime(ProviderCredentialRuntime):
+        def __init__(self, **kwargs: Any) -> None:
+            kwargs.pop("override_snapshot_resolver", None)
+            super().__init__(
+                resolver=_resolve_byok,
+                server_config_snapshot={},
+                **kwargs,
+            )
 
     captured: list[dict] = []
 
@@ -148,17 +214,13 @@ def test_chat_endpoint_sets_post_parse_url_free_provenance(
             ],
         }
 
-    monkeypatch.setattr(chat_endpoint, "resolve_byok_credentials", _resolve_byok)
+    monkeypatch.setattr(chat_endpoint, "ProviderCredentialRuntime", _Runtime)
     monkeypatch.setattr(chat_endpoint, "perform_chat_api_call", _perform_chat_api_call)
     body = {
         "api_provider": "custom-openai-api",
         "model": "model",
         "messages": [{"role": "user", "content": "hi"}],
-        "_endpoint_provenance": "request_override",
-        "endpoint_provenance": "http://attacker.invalid",
     }
-    if override_key:
-        body[override_key] = "http://request-owned-endpoint:18095/v1"
 
     response = authenticated_client.post("/api/v1/chat/completions", json=body)
 

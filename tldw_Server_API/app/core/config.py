@@ -2,13 +2,14 @@
 # Description: Configuration settings for the tldw server application.
 #
 from __future__ import annotations
+
 # Imports
 import configparser
 import contextlib
 import json
 import os
 import platform
-from collections.abc import MutableMapping
+from collections.abc import Mapping, MutableMapping
 from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
@@ -38,8 +39,8 @@ from tldw_Server_API.app.core.testing import (
 )
 
 if TYPE_CHECKING:
-    from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Schemas import LlamaCppConfig
     from tldw_Server_API.app.core.config_sections import ConfigSections
+    from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Schemas import LlamaCppConfig
 
 _CONFIG_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -95,10 +96,15 @@ def resolve_default_transcription_model_setting(value: Any) -> str:
     return raw
 
 
-def _first_nonempty_env(env_keys: tuple[str, ...]) -> Optional[str]:
+def _first_nonempty_env(
+    env_keys: tuple[str, ...],
+    *,
+    environment: Mapping[str, str] | None = None,
+) -> str | None:
     """Return the first non-empty environment value from ordered candidates."""
+    env = os.environ if environment is None else environment
     for env_key in env_keys:
-        value = os.getenv(env_key)
+        value = env.get(env_key)
         if isinstance(value, str) and value.strip():
             return value.strip()
     return None
@@ -111,9 +117,13 @@ def _env_or_config_value(
     key: str,
     *,
     fallback: Optional[str] = None,
+    environment: Mapping[str, str] | None = None,
 ) -> Optional[str]:
     """Resolve an env-first value with a single config option fallback."""
-    return _first_nonempty_env(env_keys) or config_parser_object.get(section, key, fallback=fallback)
+    return _first_nonempty_env(
+        env_keys,
+        environment=environment,
+    ) or config_parser_object.get(section, key, fallback=fallback)
 
 
 def _first_config_option_value(
@@ -142,9 +152,13 @@ def _env_or_config_option_value(
     keys: tuple[str, ...],
     *,
     fallback: Optional[str] = None,
+    environment: Mapping[str, str] | None = None,
 ) -> Optional[str]:
     """Resolve ordered env aliases before ordered config option aliases."""
-    return _first_nonempty_env(env_keys) or _first_config_option_value(
+    return _first_nonempty_env(
+        env_keys,
+        environment=environment,
+    ) or _first_config_option_value(
         config_parser_object,
         section,
         keys,
@@ -3686,9 +3700,14 @@ def route_enabled(route_key: str, *, default_stable: bool = True) -> bool:
     # Fallback default behavior: stable routes are enabled unless explicitly disabled
     return bool(default_stable)
 
-def load_and_log_configs():
+def load_and_log_configs(
+    *,
+    environment: Mapping[str, str] | None = None,
+) -> dict[str, Any] | None:
+    """Load configuration, optionally using one immutable environment view."""
     _log_debug("load_and_log_configs(): Loading and logging configurations...")
     try:
+        env = os.environ if environment is None else environment
         # The 'config' variable below should be the result from load_comprehensive_config()
         config_parser_object = load_comprehensive_config()
 
@@ -3697,50 +3716,50 @@ def load_and_log_configs():
             _log_error("Comprehensive config object is None, cannot proceed")  # Changed to logger
             return None
         # API Keys - Check environment variables first, then config file
-        anthropic_api_key = os.getenv('ANTHROPIC_API_KEY') or config_parser_object.get('API', 'anthropic_api_key', fallback=None)
+        anthropic_api_key = env.get('ANTHROPIC_API_KEY') or config_parser_object.get('API', 'anthropic_api_key', fallback=None)
         # logging.debug(
         #     f"Loaded Anthropic API Key: {anthropic_api_key[:5]}...{anthropic_api_key[-5:] if anthropic_api_key else None}")
 
-        cohere_api_key = os.getenv('COHERE_API_KEY') or config_parser_object.get('API', 'cohere_api_key', fallback=None)
+        cohere_api_key = env.get('COHERE_API_KEY') or config_parser_object.get('API', 'cohere_api_key', fallback=None)
         # logging.debug(
         #     f"Loaded Cohere API Key: {cohere_api_key[:5]}...{cohere_api_key[-5:] if cohere_api_key else None}")
 
-        groq_api_key = os.getenv('GROQ_API_KEY') or config_parser_object.get('API', 'groq_api_key', fallback=None)
+        groq_api_key = env.get('GROQ_API_KEY') or config_parser_object.get('API', 'groq_api_key', fallback=None)
         # logging.debug(f"Loaded Groq API Key: {groq_api_key[:5]}...{groq_api_key[-5:] if groq_api_key else None}")
 
-        openai_api_key = os.getenv('OPENAI_API_KEY') or config_parser_object.get('API', 'openai_api_key', fallback=None)
+        openai_api_key = env.get('OPENAI_API_KEY') or config_parser_object.get('API', 'openai_api_key', fallback=None)
         # logging.debug(
         #     f"Loaded OpenAI API Key: {openai_api_key[:5]}...{openai_api_key[-5:] if openai_api_key else None}")
 
-        huggingface_api_key = os.getenv('HUGGINGFACE_API_KEY') or config_parser_object.get('API', 'huggingface_api_key', fallback=None)
+        huggingface_api_key = env.get('HUGGINGFACE_API_KEY') or config_parser_object.get('API', 'huggingface_api_key', fallback=None)
         # logging.debug(
         #     f"Loaded HuggingFace API Key: {huggingface_api_key[:5]}...{huggingface_api_key[-5:] if huggingface_api_key else None}")
 
-        openrouter_api_key = os.getenv('OPENROUTER_API_KEY') or config_parser_object.get('API', 'openrouter_api_key', fallback=None)
+        openrouter_api_key = env.get('OPENROUTER_API_KEY') or config_parser_object.get('API', 'openrouter_api_key', fallback=None)
         # logging.debug(
         #     f"Loaded OpenRouter API Key: {openrouter_api_key[:5]}...{openrouter_api_key[-5:] if openrouter_api_key else None}")
 
-        moonshot_api_key = os.getenv('MOONSHOT_API_KEY') or config_parser_object.get('API', 'moonshot_api_key', fallback=None)
+        moonshot_api_key = env.get('MOONSHOT_API_KEY') or config_parser_object.get('API', 'moonshot_api_key', fallback=None)
 
-        zai_api_key = os.getenv('ZAI_API_KEY') or config_parser_object.get('API', 'zai_api_key', fallback=None)
+        zai_api_key = env.get('ZAI_API_KEY') or config_parser_object.get('API', 'zai_api_key', fallback=None)
 
-        deepseek_api_key = os.getenv('DEEPSEEK_API_KEY') or config_parser_object.get('API', 'deepseek_api_key', fallback=None)
+        deepseek_api_key = env.get('DEEPSEEK_API_KEY') or config_parser_object.get('API', 'deepseek_api_key', fallback=None)
         # logging.debug(
         #     f"Loaded DeepSeek API Key: {deepseek_api_key[:5]}...{deepseek_api_key[-5:] if deepseek_api_key else None}")
 
-        qwen_api_key = os.getenv('QWEN_API_KEY') or config_parser_object.get('API', 'qwen_api_key', fallback=None)
+        qwen_api_key = env.get('QWEN_API_KEY') or config_parser_object.get('API', 'qwen_api_key', fallback=None)
         # logging.debug(
         #     f"Loaded Qwen API Key: {qwen_api_key[:5]}...{qwen_api_key[-5:] if qwen_api_key else None}")
 
-        mistral_api_key = os.getenv('MISTRAL_API_KEY') or config_parser_object.get('API', 'mistral_api_key', fallback=None)
+        mistral_api_key = env.get('MISTRAL_API_KEY') or config_parser_object.get('API', 'mistral_api_key', fallback=None)
         # logging.debug(
         #     f"Loaded Mistral API Key: {mistral_api_key[:5]}...{mistral_api_key[-5:] if mistral_api_key else None}")
 
-        google_api_key = os.getenv('GOOGLE_API_KEY') or config_parser_object.get('API', 'google_api_key', fallback=None)
+        google_api_key = env.get('GOOGLE_API_KEY') or config_parser_object.get('API', 'google_api_key', fallback=None)
         # logging.debug(
         #     f"Loaded Google API Key: {google_api_key[:5]}...{google_api_key[-5:] if google_api_key else None}")
 
-        elevenlabs_api_key = os.getenv('ELEVENLABS_API_KEY') or config_parser_object.get('API', 'elevenlabs_api_key', fallback=None)
+        elevenlabs_api_key = env.get('ELEVENLABS_API_KEY') or config_parser_object.get('API', 'elevenlabs_api_key', fallback=None)
         # logging.debug(
         #     f"Loaded elevenlabs API Key: {elevenlabs_api_key[:5]}...{elevenlabs_api_key[-5:] if elevenlabs_api_key else None}")
 
@@ -3883,10 +3902,10 @@ def load_and_log_configs():
         zai_api_retry_delay = config_parser_object.get('API', 'zai_api_retry_delay', fallback='1')
 
         # Bedrock
-        bedrock_api_key = os.getenv('BEDROCK_API_KEY') or os.getenv('AWS_BEARER_TOKEN_BEDROCK') or config_parser_object.get('API', 'bedrock_api_key', fallback=None)
-        bedrock_region = os.getenv('BEDROCK_REGION') or config_parser_object.get('API', 'bedrock_region', fallback='us-west-2')
-        bedrock_runtime_endpoint = os.getenv('BEDROCK_RUNTIME_ENDPOINT') or config_parser_object.get('API', 'bedrock_runtime_endpoint', fallback=None)
-        bedrock_model = os.getenv('BEDROCK_MODEL') or config_parser_object.get('API', 'bedrock_model', fallback=None)
+        bedrock_api_key = env.get('BEDROCK_API_KEY') or env.get('AWS_BEARER_TOKEN_BEDROCK') or config_parser_object.get('API', 'bedrock_api_key', fallback=None)
+        bedrock_region = env.get('BEDROCK_REGION') or config_parser_object.get('API', 'bedrock_region', fallback='us-west-2')
+        bedrock_runtime_endpoint = env.get('BEDROCK_RUNTIME_ENDPOINT') or config_parser_object.get('API', 'bedrock_runtime_endpoint', fallback=None)
+        bedrock_model = env.get('BEDROCK_MODEL') or config_parser_object.get('API', 'bedrock_model', fallback=None)
         bedrock_streaming = config_parser_object.get('API', 'bedrock_streaming', fallback='False')
         bedrock_temperature = config_parser_object.get('API', 'bedrock_temperature', fallback='0.7')
         bedrock_top_p = config_parser_object.get('API', 'bedrock_top_p', fallback='')
@@ -3998,6 +4017,7 @@ def load_and_log_configs():
             'API',
             custom_openai_config_option_names(1, 'key'),
             fallback=None,
+            environment=env,
         )
         custom_openai_api_ip = _env_or_config_value(
             CUSTOM_OPENAI_ENDPOINT_ENV_KEYS,
@@ -4005,6 +4025,7 @@ def load_and_log_configs():
             'API',
             'custom_openai_api_ip',
             fallback=None,
+            environment=env,
         )
         custom_openai_api_model = _env_or_config_option_value(
             custom_openai_model_env_keys(1),
@@ -4012,6 +4033,7 @@ def load_and_log_configs():
             'API',
             custom_openai_config_option_names(1, 'model'),
             fallback=None,
+            environment=env,
         )
         custom_openai_api_streaming = config_parser_object.get('API', 'custom_openai_api_streaming', fallback='False')
         custom_openai_api_temperature = config_parser_object.get('API', 'custom_openai_api_temperature', fallback='0.7')
@@ -4029,6 +4051,7 @@ def load_and_log_configs():
             'API',
             custom_openai_config_option_names(2, 'key'),
             fallback=None,
+            environment=env,
         )
         custom_openai2_api_ip = _env_or_config_option_value(
             CUSTOM_OPENAI2_ENDPOINT_ENV_KEYS,
@@ -4036,6 +4059,7 @@ def load_and_log_configs():
             'API',
             custom_openai_config_option_names(2, 'ip'),
             fallback=None,
+            environment=env,
         )
         custom_openai2_api_model = _env_or_config_option_value(
             custom_openai_model_env_keys(2),
@@ -4043,6 +4067,7 @@ def load_and_log_configs():
             'API',
             custom_openai_config_option_names(2, 'model'),
             fallback=None,
+            environment=env,
         )
         custom_openai2_api_streaming = config_parser_object.get('API', 'custom_openai2_api_streaming', fallback='False')
         custom_openai2_api_temperature = config_parser_object.get('API', 'custom_openai2_api_temperature', fallback='0.7')
@@ -4253,11 +4278,11 @@ def load_and_log_configs():
         chat_dict_replacement_strategy = config_parser_object.get('Chat-Dictionaries', 'chat_dictionary_replacement_strategy', fallback='character_lore_first')
         chat_dict_max_tokens = config_parser_object.get('Chat-Dictionaries', 'chat_dictionary_max_tokens', fallback='1000')
         default_rag_prompt = config_parser_object.get('Chat-Dictionaries', 'default_rag_prompt', fallback='')
-        rag_default_llm_provider = os.getenv("RAG_DEFAULT_LLM_PROVIDER") or (
+        rag_default_llm_provider = env.get("RAG_DEFAULT_LLM_PROVIDER") or (
             config_parser_object.get('RAG', 'default_llm_provider', fallback=None)
             if config_parser_object.has_section('RAG') else None
         )
-        rag_default_llm_model = os.getenv("RAG_DEFAULT_LLM_MODEL") or (
+        rag_default_llm_model = env.get("RAG_DEFAULT_LLM_MODEL") or (
             config_parser_object.get('RAG', 'default_llm_model', fallback=None)
             if config_parser_object.has_section('RAG') else None
         )
@@ -4484,13 +4509,13 @@ def load_and_log_configs():
         )
 
         def _env_or_cfg_bool(env_key: str, section: str, key: str, default: bool) -> bool:
-            env_val = os.getenv(env_key)
+            env_val = env.get(env_key)
             if env_val is not None:
                 return is_truthy(env_val)
             return _get_bool(section, key, default)
 
         def _env_or_cfg_int(env_key: str, section: str, key: str, default: int) -> int:
-            env_val = os.getenv(env_key)
+            env_val = env.get(env_key)
             if env_val is not None:
                 try:
                     return int(str(env_val).strip())
@@ -4499,7 +4524,7 @@ def load_and_log_configs():
             return _get_int(section, key, default)
 
         def _env_or_cfg_str(env_key: str, section: str, key: str, default: str | None) -> str | None:
-            env_val = os.getenv(env_key)
+            env_val = env.get(env_key)
             if env_val is not None:
                 s = str(env_val).strip()
                 return s if s != "" else default
@@ -4721,8 +4746,8 @@ def load_and_log_configs():
         web_scraper_retry_timeout = config_parser_object.get('Web-Scraper', 'web_scraper_retry_timeout', fallback='5')
         web_scraper_stealth_playwright = config_parser_object.get('Web-Scraper', 'web_scraper_stealth_playwright', fallback='False')
         custom_scrapers_yaml_path = (
-            os.getenv('WEB_SCRAPER_CUSTOM_SCRAPERS_YAML_PATH')
-            or os.getenv('CUSTOM_SCRAPERS_YAML_PATH')
+            env.get('WEB_SCRAPER_CUSTOM_SCRAPERS_YAML_PATH')
+            or env.get('CUSTOM_SCRAPERS_YAML_PATH')
             or config_parser_object.get(
                 'Web-Scraper',
                 'custom_scrapers_yaml_path',
@@ -4730,15 +4755,15 @@ def load_and_log_configs():
             )
         )
         web_scraper_default_backend = (
-            os.getenv('WEB_SCRAPER_HTTP_BACKEND')
-            or os.getenv('WEB_SCRAPER_DEFAULT_BACKEND')
+            env.get('WEB_SCRAPER_HTTP_BACKEND')
+            or env.get('WEB_SCRAPER_DEFAULT_BACKEND')
             or config_parser_object.get(
             'Web-Scraper',
             'web_scraper_default_backend',
             fallback='auto',
             )
         )
-        web_scraper_ua_mode = os.getenv('WEB_SCRAPER_UA_MODE') or config_parser_object.get(
+        web_scraper_ua_mode = env.get('WEB_SCRAPER_UA_MODE') or config_parser_object.get(
             'Web-Scraper',
             'web_scraper_ua_mode',
             fallback='fixed',
@@ -4746,7 +4771,7 @@ def load_and_log_configs():
 
         # Web Scraper crawl flags (env overrides config.txt)
         def _env_or_cfg(env_key: str, section: str, cfg_key: str, default: str) -> str:
-            return os.getenv(env_key) or config_parser_object.get(section, cfg_key, fallback=default)
+            return env.get(env_key) or config_parser_object.get(section, cfg_key, fallback=default)
 
         def _as_bool(v: object, d: bool) -> bool:
             try:
@@ -4819,6 +4844,7 @@ def load_and_log_configs():
                 'API',
                 custom_openai_config_option_names(provider_number, 'ip'),
                 fallback=None,
+                environment=env,
             )
             api_key = _env_or_config_option_value(
                 custom_openai_api_key_env_keys(provider_number),
@@ -4826,6 +4852,7 @@ def load_and_log_configs():
                 'API',
                 custom_openai_config_option_names(provider_number, 'key'),
                 fallback=None,
+                environment=env,
             )
             model = _env_or_config_option_value(
                 custom_openai_model_env_keys(provider_number),
@@ -4833,6 +4860,7 @@ def load_and_log_configs():
                 'API',
                 custom_openai_config_option_names(provider_number, 'model'),
                 fallback=None,
+                environment=env,
             )
             if not any(value for value in (api_ip, api_key, model)):
                 return None

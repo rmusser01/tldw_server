@@ -389,6 +389,19 @@ def test_full_suite_pytest_steps_do_not_leak_shared_postgres_dsn() -> None:
     assert checked >= len(step_names)
 
 
+def test_windows_research_shard_has_bounded_per_test_timeout() -> None:
+    workflow = _load(".github/workflows/ci.yml")
+    steps = workflow["jobs"]["full-suite-windows-312-shards"]["steps"]
+    run_script = str(_get_step(steps, "Run OS shard tests")["run"])
+
+    assert 'if [ "$SHARD_NAME" = "research-websearch" ]; then' in run_script
+    assert (
+        "EXTRA_PYTEST_ARGS=(-vv -p pytest_timeout --timeout=120 --timeout-method=thread)"
+        in run_script
+    )
+    assert '"${EXTRA_PYTEST_ARGS[@]}"' in run_script
+
+
 def test_embedding_model_cache_restore_is_non_blocking() -> None:
     workflow = _load(".github/workflows/ci.yml")
     cache_steps = [

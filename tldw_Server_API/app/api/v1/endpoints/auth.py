@@ -9,7 +9,6 @@ import json
 import os
 import re
 import secrets
-import string
 import time
 from datetime import datetime, timedelta, timezone
 from importlib import import_module
@@ -840,22 +839,6 @@ def _username_with_suffix(base: str, suffix: str) -> str:
     return f"{base[: 32 - len(suffix)]}{suffix}"
 
 
-def _generate_magic_password(length: int = 16) -> str:
-    # Ensure a mix of upper, lower, digit, and special characters.
-    specials = "!@#$%^&*"
-    choices = string.ascii_letters + string.digits + specials
-    base = [
-        secrets.choice(string.ascii_lowercase),
-        secrets.choice(string.ascii_uppercase),
-        secrets.choice(string.digits),
-        secrets.choice(specials),
-    ]
-    remaining = max(length - len(base), 0)
-    base.extend(secrets.choice(choices) for _ in range(remaining))
-    secrets.SystemRandom().shuffle(base)
-    return "".join(base)
-
-
 async def _provision_federated_user(
     *,
     mapped_claims: dict[str, Any],
@@ -869,8 +852,10 @@ async def _provision_federated_user(
             detail="OIDC claims did not resolve an email for JIT provisioning",
         )
 
-    password = _generate_magic_password()
     username_base = _derive_username_from_claims(mapped_claims)
+    password = registration_service.password_service.generate_secure_password(
+        username=username_base,
+    )
     user_info: Optional[dict[str, Any]] = None
 
     for attempt in range(5):
@@ -3069,7 +3054,9 @@ async def verify_magic_link(
 
         # Create a new user on first magic-link sign-in
         username_base = _derive_username_from_email(email or "user")
-        password = _generate_magic_password()
+        password = registration_service.password_service.generate_secure_password(
+            username=username_base,
+        )
         user_info: Optional[dict[str, Any]] = None
         for attempt in range(5):
             username = username_base if attempt == 0 else f"{username_base}-{secrets.token_hex(2)}"
