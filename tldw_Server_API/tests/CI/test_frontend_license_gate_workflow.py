@@ -29,7 +29,7 @@ EXPECTED_STEP_IDENTITIES = (
 )
 TRUSTED_RUN_SHA256 = {
     "Mark trusted policy pending": "1d7e75459f8d398a821dd7987e2a2dcfa73a7a34d0535ef7cd786f93251074f0",
-    "Evaluate immutable pull request metadata": "dd667ebf4091850b7d580e9febdec4e77f1e815532984b4f726326868d2126c4",
+    "Evaluate immutable pull request metadata": "2e31c8d430e2e636f770de9d869c9bff364c6a1ceb37ca8d16bed83b6326f243",
     "Publish trusted policy result": "314715f909e05c812a2d63ce6eb13afee2b69811809f0cc037d1fc3eb6c4f388",
 }
 COMMON_METADATA_VALIDATIONS = (
@@ -140,6 +140,22 @@ def assert_success_follows_prerequisites(script: str) -> None:
     assert positions == sorted(positions)
     assert positions[-1] < success_positions[1]
     assert success_positions[1] == script.rfind("verdict=success")
+
+
+def test_evaluator_separates_readonly_declarations_from_command_substitution() -> None:
+    steps = load_yaml(WORKFLOW_PATH)["jobs"][JOB_ID]["steps"]
+    script = next(step for step in steps if step.get("id") == "evaluate")["run"]
+
+    expected_assignments = {
+        "fetched_base": 'fetched_base="$(git rev-parse refs/remotes/license-gate/base)"',
+        "fetched_head": 'fetched_head="$(git rev-parse refs/remotes/license-gate/pr-head)"',
+    }
+    for variable, assignment in expected_assignments.items():
+        declaration = f"readonly {variable}"
+        assert script.count(assignment) == 1
+        assert script.count(declaration) == 1
+        assert f"readonly {variable}=" not in script
+        assert script.index(assignment) < script.index(declaration)
 
 
 def test_workflow_uses_the_base_controlled_trigger_and_minimum_permissions() -> None:
