@@ -4,7 +4,7 @@ title: 'Land PR #2727 on current dev'
 status: In Progress
 assignee: []
 created_date: '2026-07-22 03:45'
-updated_date: '2026-07-22 03:57'
+updated_date: '2026-07-22 05:05'
 labels:
   - integration
   - release
@@ -33,6 +33,12 @@ Integrate the merged frontend licensing cutoff into PR #2727, revalidate the exa
 - [ ] #4 Landing evidence records integration parents, exact-head gates, reproduced failure dispositions, review results, and the final merge commit.
 - [ ] #5 The actual merge commit is verified to contain the validated PR head and current protected dev tip, with merged licensing metadata and trusted-policy files present, before any deployment task begins.
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Docs/superpowers/plans/2026-07-21-pr-2727-current-dev-landing-implementation-plan.md
+<!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
 
