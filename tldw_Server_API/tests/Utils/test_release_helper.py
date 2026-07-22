@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess  # nosec B404
 import sys
 from pathlib import Path
@@ -775,6 +776,11 @@ def test_shell_release_runner_refreshes_published_before_staging_and_commit(
     monkeypatch.setenv("TLDW_RELEASE_TEST_SENTINEL", "preserved")
 
     assert runner.create_release_commit("1.2.3") == "release-sha"
+    assert os.environ["TLDW_DOCS_SOURCE_DIR"] == "hostile-source"
+    assert os.environ["TLDW_DOCS_PUBLISHED_DIR"] == "hostile-published"
+    assert os.environ["TLDW_DOCS_TEST_FAIL_AFTER_BACKUP"] == "1"
+    assert os.environ["TLDW_DOCS_TEST_FAIL_DURING_BACKUP_CLEANUP"] == "1"
+    assert os.environ["TLDW_DOCS_TEST_MODE"] == "1"
     assert commands == [
         [
             "bash",
