@@ -39,20 +39,6 @@ test.describe('Stage 6 interaction stage 2 positive regressions', () => {
     let lastRagQuery = '';
     let messageCounter = 0;
 
-    await page.route('**/api/_tldw-webui/runtime-config', async (route) => {
-      await fulfillJson(route, 200, {
-        runtimeAuth: {
-          available: true,
-          authMode: 'single-user',
-          apiKey: E2E_RUNTIME_API_KEY,
-        },
-        networking: {
-          deploymentMode: 'advanced',
-          serverUrl: '',
-        },
-      });
-    });
-
     await page.route(/\/api\/v1\/characters\/search(?:\?.*)?$/, async (route) => {
       await fulfillJson(route, 200, [DEFAULT_CHARACTER_FIXTURE]);
     });
