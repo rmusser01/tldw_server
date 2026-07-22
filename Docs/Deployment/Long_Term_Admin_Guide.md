@@ -54,7 +54,7 @@ Database migrations
 
 What to back up
 - AuthNZ DB: Postgres (`pg_dump`) or SQLite file at `Databases/users.db`.
-- Content DBs: for per-user SQLite, back up every `.db` file under each `<USER_DB_BASE_DIR>/<user_id>/` directory; also back up any explicit content SQLite path set via `TLDW_CONTENT_SQLITE_PATH` or `[Database].sqlite_path`. For PostgreSQL, back up the migrated content database.
+- Content DBs: for per-user SQLite, back up the complete `<USER_DB_BASE_DIR>/` tree; also back up any explicit content SQLite path set via `TLDW_CONTENT_SQLITE_PATH` or `[Database].sqlite_path`. For PostgreSQL, back up the migrated content database.
 - Per-user data: `<USER_DB_BASE_DIR>/<user_id>/ChaChaNotes.db` and associated files.
 - Chroma/vector data: volume/directory you configured (default under `Databases/user_databases`).
 - Config: `.env`, `tldw_Server_API/Config_Files/config.txt`.
@@ -74,11 +74,11 @@ pg_dump -U "$PG_USER" -h "$PG_HOST" -F c -d "$PG_DB" > /backups/${PG_DB}_$(date 
 pg_restore -U "$PG_USER" -h "$PG_HOST" -d "$PG_DB" -c /backups/${PG_DB}_YYYY-MM-DD.dump
 ```
 
-SQLite (file copy)
-```bash
-# Quiesce app, then copy DB files
-cp Databases/*.db /backups/sqlite_$(date +%F)/
-```
+SQLite backup
+1. For a raw file copy, fully stop the application and every other process that can write to its SQLite databases. For a live backup, use SQLite's backup API or `VACUUM INTO` instead of copying open database files.
+2. For the default layout, copy the complete `Databases/` tree while preserving its directory structure and any `-wal`, `-shm`, or `-journal` sidecars. If `USER_DB_BASE_DIR` points outside that tree, copy the complete configured directory too.
+3. Copy each explicit content SQLite path configured through `TLDW_CONTENT_SQLITE_PATH` or `[Database].sqlite_path` if it is outside those trees, together with any matching journal sidecars.
+4. Verify that the backup contains every configured database path before restarting the application.
 
 Disaster recovery (Compose)
 1. Provision a new host with Docker/Compose, same `.env` and volumes.
