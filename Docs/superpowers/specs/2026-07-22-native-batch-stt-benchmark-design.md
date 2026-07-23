@@ -12,11 +12,13 @@
 
 tldw_server should gain a small, standalone benchmark harness that compares
 batch speech-to-text providers through the existing native
-`SttProviderRegistry` and `SttProviderAdapter.transcribe_batch()` contract.
+`SttProviderRegistry` and `SttProviderAdapter.transcribe_batch()` boundary,
+extended with an optional immutable execution plan for benchmark calls.
 The benchmark will use independently verified references, deterministic strict
 and normalized WER/CER scoring, isolated provider/model worker processes,
-separate cold-first-transcription and warm-inference measurements, incremental
-JSONL persistence, and reproducible regression and comparison profiles.
+separate cold-first-transcription and warm-adapter-transcription measurements,
+incremental JSONL persistence, and reproducible regression and comparison
+profiles.
 
 The harness will not use Pipecat, an LLM judge, FastAPI, Jobs, or the
 tldw_server Evaluations service. It will live with the repository's other
@@ -123,7 +125,8 @@ These are reasons to reuse ideas rather than fork or adapt that implementation.
 - Use independent references and deterministic scoring only.
 - Report strict and normalized WER/CER without hiding meaningful recognition
   errors.
-- Measure cold-first-transcription behavior separately from warm inference.
+- Measure cold-first-transcription behavior separately from warm adapter
+  transcription.
 - Produce crash-safe, resumable, inspectable results.
 - Capture enough environment and configuration metadata for an honest
   comparison.
@@ -170,8 +173,8 @@ The coordinator is the user-facing CLI process. It:
 6. Monitors worker exit status and preserves partial results.
 7. Builds summaries from the append-only result records.
 
-Targets run sequentially by default. Parallel model execution would introduce
-CPU, GPU, storage, network, and thermal contention and is outside v1.
+Targets run sequentially in requested CLI order. Parallel model execution would
+introduce CPU, GPU, storage, network, and thermal contention and is outside v1.
 
 ### Isolated target worker
 
@@ -182,9 +185,12 @@ Each provider/model combination runs in a fresh process. The worker:
 3. Records safe setup and environment metadata.
 4. Runs the target's stable cold-probe sample as a cold first transcription.
 5. Reuses the loaded adapter/model state for the remaining warm samples.
-6. Appends each completed sample record before starting the next.
-7. Converts adapter exceptions and empty artifacts into explicit result
-   statuses.
+6. Announces the in-flight completion key to the coordinator before entering
+   each synchronous adapter call.
+7. Appends and durably flushes each completed sample record before starting
+   the next.
+8. Converts adapter exceptions, error sentinels, and empty artifacts into
+   explicit result statuses.
 
 Process isolation prevents optional-dependency failures, global model caches,
 GPU allocations, and hard crashes from contaminating later targets.
@@ -201,10 +207,98 @@ The benchmark must fail closed:
 - A missing adapter is a target failure.
 - The registry's defensive faster-whisper fallback must not be used for an
   invalid benchmark target.
-- Requested provider/model identifiers and actual artifact metadata are both
-  recorded.
+- Project-defined transcription error sentinels such as `[Error: ...]` are
+  adapter failures, never hypotheses. Adapters should raise a typed error at
+  the native boundary; the worker also applies the existing centralized
+  sentinel check as defense in depth.
+- Requested provider/model identifiers and an allowlisted actual-execution
+  envelope are recorded. Arbitrary adapter metadata is never copied into
+  benchmark artifacts.
 - A material requested/actual identity mismatch is visible in the result and
   prevents a baseline comparison unless explicitly corrected.
+
+### Execution-contract preflight
+
+The current `SttProviderCapabilities` object is not sufficient to decide
+whether a configured target is local, network-backed, or eligible for
+`neutral-v1`. Qwen3-ASR and VibeVoice can select HTTP backends from
+configuration, and VibeVoice can fall back from HTTP to local inference.
+Provider name alone must therefore never be used as an egress or backend
+classification.
+
+Every benchmark-capable adapter exposes one small, non-loading
+`plan_batch_execution(...)` operation for the requested model and common
+semantic settings. It returns an immutable, multiprocessing-serializable
+execution plan plus a safe descriptor containing:
+
+- Requested and resolved provider/model identity.
+- Stable model revision, local artifact identifier, or an explicit
+  `identity_unresolved` marker.
+- Expected backend and whether backend fallback is possible.
+- Audio egress as `none`, `loopback`, or `remote`, plus a non-secret opaque
+  endpoint or region identifier for network-backed targets.
+- Whether the requested task, language hint, prompt absence, hotword absence,
+  diarization setting, and timestamp setting are honored.
+- Expected device, compute type or dtype, and material decoding settings when
+  discoverable without loading the model.
+- Whether the model is available locally and whether executing the target
+  would initiate a model download.
+
+The coordinator creates and approves the plan before the target worker opens
+audio for transcription, loads a model, or makes a network call. Manifest
+validation may already have read the local file for hashing and duration. The
+plan may carry sensitive runtime values in memory, but only its allowlisted
+safe descriptor is hashed, logged, or serialized to disk. The coordinator
+passes that exact plan to the worker. The worker verifies its safe descriptor
+against `run.json`, then calls
+`transcribe_batch(..., execution_plan=plan)`.
+
+`execution_plan` is an optional backward-compatible adapter argument. Existing
+production callers may omit it and retain current config-driven behavior. When
+the benchmark supplies it, the adapter and underlying provider helpers must use
+the resolved backend, endpoint, semantic settings, model path, fallback policy,
+and no-download policy from the plan. They must not reread material execution
+configuration or choose an unplanned backend. A plan mismatch fails before the
+audio file is opened, closing the time-of-check/time-of-use gap between consent
+and transcription. Network execution plans disable HTTP redirects so an
+approved endpoint cannot forward audio to an unclassified destination.
+
+Unknown egress fails closed. Any `loopback` or `remote` target requires
+`--allow-network-targets` before its worker starts. A `neutral-v1` target must
+pin one backend, prohibit backend fallback, and prove that the common semantic
+settings are honored. A `production-v1` target may retain configured fallback,
+but every sample records the actual backend. Mixed-backend production results
+are reported by backend and as a complete-configuration outcome; they are not
+eligible for model-quality ranking or performance gates.
+
+`loopback` is reserved for literal localhost or loopback-address endpoints.
+Hostnames or addresses that are not unambiguously loopback are classified
+`remote`; the harness does not weaken privacy based on DNS inference.
+
+The harness never installs or downloads models. Local measured targets must
+pass preflight with their weights already available and with native
+no-download behavior enforced by the supplied plan. The worker also enables
+standard offline-library controls as defense in depth. A provider whose loader
+cannot honor the no-download plan is unsupported by the benchmark until its
+native loader exposes that control. This prevents network downloads from
+silently becoming most of a `cold_first_transcription_seconds` measurement.
+
+The descriptor is hashed with the benchmark/scorer implementation identity,
+tldw_server Git commit, execution-relevant benchmark/adapter/provider source
+fingerprints, relevant dependency versions, and safe target settings to produce
+an `execution_contract_hash`.
+
+After each call, the adapter returns a normalized, allowlisted actual-execution
+envelope containing only provider, resolved model/artifact ID, backend/source,
+device, compute type or dtype, and non-sensitive decoding identifiers. The
+benchmark never serializes the provider's unrestricted metadata mapping; prompt
+text, hotwords, headers, tokens, URLs, and unknown fields are discarded. A
+mismatch is stored explicitly. Results may remain descriptive when identity
+cannot be resolved, but unresolved identity or an
+actual-versus-planned mismatch is never eligible for baseline gates. Exact hash
+equality defines one resumable run generation; cross-run regression
+compatibility compares the documented material fields so the implementation or
+dependency version under test is allowed to differ.
 
 No provider lifecycle hook is required in v1. Because some adapters load
 weights lazily inside the first transcription, the cold measurement is named
@@ -291,6 +385,12 @@ Future multilingual packs can add language-specific normalization profiles
 without changing runner or result schemas. FLEURS is a suitable future
 multilingual source, but multilingual data is not required for v1.
 
+V1 uses a documented `bcp47-basic-v1` syntax check: a 2-8 ASCII-letter primary
+language subtag followed by zero or more hyphen-delimited 1-8 ASCII
+alphanumeric subtags. It canonicalizes case for comparison but does not claim
+IANA-registry validation. Provider support is a separate execution-preflight
+decision.
+
 ### Manifest record
 
 Each JSONL record has this conceptual shape:
@@ -301,8 +401,13 @@ Each JSONL record has this conceptual shape:
   "audio": "public/librispeech/test-other/1234/5678/clip.flac",
   "reference": "the independently verified transcript",
   "language": "en",
+  "normalization_profile": "en-v1",
   "duration_seconds": 8.42,
   "profiles": ["comparison"],
+  "suite": "public-english-v1",
+  "suite_visibility": "public",
+  "annotation_profile": "librispeech-canonical-v1",
+  "diagnostic_only": false,
   "source": {
     "dataset": "librispeech",
     "version": "openslr-12",
@@ -323,13 +428,18 @@ Required validation includes:
 
 - Unique, stable sample IDs.
 - Non-empty independent reference text.
-- Supported language tag and normalization profile.
+- Syntactically well-formed BCP 47-compatible language tag and a known
+  normalization profile. This is syntax/profile validation, not a claim that
+  every provider supports the tag.
 - Audio path containment under an explicit dataset root.
 - Existing regular file, no symlink escape, and matching SHA-256.
 - Positive duration measured from the checked audio file.
 - When `duration_seconds` is declared, agreement with the measured duration
   within the greater of 100 ms or 1 percent.
 - Known profile names and bounded tags.
+- Stable suite and annotation-profile identifiers, with `suite_visibility`
+  restricted to `public` or `private`.
+- One consistent visibility for every record sharing a suite ID.
 - Complete source, version, license, and reference provenance.
 
 Absolute local paths are accepted at the CLI boundary through `--dataset-root`
@@ -349,15 +459,35 @@ all targets use the same duration.
 - Reference corrections require a manifest version change and a new hash.
 - The report records the manifest hash and reference-provenance counts.
 
+The tldw challenge pack uses a versioned annotation protocol. It defines
+orthography, casing, punctuation, fillers, false starts, partial words,
+unintelligible speech, non-speech events, numerals, abbreviations, proper
+nouns, and reviewer/adjudication metadata. The protocol identifier is stored
+as `annotation_profile`, and reference review status is retained in source
+provenance without storing reviewer identities.
+
+Overlapping speech has no unique linear word order. Until a deterministic
+serialization or multi-reference scoring policy exists, overlap samples are
+tagged and set to `diagnostic_only: true`. They appear in sample-level and
+diagnostic slice reports but do not contribute to primary WER/CER, model
+rankings, or regression gates.
+
+Public reproducibility and private workload relevance are separate suites.
+Primary pooled metrics are calculated per suite. The default report does not
+combine public and private suites into one headline number; any later composite
+must declare its suite weights explicitly.
+
 ## Deterministic Scoring
 
 No LLM or external service participates in scoring.
 
 ### Raw text and exact match
 
-The raw reference and hypothesis are retained. Exact match replaces CRLF and
-bare CR with LF and makes no other change. It intentionally remains sensitive
-to case, punctuation, and whitespace.
+The scorer receives the raw reference and hypothesis before any retention
+policy is applied. Exact match replaces CRLF and bare CR with LF and makes no
+other change. It intentionally remains sensitive to case, punctuation, and
+whitespace. Raw text is persisted only according to the run's text-retention
+mode.
 
 ### Strict profile
 
@@ -382,10 +512,11 @@ The initial `en-v1` profile performs these transformations in order:
 2. Map `U+2018`, `U+2019`, `U+02BC`, and `U+FF07` to ASCII apostrophe
    (`U+0027`).
 3. Apply Unicode-aware `str.casefold()`.
-4. Delete `U+0027` only when it occurs between two characters for which
+4. Preserve `U+0027` when it occurs between two characters for which
    `str.isalnum()` is true; replace every other `U+0027` with `U+0020`.
-5. Replace every Unicode character whose general category starts with `P`
-   (punctuation, including all dash punctuation) with `U+0020`.
+5. Replace every remaining Unicode character whose general category starts
+   with `P` (punctuation, including all dash punctuation) with `U+0020`, except
+   for the preserved internal `U+0027`.
 6. Replace every maximal `str.isspace()` run with one `U+0020`, then trim.
 
 It deliberately does not:
@@ -398,6 +529,10 @@ It deliberately does not:
 - Ignore names, negations, dates, quantities, or units.
 
 Those differences can change downstream meaning and should remain visible.
+In particular, `we're` does not normalize to `were`, and `can't` does not
+normalize to `cant`. Unicode NFKC may still perform compatibility mappings such
+as full-width digits to ASCII digits; the profile performs no additional
+number normalization.
 Language-specific profiles can later replace `en-v1`; normalization must never
 use an ASCII-only regular expression that destroys non-English text.
 
@@ -414,14 +549,20 @@ error rate for words and characters. Its dynamic-programming alignment uses a
 deterministic operation priority when multiple minimum-cost paths exist:
 match, substitution, deletion, then insertion.
 
-Per target, reports include:
+For every target and suite, reports include:
 
-- Pooled WER/CER: total edits divided by total reference units.
+- Per-suite pooled WER/CER: total edits divided by total reference units.
 - Mean sample WER/CER.
 - Sample p50, p90, p95, and p99.
 - Exact-match rate.
 - Successful-transcription, empty-output, and failure rates.
 - Per-dataset and per-tag aggregates.
+
+Every headline quality aggregate and quality gate is suite-specific, including
+means, percentiles, exact-match rate, failure rate, and successful/empty-output
+rates. Warm performance aggregates are also suite-specific; the single cold
+probe remains a clearly labeled target-level observation. Optional cross-suite
+views are informational and never gate.
 
 All percentiles use linear interpolation over sorted values with the
 zero-based index `h = (n - 1) * p`; the values at `floor(h)` and `ceil(h)` are
@@ -429,9 +570,10 @@ interpolated by the fractional part of `h`. A one-value population returns
 that value. Reports never substitute a library's undocumented percentile
 default.
 
-Pooled normalized WER is the primary cross-dataset accuracy metric. Mean and
-slice metrics remain visible so a large dataset or long samples cannot hide a
-weak category.
+Pooled normalized WER within each suite is the primary accuracy metric. Mean
+and slice metrics remain visible so a large dataset or long samples cannot
+hide a weak category. Diagnostic-only samples are excluded from primary
+aggregates but always reported separately.
 
 If a target fails or returns no usable hypothesis, the sample is recorded as a
 failure and scored as an empty hypothesis for aggregate WER/CER. This prevents
@@ -447,7 +589,7 @@ All elapsed timings use `time.perf_counter_ns()`.
 - Worker startup/import time.
 - Registry and adapter setup time.
 - `cold_first_transcription_seconds`.
-- Warm transcription seconds per sample.
+- `warm_adapter_transcription_seconds` per sample.
 - Total target wall time.
 - Audio duration.
 - Real-time factor:
@@ -462,6 +604,15 @@ The stable cold-probe sample participates in accuracy totals once but is
 excluded from warm latency and RTF aggregates. A user-selected timing subset
 may run multiple warm repetitions; the default accuracy run records one scored
 transcription per sample.
+
+These are end-to-end native adapter-call measurements. They include any audio
+decode/resample work, provider preprocessing, model execution or HTTP request,
+and adapter postprocessing performed inside `transcribe_batch()`. They are not
+labeled pure model inference. One-repetition performance is descriptive.
+Performance gates require at least three matching warm repetitions and report
+the median and interquartile range using the scorer's documented percentile
+interpolation. Cold-first results are also descriptive unless model-cache and
+artifact-availability state are controlled and recorded.
 
 ### Optional best-effort metrics
 
@@ -478,14 +629,18 @@ across incompatible operating systems or collection methods.
 Each run records:
 
 - tldw_server Git commit and dirty-worktree flag.
+- Content fingerprints for the benchmark/scorer and the selected adapter and
+  provider/loader source modules, so unrelated worktree edits do not invalidate
+  resume.
 - Manifest and target-configuration hashes.
 - Scorer and normalization-profile versions.
-- Python, operating system, architecture, and relevant package versions.
+- Python, `unicodedata.unidata_version`, operating system, architecture, and
+  relevant package versions.
 - CPU model, logical/physical core counts, and total RAM.
 - GPU or Apple Silicon identity, driver/runtime, and visible memory when
   discoverable.
 - Requested device and compute type.
-- Deterministic sample-order seed.
+- Deterministic sample-order seed and actual target execution order.
 - Comparison mode and safe transcription settings including language hint,
   prompt/hotword presence and count, opaque `configuration_id` where required,
   and non-sensitive provider/model options.
@@ -504,6 +659,7 @@ Runs are stored outside tracked source by default:
 ```text
 .benchmarks/stt/<run-id>/
 |-- run.json
+|-- inflight.json
 |-- results.jsonl
 |-- summary.json
 `-- summary.md
@@ -514,7 +670,31 @@ Runs are stored outside tracked source by default:
 Contains an explicit artifact `schema_version`, the immutable run identity,
 compatible comparison fields, manifest hash, target matrix, environment
 fingerprint, safe settings, the shared cold-probe ID, and worker-attempt
-metadata.
+metadata. Each target includes its immutable `execution_contract_hash`.
+
+Resume re-runs preflight and requires exact execution-contract equality. A
+changed implementation, dependency set, target configuration, backend, model
+artifact, device/compute contract, or egress classification refuses resume and
+requires a new run directory. Run-level settings such as selected profile,
+sample IDs, comparison mode, repetition policy, and text retention must also
+match, as must the recorded hardware profile. Accuracy results from separate
+hardware may still be compared later under the comparison policy, but they are
+never pooled inside one resumed run.
+
+### `inflight.json`
+
+The coordinator atomically writes the active target, completion key, and
+attempt ID after the worker announces a sample and before acknowledging that it
+may enter `transcribe_batch()`. The file contains no transcript text. After a
+terminal JSONL record is flushed and synced, the coordinator clears it.
+
+If the worker or coordinator terminates abnormally, the coordinator or next
+resume first checks whether that exact attempt already has a terminal JSONL
+record. If so, it clears the stale in-flight state. Otherwise it appends one
+`worker_crash`, watchdog `timeout`, or parent `interrupted` result for that
+exact attempt. Failed keys are skipped on ordinary resume and receive one new
+attempt only when the user supplies `--retry-errors`; there is no automatic
+retry loop.
 
 ### `results.jsonl`
 
@@ -522,13 +702,17 @@ One append-only, schema-versioned record per sample attempt contains:
 
 - Run and target IDs.
 - Sample, repetition, and monotonically increasing attempt IDs.
-- Requested and actual provider/model identity.
-- Status: `ok`, `empty`, `adapter_error`, `timeout`, `worker_crash`, or
-  `invalid_artifact`.
+- Requested and actual provider/model and execution identity.
+- Status: `ok`, `empty`, `adapter_error`, `timeout`, `worker_crash`,
+  `interrupted`, or `invalid_artifact`.
 - Raw hypothesis and reference or their configured retained form.
 - Strict and normalized edit counts and rates.
 - Timing and optional resource measurements.
 - Bounded, sanitized error type and message.
+
+Each terminal JSONL record is flushed and `fsync`-ed before the next sample is
+acknowledged. Persistence occurs outside the adapter timing window. This makes
+the crash-recovery guarantee independent of Python file-buffer shutdown.
 
 The completion key is derived from:
 
@@ -536,7 +720,7 @@ The completion key is derived from:
 manifest hash
 + provider
 + model
-+ safe settings hash
++ execution contract hash
 + sample ID
 + repetition
 ```
@@ -564,6 +748,19 @@ coordinator displays and records that egress classification and requires an
 explicit `--allow-network-targets` flag before the worker starts. Unattended
 runs cannot infer that consent from the presence of an API key.
 
+The run records one text-retention mode:
+
+- `full`: retain raw reference and hypothesis for every sample.
+- `errors-only`: retain them only for any non-zero strict or normalized edit
+  count, or non-`ok` status.
+- `none`: retain neither; keep IDs, counts, timings, and bounded errors.
+
+The default is `full` because benchmark diagnosis normally requires examples,
+but the CLI warns when a selected suite has `suite_visibility: private`.
+Retention changes inspection detail, not scoring, because scoring occurs before
+the configured text is discarded. Generated JSON and Markdown summaries honor
+the same retention mode and never reconstruct discarded text from the manifest.
+
 ## CLI
 
 The first version exposes four subcommands:
@@ -580,6 +777,7 @@ python Helper_Scripts/benchmarks/stt_bench.py run \
   --dataset-root /data/stt \
   --profile regression \
   --mode neutral-v1 \
+  --text-retention full \
   --target faster-whisper=large-v3 \
   --target parakeet=parakeet-tdt-0.6b-v3-onnx
 
@@ -597,6 +795,12 @@ python Helper_Scripts/benchmarks/stt_bench.py compare \
 IDs that themselves contain colons. A future target-config file may describe
 larger matrices; v1 does not require one.
 
+`run` performs execution-contract preflight for every selected target before
+starting any worker. It reports unavailable local artifacts, unresolved
+identity, unsupported language semantics, backend fallback, and egress
+classification together so a matrix fails early. The harness exposes no model
+download option.
+
 The CLI uses the standard library `argparse` to match existing scripts under
 `Helper_Scripts/benchmarks/`. It does not add a benchmark framework.
 
@@ -605,7 +809,8 @@ The CLI uses the standard library `argparse` to match existing scripts under
 Cross-target model/configuration comparisons require:
 
 - Manifest content hash and selected sample IDs.
-- Profile and normalization/scorer versions.
+- Profile, suite membership, normalization/scorer versions, and Unicode data
+  version.
 - Comparison mode and common semantic settings.
 - Repetition policy for performance metrics.
 
@@ -615,11 +820,17 @@ Provider/model identity is expected to differ in a cross-target comparison.
 
 Same-target regression/baseline checks additionally require identical
 provider/model identity, safe settings hash or opaque `configuration_id`, and
-material adapter configuration. Quality comparisons may be made across
-hardware, but the environment fingerprints stay visible. Performance
-thresholds are enforced only when the candidate matches the baseline hardware
-profile and collection method. Otherwise, performance differences are
-reported as informational.
+material adapter configuration. They also require resolved model-artifact
+identity and matching effective backend and compute/dtype. Quality results
+across different hardware or effective compute contracts may be compared
+descriptively, with environment fingerprints visible, but are not eligible for
+same-target regression gates. Performance thresholds are enforced only when
+the candidate matches the baseline model artifact, effective backend and
+compute/dtype, safe settings, hardware profile, collection method, target-order
+policy, and a minimum of three warm repetitions. The implementation or
+dependency version under test may differ and is shown explicitly; all other
+material fields must match. Otherwise, performance differences are
+informational.
 
 Performance from network-backed targets is informational by default even when
 the client hardware matches. Enabling a network-performance gate requires an
@@ -632,11 +843,11 @@ inference time.
 Baselines define bounded, reviewable expectations rather than exact transcript
 snapshots:
 
-- Maximum absolute or relative normalized pooled WER/CER regression.
-- Maximum failure-rate regression.
-- Optional minimum exact-match rate.
+- Per-suite maximum absolute or relative normalized pooled WER/CER regression.
+- Per-suite maximum failure-rate regression.
+- Optional per-suite minimum exact-match rate.
 - Eligible local hardware-matched, or explicitly profiled network-backed,
-  maximum warm RTF or latency regression.
+  per-suite maximum warm RTF or latency regression.
 
 Strict scores remain diagnostic unless a specific dataset's formatting
 contract makes them suitable for gating. Real-model regression runs are
@@ -644,16 +855,25 @@ opt-in, suitable for developer machines, GPU runners, dependency upgrades,
 release candidates, and STT incident follow-up. Ordinary PR CI continues to
 use deterministic fake adapters and small audio/manifest fixtures.
 
+V1 point estimates do not establish statistical significance. Until paired
+confidence intervals are implemented, all model rankings are labeled
+descriptive and reports expose the paired per-sample deltas needed for later
+analysis.
+
 ## Error Handling
 
 - Manifest errors fail before any model loads and identify the sample and
   field.
+- Execution-preflight errors fail before a target worker opens audio, loads a
+  model, or makes a network request.
 - Missing optional provider dependencies fail only that target.
 - Adapter exceptions create a per-sample failure record and normally continue
   with later samples.
-- Empty or malformed normalized artifacts are explicit failures.
-- A hard worker crash preserves prior JSONL records and produces a target-level
-  crash result from the coordinator.
+- Error sentinels and empty or malformed normalized artifacts are explicit
+  failures.
+- A hard worker crash preserves prior JSONL records and produces a
+  sample-attributed crash result from the coordinator's persisted in-flight
+  state, plus target-level attempt metadata.
 - Interrupt handling stops scheduling new targets, asks the active worker to
   exit, and leaves a resumable run.
 - Error messages are bounded and sanitized; secrets and complete environment
@@ -664,8 +884,10 @@ use deterministic fake adapters and small audio/manifest fixtures.
 A worker-level watchdog can terminate a hung target. Per-sample hard timeouts
 inside a reusable warm worker are not guaranteed in v1 because safely killing
 an arbitrary synchronous GPU call would also destroy warmed model state. The
-result must describe this distinction rather than claim a timeout guarantee it
-cannot provide.
+watchdog's `timeout` status applies to the persisted in-flight sample and ends
+that worker attempt; it does not imply that the worker continued with warm
+state. The result must describe this distinction rather than claim a timeout
+guarantee it cannot provide.
 
 ## Integration with Existing STT Tests
 
@@ -697,10 +919,13 @@ and must not be cited as real provider performance.
 - Strict versus normalized scoring.
 - Exact `strict-v1` and `en-v1` Unicode mapping, category, whitespace, number,
   and non-English preservation cases.
+- Internal-apostrophe cases prove that `we're` differs from `were` and `can't`
+  differs from `cant`.
 - Deterministic alignment tie-breaking and type-7-style percentile
   interpolation.
-- Aggregate calculations and attempt reduction.
-- Environment metadata allowlisting and secret exclusion.
+- Per-suite and diagnostic-only aggregate calculations and attempt reduction.
+- Environment and actual-execution metadata allowlisting, including hostile
+  adapter metadata containing prompt, hotword, token, header, and URL values.
 
 ### Property-based tests
 
@@ -715,6 +940,8 @@ and must not be cited as real provider performance.
 - Duplicate IDs.
 - Missing or empty references.
 - Invalid profiles and language tags.
+- Unknown suites, inconsistent suite visibility, annotation profiles, and
+  normalization profiles.
 - Path traversal and symlink escape.
 - Missing files and checksum mismatches.
 - Measured/declared duration mismatch and malformed source metadata.
@@ -727,12 +954,21 @@ Use fake native adapters to cover:
 - Shared cold probe, probe-failure recovery, and resume warm-up without
   changing sample classification.
 - Requested/actual identity validation.
-- Incremental persistence and resume.
-- Exceptions, empty transcripts, invalid artifacts, and worker crashes.
+- Bound execution plans for dynamic local/network backends, semantic settings,
+  local model availability, no-download enforcement, and neutral-mode fallback
+  rejection.
+- A configuration change after planning cannot change the executed backend,
+  endpoint, fallback policy, or semantic settings.
+- Network plans reject redirects to a different endpoint.
+- Resume refusal after an execution-contract change.
+- Incremental persistence, in-flight recovery, and durable resume.
+- Exceptions, recognized error sentinels, empty transcripts, invalid
+  artifacts, and sample-attributed worker crashes.
 - Retry attempt ordering and latest-attempt aggregation.
 - Comparison-mode enforcement and external-target consent.
 - Artifact schema rejection and local/network performance-gate eligibility.
 - Deterministic sample order.
+- Text-retention modes.
 - Summary regeneration after partial completion.
 
 ### Opt-in real-model tests
@@ -756,6 +992,7 @@ The implementation should begin with:
 ```text
 Helper_Scripts/benchmarks/stt_bench.py
 Helper_Scripts/benchmarks/stt_benchmark_manifest.example.jsonl
+tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/stt_provider_adapter.py
 tldw_Server_API/tests/Benchmarks/test_stt_bench.py
 Docs/Development/STT_Benchmark_Protocol.md
 .gitignore
@@ -764,6 +1001,13 @@ Docs/Development/STT_Benchmark_Protocol.md
 The first implementation should favor one importable CLI module and pure
 functions over a new package hierarchy. Split modules only when the scorer,
 worker, or reporting code becomes difficult to test independently.
+The existing STT adapter module defines the immutable execution-plan contract
+and error-sentinel enforcement at the shared native boundary. Affected native
+provider/loader modules receive the minimum changes needed to consume that
+plan, enforce backend/fallback/no-download choices, and return the allowlisted
+actual-execution envelope. A provider remains unsupported by the benchmark
+until those controls are enforceable. The benchmark does not build a parallel
+provider registry or duplicate provider implementations.
 
 Large public or private audio corpora are not committed. The repository may
 include a tiny redistributable test fixture if one already exists or can be
@@ -797,11 +1041,23 @@ The eventual implementation is complete when:
 4. Cold first transcription and warm RTF/throughput are reported with the
    documented definitions.
 5. Reports include failures and dataset/tag slices rather than only successful
-   global averages.
+   global averages, and keep public/private suites and diagnostic-only samples
+   distinct.
 6. Invalid provider targets fail closed without faster-whisper fallback.
 7. Compatible runs can be compared and hardware-mismatched performance gates
    are rejected.
 8. Existing golden tests reuse the benchmark scoring contract.
+9. Dynamic remote backends require preflight egress consent and execute the
+   exact approved plan; neutral-mode targets cannot fall back across backends,
+   and measured local targets cannot download models.
+10. Recognized error sentinels are failures, and hard crashes or watchdog
+    termination are attributed to the persisted in-flight sample.
+11. A run cannot resume across an execution-contract change, and unresolved
+    model/backend/compute identity is ineligible for regression gates; only
+    allowlisted actual-execution fields are stored.
+12. The English normalized profile preserves meaning-bearing internal
+    apostrophes, records its Unicode data version, and follows a versioned
+    challenge-corpus annotation policy.
 
 ## References
 
