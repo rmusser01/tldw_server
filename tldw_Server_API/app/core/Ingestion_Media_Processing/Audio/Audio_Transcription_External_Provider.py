@@ -27,8 +27,19 @@ import numpy as np
 import soundfile as sf
 from loguru import logger
 
-from tldw_Server_API.app.core.exceptions import NetworkError, RetryExhaustedError
+from tldw_Server_API.app.core.exceptions import (
+    NetworkError,
+    RetryExhaustedError,
+    STTExecutionPlanError,
+)
 from tldw_Server_API.app.core.http_client import RetryPolicy, afetch
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_contract import (
+    SttBatchExecutionPlan,
+    SttTranscriptionOutcome,
+    _normalize_audio_endpoint,
+    actual_execution_from_route,
+    raise_for_planned_stt_sentinel,
+)
 from tldw_Server_API.app.core.Ingestion_Media_Processing.path_utils import open_safe_local_path
 
 logger = logger
@@ -163,12 +174,24 @@ def validate_external_provider_config(config: ExternalProviderConfig) -> tuple[b
     return True, None
 
 
+def _resolve_transcription_endpoint(base_url: str) -> str:
+    """Resolve an OpenAI-compatible base URL to its final STT endpoint."""
+    parsed = urlparse(base_url)
+    if parsed.path.rstrip("/").endswith("/v1/audio/transcriptions"):
+        return base_url
+    return urljoin(
+        base_url.rstrip("/") + "/",
+        "v1/audio/transcriptions",
+    )
+
+
 async def transcribe_with_external_provider_async(
     audio_data: Union[np.ndarray, str, Path],
     sample_rate: int = 16000,
     provider_name: str = "default",
     config: Optional[ExternalProviderConfig] = None,
     base_dir: Optional[Path] = None,
+    execution_plan: SttBatchExecutionPlan | None = None,
     **kwargs
 ) -> str:
     """
@@ -196,10 +219,31 @@ async def transcribe_with_external_provider_async(
           in those cases, configure ``base_url`` with the full endpoint URL.
     """
     # Load configuration
+    if execution_plan is not None and config is None:
+        raise STTExecutionPlanError(
+            "Planned external STT execution requires frozen configuration"
+        )
     if config is None:
         config = load_external_provider_config(provider_name)
         if config is None:
             return f"[Error: External provider '{provider_name}' not configured]"
+    if execution_plan is not None:
+        route = execution_plan.descriptor.primary_route
+        endpoint, egress, endpoint_id = _normalize_audio_endpoint(
+            _resolve_transcription_endpoint(config.base_url)
+        )
+        if (
+            len(execution_plan.descriptor.routes) != 1
+            or route.provider != "external"
+            or route.backend != "openai_compatible"
+            or route.source != "external_http"
+            or route.audio_egress is not egress
+            or route.endpoint_id != endpoint_id
+        ):
+            raise STTExecutionPlanError(
+                "External STT endpoint does not match its plan"
+            )
+        config.base_url = endpoint
 
     # Validate configuration
     is_valid, error_msg = validate_external_provider_config(config)
@@ -228,11 +272,7 @@ async def transcribe_with_external_provider_async(
         #   (.../v1/audio/transcriptions), use it as-is.
         # - Otherwise, treat base_url as an API root and append the standard
         #   OpenAI-compatible audio transcription path.
-        parsed = urlparse(config.base_url)
-        if parsed.path.rstrip("/").endswith("/v1/audio/transcriptions"):
-            endpoint = config.base_url
-        else:
-            endpoint = urljoin(config.base_url.rstrip("/") + "/", "v1/audio/transcriptions")
+        endpoint = _resolve_transcription_endpoint(config.base_url)
 
         # Prepare headers
         headers = {}
@@ -309,13 +349,22 @@ async def transcribe_with_external_provider_async(
                 return f"[Error: API returned {status_code}]"
 
             except RetryExhaustedError as e:
-                logger.warning(f"External provider retries exhausted: {e}")
+                if execution_plan is None:
+                    logger.warning(f"External provider retries exhausted: {e}")
+                else:
+                    logger.warning("Planned external provider retries exhausted")
                 return "[Error: External transcription request failed]"
             except NetworkError as e:
-                logger.warning(f"External provider network error: {e}")
+                if execution_plan is None:
+                    logger.warning(f"External provider network error: {e}")
+                else:
+                    logger.warning("Planned external provider network error")
                 return "[Error: External transcription request failed]"
             except EXTERNAL_PROVIDER_RUNTIME_EXCEPTIONS as e:
-                logger.exception(f"External provider request failed: {e}")
+                if execution_plan is None:
+                    logger.exception(f"External provider request failed: {e}")
+                else:
+                    logger.warning("Planned external provider request failed")
                 return "[Error: External transcription request failed]"
             finally:
                 await _close_response(resp)
@@ -323,7 +372,10 @@ async def transcribe_with_external_provider_async(
         return "[Error: Failed to transcribe after all retries]"
 
     except EXTERNAL_PROVIDER_RUNTIME_EXCEPTIONS as e:
-        logger.exception(f"Error in external provider transcription: {e}")
+        if execution_plan is None:
+            logger.exception(f"Error in external provider transcription: {e}")
+        else:
+            logger.warning("Planned external provider transcription failed")
         return "[Error: External transcription failed]"
 
     finally:
@@ -336,8 +388,9 @@ def transcribe_with_external_provider(
     provider_name: str = "default",
     config: Optional[ExternalProviderConfig] = None,
     base_dir: Optional[Path] = None,
+    execution_plan: SttBatchExecutionPlan | None = None,
     **kwargs
-) -> str:
+) -> str | SttTranscriptionOutcome:
     """
     Synchronous wrapper for external provider transcription.
 
@@ -352,6 +405,10 @@ def transcribe_with_external_provider(
     Returns:
         Transcribed text or error message
     """
+    if execution_plan is not None and config is None:
+        raise STTExecutionPlanError(
+            "Planned external STT execution requires frozen configuration"
+        )
     try:
         # Run async function in sync context, handling various loop states robustly
         try:
@@ -363,6 +420,7 @@ def transcribe_with_external_provider(
             # We are in a running loop (e.g., notebook, async context). Use a worker thread
             # to run a fresh event loop and avoid cross-loop issues.
             import concurrent.futures
+
             def _run_in_fresh_loop():
                 return asyncio.run(
                     transcribe_with_external_provider_async(
@@ -371,28 +429,57 @@ def transcribe_with_external_provider(
                         provider_name,
                         config,
                         base_dir=base_dir,
+                        execution_plan=execution_plan,
                         **kwargs,
                     )
                 )
 
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
                 future = executor.submit(_run_in_fresh_loop)
-                return future.result()
+                result = future.result()
         else:
             # Normal case - no loop running in this thread
-            return asyncio.run(
+            result = asyncio.run(
                 transcribe_with_external_provider_async(
                     audio_data,
                     sample_rate,
                     provider_name,
                     config,
                     base_dir=base_dir,
+                    execution_plan=execution_plan,
                     **kwargs,
                 )
             )
     except EXTERNAL_PROVIDER_RUNTIME_EXCEPTIONS as e:
-        logger.exception(f"Error in external provider transcription: {e}")
-        return "[Error: External transcription failed]"
+        if execution_plan is None:
+            logger.exception(f"Error in external provider transcription: {e}")
+        else:
+            logger.warning("Planned external provider transcription failed")
+        result = "[Error: External transcription failed]"
+    if execution_plan is None:
+        return result
+    raise_for_planned_stt_sentinel(result)
+    route = execution_plan.descriptor.primary_route
+    artifact = {
+        "text": result,
+        "language": config.language,
+        "segments": [
+            {
+                "start_seconds": 0.0,
+                "end_seconds": 0.0,
+                "Text": result,
+            }
+        ],
+        "diarization": {"enabled": False, "speakers": None},
+        "usage": {"duration_ms": None, "tokens": None},
+    }
+    return SttTranscriptionOutcome(
+        artifact=artifact,
+        actual_execution=actual_execution_from_route(
+            route,
+            device=None,
+        ),
+    )
 
 
 def add_external_provider(name: str, config: ExternalProviderConfig) -> bool:

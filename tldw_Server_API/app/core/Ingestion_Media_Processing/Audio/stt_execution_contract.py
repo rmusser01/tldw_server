@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import hashlib
+import ipaddress
+import posixpath
 import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, fields
 from enum import Enum
 from types import MappingProxyType
 from typing import Any
+from urllib.parse import urlparse, urlunparse
 
 SttPlanScalar = str | int | float | bool | None | tuple[str, ...]
 
@@ -270,6 +274,75 @@ class SttAudioEgress(str, Enum):
     NONE = "none"
     LOOPBACK = "loopback"
     REMOTE = "remote"
+
+
+def _normalize_audio_endpoint(
+    url: str,
+) -> tuple[str, SttAudioEgress, str]:
+    """Validate and normalize one final STT endpoint without resolving DNS."""
+    from tldw_Server_API.app.core.exceptions import STTExecutionUnsupportedError
+
+    raw = str(url or "").strip()
+    try:
+        parsed = urlparse(raw)
+        if (
+            not raw
+            or parsed.scheme.lower() not in {"http", "https"}
+            or not parsed.netloc
+            or parsed.hostname is None
+            or parsed.username is not None
+            or parsed.password is not None
+            or "?" in raw
+            or "#" in raw
+        ):
+            raise ValueError
+        port = parsed.port
+        if parsed.netloc.endswith(":"):
+            raise ValueError
+    except (TypeError, ValueError):
+        raise STTExecutionUnsupportedError(
+            "STT transcription endpoint is invalid"
+        ) from None
+
+    scheme = parsed.scheme.lower()
+    hostname = parsed.hostname.lower()
+    try:
+        address = ipaddress.ip_address(hostname)
+    except ValueError:
+        address = None
+
+    is_loopback = hostname == "localhost"
+    if address is not None:
+        is_loopback = address.is_loopback or bool(
+            getattr(address, "ipv4_mapped", None)
+            and address.ipv4_mapped.is_loopback
+        )
+        hostname = address.compressed
+
+    if ":" in hostname:
+        hostname = f"[{hostname}]"
+    default_port = 80 if scheme == "http" else 443
+    netloc = hostname if port in {None, default_port} else f"{hostname}:{port}"
+    path = posixpath.normpath("/" + parsed.path.lstrip("/"))
+    if parsed.path.endswith("/") and path != "/":
+        path += "/"
+    normalized = urlunparse(
+        (scheme, netloc, path, parsed.params, "", "")
+    )
+    endpoint_id = "sha256:" + hashlib.sha256(
+        normalized.encode("utf-8")
+    ).hexdigest()
+    egress = (
+        SttAudioEgress.LOOPBACK
+        if is_loopback
+        else SttAudioEgress.REMOTE
+    )
+    return normalized, egress, endpoint_id
+
+
+def _classify_audio_egress(url: str) -> SttAudioEgress:
+    """Classify a validated final STT endpoint without resolving DNS."""
+    return _normalize_audio_endpoint(url)[1]
 
 
 @dataclass(frozen=True)

@@ -442,7 +442,6 @@ def test_transcribe_vllm_http_missing_url(monkeypatch, tmp_path):
     qwen3 = _import_module()
 
     from tldw_Server_API.app.core.exceptions import BadRequestError
-    from pathlib import Path
 
     audio_file = tmp_path / "test.wav"
     audio_file.write_bytes(b"\x00" * 100)
@@ -487,9 +486,11 @@ def test_transcribe_vllm_http_success(monkeypatch, tmp_path):
                 "duration": 2.5,
             }
 
+    client_kwargs = {}
+
     class MockClient:
         def __init__(self, **kwargs):
-            pass
+            client_kwargs.update(kwargs)
 
         def __enter__(self):
             return self
@@ -528,6 +529,7 @@ def test_transcribe_vllm_http_success(monkeypatch, tmp_path):
         assert result["language"] == "en"
         assert result["metadata"]["model"] == "vllm:http://localhost:8000"
         assert result["usage"]["duration_ms"] == 2500
+        assert client_kwargs["follow_redirects"] is False
     finally:
         if "httpx" in sys.modules and sys.modules["httpx"] is mock_httpx:
             del sys.modules["httpx"]

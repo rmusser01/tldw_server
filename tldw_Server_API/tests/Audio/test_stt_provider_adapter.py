@@ -18,6 +18,9 @@ if "torch" not in sys.modules:
     _fake_torch = types.ModuleType("torch")
     _fake_torch.__spec__ = importlib.machinery.ModuleSpec("torch", loader=None)
     _fake_torch.Tensor = object
+    _fake_torch.float16 = "float16"
+    _fake_torch.float32 = "float32"
+    _fake_torch.bfloat16 = "bfloat16"
     _fake_torch.nn = types.SimpleNamespace(Module=object)
     _fake_torch.cuda = types.SimpleNamespace(is_available=lambda: False)
     sys.modules["torch"] = _fake_torch
@@ -558,6 +561,9 @@ def test_neutral_sentinel_predicate_does_not_import_runtime_or_adapter():
         "Audio_Transcription_Nemo",
         "Audio_Transcription_Parakeet_ONNX",
         "Audio_Transcription_Parakeet_MLX",
+        "Audio_Transcription_Qwen3ASR",
+        "Audio_Transcription_VibeVoice",
+        "Audio_Transcription_External_Provider",
     ],
 )
 def test_provider_runtime_module_does_not_import_adapter(provider_module):
@@ -639,70 +645,6 @@ def test_planned_provider_mismatch_fails_before_provider_helper(monkeypatch):
         )
 
     assert calls == []
-
-
-@pytest.mark.unit
-@pytest.mark.parametrize(
-    ("adapter_name", "provider", "planned_model", "requested_model"),
-    [
-        ("Qwen3ASRAdapter", "qwen3-asr", "Qwen/Qwen3-ASR-1.7B", None),
-        (
-            "VibeVoiceAdapter",
-            "vibevoice",
-            "microsoft/VibeVoice-ASR",
-            None,
-        ),
-        ("ExternalAdapter", "external", "external:custom", "external:custom"),
-    ],
-)
-def test_unimplemented_planned_adapters_fail_closed_before_runtime_access(
-    monkeypatch,
-    adapter_name,
-    provider,
-    planned_model,
-    requested_model,
-):
-    spa = _import_module()
-    plan = _make_execution_plan(
-        spa,
-        provider=provider,
-        model_label=planned_model,
-    )
-    config_calls = []
-    real_import = builtins.__import__
-
-    def fake_get_stt_config():
-        config_calls.append(True)
-        return {
-            "nemo_model_variant": "mlx",
-            "qwen3_asr_model_path": "mutated-qwen3-model",
-            "vibevoice_model_id": "mutated/vibevoice-model",
-        }
-
-    def guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
-        blocked_suffixes = (
-            "Audio_Transcription_Lib",
-            "Audio_Transcription_Nemo",
-            "Audio_Transcription_Qwen3ASR",
-            "Audio_Transcription_VibeVoice",
-            "Audio_Transcription_External_Provider",
-        )
-        if name.endswith(blocked_suffixes):
-            raise AssertionError(f"planned execution imported {name}")
-        return real_import(name, globals, locals, fromlist, level)
-
-    monkeypatch.setattr(spa, "get_stt_config", fake_get_stt_config)
-    monkeypatch.setattr(builtins, "__import__", guarded_import)
-
-    with pytest.raises(spa.STTExecutionUnsupportedError):
-        getattr(spa, adapter_name)().transcribe_batch(
-            "not-opened.wav",
-            model=requested_model,
-            language="en",
-            execution_plan=plan,
-        )
-
-    assert config_calls == []
 
 
 @pytest.mark.unit

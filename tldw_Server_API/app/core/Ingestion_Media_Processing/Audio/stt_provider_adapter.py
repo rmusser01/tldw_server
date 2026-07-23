@@ -59,6 +59,12 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_con
     SttTranscriptionOutcome as SttTranscriptionOutcome,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_contract import (
+    _classify_audio_egress as _classify_audio_egress,
+)
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_contract import (
+    _normalize_audio_endpoint as _normalize_audio_endpoint,
+)
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_contract import (
     actual_execution_from_route as actual_execution_from_route,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_contract import (
@@ -176,6 +182,19 @@ _LOCAL_RUNTIME_DEVICE_MAP = "device_map"
 _LOCAL_RUNTIME_COMPUTE_TYPE = "compute_type"
 _LOCAL_RUNTIME_DTYPE = "dtype"
 _LOCAL_RUNTIME_VARIANT = "variant"
+_EXTERNAL_RUNTIME_API_KEY = "external_api_key"
+_EXTERNAL_RUNTIME_BASE_URL = "external_base_url"
+_EXTERNAL_RUNTIME_HEADER_NAMES = "external_header_names"
+_EXTERNAL_RUNTIME_HEADER_VALUES = "external_header_values"
+_EXTERNAL_RUNTIME_LANGUAGE = "external_language"
+_EXTERNAL_RUNTIME_MAX_RETRIES = "external_max_retries"
+_EXTERNAL_RUNTIME_MODEL = "external_model"
+_EXTERNAL_RUNTIME_PROMPT = "external_prompt"
+_EXTERNAL_RUNTIME_PROVIDER = "external_provider"
+_EXTERNAL_RUNTIME_RESPONSE_FORMAT = "external_response_format"
+_EXTERNAL_RUNTIME_TEMPERATURE = "external_temperature"
+_EXTERNAL_RUNTIME_TIMEOUT = "external_timeout"
+_EXTERNAL_RUNTIME_VERIFY_SSL = "external_verify_ssl"
 
 
 def _segment_text_value(segment: dict[str, Any]) -> str:
@@ -1562,6 +1581,205 @@ class Qwen3ASRAdapter(SttProviderAdapter):
             notes=notes,
         )
 
+    def plan_batch_execution(
+        self,
+        *,
+        model: str | None,
+        language: str | None,
+        task: str,
+        word_timestamps: bool,
+        prompt: str | None,
+        hotwords: Sequence[str] | None,
+        diarization: bool,
+        mode: str,
+    ) -> SttBatchExecutionPlan:
+        normalized_mode = str(mode or "").strip().lower()
+        if normalized_mode not in {"neutral-v1", "production-v1"}:
+            raise STTExecutionUnsupportedError(
+                f"Unsupported STT benchmark mode: {mode}"
+            )
+        if (
+            task != "transcribe"
+            or word_timestamps
+            or prompt is not None
+            or hotwords
+            or diarization
+        ):
+            raise STTExecutionUnsupportedError(
+                "Qwen3-ASR cannot honor the requested benchmark semantics"
+            )
+        from . import Audio_Transcription_Qwen3ASR as qwen3
+
+        settings = qwen3._resolve_settings()
+        if not settings.get("enabled"):
+            raise STTExecutionUnsupportedError("Qwen3-ASR is disabled")
+        requested = model or str(
+            settings.get("model_path") or "qwen3-asr"
+        )
+        model_label = _safe_requested_model_label(requested)
+        backend = str(settings.get("backend") or "").strip().lower()
+        runtime: dict[str, SttPlanScalar]
+        if backend == "vllm":
+            base_url = str(
+                settings.get("vllm_base_url") or ""
+            ).strip()
+            endpoint, egress, endpoint_id = _normalize_audio_endpoint(
+                f"{base_url.rstrip('/')}/v1/audio/transcriptions"
+            )
+            route = SttExecutionRoute(
+                route_id="vllm-http-1",
+                provider=self.name.value,
+                model_label=model_label,
+                artifact_id=None,
+                identity_resolved=False,
+                backend="vllm_http",
+                source="vllm_http",
+                audio_egress=egress,
+                endpoint_id=endpoint_id,
+                device=None,
+                compute_type=None,
+                dtype=None,
+                decoding_ids=(),
+                local_model_available=False,
+                would_download=False,
+            )
+            runtime = {
+                "backend": "vllm",
+                "endpoint": endpoint,
+                "sample_rate": int(
+                    settings.get("sample_rate") or 16000
+                ),
+            }
+            dependencies = ("httpx",)
+        else:
+            if language is not None:
+                raise STTExecutionUnsupportedError(
+                    "Qwen3-ASR local execution cannot honor a language hint"
+                )
+            model_path = Path(
+                str(model or settings.get("model_path") or "")
+            )
+            if (
+                not model_path.is_dir()
+                or bool(settings.get("allow_download"))
+            ):
+                raise STTExecutionUnsupportedError(
+                    "Qwen3-ASR requires an existing no-download local model"
+                )
+            device = str(
+                settings.get("device") or "cpu"
+            ).strip().lower()
+            if qwen3._resolve_device(device) != device:
+                raise STTExecutionUnsupportedError(
+                    "Qwen3-ASR planned device is unavailable"
+                )
+            dtype = _require_planned_precision(
+                str(
+                    settings.get("dtype") or "float32"
+                ).strip().lower(),
+                provider=self.name.value,
+                label="dtype",
+                allowed={"float16", "bfloat16", "float32"},
+            )
+            revision_value = str(
+                settings.get("model_revision") or ""
+            ).strip()
+            revision = revision_value or None
+            artifact_id = (
+                revision
+                if revision is not None
+                and _IMMUTABLE_REVISION_RE.fullmatch(revision)
+                else None
+            )
+            route = SttExecutionRoute(
+                route_id="local-1",
+                provider=self.name.value,
+                model_label=model_label,
+                artifact_id=artifact_id,
+                identity_resolved=artifact_id is not None,
+                backend="transformers",
+                source="local",
+                audio_egress=SttAudioEgress.NONE,
+                endpoint_id=None,
+                device=device,
+                compute_type=None,
+                dtype=dtype,
+                decoding_ids=(),
+                local_model_available=True,
+                would_download=False,
+            )
+            runtime = {
+                "allow_download": False,
+                "backend": "transformers",
+                "device": device,
+                "dtype": dtype,
+                "max_new_tokens": int(
+                    settings.get("max_new_tokens") or 4096
+                ),
+                "model_path": str(model_path.resolve()),
+                "model_revision": revision,
+                "sample_rate": int(
+                    settings.get("sample_rate") or 16000
+                ),
+            }
+            dependencies = ("transformers",)
+        descriptor = SttExecutionDescriptor(
+            requested_provider=self.name.value,
+            requested_model_label=model_label,
+            resolved_provider=self.name.value,
+            resolved_model_label=model_label,
+            routes=(route,),
+            honors_task=True,
+            honors_language=True,
+            honors_prompt_absence=True,
+            honors_hotword_absence=True,
+            honors_diarization=True,
+            honors_word_timestamps=True,
+            decoding_settings=(),
+            source_modules=tuple(
+                sorted(
+                    (
+                        "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Qwen3ASR",
+                        "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_contract",
+                        "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_provider_adapter",
+                    )
+                )
+            ),
+            dependency_distributions=dependencies,
+        )
+        return SttBatchExecutionPlan(
+            descriptor=descriptor,
+            task=task,
+            language=language,
+            runtime_settings=tuple(sorted(runtime.items())),
+        )
+
+    def _transcribe_planned_batch(
+        self,
+        audio_path: str,
+        *,
+        execution_plan: SttBatchExecutionPlan,
+        base_dir: Path | None,
+        cancel_check: Callable[[], bool] | None,
+    ) -> SttTranscriptionOutcome:
+        from .Audio_Transcription_Qwen3ASR import (
+            transcribe_with_qwen3_asr,
+        )
+
+        outcome = transcribe_with_qwen3_asr(
+            audio_path,
+            language=execution_plan.language,
+            word_timestamps=execution_plan.word_timestamps,
+            base_dir=base_dir,
+            cancel_check=cancel_check,
+            execution_plan=execution_plan,
+        )
+        if not isinstance(outcome, SttTranscriptionOutcome):
+            raise STTExecutionPlanError(
+                "Planned Qwen3-ASR execution did not report its route"
+            )
+        return outcome
+
     def transcribe_batch(
         self,
         audio_path: str,
@@ -1636,6 +1854,245 @@ class VibeVoiceAdapter(SttProviderAdapter):
             notes="VibeVoice-ASR supports batch transcription with diarization metadata; streaming is not supported.",
         )
 
+    def plan_batch_execution(
+        self,
+        *,
+        model: str | None,
+        language: str | None,
+        task: str,
+        word_timestamps: bool,
+        prompt: str | None,
+        hotwords: Sequence[str] | None,
+        diarization: bool,
+        mode: str,
+    ) -> SttBatchExecutionPlan:
+        normalized_mode = str(mode or "").strip().lower()
+        if normalized_mode not in {"neutral-v1", "production-v1"}:
+            raise STTExecutionUnsupportedError(
+                f"Unsupported STT benchmark mode: {mode}"
+            )
+        if (
+            task != "transcribe"
+            or word_timestamps
+            or prompt is not None
+            or diarization
+            or (normalized_mode == "neutral-v1" and hotwords)
+        ):
+            raise STTExecutionUnsupportedError(
+                "VibeVoice cannot honor the requested benchmark semantics"
+            )
+        from . import Audio_Transcription_VibeVoice as vibe
+
+        settings = vibe._resolve_settings()
+        original_model = str(
+            settings.get("model_id") or "microsoft/VibeVoice-ASR"
+        )
+        if model and model.strip():
+            settings["model_id"] = model.strip()
+            if str(
+                settings.get("vllm_model_id") or ""
+            ).strip() in {"", original_model}:
+                settings["vllm_model_id"] = model.strip()
+        requested = model or str(settings["model_id"])
+        model_label = _safe_requested_model_label(requested)
+        planned_hotwords = tuple(hotwords or ())
+        decoding_settings = (
+            (
+                ("hotword_count", len(planned_hotwords)),
+                ("prompt_present", False),
+            )
+            if normalized_mode == "production-v1"
+            else ()
+        )
+        decoding_ids = tuple(
+            key for key, _value in decoding_settings
+        )
+        routes: list[SttExecutionRoute] = []
+        runtime: dict[str, SttPlanScalar] = {
+            "allow_download": False,
+            "cache_dir": str(settings.get("cache_dir") or ""),
+            "device": str(settings.get("device") or "cpu").lower(),
+            "dtype": str(settings.get("dtype") or "float32").lower(),
+            "max_new_tokens": int(
+                settings.get("max_new_tokens") or 4096
+            ),
+            "model_id": str(settings["model_id"]),
+            "model_revision": str(
+                settings.get("model_revision") or ""
+            )
+            or None,
+            "sample_rate": int(
+                settings.get("sample_rate") or 16000
+            ),
+            "strict_semantics": True,
+            "vllm_api_key": settings.get("vllm_api_key"),
+            "vllm_model_id": str(
+                settings.get("vllm_model_id")
+                or settings["model_id"]
+            ),
+            "vllm_timeout_seconds": int(
+                settings.get("vllm_timeout_seconds") or 600
+            ),
+        }
+        if settings.get("vllm_enabled"):
+            endpoint, egress, endpoint_id = _normalize_audio_endpoint(
+                vibe._resolve_vllm_endpoint(
+                    str(settings.get("vllm_base_url") or "")
+                )
+            )
+            runtime["endpoint"] = endpoint
+            routes.append(
+                SttExecutionRoute(
+                    route_id="vllm-http-1",
+                    provider=self.name.value,
+                    model_label=model_label,
+                    artifact_id=None,
+                    identity_resolved=False,
+                    backend="vllm_http",
+                    source="vllm_http",
+                    audio_egress=egress,
+                    endpoint_id=endpoint_id,
+                    device=None,
+                    compute_type=None,
+                    dtype=None,
+                    decoding_ids=decoding_ids,
+                    local_model_available=False,
+                    would_download=False,
+                )
+            )
+        include_local = (
+            not routes or normalized_mode == "production-v1"
+        ) and bool(settings.get("enabled"))
+        if include_local:
+            model_path = Path(str(settings["model_id"]))
+            if (
+                not model_path.is_dir()
+                or bool(settings.get("allow_download"))
+            ):
+                raise STTExecutionUnsupportedError(
+                    "VibeVoice production fallback is not an explicit no-download local model"
+                )
+            device = str(
+                settings.get("device") or "cpu"
+            ).strip().lower()
+            if vibe._resolve_device(device) != device:
+                raise STTExecutionUnsupportedError(
+                    "VibeVoice planned device is unavailable"
+                )
+            dtype = _require_planned_precision(
+                str(
+                    settings.get("dtype") or "float32"
+                ).strip().lower(),
+                provider=self.name.value,
+                label="dtype",
+                allowed={"float16", "bfloat16", "float32"},
+            )
+            revision = str(
+                settings.get("model_revision") or ""
+            ).strip() or None
+            artifact_id = (
+                revision
+                if revision is not None
+                and _IMMUTABLE_REVISION_RE.fullmatch(revision)
+                else None
+            )
+            runtime.update(
+                device=device,
+                dtype=dtype,
+                model_id=str(model_path.resolve()),
+                model_revision=revision,
+            )
+            routes.append(
+                SttExecutionRoute(
+                    route_id=(
+                        "local-2" if len(routes) == 1 else "local-1"
+                    ),
+                    provider=self.name.value,
+                    model_label=model_label,
+                    artifact_id=artifact_id,
+                    identity_resolved=artifact_id is not None,
+                    backend="transformers",
+                    source="local",
+                    audio_egress=SttAudioEgress.NONE,
+                    endpoint_id=None,
+                    device=device,
+                    compute_type=None,
+                    dtype=dtype,
+                    decoding_ids=decoding_ids,
+                    local_model_available=True,
+                    would_download=False,
+                )
+            )
+        if not routes:
+            raise STTExecutionUnsupportedError(
+                "VibeVoice has no enforceable configured execution route"
+            )
+        descriptor = SttExecutionDescriptor(
+            requested_provider=self.name.value,
+            requested_model_label=model_label,
+            resolved_provider=self.name.value,
+            resolved_model_label=model_label,
+            routes=tuple(routes),
+            honors_task=True,
+            honors_language=True,
+            honors_prompt_absence=True,
+            honors_hotword_absence=True,
+            honors_diarization=True,
+            honors_word_timestamps=True,
+            decoding_settings=decoding_settings,
+            source_modules=tuple(
+                sorted(
+                    (
+                        "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_VibeVoice",
+                        "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_contract",
+                        "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_provider_adapter",
+                    )
+                )
+            ),
+            dependency_distributions=(
+                ("httpx", "transformers")
+                if len(routes) == 2
+                else (
+                    ("httpx",)
+                    if routes[0].backend == "vllm_http"
+                    else ("transformers",)
+                )
+            ),
+        )
+        return SttBatchExecutionPlan(
+            descriptor=descriptor,
+            task=task,
+            language=language,
+            hotwords=planned_hotwords,
+            runtime_settings=tuple(sorted(runtime.items())),
+        )
+
+    def _transcribe_planned_batch(
+        self,
+        audio_path: str,
+        *,
+        execution_plan: SttBatchExecutionPlan,
+        base_dir: Path | None,
+        cancel_check: Callable[[], bool] | None,
+    ) -> SttTranscriptionOutcome:
+        from .Audio_Transcription_VibeVoice import (
+            transcribe_with_vibevoice,
+        )
+
+        outcome = transcribe_with_vibevoice(
+            audio_path,
+            language=execution_plan.language,
+            hotwords=execution_plan.hotwords,
+            base_dir=base_dir,
+            cancel_check=cancel_check,
+            execution_plan=execution_plan,
+        )
+        if not isinstance(outcome, SttTranscriptionOutcome):
+            raise STTExecutionPlanError(
+                "Planned VibeVoice execution did not report its route"
+            )
+        return outcome
+
     def transcribe_batch(
         self,
         audio_path: str,
@@ -1708,6 +2165,233 @@ class ExternalAdapter(SttProviderAdapter):
             supports_streaming=False,
             supports_diarization=False,
         )
+
+    def plan_batch_execution(
+        self,
+        *,
+        model: str | None,
+        language: str | None,
+        task: str,
+        word_timestamps: bool,
+        prompt: str | None,
+        hotwords: Sequence[str] | None,
+        diarization: bool,
+        mode: str,
+    ) -> SttBatchExecutionPlan:
+        normalized_mode = str(mode or "").strip().lower()
+        if normalized_mode not in {"neutral-v1", "production-v1"}:
+            raise STTExecutionUnsupportedError(
+                f"Unsupported STT benchmark mode: {mode}"
+            )
+        if (
+            task != "transcribe"
+            or word_timestamps
+            or hotwords
+            or diarization
+            or (normalized_mode == "neutral-v1" and prompt is not None)
+        ):
+            raise STTExecutionUnsupportedError(
+                "External STT cannot honor the requested benchmark semantics"
+            )
+        from . import Audio_Transcription_External_Provider as external
+
+        requested = model or "external:default"
+        model_label = _safe_requested_model_label(requested)
+        provider_name = (
+            requested.split(":", 1)[1] or "default"
+            if requested.startswith("external:")
+            else "default"
+        )
+        config = external.load_external_provider_config(provider_name)
+        if config is None:
+            raise STTExecutionUnsupportedError(
+                "External STT provider is not configured"
+            )
+        if normalized_mode == "neutral-v1" and config.prompt is not None:
+            raise STTExecutionUnsupportedError(
+                "External STT configured prompt is incompatible with neutral-v1"
+            )
+        if (
+            normalized_mode == "production-v1"
+            and config.prompt != prompt
+        ):
+            raise STTExecutionUnsupportedError(
+                "External STT production prompt does not match the request"
+            )
+        if (
+            language is not None
+            and config.language is not None
+            and config.language != language
+        ):
+            raise STTExecutionUnsupportedError(
+                "External STT configured language does not match the request"
+            )
+        planned_language = language or config.language
+        planned_prompt = (
+            config.prompt
+            if normalized_mode == "production-v1"
+            else None
+        )
+        endpoint, egress, endpoint_id = _normalize_audio_endpoint(
+            external._resolve_transcription_endpoint(config.base_url)
+        )
+        decoding_settings = (
+            (
+                ("hotword_count", 0),
+                ("prompt_present", planned_prompt is not None),
+            )
+            if normalized_mode == "production-v1"
+            else ()
+        )
+        decoding_ids = tuple(
+            key for key, _value in decoding_settings
+        )
+        route = SttExecutionRoute(
+            route_id="external-http-1",
+            provider=self.name.value,
+            model_label=model_label,
+            artifact_id=None,
+            identity_resolved=False,
+            backend="openai_compatible",
+            source="external_http",
+            audio_egress=egress,
+            endpoint_id=endpoint_id,
+            device=None,
+            compute_type=None,
+            dtype=None,
+            decoding_ids=decoding_ids,
+            local_model_available=False,
+            would_download=False,
+        )
+        header_items = tuple(
+            sorted((config.custom_headers or {}).items())
+        )
+        runtime: dict[str, SttPlanScalar] = {
+            _EXTERNAL_RUNTIME_API_KEY: config.api_key,
+            _EXTERNAL_RUNTIME_BASE_URL: endpoint,
+            _EXTERNAL_RUNTIME_HEADER_NAMES: tuple(
+                name for name, _value in header_items
+            ),
+            _EXTERNAL_RUNTIME_HEADER_VALUES: tuple(
+                value for _name, value in header_items
+            ),
+            _EXTERNAL_RUNTIME_LANGUAGE: planned_language,
+            _EXTERNAL_RUNTIME_MAX_RETRIES: int(config.max_retries),
+            _EXTERNAL_RUNTIME_MODEL: config.model,
+            _EXTERNAL_RUNTIME_PROMPT: planned_prompt,
+            _EXTERNAL_RUNTIME_PROVIDER: provider_name,
+            _EXTERNAL_RUNTIME_RESPONSE_FORMAT: (
+                config.response_format
+            ),
+            _EXTERNAL_RUNTIME_TEMPERATURE: float(
+                config.temperature
+            ),
+            _EXTERNAL_RUNTIME_TIMEOUT: float(config.timeout),
+            _EXTERNAL_RUNTIME_VERIFY_SSL: bool(config.verify_ssl),
+        }
+        descriptor = SttExecutionDescriptor(
+            requested_provider=self.name.value,
+            requested_model_label=model_label,
+            resolved_provider=self.name.value,
+            resolved_model_label=model_label,
+            routes=(route,),
+            honors_task=True,
+            honors_language=True,
+            honors_prompt_absence=planned_prompt is None,
+            honors_hotword_absence=True,
+            honors_diarization=True,
+            honors_word_timestamps=True,
+            decoding_settings=decoding_settings,
+            source_modules=tuple(
+                sorted(
+                    (
+                        "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_External_Provider",
+                        "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_contract",
+                        "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_provider_adapter",
+                    )
+                )
+            ),
+            dependency_distributions=("httpx",),
+        )
+        return SttBatchExecutionPlan(
+            descriptor=descriptor,
+            task=task,
+            language=planned_language,
+            prompt=planned_prompt,
+            runtime_settings=tuple(sorted(runtime.items())),
+        )
+
+    def _transcribe_planned_batch(
+        self,
+        audio_path: str,
+        *,
+        execution_plan: SttBatchExecutionPlan,
+        base_dir: Path | None,
+        cancel_check: Callable[[], bool] | None,
+    ) -> SttTranscriptionOutcome:
+        from .Audio_Transcription_External_Provider import (
+            ExternalProviderConfig,
+            transcribe_with_external_provider,
+        )
+
+        runtime = execution_plan.runtime_values()
+        header_names = runtime[_EXTERNAL_RUNTIME_HEADER_NAMES]
+        header_values = runtime[_EXTERNAL_RUNTIME_HEADER_VALUES]
+        if (
+            not isinstance(header_names, tuple)
+            or not isinstance(header_values, tuple)
+            or len(header_names) != len(header_values)
+        ):
+            raise STTExecutionPlanError(
+                "External STT header snapshot is invalid"
+            )
+        config = ExternalProviderConfig(
+            base_url=str(runtime[_EXTERNAL_RUNTIME_BASE_URL]),
+            api_key=(
+                str(runtime[_EXTERNAL_RUNTIME_API_KEY])
+                if runtime[_EXTERNAL_RUNTIME_API_KEY] is not None
+                else None
+            ),
+            model=str(runtime[_EXTERNAL_RUNTIME_MODEL]),
+            timeout=float(runtime[_EXTERNAL_RUNTIME_TIMEOUT]),
+            max_retries=int(
+                runtime[_EXTERNAL_RUNTIME_MAX_RETRIES]
+            ),
+            verify_ssl=bool(
+                runtime[_EXTERNAL_RUNTIME_VERIFY_SSL]
+            ),
+            custom_headers=dict(zip(header_names, header_values)),
+            response_format=str(
+                runtime[_EXTERNAL_RUNTIME_RESPONSE_FORMAT]
+            ),
+            temperature=float(
+                runtime[_EXTERNAL_RUNTIME_TEMPERATURE]
+            ),
+            language=(
+                str(runtime[_EXTERNAL_RUNTIME_LANGUAGE])
+                if runtime[_EXTERNAL_RUNTIME_LANGUAGE] is not None
+                else None
+            ),
+            prompt=(
+                str(runtime[_EXTERNAL_RUNTIME_PROMPT])
+                if runtime[_EXTERNAL_RUNTIME_PROMPT] is not None
+                else None
+            ),
+        )
+        outcome = transcribe_with_external_provider(
+            audio_path,
+            provider_name=str(
+                runtime[_EXTERNAL_RUNTIME_PROVIDER]
+            ),
+            config=config,
+            base_dir=base_dir,
+            execution_plan=execution_plan,
+        )
+        if not isinstance(outcome, SttTranscriptionOutcome):
+            raise STTExecutionPlanError(
+                "Planned external STT execution did not report its route"
+            )
+        return outcome
 
     def transcribe_batch(
         self,

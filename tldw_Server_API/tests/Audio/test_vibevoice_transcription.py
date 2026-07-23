@@ -1,16 +1,17 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 import numpy as np
 import pytest
 import soundfile as sf  # type: ignore
 
 import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_VibeVoice as vv
+from tldw_Server_API.app.core.exceptions import STTExecutionPlanError
 
 
-def _minimal_settings(tmp_path: Path) -> Dict[str, Any]:
+def _minimal_settings(tmp_path: Path) -> dict[str, Any]:
     return {
         "enabled": True,
         "model_id": "microsoft/VibeVoice-ASR",
@@ -66,9 +67,9 @@ def test_transcribe_prefers_vllm_when_enabled(monkeypatch: pytest.MonkeyPatch, t
 
     monkeypatch.setattr(vv, "_resolve_settings", lambda: dict(settings), raising=True)
 
-    captured: Dict[str, Any] = {}
+    captured: dict[str, Any] = {}
 
-    def _fake_vllm(**kwargs: Any) -> Dict[str, Any]:
+    def _fake_vllm(**kwargs: Any) -> dict[str, Any]:
         captured.update(kwargs)
         return {
             "text": "vllm path",
@@ -100,7 +101,7 @@ def test_vllm_failure_falls_back_to_local(monkeypatch: pytest.MonkeyPatch, tmp_p
 
     called = {"local": 0}
 
-    def _fake_local(**kwargs: Any) -> Dict[str, Any]:
+    def _fake_local(**kwargs: Any) -> dict[str, Any]:
         called["local"] += 1
         return {
             "text": "local path",
@@ -117,3 +118,103 @@ def test_vllm_failure_falls_back_to_local(monkeypatch: pytest.MonkeyPatch, tmp_p
     assert artifact["metadata"]["source"] == "local"
     assert called["local"] == 1
 
+
+@pytest.mark.unit
+def test_vllm_http_disables_redirects(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    audio = tmp_path / "sample.wav"
+    audio.write_bytes(b"audio")
+    settings = _minimal_settings(tmp_path)
+    settings["vllm_base_url"] = "http://127.0.0.1:8000"
+    captured: dict[str, Any] = {}
+
+    def fake_fetch_json(**kwargs: Any) -> dict[str, Any]:
+        captured.update(kwargs)
+        return {"text": "redirect-safe"}
+
+    from tldw_Server_API.app.core import http_client
+
+    monkeypatch.setattr(
+        http_client,
+        "fetch_json",
+        fake_fetch_json,
+    )
+    monkeypatch.setattr(
+        vv,
+        "_audio_duration_seconds",
+        lambda _path: 1.0,
+    )
+
+    artifact = vv._transcribe_via_vllm_http(
+        audio_path=audio,
+        base_dir=tmp_path,
+        settings=settings,
+        language="en",
+        hotwords=[],
+        cancel_check=None,
+    )
+
+    assert captured["allow_redirects"] is False
+    assert artifact["text"] == "redirect-safe"
+
+
+@pytest.mark.unit
+def test_planned_local_processor_never_drops_language_or_hotwords() -> None:
+    calls: list[dict[str, Any]] = []
+
+    def processor(**kwargs: Any) -> object:
+        calls.append(kwargs)
+        if "language" in kwargs or "hotwords" in kwargs:
+            raise TypeError("unsupported optional input")
+        return object()
+
+    with pytest.raises(STTExecutionPlanError, match="semantics"):
+        vv._build_processor_inputs(
+            processor,
+            audio_np=np.zeros(10, dtype="float32"),
+            sample_rate=16000,
+            language="en",
+            hotwords=["private-hotword"],
+            strict_semantics=True,
+        )
+
+    assert len(calls) == 1
+
+
+@pytest.mark.unit
+def test_planned_local_transcribe_never_retries_without_language(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, Any]] = []
+
+    class Model:
+        def transcribe(self, _audio: object, **kwargs: Any) -> object:
+            calls.append(kwargs)
+            if "language" in kwargs:
+                raise TypeError("language unsupported")
+            return {"text": "silently dropped language"}
+
+    monkeypatch.setattr(
+        vv,
+        "_load_local_components",
+        lambda _settings: (object(), Model(), "cpu"),
+    )
+
+    with pytest.raises(STTExecutionPlanError, match="semantics"):
+        vv._transcribe_local(
+            audio_np=np.zeros(10, dtype="float32"),
+            sample_rate=16000,
+            duration_seconds=0.1,
+            settings={
+                "model_id": "local-model",
+                "max_new_tokens": 10,
+                "strict_semantics": True,
+            },
+            language="en",
+            hotwords=[],
+            cancel_check=None,
+        )
+
+    assert len(calls) == 1
