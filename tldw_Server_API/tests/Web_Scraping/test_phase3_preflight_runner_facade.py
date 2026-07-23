@@ -1339,6 +1339,11 @@ async def test_legacy_gather_converts_deadline_to_timeout_aggregate_and_closes_o
         }
         for key in ANALYZER_KEYS
     }
+    assert result["score"] == {"score": 0, "label": "Unknown"}
+    assert result["recommendations"] == {
+        "tools": ["Retry preflight analysis before selecting scraping tools."],
+        "strategy": ["Do not infer scrape difficulty from an incomplete preflight analysis."],
+    }
     assert cast(_Context, context).close_calls == 1
 
 
@@ -1365,6 +1370,11 @@ def test_sync_legacy_gather_converts_deadline_to_timeout_aggregate_and_closes_on
             "error_code": "timeout",
         }
         for key in ANALYZER_KEYS
+    }
+    assert result["score"] == {"score": 0, "label": "Unknown"}
+    assert result["recommendations"] == {
+        "tools": ["Retry preflight analysis before selecting scraping tools."],
+        "strategy": ["Do not infer scrape difficulty from an incomplete preflight analysis."],
     }
     assert cast(_Context, context).close_calls == 1
 

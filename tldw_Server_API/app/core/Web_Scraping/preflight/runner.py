@@ -202,8 +202,11 @@ def _timeout_failure_analysis() -> AnalysisOutput:
     results = {key: dict(_TIMEOUT_ERROR) for key in ANALYZER_KEYS}
     return {
         "results": results,
-        "score": calculate_difficulty_score(results),
-        "recommendations": generate_recommendations(results),
+        "score": {"score": 0, "label": "Unknown"},
+        "recommendations": {
+            "tools": ["Retry preflight analysis before selecting scraping tools."],
+            "strategy": ["Do not infer scrape difficulty from an incomplete preflight analysis."],
+        },
     }
 
 
