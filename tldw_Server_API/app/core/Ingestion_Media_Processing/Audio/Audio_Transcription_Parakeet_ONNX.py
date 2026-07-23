@@ -35,10 +35,9 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_con
     SttExecutionRoute,
     SttLoadedRuntime,
     SttTranscriptionOutcome,
-)
-from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_provider_adapter import (
     actual_execution_from_route,
     require_local_execution_route,
+    validate_stt_loaded_runtime,
 )
 
 try:
@@ -706,6 +705,28 @@ def _onnx_loaded_runtime(
     )
 
 
+def validate_local_onnx_artifact(model_path: str | Path) -> Path:
+    """Require a complete local ONNX graph and tokenizer artifact."""
+    path = Path(model_path)
+    if not path.is_dir() or path.is_symlink():
+        raise STTExecutionUnsupportedError(
+            "Planned Parakeet ONNX requires a complete local artifact"
+        )
+    resolved = path.resolve()
+    if _resolve_parakeet_tdt_bundle_paths(resolved) is not None:
+        return resolved
+    has_graph = any(resolved.glob("*.onnx"))
+    has_tokenizer = any(
+        (resolved / name).is_file()
+        for name in ("vocab.json", "tokenizer.json")
+    )
+    if not has_graph or not has_tokenizer:
+        raise STTExecutionUnsupportedError(
+            "Planned Parakeet ONNX requires a complete local artifact"
+        )
+    return resolved
+
+
 def load_parakeet_onnx_model(
     model_path: Optional[str] = None,
     device: str = "cpu",
@@ -761,11 +782,8 @@ def load_parakeet_onnx_model(
             raise STTExecutionUnsupportedError(
                 "No-download Parakeet ONNX execution requires an explicit local model directory"
             )
-        planned_dir = Path(model_path)
-        if not planned_dir.is_dir():
-            raise STTExecutionUnsupportedError(
-                "No-download Parakeet ONNX execution requires an existing local model directory"
-            )
+        planned_dir = validate_local_onnx_artifact(model_path)
+        model_path = str(planned_dir)
         stt_cfg: dict[str, Any] = {}
     else:
         try:
@@ -784,7 +802,11 @@ def load_parakeet_onnx_model(
         if raw_configured_revision is not None
         else None
     )
-    revision = configured_revision or os.getenv("PARAKEET_ONNX_REVISION")
+    revision = (
+        None
+        if planned
+        else configured_revision or os.getenv("PARAKEET_ONNX_REVISION")
+    )
 
     cache_key = f"{model_path}_{revision or ''}_{device}"
     if cache_key in _onnx_model_cache:
@@ -846,10 +868,15 @@ def load_parakeet_onnx_model(
                     return None, None
 
         # Set up providers
-        providers = []
-        if device == 'cuda':
-            providers.append('CUDAExecutionProvider')
-        providers.append('CPUExecutionProvider')
+        providers = [
+            "CUDAExecutionProvider"
+            if device == "cuda"
+            else "CPUExecutionProvider"
+        ] if planned else (
+            ["CUDAExecutionProvider", "CPUExecutionProvider"]
+            if device == "cuda"
+            else ["CPUExecutionProvider"]
+        )
 
         # Create ONNX sessions. Use a fresh import so patched attributes are respected.
         try:
@@ -857,6 +884,21 @@ def load_parakeet_onnx_model(
             _runtime = _importlib.import_module('onnxruntime')
         except (ImportError, ModuleNotFoundError, RuntimeError):
             _runtime = ort
+        if planned:
+            get_available_providers = getattr(
+                _runtime,
+                "get_available_providers",
+                None,
+            )
+            available = (
+                set(map(str, get_available_providers()))
+                if callable(get_available_providers)
+                else set()
+            )
+            if callable(get_available_providers) and providers[0] not in available:
+                raise STTExecutionUnsupportedError(
+                    "Planned Parakeet ONNX device provider is unavailable"
+                )
 
         session_options = _runtime.SessionOptions()
         session_options.graph_optimization_level = _runtime.GraphOptimizationLevel.ORT_ENABLE_ALL
@@ -974,11 +1016,9 @@ def load_parakeet_onnx_model(
         # Find ONNX files
         onnx_files = list(model_dir.glob("*.onnx"))
         if not onnx_files:
-            # In test environments, the session may be mocked; proceed with a placeholder path
+            # Legacy mode preserves its historical mocked-session fallback.
             logger.warning(
-                "No ONNX files found in planned local artifact; proceeding with placeholder path"
-                if planned
-                else f"No ONNX files found in {model_dir}; proceeding with placeholder path for session initialization"
+                f"No ONNX files found in {model_dir}; proceeding with placeholder path for session initialization"
             )
             onnx_path = model_dir / "model.onnx"
         else:
@@ -1086,17 +1126,18 @@ def transcribe_with_parakeet_onnx(
             ),
         )
         if execution_plan is not None:
-            if not isinstance(loaded, SttLoadedRuntime):
-                raise STTExecutionPlanError(
-                    "Planned Parakeet ONNX load did not report actual execution"
-                )
-            loaded_runtime = loaded
+            route = execution_route or execution_plan.descriptor.primary_route
+            loaded_runtime = validate_stt_loaded_runtime(loaded, route)
             session, tokenizer = loaded.components
         else:
             session, tokenizer = loaded
     except (STTExecutionPlanError, STTExecutionUnsupportedError):
         raise
     except Exception as e:
+        if execution_plan is not None:
+            raise STTTranscriptionError(
+                "Parakeet ONNX model load failed during planned execution"
+            ) from None
         logger.exception(f"Failed to load ONNX model: {e}")
         return _finish("[Error: Failed to load ONNX model]")
     if session is None or tokenizer is None:
@@ -1115,6 +1156,10 @@ def transcribe_with_parakeet_onnx(
                     target_sr=sample_rate
                 )
         except (ImportError, OSError, RuntimeError, TypeError, ValueError) as e:
+            if execution_plan is not None:
+                raise STTTranscriptionError(
+                    "Parakeet ONNX audio decode failed during planned execution"
+                ) from None
             logger.exception(f"Failed to load audio file: {e}")
             return _finish("[Error: Failed to load audio]")
 
@@ -1172,6 +1217,10 @@ def transcribe_with_parakeet_onnx(
         except (STTExecutionPlanError, STTExecutionUnsupportedError, STTTranscriptionError):
             raise
         except Exception as e:
+            if execution_plan is not None:
+                raise STTTranscriptionError(
+                    "Parakeet ONNX transcription failed during planned execution"
+                ) from None
             logger.exception(f"Parakeet TDT ONNX graph bundle transcription error: {e}")
             return _finish("[Error: Parakeet ONNX transcription failed]")
 
@@ -1236,6 +1285,10 @@ def transcribe_with_parakeet_onnx(
     except (STTExecutionPlanError, STTExecutionUnsupportedError, STTTranscriptionError):
         raise
     except Exception as e:
+        if execution_plan is not None:
+            raise STTTranscriptionError(
+                "Parakeet ONNX transcription failed during planned execution"
+            ) from None
         logger.exception(f"Transcription error: {e}")
         return _finish("[Error: Parakeet ONNX transcription failed]")
 

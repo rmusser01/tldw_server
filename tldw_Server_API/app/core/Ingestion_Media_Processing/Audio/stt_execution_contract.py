@@ -517,6 +517,69 @@ def _actual_matches_route(
     )
 
 
+def require_local_execution_route(
+    route: SttExecutionRoute,
+    *,
+    provider: str,
+    backend: str,
+) -> None:
+    """Reject any route that is not an offline local execution."""
+    from tldw_Server_API.app.core.exceptions import STTExecutionPlanError
+
+    if (
+        route.provider != provider
+        or route.backend != backend
+        or route.source != "local"
+        or route.audio_egress is not SttAudioEgress.NONE
+        or not route.local_model_available
+        or route.would_download
+    ):
+        raise STTExecutionPlanError(
+            f"Invalid local execution route for {provider}"
+        )
+
+
+def actual_execution_from_route(
+    route: SttExecutionRoute,
+    *,
+    device: str | None,
+    compute_type: str | None = None,
+    dtype: str | None = None,
+) -> SttActualExecution:
+    """Copy route identity while recording loaded-runtime values."""
+    return SttActualExecution(
+        route_id=route.route_id,
+        provider=route.provider,
+        model_label=route.model_label,
+        artifact_id=route.artifact_id,
+        backend=route.backend,
+        audio_egress=route.audio_egress,
+        endpoint_id=route.endpoint_id,
+        source=route.source,
+        device=device,
+        compute_type=compute_type,
+        dtype=dtype,
+        decoding_ids=route.decoding_ids,
+    )
+
+
+def validate_stt_loaded_runtime(
+    loaded: object,
+    route: SttExecutionRoute,
+) -> SttLoadedRuntime:
+    """Require a typed loaded runtime matching the selected route."""
+    from tldw_Server_API.app.core.exceptions import STTExecutionPlanError
+
+    if (
+        not isinstance(loaded, SttLoadedRuntime)
+        or not _actual_matches_route(loaded.actual_execution, route)
+    ):
+        raise STTExecutionPlanError(
+            "Loaded STT runtime does not match the selected execution route"
+        )
+    return loaded
+
+
 def _semantic_mismatches(plan: SttBatchExecutionPlan) -> list[str]:
     descriptor = plan.descriptor
     mismatches: list[str] = []

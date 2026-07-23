@@ -529,6 +529,34 @@ def test_dependency_neutral_contract_does_not_import_adapter():
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    "provider_module",
+    [
+        "Audio_Transcription_Lib",
+        "Audio_Transcription_Nemo",
+        "Audio_Transcription_Parakeet_ONNX",
+        "Audio_Transcription_Parakeet_MLX",
+    ],
+)
+def test_provider_runtime_module_does_not_import_adapter(provider_module):
+    package = "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio"
+    adapter_name = f"{package}.stt_provider_adapter"
+    command = (
+        f"import sys; import {package}.{provider_module}; "
+        f"assert {adapter_name!r} not in sys.modules"
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-c", command],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.unit
 def test_get_adapter_strict_rejects_unknown_but_legacy_lookup_still_falls_back():
     spa = _import_module()
     registry = spa.SttProviderRegistry()

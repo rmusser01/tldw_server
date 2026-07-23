@@ -39,10 +39,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_con
     SttExecutionRoute,
     SttLoadedRuntime,
     SttTranscriptionOutcome,
-)
-from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_provider_adapter import (
     actual_execution_from_route,
-    require_local_execution_route,
 )
 
 # Check if we're on macOS
@@ -337,15 +334,9 @@ def load_parakeet_mlx_model(
 
     planned = execution_route is not None
     if planned:
-        require_local_execution_route(
-            execution_route,
-            provider="parakeet",
-            backend="mlx",
+        raise STTExecutionUnsupportedError(
+            "Planned Parakeet MLX execution cannot prove local device and dtype"
         )
-        if allow_download:
-            raise STTExecutionPlanError(
-                "Planned Parakeet MLX execution must prohibit downloads"
-            )
     if not allow_download:
         if model_path is None or not Path(model_path).is_dir():
             raise STTExecutionUnsupportedError(

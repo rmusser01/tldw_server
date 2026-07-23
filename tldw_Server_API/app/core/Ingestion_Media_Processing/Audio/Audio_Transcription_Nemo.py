@@ -46,10 +46,9 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_con
     SttExecutionRoute,
     SttLoadedRuntime,
     SttTranscriptionOutcome,
-)
-from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_provider_adapter import (
     actual_execution_from_route,
     require_local_execution_route,
+    validate_stt_loaded_runtime,
 )
 
 # Global model cache
@@ -317,7 +316,12 @@ def _require_local_nemo_path(model_path: str | None) -> Path:
         raise STTExecutionUnsupportedError(
             "No-download NeMo execution requires an existing local .nemo artifact"
         )
-    return path.resolve()
+    resolved = path.resolve()
+    if path.is_symlink() or any(parent.is_symlink() for parent in path.parents):
+        raise STTExecutionUnsupportedError(
+            "No-download NeMo execution requires a non-symlink local .nemo artifact"
+        )
+    return resolved
 
 
 def _nemo_actual(
@@ -717,6 +721,7 @@ def transcribe_with_canary(
     target_language: Optional[str] = None,
     execution_plan: SttBatchExecutionPlan | None = None,
     execution_route: SttExecutionRoute | None = None,
+    _loaded_runtime: SttLoadedRuntime | None = None,
 ) -> str | SttTranscriptionOutcome:
     """
     Transcribe or translate audio using the Canary-1b-v2 model.
@@ -747,18 +752,14 @@ def transcribe_with_canary(
     if execution_plan is not None:
         route = execution_route or execution_plan.descriptor.primary_route
         runtime = execution_plan.runtime_values()
-        loaded = load_canary_model(
+        loaded = _loaded_runtime or load_canary_model(
             model_path=str(runtime.get(_RUNTIME_MODEL_PATH) or ""),
             device=str(runtime.get(_RUNTIME_DEVICE) or ""),
             dtype_name=str(runtime.get(_RUNTIME_DTYPE) or ""),
             allow_download=False,
             execution_route=route,
         )
-        if not isinstance(loaded, SttLoadedRuntime):
-            raise STTExecutionPlanError(
-                "Planned Canary load did not report actual execution"
-            )
-        loaded_runtime = loaded
+        loaded_runtime = validate_stt_loaded_runtime(loaded, route)
         model = loaded.components[0]
     else:
         model = load_canary_model()
@@ -838,6 +839,10 @@ def transcribe_with_canary(
         except STTTranscriptionError:
             raise
         except _NEMO_NONCRITICAL_EXCEPTIONS as direct_err:
+            if execution_plan is not None:
+                raise STTTranscriptionError(
+                    "Canary transcription failed during planned execution"
+                ) from None
             logging.debug(f"Canary direct numpy transcription failed, falling back to temp file: {direct_err}")
             audio_path = _temp_wav_from_numpy(audio_np, model_sample_rate)
             audio_source = audio_path
@@ -856,11 +861,11 @@ def transcribe_with_canary(
     except (STTExecutionPlanError, STTExecutionUnsupportedError, STTTranscriptionError):
         raise
     except Exception as e:
-        logging.exception(f"Error during Canary transcription: {e}")
         if execution_plan is not None:
             raise STTTranscriptionError(
                 "Canary transcription failed during planned execution"
-            ) from e
+            ) from None
+        logging.exception(f"Error during Canary transcription: {e}")
         return "[Transcription error] Canary transcription failed"
     finally:
         if cleanup_temp and audio_path and os.path.exists(audio_path):
@@ -880,6 +885,7 @@ def transcribe_with_parakeet(
     *,
     execution_plan: SttBatchExecutionPlan | None = None,
     execution_route: SttExecutionRoute | None = None,
+    _loaded_runtime: SttLoadedRuntime | None = None,
 ) -> str | SttTranscriptionOutcome:
     """
     Transcribe audio using the Parakeet TDT model.
@@ -913,7 +919,7 @@ def transcribe_with_parakeet(
                 f"NeMo cannot execute planned Parakeet variant {planned_variant}"
             )
         variant = planned_variant
-        loaded = load_parakeet_model(
+        loaded = _loaded_runtime or load_parakeet_model(
             variant,
             model_path=str(runtime.get(_RUNTIME_MODEL_PATH) or ""),
             device=str(runtime.get(_RUNTIME_DEVICE) or ""),
@@ -922,11 +928,7 @@ def transcribe_with_parakeet(
             allow_variant_fallback=False,
             execution_route=route,
         )
-        if not isinstance(loaded, SttLoadedRuntime):
-            raise STTExecutionPlanError(
-                "Planned Parakeet load did not report actual execution"
-            )
-        loaded_runtime = loaded
+        loaded_runtime = validate_stt_loaded_runtime(loaded, route)
         model = loaded.components[0]
     else:
         model = load_parakeet_model(variant)
@@ -962,6 +964,10 @@ def transcribe_with_parakeet(
                     chunk_callback=chunk_callback
                 )
             except _NEMO_NONCRITICAL_EXCEPTIONS as direct_err:
+                if execution_plan is not None:
+                    raise STTTranscriptionError(
+                        "Parakeet transcription failed during planned execution"
+                    ) from None
                 logging.debug(f"Parakeet direct numpy transcription failed, falling back to temp file: {direct_err}")
                 audio_path = _temp_wav_from_numpy(audio_np, model_sample_rate)
                 audio_source = audio_path
@@ -1013,11 +1019,11 @@ def transcribe_with_parakeet(
     except (STTExecutionPlanError, STTExecutionUnsupportedError, STTTranscriptionError):
         raise
     except Exception as e:
-        logging.exception(f"Error during Parakeet transcription: {e}")
         if execution_plan is not None:
             raise STTTranscriptionError(
                 "Parakeet transcription failed during planned execution"
-            ) from e
+            ) from None
+        logging.exception(f"Error during Parakeet transcription: {e}")
         return "[Transcription error] Parakeet transcription failed"
     finally:
         if cleanup_temp and audio_path and os.path.exists(audio_path):

@@ -59,7 +59,13 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_con
     SttTranscriptionOutcome as SttTranscriptionOutcome,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_contract import (
+    actual_execution_from_route as actual_execution_from_route,
+)
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_contract import (
     finalize_stt_artifact as finalize_stt_artifact,
+)
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_contract import (
+    require_local_execution_route as require_local_execution_route,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.path_utils import resolve_safe_local_path
 
@@ -170,50 +176,6 @@ _LOCAL_RUNTIME_DEVICE_MAP = "device_map"
 _LOCAL_RUNTIME_COMPUTE_TYPE = "compute_type"
 _LOCAL_RUNTIME_DTYPE = "dtype"
 _LOCAL_RUNTIME_VARIANT = "variant"
-
-
-def require_local_execution_route(
-    route: SttExecutionRoute,
-    *,
-    provider: str,
-    backend: str,
-) -> None:
-    """Reject any route that is not a pinned, offline local execution."""
-    if (
-        route.provider != provider
-        or route.backend != backend
-        or route.source != "local"
-        or route.audio_egress is not SttAudioEgress.NONE
-        or not route.local_model_available
-        or route.would_download
-    ):
-        raise STTExecutionPlanError(
-            f"Invalid local execution route for {provider}"
-        )
-
-
-def actual_execution_from_route(
-    route: SttExecutionRoute,
-    *,
-    device: str | None,
-    compute_type: str | None = None,
-    dtype: str | None = None,
-) -> SttActualExecution:
-    """Copy route identity while recording values proven by the loaded runtime."""
-    return SttActualExecution(
-        route_id=route.route_id,
-        provider=route.provider,
-        model_label=route.model_label,
-        artifact_id=route.artifact_id,
-        backend=route.backend,
-        audio_egress=route.audio_egress,
-        endpoint_id=route.endpoint_id,
-        source=route.source,
-        device=device,
-        compute_type=compute_type,
-        dtype=dtype,
-        decoding_ids=route.decoding_ids,
-    )
 
 
 def _segment_text_value(segment: dict[str, Any]) -> str:
@@ -396,6 +358,10 @@ def _require_benchmark_mode(mode: str) -> str:
         raise STTExecutionUnsupportedError(
             f"Unsupported STT benchmark mode: {mode}"
         )
+    if normalized == "production-v1":
+        raise STTExecutionUnsupportedError(
+            "production-v1 is unsupported for local STT providers"
+        )
     return normalized
 
 
@@ -423,6 +389,33 @@ def _require_existing_path(
             f"{provider} requires an explicit existing local {description}"
         )
     return path.resolve()
+
+
+def _require_planned_device(
+    device: str,
+    *,
+    provider: str,
+    allowed: set[str],
+) -> str:
+    if device not in allowed:
+        raise STTExecutionUnsupportedError(
+            f"{provider} planned device is unsupported"
+        )
+    return device
+
+
+def _require_planned_precision(
+    value: str,
+    *,
+    provider: str,
+    label: str,
+    allowed: set[str],
+) -> str:
+    if value not in allowed:
+        raise STTExecutionUnsupportedError(
+            f"{provider} planned {label} is unsupported"
+        )
+    return value
 
 
 def _plan_semantics(
@@ -565,12 +558,12 @@ def _build_local_plan(
         resolved_provider=provider,
         resolved_model_label=resolved_model,
         routes=(route,),
-        honors_task=True,
-        honors_language=True,
-        honors_prompt_absence=True,
-        honors_hotword_absence=True,
-        honors_diarization=True,
-        honors_word_timestamps=True,
+        honors_task=task == "transcribe",
+        honors_language=language is not None,
+        honors_prompt_absence=prompt is None,
+        honors_hotword_absence=not planned_hotwords,
+        honors_diarization=not diarization,
+        honors_word_timestamps=not word_timestamps,
         decoding_settings=decoding_settings,
         source_modules=tuple(sorted(source_modules)),
         dependency_distributions=tuple(sorted(dependency_distributions)),
@@ -820,11 +813,14 @@ class FasterWhisperAdapter(SttProviderAdapter):
         requested = model or "distil-large-v3"
         requested_label = _safe_requested_model_label(requested)
         if requested_label == "local-model":
-            model_path: Path | str = _require_existing_path(
-                requested,
-                provider=self.name.value,
-                directory=True,
-            )
+            try:
+                model_path: Path | str = atlib.validate_whisper_model_identifier(
+                    requested
+                )
+            except ValueError:
+                raise STTExecutionUnsupportedError(
+                    "faster-whisper local model artifact is invalid"
+                ) from None
         else:
             if not atlib.check_model_exists(requested):
                 raise STTExecutionUnsupportedError(
@@ -835,11 +831,30 @@ class FasterWhisperAdapter(SttProviderAdapter):
         device = str(
             stt_cfg.get("whisper_device") or atlib.processing_choice or "cpu"
         ).strip().lower()
+        device = _require_planned_device(
+            device,
+            provider=self.name.value,
+            allowed={"cpu", "cuda"},
+        )
         compute_type = str(
             stt_cfg.get("whisper_compute_type") or ""
         ).strip().lower()
         if not compute_type or compute_type == "auto":
             compute_type = "float16" if "cuda" in device else "int8"
+        compute_type = _require_planned_precision(
+            compute_type,
+            provider=self.name.value,
+            label="compute type",
+            allowed=(
+                {"float16", "int8", "int8_float16", "float32", "bfloat16"}
+                if device == "cuda"
+                else {"int8", "int8_float32", "float32"}
+            ),
+        )
+        if device == "cuda" and not atlib.faster_whisper_cuda_available():
+            raise STTExecutionUnsupportedError(
+                "faster-whisper planned CUDA backend is unavailable"
+            )
         if normalized_mode == "production-v1" and "cuda" in device:
             raise STTExecutionUnsupportedError(
                 "production-v1 CUDA-to-CPU fallback cannot be frozen by this local plan"
@@ -996,7 +1011,9 @@ class ParakeetAdapter(SttProviderAdapter):
         }:
             variant = "onnx"
         elif lowered == "parakeet-mlx":
-            variant = "mlx"
+            raise STTExecutionUnsupportedError(
+                "Parakeet MLX planning cannot prove local device and dtype"
+            )
         elif lowered == "parakeet-cuda":
             variant = "cuda"
         else:
@@ -1005,16 +1022,14 @@ class ParakeetAdapter(SttProviderAdapter):
             )
         stt_cfg = get_stt_config() or {}
         if variant in {"standard", "cuda"}:
+            from . import Audio_Transcription_Nemo as nemo
+
             path_value = (
                 requested
                 if requested_label == "local-model"
                 else stt_cfg.get("parakeet_model_path")
             )
-            model_path = _require_existing_path(
-                path_value,
-                provider=self.name.value,
-                suffix=".nemo",
-            )
+            model_path = nemo._require_local_nemo_path(path_value)
             backend = "nemo"
             device = (
                 "cuda"
@@ -1024,6 +1039,22 @@ class ParakeetAdapter(SttProviderAdapter):
             dtype = str(
                 stt_cfg.get("nemo_compute_type") or "float32"
             ).strip().lower()
+            dtype = _require_planned_precision(
+                dtype,
+                provider=self.name.value,
+                label="dtype",
+                allowed=(
+                    {"float16", "bfloat16", "float32"}
+                    if device == "cuda"
+                    else {"float32"}
+                ),
+            )
+            if device == "cuda" and not nemo._torch_cuda_available(
+                allow_import=False
+            ):
+                raise STTExecutionUnsupportedError(
+                    "Parakeet planned CUDA backend is unavailable"
+                )
             dependencies = ("nemo-toolkit",)
             modules = (
                 "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib",
@@ -1031,16 +1062,31 @@ class ParakeetAdapter(SttProviderAdapter):
                 "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_provider_adapter",
             )
         elif variant == "onnx":
-            model_path = _require_existing_path(
-                stt_cfg.get("parakeet_onnx_model_id"),
-                provider=self.name.value,
-                directory=True,
+            from . import Audio_Transcription_Parakeet_ONNX as parakeet_onnx
+
+            model_path = parakeet_onnx.validate_local_onnx_artifact(
+                str(stt_cfg.get("parakeet_onnx_model_id") or "")
             )
             backend = "onnxruntime"
             device = str(
                 stt_cfg.get("parakeet_onnx_device") or "cpu"
             ).strip().lower()
             dtype = None
+            if device == "cuda":
+                get_available = getattr(
+                    parakeet_onnx.ort,
+                    "get_available_providers",
+                    None,
+                )
+                available = (
+                    set(map(str, get_available()))
+                    if callable(get_available)
+                    else set()
+                )
+                if "CUDAExecutionProvider" not in available:
+                    raise STTExecutionUnsupportedError(
+                        "Parakeet planned CUDA backend is unavailable"
+                    )
             dependencies = ("onnxruntime",)
             modules = (
                 "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib",
@@ -1062,10 +1108,11 @@ class ParakeetAdapter(SttProviderAdapter):
                 "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Parakeet_MLX",
                 "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_provider_adapter",
             )
-        if normalized_mode == "production-v1" and variant != "onnx":
-            raise STTExecutionUnsupportedError(
-                "production-v1 Parakeet fallback cannot be fully frozen"
-            )
+        device = _require_planned_device(
+            device,
+            provider=self.name.value,
+            allowed={"cpu", "cuda"},
+        )
         return _build_local_plan(
             provider=self.name.value,
             requested_model=requested_label,
@@ -1198,21 +1245,47 @@ class CanaryAdapter(SttProviderAdapter):
         normalized_mode = _require_benchmark_mode(mode)
         requested = model or "nemo-canary-1b"
         requested_label = _safe_requested_model_label(requested)
+        primary_language = _primary_language(language)
+        from .Audio_Transcription_Nemo import CANARY_SUPPORTED_LANG_CODES
+
+        if primary_language not in CANARY_SUPPORTED_LANG_CODES:
+            raise STTExecutionUnsupportedError(
+                "Canary does not support the requested language"
+            )
         stt_cfg = get_stt_config() or {}
+        from . import Audio_Transcription_Nemo as nemo
+
         path_value = (
             requested
             if requested_label == "local-model"
             else stt_cfg.get("canary_model_path")
         )
-        model_path = _require_existing_path(
-            path_value,
-            provider=self.name.value,
-            suffix=".nemo",
-        )
+        model_path = nemo._require_local_nemo_path(path_value)
         device = str(stt_cfg.get("nemo_device") or "cpu").strip().lower()
+        device = _require_planned_device(
+            device,
+            provider=self.name.value,
+            allowed={"cpu", "cuda"},
+        )
         dtype = str(
             stt_cfg.get("nemo_compute_type") or "float32"
         ).strip().lower()
+        dtype = _require_planned_precision(
+            dtype,
+            provider=self.name.value,
+            label="dtype",
+            allowed=(
+                {"float16", "bfloat16", "float32"}
+                if device == "cuda"
+                else {"float32"}
+            ),
+        )
+        if device == "cuda" and not nemo._torch_cuda_available(
+            allow_import=False
+        ):
+            raise STTExecutionUnsupportedError(
+                "Canary planned CUDA backend is unavailable"
+            )
         return _build_local_plan(
             provider=self.name.value,
             requested_model=requested_label,
@@ -1352,31 +1425,57 @@ class Qwen2AudioAdapter(SttProviderAdapter):
         mode: str,
     ) -> SttBatchExecutionPlan:
         normalized_mode = _require_benchmark_mode(mode)
-        if normalized_mode == "production-v1":
+        if _primary_language(language) != "en":
             raise STTExecutionUnsupportedError(
-                "production-v1 Qwen2Audio-to-Whisper fallback cannot be fully frozen"
+                "Qwen2Audio neutral-v1 supports only English language tags"
             )
         requested = model or "qwen2audio"
         requested_label = _safe_requested_model_label(requested)
+        from . import Audio_Transcription_Lib as atlib
+
         stt_cfg = get_stt_config() or {}
         path_value = (
             requested
             if requested_label == "local-model" and Path(requested).is_dir()
             else stt_cfg.get("qwen2audio_model_id")
         )
-        model_path = _require_existing_path(
-            path_value,
-            provider=self.name.value,
-            directory=True,
-        )
+        try:
+            model_path = atlib.validate_qwen2audio_model_identifier(
+                str(path_value or "")
+            )
+        except ValueError:
+            raise STTExecutionUnsupportedError(
+                "Qwen2Audio local model artifact is invalid"
+            ) from None
         revision_value = stt_cfg.get("qwen2audio_revision")
         revision = str(revision_value).strip() if revision_value else None
         device_map = str(
             stt_cfg.get("qwen2audio_device_map") or "auto"
         ).strip().lower()
+        device_map = _require_planned_device(
+            device_map,
+            provider=self.name.value,
+            allowed={"cpu", "cuda"},
+        )
         dtype = str(
             stt_cfg.get("qwen2audio_dtype") or "float16"
         ).strip().lower()
+        dtype = _require_planned_precision(
+            dtype,
+            provider=self.name.value,
+            label="dtype",
+            allowed=(
+                {"float16", "bfloat16", "float32"}
+                if device_map == "cuda"
+                else {"float32"}
+            ),
+        )
+        if device_map == "cuda" and not atlib._torch_cuda_available(
+            allow_import=False
+        ):
+            raise STTExecutionUnsupportedError(
+                "Qwen2Audio planned CUDA backend is unavailable"
+            )
         runtime_settings: dict[str, SttPlanScalar] = {
             _LOCAL_RUNTIME_DEVICE_MAP: device_map,
             _LOCAL_RUNTIME_DTYPE: dtype,
