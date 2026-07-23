@@ -1,7 +1,7 @@
 ---
 id: TASK-12985
 title: Design native batch STT benchmark harness
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-07-23 06:09'
 updated_date: '2026-07-23 06:34'
@@ -25,9 +25,9 @@ Document the approved design for a standalone batch-only STT benchmark that invo
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Design captures architecture, dataset contract, scoring, timing, reporting, recovery, and regression policy
-- [ ] #2 Design records the review of pipecat-ai/stt-benchmark and the decisions to avoid Pipecat and LLM judges
-- [ ] #3 Approved design is self-reviewed, linked from this task, and committed
+- [x] #1 Design captures architecture, dataset contract, scoring, timing, reporting, recovery, and regression policy
+- [x] #2 Design records the review of pipecat-ai/stt-benchmark and the decisions to avoid Pipecat and LLM judges
+- [x] #3 Approved design is self-reviewed, linked from this task, and committed
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -44,12 +44,18 @@ Approved design written and self-reviewed. No TODO/TBD placeholders remain. Arch
 Independent design review completed. Initial review found resume timing, cross-model compatibility, retry reduction, scoring determinism, comparison fairness, duration validation, and privacy gaps; all were resolved. Focused re-review confirmed no remaining Critical or Important issues and returned Ready to commit: Yes.
 <!-- SECTION:NOTES:END -->
 
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Approved native batch STT benchmark design committed as a09ee18033. The spec documents the pinned Pipecat benchmark review, standalone native-adapter architecture, hybrid English-first dataset contract, deterministic strict/normalized WER and CER, cold/warm timing, fair comparison modes, resumable schema-versioned artifacts, privacy and network-egress safeguards, regression policy, migration from existing golden tests, and verification strategy. Verification: placeholder scan and git diff --check passed; independent review returned Ready to commit with no remaining Critical or Important issues. No code changed, so tests and Bandit were not applicable. No known blockers.
+<!-- SECTION:FINAL_SUMMARY:END -->
+
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
