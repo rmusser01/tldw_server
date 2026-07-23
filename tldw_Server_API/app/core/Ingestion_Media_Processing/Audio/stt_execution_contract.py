@@ -10,13 +10,25 @@ from typing import Any
 
 SttPlanScalar = str | int | float | bool | None | tuple[str, ...]
 
-_SAFE_LABEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+:@-]*" r"(?:/[A-Za-z0-9][A-Za-z0-9._+:@-]*)?$")
-_STABLE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:+-]*$")
+_SAFE_LABEL_RE = re.compile(
+    r"^[A-Za-z0-9][A-Za-z0-9._+-]*"
+    r"(?:/[A-Za-z0-9][A-Za-z0-9._+-]*)?$"
+)
+_STABLE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]*$")
 _ENDPOINT_ID_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _CONTENT_SHA_RE = re.compile(r"^(?:sha256:)?[0-9a-f]{64}$")
 _SNAPSHOT_COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 _SOURCE_MODULE_RE = re.compile(r"^(?:tldw_Server_API|Helper_Scripts)" r"(?:\.[A-Za-z_][A-Za-z0-9_]*)+$")
 _DISTRIBUTION_RE = re.compile(r"^[A-Za-z0-9]+(?:[._-][A-Za-z0-9]+)*$")
+_URL_SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
+_WINDOWS_ABSOLUTE_RE = re.compile(r"^[A-Za-z]:[\\/]")
+_SECRET_SHAPED_RE = re.compile(
+    r"(?:^|[^A-Za-z0-9])"
+    r"(?:api[_-]?key|authorization|bearer|password|secret|"
+    r"access[_-]?token|refresh[_-]?token|private[_-]?key)"
+    r"(?:$|[^A-Za-z0-9])",
+    re.IGNORECASE,
+)
 _MAX_EXECUTION_MISMATCHES = 8
 
 
@@ -26,9 +38,40 @@ def _require_nonblank(value: object, field_name: str) -> str:
     return value
 
 
+def _reject_hostile_serialized_string(value: str, field_name: str) -> str:
+    if any(ord(character) < 32 or ord(character) == 127 for character in value):
+        raise ValueError(f"{field_name} must not contain control characters")
+    if (
+        value.startswith(("/", "\\\\", "//", "~", "./", "../"))
+        or _WINDOWS_ABSOLUTE_RE.match(value)
+    ):
+        raise ValueError(f"{field_name} must not contain an absolute or relative path")
+    if (
+        _URL_SCHEME_RE.match(value)
+        or "://" in value
+        or any(character in value for character in ("@", "?", "#"))
+    ):
+        raise ValueError(f"{field_name} must not contain URL components")
+    if _SECRET_SHAPED_RE.search(value):
+        raise ValueError(f"{field_name} must not contain secret-shaped values")
+    return value
+
+
 def _require_safe_label(value: object, field_name: str) -> str:
     label = _require_nonblank(value, field_name)
-    if not _SAFE_LABEL_RE.fullmatch(label) or label.startswith((".", "/", "~")) or "\\" in label or "://" in label:
+    if not field_name.endswith("model_label"):
+        return _require_serialized_id(label, field_name)
+    if label.startswith("external:"):
+        external_label = label.removeprefix("external:")
+        _require_stable_id(external_label, field_name)
+        _reject_hostile_serialized_string(external_label, field_name)
+        return label
+    _reject_hostile_serialized_string(label, field_name)
+    if (
+        not _SAFE_LABEL_RE.fullmatch(label)
+        or label.startswith((".", "/", "~"))
+        or "\\" in label
+    ):
         raise ValueError(f"{field_name} must be a safe provider/model label")
     return label
 
@@ -40,8 +83,23 @@ def _require_stable_id(value: object, field_name: str) -> str:
     return identifier
 
 
+def _require_serialized_id(value: object, field_name: str) -> str:
+    identifier = _require_stable_id(value, field_name)
+    return _reject_hostile_serialized_string(identifier, field_name)
+
+
+def _require_artifact_id(value: object, field_name: str) -> str:
+    identifier = _require_nonblank(value, field_name)
+    if _CONTENT_SHA_RE.fullmatch(identifier) or _SNAPSHOT_COMMIT_RE.fullmatch(
+        identifier
+    ):
+        return identifier
+    return _require_serialized_id(identifier, field_name)
+
+
 def _require_source_module(value: object, field_name: str) -> str:
     module = _require_nonblank(value, field_name)
+    _reject_hostile_serialized_string(module, field_name)
     if not _SOURCE_MODULE_RE.fullmatch(module):
         raise ValueError(f"{field_name} must contain valid project modules")
     return module
@@ -49,6 +107,7 @@ def _require_source_module(value: object, field_name: str) -> str:
 
 def _require_distribution_name(value: object, field_name: str) -> str:
     distribution = _require_nonblank(value, field_name)
+    _reject_hostile_serialized_string(distribution, field_name)
     if not _DISTRIBUTION_RE.fullmatch(distribution):
         raise ValueError(f"{field_name} must contain valid distribution names")
     return distribution
@@ -76,9 +135,23 @@ def _validate_scalar(value: object, field_name: str) -> None:
     raise ValueError(f"{field_name} contains an unsupported runtime value")
 
 
+def _validate_safe_scalar(value: object, field_name: str) -> None:
+    _validate_scalar(value, field_name)
+    string_values = value if isinstance(value, tuple) else (value,)
+    for item in string_values:
+        if not isinstance(item, str):
+            continue
+        if item.startswith("fixed:"):
+            _require_serialized_id(item.removeprefix("fixed:"), field_name)
+            continue
+        _require_serialized_id(item, field_name)
+
+
 def _validate_settings(
     settings: tuple[tuple[str, SttPlanScalar], ...],
     field_name: str,
+    *,
+    serialized: bool = False,
 ) -> tuple[str, ...]:
     if not isinstance(settings, tuple):
         raise ValueError(f"{field_name} must be a tuple")
@@ -87,8 +160,12 @@ def _validate_settings(
         if not isinstance(item, tuple) or len(item) != 2:
             raise ValueError(f"{field_name} entries must be key/value tuples")
         key, value = item
-        _require_stable_id(key, f"{field_name} key")
-        _validate_scalar(value, field_name)
+        key_validator = _require_serialized_id if serialized else _require_stable_id
+        key_validator(key, f"{field_name} key")
+        if serialized:
+            _validate_safe_scalar(value, field_name)
+        else:
+            _validate_scalar(value, field_name)
         keys.append(key)
     ordered_keys = tuple(keys)
     if len(set(ordered_keys)) != len(ordered_keys) or ordered_keys != tuple(sorted(ordered_keys)):
@@ -141,11 +218,11 @@ class SttExecutionRoute:
     would_download: bool
 
     def __post_init__(self) -> None:
-        _require_stable_id(self.route_id, "route_id")
+        _require_serialized_id(self.route_id, "route_id")
         _require_safe_label(self.provider, "provider")
         _require_safe_label(self.model_label, "model_label")
-        _require_nonblank(self.backend, "backend")
-        _require_nonblank(self.source, "source")
+        _require_serialized_id(self.backend, "backend")
+        _require_serialized_id(self.source, "source")
         if not isinstance(self.audio_egress, SttAudioEgress):
             raise ValueError("audio_egress must be an SttAudioEgress")
         if self.audio_egress is SttAudioEgress.NONE:
@@ -154,7 +231,7 @@ class SttExecutionRoute:
         elif not isinstance(self.endpoint_id, str) or not _ENDPOINT_ID_RE.fullmatch(self.endpoint_id):
             raise ValueError("network routes require an opaque endpoint_id")
         if self.artifact_id is not None:
-            _require_stable_id(self.artifact_id, "artifact_id")
+            _require_artifact_id(self.artifact_id, "artifact_id")
         if not isinstance(self.identity_resolved, bool):
             raise ValueError("identity_resolved must be boolean")
         if self.identity_resolved and (
@@ -165,8 +242,12 @@ class SttExecutionRoute:
         for name in ("device", "compute_type", "dtype"):
             value = getattr(self, name)
             if value is not None:
-                _require_stable_id(value, name)
-        _validate_ordered_unique(self.decoding_ids, "decoding_ids")
+                _require_serialized_id(value, name)
+        _validate_ordered_unique(
+            self.decoding_ids,
+            "decoding_ids",
+            validator=_require_serialized_id,
+        )
         if not isinstance(self.local_model_available, bool):
             raise ValueError("local_model_available must be boolean")
         if not isinstance(self.would_download, bool):
@@ -221,6 +302,7 @@ class SttExecutionDescriptor:
         decoding_keys = _validate_settings(
             self.decoding_settings,
             "decoding_settings",
+            serialized=True,
         )
         for route in self.routes:
             if not set(route.decoding_ids).issubset(decoding_keys):
@@ -331,13 +413,13 @@ class SttActualExecution:
     decoding_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        _require_stable_id(self.route_id, "route_id")
+        _require_serialized_id(self.route_id, "route_id")
         _require_safe_label(self.provider, "provider")
         _require_safe_label(self.model_label, "model_label")
-        _require_nonblank(self.backend, "backend")
-        _require_nonblank(self.source, "source")
+        _require_serialized_id(self.backend, "backend")
+        _require_serialized_id(self.source, "source")
         if self.artifact_id is not None:
-            _require_stable_id(self.artifact_id, "artifact_id")
+            _require_artifact_id(self.artifact_id, "artifact_id")
         if not isinstance(self.audio_egress, SttAudioEgress):
             raise ValueError("audio_egress must be an SttAudioEgress")
         if self.audio_egress is SttAudioEgress.NONE:
@@ -348,8 +430,12 @@ class SttActualExecution:
         for name in ("device", "compute_type", "dtype"):
             value = getattr(self, name)
             if value is not None:
-                _require_stable_id(value, name)
-        _validate_ordered_unique(self.decoding_ids, "decoding_ids")
+                _require_serialized_id(value, name)
+        _validate_ordered_unique(
+            self.decoding_ids,
+            "decoding_ids",
+            validator=_require_serialized_id,
+        )
 
     def as_safe_dict(self) -> dict[str, Any]:
         """Return only the actual execution's declared safe fields."""

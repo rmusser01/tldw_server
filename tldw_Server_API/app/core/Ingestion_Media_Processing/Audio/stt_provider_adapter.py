@@ -41,8 +41,6 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_con
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_contract import (
     SttBatchExecutionPlan,
-    SttTranscriptionOutcome,
-    finalize_stt_artifact,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_contract import (
     SttExecutionDescriptor as SttExecutionDescriptor,
@@ -55,6 +53,12 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_con
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_contract import (
     SttPlanScalar as SttPlanScalar,
+)
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_contract import (
+    SttTranscriptionOutcome as SttTranscriptionOutcome,
+)
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_contract import (
+    finalize_stt_artifact as finalize_stt_artifact,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.path_utils import resolve_safe_local_path
 
@@ -197,12 +201,13 @@ def _validate_execution_plan_request(
         raise STTExecutionPlanError(
             f"Execution plan provider does not match {adapter.name.value}"
         )
+    if route.model_label != descriptor.resolved_model_label:
+        raise STTExecutionPlanError(
+            "Execution plan route model does not match resolved model"
+        )
     if model is not None:
         model_label = _safe_requested_model_label(model)
-        if model_label not in {
-            descriptor.requested_model_label,
-            descriptor.resolved_model_label,
-        }:
+        if model_label != descriptor.requested_model_label:
             raise STTExecutionPlanError("Execution plan model does not match request")
     if (
         plan.task != task
@@ -214,20 +219,8 @@ def _validate_execution_plan_request(
         raise STTExecutionPlanError(
             "Execution plan semantic settings do not match request"
         )
-
-
-def _finalize_planned_outcome(
-    outcome: object,
-    plan: SttBatchExecutionPlan,
-) -> dict[str, Any]:
-    if not isinstance(outcome, SttTranscriptionOutcome):
-        raise STTExecutionPlanError(
-            "Planned STT provider did not report typed actual execution"
-        )
-    return finalize_stt_artifact(
-        outcome.artifact,
-        plan=plan,
-        actual=outcome.actual_execution,
+    raise STTExecutionUnsupportedError(
+        f"Provider {adapter.name.value} cannot yet honor planned execution"
     )
 
 
@@ -512,11 +505,7 @@ class FasterWhisperAdapter(SttProviderAdapter):
             "base_dir": base_dir,
             "cancel_check": cancel_check,
         }
-        if execution_plan is not None:
-            call_kwargs["execution_plan"] = execution_plan
         result = fw_speech_to_text(audio_path, **call_kwargs)
-        if execution_plan is not None:
-            return _finalize_planned_outcome(result, execution_plan)
 
         segments_list, detected_lang = result
         # Strip Whisper metadata header so callers see only user content
@@ -607,11 +596,7 @@ class ParakeetAdapter(SttProviderAdapter):
             "base_dir": base_dir,
             "cancel_check": cancel_check,
         }
-        if execution_plan is not None:
-            call_kwargs["execution_plan"] = execution_plan
         result = speech_to_text(audio_path, **call_kwargs)
-        if execution_plan is not None:
-            return _finalize_planned_outcome(result, execution_plan)
         segments_list, lang = result
         text = " ".join(
             _segment_text_value(seg)
@@ -697,16 +682,12 @@ class CanaryAdapter(SttProviderAdapter):
             "task": task,
             "target_language": "en" if task == "translate" else None,
         }
-        if execution_plan is not None:
-            call_kwargs["execution_plan"] = execution_plan
         result = transcribe_with_canary(
             audio_np,
             sample_rate,
             language,
             **call_kwargs,
         )
-        if execution_plan is not None:
-            return _finalize_planned_outcome(result, execution_plan)
         text = result
         segments = [
             {
@@ -783,11 +764,7 @@ class Qwen2AudioAdapter(SttProviderAdapter):
             "base_dir": base_dir,
             "cancel_check": cancel_check,
         }
-        if execution_plan is not None:
-            call_kwargs["execution_plan"] = execution_plan
         result = speech_to_text(audio_path, **call_kwargs)
-        if execution_plan is not None:
-            return _finalize_planned_outcome(result, execution_plan)
         segments_list, lang = result
         text = " ".join(
             _segment_text_value(seg)
@@ -894,11 +871,7 @@ class Qwen3ASRAdapter(SttProviderAdapter):
             "base_dir": base_dir,
             "cancel_check": cancel_check,
         }
-        if execution_plan is not None:
-            call_kwargs["execution_plan"] = execution_plan
         artifact = transcribe_with_qwen3_asr(audio_path_for_provider, **call_kwargs)
-        if execution_plan is not None:
-            return _finalize_planned_outcome(artifact, execution_plan)
         if not isinstance(artifact, dict):
             raise BadRequestError("Qwen3-ASR transcription did not return a valid artifact")
         return artifact
@@ -969,11 +942,7 @@ class VibeVoiceAdapter(SttProviderAdapter):
             "base_dir": base_dir,
             "cancel_check": cancel_check,
         }
-        if execution_plan is not None:
-            call_kwargs["execution_plan"] = execution_plan
         artifact = transcribe_with_vibevoice(audio_path_for_provider, **call_kwargs)
-        if execution_plan is not None:
-            return _finalize_planned_outcome(artifact, execution_plan)
         if not isinstance(artifact, dict):
             raise BadRequestError("VibeVoice-ASR transcription did not return a valid artifact")
         return artifact
@@ -1035,11 +1004,7 @@ class ExternalAdapter(SttProviderAdapter):
             "provider_name": provider_name,
             "base_dir": base_dir,
         }
-        if execution_plan is not None:
-            call_kwargs["execution_plan"] = execution_plan
         result = transcribe_with_external_provider(audio_path, **call_kwargs)
-        if execution_plan is not None:
-            return _finalize_planned_outcome(result, execution_plan)
         text = result
         segments = [
             {

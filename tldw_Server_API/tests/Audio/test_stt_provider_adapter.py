@@ -281,6 +281,88 @@ def test_safe_descriptor_contains_only_declared_fields():
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
+    ("target", "changes"),
+    [
+        ("route", {"model_label": "file:/etc/passwd"}),
+        ("route", {"model_label": "/opt/models/private"}),
+        ("route", {"model_label": r"C:\models\private"}),
+        ("route", {"model_label": "vendor/model?access_token=secret"}),
+        ("route", {"model_label": "vendor/model\n"}),
+        ("route", {"backend": "https://user:secret@example.test/runtime"}),
+        ("route", {"source": "Bearer secret"}),
+        ("route", {"device": "api_key"}),
+        ("actual", {"source": r"\\server\share\credentials"}),
+        ("actual", {"backend": "file:/etc/passwd"}),
+        ("descriptor", {"requested_provider": "user@example.test"}),
+        (
+            "descriptor",
+            {
+                "decoding_settings": (
+                    ("beam_size", "Authorization: Bearer secret"),
+                )
+            },
+        ),
+    ],
+)
+def test_serialized_execution_values_reject_hostile_strings(target, changes):
+    spa = _import_module()
+    plan = _make_execution_plan(spa)
+    route = plan.descriptor.primary_route
+
+    with pytest.raises(ValueError):
+        if target == "route":
+            replace(route, **changes)
+        elif target == "descriptor":
+            replace(plan.descriptor, **changes)
+        else:
+            actual_values = {
+                "route_id": route.route_id,
+                "provider": route.provider,
+                "model_label": route.model_label,
+                "artifact_id": route.artifact_id,
+                "backend": route.backend,
+                "audio_egress": route.audio_egress,
+                "endpoint_id": route.endpoint_id,
+                "source": route.source,
+                "device": route.device,
+                "compute_type": route.compute_type,
+                "dtype": route.dtype,
+                "decoding_ids": route.decoding_ids,
+            }
+            actual_values.update(changes)
+            spa.SttActualExecution(**actual_values)
+
+
+@pytest.mark.unit
+def test_safe_descriptor_allows_fixed_language_contract():
+    spa = _import_module()
+    plan = _make_execution_plan(
+        spa,
+        decoding_settings=(("language_contract", "fixed:en"),),
+    )
+
+    assert plan.descriptor.as_safe_dict()["decoding_settings"] == [
+        ["language_contract", "fixed:en"]
+    ]
+
+
+@pytest.mark.unit
+def test_safe_route_allows_opaque_endpoint_hash():
+    spa = _import_module()
+    plan = _make_execution_plan(spa)
+    endpoint_id = f"sha256:{'b' * 64}"
+
+    route = replace(
+        plan.descriptor.primary_route,
+        audio_egress=spa.SttAudioEgress.REMOTE,
+        endpoint_id=endpoint_id,
+    )
+
+    assert route.as_safe_dict()["endpoint_id"] == endpoint_id
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
     "module_order",
     [
         (
@@ -395,56 +477,125 @@ def test_planned_provider_mismatch_fails_before_provider_helper(monkeypatch):
 
 
 @pytest.mark.unit
-def test_planned_adapter_requires_typed_outcome_and_finalizes_it(monkeypatch):
+@pytest.mark.parametrize(
+    ("adapter_name", "provider", "planned_model", "requested_model"),
+    [
+        ("FasterWhisperAdapter", "faster-whisper", "tiny", "tiny"),
+        ("ParakeetAdapter", "parakeet", "parakeet-standard", None),
+        ("CanaryAdapter", "canary", "nemo-canary-1b", "nemo-canary-1b"),
+        ("Qwen2AudioAdapter", "qwen2audio", "qwen2audio", "qwen2audio"),
+        ("Qwen3ASRAdapter", "qwen3-asr", "Qwen/Qwen3-ASR-1.7B", None),
+        (
+            "VibeVoiceAdapter",
+            "vibevoice",
+            "microsoft/VibeVoice-ASR",
+            None,
+        ),
+        ("ExternalAdapter", "external", "external:custom", "external:custom"),
+    ],
+)
+def test_unimplemented_planned_adapters_fail_closed_before_runtime_access(
+    monkeypatch,
+    adapter_name,
+    provider,
+    planned_model,
+    requested_model,
+):
     spa = _import_module()
-    plan = _make_execution_plan(spa)
-    route = plan.descriptor.primary_route
-    actual = spa.SttActualExecution(
-        route_id=route.route_id,
-        provider=route.provider,
-        model_label=route.model_label,
-        artifact_id=route.artifact_id,
-        backend=route.backend,
-        audio_egress=route.audio_egress,
-        endpoint_id=route.endpoint_id,
-        source=route.source,
-        device=route.device,
-        compute_type=route.compute_type,
-        dtype=route.dtype,
-        decoding_ids=route.decoding_ids,
+    plan = _make_execution_plan(
+        spa,
+        provider=provider,
+        model_label=planned_model,
     )
+    config_calls = []
+    real_import = builtins.__import__
 
-    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as atlib
+    def fake_get_stt_config():
+        config_calls.append(True)
+        return {
+            "nemo_model_variant": "mlx",
+            "qwen3_asr_model_path": "mutated-qwen3-model",
+            "vibevoice_model_id": "mutated/vibevoice-model",
+        }
 
-    def fake_speech_to_text(*args, **kwargs):
-        assert kwargs["execution_plan"] is plan
-        return spa.SttTranscriptionOutcome(
-            artifact={
-                "text": "planned",
-                "segments": [],
-                "metadata": {"actual_execution": {"provider": "attacker"}},
-            },
-            actual_execution=actual,
+    def guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
+        blocked_suffixes = (
+            "Audio_Transcription_Lib",
+            "Audio_Transcription_Nemo",
+            "Audio_Transcription_Qwen3ASR",
+            "Audio_Transcription_VibeVoice",
+            "Audio_Transcription_External_Provider",
+        )
+        if name.endswith(blocked_suffixes):
+            raise AssertionError(f"planned execution imported {name}")
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(spa, "get_stt_config", fake_get_stt_config)
+    monkeypatch.setattr(builtins, "__import__", guarded_import)
+
+    with pytest.raises(spa.STTExecutionUnsupportedError):
+        getattr(spa, adapter_name)().transcribe_batch(
+            "not-opened.wav",
+            model=requested_model,
+            language="en",
+            execution_plan=plan,
         )
 
-    monkeypatch.setattr(atlib, "speech_to_text", fake_speech_to_text)
-    monkeypatch.setattr(
-        atlib,
-        "is_transcription_error_message",
-        lambda text: False,
-        raising=False,
+    assert config_calls == []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("requested_model", [None, "tiny"])
+def test_planned_model_must_match_primary_route_before_runtime_access(
+    requested_model,
+):
+    spa = _import_module()
+    plan = _make_execution_plan(spa)
+    route = replace(plan.descriptor.primary_route, model_label="base")
+    plan = replace(
+        plan,
+        descriptor=replace(plan.descriptor, routes=(route,)),
     )
 
-    artifact = spa.FasterWhisperAdapter().transcribe_batch(
-        "not-opened.wav",
-        model="tiny",
-        language="en",
-        execution_plan=plan,
-    )
+    with pytest.raises(spa.STTExecutionPlanError) as exc_info:
+        spa.FasterWhisperAdapter().transcribe_batch(
+            "not-opened.wav",
+            model=requested_model,
+            language="en",
+            execution_plan=plan,
+        )
 
-    assert artifact["text"] == "planned"
-    assert artifact["actual_execution"] == actual.as_safe_dict()
-    assert "metadata" not in artifact
+    assert exc_info.type is spa.STTExecutionPlanError
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "call_overrides",
+    [
+        {"task": "translate"},
+        {"language": "fr"},
+        {"prompt": "different prompt"},
+        {"hotwords": ("different",)},
+        {"word_timestamps": True},
+    ],
+)
+def test_planned_semantics_must_match_request_before_runtime_access(
+    call_overrides,
+):
+    spa = _import_module()
+    plan = _make_execution_plan(spa)
+    call = {
+        "model": "tiny",
+        "language": "en",
+        "execution_plan": plan,
+        **call_overrides,
+    }
+
+    with pytest.raises(spa.STTExecutionPlanError):
+        spa.FasterWhisperAdapter().transcribe_batch(
+            "not-opened.wav",
+            **call,
+        )
 
 
 @pytest.mark.unit
@@ -968,6 +1119,7 @@ def test_transcribe_batch_whisper_normalizes_artifact(monkeypatch, tmp_path):
     assert artifact["diarization"]["enabled"] is False
     assert artifact["diarization"]["speakers"] is None
     assert artifact["usage"]["duration_ms"] is None
+    assert "actual_execution" not in artifact
 
 
 @pytest.mark.unit
@@ -1014,6 +1166,59 @@ def test_transcribe_batch_parakeet_normalizes_artifact(monkeypatch, tmp_path):
     assert artifact["metadata"]["provider"] == "parakeet"
     assert artifact["metadata"]["model"] == "parakeet-standard"
     assert artifact["diarization"]["enabled"] is False
+    assert "actual_execution" not in artifact
+
+
+@pytest.mark.unit
+def test_transcribe_batch_qwen2audio_normalizes_artifact(monkeypatch, tmp_path):
+    spa = _import_module()
+    audio_file = tmp_path / "sample_qwen2audio.wav"
+    audio_file.write_bytes(b"\x00" * 1024)
+
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as atlib
+
+    def fake_speech_to_text(
+        path,
+        whisper_model,
+        selected_source_lang,
+        vad_filter,
+        diarize,
+        return_language,
+        base_dir=None,
+        cancel_check=None,
+    ):
+        assert str(path) == str(audio_file)
+        assert whisper_model == "qwen2audio"
+        return [
+            {
+                "Text": "qwen2 audio",
+                "start_seconds": 0.0,
+                "end_seconds": 1.0,
+            }
+        ], "en"
+
+    monkeypatch.setattr(atlib, "speech_to_text", fake_speech_to_text)
+
+    artifact = spa.Qwen2AudioAdapter().transcribe_batch(
+        str(audio_file),
+        model="qwen2audio",
+        language="en",
+    )
+
+    assert artifact == {
+        "text": "qwen2 audio",
+        "language": "en",
+        "segments": [
+            {
+                "Text": "qwen2 audio",
+                "start_seconds": 0.0,
+                "end_seconds": 1.0,
+            }
+        ],
+        "diarization": {"enabled": False, "speakers": None},
+        "usage": {"duration_ms": None, "tokens": None},
+        "metadata": {"provider": "qwen2audio", "model": "qwen2audio"},
+    }
 
 
 @pytest.mark.unit
@@ -1058,6 +1263,7 @@ def test_transcribe_batch_canary_normalizes_artifact(monkeypatch, tmp_path):
     assert artifact["segments"][0]["Text"] == "canary transcript"
     assert artifact["metadata"]["provider"] == "canary"
     assert artifact["diarization"]["enabled"] is False
+    assert "actual_execution" not in artifact
 
 
 @pytest.mark.unit
@@ -1309,6 +1515,7 @@ def test_transcribe_batch_external_normalizes_artifact(monkeypatch, tmp_path):
     assert artifact["metadata"]["provider"] == "external"
     assert artifact["metadata"]["external_provider_name"] == "myprovider"
     assert artifact["diarization"]["enabled"] is False
+    assert "actual_execution" not in artifact
 
 
 @pytest.mark.unit
@@ -1421,6 +1628,68 @@ def test_transcribe_batch_qwen3_asr_normalizes_artifact(monkeypatch, tmp_path):
     assert artifact["segments"][0]["Text"] == "qwen3 transcript"
     assert artifact["metadata"]["provider"] == "qwen3-asr"
     assert artifact["diarization"]["enabled"] is False
+    assert "actual_execution" not in artifact
+
+
+@pytest.mark.unit
+def test_transcribe_batch_vibevoice_preserves_legacy_artifact(
+    monkeypatch,
+    tmp_path,
+):
+    spa = _import_module()
+    audio_file = tmp_path / "sample_vibevoice.wav"
+    audio_file.write_bytes(b"\x00" * 1024)
+    fake_vibe_mod = types.ModuleType(
+        "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio."
+        "Audio_Transcription_VibeVoice"
+    )
+    expected = {
+        "text": "vibevoice transcript",
+        "language": "en",
+        "segments": [
+            {
+                "Text": "vibevoice transcript",
+                "start_seconds": 0.0,
+                "end_seconds": 1.0,
+            }
+        ],
+        "diarization": {"enabled": True, "speakers": 1},
+        "usage": {"duration_ms": 1000, "tokens": None},
+        "metadata": {
+            "provider": "vibevoice",
+            "model": "microsoft/VibeVoice-ASR",
+        },
+    }
+
+    def fake_transcribe_with_vibevoice(
+        audio_path,
+        *,
+        model_id,
+        language,
+        hotwords,
+        base_dir,
+        cancel_check,
+    ):
+        assert str(audio_path) == str(audio_file)
+        assert model_id == "microsoft/VibeVoice-ASR"
+        return expected
+
+    fake_vibe_mod.transcribe_with_vibevoice = fake_transcribe_with_vibevoice
+    monkeypatch.setitem(
+        sys.modules,
+        "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio."
+        "Audio_Transcription_VibeVoice",
+        fake_vibe_mod,
+    )
+
+    artifact = spa.VibeVoiceAdapter().transcribe_batch(
+        str(audio_file),
+        model="microsoft/VibeVoice-ASR",
+        language="en",
+    )
+
+    assert artifact is expected
+    assert "actual_execution" not in artifact
 
 
 @pytest.mark.unit
