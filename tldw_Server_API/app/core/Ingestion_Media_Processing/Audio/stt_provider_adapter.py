@@ -219,9 +219,6 @@ def _validate_execution_plan_request(
         raise STTExecutionPlanError(
             "Execution plan semantic settings do not match request"
         )
-    raise STTExecutionUnsupportedError(
-        f"Provider {adapter.name.value} cannot yet honor planned execution"
-    )
 
 
 def _raise_if_cancelled(cancel_check: Callable[[], bool] | None) -> None:
@@ -435,6 +432,60 @@ class SttProviderAdapter(ABC):
             f"Provider {self.name.value} does not expose enforceable benchmark planning"
         )
 
+    def _transcribe_planned_batch(
+        self,
+        audio_path: str,
+        *,
+        execution_plan: SttBatchExecutionPlan,
+        base_dir: Path | None,
+        cancel_check: Callable[[], bool] | None,
+    ) -> SttTranscriptionOutcome:
+        """Return a typed outcome once a provider implements planned execution."""
+        raise STTExecutionUnsupportedError(
+            f"Provider {self.name.value} cannot yet honor planned execution"
+        )
+
+    def _run_planned_batch(
+        self,
+        audio_path: str,
+        *,
+        execution_plan: SttBatchExecutionPlan,
+        model: str | None,
+        language: str | None,
+        task: str,
+        word_timestamps: bool,
+        prompt: str | None,
+        hotwords: Sequence[str] | None,
+        base_dir: Path | None,
+        cancel_check: Callable[[], bool] | None,
+    ) -> dict[str, Any]:
+        """Validate, execute, and safely finalize one planned batch request."""
+        _validate_execution_plan_request(
+            self,
+            execution_plan,
+            model=model,
+            language=language,
+            task=task,
+            word_timestamps=word_timestamps,
+            prompt=prompt,
+            hotwords=hotwords,
+        )
+        outcome = self._transcribe_planned_batch(
+            audio_path,
+            execution_plan=execution_plan,
+            base_dir=base_dir,
+            cancel_check=cancel_check,
+        )
+        if not isinstance(outcome, SttTranscriptionOutcome):
+            raise STTExecutionPlanError(
+                "Planned STT provider did not report typed actual execution"
+            )
+        return finalize_stt_artifact(
+            outcome.artifact,
+            plan=execution_plan,
+            actual=outcome.actual_execution,
+        )
+
 
 class FasterWhisperAdapter(SttProviderAdapter):
     """Adapter metadata for faster-whisper based transcription."""
@@ -467,15 +518,17 @@ class FasterWhisperAdapter(SttProviderAdapter):
         execution_plan: SttBatchExecutionPlan | None = None,
     ) -> dict[str, Any]:
         if execution_plan is not None:
-            _validate_execution_plan_request(
-                self,
-                execution_plan,
+            return self._run_planned_batch(
+                audio_path,
+                execution_plan=execution_plan,
                 model=model,
                 language=language,
                 task=task,
                 word_timestamps=word_timestamps,
                 prompt=prompt,
                 hotwords=hotwords,
+                base_dir=base_dir,
+                cancel_check=cancel_check,
             )
         # We reuse the core speech_to_text helper so behavior stays aligned
         # with existing REST/media ingestion flows.
@@ -560,15 +613,17 @@ class ParakeetAdapter(SttProviderAdapter):
         execution_plan: SttBatchExecutionPlan | None = None,
     ) -> dict[str, Any]:
         if execution_plan is not None:
-            _validate_execution_plan_request(
-                self,
-                execution_plan,
+            return self._run_planned_batch(
+                audio_path,
+                execution_plan=execution_plan,
                 model=model,
                 language=language,
                 task=task,
                 word_timestamps=word_timestamps,
                 prompt=prompt,
                 hotwords=hotwords,
+                base_dir=base_dir,
+                cancel_check=cancel_check,
             )
         # Parakeet batch flows are routed through speech_to_text's Parakeet
         # branch by encoding the model name (e.g. "parakeet-standard").
@@ -647,15 +702,17 @@ class CanaryAdapter(SttProviderAdapter):
         execution_plan: SttBatchExecutionPlan | None = None,
     ) -> dict[str, Any]:
         if execution_plan is not None:
-            _validate_execution_plan_request(
-                self,
-                execution_plan,
+            return self._run_planned_batch(
+                audio_path,
+                execution_plan=execution_plan,
                 model=model,
                 language=language,
                 task=task,
                 word_timestamps=word_timestamps,
                 prompt=prompt,
                 hotwords=hotwords,
+                base_dir=base_dir,
+                cancel_check=cancel_check,
             )
         import numpy as np  # type: ignore
         import soundfile as sf  # type: ignore
@@ -739,15 +796,17 @@ class Qwen2AudioAdapter(SttProviderAdapter):
         execution_plan: SttBatchExecutionPlan | None = None,
     ) -> dict[str, Any]:
         if execution_plan is not None:
-            _validate_execution_plan_request(
-                self,
-                execution_plan,
+            return self._run_planned_batch(
+                audio_path,
+                execution_plan=execution_plan,
                 model=model,
                 language=language,
                 task=task,
                 word_timestamps=word_timestamps,
                 prompt=prompt,
                 hotwords=hotwords,
+                base_dir=base_dir,
+                cancel_check=cancel_check,
             )
         from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib import (  # type: ignore
             speech_to_text,
@@ -836,15 +895,17 @@ class Qwen3ASRAdapter(SttProviderAdapter):
         execution_plan: SttBatchExecutionPlan | None = None,
     ) -> dict[str, Any]:
         if execution_plan is not None:
-            _validate_execution_plan_request(
-                self,
-                execution_plan,
+            return self._run_planned_batch(
+                audio_path,
+                execution_plan=execution_plan,
                 model=model,
                 language=language,
                 task=task,
                 word_timestamps=word_timestamps,
                 prompt=prompt,
                 hotwords=hotwords,
+                base_dir=base_dir,
+                cancel_check=cancel_check,
             )
         from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Qwen3ASR import (
             transcribe_with_qwen3_asr,
@@ -908,15 +969,17 @@ class VibeVoiceAdapter(SttProviderAdapter):
         execution_plan: SttBatchExecutionPlan | None = None,
     ) -> dict[str, Any]:
         if execution_plan is not None:
-            _validate_execution_plan_request(
-                self,
-                execution_plan,
+            return self._run_planned_batch(
+                audio_path,
+                execution_plan=execution_plan,
                 model=model,
                 language=language,
                 task=task,
                 word_timestamps=word_timestamps,
                 prompt=prompt,
                 hotwords=hotwords,
+                base_dir=base_dir,
+                cancel_check=cancel_check,
             )
         from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_VibeVoice import (  # type: ignore
             transcribe_with_vibevoice,
@@ -979,15 +1042,17 @@ class ExternalAdapter(SttProviderAdapter):
         execution_plan: SttBatchExecutionPlan | None = None,
     ) -> dict[str, Any]:
         if execution_plan is not None:
-            _validate_execution_plan_request(
-                self,
-                execution_plan,
+            return self._run_planned_batch(
+                audio_path,
+                execution_plan=execution_plan,
                 model=model,
                 language=language,
                 task=task,
                 word_timestamps=word_timestamps,
                 prompt=prompt,
                 hotwords=hotwords,
+                base_dir=base_dir,
+                cancel_check=cancel_check,
             )
         from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_External_Provider import (  # type: ignore
             transcribe_with_external_provider,

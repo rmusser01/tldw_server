@@ -157,7 +157,7 @@ def _make_execution_plan(
     model_label="tiny",
     task="transcribe",
     language="en",
-    decoding_settings=(("beam_size", 1),),
+    decoding_settings=(("configuration_id", "neutral-1"),),
     runtime_settings=(),
 ):
     route = spa.SttExecutionRoute(
@@ -219,8 +219,14 @@ def test_execution_plan_is_frozen_and_pickleable():
 @pytest.mark.parametrize(
     ("field_name", "settings"),
     [
-        ("decoding", (("temperature", 0), ("beam_size", 1))),
-        ("decoding", (("beam_size", 1), ("beam_size", 2))),
+        (
+            "decoding",
+            (("prompt_present", False), ("hotword_count", 0)),
+        ),
+        (
+            "decoding",
+            (("configuration_id", "one"), ("configuration_id", "two")),
+        ),
         ("runtime", (("token", "one"), ("api_key", "two"))),
         ("runtime", (("api_key", "one"), ("api_key", "two"))),
     ],
@@ -298,7 +304,7 @@ def test_safe_descriptor_contains_only_declared_fields():
             "descriptor",
             {
                 "decoding_settings": (
-                    ("beam_size", "Authorization: Bearer secret"),
+                    ("configuration_id", "Authorization: Bearer secret"),
                 )
             },
         ),
@@ -344,6 +350,80 @@ def test_safe_descriptor_allows_fixed_language_contract():
     assert plan.descriptor.as_safe_dict()["decoding_settings"] == [
         ["language_contract", "fixed:en"]
     ]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "decoding_settings",
+    [
+        (("prompt", "transcript"),),
+        (("hotwords", "alpha"),),
+        (("headers", "alpha"),),
+        (("credential", "alpha"),),
+        (("language_contract", "transcript"),),
+        (("prompt_present", "alpha"),),
+        (("hotword_count", "sk_proj_123"),),
+        (("hotword_count", True),),
+        (("hotword_count", -1),),
+        (("configuration_id", "sk_proj_123"),),
+    ],
+)
+def test_descriptor_rejects_decoding_values_outside_v1_schema(
+    decoding_settings,
+):
+    spa = _import_module()
+
+    with pytest.raises(ValueError):
+        _make_execution_plan(
+            spa,
+            decoding_settings=decoding_settings,
+        )
+
+
+@pytest.mark.unit
+def test_descriptor_accepts_all_v1_decoding_settings():
+    spa = _import_module()
+    decoding_settings = (
+        ("configuration_id", "neutral-1"),
+        ("hotword_count", 0),
+        ("language_contract", "fixed:en"),
+        ("prompt_present", False),
+    )
+    plan = _make_execution_plan(
+        spa,
+        decoding_settings=decoding_settings,
+    )
+
+    assert plan.descriptor.as_safe_dict()["decoding_settings"] == [
+        [key, value] for key, value in decoding_settings
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("target", ["route", "actual"])
+def test_route_and_actual_reject_decoding_ids_outside_v1_schema(target):
+    spa = _import_module()
+    plan = _make_execution_plan(spa)
+    route = plan.descriptor.primary_route
+
+    with pytest.raises(ValueError):
+        if target == "route":
+            replace(route, decoding_ids=("prompt",))
+        else:
+            spa.SttActualExecution(
+                route_id=route.route_id,
+                provider=route.provider,
+                model_label=route.model_label,
+                artifact_id=route.artifact_id,
+                backend=route.backend,
+                audio_egress=route.audio_egress,
+                endpoint_id=route.endpoint_id,
+                source=route.source,
+                device=route.device,
+                compute_type=route.compute_type,
+                dtype=route.dtype,
+                decoding_ids=("prompt",),
+            )
 
 
 @pytest.mark.unit
@@ -596,6 +676,101 @@ def test_planned_semantics_must_match_request_before_runtime_access(
             "not-opened.wav",
             **call,
         )
+
+
+@pytest.mark.unit
+def test_shared_planned_runner_finalizes_typed_provider_outcome(monkeypatch):
+    spa = _import_module()
+    plan = _make_execution_plan(spa)
+    route = plan.descriptor.primary_route
+    actual = spa.SttActualExecution(
+        route_id=route.route_id,
+        provider=route.provider,
+        model_label=route.model_label,
+        artifact_id=route.artifact_id,
+        backend=route.backend,
+        audio_egress=route.audio_egress,
+        endpoint_id=route.endpoint_id,
+        source=route.source,
+        device=route.device,
+        compute_type=route.compute_type,
+        dtype=route.dtype,
+        decoding_ids=route.decoding_ids,
+    )
+    calls = []
+
+    class PlannedFasterWhisperAdapter(spa.FasterWhisperAdapter):
+        def _transcribe_planned_batch(
+            self,
+            audio_path,
+            *,
+            execution_plan,
+            base_dir,
+            cancel_check,
+        ):
+            calls.append(
+                (audio_path, execution_plan, base_dir, cancel_check)
+            )
+            return spa.SttTranscriptionOutcome(
+                artifact={
+                    "text": "planned transcript",
+                    "segments": [],
+                    "language": "en",
+                    "metadata": {"authorization": "Bearer secret"},
+                },
+                actual_execution=actual,
+            )
+
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as atlib
+
+    monkeypatch.setattr(
+        atlib,
+        "is_transcription_error_message",
+        lambda text: False,
+        raising=False,
+    )
+    adapter = PlannedFasterWhisperAdapter()
+    artifact = adapter.transcribe_batch(
+        "not-opened.wav",
+        model="tiny",
+        language="en",
+        execution_plan=plan,
+    )
+
+    assert calls == [("not-opened.wav", plan, None, None)]
+    assert artifact == {
+        "text": "planned transcript",
+        "segments": [],
+        "language": "en",
+        "actual_execution": actual.as_safe_dict(),
+    }
+
+
+@pytest.mark.unit
+def test_shared_planned_runner_requires_typed_provider_outcome():
+    spa = _import_module()
+    plan = _make_execution_plan(spa)
+
+    class UntypedFasterWhisperAdapter(spa.FasterWhisperAdapter):
+        def _transcribe_planned_batch(
+            self,
+            audio_path,
+            *,
+            execution_plan,
+            base_dir,
+            cancel_check,
+        ):
+            return {"text": "untyped", "segments": []}
+
+    with pytest.raises(spa.STTExecutionPlanError) as exc_info:
+        UntypedFasterWhisperAdapter().transcribe_batch(
+            "not-opened.wav",
+            model="tiny",
+            language="en",
+            execution_plan=plan,
+        )
+
+    assert exc_info.type is spa.STTExecutionPlanError
 
 
 @pytest.mark.unit

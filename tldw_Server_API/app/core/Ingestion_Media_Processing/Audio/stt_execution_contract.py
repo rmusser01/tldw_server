@@ -6,6 +6,7 @@ import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, fields
 from enum import Enum
+from types import MappingProxyType
 from typing import Any
 
 SttPlanScalar = str | int | float | bool | None | tuple[str, ...]
@@ -25,11 +26,20 @@ _WINDOWS_ABSOLUTE_RE = re.compile(r"^[A-Za-z]:[\\/]")
 _SECRET_SHAPED_RE = re.compile(
     r"(?:^|[^A-Za-z0-9])"
     r"(?:api[_-]?key|authorization|bearer|password|secret|"
-    r"access[_-]?token|refresh[_-]?token|private[_-]?key)"
+    r"access[_-]?token|refresh[_-]?token|private[_-]?key|"
+    r"sk[_-](?:proj[_-])?[A-Za-z0-9._-]+)"
     r"(?:$|[^A-Za-z0-9])",
     re.IGNORECASE,
 )
 _MAX_EXECUTION_MISMATCHES = 8
+STT_DECODING_SETTINGS_V1 = MappingProxyType(
+    {
+        "configuration_id": "stable_id",
+        "hotword_count": "non_negative_int",
+        "language_contract": "fixed:en",
+        "prompt_present": "bool",
+    }
+)
 
 
 def _require_nonblank(value: object, field_name: str) -> str:
@@ -97,6 +107,13 @@ def _require_artifact_id(value: object, field_name: str) -> str:
     return _require_serialized_id(identifier, field_name)
 
 
+def _require_decoding_id(value: object, field_name: str) -> str:
+    identifier = _require_serialized_id(value, field_name)
+    if identifier not in STT_DECODING_SETTINGS_V1:
+        raise ValueError(f"{field_name} must name a v1 decoding setting")
+    return identifier
+
+
 def _require_source_module(value: object, field_name: str) -> str:
     module = _require_nonblank(value, field_name)
     _reject_hostile_serialized_string(module, field_name)
@@ -135,23 +152,9 @@ def _validate_scalar(value: object, field_name: str) -> None:
     raise ValueError(f"{field_name} contains an unsupported runtime value")
 
 
-def _validate_safe_scalar(value: object, field_name: str) -> None:
-    _validate_scalar(value, field_name)
-    string_values = value if isinstance(value, tuple) else (value,)
-    for item in string_values:
-        if not isinstance(item, str):
-            continue
-        if item.startswith("fixed:"):
-            _require_serialized_id(item.removeprefix("fixed:"), field_name)
-            continue
-        _require_serialized_id(item, field_name)
-
-
 def _validate_settings(
     settings: tuple[tuple[str, SttPlanScalar], ...],
     field_name: str,
-    *,
-    serialized: bool = False,
 ) -> tuple[str, ...]:
     if not isinstance(settings, tuple):
         raise ValueError(f"{field_name} must be a tuple")
@@ -160,17 +163,42 @@ def _validate_settings(
         if not isinstance(item, tuple) or len(item) != 2:
             raise ValueError(f"{field_name} entries must be key/value tuples")
         key, value = item
-        key_validator = _require_serialized_id if serialized else _require_stable_id
-        key_validator(key, f"{field_name} key")
-        if serialized:
-            _validate_safe_scalar(value, field_name)
-        else:
-            _validate_scalar(value, field_name)
+        _require_stable_id(key, f"{field_name} key")
+        _validate_scalar(value, field_name)
         keys.append(key)
     ordered_keys = tuple(keys)
     if len(set(ordered_keys)) != len(ordered_keys) or ordered_keys != tuple(sorted(ordered_keys)):
         raise ValueError(f"{field_name} keys must be unique and lexicographically ordered")
     return ordered_keys
+
+
+def _validate_decoding_settings(
+    settings: tuple[tuple[str, SttPlanScalar], ...],
+) -> tuple[str, ...]:
+    keys = _validate_settings(settings, "decoding_settings")
+    for key, value in settings:
+        _require_decoding_id(key, "decoding_settings key")
+        schema = STT_DECODING_SETTINGS_V1[key]
+        if schema == "fixed:en":
+            if value != "fixed:en":
+                raise ValueError(
+                    "language_contract must be exactly 'fixed:en'"
+                )
+        elif schema == "bool":
+            if not isinstance(value, bool):
+                raise ValueError("prompt_present must be boolean")
+        elif schema == "non_negative_int":
+            if (
+                not isinstance(value, int)
+                or isinstance(value, bool)
+                or value < 0
+            ):
+                raise ValueError(
+                    "hotword_count must be a non-negative integer"
+                )
+        elif schema == "stable_id":
+            _require_serialized_id(value, "configuration_id")
+    return keys
 
 
 def _safe_scalar(value: SttPlanScalar) -> SttPlanScalar | list[str]:
@@ -246,7 +274,7 @@ class SttExecutionRoute:
         _validate_ordered_unique(
             self.decoding_ids,
             "decoding_ids",
-            validator=_require_serialized_id,
+            validator=_require_decoding_id,
         )
         if not isinstance(self.local_model_available, bool):
             raise ValueError("local_model_available must be boolean")
@@ -299,11 +327,7 @@ class SttExecutionDescriptor:
             if material_route in seen_routes:
                 raise ValueError("fallback routes must be materially distinct")
             seen_routes.add(material_route)
-        decoding_keys = _validate_settings(
-            self.decoding_settings,
-            "decoding_settings",
-            serialized=True,
-        )
+        decoding_keys = _validate_decoding_settings(self.decoding_settings)
         for route in self.routes:
             if not set(route.decoding_ids).issubset(decoding_keys):
                 raise ValueError("route decoder IDs must name declared settings")
@@ -434,7 +458,7 @@ class SttActualExecution:
         _validate_ordered_unique(
             self.decoding_ids,
             "decoding_ids",
-            validator=_require_serialized_id,
+            validator=_require_decoding_id,
         )
 
     def as_safe_dict(self) -> dict[str, Any]:
