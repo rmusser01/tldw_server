@@ -32,6 +32,7 @@ _SECRET_SHAPED_RE = re.compile(
     re.IGNORECASE,
 )
 _MAX_EXECUTION_MISMATCHES = 8
+PLANNED_STT_TRANSCRIPTION_FAILURE = "Planned local STT transcription failed"
 STT_DECODING_SETTINGS_V1 = MappingProxyType(
     {
         "configuration_id": "stable_id",
@@ -40,6 +41,20 @@ STT_DECODING_SETTINGS_V1 = MappingProxyType(
         "prompt_present": "bool",
     }
 )
+
+
+def raise_for_planned_stt_sentinel(text: str) -> None:
+    """Reject planned-provider error and empty-result sentinels safely."""
+    from tldw_Server_API.app.core.exceptions import STTTranscriptionError
+
+    from .Audio_Transcription_Lib import is_transcription_error_message
+
+    normalized = text.strip().lower()
+    if is_transcription_error_message(text) or normalized in {
+        "[no transcription produced]",
+        "[no speech detected]",
+    }:
+        raise STTTranscriptionError(PLANNED_STT_TRANSCRIPTION_FAILURE) from None
 
 
 def _require_nonblank(value: object, field_name: str) -> str:
@@ -623,10 +638,7 @@ def finalize_stt_artifact(
     if not isinstance(text, str) or not isinstance(segments, list):
         raise STTTranscriptionError("STT provider artifact requires string text and list segments")
 
-    from .Audio_Transcription_Lib import is_transcription_error_message
-
-    if is_transcription_error_message(text):
-        raise STTTranscriptionError(text)
+    raise_for_planned_stt_sentinel(text)
 
     finalized: dict[str, Any] = {"text": text, "segments": segments}
     for key in ("language", "diarization", "usage"):

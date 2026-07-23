@@ -509,6 +509,135 @@ def test_planned_qwen_cache_never_bypasses_later_legacy_gating(
 
 
 @pytest.mark.unit
+def test_legacy_qwen_cache_reuse_survives_config_loader_failure(
+    monkeypatch,
+):
+    cached_processor = object()
+    cached_model = object()
+    atlib.qwen_processor = cached_processor
+    atlib.qwen_model = cached_model
+    monkeypatch.setattr(
+        atlib,
+        "load_and_log_configs",
+        lambda: (_ for _ in ()).throw(AssertionError("config reread")),
+    )
+
+    processor, model = atlib.load_qwen2audio()
+
+    assert processor is cached_processor
+    assert model is cached_model
+
+
+@pytest.mark.unit
+def test_legacy_qwen_cache_reuse_survives_disabled_config(
+    monkeypatch,
+):
+    cached_processor = object()
+    cached_model = object()
+    atlib.qwen_processor = cached_processor
+    atlib.qwen_model = cached_model
+    config_reads: list[bool] = []
+
+    def disabled_config():
+        config_reads.append(True)
+        return {"STT-Settings": {"qwen2audio_enabled": False}}
+
+    monkeypatch.setattr(atlib, "load_and_log_configs", disabled_config)
+
+    processor, model = atlib.load_qwen2audio()
+
+    assert processor is cached_processor
+    assert model is cached_model
+    assert config_reads == []
+
+
+@pytest.mark.unit
+def test_unload_all_clears_qwen_caches_and_later_loads_miss(
+    monkeypatch,
+    tmp_path,
+):
+    model_dir = tmp_path / "qwen"
+    _write_qwen_artifact(model_dir)
+    atlib.qwen_processor = object()
+    atlib.qwen_model = object()
+    atlib._qwen2audio_plan_cache[("stale", None, "cpu", "float32")] = (
+        object(),
+        object(),
+    )
+    calls: list[tuple[str, str]] = []
+
+    class FakeProcessor:
+        @classmethod
+        def from_pretrained(cls, model_id, **_kwargs):
+            calls.append(("processor", model_id))
+            return cls()
+
+    class FakeModel:
+        device = "cpu"
+        dtype = "float32"
+
+        @classmethod
+        def from_pretrained(cls, model_id, **_kwargs):
+            calls.append(("model", model_id))
+            return cls()
+
+    monkeypatch.setattr(atlib, "unload_whisper_model", lambda: None)
+    monkeypatch.setattr(atlib, "WHISPER_MODEL_BASE_DIR", tmp_path)
+    monkeypatch.setattr(atlib, "_get_torch", lambda **_kwargs: types.SimpleNamespace(
+        float16="float16",
+        float32="float32",
+    ))
+    monkeypatch.setattr(atlib, "_torch_cuda_available", lambda **_kwargs: False)
+    monkeypatch.setattr(
+        atlib,
+        "_get_qwen2audio_classes",
+        lambda: (FakeProcessor, FakeModel),
+    )
+    monkeypatch.setattr(
+        atlib,
+        "load_and_log_configs",
+        lambda: {
+            "STT-Settings": {
+                "qwen2audio_enabled": True,
+                "qwen2audio_model_id": str(model_dir),
+            }
+        },
+    )
+
+    atlib.unload_all_transcription_models()
+
+    assert atlib.qwen_processor is None
+    assert atlib.qwen_model is None
+    assert atlib._qwen2audio_plan_cache == {}
+
+    legacy_processor, legacy_model = atlib.load_qwen2audio()
+    route = _route(
+        provider="qwen2audio",
+        model_label="local-model",
+        backend="transformers",
+        device="cpu",
+        dtype="float32",
+    )
+    planned = atlib.load_qwen2audio(
+        model_id=str(model_dir),
+        local_files_only=True,
+        device_map="cpu",
+        dtype_name="float32",
+        execution_route=route,
+    )
+
+    assert isinstance(legacy_processor, FakeProcessor)
+    assert isinstance(legacy_model, FakeModel)
+    assert isinstance(planned, spa.SttLoadedRuntime)
+    assert calls == [
+        ("processor", str(model_dir)),
+        ("model", str(model_dir)),
+        ("processor", str(model_dir)),
+        ("model", str(model_dir)),
+    ]
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     ("loader_name", "provider", "backend"),
     [
@@ -608,6 +737,7 @@ def test_planned_canary_uses_restore_from_and_loaded_device_dtype(
 @pytest.mark.unit
 def test_planned_canary_typed_failure_does_not_enter_temp_file_fallback(
     monkeypatch,
+    caplog,
 ):
     route = _route(
         provider="canary",
@@ -626,11 +756,12 @@ def test_planned_canary_typed_failure_does_not_enter_temp_file_fallback(
         ),
     )
     calls: list[bool] = []
+    secret = "secret-token /Users/alice/private-canary.nemo"
 
     class FakeModel:
         def transcribe(self, *_args, **_kwargs):
             calls.append(True)
-            return ["[Error: planned Canary failed]"]
+            return [f"[Error: {secret}]"]
 
     monkeypatch.setattr(
         nemo,
@@ -645,13 +776,121 @@ def test_planned_canary_typed_failure_does_not_enter_temp_file_fallback(
         ),
     )
 
-    with pytest.raises(STTTranscriptionError, match="planned Canary failed"):
+    with pytest.raises(STTTranscriptionError) as exc_info:
         nemo.transcribe_with_canary(
             np.zeros(1600, dtype=np.float32),
             execution_plan=plan,
         )
 
     assert calls == [True]
+    assert str(exc_info.value) == "Planned local STT transcription failed"
+    assert secret not in str(exc_info.value)
+    assert exc_info.value.__cause__ is None
+    assert secret not in caplog.text
+
+
+@pytest.mark.unit
+def test_planned_standard_parakeet_sentinel_is_sanitized(
+    caplog,
+):
+    route = _route(
+        provider="parakeet",
+        model_label="parakeet-standard",
+        backend="nemo",
+        device="cpu",
+        dtype="float32",
+    )
+    plan = _plan(
+        route,
+        runtime_settings=(
+            ("device", "cpu"),
+            ("dtype", "float32"),
+            ("model_path", "parakeet.nemo"),
+            ("variant", "standard"),
+        ),
+    )
+    secret = "secret-token /Users/alice/private-parakeet.nemo"
+
+    class FakeModel:
+        def transcribe(self, *_args, **_kwargs):
+            return [f"[Transcription error] {secret}"]
+
+    loaded = spa.SttLoadedRuntime(
+        components=(FakeModel(),),
+        actual_execution=spa.actual_execution_from_route(
+            route,
+            device="cpu",
+            dtype="float32",
+        ),
+    )
+
+    with pytest.raises(STTTranscriptionError) as exc_info:
+        nemo.transcribe_with_parakeet(
+            np.zeros(1600, dtype=np.float32),
+            execution_plan=plan,
+            execution_route=route,
+            _loaded_runtime=loaded,
+        )
+
+    assert str(exc_info.value) == "Planned local STT transcription failed"
+    assert secret not in str(exc_info.value)
+    assert exc_info.value.__cause__ is None
+    assert secret not in caplog.text
+
+
+@pytest.mark.unit
+def test_planned_parakeet_onnx_sentinel_is_sanitized(
+    monkeypatch,
+    caplog,
+):
+    route = _route(
+        provider="parakeet",
+        model_label="parakeet-onnx",
+        backend="onnxruntime",
+        device="cpu",
+    )
+    plan = _plan(
+        route,
+        runtime_settings=(
+            ("device", "cpu"),
+            ("dtype", None),
+            ("model_path", "/safe/onnx"),
+            ("variant", "onnx"),
+        ),
+    )
+    secret = "secret-token /Users/alice/private-parakeet.onnx"
+
+    class FakeSession:
+        def get_providers(self):
+            return ["CPUExecutionProvider"]
+
+        def transcribe(self, *_args, **_kwargs):
+            return f"[Error: {secret}]"
+
+    loaded = spa.SttLoadedRuntime(
+        components=(FakeSession(), object()),
+        actual_execution=spa.actual_execution_from_route(
+            route,
+            device="cpu",
+        ),
+    )
+    monkeypatch.setattr(
+        parakeet_onnx,
+        "load_parakeet_onnx_model",
+        lambda *_args, **_kwargs: loaded,
+    )
+
+    with pytest.raises(STTTranscriptionError) as exc_info:
+        parakeet_onnx.transcribe_with_parakeet_onnx(
+            np.zeros(1600, dtype=np.float32),
+            execution_plan=plan,
+            execution_route=route,
+        )
+
+    assert str(exc_info.value) == "Planned local STT transcription failed"
+    assert secret not in str(exc_info.value)
+    assert exc_info.value.__cause__ is None
+    assert secret not in caplog.text
 
 
 def _install_nemo_modules(monkeypatch, asr_module):
@@ -1596,7 +1835,6 @@ def test_all_local_production_planners_fail_closed(
     config = {
         "nemo_device": "cpu",
         "nemo_compute_type": "float32",
-        "stt_benchmark_configuration_id": "production-1",
         "whisper_compute_type": "int8",
         "whisper_device": "cpu",
     }
@@ -1769,6 +2007,84 @@ def test_planned_qwen_failure_is_sanitized_and_never_falls_back_to_whisper(
     assert whisper_calls == []
     assert secret not in str(exc_info.value)
     assert exc_info.value.__cause__ is None
+
+
+@pytest.mark.unit
+def test_outer_planned_boundary_sanitizes_typed_error_sentinel(
+    monkeypatch,
+    caplog,
+):
+    route = _route(
+        provider="canary",
+        model_label="local-model",
+        backend="nemo",
+        device="cpu",
+        dtype="float32",
+    )
+    plan = _plan(
+        route,
+        runtime_settings=(
+            ("device", "cpu"),
+            ("dtype", "float32"),
+            ("model_path", "/safe/canary.nemo"),
+            ("variant", "standard"),
+        ),
+    )
+    secret = "secret-token /Users/alice/private-provider-output.txt"
+    monkeypatch.setattr(
+        atlib,
+        "_speech_to_text_planned",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            STTTranscriptionError(f"[Error: {secret}]")
+        ),
+    )
+
+    with pytest.raises(STTTranscriptionError) as exc_info:
+        atlib.speech_to_text(
+            "not-opened.wav",
+            execution_plan=plan,
+        )
+
+    assert str(exc_info.value) == "Planned local STT transcription failed"
+    assert secret not in str(exc_info.value)
+    assert exc_info.value.__cause__ is None
+    assert secret not in caplog.text
+
+
+@pytest.mark.unit
+def test_outer_planned_boundary_preserves_non_sentinel_typed_error(
+    monkeypatch,
+):
+    route = _route(
+        provider="canary",
+        model_label="local-model",
+        backend="nemo",
+        device="cpu",
+        dtype="float32",
+    )
+    plan = _plan(
+        route,
+        runtime_settings=(
+            ("device", "cpu"),
+            ("dtype", "float32"),
+            ("model_path", "/safe/canary.nemo"),
+            ("variant", "standard"),
+        ),
+    )
+    failure = STTTranscriptionError("Ordinary planned transcription failure")
+    monkeypatch.setattr(
+        atlib,
+        "_speech_to_text_planned",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(failure),
+    )
+
+    with pytest.raises(STTTranscriptionError) as exc_info:
+        atlib.speech_to_text(
+            "not-opened.wav",
+            execution_plan=plan,
+        )
+
+    assert exc_info.value is failure
 
 
 @pytest.mark.unit

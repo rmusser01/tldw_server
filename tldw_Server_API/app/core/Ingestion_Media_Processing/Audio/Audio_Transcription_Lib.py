@@ -76,6 +76,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_con
     SttLoadedRuntime,
     SttTranscriptionOutcome,
     actual_execution_from_route,
+    raise_for_planned_stt_sentinel,
     require_local_execution_route,
     validate_stt_loaded_runtime,
 )
@@ -2263,8 +2264,8 @@ def load_qwen2audio(
             planned_processor = planned_model = None
     else:
         planned_cache_key = None
-        # Legacy calls always reapply current enablement and identifier
-        # validation before considering the legacy cache.
+        if qwen_processor is not None and qwen_model is not None:
+            return qwen_processor, qwen_model
         cfg = load_and_log_configs() or {}
         stt_cfg = cfg.get("STT-Settings") or {}
         enabled_raw = stt_cfg.get("qwen2audio_enabled")
@@ -2773,6 +2774,7 @@ def unload_all_transcription_models():
     if qwen_model is not None:
         del qwen_model
         qwen_model = None
+    _qwen2audio_plan_cache.clear()
 
     # Unload Nemo models
     try:
@@ -4029,11 +4031,13 @@ def speech_to_text(
                 base_dir=base_dir,
                 cancel_check=cancel_check,
             )
+        except STTTranscriptionError as exc:
+            raise_for_planned_stt_sentinel(str(exc))
+            raise
         except (
             CancelCheckError,
             STTExecutionPlanError,
             STTExecutionUnsupportedError,
-            STTTranscriptionError,
             TranscriptionCancelled,
         ):
             raise

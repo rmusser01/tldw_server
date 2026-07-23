@@ -420,7 +420,6 @@ def _require_planned_precision(
 
 def _plan_semantics(
     *,
-    mode: str,
     task: str,
     language: str | None,
     word_timestamps: bool,
@@ -428,7 +427,6 @@ def _plan_semantics(
     hotwords: Sequence[str] | None,
     diarization: bool,
     fixed_english: bool,
-    configuration_id: object,
 ) -> tuple[
     str,
     str | None,
@@ -438,50 +436,23 @@ def _plan_semantics(
     bool,
     tuple[tuple[str, SttPlanScalar], ...],
 ]:
-    if mode == "neutral-v1":
-        if fixed_english and _primary_language(language) != "en":
-            raise STTExecutionUnsupportedError(
-                "This provider supports neutral-v1 only for English language tags"
-            )
-        decoding = (
-            (("language_contract", "fixed:en"),)
-            if fixed_english
-            else ()
-        )
-        return (
-            "transcribe",
-            language,
-            False,
-            None,
-            (),
-            False,
-            decoding,
-        )
-
-    normalized_configuration_id = str(configuration_id or "").strip()
-    if not normalized_configuration_id:
+    if fixed_english and _primary_language(language) != "en":
         raise STTExecutionUnsupportedError(
-            "production-v1 requires an opaque configuration_id"
+            "This provider supports neutral-v1 only for English language tags"
         )
-    decoding_values: list[tuple[str, SttPlanScalar]] = [
-        ("configuration_id", normalized_configuration_id),
-        ("hotword_count", len(tuple(hotwords or ()))),
-        ("prompt_present", bool(prompt)),
-    ]
-    if fixed_english:
-        if _primary_language(language) != "en":
-            raise STTExecutionUnsupportedError(
-                "This provider supports production-v1 only for English language tags"
-            )
-        decoding_values.append(("language_contract", "fixed:en"))
+    decoding = (
+        (("language_contract", "fixed:en"),)
+        if fixed_english
+        else ()
+    )
     return (
-        task,
+        "transcribe",
         language,
-        word_timestamps,
-        prompt,
-        tuple(hotwords or ()),
-        diarization,
-        tuple(sorted(decoding_values)),
+        False,
+        None,
+        (),
+        False,
+        decoding,
     )
 
 
@@ -496,7 +467,6 @@ def _build_local_plan(
     compute_type: str | None,
     dtype: str | None,
     revision: str | None,
-    mode: str,
     task: str,
     language: str | None,
     word_timestamps: bool,
@@ -504,7 +474,6 @@ def _build_local_plan(
     hotwords: Sequence[str] | None,
     diarization: bool,
     fixed_english: bool,
-    configuration_id: object,
     runtime_settings: dict[str, SttPlanScalar],
     source_modules: Sequence[str],
     dependency_distributions: Sequence[str],
@@ -518,7 +487,6 @@ def _build_local_plan(
         diarization,
         decoding_settings,
     ) = _plan_semantics(
-        mode=mode,
         task=task,
         language=language,
         word_timestamps=word_timestamps,
@@ -526,7 +494,6 @@ def _build_local_plan(
         hotwords=hotwords,
         diarization=diarization,
         fixed_english=fixed_english,
-        configuration_id=configuration_id,
     )
     artifact_id = (
         revision
@@ -807,7 +774,7 @@ class FasterWhisperAdapter(SttProviderAdapter):
         diarization: bool,
         mode: str,
     ) -> SttBatchExecutionPlan:
-        normalized_mode = _require_benchmark_mode(mode)
+        _require_benchmark_mode(mode)
         from . import Audio_Transcription_Lib as atlib
 
         requested = model or "distil-large-v3"
@@ -855,10 +822,6 @@ class FasterWhisperAdapter(SttProviderAdapter):
             raise STTExecutionUnsupportedError(
                 "faster-whisper planned CUDA backend is unavailable"
             )
-        if normalized_mode == "production-v1" and "cuda" in device:
-            raise STTExecutionUnsupportedError(
-                "production-v1 CUDA-to-CPU fallback cannot be frozen by this local plan"
-            )
         return _build_local_plan(
             provider=self.name.value,
             requested_model=requested_label,
@@ -869,7 +832,6 @@ class FasterWhisperAdapter(SttProviderAdapter):
             compute_type=compute_type,
             dtype=None,
             revision=None,
-            mode=normalized_mode,
             task=task,
             language=language,
             word_timestamps=word_timestamps,
@@ -877,7 +839,6 @@ class FasterWhisperAdapter(SttProviderAdapter):
             hotwords=hotwords,
             diarization=diarization,
             fixed_english=False,
-            configuration_id=stt_cfg.get("stt_benchmark_configuration_id"),
             runtime_settings={
                 _LOCAL_RUNTIME_COMPUTE_TYPE: compute_type,
                 _LOCAL_RUNTIME_DEVICE: device,
@@ -996,7 +957,7 @@ class ParakeetAdapter(SttProviderAdapter):
         diarization: bool,
         mode: str,
     ) -> SttBatchExecutionPlan:
-        normalized_mode = _require_benchmark_mode(mode)
+        _require_benchmark_mode(mode)
         requested = model or "parakeet-standard"
         requested_label = _safe_requested_model_label(requested)
         lowered = requested.lower()
@@ -1123,7 +1084,6 @@ class ParakeetAdapter(SttProviderAdapter):
             compute_type=None,
             dtype=dtype,
             revision=None,
-            mode=normalized_mode,
             task=task,
             language=language,
             word_timestamps=word_timestamps,
@@ -1131,7 +1091,6 @@ class ParakeetAdapter(SttProviderAdapter):
             hotwords=hotwords,
             diarization=diarization,
             fixed_english=True,
-            configuration_id=stt_cfg.get("stt_benchmark_configuration_id"),
             runtime_settings={
                 _LOCAL_RUNTIME_DEVICE: device,
                 _LOCAL_RUNTIME_DTYPE: dtype,
@@ -1242,7 +1201,7 @@ class CanaryAdapter(SttProviderAdapter):
         diarization: bool,
         mode: str,
     ) -> SttBatchExecutionPlan:
-        normalized_mode = _require_benchmark_mode(mode)
+        _require_benchmark_mode(mode)
         requested = model or "nemo-canary-1b"
         requested_label = _safe_requested_model_label(requested)
         primary_language = _primary_language(language)
@@ -1296,7 +1255,6 @@ class CanaryAdapter(SttProviderAdapter):
             compute_type=None,
             dtype=dtype,
             revision=None,
-            mode=normalized_mode,
             task=task,
             language=language,
             word_timestamps=word_timestamps,
@@ -1304,7 +1262,6 @@ class CanaryAdapter(SttProviderAdapter):
             hotwords=hotwords,
             diarization=diarization,
             fixed_english=False,
-            configuration_id=stt_cfg.get("stt_benchmark_configuration_id"),
             runtime_settings={
                 _LOCAL_RUNTIME_DEVICE: device,
                 _LOCAL_RUNTIME_DTYPE: dtype,
@@ -1424,7 +1381,7 @@ class Qwen2AudioAdapter(SttProviderAdapter):
         diarization: bool,
         mode: str,
     ) -> SttBatchExecutionPlan:
-        normalized_mode = _require_benchmark_mode(mode)
+        _require_benchmark_mode(mode)
         if _primary_language(language) != "en":
             raise STTExecutionUnsupportedError(
                 "Qwen2Audio neutral-v1 supports only English language tags"
@@ -1491,7 +1448,6 @@ class Qwen2AudioAdapter(SttProviderAdapter):
             compute_type=None,
             dtype=dtype,
             revision=revision,
-            mode=normalized_mode,
             task=task,
             language=language,
             word_timestamps=word_timestamps,
@@ -1499,7 +1455,6 @@ class Qwen2AudioAdapter(SttProviderAdapter):
             hotwords=hotwords,
             diarization=diarization,
             fixed_english=True,
-            configuration_id=None,
             runtime_settings=runtime_settings,
             source_modules=(
                 "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib",

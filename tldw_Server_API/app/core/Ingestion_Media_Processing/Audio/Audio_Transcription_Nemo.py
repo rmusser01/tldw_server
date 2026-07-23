@@ -47,6 +47,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_con
     SttLoadedRuntime,
     SttTranscriptionOutcome,
     actual_execution_from_route,
+    raise_for_planned_stt_sentinel,
     require_local_execution_route,
     validate_stt_loaded_runtime,
 )
@@ -814,8 +815,7 @@ def transcribe_with_canary(
     def _finish(result: str) -> str | SttTranscriptionOutcome:
         if loaded_runtime is None:
             return result
-        if result.startswith("["):
-            raise STTTranscriptionError(result)
+        raise_for_planned_stt_sentinel(result)
         return SttTranscriptionOutcome(
             artifact={
                 "text": result,
@@ -998,9 +998,8 @@ def transcribe_with_parakeet(
 
         if loaded_runtime is None:
             return result
-        if str(result).startswith("["):
-            raise STTTranscriptionError(str(result))
         text = str(result)
+        raise_for_planned_stt_sentinel(text)
         return SttTranscriptionOutcome(
             artifact={
                 "text": text,

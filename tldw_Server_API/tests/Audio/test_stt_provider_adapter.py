@@ -833,7 +833,18 @@ def test_shared_planned_runner_requires_typed_provider_outcome():
 
 
 @pytest.mark.unit
-def test_finalize_stt_artifact_rejects_recognized_error_sentinel(monkeypatch):
+@pytest.mark.parametrize(
+    "sentinel",
+    [
+        "[Error: {secret}]",
+        "[No transcription produced]",
+        "[No speech detected]",
+    ],
+)
+def test_finalize_stt_artifact_sanitizes_recognized_error_sentinel(
+    caplog,
+    sentinel,
+):
     spa = _import_module()
     plan = _make_execution_plan(spa)
     route = plan.descriptor.primary_route
@@ -851,22 +862,21 @@ def test_finalize_stt_artifact_rejects_recognized_error_sentinel(monkeypatch):
         dtype=route.dtype,
         decoding_ids=route.decoding_ids,
     )
+    secret = "secret-token /Users/alice/private-transcript.txt"
+    raw_sentinel = sentinel.format(secret=secret)
 
-    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as atlib
-
-    monkeypatch.setattr(
-        atlib,
-        "is_transcription_error_message",
-        lambda text: text.startswith("[Error:"),
-        raising=False,
-    )
-
-    with pytest.raises(spa.STTTranscriptionError):
+    with pytest.raises(spa.STTTranscriptionError) as exc_info:
         spa.finalize_stt_artifact(
-            {"text": "[Error: backend failed]", "segments": []},
+            {"text": raw_sentinel, "segments": []},
             plan=plan,
             actual=actual,
         )
+
+    assert str(exc_info.value) == "Planned local STT transcription failed"
+    assert secret not in str(exc_info.value)
+    assert exc_info.value.__cause__ is None
+    assert secret not in caplog.text
+    assert raw_sentinel not in caplog.text
 
 
 @pytest.mark.unit

@@ -36,6 +36,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_con
     SttLoadedRuntime,
     SttTranscriptionOutcome,
     actual_execution_from_route,
+    raise_for_planned_stt_sentinel,
     require_local_execution_route,
     validate_stt_loaded_runtime,
 )
@@ -1096,8 +1097,7 @@ def transcribe_with_parakeet_onnx(
     def _finish(text: str) -> str | SttTranscriptionOutcome:
         if loaded_runtime is None:
             return text
-        if text.startswith("[Error:") or text.startswith("[Transcription error]"):
-            raise STTTranscriptionError(text)
+        raise_for_planned_stt_sentinel(text)
         return SttTranscriptionOutcome(
             artifact={
                 "text": text,
