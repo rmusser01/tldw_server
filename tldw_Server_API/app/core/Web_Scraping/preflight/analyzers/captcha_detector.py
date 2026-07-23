@@ -9,7 +9,7 @@ from typing import Any
 from ..compatibility import _run_sync_compat
 from ..context import PreflightDeadlineExceeded, PreflightExecutionContext
 from ..facade import run_legacy_analyzer
-from ..probes import BrowserProbeOptions, ProbeUnavailable
+from ..probes import BrowserProbeOptions, ProbeError
 from ._shared import _safe_analyzer_call
 
 CAPTCHA_FINGERPRINTS: dict[str, list[str]] = {
@@ -43,7 +43,7 @@ async def _navigate_best_effort(page: Any, url: str) -> None:
         await page.wait_for_load_state("networkidle", timeout_ms=5_000)
     except asyncio.CancelledError:
         raise
-    except (PreflightDeadlineExceeded, ProbeUnavailable):
+    except (PreflightDeadlineExceeded, ProbeError):
         raise
     except Exception:  # noqa: BLE001 - preserve partial-page legacy heuristic
         return

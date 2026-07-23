@@ -12,8 +12,8 @@ from ..context import PreflightDeadlineExceeded, PreflightExecutionContext
 from ..facade import run_legacy_analyzer
 from ..probes import (
     BrowserProbeOptions,
+    ProbeError,
     ProbeHttpRequest,
-    ProbeUnavailable,
 )
 from ..utils.impersonate_target import get_impersonate_target
 from ._shared import _safe_analyzer_call
@@ -46,7 +46,7 @@ async def _navigate_best_effort(page: Any, url: str) -> None:
         await page.wait_for_load_state("networkidle", timeout_ms=5_000)
     except asyncio.CancelledError:
         raise
-    except (PreflightDeadlineExceeded, ProbeUnavailable):
+    except (PreflightDeadlineExceeded, ProbeError):
         raise
     except Exception:  # noqa: BLE001 - preserve partial-page legacy heuristic
         return

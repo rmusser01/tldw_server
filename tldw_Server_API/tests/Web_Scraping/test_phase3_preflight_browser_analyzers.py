@@ -15,6 +15,7 @@ from tldw_Server_API.app.core.Web_Scraping.preflight.context import (
 )
 from tldw_Server_API.app.core.Web_Scraping.preflight.probes import (
     BrowserProbeOptions,
+    ProbeError,
     ProbeHttpRequest,
     ProbeHttpResponse,
     ProbeTimeout,
@@ -354,6 +355,39 @@ async def test_js_navigation_is_best_effort() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("analyzer_name", ["js", "captcha"])
+async def test_governed_navigation_probe_error_is_propagated(
+    analyzer_name: str,
+) -> None:
+    from tldw_Server_API.app.core.Web_Scraping.preflight.analyzers.captcha_detector import (
+        _detect_captcha_impl,
+    )
+    from tldw_Server_API.app.core.Web_Scraping.preflight.analyzers.js_detector import (
+        _analyze_js_rendering_impl,
+    )
+
+    failure = ProbeError("policy_denied", "Probe destination was denied.")
+    page = FakeBrowserPage(
+        contents=["<body>rendered</body>"],
+        errors={"goto": failure},
+    )
+    context = fake_context(
+        http_text="<body>rendered</body>",
+        browser_pages=[page],
+    )
+    analyzer = {
+        "js": _analyze_js_rendering_impl,
+        "captcha": _detect_captcha_impl,
+    }[analyzer_name]
+
+    with pytest.raises(ProbeError) as raised:
+        await analyzer(_URL, context)
+
+    assert raised.value is failure
+    assert [call[0] for call in page.calls] == ["goto"]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("total_links", "scan_depth", "expected_checked"),
     [
@@ -486,6 +520,23 @@ async def test_captcha_none_preserves_compact_success_shape() -> None:
         "captcha_detected": False,
     }
     assert page.reload_calls == 10
+
+
+@pytest.mark.asyncio
+async def test_captcha_navigation_is_best_effort() -> None:
+    _, _, captcha, _, _ = _canonical_analyzers()
+    page = FakeBrowserPage(
+        contents=["<body>none</body>", "<body>none</body>"],
+        errors={"goto": RuntimeError("navigation secret token=abc")},
+    )
+    context = fake_context(browser_pages=[page])
+
+    assert await captcha(_URL, context) == {
+        "status": "success",
+        "captcha_detected": False,
+    }
+    assert page.reload_calls == 10
+    assert page.clear_calls == 1
 
 
 @pytest.mark.asyncio
