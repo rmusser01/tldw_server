@@ -47,6 +47,10 @@ _EXECUTABLE = "/opt/private/bin/wafw00f"
 _MISSING = object()
 
 
+class _LegacyAsyncioTimeoutError(Exception):
+    """Simulate Python 3.10's distinct asyncio timeout exception."""
+
+
 def _adapter_module() -> Any | None:
     try:
         return importlib.import_module(_ADAPTER_MODULE)
@@ -603,12 +607,36 @@ async def test_process_creation_is_bounded_by_analyzer_local_timeout() -> None:
     factory = FakeProcessFactory(block_creation=True)
 
     with pytest.raises(ProbeTimeout):
-        async with asyncio.timeout(0.2):
-            await _probe(
+        await asyncio.wait_for(
+            _probe(
                 process_factory=factory,
-            ).run_waf(_URL, find_all=False, enabled=True)
+            ).run_waf(_URL, find_all=False, enabled=True),
+            timeout=0.2,
+        )
 
     assert factory.creation_cancellations == 1
+
+
+@pytest.mark.asyncio
+async def test_process_creation_normalizes_python310_asyncio_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _adapter_module()
+    assert module is not None
+
+    async def legacy_timeout(*_args: Any, **_kwargs: Any) -> Any:
+        raise _LegacyAsyncioTimeoutError()
+
+    monkeypatch.setattr(module.asyncio, "TimeoutError", _LegacyAsyncioTimeoutError)
+    probe = _probe(process_factory=legacy_timeout)
+
+    with pytest.raises(ProbeTimeout):
+        await probe._create_process(
+            _EXECUTABLE,
+            _URL,
+            find_all=False,
+            timeout_s=0.02,
+        )
 
 
 @pytest.mark.asyncio
@@ -708,6 +736,36 @@ async def test_communicate_uses_analyzer_local_timeout_and_cleans_process() -> N
     assert process.communicate_cancellations == 1
     assert process.terminate_calls == 1
     assert process.kill_calls == 0
+    assert process.wait_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_communicate_normalizes_python310_asyncio_timeout_and_cleans_process(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _adapter_module()
+    assert module is not None
+    process = FakeExternalProcess()
+    original_wait_for = asyncio.wait_for
+    communicate_pending = True
+
+    async def legacy_wait_for(awaitable: Any, *, timeout: float) -> Any:
+        nonlocal communicate_pending
+        if communicate_pending:
+            communicate_pending = False
+            awaitable.close()
+            raise _LegacyAsyncioTimeoutError()
+        return await original_wait_for(awaitable, timeout=timeout)
+
+    monkeypatch.setattr(module.asyncio, "TimeoutError", _LegacyAsyncioTimeoutError)
+    monkeypatch.setattr(module.asyncio, "wait_for", legacy_wait_for)
+
+    with pytest.raises(ProbeTimeout):
+        await _probe(
+            process_factory=FakeProcessFactory([process]),
+        ).run_waf(_URL, find_all=False, enabled=True)
+
+    assert process.terminate_calls == 1
     assert process.wait_calls == 1
 
 

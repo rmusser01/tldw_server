@@ -231,7 +231,7 @@ class GuardedExternalToolProbe:
                 )
         except asyncio.CancelledError:
             raise
-        except TimeoutError:
+        except (TimeoutError, asyncio.TimeoutError):
             if self._controls.deadline_exhausted():
                 raise PreflightDeadlineExceeded() from None
             raise ProbeTimeout() from None
@@ -330,7 +330,7 @@ class GuardedExternalToolProbe:
         except asyncio.CancelledError:
             await self._cleanup_process(handle)
             raise
-        except TimeoutError:
+        except (TimeoutError, asyncio.TimeoutError):
             deadline_exhausted = self._controls.deadline_exhausted()
             await self._cleanup_process(handle)
             if deadline_exhausted:

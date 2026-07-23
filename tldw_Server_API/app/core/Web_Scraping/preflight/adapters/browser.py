@@ -114,7 +114,7 @@ async def _await_shared_deadline(
         try:
             async with timeout:
                 result = await operation()
-        except TimeoutError:
+        except (TimeoutError, asyncio.TimeoutError):
             if timeout.expired():
                 raise PreflightDeadlineExceeded() from None
             raise

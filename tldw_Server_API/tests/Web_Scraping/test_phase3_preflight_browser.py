@@ -41,6 +41,10 @@ _ADAPTER_MODULE = "tldw_Server_API.app.core.Web_Scraping.preflight.adapters.brow
 _ASYNCIO_COMPAT_MODULE = "tldw_Server_API.app.core.Web_Scraping.preflight.asyncio_compat"
 
 
+class _LegacyAsyncioTimeoutError(Exception):
+    """Simulate Python 3.10's distinct asyncio timeout exception."""
+
+
 def _adapter_module() -> Any | None:
     try:
         return importlib.import_module(_ADAPTER_MODULE)
@@ -96,7 +100,7 @@ async def test_asyncio_timeout_compatibility_uses_async_timeout_when_stdlib_is_a
 
     legacy_module = types.ModuleType("async_timeout")
     legacy_module.timeout = legacy_timeout
-    monkeypatch.delattr(compat.asyncio, "timeout")
+    monkeypatch.delattr(compat.asyncio, "timeout", raising=False)
     monkeypatch.setitem(sys.modules, "async_timeout", legacy_module)
 
     context = compat.timeout(0.25)
@@ -105,6 +109,38 @@ async def test_asyncio_timeout_compatibility_uses_async_timeout_when_stdlib_is_a
 
     assert created == [0.25]
     assert context.expired() is False
+
+
+@pytest.mark.asyncio
+async def test_shared_deadline_normalizes_python310_asyncio_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _adapter_module()
+    assert module is not None
+    controls = _live_controls(deadline_s=1.0)
+
+    class ExpiredTimeout:
+        async def __aenter__(self) -> None:
+            return None
+
+        async def __aexit__(self, *_args: Any) -> None:
+            return None
+
+        def expired(self) -> bool:
+            return True
+
+    async def legacy_timeout() -> None:
+        raise _LegacyAsyncioTimeoutError()
+
+    monkeypatch.setattr(module.asyncio, "TimeoutError", _LegacyAsyncioTimeoutError)
+    monkeypatch.setattr(module, "_asyncio_timeout", lambda _delay: ExpiredTimeout())
+
+    with pytest.raises(PreflightDeadlineExceeded):
+        await module._await_shared_deadline(
+            controls,
+            legacy_timeout,
+            check_after=False,
+        )
 
 
 @pytest.mark.asyncio
