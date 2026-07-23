@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import re
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -160,6 +161,59 @@ _STT_PROVIDER_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     TypeError,
     ValueError,
 )
+_IMMUTABLE_REVISION_RE = re.compile(r"^[0-9a-f]{40}$")
+
+_LOCAL_RUNTIME_MODEL_PATH = "model_path"
+_LOCAL_RUNTIME_REVISION = "revision"
+_LOCAL_RUNTIME_DEVICE = "device"
+_LOCAL_RUNTIME_DEVICE_MAP = "device_map"
+_LOCAL_RUNTIME_COMPUTE_TYPE = "compute_type"
+_LOCAL_RUNTIME_DTYPE = "dtype"
+_LOCAL_RUNTIME_VARIANT = "variant"
+
+
+def require_local_execution_route(
+    route: SttExecutionRoute,
+    *,
+    provider: str,
+    backend: str,
+) -> None:
+    """Reject any route that is not a pinned, offline local execution."""
+    if (
+        route.provider != provider
+        or route.backend != backend
+        or route.source != "local"
+        or route.audio_egress is not SttAudioEgress.NONE
+        or not route.local_model_available
+        or route.would_download
+    ):
+        raise STTExecutionPlanError(
+            f"Invalid local execution route for {provider}"
+        )
+
+
+def actual_execution_from_route(
+    route: SttExecutionRoute,
+    *,
+    device: str | None,
+    compute_type: str | None = None,
+    dtype: str | None = None,
+) -> SttActualExecution:
+    """Copy route identity while recording values proven by the loaded runtime."""
+    return SttActualExecution(
+        route_id=route.route_id,
+        provider=route.provider,
+        model_label=route.model_label,
+        artifact_id=route.artifact_id,
+        backend=route.backend,
+        audio_egress=route.audio_egress,
+        endpoint_id=route.endpoint_id,
+        source=route.source,
+        device=device,
+        compute_type=compute_type,
+        dtype=dtype,
+        decoding_ids=route.decoding_ids,
+    )
 
 
 def _segment_text_value(segment: dict[str, Any]) -> str:
@@ -336,6 +390,239 @@ def _resolve_default_model_for_provider(
     return "", None
 
 
+def _require_benchmark_mode(mode: str) -> str:
+    normalized = str(mode or "").strip().lower()
+    if normalized not in {"neutral-v1", "production-v1"}:
+        raise STTExecutionUnsupportedError(
+            f"Unsupported STT benchmark mode: {mode}"
+        )
+    return normalized
+
+
+def _primary_language(language: str | None) -> str | None:
+    if language is None:
+        return None
+    return str(language).replace("_", "-").split("-", 1)[0].strip().lower()
+
+
+def _require_existing_path(
+    value: object,
+    *,
+    provider: str,
+    suffix: str | None = None,
+    directory: bool = False,
+) -> Path:
+    raw = str(value or "").strip()
+    path = Path(raw)
+    valid = path.is_dir() if directory else path.is_file()
+    if suffix is not None:
+        valid = valid and path.suffix.lower() == suffix
+    if not raw or not valid:
+        description = "directory" if directory else f"{suffix or ''} artifact"
+        raise STTExecutionUnsupportedError(
+            f"{provider} requires an explicit existing local {description}"
+        )
+    return path.resolve()
+
+
+def _plan_semantics(
+    *,
+    mode: str,
+    task: str,
+    language: str | None,
+    word_timestamps: bool,
+    prompt: str | None,
+    hotwords: Sequence[str] | None,
+    diarization: bool,
+    fixed_english: bool,
+    configuration_id: object,
+) -> tuple[
+    str,
+    str | None,
+    bool,
+    str | None,
+    tuple[str, ...],
+    bool,
+    tuple[tuple[str, SttPlanScalar], ...],
+]:
+    if mode == "neutral-v1":
+        if fixed_english and _primary_language(language) != "en":
+            raise STTExecutionUnsupportedError(
+                "This provider supports neutral-v1 only for English language tags"
+            )
+        decoding = (
+            (("language_contract", "fixed:en"),)
+            if fixed_english
+            else ()
+        )
+        return (
+            "transcribe",
+            language,
+            False,
+            None,
+            (),
+            False,
+            decoding,
+        )
+
+    normalized_configuration_id = str(configuration_id or "").strip()
+    if not normalized_configuration_id:
+        raise STTExecutionUnsupportedError(
+            "production-v1 requires an opaque configuration_id"
+        )
+    decoding_values: list[tuple[str, SttPlanScalar]] = [
+        ("configuration_id", normalized_configuration_id),
+        ("hotword_count", len(tuple(hotwords or ()))),
+        ("prompt_present", bool(prompt)),
+    ]
+    if fixed_english:
+        if _primary_language(language) != "en":
+            raise STTExecutionUnsupportedError(
+                "This provider supports production-v1 only for English language tags"
+            )
+        decoding_values.append(("language_contract", "fixed:en"))
+    return (
+        task,
+        language,
+        word_timestamps,
+        prompt,
+        tuple(hotwords or ()),
+        diarization,
+        tuple(sorted(decoding_values)),
+    )
+
+
+def _build_local_plan(
+    *,
+    provider: str,
+    requested_model: str,
+    resolved_model: str,
+    backend: str,
+    model_path: Path | str,
+    device: str | None,
+    compute_type: str | None,
+    dtype: str | None,
+    revision: str | None,
+    mode: str,
+    task: str,
+    language: str | None,
+    word_timestamps: bool,
+    prompt: str | None,
+    hotwords: Sequence[str] | None,
+    diarization: bool,
+    fixed_english: bool,
+    configuration_id: object,
+    runtime_settings: dict[str, SttPlanScalar],
+    source_modules: Sequence[str],
+    dependency_distributions: Sequence[str],
+) -> SttBatchExecutionPlan:
+    (
+        task,
+        language,
+        word_timestamps,
+        prompt,
+        planned_hotwords,
+        diarization,
+        decoding_settings,
+    ) = _plan_semantics(
+        mode=mode,
+        task=task,
+        language=language,
+        word_timestamps=word_timestamps,
+        prompt=prompt,
+        hotwords=hotwords,
+        diarization=diarization,
+        fixed_english=fixed_english,
+        configuration_id=configuration_id,
+    )
+    artifact_id = (
+        revision
+        if revision is not None and _IMMUTABLE_REVISION_RE.fullmatch(revision)
+        else None
+    )
+    identity_resolved = artifact_id is not None
+    decoding_ids = tuple(key for key, _value in decoding_settings)
+    route = SttExecutionRoute(
+        route_id="local-1",
+        provider=provider,
+        model_label=resolved_model,
+        artifact_id=artifact_id,
+        identity_resolved=identity_resolved,
+        backend=backend,
+        source="local",
+        audio_egress=SttAudioEgress.NONE,
+        endpoint_id=None,
+        device=device,
+        compute_type=compute_type,
+        dtype=dtype,
+        decoding_ids=decoding_ids,
+        local_model_available=True,
+        would_download=False,
+    )
+    descriptor = SttExecutionDescriptor(
+        requested_provider=provider,
+        requested_model_label=requested_model,
+        resolved_provider=provider,
+        resolved_model_label=resolved_model,
+        routes=(route,),
+        honors_task=True,
+        honors_language=True,
+        honors_prompt_absence=True,
+        honors_hotword_absence=True,
+        honors_diarization=True,
+        honors_word_timestamps=True,
+        decoding_settings=decoding_settings,
+        source_modules=tuple(sorted(source_modules)),
+        dependency_distributions=tuple(sorted(dependency_distributions)),
+    )
+    runtime_values = {
+        _LOCAL_RUNTIME_MODEL_PATH: str(model_path),
+        **runtime_settings,
+    }
+    return SttBatchExecutionPlan(
+        descriptor=descriptor,
+        task=task,
+        language=language,
+        prompt=prompt,
+        hotwords=planned_hotwords,
+        diarization=diarization,
+        word_timestamps=word_timestamps,
+        runtime_settings=tuple(sorted(runtime_values.items())),
+    )
+
+
+def _run_local_planned_helper(
+    audio_path: str,
+    *,
+    execution_plan: SttBatchExecutionPlan,
+    base_dir: Path | None,
+    cancel_check: Callable[[], bool] | None,
+) -> SttTranscriptionOutcome:
+    from .Audio_Transcription_Lib import speech_to_text
+
+    runtime = execution_plan.runtime_values()
+    outcome = speech_to_text(
+        audio_path,
+        whisper_model=str(runtime[_LOCAL_RUNTIME_MODEL_PATH]),
+        selected_source_lang=execution_plan.language,
+        vad_filter=False,
+        diarize=execution_plan.diarization,
+        word_timestamps=execution_plan.word_timestamps,
+        initial_prompt=execution_plan.prompt,
+        hotwords=execution_plan.hotwords,
+        task=execution_plan.task,
+        base_dir=base_dir,
+        cancel_check=cancel_check,
+        include_metadata_header=False,
+        execution_plan=execution_plan,
+    )
+    if not isinstance(outcome, SttTranscriptionOutcome):
+        raise STTExecutionPlanError(
+            "Planned local STT helper did not report typed actual execution"
+        )
+    return outcome
+
+
 class SttProviderName(str, Enum):
     """Canonical provider identifiers used across the STT module."""
 
@@ -440,9 +727,21 @@ class SttProviderAdapter(ABC):
         base_dir: Path | None,
         cancel_check: Callable[[], bool] | None,
     ) -> SttTranscriptionOutcome:
-        """Return a typed outcome once a provider implements planned execution."""
-        raise STTExecutionUnsupportedError(
-            f"Provider {self.name.value} cannot yet honor planned execution"
+        """Run the four native local providers through their shared plan helper."""
+        if self.name not in {
+            SttProviderName.FASTER_WHISPER,
+            SttProviderName.PARAKEET,
+            SttProviderName.CANARY,
+            SttProviderName.QWEN2AUDIO,
+        }:
+            raise STTExecutionUnsupportedError(
+                f"Provider {self.name.value} cannot yet honor planned execution"
+            )
+        return _run_local_planned_helper(
+            audio_path,
+            execution_plan=execution_plan,
+            base_dir=base_dir,
+            cancel_check=cancel_check,
         )
 
     def _run_planned_batch(
@@ -501,6 +800,78 @@ class FasterWhisperAdapter(SttProviderAdapter):
             supports_batch=True,
             supports_streaming=True,
             supports_diarization=True,
+        )
+
+    def plan_batch_execution(
+        self,
+        *,
+        model: str | None,
+        language: str | None,
+        task: str,
+        word_timestamps: bool,
+        prompt: str | None,
+        hotwords: Sequence[str] | None,
+        diarization: bool,
+        mode: str,
+    ) -> SttBatchExecutionPlan:
+        normalized_mode = _require_benchmark_mode(mode)
+        from . import Audio_Transcription_Lib as atlib
+
+        requested = model or "distil-large-v3"
+        requested_label = _safe_requested_model_label(requested)
+        if requested_label == "local-model":
+            model_path: Path | str = _require_existing_path(
+                requested,
+                provider=self.name.value,
+                directory=True,
+            )
+        else:
+            if not atlib.check_model_exists(requested):
+                raise STTExecutionUnsupportedError(
+                    f"Whisper model {requested} is not available locally"
+                )
+            model_path = requested
+        stt_cfg = get_stt_config() or {}
+        device = str(
+            stt_cfg.get("whisper_device") or atlib.processing_choice or "cpu"
+        ).strip().lower()
+        compute_type = str(
+            stt_cfg.get("whisper_compute_type") or ""
+        ).strip().lower()
+        if not compute_type or compute_type == "auto":
+            compute_type = "float16" if "cuda" in device else "int8"
+        if normalized_mode == "production-v1" and "cuda" in device:
+            raise STTExecutionUnsupportedError(
+                "production-v1 CUDA-to-CPU fallback cannot be frozen by this local plan"
+            )
+        return _build_local_plan(
+            provider=self.name.value,
+            requested_model=requested_label,
+            resolved_model=requested_label,
+            backend="ctranslate2",
+            model_path=model_path,
+            device=device,
+            compute_type=compute_type,
+            dtype=None,
+            revision=None,
+            mode=normalized_mode,
+            task=task,
+            language=language,
+            word_timestamps=word_timestamps,
+            prompt=prompt,
+            hotwords=hotwords,
+            diarization=diarization,
+            fixed_english=False,
+            configuration_id=stt_cfg.get("stt_benchmark_configuration_id"),
+            runtime_settings={
+                _LOCAL_RUNTIME_COMPUTE_TYPE: compute_type,
+                _LOCAL_RUNTIME_DEVICE: device,
+            },
+            source_modules=(
+                "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib",
+                "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_provider_adapter",
+            ),
+            dependency_distributions=("faster-whisper",),
         )
 
     def transcribe_batch(
@@ -598,6 +969,131 @@ class ParakeetAdapter(SttProviderAdapter):
             supports_diarization=False,
         )
 
+    def plan_batch_execution(
+        self,
+        *,
+        model: str | None,
+        language: str | None,
+        task: str,
+        word_timestamps: bool,
+        prompt: str | None,
+        hotwords: Sequence[str] | None,
+        diarization: bool,
+        mode: str,
+    ) -> SttBatchExecutionPlan:
+        normalized_mode = _require_benchmark_mode(mode)
+        requested = model or "parakeet-standard"
+        requested_label = _safe_requested_model_label(requested)
+        lowered = requested.lower()
+        if (
+            requested_label == "local-model"
+            and Path(requested).suffix.lower() == ".nemo"
+        ) or lowered in {"parakeet-standard", "nemo-parakeet"}:
+            variant = "standard"
+        elif lowered in {
+            "parakeet-onnx",
+            _CANONICAL_PARAKEET_ONNX_MODEL,
+        }:
+            variant = "onnx"
+        elif lowered == "parakeet-mlx":
+            variant = "mlx"
+        elif lowered == "parakeet-cuda":
+            variant = "cuda"
+        else:
+            raise STTExecutionUnsupportedError(
+                "Unsupported Parakeet variant"
+            )
+        stt_cfg = get_stt_config() or {}
+        if variant in {"standard", "cuda"}:
+            path_value = (
+                requested
+                if requested_label == "local-model"
+                else stt_cfg.get("parakeet_model_path")
+            )
+            model_path = _require_existing_path(
+                path_value,
+                provider=self.name.value,
+                suffix=".nemo",
+            )
+            backend = "nemo"
+            device = (
+                "cuda"
+                if variant == "cuda"
+                else str(stt_cfg.get("nemo_device") or "cpu").strip().lower()
+            )
+            dtype = str(
+                stt_cfg.get("nemo_compute_type") or "float32"
+            ).strip().lower()
+            dependencies = ("nemo-toolkit",)
+            modules = (
+                "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib",
+                "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo",
+                "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_provider_adapter",
+            )
+        elif variant == "onnx":
+            model_path = _require_existing_path(
+                stt_cfg.get("parakeet_onnx_model_id"),
+                provider=self.name.value,
+                directory=True,
+            )
+            backend = "onnxruntime"
+            device = str(
+                stt_cfg.get("parakeet_onnx_device") or "cpu"
+            ).strip().lower()
+            dtype = None
+            dependencies = ("onnxruntime",)
+            modules = (
+                "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib",
+                "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Parakeet_ONNX",
+                "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_provider_adapter",
+            )
+        else:
+            model_path = _require_existing_path(
+                stt_cfg.get("mlx_model_id"),
+                provider=self.name.value,
+                directory=True,
+            )
+            backend = "mlx"
+            device = "mps"
+            dtype = "bfloat16"
+            dependencies = ("parakeet-mlx",)
+            modules = (
+                "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib",
+                "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Parakeet_MLX",
+                "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_provider_adapter",
+            )
+        if normalized_mode == "production-v1" and variant != "onnx":
+            raise STTExecutionUnsupportedError(
+                "production-v1 Parakeet fallback cannot be fully frozen"
+            )
+        return _build_local_plan(
+            provider=self.name.value,
+            requested_model=requested_label,
+            resolved_model=requested_label,
+            backend=backend,
+            model_path=model_path,
+            device=device,
+            compute_type=None,
+            dtype=dtype,
+            revision=None,
+            mode=normalized_mode,
+            task=task,
+            language=language,
+            word_timestamps=word_timestamps,
+            prompt=prompt,
+            hotwords=hotwords,
+            diarization=diarization,
+            fixed_english=True,
+            configuration_id=stt_cfg.get("stt_benchmark_configuration_id"),
+            runtime_settings={
+                _LOCAL_RUNTIME_DEVICE: device,
+                _LOCAL_RUNTIME_DTYPE: dtype,
+                _LOCAL_RUNTIME_VARIANT: variant,
+            },
+            source_modules=modules,
+            dependency_distributions=dependencies,
+        )
+
     def transcribe_batch(
         self,
         audio_path: str,
@@ -685,6 +1181,68 @@ class CanaryAdapter(SttProviderAdapter):
             supports_batch=True,
             supports_streaming=False,
             supports_diarization=False,
+        )
+
+    def plan_batch_execution(
+        self,
+        *,
+        model: str | None,
+        language: str | None,
+        task: str,
+        word_timestamps: bool,
+        prompt: str | None,
+        hotwords: Sequence[str] | None,
+        diarization: bool,
+        mode: str,
+    ) -> SttBatchExecutionPlan:
+        normalized_mode = _require_benchmark_mode(mode)
+        requested = model or "nemo-canary-1b"
+        requested_label = _safe_requested_model_label(requested)
+        stt_cfg = get_stt_config() or {}
+        path_value = (
+            requested
+            if requested_label == "local-model"
+            else stt_cfg.get("canary_model_path")
+        )
+        model_path = _require_existing_path(
+            path_value,
+            provider=self.name.value,
+            suffix=".nemo",
+        )
+        device = str(stt_cfg.get("nemo_device") or "cpu").strip().lower()
+        dtype = str(
+            stt_cfg.get("nemo_compute_type") or "float32"
+        ).strip().lower()
+        return _build_local_plan(
+            provider=self.name.value,
+            requested_model=requested_label,
+            resolved_model=requested_label,
+            backend="nemo",
+            model_path=model_path,
+            device=device,
+            compute_type=None,
+            dtype=dtype,
+            revision=None,
+            mode=normalized_mode,
+            task=task,
+            language=language,
+            word_timestamps=word_timestamps,
+            prompt=prompt,
+            hotwords=hotwords,
+            diarization=diarization,
+            fixed_english=False,
+            configuration_id=stt_cfg.get("stt_benchmark_configuration_id"),
+            runtime_settings={
+                _LOCAL_RUNTIME_DEVICE: device,
+                _LOCAL_RUNTIME_DTYPE: dtype,
+                _LOCAL_RUNTIME_VARIANT: "standard",
+            },
+            source_modules=(
+                "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib",
+                "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo",
+                "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_provider_adapter",
+            ),
+            dependency_distributions=("nemo-toolkit",),
         )
 
     def transcribe_batch(
@@ -779,6 +1337,76 @@ class Qwen2AudioAdapter(SttProviderAdapter):
             supports_batch=True,
             supports_streaming=False,
             supports_diarization=False,
+        )
+
+    def plan_batch_execution(
+        self,
+        *,
+        model: str | None,
+        language: str | None,
+        task: str,
+        word_timestamps: bool,
+        prompt: str | None,
+        hotwords: Sequence[str] | None,
+        diarization: bool,
+        mode: str,
+    ) -> SttBatchExecutionPlan:
+        normalized_mode = _require_benchmark_mode(mode)
+        if normalized_mode == "production-v1":
+            raise STTExecutionUnsupportedError(
+                "production-v1 Qwen2Audio-to-Whisper fallback cannot be fully frozen"
+            )
+        requested = model or "qwen2audio"
+        requested_label = _safe_requested_model_label(requested)
+        stt_cfg = get_stt_config() or {}
+        path_value = (
+            requested
+            if requested_label == "local-model" and Path(requested).is_dir()
+            else stt_cfg.get("qwen2audio_model_id")
+        )
+        model_path = _require_existing_path(
+            path_value,
+            provider=self.name.value,
+            directory=True,
+        )
+        revision_value = stt_cfg.get("qwen2audio_revision")
+        revision = str(revision_value).strip() if revision_value else None
+        device_map = str(
+            stt_cfg.get("qwen2audio_device_map") or "auto"
+        ).strip().lower()
+        dtype = str(
+            stt_cfg.get("qwen2audio_dtype") or "float16"
+        ).strip().lower()
+        runtime_settings: dict[str, SttPlanScalar] = {
+            _LOCAL_RUNTIME_DEVICE_MAP: device_map,
+            _LOCAL_RUNTIME_DTYPE: dtype,
+            _LOCAL_RUNTIME_REVISION: revision,
+        }
+        return _build_local_plan(
+            provider=self.name.value,
+            requested_model=requested_label,
+            resolved_model=requested_label,
+            backend="transformers",
+            model_path=model_path,
+            device=None if device_map == "auto" else device_map,
+            compute_type=None,
+            dtype=dtype,
+            revision=revision,
+            mode=normalized_mode,
+            task=task,
+            language=language,
+            word_timestamps=word_timestamps,
+            prompt=prompt,
+            hotwords=hotwords,
+            diarization=diarization,
+            fixed_english=True,
+            configuration_id=None,
+            runtime_settings=runtime_settings,
+            source_modules=(
+                "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib",
+                "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_provider_adapter",
+            ),
+            dependency_distributions=("transformers",),
         )
 
     def transcribe_batch(

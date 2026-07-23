@@ -34,10 +34,30 @@ from .numpy_compat import ensure_numpy_compatibility
 ensure_numpy_compatibility()
 
 # Import local config helpers
-from tldw_Server_API.app.core.config import get_stt_config, loaded_config_data
+from tldw_Server_API.app.core.config import get_stt_config
+from tldw_Server_API.app.core.exceptions import (
+    STTExecutionPlanError,
+    STTExecutionUnsupportedError,
+    STTTranscriptionError,
+)
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_contract import (
+    SttActualExecution,
+    SttBatchExecutionPlan,
+    SttExecutionRoute,
+    SttLoadedRuntime,
+    SttTranscriptionOutcome,
+)
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_provider_adapter import (
+    actual_execution_from_route,
+    require_local_execution_route,
+)
 
 # Global model cache
 _model_cache: dict[str, Any] = {}
+_RUNTIME_MODEL_PATH = "model_path"
+_RUNTIME_DEVICE = "device"
+_RUNTIME_DTYPE = "dtype"
+_RUNTIME_VARIANT = "variant"
 
 # Canonical language codes supported by Canary-1b-v2.
 # See: https://huggingface.co/nvidia/canary-1b-v2
@@ -265,13 +285,189 @@ def _get_cache_dir() -> Path:
     return cache_path
 
 
-def load_canary_model():
+def _runtime_string(value: object) -> str | None:
+    if value is None:
+        return None
+    type_value = getattr(value, "type", None)
+    rendered = str(type_value if type_value is not None else value).strip().lower()
+    return rendered.removeprefix("torch.") or None
+
+
+def _effective_model_attr(model: object, name: str) -> str | None:
+    direct = _runtime_string(getattr(model, name, None))
+    if direct is not None:
+        return direct
+    parameters = getattr(model, "parameters", None)
+    if callable(parameters):
+        try:
+            parameter = next(iter(parameters()))
+        except (StopIteration, TypeError):
+            return None
+        return _runtime_string(getattr(parameter, name, None))
+    return None
+
+
+def _require_local_nemo_path(model_path: str | None) -> Path:
+    if model_path is None:
+        raise STTExecutionUnsupportedError(
+            "No-download NeMo execution requires an explicit local .nemo artifact"
+        )
+    path = Path(model_path)
+    if path.suffix.lower() != ".nemo" or not path.is_file():
+        raise STTExecutionUnsupportedError(
+            "No-download NeMo execution requires an existing local .nemo artifact"
+        )
+    return path.resolve()
+
+
+def _nemo_actual(
+    route: SttExecutionRoute,
+    model: object,
+) -> SttActualExecution:
+    device = _effective_model_attr(model, "device")
+    dtype = _effective_model_attr(model, "dtype")
+    if device is None or dtype is None:
+        raise STTExecutionPlanError(
+            "NeMo model did not expose effective device and dtype"
+        )
+    return actual_execution_from_route(
+        route,
+        device=device,
+        dtype=dtype,
+    )
+
+
+def _move_nemo_model(
+    model: Any,
+    *,
+    device: str,
+    dtype_name: str | None,
+) -> Any:
+    torch_mod = _get_torch(allow_import=False)
+    dtype_value = (
+        getattr(torch_mod, dtype_name, None)
+        if torch_mod is not None and dtype_name is not None
+        else None
+    )
+    if dtype_name is not None and dtype_value is None:
+        raise STTExecutionUnsupportedError(
+            f"Unsupported or unavailable NeMo dtype: {dtype_name}"
+        )
+    to_method = getattr(model, "to", None)
+    if callable(to_method):
+        kwargs: dict[str, Any] = {"device": device}
+        if dtype_value is not None:
+            kwargs["dtype"] = dtype_value
+        model = to_method(**kwargs)
+    elif device == "cuda":
+        model = model.cuda()
+    else:
+        model = model.cpu()
+    model.eval()
+    return model
+
+
+def _load_controlled_nemo_model(
+    *,
+    provider: str,
+    model_class_name: str,
+    hub_model_id: str,
+    model_path: str | None,
+    device: str | None,
+    dtype_name: str | None,
+    allow_download: bool,
+    execution_route: SttExecutionRoute | None,
+    configure_decoding: bool = False,
+) -> Any | SttLoadedRuntime:
+    if execution_route is not None:
+        require_local_execution_route(
+            execution_route,
+            provider=provider,
+            backend="nemo",
+        )
+    local_path = (
+        _require_local_nemo_path(model_path)
+        if not allow_download
+        else Path(model_path).resolve() if model_path is not None else None
+    )
+    if device is None:
+        raise STTExecutionUnsupportedError(
+            f"Controlled {provider} loading requires an explicit device"
+        )
+    try:
+        import nemo.collections.asr as nemo_asr
+    except ImportError:
+        raise STTExecutionUnsupportedError(
+            "Nemo toolkit is unavailable"
+        ) from None
+    model_class = getattr(nemo_asr.models, model_class_name)
+    cache_key = _get_model_cache_key(
+        provider,
+        f"{local_path or 'hub'}:{device}:{dtype_name or ''}",
+    )
+    model = _model_cache.get(cache_key)
+    if model is None:
+        try:
+            model = (
+                model_class.restore_from(str(local_path), map_location=device)
+                if local_path is not None
+                else model_class.from_pretrained(hub_model_id)
+            )
+            if configure_decoding:
+                model.change_decoding_strategy(None)
+            model = _move_nemo_model(
+                model,
+                device=device,
+                dtype_name=dtype_name,
+            )
+        except (STTExecutionPlanError, STTExecutionUnsupportedError):
+            raise
+        except Exception:
+            raise STTExecutionUnsupportedError(
+                f"Controlled local {provider} artifact could not be loaded"
+            ) from None
+        _model_cache[cache_key] = model
+    if execution_route is None:
+        return model
+    return SttLoadedRuntime(
+        components=(model,),
+        actual_execution=_nemo_actual(execution_route, model),
+    )
+
+
+def load_canary_model(
+    *,
+    model_path: str | None = None,
+    device: str | None = None,
+    dtype_name: str | None = None,
+    allow_download: bool = True,
+    execution_route: SttExecutionRoute | None = None,
+) -> Any | SttLoadedRuntime:
     """
     Load and cache the Canary-1b model.
 
     Returns:
         The loaded Canary model instance, or None if loading fails.
     """
+    controlled = (
+        model_path is not None
+        or device is not None
+        or dtype_name is not None
+        or not allow_download
+        or execution_route is not None
+    )
+    if controlled:
+        return _load_controlled_nemo_model(
+            provider="canary",
+            model_class_name="EncDecMultiTaskModel",
+            hub_model_id="nvidia/canary-1b-v2",
+            model_path=model_path,
+            device=device,
+            dtype_name=dtype_name,
+            allow_download=allow_download,
+            execution_route=execution_route,
+        )
+
     cache_key = _get_model_cache_key('canary', 'standard')
 
     if cache_key in _model_cache:
@@ -315,7 +511,16 @@ def load_canary_model():
         return None
 
 
-def load_parakeet_model(variant: str = 'standard'):
+def load_parakeet_model(
+    variant: str = "standard",
+    *,
+    model_path: str | None = None,
+    device: str | None = None,
+    compute_type: str | None = None,
+    allow_download: bool = True,
+    allow_variant_fallback: bool = True,
+    execution_route: SttExecutionRoute | None = None,
+) -> Any | SttLoadedRuntime:
     """
     Load and cache the Parakeet TDT model.
 
@@ -325,6 +530,32 @@ def load_parakeet_model(variant: str = 'standard'):
     Returns:
         The loaded Parakeet model instance, or None if loading fails.
     """
+    controlled = (
+        model_path is not None
+        or device is not None
+        or compute_type is not None
+        or not allow_download
+        or not allow_variant_fallback
+        or execution_route is not None
+    )
+    if controlled:
+        normalized_variant = str(variant or "").strip().lower()
+        if normalized_variant not in {"standard", "cuda"}:
+            raise STTExecutionUnsupportedError(
+                f"Controlled NeMo Parakeet variant is unsupported: {variant}"
+            )
+        return _load_controlled_nemo_model(
+            provider="parakeet",
+            model_class_name="EncDecRNNTBPEModel",
+            hub_model_id="nvidia/parakeet-tdt-0.6b-v3",
+            model_path=model_path,
+            device=device,
+            dtype_name=compute_type,
+            allow_download=allow_download,
+            execution_route=execution_route,
+            configure_decoding=True,
+        )
+
     cache_key = _get_model_cache_key('parakeet', variant)
 
     if cache_key in _model_cache:
@@ -484,7 +715,9 @@ def transcribe_with_canary(
     *,
     task: str = "transcribe",
     target_language: Optional[str] = None,
-) -> str:
+    execution_plan: SttBatchExecutionPlan | None = None,
+    execution_route: SttExecutionRoute | None = None,
+) -> str | SttTranscriptionOutcome:
     """
     Transcribe or translate audio using the Canary-1b-v2 model.
 
@@ -510,7 +743,25 @@ def transcribe_with_canary(
     Returns:
         Transcribed text string
     """
-    model = load_canary_model()
+    loaded_runtime: SttLoadedRuntime | None = None
+    if execution_plan is not None:
+        route = execution_route or execution_plan.descriptor.primary_route
+        runtime = execution_plan.runtime_values()
+        loaded = load_canary_model(
+            model_path=str(runtime.get(_RUNTIME_MODEL_PATH) or ""),
+            device=str(runtime.get(_RUNTIME_DEVICE) or ""),
+            dtype_name=str(runtime.get(_RUNTIME_DTYPE) or ""),
+            allow_download=False,
+            execution_route=route,
+        )
+        if not isinstance(loaded, SttLoadedRuntime):
+            raise STTExecutionPlanError(
+                "Planned Canary load did not report actual execution"
+            )
+        loaded_runtime = loaded
+        model = loaded.components[0]
+    else:
+        model = load_canary_model()
     if model is None:
         return "[Error: Canary model could not be loaded]"
 
@@ -559,11 +810,33 @@ def transcribe_with_canary(
             result = "[No transcription produced]"
         return result
 
+    def _finish(result: str) -> str | SttTranscriptionOutcome:
+        if loaded_runtime is None:
+            return result
+        if result.startswith("["):
+            raise STTTranscriptionError(result)
+        return SttTranscriptionOutcome(
+            artifact={
+                "text": result,
+                "segments": [
+                    {
+                        "start_seconds": 0.0,
+                        "end_seconds": 0.0,
+                        "Text": result,
+                    }
+                ],
+                "language": execution_plan.language if execution_plan else language,
+            },
+            actual_execution=loaded_runtime.actual_execution,
+        )
+
     if isinstance(audio_data, np.ndarray):
         audio_np, model_sample_rate = _prepare_numpy_audio_for_nemo(audio_data, sample_rate)
         try:
             transcriptions = model.transcribe([audio_np], batch_size=1, **lang_kwargs)
-            return _extract_result(transcriptions)
+            return _finish(_extract_result(transcriptions))
+        except STTTranscriptionError:
+            raise
         except _NEMO_NONCRITICAL_EXCEPTIONS as direct_err:
             logging.debug(f"Canary direct numpy transcription failed, falling back to temp file: {direct_err}")
             audio_path = _temp_wav_from_numpy(audio_np, model_sample_rate)
@@ -578,10 +851,16 @@ def transcribe_with_canary(
             **lang_kwargs,
         )
 
-        return _extract_result(transcriptions)
+        return _finish(_extract_result(transcriptions))
 
+    except (STTExecutionPlanError, STTExecutionUnsupportedError, STTTranscriptionError):
+        raise
     except Exception as e:
         logging.exception(f"Error during Canary transcription: {e}")
+        if execution_plan is not None:
+            raise STTTranscriptionError(
+                "Canary transcription failed during planned execution"
+            ) from e
         return "[Transcription error] Canary transcription failed"
     finally:
         if cleanup_temp and audio_path and os.path.exists(audio_path):
@@ -597,8 +876,11 @@ def transcribe_with_parakeet(
     variant: str = 'standard',
     chunk_duration: Optional[float] = None,
     overlap_duration: float = 15.0,
-    chunk_callback: Optional[Callable[[int, int], None]] = None
-) -> str:
+    chunk_callback: Optional[Callable[[int, int], None]] = None,
+    *,
+    execution_plan: SttBatchExecutionPlan | None = None,
+    execution_route: SttExecutionRoute | None = None,
+) -> str | SttTranscriptionOutcome:
     """
     Transcribe audio using the Parakeet TDT model.
 
@@ -613,15 +895,41 @@ def transcribe_with_parakeet(
     Returns:
         Transcribed text string
     """
-    # Get variant from config if not specified
-    if variant == 'auto':
+    # Get variant from config if not specified in legacy mode.
+    if variant == 'auto' and execution_plan is None:
         try:
             stt_cfg = get_stt_config()
         except _NEMO_NONCRITICAL_EXCEPTIONS:
             stt_cfg = {}
         variant = stt_cfg.get('nemo_model_variant', 'standard')
 
-    model = load_parakeet_model(variant)
+    loaded_runtime: SttLoadedRuntime | None = None
+    if execution_plan is not None:
+        route = execution_route or execution_plan.descriptor.primary_route
+        runtime = execution_plan.runtime_values()
+        planned_variant = str(runtime.get(_RUNTIME_VARIANT) or "")
+        if planned_variant not in {"standard", "cuda"}:
+            raise STTExecutionUnsupportedError(
+                f"NeMo cannot execute planned Parakeet variant {planned_variant}"
+            )
+        variant = planned_variant
+        loaded = load_parakeet_model(
+            variant,
+            model_path=str(runtime.get(_RUNTIME_MODEL_PATH) or ""),
+            device=str(runtime.get(_RUNTIME_DEVICE) or ""),
+            compute_type=str(runtime.get(_RUNTIME_DTYPE) or ""),
+            allow_download=False,
+            allow_variant_fallback=False,
+            execution_route=route,
+        )
+        if not isinstance(loaded, SttLoadedRuntime):
+            raise STTExecutionPlanError(
+                "Planned Parakeet load did not report actual execution"
+            )
+        loaded_runtime = loaded
+        model = loaded.components[0]
+    else:
+        model = load_parakeet_model(variant)
     if model is None:
         return f"[Error: Parakeet model ({variant}) could not be loaded]"
 
@@ -682,10 +990,34 @@ def transcribe_with_parakeet(
         else:
             result = "[No transcription produced]"
 
-        return result
+        if loaded_runtime is None:
+            return result
+        if str(result).startswith("["):
+            raise STTTranscriptionError(str(result))
+        text = str(result)
+        return SttTranscriptionOutcome(
+            artifact={
+                "text": text,
+                "segments": [
+                    {
+                        "start_seconds": 0.0,
+                        "end_seconds": 0.0,
+                        "Text": text,
+                    }
+                ],
+                "language": execution_plan.language if execution_plan else None,
+            },
+            actual_execution=loaded_runtime.actual_execution,
+        )
 
+    except (STTExecutionPlanError, STTExecutionUnsupportedError, STTTranscriptionError):
+        raise
     except Exception as e:
         logging.exception(f"Error during Parakeet transcription: {e}")
+        if execution_plan is not None:
+            raise STTTranscriptionError(
+                "Parakeet transcription failed during planned execution"
+            ) from e
         return "[Transcription error] Parakeet transcription failed"
     finally:
         if cleanup_temp and audio_path and os.path.exists(audio_path):

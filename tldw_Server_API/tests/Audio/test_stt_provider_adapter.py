@@ -469,6 +469,41 @@ def test_execution_contract_and_adapter_import_in_either_order(module_order):
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    "module_order",
+    [
+        (
+            "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_contract",
+            "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib",
+            "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo",
+            "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Parakeet_ONNX",
+            "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Parakeet_MLX",
+            "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_provider_adapter",
+        ),
+        (
+            "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_provider_adapter",
+            "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Parakeet_MLX",
+            "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Parakeet_ONNX",
+            "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo",
+            "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib",
+            "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_contract",
+        ),
+    ],
+)
+def test_local_execution_modules_import_in_either_order(module_order):
+    command = "; ".join(f"import {module}" for module in module_order)
+
+    result = subprocess.run(
+        [sys.executable, "-c", command],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.unit
 def test_dependency_neutral_contract_does_not_import_adapter():
     contract_name = (
         "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio."
@@ -560,10 +595,6 @@ def test_planned_provider_mismatch_fails_before_provider_helper(monkeypatch):
 @pytest.mark.parametrize(
     ("adapter_name", "provider", "planned_model", "requested_model"),
     [
-        ("FasterWhisperAdapter", "faster-whisper", "tiny", "tiny"),
-        ("ParakeetAdapter", "parakeet", "parakeet-standard", None),
-        ("CanaryAdapter", "canary", "nemo-canary-1b", "nemo-canary-1b"),
-        ("Qwen2AudioAdapter", "qwen2audio", "qwen2audio", "qwen2audio"),
         ("Qwen3ASRAdapter", "qwen3-asr", "Qwen/Qwen3-ASR-1.7B", None),
         (
             "VibeVoiceAdapter",
