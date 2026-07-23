@@ -67,6 +67,11 @@ FORBIDDEN_ASYNCIO_DIRECT_IO_APIS = {
     "subprocess_exec",
     "subprocess_shell",
 }
+UNSUPPORTED_ASYNCIO_TIMEOUT_APIS = {"timeout", "timeout_at"}
+PREFLIGHT_TIMEOUT_ADAPTERS = (
+    PREFLIGHT_ROOT / "adapters/browser.py",
+    PREFLIGHT_ROOT / "adapters/external_tools.py",
+)
 FORBIDDEN_PREFLIGHT_CONSUMERS = {
     f"{WEB_SCRAPING_PACKAGE}.Article_Extractor_Lib",
     f"{WEB_SCRAPING_PACKAGE}.enhanced_web_scraping",
@@ -513,6 +518,43 @@ def assert_analyzer_dependencies_are_governed(root: Path) -> None:
     assert violations == []
 
 
+def _unsupported_asyncio_timeout_references(path: Path, tree: ast.AST) -> list[str]:
+    violations: list[str] = []
+    asyncio_names = {"asyncio"}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Import):
+            continue
+        for alias in node.names:
+            if alias.name == "asyncio":
+                asyncio_names.add(alias.asname or alias.name)
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module == "asyncio":
+            for alias in node.names:
+                if alias.name in UNSUPPORTED_ASYNCIO_TIMEOUT_APIS:
+                    violations.append(
+                        f"{_display_path(path)}:{node.lineno} imports unsupported asyncio timeout API {alias.name}"
+                    )
+        elif (
+            isinstance(node, ast.Attribute)
+            and isinstance(node.value, ast.Name)
+            and node.value.id in asyncio_names
+            and node.attr in UNSUPPORTED_ASYNCIO_TIMEOUT_APIS
+        ):
+            violations.append(
+                f"{_display_path(path)}:{node.lineno} references unsupported asyncio timeout API {node.attr}"
+            )
+    return violations
+
+
+def assert_timeout_compatibility_boundary_is_used(paths: tuple[Path, ...]) -> None:
+    violations: list[str] = []
+    for path in paths:
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        violations.extend(_unsupported_asyncio_timeout_references(path, tree))
+    assert violations == []
+
+
 def _is_docstring(statement: ast.stmt) -> bool:
     return (
         isinstance(statement, ast.Expr)
@@ -718,6 +760,25 @@ def test_preflight_dependency_direction() -> None:
             f"{WEB_SCRAPING_PACKAGE}.policy",
         },
     )
+
+
+def test_preflight_adapters_use_the_timeout_compatibility_boundary() -> None:
+    assert_timeout_compatibility_boundary_is_used(PREFLIGHT_TIMEOUT_ADAPTERS)
+
+
+@pytest.mark.parametrize("asyncio_name", ("asyncio", "aio"))
+def test_timeout_architecture_guard_rejects_direct_asyncio_timeout(
+    tmp_path: Path,
+    asyncio_name: str,
+) -> None:
+    adapter = tmp_path / "adapter.py"
+    import_statement = "import asyncio" if asyncio_name == "asyncio" else "import asyncio as aio"
+    adapter.write_text(
+        f"{import_statement}\n\nasync def probe():\n    async with {asyncio_name}.timeout(1):\n        pass\n"
+    )
+
+    with pytest.raises(AssertionError, match="unsupported asyncio timeout API"):
+        assert_timeout_compatibility_boundary_is_used((adapter,))
 
 
 @pytest.mark.parametrize(
@@ -984,9 +1045,9 @@ def test_preflight_dependency_floors_are_exact() -> None:
     ]
     if len(curl_requirements) != 1:
         violations.append(f"scrape-analyzers has {len(curl_requirements)} curl-cffi requirements")
-    elif str(curl_requirements[0].specifier) != ">=0.5.9":
+    elif str(curl_requirements[0].specifier) != ">=0.9.0":
         violations.append(
-            "scrape-analyzers pins curl-cffi as " f"{str(curl_requirements[0].specifier)!r}, expected '>=0.5.9'"
+            "scrape-analyzers pins curl-cffi as " f"{str(curl_requirements[0].specifier)!r}, expected '>=0.9.0'"
         )
 
     assert violations == []

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import sys
+import types
 from typing import Any
 
 import pytest
@@ -36,6 +38,7 @@ from tldw_Server_API.tests.Web_Scraping.preflight_fakes import (
 pytestmark = pytest.mark.unit
 
 _ADAPTER_MODULE = "tldw_Server_API.app.core.Web_Scraping.preflight.adapters.browser"
+_ASYNCIO_COMPAT_MODULE = "tldw_Server_API.app.core.Web_Scraping.preflight.asyncio_compat"
 
 
 def _adapter_module() -> Any | None:
@@ -52,6 +55,71 @@ def _required(name: str) -> Any:
     assert module is not None, "Task 5 governed browser adapter module is missing"
     assert hasattr(module, name), f"Task 5 governed browser adapter {name} is missing"
     return getattr(module, name)
+
+
+def _asyncio_compat_module() -> Any:
+    return importlib.import_module(_ASYNCIO_COMPAT_MODULE)
+
+
+@pytest.mark.asyncio
+async def test_asyncio_timeout_compatibility_uses_stdlib_context_with_expired_method() -> None:
+    compat = _asyncio_compat_module()
+
+    context = compat.timeout(1.0)
+    async with context:
+        pass
+
+    assert context.expired() is False
+
+
+@pytest.mark.asyncio
+async def test_asyncio_timeout_compatibility_uses_async_timeout_when_stdlib_is_absent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    compat = _asyncio_compat_module()
+    created: list[float | None] = []
+
+    class LegacyTimeout:
+        @property
+        def expired(self) -> bool:
+            return False
+
+        async def __aenter__(self) -> None:
+            return None
+
+        async def __aexit__(self, *_args: Any) -> None:
+            return None
+
+    def legacy_timeout(delay: float | None) -> LegacyTimeout:
+        created.append(delay)
+        return LegacyTimeout()
+
+    legacy_module = types.ModuleType("async_timeout")
+    legacy_module.timeout = legacy_timeout
+    monkeypatch.delattr(compat.asyncio, "timeout")
+    monkeypatch.setitem(sys.modules, "async_timeout", legacy_module)
+
+    context = compat.timeout(0.25)
+    async with context:
+        pass
+
+    assert created == [0.25]
+    assert context.expired() is False
+
+
+@pytest.mark.asyncio
+async def test_shared_deadline_preserves_nested_timeout_error() -> None:
+    controls = _live_controls(deadline_s=1.0)
+
+    async def nested_timeout() -> None:
+        raise TimeoutError("nested operation timeout")
+
+    with pytest.raises(TimeoutError, match="nested operation timeout"):
+        await _required("_await_shared_deadline")(
+            controls,
+            nested_timeout,
+            check_after=False,
+        )
 
 
 def _controls(

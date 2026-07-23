@@ -3,8 +3,9 @@ from __future__ import annotations
 import asyncio
 import inspect
 from collections.abc import Awaitable
+from importlib.util import find_spec
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, get_args
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -16,6 +17,9 @@ from tldw_Server_API.app.core.Web_Scraping.contracts import (
     WebScrapingStatus,
 )
 from tldw_Server_API.app.core.Web_Scraping.preflight import PreflightTarget
+from tldw_Server_API.app.core.Web_Scraping.preflight.utils.impersonate_target import (
+    get_impersonate_target,
+)
 from tldw_Server_API.app.core.Web_Scraping.runtime import (
     FetchRequest,
     FetchResponse,
@@ -992,3 +996,37 @@ async def test_enhanced_successful_advice_omits_payload_when_results_are_disable
     assert scrape_calls[0]["backend"] == "curl"  # nosec B101
     assert "preflight_analysis" not in result  # nosec B101
     run_preflight.assert_awaited_once()
+
+
+@pytest.mark.parametrize(
+    ("user_agent", "expected_target"),
+    (
+        (
+            "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/131.0.0.0 Mobile Safari/537.36",
+            "chrome131_android",
+        ),
+        (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_6) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36",
+            "chrome131",
+        ),
+        (
+            "Mozilla/5.0 (X11; Linux x86_64; rv:133.0) Gecko/20100101 Firefox/133.0",
+            "firefox133",
+        ),
+    ),
+)
+def test_impersonate_target_matches_supported_modern_user_agent_profiles(
+    user_agent: str,
+    expected_target: str,
+) -> None:
+    assert get_impersonate_target(user_agent) == expected_target  # nosec B101
+
+
+def test_impersonate_targets_exist_when_optional_curl_cffi_is_installed() -> None:
+    if find_spec("curl_cffi") is None:
+        pytest.skip("curl-cffi is optional")
+
+    from curl_cffi.requests.impersonate import BrowserTypeLiteral
+
+    supported_targets = set(get_args(BrowserTypeLiteral))
+    assert {"chrome131", "chrome131_android", "firefox133"} <= supported_targets  # nosec B101

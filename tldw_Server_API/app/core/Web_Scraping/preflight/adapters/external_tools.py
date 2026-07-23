@@ -12,6 +12,7 @@ from typing import Any, cast
 
 from loguru import logger
 
+from tldw_Server_API.app.core.Web_Scraping.preflight.asyncio_compat import timeout as _asyncio_timeout
 from tldw_Server_API.app.core.Web_Scraping.preflight.context import (
     PreflightDeadlineExceeded,
     PreflightRuntimeControls,
@@ -28,13 +29,18 @@ _WAF_TIMEOUT_SECONDS = 60.0
 _PROCESS_CLEANUP_GRACE_SECONDS = 2.0
 _LEGACY_DEFAULT_WARNING = "Preflight external tool used because its config key is absent"
 _LEGACY_DEFAULT_METRIC = "web_scraping_preflight_legacy_external_tool_default_total"
+_OBSERVER_FAILURE_MESSAGES = {
+    "legacy_default_warning": "Preflight external-tool observer failed: legacy_default_warning.",
+    "legacy_default_metric": "Preflight external-tool observer failed: legacy_default_metric.",
+    "legacy_default_observer": "Preflight external-tool observer failed: legacy_default_observer.",
+}
 
 
-def _run_best_effort(callback: Callable[[], Any]) -> None:
+def _run_best_effort(callback: Callable[[], Any], *, label: str) -> None:
     try:
         callback()
     except Exception:  # noqa: BLE001 - observer failures are deliberately secondary
-        return
+        logger.warning(_OBSERVER_FAILURE_MESSAGES[label])
 
 
 class _LegacyExternalToolDefaultObserver:
@@ -57,8 +63,14 @@ class _LegacyExternalToolDefaultObserver:
                 return
             self._observed = True
 
-        _run_best_effort(lambda: self._warning(_LEGACY_DEFAULT_WARNING))
-        _run_best_effort(self._increment_legacy_default_metric)
+        _run_best_effort(
+            lambda: self._warning(_LEGACY_DEFAULT_WARNING),
+            label="legacy_default_warning",
+        )
+        _run_best_effort(
+            self._increment_legacy_default_metric,
+            label="legacy_default_metric",
+        )
 
     def _increment_legacy_default_metric(self) -> None:
         increment_counter = self._increment_counter
@@ -211,7 +223,7 @@ class GuardedExternalToolProbe:
     ) -> Any:
         argv = (executable, url, *(("-a",) if find_all else ()))
         try:
-            async with asyncio.timeout(timeout_s):
+            async with _asyncio_timeout(timeout_s):
                 return await self._process_factory(
                     *argv,
                     stdout=asyncio.subprocess.PIPE,
@@ -240,7 +252,10 @@ class GuardedExternalToolProbe:
             logger.warning("External tool process cleanup failed.")
 
     def _observe_legacy_default(self) -> None:
-        _run_best_effort(self._legacy_default_observer.observe)
+        _run_best_effort(
+            self._legacy_default_observer.observe,
+            label="legacy_default_observer",
+        )
 
     async def run_waf(
         self,

@@ -11,7 +11,7 @@ def get_impersonate_target(user_agent: str) -> str:
         return "edge101"
     if "chrome/" in ua_lower and "edg/" not in ua_lower:
         if "android" in ua_lower:
-            return "chrome131"
+            return "chrome131_android"
         return "chrome131"
     if "firefox/" in ua_lower:
         return "firefox133"

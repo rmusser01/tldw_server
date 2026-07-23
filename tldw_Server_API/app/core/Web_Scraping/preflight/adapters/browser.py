@@ -13,6 +13,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 from loguru import logger
 
+from tldw_Server_API.app.core.Web_Scraping.preflight.asyncio_compat import timeout as _asyncio_timeout
 from tldw_Server_API.app.core.Web_Scraping.preflight.context import (
     PreflightDeadlineExceeded,
     PreflightRuntimeControls,
@@ -109,7 +110,7 @@ async def _await_shared_deadline(
     if remaining_s is None:
         result = await operation()
     else:
-        timeout = asyncio.timeout(remaining_s)
+        timeout = _asyncio_timeout(remaining_s)
         try:
             async with timeout:
                 result = await operation()

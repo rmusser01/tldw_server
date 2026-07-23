@@ -214,42 +214,62 @@ async def test_absent_installed_transition_signal_is_once_under_concurrency() ->
 async def test_transition_observer_failure_does_not_block_execution(
     failed_observer: str,
 ) -> None:
-    warning = FakeCallRecorder(
-        error=RuntimeError("logger included sensitive output") if failed_observer == "warning" else None
-    )
-    metric = FakeCallRecorder(
-        error=RuntimeError("metric included sensitive output") if failed_observer == "metric" else None
-    )
+    failure_text = f"observer raw secret {_URL} {_EXECUTABLE} callback-repr"
+    warning = FakeCallRecorder(error=RuntimeError(failure_text) if failed_observer == "warning" else None)
+    metric = FakeCallRecorder(error=RuntimeError(failure_text) if failed_observer == "metric" else None)
     observer = _required("_LegacyExternalToolDefaultObserver")(
         warning=warning,
         increment_counter=metric,
     )
     factory = FakeProcessFactory([FakeExternalProcess(stdout=b"ok")])
 
-    result = await _probe(
-        process_factory=factory,
-        observer=observer,
-    ).run_waf(_URL, find_all=False, enabled=None)
+    logged: list[str] = []
+    sink_id = logger.add(logged.append, format="{message}")
+    try:
+        result = await _probe(
+            process_factory=factory,
+            observer=observer,
+        ).run_waf(_URL, find_all=False, enabled=None)
+    finally:
+        logger.remove(sink_id)
 
     assert result.stdout == "ok"
     assert len(factory.calls) == 1
     assert len(warning.calls) == 1
     assert len(metric.calls) == 1
+    assert [message.rstrip() for message in logged] == [
+        f"Preflight external-tool observer failed: legacy_default_{failed_observer}."
+    ]
+    assert all(
+        secret not in message for secret in (failure_text, _URL, _EXECUTABLE, "callback-repr") for message in logged
+    )
 
 
 @pytest.mark.asyncio
 async def test_raising_injected_observer_does_not_block_governed_execution() -> None:
-    observer = FakeCallRecorder(error=RuntimeError("observer raw secret"))
+    failure_text = f"observer raw secret {_URL} {_EXECUTABLE} callback-repr"
+    observer = FakeCallRecorder(error=RuntimeError(failure_text))
     factory = FakeProcessFactory([FakeExternalProcess(stdout=b"ok")])
 
-    result = await _probe(
-        process_factory=factory,
-        observer=observer,
-    ).run_waf(_URL, find_all=False, enabled=None)
+    logged: list[str] = []
+    sink_id = logger.add(logged.append, format="{message}")
+    try:
+        result = await _probe(
+            process_factory=factory,
+            observer=observer,
+        ).run_waf(_URL, find_all=False, enabled=None)
+    finally:
+        logger.remove(sink_id)
 
     assert result.stdout == "ok"
     assert len(observer.calls) == 1
     assert len(factory.calls) == 1
+    assert [message.rstrip() for message in logged] == [
+        "Preflight external-tool observer failed: legacy_default_observer."
+    ]
+    assert all(
+        secret not in message for secret in (failure_text, _URL, _EXECUTABLE, "callback-repr") for message in logged
+    )
 
 
 @pytest.mark.asyncio
@@ -625,7 +645,7 @@ async def test_spawn_elapsed_time_reduces_communicate_budget(
         communicate_timeouts.append(timeout)
         return await awaitable
 
-    monkeypatch.setattr(module.asyncio, "timeout", RecordingTimeout)
+    monkeypatch.setattr(module, "_asyncio_timeout", RecordingTimeout)
     monkeypatch.setattr(module.asyncio, "wait_for", recording_wait_for)
 
     result = await _probe(
