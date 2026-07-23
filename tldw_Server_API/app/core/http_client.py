@@ -207,7 +207,7 @@ ENFORCE_TLS_MIN = (
 )
 ENFORCE_TLS_MIN = is_truthy(str(ENFORCE_TLS_MIN))
 TLS_MIN_VERSION = (os.getenv("HTTP_TLS_MIN_VERSION") or os.getenv("TLS_MIN_VERSION") or "1.2").strip()
-_SENSITIVE_OBSERVABILITY_URL = "https://sensitive-endpoint.invalid/"
+_SENSITIVE_OBSERVABILITY_URL = "https://sensitive-endpoint.invalid"
 _SENSITIVE_HTTP_LOG_CONTEXT = contextvars.ContextVar(
     "tldw_sensitive_http_log_context",
     default=False,
