@@ -10,8 +10,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
-import tomllib
 from packaging.requirements import Requirement
+
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib
 
 pytestmark = pytest.mark.unit
 
@@ -72,6 +76,7 @@ PREFLIGHT_TIMEOUT_ADAPTERS = (
     PREFLIGHT_ROOT / "adapters/browser.py",
     PREFLIGHT_ROOT / "adapters/external_tools.py",
 )
+PHASE3_TIMEOUT_TESTS = (Path(__file__).with_name("test_phase3_preflight_browser.py"),)
 FORBIDDEN_PREFLIGHT_CONSUMERS = {
     f"{WEB_SCRAPING_PACKAGE}.Article_Extractor_Lib",
     f"{WEB_SCRAPING_PACKAGE}.enhanced_web_scraping",
@@ -764,6 +769,10 @@ def test_preflight_dependency_direction() -> None:
 
 def test_preflight_adapters_use_the_timeout_compatibility_boundary() -> None:
     assert_timeout_compatibility_boundary_is_used(PREFLIGHT_TIMEOUT_ADAPTERS)
+
+
+def test_phase3_final_gate_tests_use_the_timeout_compatibility_boundary() -> None:
+    assert_timeout_compatibility_boundary_is_used(PHASE3_TIMEOUT_TESTS)
 
 
 @pytest.mark.parametrize("asyncio_name", ("asyncio", "aio"))

@@ -19,6 +19,7 @@ from tldw_Server_API.app.core.Web_Scraping.preflight import (
     ProbeTimeout,
     ProbeUnavailable,
 )
+from tldw_Server_API.app.core.Web_Scraping.preflight.asyncio_compat import timeout as asyncio_timeout
 from tldw_Server_API.app.core.Web_Scraping.runtime import RuntimeRequestContext
 from tldw_Server_API.tests.Web_Scraping.preflight_fakes import (
     FakeBrowserContext,
@@ -933,7 +934,7 @@ async def test_each_startup_await_is_bounded_by_the_shared_deadline(stage: str) 
     options = BrowserProbeOptions(init_scripts=("window.test = true",))
 
     with pytest.raises(PreflightDeadlineExceeded):
-        async with asyncio.timeout(0.2):
+        async with asyncio_timeout(0.2):
             async with probe.open_page(options):
                 pytest.fail("page must not be created")
 
@@ -1207,7 +1208,7 @@ async def test_operations_without_playwright_timeout_are_deadline_bounded(
             "visibility": lambda: page.link_is_visible(0),
         }[operation]
         with pytest.raises(PreflightDeadlineExceeded):
-            async with asyncio.timeout(0.2):
+            async with asyncio_timeout(0.2):
                 await call()
     await controls.close(grace_s=0.02)
 
@@ -1556,7 +1557,7 @@ async def test_fresh_caller_cancellation_wins_earlier_startup_error_cleanup(
     caller.cancel()
 
     with pytest.raises(asyncio.CancelledError):
-        async with asyncio.timeout(0.2):
+        async with asyncio_timeout(0.2):
             await caller
 
 
@@ -1652,9 +1653,9 @@ async def test_all_real_like_graph_uses_reserved_parent_teardown_window(
     scope_cleanup.cancel()
 
     with pytest.raises(asyncio.CancelledError):
-        async with asyncio.timeout(grace_s * 3):
+        async with asyncio_timeout(grace_s * 3):
             await scope_cleanup
-    async with asyncio.timeout(grace_s * 3):
+    async with asyncio_timeout(grace_s * 3):
         await request_cleanup
     elapsed_s = loop.time() - started_at
     await asyncio.sleep(0)
