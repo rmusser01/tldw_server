@@ -45,6 +45,18 @@ async def _allow_async_egress(*_args, **_kwargs):
     return None
 
 
+def test_network_error_preserves_status_code_and_timeout_classification():
+    error = hc.NetworkError(
+        "ReadTimeout",
+        status_code=504,
+        classification="timeout",
+    )
+
+    assert str(error) == "ReadTimeout"
+    assert error.status_code == 504
+    assert error.classification == "timeout"
+
+
 class _CapturedTracingManager:
     def __init__(self):
         self.spans = []
