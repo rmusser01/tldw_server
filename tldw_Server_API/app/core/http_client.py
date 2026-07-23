@@ -3408,6 +3408,11 @@ async def _afetch_aiohttp(
         except EgressPolicyError:
             raise
         except _HTTPCLIENT_REQUEST_EXCEPTIONS as e:
+            with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+                logger.debug(
+                    "afetch _do_once: caught exception {}",
+                    type(e).__name__,
+                )
             try:
                 if _is_dns_resolution_error(e):
                     with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):

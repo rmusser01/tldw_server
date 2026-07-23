@@ -242,6 +242,28 @@ async def test_enhanced_disabled_still_admits_without_preflight_context(
 
 
 @pytest.mark.unit
+async def test_enhanced_preflight_advice_log_excludes_target_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sensitive_url = "https://user:password@example.com/article?token=secret-value"
+    contract = PreflightResult(
+        analysis={"results": {"tls": {"status": "active"}}},
+    )
+    harness = install_enhanced_defaults(monkeypatch, preflight_result=contract)
+    messages: list[str] = []
+    monkeypatch.setattr(harness.enhanced.logger, "debug", lambda message: messages.append(str(message)))
+
+    await harness.scraper.scrape_article(sensitive_url)
+
+    combined_logs = " ".join(messages)
+    assert "tls_active" in combined_logs
+    assert "secret-value" not in combined_logs
+    assert "password" not in combined_logs
+    assert "?token=" not in combined_logs
+    assert sensitive_url not in combined_logs
+
+
+@pytest.mark.unit
 async def test_enhanced_evaluates_target_once_with_runtime_context(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

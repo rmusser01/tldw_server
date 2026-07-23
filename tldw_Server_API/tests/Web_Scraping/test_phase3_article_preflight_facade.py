@@ -343,6 +343,9 @@ async def test_article_policy_failure_is_structural_and_logs_no_sensitive_detail
     assert "password" not in combined_logs
     assert "credential leaked" not in combined_logs
     assert "?token=" not in combined_logs
+    assert "source=article_extract" in combined_logs
+    assert "stage=pre_fetch" in combined_logs
+    assert "exception_type=RuntimeError" in combined_logs
     harness.build_context.assert_not_called()
     harness.run_preflight.assert_not_awaited()
     assert harness.fetch_client.requests == []

@@ -66,6 +66,7 @@ class _CapturedTracingManager:
 @pytest.mark.asyncio
 @pytest.mark.parametrize("backend", ["httpx", "aiohttp"])
 async def test_afetch_timeout_errors_have_stable_classification(monkeypatch, backend):
+    logs = []
     monkeypatch.setattr(hc, "_avalidate_egress_or_raise", _allow_async_egress)
     monkeypatch.setattr(hc, "_is_aiohttp_client", lambda _client: backend == "aiohttp")
 
@@ -80,16 +81,39 @@ async def test_afetch_timeout_errors_have_stable_classification(monkeypatch, bac
     io_name = "_httpx_arequest_io" if backend == "httpx" else "_aiohttp_request_io"
     monkeypatch.setattr(hc, io_name, raise_timeout)
 
-    with pytest.raises(hc.NetworkError) as raised:
-        await hc.afetch(
-            method="GET",
-            url="https://example.com/timeout",
-            client=object(),
-            retry=hc.RetryPolicy(attempts=1),
-        )
+    sink_id = hc.logger.add(
+        lambda message: logs.append(str(message)),
+        level="DEBUG",
+        format="{message}|{extra}",
+    )
+    try:
+        with pytest.raises(hc.NetworkError) as raised:
+            await hc.afetch(
+                method="GET",
+                url=(
+                    "https://user-secret:password-secret@example.com/"
+                    "timeout?token=query-secret"
+                ),
+                client=object(),
+                retry=hc.RetryPolicy(attempts=1),
+                sensitive_observability=True,
+            )
+    finally:
+        hc.logger.remove(sink_id)
 
     assert raised.value.classification == "timeout"
     assert "secret" not in str(raised.value)
+    combined_logs = " ".join(logs)
+    expected_exception = "ReadTimeout" if backend == "httpx" else "ServerTimeoutError"
+    assert expected_exception in combined_logs
+    for secret in (
+        "httpx-timeout-secret",
+        "aiohttp-timeout-secret",
+        "user-secret",
+        "password-secret",
+        "query-secret",
+    ):
+        assert secret not in combined_logs
 
 
 @pytest.mark.asyncio

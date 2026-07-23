@@ -1367,7 +1367,7 @@ class EnhancedWebScraper:
             )
             preflight_notes = list(preflight_result.advice.notes) if preflight_result is not None else []
             if preflight_notes:
-                logger.debug(f"Preflight advice for {url}: {preflight_notes}")
+                logger.debug(f"Preflight advice: {preflight_notes}")
             preflight_payload = preflight_facade.public_preflight_payload(
                 preflight_result,
                 options.include_results,

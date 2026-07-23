@@ -2853,8 +2853,12 @@ async def scrape_article(
         )
     except asyncio.CancelledError:
         raise
-    except _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS:
-        logging.error("Outbound policy evaluation failed.")
+    except _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS as exc:
+        logging.error(
+            "Outbound policy evaluation failed. "
+            "source=article_extract stage=pre_fetch "
+            f"exception_type={type(exc).__name__[:80]}"
+        )
         return _attach_preflight(
             {
                 "url": url,
