@@ -18,13 +18,46 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Callable
 
-from tldw_Server_API.app.core.Infrastructure.provider_registry import ProviderRegistryBase
 from tldw_Server_API.app.core.config import (
     get_stt_config,
     resolve_default_transcription_model_setting,
 )
-from tldw_Server_API.app.core.exceptions import BadRequestError, CancelCheckError, TranscriptionCancelled
+from tldw_Server_API.app.core.exceptions import (
+    BadRequestError,
+    CancelCheckError,
+    STTExecutionPlanError,
+    STTExecutionUnsupportedError,
+    TranscriptionCancelled,
+)
+from tldw_Server_API.app.core.exceptions import (
+    STTTranscriptionError as STTTranscriptionError,
+)
+from tldw_Server_API.app.core.Infrastructure.provider_registry import ProviderRegistryBase
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_contract import (
+    SttActualExecution as SttActualExecution,
+)
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_contract import (
+    SttAudioEgress as SttAudioEgress,
+)
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_contract import (
+    SttBatchExecutionPlan,
+    SttTranscriptionOutcome,
+    finalize_stt_artifact,
+)
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_contract import (
+    SttExecutionDescriptor as SttExecutionDescriptor,
+)
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_contract import (
+    SttExecutionRoute as SttExecutionRoute,
+)
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_contract import (
+    SttLoadedRuntime as SttLoadedRuntime,
+)
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_contract import (
+    SttPlanScalar as SttPlanScalar,
+)
 from tldw_Server_API.app.core.Ingestion_Media_Processing.path_utils import resolve_safe_local_path
+
 
 def _fallback_parse_transcription_model(
     model_name: str,
@@ -128,6 +161,74 @@ _STT_PROVIDER_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
 def _segment_text_value(segment: dict[str, Any]) -> str:
     """Return segment text across legacy and normalized keys."""
     return str(segment.get("text") or segment.get("Text") or "").strip()
+
+
+def _safe_requested_model_label(model: str) -> str:
+    normalized = model.strip()
+    if (
+        not normalized
+        or normalized.startswith((".", "/", "~"))
+        or "\\" in normalized
+        or "://" in normalized
+        or normalized.count("/") > 1
+    ):
+        return "local-model"
+    return normalized
+
+
+def _validate_execution_plan_request(
+    adapter: SttProviderAdapter,
+    plan: SttBatchExecutionPlan,
+    *,
+    model: str | None,
+    language: str | None,
+    task: str,
+    word_timestamps: bool,
+    prompt: str | None,
+    hotwords: Sequence[str] | None,
+) -> None:
+    """Fail before provider entry when a supplied plan does not match the call."""
+    descriptor = plan.descriptor
+    route = descriptor.primary_route
+    if (
+        descriptor.resolved_provider != adapter.name.value
+        or route.provider != adapter.name.value
+    ):
+        raise STTExecutionPlanError(
+            f"Execution plan provider does not match {adapter.name.value}"
+        )
+    if model is not None:
+        model_label = _safe_requested_model_label(model)
+        if model_label not in {
+            descriptor.requested_model_label,
+            descriptor.resolved_model_label,
+        }:
+            raise STTExecutionPlanError("Execution plan model does not match request")
+    if (
+        plan.task != task
+        or plan.language != language
+        or plan.word_timestamps != word_timestamps
+        or plan.prompt != prompt
+        or plan.hotwords != tuple(hotwords or ())
+    ):
+        raise STTExecutionPlanError(
+            "Execution plan semantic settings do not match request"
+        )
+
+
+def _finalize_planned_outcome(
+    outcome: object,
+    plan: SttBatchExecutionPlan,
+) -> dict[str, Any]:
+    if not isinstance(outcome, SttTranscriptionOutcome):
+        raise STTExecutionPlanError(
+            "Planned STT provider did not report typed actual execution"
+        )
+    return finalize_stt_artifact(
+        outcome.artifact,
+        plan=plan,
+        actual=outcome.actual_execution,
+    )
 
 
 def _raise_if_cancelled(cancel_check: Callable[[], bool] | None) -> None:
@@ -308,6 +409,7 @@ class SttProviderAdapter(ABC):
         hotwords: Sequence[str] | None = None,
         base_dir: Path | None = None,
         cancel_check: Callable[[], bool] | None = None,
+        execution_plan: SttBatchExecutionPlan | None = None,
     ) -> dict[str, Any]:
         """
         Perform a batch transcription and return a normalized artifact.
@@ -322,6 +424,23 @@ class SttProviderAdapter(ABC):
           "metadata": {...},
         }
         """
+
+    def plan_batch_execution(
+        self,
+        *,
+        model: str | None,
+        language: str | None,
+        task: str,
+        word_timestamps: bool,
+        prompt: str | None,
+        hotwords: Sequence[str] | None,
+        diarization: bool,
+        mode: str,
+    ) -> SttBatchExecutionPlan:
+        """Fail closed until a concrete adapter exposes enforceable planning."""
+        raise STTExecutionUnsupportedError(
+            f"Provider {self.name.value} does not expose enforceable benchmark planning"
+        )
 
 
 class FasterWhisperAdapter(SttProviderAdapter):
@@ -352,7 +471,19 @@ class FasterWhisperAdapter(SttProviderAdapter):
         hotwords: Sequence[str] | None = None,
         base_dir: Path | None = None,
         cancel_check: Callable[[], bool] | None = None,
+        execution_plan: SttBatchExecutionPlan | None = None,
     ) -> dict[str, Any]:
+        if execution_plan is not None:
+            _validate_execution_plan_request(
+                self,
+                execution_plan,
+                model=model,
+                language=language,
+                task=task,
+                word_timestamps=word_timestamps,
+                prompt=prompt,
+                hotwords=hotwords,
+            )
         # We reuse the core speech_to_text helper so behavior stays aligned
         # with existing REST/media ingestion flows.
         from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib import (  # type: ignore
@@ -369,19 +500,23 @@ class FasterWhisperAdapter(SttProviderAdapter):
 
         model_name = model or "distil-large-v3"
         _raise_if_cancelled(cancel_check)
-        result = fw_speech_to_text(
-            audio_path,
-            whisper_model=model_name,
-            selected_source_lang=selected_lang,
-            vad_filter=False,
-            diarize=False,
-            word_timestamps=word_timestamps,
-            return_language=True,
-            initial_prompt=prompt,
-            task=task,
-            base_dir=base_dir,
-            cancel_check=cancel_check,
-        )
+        call_kwargs: dict[str, Any] = {
+            "whisper_model": model_name,
+            "selected_source_lang": selected_lang,
+            "vad_filter": False,
+            "diarize": False,
+            "word_timestamps": word_timestamps,
+            "return_language": True,
+            "initial_prompt": prompt,
+            "task": task,
+            "base_dir": base_dir,
+            "cancel_check": cancel_check,
+        }
+        if execution_plan is not None:
+            call_kwargs["execution_plan"] = execution_plan
+        result = fw_speech_to_text(audio_path, **call_kwargs)
+        if execution_plan is not None:
+            return _finalize_planned_outcome(result, execution_plan)
 
         segments_list, detected_lang = result
         # Strip Whisper metadata header so callers see only user content
@@ -433,7 +568,19 @@ class ParakeetAdapter(SttProviderAdapter):
         hotwords: Sequence[str] | None = None,
         base_dir: Path | None = None,
         cancel_check: Callable[[], bool] | None = None,
+        execution_plan: SttBatchExecutionPlan | None = None,
     ) -> dict[str, Any]:
+        if execution_plan is not None:
+            _validate_execution_plan_request(
+                self,
+                execution_plan,
+                model=model,
+                language=language,
+                task=task,
+                word_timestamps=word_timestamps,
+                prompt=prompt,
+                hotwords=hotwords,
+            )
         # Parakeet batch flows are routed through speech_to_text's Parakeet
         # branch by encoding the model name (e.g. "parakeet-standard").
         from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib import (  # type: ignore
@@ -451,16 +598,21 @@ class ParakeetAdapter(SttProviderAdapter):
             if not model_name:
                 model_name = "parakeet-standard"
         _raise_if_cancelled(cancel_check)
-        segments_list, lang = speech_to_text(
-            audio_path,
-            whisper_model=model_name,
-            selected_source_lang=language,
-            vad_filter=False,
-            diarize=False,
-            return_language=True,
-            base_dir=base_dir,
-            cancel_check=cancel_check,
-        )
+        call_kwargs = {
+            "whisper_model": model_name,
+            "selected_source_lang": language,
+            "vad_filter": False,
+            "diarize": False,
+            "return_language": True,
+            "base_dir": base_dir,
+            "cancel_check": cancel_check,
+        }
+        if execution_plan is not None:
+            call_kwargs["execution_plan"] = execution_plan
+        result = speech_to_text(audio_path, **call_kwargs)
+        if execution_plan is not None:
+            return _finalize_planned_outcome(result, execution_plan)
+        segments_list, lang = result
         text = " ".join(
             _segment_text_value(seg)
             for seg in segments_list
@@ -507,7 +659,19 @@ class CanaryAdapter(SttProviderAdapter):
         hotwords: Sequence[str] | None = None,
         base_dir: Path | None = None,
         cancel_check: Callable[[], bool] | None = None,
+        execution_plan: SttBatchExecutionPlan | None = None,
     ) -> dict[str, Any]:
+        if execution_plan is not None:
+            _validate_execution_plan_request(
+                self,
+                execution_plan,
+                model=model,
+                language=language,
+                task=task,
+                word_timestamps=word_timestamps,
+                prompt=prompt,
+                hotwords=hotwords,
+            )
         import numpy as np  # type: ignore
         import soundfile as sf  # type: ignore
 
@@ -529,13 +693,21 @@ class CanaryAdapter(SttProviderAdapter):
         # controls ASR language, task="translate" can be interpreted by the
         # underlying helper (if supported).
         _raise_if_cancelled(cancel_check)
-        text = transcribe_with_canary(
+        call_kwargs = {
+            "task": task,
+            "target_language": "en" if task == "translate" else None,
+        }
+        if execution_plan is not None:
+            call_kwargs["execution_plan"] = execution_plan
+        result = transcribe_with_canary(
             audio_np,
             sample_rate,
             language,
-            task=task,
-            target_language="en" if task == "translate" else None,
+            **call_kwargs,
         )
+        if execution_plan is not None:
+            return _finalize_planned_outcome(result, execution_plan)
+        text = result
         segments = [
             {
                 "start_seconds": 0.0,
@@ -583,23 +755,40 @@ class Qwen2AudioAdapter(SttProviderAdapter):
         hotwords: Sequence[str] | None = None,
         base_dir: Path | None = None,
         cancel_check: Callable[[], bool] | None = None,
+        execution_plan: SttBatchExecutionPlan | None = None,
     ) -> dict[str, Any]:
+        if execution_plan is not None:
+            _validate_execution_plan_request(
+                self,
+                execution_plan,
+                model=model,
+                language=language,
+                task=task,
+                word_timestamps=word_timestamps,
+                prompt=prompt,
+                hotwords=hotwords,
+            )
         from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib import (  # type: ignore
             speech_to_text,
         )
 
         model_name = model or "qwen2audio"
         _raise_if_cancelled(cancel_check)
-        segments_list, lang = speech_to_text(
-            audio_path,
-            whisper_model=model_name,
-            selected_source_lang=language,
-            vad_filter=False,
-            diarize=False,
-            return_language=True,
-            base_dir=base_dir,
-            cancel_check=cancel_check,
-        )
+        call_kwargs = {
+            "whisper_model": model_name,
+            "selected_source_lang": language,
+            "vad_filter": False,
+            "diarize": False,
+            "return_language": True,
+            "base_dir": base_dir,
+            "cancel_check": cancel_check,
+        }
+        if execution_plan is not None:
+            call_kwargs["execution_plan"] = execution_plan
+        result = speech_to_text(audio_path, **call_kwargs)
+        if execution_plan is not None:
+            return _finalize_planned_outcome(result, execution_plan)
+        segments_list, lang = result
         text = " ".join(
             _segment_text_value(seg)
             for seg in segments_list
@@ -667,7 +856,19 @@ class Qwen3ASRAdapter(SttProviderAdapter):
         hotwords: Sequence[str] | None = None,
         base_dir: Path | None = None,
         cancel_check: Callable[[], bool] | None = None,
+        execution_plan: SttBatchExecutionPlan | None = None,
     ) -> dict[str, Any]:
+        if execution_plan is not None:
+            _validate_execution_plan_request(
+                self,
+                execution_plan,
+                model=model,
+                language=language,
+                task=task,
+                word_timestamps=word_timestamps,
+                prompt=prompt,
+                hotwords=hotwords,
+            )
         from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Qwen3ASR import (
             transcribe_with_qwen3_asr,
         )
@@ -686,14 +887,18 @@ class Qwen3ASRAdapter(SttProviderAdapter):
 
         _raise_if_cancelled(cancel_check)
         audio_path_for_provider = str(_canonicalize_wav_for_soundfile_adapter(audio_path, base_dir))
-        artifact = transcribe_with_qwen3_asr(
-            audio_path_for_provider,
-            model_path=model_path,
-            language=language,
-            word_timestamps=word_timestamps,
-            base_dir=base_dir,
-            cancel_check=cancel_check,
-        )
+        call_kwargs = {
+            "model_path": model_path,
+            "language": language,
+            "word_timestamps": word_timestamps,
+            "base_dir": base_dir,
+            "cancel_check": cancel_check,
+        }
+        if execution_plan is not None:
+            call_kwargs["execution_plan"] = execution_plan
+        artifact = transcribe_with_qwen3_asr(audio_path_for_provider, **call_kwargs)
+        if execution_plan is not None:
+            return _finalize_planned_outcome(artifact, execution_plan)
         if not isinstance(artifact, dict):
             raise BadRequestError("Qwen3-ASR transcription did not return a valid artifact")
         return artifact
@@ -727,7 +932,19 @@ class VibeVoiceAdapter(SttProviderAdapter):
         hotwords: Sequence[str] | None = None,
         base_dir: Path | None = None,
         cancel_check: Callable[[], bool] | None = None,
+        execution_plan: SttBatchExecutionPlan | None = None,
     ) -> dict[str, Any]:
+        if execution_plan is not None:
+            _validate_execution_plan_request(
+                self,
+                execution_plan,
+                model=model,
+                language=language,
+                task=task,
+                word_timestamps=word_timestamps,
+                prompt=prompt,
+                hotwords=hotwords,
+            )
         from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_VibeVoice import (  # type: ignore
             transcribe_with_vibevoice,
         )
@@ -745,14 +962,18 @@ class VibeVoiceAdapter(SttProviderAdapter):
 
         _raise_if_cancelled(cancel_check)
         audio_path_for_provider = str(_canonicalize_wav_for_soundfile_adapter(audio_path, base_dir))
-        artifact = transcribe_with_vibevoice(
-            audio_path_for_provider,
-            model_id=model_name,
-            language=language,
-            hotwords=list(hotwords) if hotwords else None,
-            base_dir=base_dir,
-            cancel_check=cancel_check,
-        )
+        call_kwargs = {
+            "model_id": model_name,
+            "language": language,
+            "hotwords": list(hotwords) if hotwords else None,
+            "base_dir": base_dir,
+            "cancel_check": cancel_check,
+        }
+        if execution_plan is not None:
+            call_kwargs["execution_plan"] = execution_plan
+        artifact = transcribe_with_vibevoice(audio_path_for_provider, **call_kwargs)
+        if execution_plan is not None:
+            return _finalize_planned_outcome(artifact, execution_plan)
         if not isinstance(artifact, dict):
             raise BadRequestError("VibeVoice-ASR transcription did not return a valid artifact")
         return artifact
@@ -786,7 +1007,19 @@ class ExternalAdapter(SttProviderAdapter):
         hotwords: Sequence[str] | None = None,
         base_dir: Path | None = None,
         cancel_check: Callable[[], bool] | None = None,
+        execution_plan: SttBatchExecutionPlan | None = None,
     ) -> dict[str, Any]:
+        if execution_plan is not None:
+            _validate_execution_plan_request(
+                self,
+                execution_plan,
+                model=model,
+                language=language,
+                task=task,
+                word_timestamps=word_timestamps,
+                prompt=prompt,
+                hotwords=hotwords,
+            )
         from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_External_Provider import (  # type: ignore
             transcribe_with_external_provider,
         )
@@ -798,11 +1031,16 @@ class ExternalAdapter(SttProviderAdapter):
 
         # Pass base_dir so external providers validate local paths consistently.
         _raise_if_cancelled(cancel_check)
-        text = transcribe_with_external_provider(
-            audio_path,
-            provider_name=provider_name,
-            base_dir=base_dir,
-        )
+        call_kwargs = {
+            "provider_name": provider_name,
+            "base_dir": base_dir,
+        }
+        if execution_plan is not None:
+            call_kwargs["execution_plan"] = execution_plan
+        result = transcribe_with_external_provider(audio_path, **call_kwargs)
+        if execution_plan is not None:
+            return _finalize_planned_outcome(result, execution_plan)
+        text = result
         segments = [
             {
                 "start_seconds": 0.0,
@@ -940,6 +1178,16 @@ class SttProviderRegistry:
         if fallback is not None:
             return fallback
         raise RuntimeError("faster-whisper adapter is not available")
+
+    def get_adapter_strict(self, provider_name: str) -> SttProviderAdapter:
+        """Return only a directly registered adapter, failing closed if absent."""
+        key = self.normalize_provider_name(provider_name)
+        adapter = self._base.get_adapter(key)
+        if adapter is None:
+            raise STTExecutionPlanError(
+                f"No STT adapter is registered for provider {provider_name!r}"
+            )
+        return adapter
 
     def get_capabilities(self, provider_name: str | None = None) -> SttProviderCapabilities:
         """

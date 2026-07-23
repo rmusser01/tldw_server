@@ -1,13 +1,16 @@
-import types
+import builtins
 import importlib
 import importlib.machinery
+import inspect
+import pickle
+import subprocess
 import sys
-import builtins
+import types
+from dataclasses import FrozenInstanceError, fields, replace
 from pathlib import Path
 from typing import Any
 
 import pytest
-
 
 # Stub heavyweight audio deps before adapter imports to avoid local
 # ctranslate2/torch dynamic-load aborts in constrained test environments.
@@ -145,6 +148,485 @@ def test_default_provider_name_falls_back_to_stt_provider(monkeypatch):
 
     registry = spa.SttProviderRegistry()
     assert registry.get_default_provider_name() == "parakeet"
+
+
+def _make_execution_plan(
+    spa,
+    *,
+    provider="faster-whisper",
+    model_label="tiny",
+    task="transcribe",
+    language="en",
+    decoding_settings=(("beam_size", 1),),
+    runtime_settings=(),
+):
+    route = spa.SttExecutionRoute(
+        route_id="neutral-1",
+        provider=provider,
+        model_label=model_label,
+        artifact_id=f"sha256:{'a' * 64}",
+        identity_resolved=True,
+        backend="ctranslate2",
+        source="local",
+        audio_egress=spa.SttAudioEgress.NONE,
+        endpoint_id=None,
+        device="cpu",
+        compute_type="int8",
+        dtype=None,
+        decoding_ids=tuple(key for key, _ in decoding_settings),
+        local_model_available=True,
+        would_download=False,
+    )
+    descriptor = spa.SttExecutionDescriptor(
+        requested_provider=provider,
+        requested_model_label=model_label,
+        resolved_provider=provider,
+        resolved_model_label=model_label,
+        routes=(route,),
+        honors_task=True,
+        honors_language=True,
+        honors_prompt_absence=True,
+        honors_hotword_absence=True,
+        honors_diarization=True,
+        honors_word_timestamps=True,
+        decoding_settings=decoding_settings,
+        source_modules=(
+            "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_provider_adapter",
+        ),
+        dependency_distributions=("faster-whisper",),
+    )
+    return spa.SttBatchExecutionPlan(
+        descriptor=descriptor,
+        task=task,
+        language=language,
+        runtime_settings=runtime_settings,
+    )
+
+
+@pytest.mark.unit
+def test_execution_plan_is_frozen_and_pickleable():
+    spa = _import_module()
+    plan = _make_execution_plan(spa)
+
+    assert pickle.loads(pickle.dumps(plan)) == plan
+    with pytest.raises(FrozenInstanceError):
+        plan.task = "translate"
+    with pytest.raises(FrozenInstanceError):
+        plan.descriptor.resolved_provider = "parakeet"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("field_name", "settings"),
+    [
+        ("decoding", (("temperature", 0), ("beam_size", 1))),
+        ("decoding", (("beam_size", 1), ("beam_size", 2))),
+        ("runtime", (("token", "one"), ("api_key", "two"))),
+        ("runtime", (("api_key", "one"), ("api_key", "two"))),
+    ],
+)
+def test_execution_plan_rejects_duplicate_or_noncanonical_setting_keys(
+    field_name,
+    settings,
+):
+    spa = _import_module()
+
+    with pytest.raises(ValueError):
+        if field_name == "decoding":
+            _make_execution_plan(spa, decoding_settings=settings)
+        else:
+            _make_execution_plan(spa, runtime_settings=settings)
+
+
+@pytest.mark.unit
+def test_execution_plan_keeps_runtime_secrets_out_of_repr_and_safe_descriptor():
+    spa = _import_module()
+    plan = _make_execution_plan(
+        spa,
+        runtime_settings=(
+            ("api_key", "secret-token"),
+            ("endpoint_url", "https://secret.example"),
+        ),
+    )
+    plan = replace(
+        plan,
+        prompt="secret prompt",
+        hotwords=("secret hotword",),
+    )
+
+    rendered = repr(plan)
+    safe = plan.descriptor.as_safe_dict()
+
+    assert "secret-token" not in rendered
+    assert "secret.example" not in rendered
+    assert "secret prompt" not in rendered
+    assert "secret hotword" not in rendered
+    assert "secret-token" not in repr(safe)
+    assert "secret.example" not in repr(safe)
+
+
+@pytest.mark.unit
+def test_safe_descriptor_contains_only_declared_fields():
+    spa = _import_module()
+    plan = _make_execution_plan(spa)
+
+    safe = plan.descriptor.as_safe_dict()
+
+    assert set(safe) == {field.name for field in fields(spa.SttExecutionDescriptor)}
+    assert set(safe["routes"][0]) == {
+        field.name for field in fields(spa.SttExecutionRoute)
+    }
+    assert safe["routes"][0]["audio_egress"] == "none"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "module_order",
+    [
+        (
+            "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_contract",
+            "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_provider_adapter",
+        ),
+        (
+            "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_provider_adapter",
+            "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_contract",
+        ),
+    ],
+)
+def test_execution_contract_and_adapter_import_in_either_order(module_order):
+    command = "; ".join(f"import {module}" for module in module_order)
+
+    result = subprocess.run(
+        [sys.executable, "-c", command],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.unit
+def test_dependency_neutral_contract_does_not_import_adapter():
+    contract_name = (
+        "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio."
+        "stt_execution_contract"
+    )
+    adapter_name = (
+        "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio."
+        "stt_provider_adapter"
+    )
+    command = (
+        f"import sys; import {contract_name}; "
+        f"assert {adapter_name!r} not in sys.modules"
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-c", command],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.unit
+def test_get_adapter_strict_rejects_unknown_but_legacy_lookup_still_falls_back():
+    spa = _import_module()
+    registry = spa.SttProviderRegistry()
+
+    with pytest.raises(spa.STTExecutionPlanError):
+        registry.get_adapter_strict("unknown-provider")
+    assert registry.get_adapter("unknown-provider").name.value == "faster-whisper"
+
+
+@pytest.mark.unit
+def test_default_planner_fails_closed_for_unimplemented_provider():
+    spa = _import_module()
+
+    with pytest.raises(spa.STTExecutionUnsupportedError):
+        spa.FasterWhisperAdapter().plan_batch_execution(
+            model="tiny",
+            language="en",
+            task="transcribe",
+            word_timestamps=False,
+            prompt=None,
+            hotwords=None,
+            diarization=False,
+            mode="neutral-v1",
+        )
+
+
+@pytest.mark.unit
+def test_all_batch_adapters_keep_execution_plan_optional():
+    spa = _import_module()
+
+    for adapter_type in spa.SttProviderRegistry.DEFAULT_ADAPTERS.values():
+        parameter = inspect.signature(adapter_type.transcribe_batch).parameters[
+            "execution_plan"
+        ]
+        assert parameter.default is None
+
+
+@pytest.mark.unit
+def test_planned_provider_mismatch_fails_before_provider_helper(monkeypatch):
+    spa = _import_module()
+    plan = _make_execution_plan(spa, provider="parakeet")
+    calls = []
+
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as atlib
+
+    monkeypatch.setattr(
+        atlib,
+        "speech_to_text",
+        lambda *args, **kwargs: calls.append((args, kwargs)),
+    )
+
+    with pytest.raises(spa.STTExecutionPlanError):
+        spa.FasterWhisperAdapter().transcribe_batch(
+            "not-opened.wav",
+            model="tiny",
+            language="en",
+            execution_plan=plan,
+        )
+
+    assert calls == []
+
+
+@pytest.mark.unit
+def test_planned_adapter_requires_typed_outcome_and_finalizes_it(monkeypatch):
+    spa = _import_module()
+    plan = _make_execution_plan(spa)
+    route = plan.descriptor.primary_route
+    actual = spa.SttActualExecution(
+        route_id=route.route_id,
+        provider=route.provider,
+        model_label=route.model_label,
+        artifact_id=route.artifact_id,
+        backend=route.backend,
+        audio_egress=route.audio_egress,
+        endpoint_id=route.endpoint_id,
+        source=route.source,
+        device=route.device,
+        compute_type=route.compute_type,
+        dtype=route.dtype,
+        decoding_ids=route.decoding_ids,
+    )
+
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as atlib
+
+    def fake_speech_to_text(*args, **kwargs):
+        assert kwargs["execution_plan"] is plan
+        return spa.SttTranscriptionOutcome(
+            artifact={
+                "text": "planned",
+                "segments": [],
+                "metadata": {"actual_execution": {"provider": "attacker"}},
+            },
+            actual_execution=actual,
+        )
+
+    monkeypatch.setattr(atlib, "speech_to_text", fake_speech_to_text)
+    monkeypatch.setattr(
+        atlib,
+        "is_transcription_error_message",
+        lambda text: False,
+        raising=False,
+    )
+
+    artifact = spa.FasterWhisperAdapter().transcribe_batch(
+        "not-opened.wav",
+        model="tiny",
+        language="en",
+        execution_plan=plan,
+    )
+
+    assert artifact["text"] == "planned"
+    assert artifact["actual_execution"] == actual.as_safe_dict()
+    assert "metadata" not in artifact
+
+
+@pytest.mark.unit
+def test_finalize_stt_artifact_rejects_recognized_error_sentinel(monkeypatch):
+    spa = _import_module()
+    plan = _make_execution_plan(spa)
+    route = plan.descriptor.primary_route
+    actual = spa.SttActualExecution(
+        route_id=route.route_id,
+        provider=route.provider,
+        model_label=route.model_label,
+        artifact_id=route.artifact_id,
+        backend=route.backend,
+        audio_egress=route.audio_egress,
+        endpoint_id=route.endpoint_id,
+        source=route.source,
+        device=route.device,
+        compute_type=route.compute_type,
+        dtype=route.dtype,
+        decoding_ids=route.decoding_ids,
+    )
+
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as atlib
+
+    monkeypatch.setattr(
+        atlib,
+        "is_transcription_error_message",
+        lambda text: text.startswith("[Error:"),
+        raising=False,
+    )
+
+    with pytest.raises(spa.STTTranscriptionError):
+        spa.finalize_stt_artifact(
+            {"text": "[Error: backend failed]", "segments": []},
+            plan=plan,
+            actual=actual,
+        )
+
+
+@pytest.mark.unit
+def test_finalize_stt_artifact_replaces_hostile_actual_execution_metadata(
+    monkeypatch,
+):
+    spa = _import_module()
+    plan = _make_execution_plan(spa)
+    route = plan.descriptor.primary_route
+    actual = spa.SttActualExecution(
+        route_id=route.route_id,
+        provider=route.provider,
+        model_label=route.model_label,
+        artifact_id=route.artifact_id,
+        backend=route.backend,
+        audio_egress=route.audio_egress,
+        endpoint_id=route.endpoint_id,
+        source=route.source,
+        device=route.device,
+        compute_type=route.compute_type,
+        dtype=route.dtype,
+        decoding_ids=route.decoding_ids,
+    )
+
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as atlib
+
+    monkeypatch.setattr(
+        atlib,
+        "is_transcription_error_message",
+        lambda text: False,
+        raising=False,
+    )
+    artifact = {
+        "text": "hello",
+        "segments": [],
+        "language": "en",
+        "metadata": {
+            "authorization": "Bearer secret",
+            "actual_execution": {"provider": "attacker"},
+        },
+        "actual_execution": {
+            "endpoint_url": "https://secret.example",
+            "provider": "attacker",
+        },
+    }
+
+    finalized = spa.finalize_stt_artifact(
+        artifact,
+        plan=plan,
+        actual=actual,
+    )
+
+    assert "metadata" not in finalized
+    assert finalized["actual_execution"] == actual.as_safe_dict()
+    assert "secret" not in repr(finalized)
+    assert set(finalized["actual_execution"]) == {
+        field.name for field in fields(spa.SttActualExecution)
+    }
+
+
+@pytest.mark.unit
+def test_finalize_stt_artifact_rejects_undeclared_actual_route(monkeypatch):
+    spa = _import_module()
+    plan = _make_execution_plan(spa)
+    route = plan.descriptor.primary_route
+    actual = spa.SttActualExecution(
+        route_id="undeclared",
+        provider=route.provider,
+        model_label=route.model_label,
+        artifact_id=route.artifact_id,
+        backend=route.backend,
+        audio_egress=route.audio_egress,
+        endpoint_id=route.endpoint_id,
+        source=route.source,
+        device=route.device,
+        compute_type=route.compute_type,
+        dtype=route.dtype,
+        decoding_ids=route.decoding_ids,
+    )
+
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as atlib
+
+    monkeypatch.setattr(
+        atlib,
+        "is_transcription_error_message",
+        lambda text: False,
+        raising=False,
+    )
+
+    with pytest.raises(spa.STTExecutionPlanError):
+        spa.finalize_stt_artifact(
+            {"text": "hello", "segments": []},
+            plan=plan,
+            actual=actual,
+        )
+
+
+@pytest.mark.unit
+def test_finalize_stt_artifact_matches_only_declared_non_null_route_fields(
+    monkeypatch,
+):
+    spa = _import_module()
+    plan = _make_execution_plan(spa)
+    route = replace(
+        plan.descriptor.primary_route,
+        artifact_id=None,
+        identity_resolved=False,
+        device=None,
+        compute_type=None,
+    )
+    plan = replace(
+        plan,
+        descriptor=replace(plan.descriptor, routes=(route,)),
+    )
+    actual = spa.SttActualExecution(
+        route_id=route.route_id,
+        provider=route.provider,
+        model_label=route.model_label,
+        artifact_id=f"sha256:{'b' * 64}",
+        backend=route.backend,
+        audio_egress=route.audio_egress,
+        endpoint_id=route.endpoint_id,
+        source=route.source,
+        device="cpu",
+        compute_type="int8",
+        dtype=route.dtype,
+        decoding_ids=route.decoding_ids,
+    )
+
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as atlib
+
+    monkeypatch.setattr(
+        atlib,
+        "is_transcription_error_message",
+        lambda text: False,
+        raising=False,
+    )
+
+    finalized = spa.finalize_stt_artifact(
+        {"text": "hello", "segments": []},
+        plan=plan,
+        actual=actual,
+    )
+
+    assert finalized["actual_execution"] == actual.as_safe_dict()
 
 
 @pytest.mark.unit
