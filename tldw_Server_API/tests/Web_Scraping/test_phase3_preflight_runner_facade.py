@@ -11,6 +11,7 @@ from dataclasses import replace
 from typing import Any, cast
 
 import pytest
+from loguru import logger
 
 from tldw_Server_API.app.core.Web_Scraping.contracts import (
     PreflightAdvice,
@@ -370,6 +371,62 @@ async def test_unexpected_analyzer_failure_is_isolated_and_remaining_analyzers_r
         "message": "JavaScript rendering analysis failed.",
         "error_code": "analyzer_error",
     }
+
+
+@pytest.mark.asyncio
+async def test_unexpected_analyzer_failure_logs_only_sanitized_context_and_exception_class() -> None:
+    runner = _runner()
+    records: list[str] = []
+
+    def fail_during_setup() -> Awaitable[dict[str, Any]]:
+        raise RuntimeError("https://user:password@example.com/path?token=secret-token")
+
+    sink_id = logger.add(
+        lambda message: records.append(str(message.record["message"])),
+        level="WARNING",
+    )
+    try:
+        result = await runner._isolated("js", fail_during_setup)
+    finally:
+        logger.remove(sink_id)
+
+    assert result == {
+        "status": "error",
+        "message": "JavaScript rendering analysis failed.",
+        "error_code": "analyzer_error",
+    }
+    assert records == ["Preflight analyzer failure: analyzer=js exception=RuntimeError"]
+
+
+@pytest.mark.asyncio
+async def test_legacy_policy_failure_logs_only_sanitized_context_and_exception_class(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner = _runner()
+    records: list[str] = []
+    sink_id = logger.add(
+        lambda message: records.append(str(message.record["message"])),
+        level="WARNING",
+    )
+    monkeypatch.setattr(
+        runner,
+        "_default_policy_checker",
+        lambda: _PolicyChecker(error=RuntimeError("https://user:password@example.com/path?token=secret-token")),
+    )
+    try:
+        result = await runner.gather_analysis("https://example.com/path")
+    finally:
+        logger.remove(sink_id)
+
+    assert result["results"] == {
+        key: {
+            "status": "error",
+            "message": "Probe destination was denied.",
+            "error_code": "policy_error",
+        }
+        for key in ANALYZER_KEYS
+    }
+    assert records == ["Legacy preflight policy failure: exception=RuntimeError"]
 
 
 @pytest.mark.asyncio
@@ -1254,6 +1311,61 @@ async def test_legacy_gather_allowed_target_uses_one_context_and_closes_once(
         impersonate=True,
     )
     assert context_calls[0][1] == {"policy_checker": checker}
+    assert cast(_Context, context).close_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_legacy_gather_converts_deadline_to_timeout_aggregate_and_closes_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner = _runner()
+    checker = _PolicyChecker()
+    context = _context()
+
+    async def deadline(*_args: Any, **_kwargs: Any) -> Any:
+        raise PreflightDeadlineExceeded()
+
+    monkeypatch.setattr(runner, "_default_policy_checker", lambda: checker)
+    monkeypatch.setattr(runner, "build_execution_context", lambda *_args, **_kwargs: context)
+    monkeypatch.setattr(runner, "gather_analysis_with_context", deadline)
+
+    result = await runner.gather_analysis("https://example.com/path")
+
+    assert result["results"] == {
+        key: {
+            "status": "error",
+            "message": "Probe timed out.",
+            "error_code": "timeout",
+        }
+        for key in ANALYZER_KEYS
+    }
+    assert cast(_Context, context).close_calls == 1
+
+
+def test_sync_legacy_gather_converts_deadline_to_timeout_aggregate_and_closes_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner = _runner()
+    checker = _PolicyChecker()
+    context = _context()
+
+    async def deadline(*_args: Any, **_kwargs: Any) -> Any:
+        raise PreflightDeadlineExceeded()
+
+    monkeypatch.setattr(runner, "_default_policy_checker", lambda: checker)
+    monkeypatch.setattr(runner, "build_execution_context", lambda *_args, **_kwargs: context)
+    monkeypatch.setattr(runner, "gather_analysis_with_context", deadline)
+
+    result = runner.run_analysis("https://example.com/path")
+
+    assert result["results"] == {
+        key: {
+            "status": "error",
+            "message": "Probe timed out.",
+            "error_code": "timeout",
+        }
+        for key in ANALYZER_KEYS
+    }
     assert cast(_Context, context).close_calls == 1
 
 

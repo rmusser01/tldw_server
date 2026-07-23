@@ -78,6 +78,11 @@ _POLICY_DENIED = {
     "error_code": "policy_denied",
 }
 _POLICY_ERROR = {**_POLICY_DENIED, "error_code": "policy_error"}
+_TIMEOUT_ERROR = {
+    "status": "error",
+    "message": "Probe timed out.",
+    "error_code": "timeout",
+}
 
 
 class AnalysisOutput(TypedDict):
@@ -105,7 +110,12 @@ async def _isolated(
             "message": exc.public_message,
             "error_code": exc.error_code,
         }
-    except Exception:  # noqa: BLE001 - analyzer failures are isolated and sanitized
+    except Exception as exc:  # noqa: BLE001 - analyzer failures are isolated and sanitized
+        logger.warning(
+            "Preflight analyzer failure: analyzer={} exception={}",
+            name,
+            type(exc).__name__,
+        )
         return {
             "status": "error",
             "message": _ANALYZER_FAILURE_MESSAGES[name],
@@ -188,6 +198,15 @@ def _policy_failure_analysis(error_code: str) -> AnalysisOutput:
     }
 
 
+def _timeout_failure_analysis() -> AnalysisOutput:
+    results = {key: dict(_TIMEOUT_ERROR) for key in ANALYZER_KEYS}
+    return {
+        "results": results,
+        "score": calculate_difficulty_score(results),
+        "recommendations": generate_recommendations(results),
+    }
+
+
 async def gather_analysis(
     url: str,
     *,
@@ -210,7 +229,8 @@ async def gather_analysis(
         allowed = bool(target.decision.allowed)
     except asyncio.CancelledError:
         raise
-    except Exception:  # noqa: BLE001 - direct legacy policy failures are sanitized
+    except Exception as exc:  # noqa: BLE001 - direct legacy policy failures are sanitized
+        logger.warning("Legacy preflight policy failure: exception={}", type(exc).__name__)
         return _policy_failure_analysis("policy_error")
 
     if not allowed:
@@ -228,7 +248,10 @@ async def gather_analysis(
         policy_checker=policy_checker,
     )
     try:
-        return await gather_analysis_with_context(target, options, context)
+        try:
+            return await gather_analysis_with_context(target, options, context)
+        except PreflightDeadlineExceeded:
+            return _timeout_failure_analysis()
     finally:
         try:
             await context.close()
