@@ -529,6 +529,28 @@ def test_dependency_neutral_contract_does_not_import_adapter():
 
 
 @pytest.mark.unit
+def test_neutral_sentinel_predicate_does_not_import_runtime_or_adapter():
+    package = "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio"
+    library_name = f"{package}.Audio_Transcription_Lib"
+    adapter_name = f"{package}.stt_provider_adapter"
+    command = (
+        f"import sys; from {package} import stt_execution_contract as contract; "
+        "assert contract.is_planned_stt_sentinel('[Error: private]'); "
+        f"assert {library_name!r} not in sys.modules; "
+        f"assert {adapter_name!r} not in sys.modules"
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-c", command],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "provider_module",
     [

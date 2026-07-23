@@ -33,6 +33,25 @@ _SECRET_SHAPED_RE = re.compile(
 )
 _MAX_EXECUTION_MISMATCHES = 8
 PLANNED_STT_TRANSCRIPTION_FAILURE = "Planned local STT transcription failed"
+_TRANSCRIPTION_ERROR_PREFIXES = (
+    "[error",
+    "[transcription error",
+    "error in transcription",
+    "canary transcription error",
+    "parakeet transcription error",
+    "external provider transcription error",
+    "external provider module not available",
+    "external provider transcription failed",
+    "nemo transcription module not available",
+    "failed to import nemo",
+    "failed to import external provider",
+)
+_PLANNED_STT_EMPTY_SENTINELS = frozenset(
+    {
+        "[no transcription produced]",
+        "[no speech detected]",
+    }
+)
 STT_DECODING_SETTINGS_V1 = MappingProxyType(
     {
         "configuration_id": "stable_id",
@@ -43,17 +62,30 @@ STT_DECODING_SETTINGS_V1 = MappingProxyType(
 )
 
 
+def is_transcription_error_message(message: object) -> bool:
+    """Return whether a value is a legacy transcription-error sentinel."""
+    if not isinstance(message, str):
+        return False
+    normalized = message.strip().lower()
+    return bool(normalized) and normalized.startswith(_TRANSCRIPTION_ERROR_PREFIXES)
+
+
+def is_planned_stt_sentinel(message: object) -> bool:
+    """Return whether a value is an error or empty-result planned STT sentinel."""
+    if not isinstance(message, str):
+        return False
+    normalized = message.strip().lower()
+    return (
+        is_transcription_error_message(message)
+        or normalized in _PLANNED_STT_EMPTY_SENTINELS
+    )
+
+
 def raise_for_planned_stt_sentinel(text: str) -> None:
     """Reject planned-provider error and empty-result sentinels safely."""
     from tldw_Server_API.app.core.exceptions import STTTranscriptionError
 
-    from .Audio_Transcription_Lib import is_transcription_error_message
-
-    normalized = text.strip().lower()
-    if is_transcription_error_message(text) or normalized in {
-        "[no transcription produced]",
-        "[no speech detected]",
-    }:
+    if is_planned_stt_sentinel(text):
         raise STTTranscriptionError(PLANNED_STT_TRANSCRIPTION_FAILURE) from None
 
 

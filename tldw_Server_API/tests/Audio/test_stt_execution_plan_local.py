@@ -1054,6 +1054,46 @@ def test_planned_parakeet_mlx_is_unsupported_before_library_entry(
 
 
 @pytest.mark.unit
+def test_planned_parakeet_mlx_transcription_fails_before_runtime_or_audio_entry(
+    monkeypatch,
+):
+    route = _route(
+        provider="parakeet",
+        model_label="parakeet-mlx",
+        backend="mlx",
+        device="mps",
+        dtype="bfloat16",
+    )
+    plan = _plan(
+        route,
+        runtime_settings=(
+            ("device", "mps"),
+            ("dtype", "bfloat16"),
+            ("model_path", "/private/model"),
+            ("variant", "mlx"),
+        ),
+    )
+    cached = object()
+    parakeet_mlx._mlx_model_cache = cached
+    monkeypatch.setattr(
+        parakeet_mlx,
+        "load_parakeet_mlx_model",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("planned MLX entered the loader")
+        ),
+    )
+
+    with pytest.raises(STTExecutionUnsupportedError, match="cannot prove"):
+        parakeet_mlx.transcribe_with_parakeet_mlx(
+            object(),
+            execution_plan=plan,
+            execution_route=route,
+        )
+
+    assert parakeet_mlx._mlx_model_cache is cached
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     ("adapter_type", "model", "language"),
     [
@@ -2047,7 +2087,23 @@ def test_outer_planned_boundary_sanitizes_typed_error_sentinel(
 
     assert str(exc_info.value) == "Planned local STT transcription failed"
     assert secret not in str(exc_info.value)
+    assert exc_info.value.__context__ is None
     assert exc_info.value.__cause__ is None
+    assert exc_info.value.__suppress_context__ is True
+    pending = [exc_info.value]
+    seen: set[int] = set()
+    graph: list[BaseException] = []
+    while pending:
+        error = pending.pop()
+        if id(error) in seen:
+            continue
+        seen.add(id(error))
+        graph.append(error)
+        if error.__context__ is not None:
+            pending.append(error.__context__)
+        if error.__cause__ is not None:
+            pending.append(error.__cause__)
+    assert secret not in " ".join(map(str, graph))
     assert secret not in caplog.text
 
 

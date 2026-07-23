@@ -29,17 +29,10 @@ from typing import Any, Callable, Optional, Union
 import numpy as np
 from loguru import logger
 
-from tldw_Server_API.app.core.exceptions import (
-    STTExecutionPlanError,
-    STTExecutionUnsupportedError,
-    STTTranscriptionError,
-)
+from tldw_Server_API.app.core.exceptions import STTExecutionUnsupportedError
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_contract import (
     SttBatchExecutionPlan,
     SttExecutionRoute,
-    SttLoadedRuntime,
-    SttTranscriptionOutcome,
-    actual_execution_from_route,
 )
 
 # Check if we're on macOS
@@ -47,7 +40,6 @@ IS_MACOS = sys.platform == 'darwin'
 
 # Global model cache
 _mlx_model_cache: Optional[Any] = None
-_mlx_plan_cache_key: tuple[str, str | None] | None = None
 _DEFAULT_MLX_MODEL_ID = "mlx-community/parakeet-tdt-0.6b-v3"
 
 
@@ -320,7 +312,7 @@ def load_parakeet_mlx_model(
     cache_dir: Optional[str] = None,
     allow_download: bool = True,
     execution_route: SttExecutionRoute | None = None,
-) -> Any | None | SttLoadedRuntime:
+) -> Any | None:
     """
     Load the Parakeet MLX model.
 
@@ -330,10 +322,9 @@ def load_parakeet_mlx_model(
     Returns:
         Loaded model instance or None if loading fails
     """
-    global _mlx_model_cache, _mlx_plan_cache_key
+    global _mlx_model_cache
 
-    planned = execution_route is not None
-    if planned:
+    if execution_route is not None:
         raise STTExecutionUnsupportedError(
             "Planned Parakeet MLX execution cannot prove local device and dtype"
         )
@@ -343,33 +334,18 @@ def load_parakeet_mlx_model(
                 "No-download Parakeet MLX execution requires an existing explicit local artifact"
             )
         model_path = str(Path(model_path).resolve())
-    planned_cache_key = (model_path, cache_dir) if planned else None
 
     if not IS_MACOS:
         logger.error("Parakeet MLX is only supported on macOS with Apple Silicon")
-        if planned:
-            raise STTExecutionUnsupportedError(
-                "Planned Parakeet MLX execution requires macOS with Apple Silicon"
-            )
         return None
 
-    if (
-        _mlx_model_cache
-        and not force_reload
-        and (not planned or _mlx_plan_cache_key == planned_cache_key)
-    ):
+    if _mlx_model_cache and not force_reload:
         logger.debug("Using cached Parakeet MLX model")
-        if not planned:
-            return _mlx_model_cache
-        return _mlx_loaded_runtime(execution_route, _mlx_model_cache)
+        return _mlx_model_cache
 
     # Check MLX availability (tests may monkeypatch this to True)
     if not check_mlx_available():
         logger.error("MLX is not available. Install with: pip install mlx")
-        if planned:
-            raise STTExecutionUnsupportedError(
-                "Planned Parakeet MLX execution requires the MLX runtime"
-            )
         return None
 
     # Check parakeet-mlx
@@ -377,22 +353,16 @@ def load_parakeet_mlx_model(
         logger.error(
             "parakeet-mlx is not installed. Install during setup/deploy (runtime auto-install is disabled)."
         )
-        if planned:
-            raise STTExecutionUnsupportedError(
-                "Planned Parakeet MLX execution requires parakeet-mlx"
-            )
         return None
 
     try:
         import parakeet_mlx
-        stt_cfg: dict[str, Any] = {}
-        if not planned:
-            try:
-                from tldw_Server_API.app.core.config import get_stt_config
+        try:
+            from tldw_Server_API.app.core.config import get_stt_config
 
-                stt_cfg = get_stt_config() or {}
-            except Exception:
-                stt_cfg = {}
+            stt_cfg: dict[str, Any] = get_stt_config() or {}
+        except Exception:
+            stt_cfg = {}
 
         # dtype is optional for tests; if mlx is unavailable, proceed without dtype
         try:
@@ -421,11 +391,7 @@ def load_parakeet_mlx_model(
 
         try:
             # Try to load the model from Hugging Face
-            logger.info(
-                "Loading planned local Parakeet MLX model"
-                if planned
-                else f"Loading model from: {model_id}"
-            )
+            logger.info(f"Loading model from: {model_id}")
             model = parakeet_mlx.from_pretrained(model_id, **from_pretrained_kwargs)
         except FileNotFoundError:
             if not allow_download:
@@ -441,67 +407,23 @@ def load_parakeet_mlx_model(
                 logger.exception(f"Failed to download/load model: {e2}")
                 return None
         except Exception as e:
-            if planned:
-                raise STTExecutionUnsupportedError(
-                    "Planned Parakeet MLX artifact could not be loaded"
-                ) from None
             logger.exception(f"Failed to load model {model_id}: {e}")
             return None
 
         _mlx_model_cache = model
-        _mlx_plan_cache_key = planned_cache_key if planned else None
         logger.info("Successfully loaded Parakeet MLX model")
 
-        if not planned:
-            return model
-        return _mlx_loaded_runtime(execution_route, model)
+        return model
 
-    except (STTExecutionPlanError, STTExecutionUnsupportedError):
+    except STTExecutionUnsupportedError:
         raise
     except ImportError as e:
-        if planned:
-            raise STTExecutionUnsupportedError(
-                "Planned Parakeet MLX execution requires parakeet-mlx"
-            ) from None
         logger.exception(f"Failed to import parakeet: {e}")
         logger.info("Try installing manually: pip install git+https://github.com/senstella/parakeet-mlx.git")
         return None
     except Exception as e:
-        if planned:
-            raise STTExecutionUnsupportedError(
-                "Planned Parakeet MLX artifact could not be loaded"
-            ) from None
         logger.exception(f"Failed to load Parakeet MLX model: {e}")
         return None
-
-
-def _mlx_runtime_string(value: object) -> str | None:
-    if value is None:
-        return None
-    type_value = getattr(value, "type", None)
-    rendered = str(type_value if type_value is not None else value).strip().lower()
-    return rendered.removeprefix("mlx.") or None
-
-
-def _mlx_loaded_runtime(
-    route: SttExecutionRoute,
-    model: object,
-) -> SttLoadedRuntime:
-    device = _mlx_runtime_string(getattr(model, "device", None))
-    dtype = _mlx_runtime_string(getattr(model, "dtype", None))
-    if device is None or dtype is None:
-        raise STTExecutionPlanError(
-            "Parakeet MLX did not expose effective device and dtype"
-        )
-    actual = actual_execution_from_route(
-        route,
-        device=device,
-        dtype=dtype,
-    )
-    return SttLoadedRuntime(
-        components=(model,),
-        actual_execution=actual,
-    )
 
 
 #######################################################################################################################
@@ -531,7 +453,7 @@ def transcribe_with_parakeet_mlx(
     sentence_max_duration: Optional[float] = None,
     execution_plan: SttBatchExecutionPlan | None = None,
     execution_route: SttExecutionRoute | None = None,
-) -> Union[str, dict[str, Any], SttTranscriptionOutcome]:
+) -> Union[str, dict[str, Any]]:
     """
     Transcribe audio using Parakeet MLX model.
 
@@ -548,61 +470,23 @@ def transcribe_with_parakeet_mlx(
     Returns:
         Transcribed text string
     """
-    _ = (language, batch_size)
-    loaded_runtime: SttLoadedRuntime | None = None
+    if execution_plan is not None or execution_route is not None:
+        raise STTExecutionUnsupportedError(
+            "Planned Parakeet MLX execution cannot prove local device and dtype"
+        )
 
-    def _finish(
-        result: str | dict[str, Any],
-    ) -> str | dict[str, Any] | SttTranscriptionOutcome:
-        if loaded_runtime is None:
-            return result
-        artifact = (
-            result
-            if isinstance(result, dict)
-            else _as_structured_artifact(result)
-        )
-        text = str(artifact.get("text") or "")
-        if text.startswith("[Error:") or text.startswith("[Transcription error]"):
-            raise STTTranscriptionError(text)
-        segments = artifact.get("sentences")
-        if not isinstance(segments, list):
-            segments = []
-        return SttTranscriptionOutcome(
-            artifact={
-                "text": text,
-                "segments": segments,
-                "language": execution_plan.language if execution_plan else None,
-            },
-            actual_execution=loaded_runtime.actual_execution,
-        )
+    _ = (language, batch_size)
 
     # Attempt to load the model first (tests may monkeypatch loader)
-    loaded = load_parakeet_mlx_model(
+    model = load_parakeet_mlx_model(
         model_path=model_path,
         cache_dir=cache_dir,
-        allow_download=execution_plan is None,
-        execution_route=(
-            execution_route or execution_plan.descriptor.primary_route
-            if execution_plan is not None
-            else None
-        ),
     )
-    if execution_plan is not None:
-        if not isinstance(loaded, SttLoadedRuntime):
-            raise STTExecutionPlanError(
-                "Planned Parakeet MLX load did not report actual execution"
-            )
-        loaded_runtime = loaded
-        model = loaded.components[0]
-    else:
-        model = loaded
     if model is None:
         # Preserve the original platform check semantics only when loading fails
         if not IS_MACOS:
-            return _finish(
-                "[Error: Parakeet MLX is only supported on macOS with Apple Silicon]"
-            )
-        return _finish("[Error: Failed to load Parakeet MLX model]")
+            return "[Error: Parakeet MLX is only supported on macOS with Apple Silicon]"
+        return "[Error: Failed to load Parakeet MLX model]"
 
     try:
         # Handle different input types
@@ -614,7 +498,7 @@ def transcribe_with_parakeet_mlx(
             audio_path = Path(audio_data)
             # lgtm[py/path-injection] read-only transcription input path must already exist; no path is written here.
             if not audio_path.exists():
-                return _finish("[Error: Audio file not found]")
+                return "[Error: Audio file not found]"
             audio_file_path = str(audio_path)
 
         elif isinstance(audio_data, np.ndarray):
@@ -637,7 +521,7 @@ def transcribe_with_parakeet_mlx(
                 )
             audio_np = np.asarray(audio_data, dtype=np.float32)
         else:
-            return _finish("[Error: Invalid audio data type]")
+            return "[Error: Invalid audio data type]"
 
         # Normalize audio to [-1, 1] range (only if we have numpy array)
         if isinstance(audio_np, np.ndarray) and audio_np.size > 0 and np.abs(audio_np).max() > 1.0:
@@ -650,14 +534,12 @@ def transcribe_with_parakeet_mlx(
             else:
                 logger.info("Transcribing audio file")
 
-        stt_cfg: dict[str, Any] = {}
-        if execution_plan is None:
-            try:
-                from tldw_Server_API.app.core.config import get_stt_config
+        try:
+            from tldw_Server_API.app.core.config import get_stt_config
 
-                stt_cfg = get_stt_config() or {}
-            except Exception:
-                stt_cfg = {}
+            stt_cfg: dict[str, Any] = get_stt_config() or {}
+        except Exception:
+            stt_cfg = {}
 
         transcribe_kwargs: dict[str, Any] = {}
         if chunk_duration is not None:
@@ -718,7 +600,7 @@ def transcribe_with_parakeet_mlx(
                     temp_audio_path = tmp_file.name
                 result = model.transcribe(temp_audio_path, **transcribe_kwargs)
             else:
-                return _finish("[Error: Invalid audio data format]")
+                return "[Error: Invalid audio data format]"
         finally:
             if temp_audio_path:
                 try:
@@ -733,19 +615,17 @@ def transcribe_with_parakeet_mlx(
             logger.info(f"Transcription complete: {text[:100]}...")
 
         if return_structured:
-            return _finish(artifact)
-        return _finish(text)
+            return artifact
+        return text
 
-    except (STTExecutionPlanError, STTExecutionUnsupportedError, STTTranscriptionError):
-        raise
     except ImportError as e:
         logger.exception(f"Missing required library: {e}")
-        return _finish("[Error: Missing required library]")
+        return "[Error: Missing required library]"
     except Exception as e:
         import traceback
         logger.exception(f"Error during Parakeet MLX transcription: {e}")
         logger.exception(f"Traceback: {traceback.format_exc()}")
-        return _finish("[Error: Parakeet MLX transcription failed]")
+        return "[Error: Parakeet MLX transcription failed]"
 
 
 @dataclass

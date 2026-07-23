@@ -71,14 +71,18 @@ from tldw_Server_API.app.core.exceptions import (
     TranscriptionCancelled,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_contract import (
+    PLANNED_STT_TRANSCRIPTION_FAILURE,
     SttBatchExecutionPlan,
     SttExecutionRoute,
     SttLoadedRuntime,
     SttTranscriptionOutcome,
     actual_execution_from_route,
-    raise_for_planned_stt_sentinel,
+    is_planned_stt_sentinel,
     require_local_execution_route,
     validate_stt_loaded_runtime,
+)
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_contract import (
+    is_transcription_error_message as _is_transcription_error_message,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.path_utils import resolve_safe_local_path
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram, timeit
@@ -1771,26 +1775,7 @@ def is_transcription_error_message(msg: str) -> bool:
     This centralizes detection used by API endpoints and speech chat so that
     provider-specific error messages stay in sync with callers.
     """
-    if not isinstance(msg, str):
-        return False
-
-    lower_msg = msg.lower().strip()
-    if not lower_msg:
-        return False
-
-    return (
-        lower_msg.startswith("[error")
-        or lower_msg.startswith("[transcription error")
-        or lower_msg.startswith("error in transcription")
-        or lower_msg.startswith("canary transcription error")
-        or lower_msg.startswith("parakeet transcription error")
-        or lower_msg.startswith("external provider transcription error")
-        or lower_msg.startswith("external provider module not available")
-        or lower_msg.startswith("external provider transcription failed")
-        or lower_msg.startswith("nemo transcription module not available")
-        or lower_msg.startswith("failed to import nemo")
-        or lower_msg.startswith("failed to import external provider")
-    )
+    return _is_transcription_error_message(msg)
 
 
 def strip_whisper_metadata_header(segments):
@@ -4024,6 +4009,7 @@ def speech_to_text(
             The original exception may be chained.
     """
     if execution_plan is not None:
+        planned_transcription_sentinel = False
         try:
             return _speech_to_text_planned(
                 audio_input,
@@ -4032,8 +4018,9 @@ def speech_to_text(
                 cancel_check=cancel_check,
             )
         except STTTranscriptionError as exc:
-            raise_for_planned_stt_sentinel(str(exc))
-            raise
+            if not is_planned_stt_sentinel(str(exc)):
+                raise
+            planned_transcription_sentinel = True
         except (
             CancelCheckError,
             STTExecutionPlanError,
@@ -4044,6 +4031,10 @@ def speech_to_text(
         except Exception:
             raise STTTranscriptionError(
                 "Planned local STT execution failed"
+            ) from None
+        if planned_transcription_sentinel:
+            raise STTTranscriptionError(
+                PLANNED_STT_TRANSCRIPTION_FAILURE
             ) from None
 
     file_path: Optional[Path] = None
