@@ -2,11 +2,13 @@
 
 Plan: `Docs/superpowers/plans/2026-07-14-jobs-admission-hardening-and-lease-lifecycle.md`
 Tracking: `TASK-12969.1`
-Execution base: `29acaca8c781213e27b12066372df13855e2e7a6`
+Execution base: `1b9518c68c929162b755a35b6863b407962c595e`
 
-Task 1: complete (commit c69e24d575, review approved; focused 4 passed with real PostgreSQL; Bandit 0 findings)
-Task 2: complete (commit 3e1356ba87, review approved; 16 passed with real PostgreSQL; Bandit 0 findings)
-Task 3: complete (commit a8d93cef56, review approved; 17 passed with real PostgreSQL; Bandit 0 findings)
-Task 4: complete (commits 95028bdef2, 0cf167c7f3, and 9d2f33c2f4; final specification and quality reviews approved)
+Task 1: complete (commit 0fcdce1c7c, review approved; focused 4 passed with real PostgreSQL; Bandit 0 findings)
+Task 2: complete (commit d44840c403, review approved; 16 passed with real PostgreSQL; Bandit 0 findings)
+Task 3: complete (commit 6a6eb7c564, review approved; 17 passed with real PostgreSQL; Bandit 0 findings)
+Task 4: complete (commits 12170fb846, e1f10ecedc, and db91a2a7cc; final specification and quality reviews approved)
 
-Final branch gate: 59 passed with required real PostgreSQL execution and no skips; Ruff and compileall passed; Bandit reported 0 findings and 0 errors; whole-branch review reported no actionable P0-P3 findings and `Ready to merge: Yes`.
+Latest-dev review remediation: complete (commit 85f5e400cc; optional psycopg failure is explicit, changed-line suppressions are removed or justified, and prune/replay coordination covers upstream candidate-row locking).
+
+Final rebased branch gate: 61 passed with required real PostgreSQL execution and no skips; Ruff and compileall passed; Bandit reported 0 findings and 0 errors.
