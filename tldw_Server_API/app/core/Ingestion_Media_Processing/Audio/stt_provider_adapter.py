@@ -65,6 +65,9 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_con
     _normalize_audio_endpoint as _normalize_audio_endpoint,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_contract import (
+    _resolve_audio_transcription_endpoint as _resolve_audio_transcription_endpoint,
+)
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_contract import (
     actual_execution_from_route as actual_execution_from_route,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_contract import (
@@ -762,6 +765,7 @@ class SttProviderAdapter(ABC):
             outcome.artifact,
             plan=execution_plan,
             actual=outcome.actual_execution,
+            runtime_mismatches=outcome.runtime_mismatches,
         )
 
 
@@ -1613,10 +1617,19 @@ class Qwen3ASRAdapter(SttProviderAdapter):
         settings = qwen3._resolve_settings()
         if not settings.get("enabled"):
             raise STTExecutionUnsupportedError("Qwen3-ASR is disabled")
-        requested = model or str(
-            settings.get("model_path") or "qwen3-asr"
-        )
+        requested = (
+            model
+            or str(settings.get("model_path") or "qwen3-asr")
+        ).strip()
         model_label = _safe_requested_model_label(requested)
+        if (
+            str(settings.get("backend") or "").strip().lower()
+            == "vllm"
+            and model_label == "local-model"
+        ):
+            raise STTExecutionUnsupportedError(
+                "Qwen3-ASR vLLM requires a safe request model identifier"
+            )
         backend = str(settings.get("backend") or "").strip().lower()
         runtime: dict[str, SttPlanScalar]
         if backend == "vllm":
@@ -1624,7 +1637,7 @@ class Qwen3ASRAdapter(SttProviderAdapter):
                 settings.get("vllm_base_url") or ""
             ).strip()
             endpoint, egress, endpoint_id = _normalize_audio_endpoint(
-                f"{base_url.rstrip('/')}/v1/audio/transcriptions"
+                _resolve_audio_transcription_endpoint(base_url)
             )
             route = SttExecutionRoute(
                 route_id="vllm-http-1",
@@ -1646,6 +1659,8 @@ class Qwen3ASRAdapter(SttProviderAdapter):
             runtime = {
                 "backend": "vllm",
                 "endpoint": endpoint,
+                "endpoint_id": endpoint_id,
+                "request_model": requested,
                 "sample_rate": int(
                     settings.get("sample_rate") or 16000
                 ),
@@ -1895,6 +1910,23 @@ class VibeVoiceAdapter(SttProviderAdapter):
                 settings["vllm_model_id"] = model.strip()
         requested = model or str(settings["model_id"])
         model_label = _safe_requested_model_label(requested)
+        vllm_model_id = str(
+            settings.get("vllm_model_id")
+            or settings["model_id"]
+        ).strip()
+        vllm_model_label = _safe_requested_model_label(
+            vllm_model_id
+        )
+        local_model_label = _safe_requested_model_label(
+            str(settings["model_id"])
+        )
+        if (
+            settings.get("vllm_enabled")
+            and vllm_model_label == "local-model"
+        ):
+            raise STTExecutionUnsupportedError(
+                "VibeVoice vLLM requires a safe request model identifier"
+            )
         planned_hotwords = tuple(hotwords or ())
         decoding_settings = (
             (
@@ -1924,28 +1956,27 @@ class VibeVoiceAdapter(SttProviderAdapter):
             "sample_rate": int(
                 settings.get("sample_rate") or 16000
             ),
-            "strict_semantics": True,
+            "strict_semantics": False,
+            "local_model_label": local_model_label,
             "vllm_api_key": settings.get("vllm_api_key"),
-            "vllm_model_id": str(
-                settings.get("vllm_model_id")
-                or settings["model_id"]
-            ),
+            "vllm_model_id": vllm_model_id,
             "vllm_timeout_seconds": int(
                 settings.get("vllm_timeout_seconds") or 600
             ),
         }
         if settings.get("vllm_enabled"):
             endpoint, egress, endpoint_id = _normalize_audio_endpoint(
-                vibe._resolve_vllm_endpoint(
+                _resolve_audio_transcription_endpoint(
                     str(settings.get("vllm_base_url") or "")
                 )
             )
             runtime["endpoint"] = endpoint
+            runtime["endpoint_id"] = endpoint_id
             routes.append(
                 SttExecutionRoute(
                     route_id="vllm-http-1",
                     provider=self.name.value,
-                    model_label=model_label,
+                    model_label=vllm_model_label,
                     artifact_id=None,
                     identity_resolved=False,
                     backend="vllm_http",
@@ -2002,13 +2033,17 @@ class VibeVoiceAdapter(SttProviderAdapter):
                 model_id=str(model_path.resolve()),
                 model_revision=revision,
             )
+            local_model_label = _safe_requested_model_label(
+                str(model_path.resolve())
+            )
+            runtime["local_model_label"] = local_model_label
             routes.append(
                 SttExecutionRoute(
                     route_id=(
                         "local-2" if len(routes) == 1 else "local-1"
                     ),
                     provider=self.name.value,
-                    model_label=model_label,
+                    model_label=local_model_label,
                     artifact_id=artifact_id,
                     identity_resolved=artifact_id is not None,
                     backend="transformers",
@@ -2031,7 +2066,7 @@ class VibeVoiceAdapter(SttProviderAdapter):
             requested_provider=self.name.value,
             requested_model_label=model_label,
             resolved_provider=self.name.value,
-            resolved_model_label=model_label,
+            resolved_model_label=routes[0].model_label,
             routes=tuple(routes),
             honors_task=True,
             honors_language=True,
@@ -2207,6 +2242,14 @@ class ExternalAdapter(SttProviderAdapter):
             raise STTExecutionUnsupportedError(
                 "External STT provider is not configured"
             )
+        actual_model_id = str(config.model).strip()
+        actual_model_label = _safe_requested_model_label(
+            actual_model_id
+        )
+        if actual_model_label == "local-model":
+            raise STTExecutionUnsupportedError(
+                "External STT requires a safe request model identifier"
+            )
         if normalized_mode == "neutral-v1" and config.prompt is not None:
             raise STTExecutionUnsupportedError(
                 "External STT configured prompt is incompatible with neutral-v1"
@@ -2233,7 +2276,7 @@ class ExternalAdapter(SttProviderAdapter):
             else None
         )
         endpoint, egress, endpoint_id = _normalize_audio_endpoint(
-            external._resolve_transcription_endpoint(config.base_url)
+            _resolve_audio_transcription_endpoint(config.base_url)
         )
         decoding_settings = (
             (
@@ -2249,7 +2292,7 @@ class ExternalAdapter(SttProviderAdapter):
         route = SttExecutionRoute(
             route_id="external-http-1",
             provider=self.name.value,
-            model_label=model_label,
+            model_label=actual_model_label,
             artifact_id=None,
             identity_resolved=False,
             backend="openai_compatible",
@@ -2277,7 +2320,7 @@ class ExternalAdapter(SttProviderAdapter):
             ),
             _EXTERNAL_RUNTIME_LANGUAGE: planned_language,
             _EXTERNAL_RUNTIME_MAX_RETRIES: int(config.max_retries),
-            _EXTERNAL_RUNTIME_MODEL: config.model,
+            _EXTERNAL_RUNTIME_MODEL: actual_model_id,
             _EXTERNAL_RUNTIME_PROMPT: planned_prompt,
             _EXTERNAL_RUNTIME_PROVIDER: provider_name,
             _EXTERNAL_RUNTIME_RESPONSE_FORMAT: (
@@ -2293,7 +2336,7 @@ class ExternalAdapter(SttProviderAdapter):
             requested_provider=self.name.value,
             requested_model_label=model_label,
             resolved_provider=self.name.value,
-            resolved_model_label=model_label,
+            resolved_model_label=actual_model_label,
             routes=(route,),
             honors_task=True,
             honors_language=True,

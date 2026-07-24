@@ -27,6 +27,7 @@ import threading  # noqa: E402
 import time  # noqa: E402
 from collections.abc import AsyncIterator, Callable, Iterable, Iterator  # noqa: E402
 from contextlib import asynccontextmanager, contextmanager, suppress  # noqa: E402
+from contextvars import ContextVar  # noqa: E402
 from dataclasses import dataclass  # noqa: E402
 from datetime import datetime, timezone  # noqa: E402
 from email.utils import parsedate_to_datetime  # noqa: E402
@@ -394,6 +395,134 @@ async def _iterate_sensitive_http_items(
         if close is not None:
             async with _sensitive_http_stream_context(enabled):
                 await close()
+
+_OPAQUE_STT_ENDPOINT_ID: ContextVar[str | None] = ContextVar(
+    "opaque_stt_endpoint_id",
+    default=None,
+)
+_OPAQUE_STT_ENDPOINT_ID_RE = re.compile(
+    r"^sha256:[0-9a-f]{64}$"
+)
+_OPAQUE_STT_LOG_FACTORY_LOCK = threading.Lock()
+
+
+def _install_opaque_stt_log_record_factory() -> None:
+    """Chain a factory that redacts HTTP client logs in STT context."""
+    current = logging.getLogRecordFactory()
+    if (
+        getattr(current, "_tldw_opaque_stt_context", None)
+        is _OPAQUE_STT_ENDPOINT_ID
+    ):
+        return
+    with _OPAQUE_STT_LOG_FACTORY_LOCK:
+        current = logging.getLogRecordFactory()
+        if (
+            getattr(current, "_tldw_opaque_stt_context", None)
+            is _OPAQUE_STT_ENDPOINT_ID
+        ):
+            return
+        previous_factory = current
+
+        def record_factory(*args: Any, **kwargs: Any) -> logging.LogRecord:
+            record = previous_factory(*args, **kwargs)
+            endpoint_id = _OPAQUE_STT_ENDPOINT_ID.get()
+            if endpoint_id is None or not (
+                record.name == "httpx"
+                or record.name.startswith("httpcore")
+                or record.name.startswith("aiohttp")
+            ):
+                return record
+            status_code = next(
+                (
+                    value
+                    for value in (
+                        record.args
+                        if isinstance(record.args, tuple)
+                        else ()
+                    )
+                    if isinstance(value, int)
+                    and 100 <= value <= 599
+                ),
+                None,
+            )
+            if status_code is None:
+                record.msg = (
+                    "planned STT HTTP endpoint_id=%s"
+                )
+                record.args = (endpoint_id,)
+            else:
+                record.msg = (
+                    "planned STT HTTP endpoint_id=%s status_code=%s"
+                )
+                record.args = (endpoint_id, status_code)
+            record.exc_info = None
+            record.exc_text = None
+            record.stack_info = None
+            return record
+
+        record_factory._tldw_opaque_stt_context = (  # type: ignore[attr-defined]
+            _OPAQUE_STT_ENDPOINT_ID
+        )
+        logging.setLogRecordFactory(record_factory)
+
+
+@contextmanager
+def opaque_stt_http_observability(
+    endpoint_id: str,
+) -> Iterator[None]:
+    """Expose only an opaque endpoint identifier for a planned STT call."""
+    if (
+        not isinstance(endpoint_id, str)
+        or _OPAQUE_STT_ENDPOINT_ID_RE.fullmatch(endpoint_id) is None
+    ):
+        raise ValueError("Invalid opaque STT endpoint identifier")
+    _install_opaque_stt_log_record_factory()
+    token = _OPAQUE_STT_ENDPOINT_ID.set(endpoint_id)
+    try:
+        yield
+    finally:
+        _OPAQUE_STT_ENDPOINT_ID.reset(token)
+
+
+def _opaque_stt_endpoint_id() -> str | None:
+    return _OPAQUE_STT_ENDPOINT_ID.get()
+
+
+def _http_trace_attributes(
+    method: str,
+    url: str,
+) -> dict[str, Any]:
+    endpoint_id = _opaque_stt_endpoint_id()
+    if endpoint_id is not None:
+        return {"stt.endpoint_id": endpoint_id}
+    if _effective_sensitive_observability():
+        url = _SENSITIVE_OBSERVABILITY_URL
+    return {
+        "http.method": method.upper(),
+        "net.host.name": _parse_host_from_url(url),
+        "url.full": _sanitize_url_for_logs(url),
+    }
+
+
+def _http_metric_labels(
+    method: str,
+    url: str,
+    *,
+    status_code: int | None = None,
+) -> dict[str, str]:
+    endpoint_id = _opaque_stt_endpoint_id()
+    if endpoint_id is not None:
+        labels = {"endpoint_id": endpoint_id}
+    else:
+        if _effective_sensitive_observability():
+            url = _SENSITIVE_OBSERVABILITY_URL
+        labels = {
+            "method": method.upper(),
+            "host": _parse_host_from_url(url),
+        }
+    if status_code is not None:
+        labels["status"] = str(status_code)
+    return labels
 
 
 def _httpx_timeout_from_defaults() -> httpx.Timeout:
@@ -1148,6 +1277,9 @@ def _redact_path_for_logging(host: str, path: str) -> str:
 
 
 def _sanitize_url_for_logs(u: str | Any) -> str:
+    endpoint_id = _opaque_stt_endpoint_id()
+    if endpoint_id is not None:
+        return endpoint_id
     try:
         s = str(u)
     except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
@@ -1204,6 +1336,9 @@ def _raise_if_json_response_exceeds_limit(
 
 def _url_parts(u: str | Any) -> tuple[str, str, str]:
     """Return (scheme, host, path) for logging; redacts query by omission."""
+    endpoint_id = _opaque_stt_endpoint_id()
+    if endpoint_id is not None:
+        return "", endpoint_id, ""
     try:
         s = str(u)
     except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
@@ -1243,6 +1378,19 @@ def _log_outbound_request(
         url = _SENSITIVE_OBSERVABILITY_URL
     try:
         duration_ms = int(max(0.0, time.time() - start_time) * 1000)
+        endpoint_id = _opaque_stt_endpoint_id()
+        if endpoint_id is not None:
+            lvl = (
+                "warning"
+                if status_code >= 400 or exception_class
+                else "info"
+            )
+            logger.bind(
+                endpoint_id=endpoint_id,
+                status_code=int(status_code),
+                duration_ms=duration_ms,
+            ).log(lvl, "planned STT HTTP outbound")
+            return
         retry_delay_ms = int(max(0.0, last_retry_delay_s) * 1000)
         scheme, host, path = _url_parts(url)
         lvl = "warning" if (status_code >= 400 or exception_class) else "info"
@@ -2939,7 +3087,6 @@ async def _afetch_httpx(
     last_exc: Exception | None = None
     tm = get_tracing_manager()
     observability_url = _SENSITIVE_OBSERVABILITY_URL if sensitive_observability else url
-    host_attr = _parse_host_from_url(observability_url)
     method_upper = str(method).upper()
     _head_disable_h2_tried = False
     _head_get_range_tried = False
@@ -3011,10 +3158,15 @@ async def _afetch_httpx(
             # can distinguish 4xx/5xx responses from transport failures. All
             # other exceptions are normalized into a NetworkError reason.
             with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
-                logger.debug(
-                    "afetch _do_once: caught exception {}",
-                    type(e).__name__,
-                )
+                if _opaque_stt_endpoint_id() is not None:
+                    logger.debug(
+                        "planned STT HTTP transport exception"
+                    )
+                else:
+                    logger.debug(
+                        "afetch _do_once: caught exception {}",
+                        type(e).__name__,
+                    )
             try:
                 _hx = _resolve_httpx()
                 if _hx is not None and isinstance(e, getattr(_hx, "HTTPStatusError", Exception)):
@@ -3046,11 +3198,7 @@ async def _afetch_httpx(
             tm,
             "http.client",
             sensitive_observability=sensitive_observability,
-            attributes={
-                "http.method": method.upper(),
-                "net.host.name": host_attr,
-                "url.full": _sanitize_url_for_logs(observability_url),
-            },
+            attributes=_http_trace_attributes(method, url),
         ):
             for attempt in range(1, attempts + 1):
                 last_exc = None
@@ -3183,21 +3331,30 @@ async def _afetch_httpx(
                             if resp.status_code < 400:
                                 # metrics for success
                                 try:
+                                    response_url = str(resp.request.url)
                                     response_observability_url = (
                                         observability_url
                                         if sensitive_observability
-                                        else _get_response_url(resp, cur_url)
-                                    )
-                                    response_host = _parse_host_from_url(
-                                        response_observability_url
+                                        else response_url
                                     )
                                     get_metrics_registry().increment(
-                                        "http_client_requests_total", 1, labels={"method": method.upper(), "host": response_host, "status": str(resp.status_code)}
+                                        "http_client_requests_total",
+                                        1,
+                                        labels=_http_metric_labels(
+                                            method,
+                                            response_url,
+                                            status_code=int(
+                                                resp.status_code
+                                            ),
+                                        ),
                                     )
                                     get_metrics_registry().observe(
                                         "http_client_request_duration_seconds",
                                         time.time() - t0,
-                                        labels={"method": method.upper(), "host": response_host},
+                                        labels=_http_metric_labels(
+                                            method,
+                                            response_url,
+                                        ),
                                     )
                                 except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
                                     pass
@@ -3338,7 +3495,6 @@ async def _afetch_aiohttp(
     last_exc: Exception | None = None
     tm = get_tracing_manager()
     observability_url = _SENSITIVE_OBSERVABILITY_URL if sensitive_observability else url
-    host_attr = _parse_host_from_url(observability_url)
     method_upper = str(method).upper()
     _head_get_range_tried = False
 
@@ -3428,11 +3584,7 @@ async def _afetch_aiohttp(
         tm,
         "http.client",
         sensitive_observability=sensitive_observability,
-        attributes={
-            "http.method": method.upper(),
-            "net.host.name": host_attr,
-            "url.full": _sanitize_url_for_logs(observability_url),
-        },
+        attributes=_http_trace_attributes(method, url),
     ):
         for attempt in range(1, attempts + 1):
             last_exc = None
@@ -3533,21 +3685,30 @@ async def _afetch_aiohttp(
                 # final response
                 if resp.status_code < 400:
                     try:
+                        response_url = _get_response_url(resp, cur_url)
                         response_observability_url = (
                             observability_url
                             if sensitive_observability
-                            else _get_response_url(resp, cur_url)
+                            else response_url
                         )
-                        response_host = _parse_host_from_url(response_observability_url)
                         get_metrics_registry().increment(
                             "http_client_requests_total",
                             1,
-                            labels={"method": method.upper(), "host": response_host, "status": str(resp.status_code)},
+                            labels=_http_metric_labels(
+                                method,
+                                response_url,
+                                status_code=int(
+                                    resp.status_code
+                                ),
+                            ),
                         )
                         get_metrics_registry().observe(
                             "http_client_request_duration_seconds",
                             time.time() - t0,
-                            labels={"method": method.upper(), "host": response_host},
+                            labels=_http_metric_labels(
+                                method,
+                                response_url,
+                            ),
                         )
                     except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
                         pass
@@ -3784,7 +3945,6 @@ def _fetch_httpx_response(
     t0 = time.time()
     tm = get_tracing_manager()
     observability_url = _SENSITIVE_OBSERVABILITY_URL if sensitive_observability else url
-    host_attr = _parse_host_from_url(observability_url)
     method_upper = str(method).upper()
     _head_disable_h2_tried = False
     _head_get_range_tried = False
@@ -3864,11 +4024,7 @@ def _fetch_httpx_response(
             tm,
             "http.client",
             sensitive_observability=sensitive_observability,
-            attributes={
-                "http.method": method.upper(),
-                "net.host.name": host_attr,
-                "url.full": _sanitize_url_for_logs(observability_url),
-            },
+            attributes=_http_trace_attributes(method, url),
         ):
             for attempt in range(1, attempts + 1):
                 cur_url = url
@@ -3996,19 +4152,30 @@ def _fetch_httpx_response(
                         continue
                     if resp.status_code < 400:
                         try:
+                            response_url = str(resp.request.url)
                             response_observability_url = (
                                 observability_url
                                 if sensitive_observability
-                                else _get_response_url(resp, cur_url)
+                                else response_url
                             )
-                            host = _parse_host_from_url(response_observability_url)
                             get_metrics_registry().increment(
-                                "http_client_requests_total", 1, labels={"method": method.upper(), "host": host, "status": str(resp.status_code)}
+                                "http_client_requests_total",
+                                1,
+                                labels=_http_metric_labels(
+                                    method,
+                                    response_url,
+                                    status_code=int(
+                                        resp.status_code
+                                    ),
+                                ),
                             )
                             get_metrics_registry().observe(
                                 "http_client_request_duration_seconds",
                                 time.time() - t0,
-                                labels={"method": method.upper(), "host": host},
+                                labels=_http_metric_labels(
+                                    method,
+                                    response_url,
+                                ),
                             )
                         except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
                             pass

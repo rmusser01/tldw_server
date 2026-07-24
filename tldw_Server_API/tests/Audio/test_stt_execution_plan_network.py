@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import subprocess
 import sys
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -117,8 +119,25 @@ def test_classify_audio_egress_treats_every_other_host_as_remote(url: str) -> No
         "http://example.com/v1/audio/transcriptions#fragment",
         "http://example.com:",
         "http://example.com:not-a-port/v1/audio/transcriptions",
+        "http://example.com:0/v1/audio/transcriptions",
         "http://example.com:70000/v1/audio/transcriptions",
         "http://::1/v1/audio/transcriptions",
+        "https://éxample.com/v1/audio/transcriptions",
+        "https://%65xample.com/v1/audio/transcriptions",
+        "https://[fe80::1%25en0]/v1/audio/transcriptions",
+        "https://example.com./v1/audio/transcriptions",
+        "https://foo..example.com/v1/audio/transcriptions",
+        "https://example.com/\x01/v1/audio/transcriptions",
+        "https://user%40example.com@example.net/v1/audio/transcriptions",
+        "https://example.com/%2e%2e/private/transcriptions",
+        "https://example.com/%7E/private/transcriptions",
+        "https://example.com/%ZZ/private/transcriptions",
+        "https://example.com/a b/transcriptions",
+        "https://example.com/{x}/transcriptions",
+        "https://example.com/a|b/transcriptions",
+        "https://example.com/[x]/transcriptions",
+        "https://example.com/proxy;private/v1/audio/transcriptions",
+        "https://example.com//v1///audio/transcriptions",
     ),
 )
 def test_classify_audio_egress_rejects_malformed_or_ambiguous_urls(url: str) -> None:
@@ -145,8 +164,113 @@ def test_normalized_endpoint_identity_is_opaque_and_covers_complete_path() -> No
     assert other_id != first_id
     assert first_id.startswith("sha256:")
     assert len(first_id) == len("sha256:") + 64
+    assert first_id == (
+        "sha256:"
+        + hashlib.sha256(first.encode("ascii")).hexdigest()
+    )
     assert "example.com" not in first_id
     assert "transcriptions" not in first_id
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    (
+        (
+            "http://example.com:080/v1/audio/transcriptions",
+            "http://example.com/v1/audio/transcriptions",
+        ),
+        (
+            "https://example.com:0443/v1/audio/transcriptions",
+            "https://example.com/v1/audio/transcriptions",
+        ),
+        (
+            "http://example.com:081/v1/audio/transcriptions",
+            "http://example.com:81/v1/audio/transcriptions",
+        ),
+        (
+            "http://[0:0:0:0:0:0:0:1]/v1/audio/transcriptions",
+            "http://[0:0:0:0:0:0:0:1]/v1/audio/transcriptions",
+        ),
+    ),
+)
+def test_normalized_endpoint_matches_ascii_transport_authority(
+    source: str,
+    expected: str,
+) -> None:
+    normalized, _egress, endpoint_id = (
+        spa._normalize_audio_endpoint(source)
+    )
+
+    assert normalized == expected
+    assert endpoint_id == (
+        "sha256:"
+        + hashlib.sha256(expected.encode("ascii")).hexdigest()
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("provider", "unsafe_base"),
+    (
+        ("qwen3", "https://example.com/proxy?api_key=private"),
+        ("vibevoice", "https://example.com/proxy?api_key=private"),
+        ("external", "https://example.com/proxy?api_key=private"),
+        ("qwen3", "https://user%40name@example.com/proxy"),
+        ("vibevoice", "https://user%40name@example.com/proxy"),
+        ("external", "https://user%40name@example.com/proxy"),
+        ("qwen3", "https://example.com/proxy;private"),
+        ("vibevoice", "https://example.com/proxy;private"),
+        ("external", "https://example.com/proxy;private"),
+    ),
+)
+def test_network_plans_validate_configured_base_before_appending_endpoint(
+    monkeypatch: pytest.MonkeyPatch,
+    provider: str,
+    unsafe_base: str,
+) -> None:
+    if provider == "qwen3":
+        monkeypatch.setattr(
+            qwen3,
+            "_resolve_settings",
+            lambda: {
+                "enabled": True,
+                "backend": "vllm",
+                "vllm_base_url": unsafe_base,
+                "model_path": "Qwen/Qwen3-ASR-1.7B",
+                "sample_rate": 16000,
+            },
+        )
+        adapter: spa.SttProviderAdapter = spa.Qwen3ASRAdapter()
+        model = "Qwen/Qwen3-ASR-1.7B"
+    elif provider == "vibevoice":
+        monkeypatch.setattr(
+            vibe,
+            "_resolve_settings",
+            lambda: {
+                "enabled": False,
+                "vllm_enabled": True,
+                "vllm_base_url": unsafe_base,
+                "vllm_model_id": "microsoft/VibeVoice-ASR",
+                "model_id": "microsoft/VibeVoice-ASR",
+                "sample_rate": 16000,
+            },
+        )
+        adapter = spa.VibeVoiceAdapter()
+        model = "microsoft/VibeVoice-ASR"
+    else:
+        config = _external_config()
+        config.base_url = unsafe_base
+        monkeypatch.setattr(
+            external,
+            "load_external_provider_config",
+            lambda _name="default": config,
+        )
+        adapter = spa.ExternalAdapter()
+        model = "external:custom"
+
+    with pytest.raises(STTExecutionUnsupportedError):
+        _plan(adapter, model=model)
 
 
 def _plan(
@@ -216,6 +340,8 @@ def test_qwen3_vllm_plan_freezes_endpoint_and_reports_actual_route(
     assert runtime["endpoint"] == (
         "http://localhost:8000/v1/audio/transcriptions"
     )
+    assert runtime["request_model"] == "Qwen/Qwen3-ASR-1.7B"
+    assert route.model_label == "Qwen/Qwen3-ASR-1.7B"
     assert "localhost" not in str(plan.descriptor.as_safe_dict())
 
     settings.update(
@@ -267,9 +393,13 @@ def test_qwen3_vllm_plan_freezes_endpoint_and_reports_actual_route(
     )
 
     assert captured["endpoint"] == runtime["endpoint"]
+    assert captured["request_model"] == runtime["request_model"]
     assert artifact["actual_execution"]["route_id"] == route.route_id
     assert artifact["actual_execution"]["source"] == "vllm_http"
     assert artifact["actual_execution"]["backend"] == "vllm_http"
+    assert artifact["actual_execution"]["model_label"] == (
+        runtime["request_model"]
+    )
     assert "metadata" not in artifact
 
 
@@ -405,14 +535,14 @@ def _vibe_settings(
         "max_new_tokens": 1024,
         "vllm_enabled": vllm_enabled,
         "vllm_base_url": "http://127.0.0.1:9000/api",
-        "vllm_model_id": str(model_dir),
+        "vllm_model_id": "microsoft/VibeVoice-ASR-HTTP",
         "vllm_api_key": "vibe-api-secret",
         "vllm_timeout_seconds": 45,
     }
 
 
 @pytest.mark.unit
-def test_vibevoice_local_neutral_plan_pins_one_strict_route(
+def test_vibevoice_local_neutral_plan_pins_one_mismatch_tracking_route(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -439,7 +569,7 @@ def test_vibevoice_local_neutral_plan_pins_one_strict_route(
     assert route.audio_egress is spa.SttAudioEgress.NONE
     assert route.device == "cpu"
     assert route.dtype == "float32"
-    assert plan.runtime_values()["strict_semantics"] is True
+    assert plan.runtime_values()["strict_semantics"] is False
 
 
 @pytest.mark.unit
@@ -545,6 +675,9 @@ def test_vibevoice_production_plan_freezes_exact_fallback_and_actual_backend(
     assert [
         route.route_id for route in plan.descriptor.routes
     ] == ["vllm-http-1", "local-2"]
+    assert [
+        route.model_label for route in plan.descriptor.routes
+    ] == ["microsoft/VibeVoice-ASR-HTTP", "local-model"]
     assert dict(plan.descriptor.decoding_settings) == {
         "hotword_count": 1,
         "prompt_present": False,
@@ -578,6 +711,9 @@ def test_vibevoice_production_plan_freezes_exact_fallback_and_actual_backend(
             "http://127.0.0.1:9000/api/v1/audio/transcriptions"
         )
         assert kwargs["settings"]["vllm_api_key"] == "vibe-api-secret"
+        assert kwargs["settings"]["vllm_model_id"] == (
+            "microsoft/VibeVoice-ASR-HTTP"
+        )
         raise RuntimeError("planned vLLM unavailable")
 
     def succeed_local(**kwargs: Any) -> dict[str, Any]:
@@ -587,7 +723,7 @@ def test_vibevoice_production_plan_freezes_exact_fallback_and_actual_backend(
         )
         assert kwargs["settings"]["device"] == "cpu"
         assert kwargs["settings"]["dtype"] == "float32"
-        assert kwargs["settings"]["strict_semantics"] is True
+        assert kwargs["settings"]["strict_semantics"] is False
         assert kwargs["language"] == "en"
         assert kwargs["hotwords"] == ["private-hotword"]
         return {
@@ -628,6 +764,7 @@ def test_vibevoice_production_plan_freezes_exact_fallback_and_actual_backend(
         *,
         plan: spa.SttBatchExecutionPlan,
         actual: spa.SttActualExecution,
+        runtime_mismatches: tuple[str, ...] = (),
     ) -> dict[str, Any]:
         assert actual.route_id == "local-2"
         assert actual.backend == "transformers"
@@ -636,6 +773,7 @@ def test_vibevoice_production_plan_freezes_exact_fallback_and_actual_backend(
             artifact,
             plan=plan,
             actual=actual,
+            runtime_mismatches=runtime_mismatches,
         )
 
     monkeypatch.setattr(
@@ -657,8 +795,509 @@ def test_vibevoice_production_plan_freezes_exact_fallback_and_actual_backend(
     assert artifact["actual_execution"]["route_id"] == "local-2"
     assert artifact["actual_execution"]["backend"] == "transformers"
     assert artifact["actual_execution"]["source"] == "local"
+    assert artifact["actual_execution"]["model_label"] == (
+        "local-model"
+    )
     assert "metadata" not in artifact
     assert "private-hotword" not in str(artifact)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "invalid_vllm_artifact",
+    (
+        {
+            "text": "[Error: private route failure]",
+            "segments": [],
+        },
+        {"text": "", "segments": []},
+        {"text": "malformed", "segments": "not-a-list"},
+        ["not", "a", "mapping"],
+    ),
+)
+def test_vibevoice_production_validates_attempt_before_declared_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    invalid_vllm_artifact: object,
+) -> None:
+    audio = tmp_path / "vibe.wav"
+    audio.write_bytes(b"audio")
+    model_dir = tmp_path / "vibe-model"
+    model_dir.mkdir()
+    monkeypatch.setattr(
+        vibe,
+        "_resolve_settings",
+        lambda: _vibe_settings(
+            model_dir,
+            vllm_enabled=True,
+        ),
+    )
+    adapter = spa.VibeVoiceAdapter()
+    plan = _plan(
+        adapter,
+        model=str(model_dir),
+        mode="production-v1",
+    )
+    attempts: list[str] = []
+
+    def invalid_vllm(**_kwargs: Any) -> Any:
+        attempts.append("vllm")
+        return invalid_vllm_artifact
+
+    def valid_local(**_kwargs: Any) -> dict[str, Any]:
+        attempts.append("local")
+        return {
+            "text": "declared local fallback",
+            "segments": [
+                {
+                    "start_seconds": 0.0,
+                    "end_seconds": 1.0,
+                    "Text": "declared local fallback",
+                }
+            ],
+        }
+
+    monkeypatch.setattr(
+        vibe,
+        "_transcribe_via_vllm_http",
+        invalid_vllm,
+    )
+    monkeypatch.setattr(
+        vibe,
+        "_load_audio",
+        lambda *_args, **_kwargs: (
+            object(),
+            16000,
+            1.0,
+        ),
+    )
+    monkeypatch.setattr(vibe, "_transcribe_local", valid_local)
+
+    artifact = adapter.transcribe_batch(
+        str(audio),
+        model=str(model_dir),
+        language="en",
+        base_dir=tmp_path,
+        execution_plan=plan,
+    )
+
+    assert attempts == ["vllm", "local"]
+    assert artifact["text"] == "declared local fallback"
+    assert artifact["actual_execution"]["route_id"] == "local-2"
+
+
+@pytest.mark.unit
+def test_vibevoice_neutral_invalid_attempt_never_uses_undeclared_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    audio = tmp_path / "vibe.wav"
+    audio.write_bytes(b"audio")
+    model_dir = tmp_path / "vibe-model"
+    model_dir.mkdir()
+    monkeypatch.setattr(
+        vibe,
+        "_resolve_settings",
+        lambda: _vibe_settings(
+            model_dir,
+            vllm_enabled=True,
+            local_enabled=False,
+        ),
+    )
+    adapter = spa.VibeVoiceAdapter()
+    plan = _plan(adapter, model=str(model_dir))
+    monkeypatch.setattr(
+        vibe,
+        "_transcribe_via_vllm_http",
+        lambda **_kwargs: {
+            "text": "[No transcription produced]",
+            "segments": [],
+        },
+    )
+    monkeypatch.setattr(
+        vibe,
+        "_transcribe_local",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("neutral plan used undeclared local route")
+        ),
+    )
+
+    with pytest.raises(spa.STTTranscriptionError) as exc_info:
+        adapter.transcribe_batch(
+            str(audio),
+            model=str(model_dir),
+            language="en",
+            base_dir=tmp_path,
+            execution_plan=plan,
+        )
+
+    assert str(exc_info.value) == "Planned STT transcription failed"
+
+
+@pytest.mark.unit
+def test_vibevoice_production_runtime_semantic_loss_is_retained(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    audio = tmp_path / "vibe.wav"
+    audio.write_bytes(b"audio")
+    model_dir = tmp_path / "vibe-model"
+    model_dir.mkdir()
+    monkeypatch.setattr(
+        vibe,
+        "_resolve_settings",
+        lambda: _vibe_settings(
+            model_dir,
+            vllm_enabled=False,
+        ),
+    )
+    adapter = spa.VibeVoiceAdapter()
+    plan = _plan(
+        adapter,
+        model=str(model_dir),
+        language="en",
+        hotwords=("private-hotword",),
+        mode="production-v1",
+    )
+    calls: list[dict[str, Any]] = []
+
+    class Model:
+        def transcribe(
+            self,
+            _audio: object,
+            **kwargs: Any,
+        ) -> object:
+            calls.append(dict(kwargs))
+            if "language" in kwargs or kwargs.get("hotwords"):
+                raise TypeError("optional semantics unsupported")
+            return {"text": "fallback semantics"}
+
+    monkeypatch.setattr(
+        vibe,
+        "_load_audio",
+        lambda *_args, **_kwargs: (
+            object(),
+            16000,
+            1.0,
+        ),
+    )
+    monkeypatch.setattr(
+        vibe,
+        "_load_local_components",
+        lambda _settings: (object(), Model(), "cpu"),
+    )
+
+    artifact = adapter.transcribe_batch(
+        str(audio),
+        model=str(model_dir),
+        language="en",
+        hotwords=("private-hotword",),
+        base_dir=tmp_path,
+        execution_plan=plan,
+    )
+
+    assert len(calls) == 2
+    assert calls[0]["language"] == "en"
+    assert calls[0]["hotwords"] == ["private-hotword"]
+    assert "language" not in calls[1]
+    assert "hotwords" not in calls[1]
+    assert artifact["execution_mismatch"] == [
+        "hotwords",
+        "language",
+    ]
+
+
+@pytest.mark.unit
+def test_vibevoice_neutral_runtime_semantic_loss_is_retained(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    audio = tmp_path / "vibe.wav"
+    audio.write_bytes(b"audio")
+    model_dir = tmp_path / "vibe-model"
+    model_dir.mkdir()
+    monkeypatch.setattr(
+        vibe,
+        "_resolve_settings",
+        lambda: _vibe_settings(
+            model_dir,
+            vllm_enabled=False,
+        ),
+    )
+    adapter = spa.VibeVoiceAdapter()
+    plan = _plan(
+        adapter,
+        model=str(model_dir),
+        language="en",
+    )
+
+    class Model:
+        def transcribe(
+            self,
+            _audio: object,
+            **kwargs: Any,
+        ) -> object:
+            if "language" in kwargs:
+                raise TypeError("language unsupported")
+            return {"text": "fallback semantics"}
+
+    monkeypatch.setattr(
+        vibe,
+        "_load_audio",
+        lambda *_args, **_kwargs: (
+            object(),
+            16000,
+            1.0,
+        ),
+    )
+    monkeypatch.setattr(
+        vibe,
+        "_load_local_components",
+        lambda _settings: (object(), Model(), "cpu"),
+    )
+
+    artifact = adapter.transcribe_batch(
+        str(audio),
+        model=str(model_dir),
+        language="en",
+        base_dir=tmp_path,
+        execution_plan=plan,
+    )
+
+    assert artifact["execution_mismatch"] == ["language"]
+
+
+@pytest.mark.unit
+def test_network_request_models_are_bound_directly_to_route_identity(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    audio = tmp_path / "sample.wav"
+    audio.write_bytes(b"audio")
+
+    monkeypatch.setattr(
+        qwen3,
+        "_resolve_settings",
+        lambda: {
+            "enabled": True,
+            "backend": "vllm",
+            "vllm_base_url": "http://localhost:8000",
+            "model_path": "Qwen/Qwen3-ASR-1.7B",
+            "sample_rate": 16000,
+        },
+    )
+    qwen_adapter = spa.Qwen3ASRAdapter()
+    qwen_plan = _plan(
+        qwen_adapter,
+        model="Qwen/Qwen3-ASR-1.7B",
+    )
+    qwen_mutated = replace(
+        qwen_plan,
+        runtime_settings=tuple(
+            (
+                key,
+                "different-safe-model"
+                if key == "request_model"
+                else value,
+            )
+            for key, value in qwen_plan.runtime_settings
+        ),
+    )
+    monkeypatch.setattr(
+        qwen3,
+        "_transcribe_vllm_http",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("mutated Qwen request was sent")
+        ),
+    )
+    with pytest.raises(spa.STTExecutionPlanError):
+        qwen_adapter.transcribe_batch(
+            str(audio),
+            model="Qwen/Qwen3-ASR-1.7B",
+            language="en",
+            base_dir=tmp_path,
+            execution_plan=qwen_mutated,
+        )
+
+    model_dir = tmp_path / "vibe-model"
+    model_dir.mkdir()
+    monkeypatch.setattr(
+        vibe,
+        "_resolve_settings",
+        lambda: _vibe_settings(
+            model_dir,
+            vllm_enabled=True,
+        ),
+    )
+    vibe_adapter = spa.VibeVoiceAdapter()
+    vibe_plan = _plan(
+        vibe_adapter,
+        model=str(model_dir),
+    )
+    vibe_mutated = replace(
+        vibe_plan,
+        runtime_settings=tuple(
+            (
+                key,
+                "different-safe-model"
+                if key == "vllm_model_id"
+                else value,
+            )
+            for key, value in vibe_plan.runtime_settings
+        ),
+    )
+    monkeypatch.setattr(
+        vibe,
+        "_transcribe_via_vllm_http",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("mutated VibeVoice request was sent")
+        ),
+    )
+    with pytest.raises(spa.STTExecutionPlanError):
+        vibe_adapter.transcribe_batch(
+            str(audio),
+            model=str(model_dir),
+            language="en",
+            base_dir=tmp_path,
+            execution_plan=vibe_mutated,
+        )
+
+
+@pytest.mark.unit
+def test_planned_remote_request_models_are_trimmed_once(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        qwen3,
+        "_resolve_settings",
+        lambda: {
+            "enabled": True,
+            "backend": "vllm",
+            "vllm_base_url": "http://localhost:8000",
+            "model_path": "Qwen/Qwen3-ASR-1.7B",
+            "sample_rate": 16000,
+        },
+    )
+    qwen_plan = _plan(
+        spa.Qwen3ASRAdapter(),
+        model="  Qwen/Qwen3-ASR-1.7B  ",
+    )
+    assert (
+        qwen_plan.runtime_values()["request_model"]
+        == qwen_plan.descriptor.primary_route.model_label
+        == "Qwen/Qwen3-ASR-1.7B"
+    )
+
+    model_dir = tmp_path / "vibe-model"
+    model_dir.mkdir()
+    vibe_settings = _vibe_settings(
+        model_dir,
+        vllm_enabled=True,
+    )
+    vibe_settings["vllm_model_id"] = (
+        "  microsoft/VibeVoice-ASR-HTTP  "
+    )
+    monkeypatch.setattr(
+        vibe,
+        "_resolve_settings",
+        lambda: dict(vibe_settings),
+    )
+    vibe_plan = _plan(
+        spa.VibeVoiceAdapter(),
+        model=str(model_dir),
+    )
+    assert (
+        vibe_plan.runtime_values()["vllm_model_id"]
+        == vibe_plan.descriptor.primary_route.model_label
+        == "microsoft/VibeVoice-ASR-HTTP"
+    )
+
+    config = _external_config()
+    config.model = "  whisper-large  "
+    monkeypatch.setattr(
+        external,
+        "load_external_provider_config",
+        lambda _name="default": config,
+    )
+    external_plan = _plan(
+        spa.ExternalAdapter(),
+        model="external:custom",
+    )
+    assert (
+        external_plan.runtime_values()["external_model"]
+        == external_plan.descriptor.primary_route.model_label
+        == "whisper-large"
+    )
+
+
+@pytest.mark.unit
+def test_typed_outcome_runtime_mismatches_are_bounded_safe_names(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        qwen3,
+        "_resolve_settings",
+        lambda: {
+            "enabled": True,
+            "backend": "vllm",
+            "vllm_base_url": "http://localhost:8000",
+            "model_path": "Qwen/Qwen3-ASR-1.7B",
+            "sample_rate": 16000,
+        },
+    )
+    plan = _plan(
+        spa.Qwen3ASRAdapter(),
+        model="Qwen/Qwen3-ASR-1.7B",
+    )
+    actual = spa.actual_execution_from_route(
+        plan.descriptor.primary_route,
+        device=None,
+    )
+    artifact = {"text": "ok", "segments": []}
+
+    default_outcome = spa.SttTranscriptionOutcome(
+        artifact=artifact,
+        actual_execution=actual,
+    )
+    assert default_outcome.runtime_mismatches == ()
+
+    safe_outcome = spa.SttTranscriptionOutcome(
+        artifact=artifact,
+        actual_execution=actual,
+        runtime_mismatches=("hotwords", "language"),
+    )
+    assert safe_outcome.runtime_mismatches == (
+        "hotwords",
+        "language",
+    )
+
+    secret = "private-api-key"
+    with pytest.raises(ValueError) as exc_info:
+        spa.SttTranscriptionOutcome(
+            artifact=artifact,
+            actual_execution=actual,
+            runtime_mismatches=(secret,),
+        )
+    assert secret not in str(exc_info.value)
+
+    with pytest.raises(ValueError, match="runtime_mismatches are invalid"):
+        spa.SttTranscriptionOutcome(
+            artifact=artifact,
+            actual_execution=actual,
+            runtime_mismatches=(["not-hashable"],),  # type: ignore[arg-type]
+        )
+
+    with pytest.raises(
+        spa.STTExecutionPlanError,
+        match="runtime mismatches are invalid",
+    ):
+        spa.finalize_stt_artifact(
+            artifact,
+            plan=plan,
+            actual=actual,
+            runtime_mismatches=(["not-hashable"],),  # type: ignore[arg-type]
+        )
 
 
 @pytest.mark.unit
@@ -714,6 +1353,13 @@ def _external_config() -> external.ExternalProviderConfig:
 
 
 @pytest.mark.unit
+def test_legacy_external_endpoint_keeps_urljoin_behavior() -> None:
+    assert external._resolve_transcription_endpoint(
+        "https://example.com/prefix?legacy=value"
+    ) == "https://example.com/v1/audio/transcriptions"
+
+
+@pytest.mark.unit
 def test_external_plan_freezes_config_and_returns_safe_typed_execution(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -733,6 +1379,9 @@ def test_external_plan_freezes_config_and_returns_safe_typed_execution(
     )
     route = plan.descriptor.primary_route
 
+    assert plan.descriptor.requested_model_label == "external:custom"
+    assert plan.descriptor.resolved_model_label == "whisper-large"
+    assert route.model_label == "whisper-large"
     assert route.backend == "openai_compatible"
     assert route.source == "external_http"
     assert route.audio_egress is spa.SttAudioEgress.REMOTE
@@ -817,6 +1466,9 @@ def test_external_plan_freezes_config_and_returns_safe_typed_execution(
     assert artifact["actual_execution"]["endpoint_id"] == (
         route.endpoint_id
     )
+    assert artifact["actual_execution"]["model_label"] == (
+        "whisper-large"
+    )
     assert "metadata" not in artifact
     for secret in (
         "external-api-secret",
@@ -868,7 +1520,7 @@ def test_external_planned_sentinel_becomes_typed_redacted_error(
         )
 
     assert str(exc_info.value) == (
-        "Planned local STT transcription failed"
+        "Planned STT transcription failed"
     )
     for secret in (
         "api.example.com",
@@ -932,7 +1584,7 @@ def test_external_neutral_plan_rejects_configured_prompt(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_external_network_call_disables_redirects(
+async def test_external_legacy_network_call_keeps_default_redirect_behavior(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -961,7 +1613,71 @@ async def test_external_network_call_disables_redirects(
     )
 
     assert result == "redirect-safe"
+    assert "allow_redirects" not in captured
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_external_planned_network_call_disables_redirects(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    audio = tmp_path / "external.wav"
+    audio.write_bytes(b"audio")
+    config = _external_config()
+    monkeypatch.setattr(
+        external,
+        "load_external_provider_config",
+        lambda _name="default": config,
+    )
+    plan = _plan(
+        spa.ExternalAdapter(),
+        model="external:custom",
+    )
+    runtime = plan.runtime_values()
+    frozen = external.ExternalProviderConfig(
+        base_url=str(runtime["external_base_url"]),
+        api_key=str(runtime["external_api_key"]),
+        model=str(runtime["external_model"]),
+        timeout=float(runtime["external_timeout"]),
+        max_retries=int(runtime["external_max_retries"]),
+        verify_ssl=bool(runtime["external_verify_ssl"]),
+        custom_headers=dict(
+            zip(
+                runtime["external_header_names"],
+                runtime["external_header_values"],
+            )
+        ),
+        response_format=str(runtime["external_response_format"]),
+        temperature=float(runtime["external_temperature"]),
+        language=str(runtime["external_language"]),
+    )
+    captured: dict[str, Any] = {}
+
+    class Response:
+        status_code = 200
+
+        def json(self) -> dict[str, str]:
+            return {"text": "redirect-safe"}
+
+        async def aclose(self) -> None:
+            return None
+
+    async def fake_afetch(**kwargs: Any) -> Response:
+        captured.update(kwargs)
+        return Response()
+
+    monkeypatch.setattr(external, "afetch", fake_afetch)
+    result = await external.transcribe_with_external_provider_async(
+        audio,
+        config=frozen,
+        base_dir=tmp_path,
+        execution_plan=plan,
+    )
+
+    assert result == "redirect-safe"
     assert captured["allow_redirects"] is False
+    assert captured["data"]["model"] == "whisper-large"
 
 
 @pytest.mark.unit

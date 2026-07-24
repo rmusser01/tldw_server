@@ -18,9 +18,6 @@ if "torch" not in sys.modules:
     _fake_torch = types.ModuleType("torch")
     _fake_torch.__spec__ = importlib.machinery.ModuleSpec("torch", loader=None)
     _fake_torch.Tensor = object
-    _fake_torch.float16 = "float16"
-    _fake_torch.float32 = "float32"
-    _fake_torch.bfloat16 = "bfloat16"
     _fake_torch.nn = types.SimpleNamespace(Module=object)
     _fake_torch.cuda = types.SimpleNamespace(is_available=lambda: False)
     sys.modules["torch"] = _fake_torch
@@ -836,7 +833,7 @@ def test_finalize_stt_artifact_sanitizes_recognized_error_sentinel(
             actual=actual,
         )
 
-    assert str(exc_info.value) == "Planned local STT transcription failed"
+    assert str(exc_info.value) == "Planned STT transcription failed"
     assert secret not in str(exc_info.value)
     assert exc_info.value.__cause__ is None
     assert secret not in caplog.text

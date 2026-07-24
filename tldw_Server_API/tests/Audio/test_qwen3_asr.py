@@ -467,7 +467,10 @@ def test_transcribe_vllm_http_success(monkeypatch, tmp_path):
     audio_file.write_bytes(b"\x00" * 100)
 
     settings = {
-        "vllm_base_url": "http://localhost:8000",
+        "vllm_base_url": (
+            "http://localhost:8000/proxy?legacy=value"
+        ),
+        "request_model": "Qwen/Qwen3-ASR-1.7B",
         "sample_rate": 16000,
     }
 
@@ -487,6 +490,8 @@ def test_transcribe_vllm_http_success(monkeypatch, tmp_path):
             }
 
     client_kwargs = {}
+    request_data = {}
+    request_urls = []
 
     class MockClient:
         def __init__(self, **kwargs):
@@ -499,6 +504,8 @@ def test_transcribe_vllm_http_success(monkeypatch, tmp_path):
             pass
 
         def post(self, url, files=None, data=None):
+            request_urls.append(url)
+            request_data.update(data or {})
             return MockResponse()
 
     # Mock httpx
@@ -527,9 +534,16 @@ def test_transcribe_vllm_http_success(monkeypatch, tmp_path):
 
         assert result["text"] == "Hello world"
         assert result["language"] == "en"
-        assert result["metadata"]["model"] == "vllm:http://localhost:8000"
+        assert result["metadata"]["model"] == (
+            "vllm:http://localhost:8000/proxy?legacy=value"
+        )
         assert result["usage"]["duration_ms"] == 2500
         assert client_kwargs["follow_redirects"] is False
+        assert request_data["model"] == "Qwen/Qwen3-ASR-1.7B"
+        assert request_urls == [
+            "http://localhost:8000/proxy?legacy=value"
+            "/v1/audio/transcriptions"
+        ]
     finally:
         if "httpx" in sys.modules and sys.modules["httpx"] is mock_httpx:
             del sys.modules["httpx"]

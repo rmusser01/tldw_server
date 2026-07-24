@@ -120,7 +120,7 @@ def test_vllm_failure_falls_back_to_local(monkeypatch: pytest.MonkeyPatch, tmp_p
 
 
 @pytest.mark.unit
-def test_vllm_http_disables_redirects(
+def test_legacy_vllm_http_keeps_default_redirect_behavior(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -156,7 +156,61 @@ def test_vllm_http_disables_redirects(
         cancel_check=None,
     )
 
+    assert "allow_redirects" not in captured
+    assert artifact["text"] == "redirect-safe"
+
+
+@pytest.mark.unit
+def test_legacy_vllm_endpoint_keeps_urljoin_behavior() -> None:
+    assert vv._resolve_vllm_endpoint(
+        "https://example.com/prefix?legacy=value"
+    ) == "https://example.com/v1/audio/transcriptions"
+
+
+@pytest.mark.unit
+def test_planned_vllm_http_disables_redirects(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    audio = tmp_path / "sample.wav"
+    audio.write_bytes(b"audio")
+    settings = _minimal_settings(tmp_path)
+    settings.update(
+        endpoint="http://127.0.0.1:8000/v1/audio/transcriptions",
+        endpoint_id="sha256:" + "a" * 64,
+    )
+    captured: dict[str, Any] = {}
+
+    def fake_fetch_json(**kwargs: Any) -> dict[str, Any]:
+        captured.update(kwargs)
+        return {"text": "redirect-safe"}
+
+    from tldw_Server_API.app.core import http_client
+
+    monkeypatch.setattr(
+        http_client,
+        "fetch_json",
+        fake_fetch_json,
+    )
+    monkeypatch.setattr(
+        vv,
+        "_audio_duration_seconds",
+        lambda _path: 1.0,
+    )
+
+    artifact = vv._transcribe_via_vllm_http(
+        audio_path=audio,
+        base_dir=tmp_path,
+        settings=settings,
+        language="en",
+        hotwords=[],
+        cancel_check=None,
+    )
+
     assert captured["allow_redirects"] is False
+    assert captured["data"]["model"] == (
+        "microsoft/VibeVoice-ASR"
+    )
     assert artifact["text"] == "redirect-safe"
 
 

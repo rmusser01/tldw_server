@@ -21,6 +21,10 @@ _SAFE_LABEL_RE = re.compile(
 )
 _STABLE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]*$")
 _ENDPOINT_ID_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+_HOST_LABEL_RE = re.compile(
+    r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$"
+)
+_URL_PATH_RE = re.compile(r"^[A-Za-z0-9._~!$&'()*+,=:@/\-]*$")
 _CONTENT_SHA_RE = re.compile(r"^(?:sha256:)?[0-9a-f]{64}$")
 _SNAPSHOT_COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 _SOURCE_MODULE_RE = re.compile(r"^(?:tldw_Server_API|Helper_Scripts)" r"(?:\.[A-Za-z_][A-Za-z0-9_]*)+$")
@@ -36,7 +40,34 @@ _SECRET_SHAPED_RE = re.compile(
     re.IGNORECASE,
 )
 _MAX_EXECUTION_MISMATCHES = 8
-PLANNED_STT_TRANSCRIPTION_FAILURE = "Planned local STT transcription failed"
+_EXECUTION_MISMATCH_NAMES = frozenset(
+    {
+        "diarization",
+        "hotword_absence",
+        "hotwords",
+        "language",
+        "prompt_absence",
+        "task",
+        "word_timestamps",
+    }
+)
+
+
+def _runtime_mismatches_are_valid(value: object) -> bool:
+    if (
+        not isinstance(value, tuple)
+        or len(value) > _MAX_EXECUTION_MISMATCHES
+        or not all(
+            isinstance(name, str)
+            and name in _EXECUTION_MISMATCH_NAMES
+            for name in value
+        )
+    ):
+        return False
+    return value == tuple(sorted(set(value)))
+
+
+PLANNED_STT_TRANSCRIPTION_FAILURE = "Planned STT transcription failed"
 _TRANSCRIPTION_ERROR_PREFIXES = (
     "[error",
     "[transcription error",
@@ -282,24 +313,36 @@ def _normalize_audio_endpoint(
     """Validate and normalize one final STT endpoint without resolving DNS."""
     from tldw_Server_API.app.core.exceptions import STTExecutionUnsupportedError
 
-    raw = str(url or "").strip()
+    source = str(url or "")
+    raw = source.strip()
     try:
+        source.encode("ascii")
         parsed = urlparse(raw)
         if (
             not raw
+            or any(
+                ord(character) < 32 or ord(character) == 127
+                for character in source
+            )
+            or "\\" in raw
             or parsed.scheme.lower() not in {"http", "https"}
             or not parsed.netloc
             or parsed.hostname is None
             or parsed.username is not None
             or parsed.password is not None
+            or "%" in parsed.netloc
             or "?" in raw
             or "#" in raw
+            or parsed.params
+            or ";" in parsed.path
+            or "//" in parsed.path
+            or _URL_PATH_RE.fullmatch(parsed.path) is None
         ):
             raise ValueError
         port = parsed.port
-        if parsed.netloc.endswith(":"):
+        if parsed.netloc.endswith(":") or port == 0:
             raise ValueError
-    except (TypeError, ValueError):
+    except (TypeError, UnicodeEncodeError, ValueError):
         raise STTExecutionUnsupportedError(
             "STT transcription endpoint is invalid"
         ) from None
@@ -310,6 +353,19 @@ def _normalize_audio_endpoint(
         address = ipaddress.ip_address(hostname)
     except ValueError:
         address = None
+        labels = hostname.split(".")
+        if (
+            not labels
+            or any(
+                not label
+                or len(label) > 63
+                or _HOST_LABEL_RE.fullmatch(label) is None
+                for label in labels
+            )
+        ):
+            raise STTExecutionUnsupportedError(
+                "STT transcription endpoint is invalid"
+            ) from None
 
     is_loopback = hostname == "localhost"
     if address is not None:
@@ -317,7 +373,8 @@ def _normalize_audio_endpoint(
             getattr(address, "ipv4_mapped", None)
             and address.ipv4_mapped.is_loopback
         )
-        hostname = address.compressed
+        if address.version == 4:
+            hostname = address.compressed
 
     if ":" in hostname:
         hostname = f"[{hostname}]"
@@ -330,7 +387,7 @@ def _normalize_audio_endpoint(
         (scheme, netloc, path, parsed.params, "", "")
     )
     endpoint_id = "sha256:" + hashlib.sha256(
-        normalized.encode("utf-8")
+        normalized.encode("ascii")
     ).hexdigest()
     egress = (
         SttAudioEgress.LOOPBACK
@@ -338,6 +395,26 @@ def _normalize_audio_endpoint(
         else SttAudioEgress.REMOTE
     )
     return normalized, egress, endpoint_id
+
+
+def _resolve_audio_transcription_endpoint(base_url: str) -> str:
+    """Validate an API base before appending the standard audio endpoint."""
+    normalized_base, _egress, _endpoint_id = (
+        _normalize_audio_endpoint(base_url)
+    )
+    parsed = urlparse(normalized_base)
+    if parsed.path.rstrip("/").endswith(
+        "/v1/audio/transcriptions"
+    ):
+        return normalized_base
+    path = (
+        parsed.path.rstrip("/")
+        + "/v1/audio/transcriptions"
+    )
+    final = urlunparse(
+        (parsed.scheme, parsed.netloc, path, "", "", "")
+    )
+    return _normalize_audio_endpoint(final)[0]
 
 
 def _classify_audio_egress(url: str) -> SttAudioEgress:
@@ -606,12 +683,17 @@ class SttTranscriptionOutcome:
 
     artifact: dict[str, Any] = field(repr=False, compare=False)
     actual_execution: SttActualExecution
+    runtime_mismatches: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.artifact, dict):
             raise ValueError("artifact must be a dictionary")
         if not isinstance(self.actual_execution, SttActualExecution):
             raise ValueError("actual_execution must be an SttActualExecution")
+        if not _runtime_mismatches_are_valid(
+            self.runtime_mismatches
+        ):
+            raise ValueError("runtime_mismatches are invalid")
 
 
 def _actual_matches_route(
@@ -723,6 +805,7 @@ def finalize_stt_artifact(
     *,
     plan: SttBatchExecutionPlan,
     actual: SttActualExecution,
+    runtime_mismatches: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     """Validate and safely finalize an artifact from a planned STT execution."""
     from tldw_Server_API.app.core.exceptions import (
@@ -734,6 +817,10 @@ def finalize_stt_artifact(
         raise STTExecutionPlanError("Planned STT execution is missing a valid plan")
     if not isinstance(actual, SttActualExecution):
         raise STTExecutionPlanError("Planned STT execution did not report typed actual execution")
+    if not _runtime_mismatches_are_valid(runtime_mismatches):
+        raise STTExecutionPlanError(
+            "Planned STT runtime mismatches are invalid"
+        )
     if not any(_actual_matches_route(actual, route) for route in plan.descriptor.routes):
         raise STTExecutionPlanError("Actual STT execution used an undeclared route")
     if not isinstance(artifact, Mapping):
@@ -751,6 +838,12 @@ def finalize_stt_artifact(
             finalized[key] = artifact[key]
     finalized["actual_execution"] = actual.as_safe_dict()
     mismatches = _semantic_mismatches(plan)
+    mismatches.extend(
+        mismatch
+        for mismatch in runtime_mismatches
+        if mismatch not in mismatches
+    )
+    mismatches = mismatches[:_MAX_EXECUTION_MISMATCHES]
     if mismatches:
         finalized["execution_mismatch"] = mismatches
     return finalized

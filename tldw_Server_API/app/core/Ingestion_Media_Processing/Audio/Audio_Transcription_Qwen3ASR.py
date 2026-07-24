@@ -594,6 +594,7 @@ def _transcribe_vllm_http(
         duration_seconds = 0.0
 
     # Build multipart form data and send request
+    planned_failure: str | None = None
     try:
         with open(audio_path, "rb") as f:
             # Determine content type based on file extension
@@ -608,41 +609,78 @@ def _transcribe_vllm_http(
             content_type = content_types.get(ext, "audio/wav")
 
             files = {"file": (audio_path.name, f, content_type)}
-            data: dict[str, Any] = {"model": "qwen3-asr"}
+            data: dict[str, Any] = {
+                "model": str(
+                    settings.get("request_model")
+                    or "qwen3-asr"
+                )
+            }
             if language:
                 data["language"] = language
 
             # Use sync httpx client with generous timeout for large files
-            with httpx.Client(
-                timeout=300.0,
-                follow_redirects=False,
-            ) as client:
-                response = client.post(url, files=files, data=data)
-                response.raise_for_status()
-                result = response.json()
+            if planned:
+                from tldw_Server_API.app.core.http_client import (
+                    opaque_stt_http_observability,
+                )
+
+                endpoint_id = str(
+                    settings.get("endpoint_id") or ""
+                )
+                with opaque_stt_http_observability(endpoint_id):
+                    with httpx.Client(
+                        timeout=300.0,
+                        follow_redirects=False,
+                    ) as client:
+                        response = client.post(
+                            url,
+                            files=files,
+                            data=data,
+                        )
+                        response.raise_for_status()
+                        result = response.json()
+            else:
+                with httpx.Client(
+                    timeout=300.0,
+                    follow_redirects=False,
+                ) as client:
+                    response = client.post(
+                        url,
+                        files=files,
+                        data=data,
+                    )
+                    response.raise_for_status()
+                    result = response.json()
 
     except httpx.HTTPStatusError as exc:
         if planned:
-            raise BadRequestError(
+            planned_failure = (
                 "Planned Qwen3-ASR server returned an HTTP error"
-            ) from None
-        raise BadRequestError(
-            f"vLLM server returned error: {exc.response.status_code} - {exc.response.text}"
-        ) from exc
+            )
+        else:
+            raise BadRequestError(
+                f"vLLM server returned error: {exc.response.status_code} - {exc.response.text}"
+            ) from exc
     except httpx.RequestError as exc:
         if planned:
-            raise BadRequestError(
+            planned_failure = (
                 "Planned Qwen3-ASR server request failed"
-            ) from None
-        raise BadRequestError(
-            f"Failed to connect to vLLM server at {base_url}: {exc}"
-        ) from exc
+            )
+        else:
+            raise BadRequestError(
+                f"Failed to connect to vLLM server at {base_url}: {exc}"
+            ) from exc
     except Exception as exc:
         if planned:
-            raise BadRequestError(
+            planned_failure = (
                 "Planned Qwen3-ASR HTTP transcription failed"
-            ) from None
-        raise BadRequestError(f"vLLM HTTP transcription failed: {exc}") from exc
+            )
+        else:
+            raise BadRequestError(
+                f"vLLM HTTP transcription failed: {exc}"
+            ) from exc
+    if planned_failure is not None:
+        raise BadRequestError(planned_failure) from None
 
     # Extract result fields with sensible defaults
     text = str(result.get("text", "")).strip()
@@ -761,11 +799,14 @@ def transcribe_with_qwen3_asr(
                 route.source != "vllm_http"
                 or route.audio_egress is not egress
                 or route.endpoint_id != endpoint_id
+                or runtime.get("request_model")
+                != route.model_label
             ):
                 raise STTExecutionPlanError(
                     "Qwen3-ASR endpoint does not match its plan"
                 )
             settings["endpoint"] = endpoint
+            settings["endpoint_id"] = endpoint_id
             resolved_path = _resolve_audio_path(audio_path, base_dir)
             artifact = _transcribe_vllm_http(
                 resolved_path,

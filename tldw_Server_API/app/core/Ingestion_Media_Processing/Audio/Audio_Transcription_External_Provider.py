@@ -32,7 +32,11 @@ from tldw_Server_API.app.core.exceptions import (
     RetryExhaustedError,
     STTExecutionPlanError,
 )
-from tldw_Server_API.app.core.http_client import RetryPolicy, afetch
+from tldw_Server_API.app.core.http_client import (
+    RetryPolicy,
+    afetch,
+    opaque_stt_http_observability,
+)
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_contract import (
     SttBatchExecutionPlan,
     SttTranscriptionOutcome,
@@ -177,7 +181,9 @@ def validate_external_provider_config(config: ExternalProviderConfig) -> tuple[b
 def _resolve_transcription_endpoint(base_url: str) -> str:
     """Resolve an OpenAI-compatible base URL to its final STT endpoint."""
     parsed = urlparse(base_url)
-    if parsed.path.rstrip("/").endswith("/v1/audio/transcriptions"):
+    if parsed.path.rstrip("/").endswith(
+        "/v1/audio/transcriptions"
+    ):
         return base_url
     return urljoin(
         base_url.rstrip("/") + "/",
@@ -239,6 +245,7 @@ async def transcribe_with_external_provider_async(
             or route.source != "external_http"
             or route.audio_egress is not egress
             or route.endpoint_id != endpoint_id
+            or route.model_label != config.model
         ):
             raise STTExecutionPlanError(
                 "External STT endpoint does not match its plan"
@@ -318,17 +325,32 @@ async def transcribe_with_external_provider_async(
                 with contextlib.suppress(OSError, ValueError):
                     file_handle.seek(0)
 
-                resp = await afetch(
-                    method="POST",
-                    url=endpoint,
-                    headers=headers,
-                    files=files,
-                    data=data,
-                    timeout=config.timeout,
-                    allow_redirects=False,
-                    retry=retry_policy,
-                    verify=config.verify_ssl,
-                )
+                request_kwargs: dict[str, Any] = {
+                    "method": "POST",
+                    "url": endpoint,
+                    "headers": headers,
+                    "files": files,
+                    "data": data,
+                    "timeout": config.timeout,
+                    "retry": retry_policy,
+                    "verify": config.verify_ssl,
+                }
+                if execution_plan is not None:
+                    request_kwargs["allow_redirects"] = False
+                if execution_plan is None:
+                    resp = await afetch(**request_kwargs)
+                else:
+                    endpoint_id = (
+                        execution_plan.descriptor.primary_route.endpoint_id
+                    )
+                    if endpoint_id is None:
+                        raise STTExecutionPlanError(
+                            "External STT plan is missing endpoint identity"
+                        )
+                    with opaque_stt_http_observability(
+                        endpoint_id
+                    ):
+                        resp = await afetch(**request_kwargs)
 
                 status_code = int(resp.status_code)
                 if status_code == 200:

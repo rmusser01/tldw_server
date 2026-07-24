@@ -34,11 +34,13 @@ from tldw_Server_API.app.core.exceptions import (
     TranscriptionCancelled,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_contract import (
+    PLANNED_STT_TRANSCRIPTION_FAILURE,
     SttAudioEgress,
     SttBatchExecutionPlan,
     SttTranscriptionOutcome,
     _normalize_audio_endpoint,
     actual_execution_from_route,
+    raise_for_planned_stt_sentinel,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.path_utils import (
     open_safe_local_path,
@@ -475,6 +477,14 @@ def _load_local_components(settings: dict[str, Any]) -> tuple[Any, Any, str]:
         return processor, model, device
 
 
+def _record_runtime_mismatch(
+    runtime_mismatches: list[str] | None,
+    name: str,
+) -> None:
+    if runtime_mismatches is not None and name not in runtime_mismatches:
+        runtime_mismatches.append(name)
+
+
 def _build_processor_inputs(
     processor: Any,
     *,
@@ -483,6 +493,7 @@ def _build_processor_inputs(
     language: str | None,
     hotwords: Sequence[str],
     strict_semantics: bool = False,
+    runtime_mismatches: list[str] | None = None,
 ) -> Any:
     base_kwargs: dict[str, Any] = {
         "audio": audio_np,
@@ -502,11 +513,13 @@ def _build_processor_inputs(
                 "VibeVoice local processor dropped planned semantics"
             ) from None
         # Retry without optional fields when the processor does not accept them.
-        base_kwargs.pop("hotwords", None)
+        if base_kwargs.pop("hotwords", None) is not None:
+            _record_runtime_mismatch(runtime_mismatches, "hotwords")
         try:
             return processor(**base_kwargs)
         except TypeError:
-            base_kwargs.pop("language", None)
+            if base_kwargs.pop("language", None) is not None:
+                _record_runtime_mismatch(runtime_mismatches, "language")
             return processor(**base_kwargs)
 
 
@@ -564,6 +577,10 @@ def _transcribe_local(
     cancel_check: Callable[[], bool] | None,
 ) -> dict[str, Any]:
     strict_semantics = bool(settings.get("strict_semantics"))
+    runtime_mismatches = settings.get("_runtime_mismatches")
+    if not isinstance(runtime_mismatches, list):
+        runtime_mismatches = []
+        settings["_runtime_mismatches"] = runtime_mismatches
     _check_cancel(cancel_check, label="local model load")
     processor, model, device = _load_local_components(settings)
     _check_cancel(cancel_check, label="local preprocessing")
@@ -591,6 +608,16 @@ def _transcribe_local(
                 raise STTExecutionPlanError(
                     "VibeVoice local model dropped planned semantics"
                 ) from None
+            if language:
+                _record_runtime_mismatch(
+                    runtime_mismatches,
+                    "language",
+                )
+            if hotwords:
+                _record_runtime_mismatch(
+                    runtime_mismatches,
+                    "hotwords",
+                )
             raw_resp = model.transcribe(audio_np, sample_rate=sample_rate)
             return _normalize_artifact(
                 raw_resp,
@@ -613,6 +640,7 @@ def _transcribe_local(
         language=language,
         hotwords=hotwords,
         strict_semantics=strict_semantics,
+        runtime_mismatches=runtime_mismatches,
     )
     inputs = _move_inputs_to_device(inputs, device)
 
@@ -634,7 +662,11 @@ def _transcribe_local(
                 raise STTExecutionPlanError(
                     "VibeVoice generation dropped planned hotwords"
                 ) from None
-            gen_kwargs.pop("hotwords", None)
+            if gen_kwargs.pop("hotwords", None) is not None:
+                _record_runtime_mismatch(
+                    runtime_mismatches,
+                    "hotwords",
+                )
             generated_ids = model.generate(**inputs, **gen_kwargs)
 
     text = _decode_generated(processor, generated_ids)
@@ -651,9 +683,14 @@ def _transcribe_local(
 
 def _resolve_vllm_endpoint(base_url: str) -> str:
     parsed = urlparse(base_url)
-    if parsed.path.rstrip("/").endswith("/v1/audio/transcriptions"):
+    if parsed.path.rstrip("/").endswith(
+        "/v1/audio/transcriptions"
+    ):
         return base_url
-    return urljoin(base_url.rstrip("/") + "/", "v1/audio/transcriptions")
+    return urljoin(
+        base_url.rstrip("/") + "/",
+        "v1/audio/transcriptions",
+    )
 
 
 def _audio_duration_seconds(audio_path: Path) -> float:
@@ -703,20 +740,32 @@ def _transcribe_via_vllm_http(
     if hotwords:
         data["hotwords"] = json.dumps(list(hotwords))
 
-    from tldw_Server_API.app.core.http_client import fetch_json
+    from tldw_Server_API.app.core.http_client import (
+        fetch_json,
+        opaque_stt_http_observability,
+    )
 
     timeout = int(settings.get("vllm_timeout_seconds") or 600)
     with file_handle:
         files = {"file": (audio_path.name, file_handle, "application/octet-stream")}
-        raw_resp = fetch_json(
-            method="POST",
-            url=endpoint,
-            headers=headers,
-            data=data,
-            files=files,
-            timeout=timeout,
-            allow_redirects=False,
-        )
+        request_kwargs: dict[str, Any] = {
+            "method": "POST",
+            "url": endpoint,
+            "headers": headers,
+            "data": data,
+            "files": files,
+            "timeout": timeout,
+        }
+        if settings.get("endpoint"):
+            request_kwargs["allow_redirects"] = False
+        endpoint_id = settings.get("endpoint_id")
+        if endpoint_id is None:
+            raw_resp = fetch_json(**request_kwargs)
+        else:
+            with opaque_stt_http_observability(
+                str(endpoint_id)
+            ):
+                raw_resp = fetch_json(**request_kwargs)
 
     _check_cancel(cancel_check, label="vLLM response parsing")
     return _normalize_artifact(
@@ -742,6 +791,27 @@ def is_vibevoice_available() -> bool:
     return True
 
 
+def _validate_planned_artifact_attempt(
+    artifact: object,
+) -> dict[str, Any]:
+    if not isinstance(artifact, dict):
+        raise STTTranscriptionError(
+            PLANNED_STT_TRANSCRIPTION_FAILURE
+        ) from None
+    text = artifact.get("text")
+    segments = artifact.get("segments")
+    if (
+        not isinstance(text, str)
+        or not text.strip()
+        or not isinstance(segments, list)
+    ):
+        raise STTTranscriptionError(
+            PLANNED_STT_TRANSCRIPTION_FAILURE
+        ) from None
+    raise_for_planned_stt_sentinel(text)
+    return artifact
+
+
 def transcribe_with_vibevoice(
     audio_path: str,
     *,
@@ -765,12 +835,9 @@ def transcribe_with_vibevoice(
         runtime = execution_plan.runtime_values()
         if (
             not routes
-            or any(
-                route.provider != "vibevoice"
-                or route.model_label
-                != execution_plan.descriptor.resolved_model_label
-                for route in routes
-            )
+            or routes[0].model_label
+            != execution_plan.descriptor.resolved_model_label
+            or any(route.provider != "vibevoice" for route in routes)
         ):
             raise STTExecutionPlanError(
                 "Invalid VibeVoice execution routes"
@@ -786,10 +853,13 @@ def transcribe_with_vibevoice(
                     route.source != "vllm_http"
                     or route.audio_egress is not egress
                     or route.endpoint_id != endpoint_id
+                    or runtime.get("vllm_model_id")
+                    != route.model_label
                 ):
                     raise STTExecutionPlanError(
                         "VibeVoice endpoint does not match its plan"
                     )
+                runtime["endpoint_id"] = endpoint_id
             elif route.backend == "transformers":
                 if (
                     route.source != "local"
@@ -799,7 +869,9 @@ def transcribe_with_vibevoice(
                     or runtime.get("device") != route.device
                     or runtime.get("dtype") != route.dtype
                     or runtime.get("allow_download") is not False
-                    or runtime.get("strict_semantics") is not True
+                    or runtime.get("strict_semantics") is not False
+                    or runtime.get("local_model_label")
+                    != route.model_label
                 ):
                     raise STTExecutionPlanError(
                         "VibeVoice local route does not match its plan"
@@ -815,9 +887,9 @@ def transcribe_with_vibevoice(
             else resolved_path.parent
         )
         hotwords_list = list(execution_plan.hotwords)
-        final_error: BaseException | None = None
         for route in routes:
             settings = dict(runtime)
+            settings["_runtime_mismatches"] = []
             try:
                 if route.backend == "vllm_http":
                     artifact = _transcribe_via_vllm_http(
@@ -828,6 +900,7 @@ def transcribe_with_vibevoice(
                         hotwords=hotwords_list,
                         cancel_check=cancel_check,
                     )
+                    _validate_planned_artifact_attempt(artifact)
                     actual = actual_execution_from_route(
                         route,
                         device=None,
@@ -856,6 +929,7 @@ def transcribe_with_vibevoice(
                         hotwords=hotwords_list,
                         cancel_check=cancel_check,
                     )
+                    _validate_planned_artifact_attempt(artifact)
                     actual = actual_execution_from_route(
                         route,
                         device=route.device,
@@ -864,21 +938,21 @@ def transcribe_with_vibevoice(
                 return SttTranscriptionOutcome(
                     artifact=artifact,
                     actual_execution=actual,
+                    runtime_mismatches=tuple(
+                        sorted(settings["_runtime_mismatches"])
+                    ),
                 )
             except (
                 STTExecutionPlanError,
                 TranscriptionCancelled,
             ):
                 raise
-            except Exception as exc:  # noqa: BLE001 - provider routes may raise optional-runtime errors
-                final_error = exc
-        if final_error is not None:
-            raise STTTranscriptionError(
-                "Planned VibeVoice transcription failed"
-            ) from None
-        raise STTExecutionPlanError(
-            "VibeVoice plan did not select a route"
-        )
+            except Exception:  # nosec B112  # noqa: BLE001
+                # A declared route failure advances to its pinned fallback.
+                continue
+        raise STTTranscriptionError(
+            PLANNED_STT_TRANSCRIPTION_FAILURE
+        ) from None
 
     settings = _resolve_settings()
     original_model_id = str(settings.get("model_id") or "microsoft/VibeVoice-ASR")

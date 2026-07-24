@@ -27,6 +27,16 @@ if "torch" not in sys.modules:
     )
     sys.modules["torch"] = fake_torch
 
+test_torch = sys.modules["torch"]
+for dtype_name in ("float16", "float32", "bfloat16"):
+    if not hasattr(test_torch, dtype_name):
+        setattr(test_torch, dtype_name, dtype_name)
+if not hasattr(test_torch, "no_grad"):
+    test_torch.no_grad = lambda: types.SimpleNamespace(
+        __enter__=lambda self: None,
+        __exit__=lambda self, *_args: None,
+    )
+
 if "faster_whisper" not in sys.modules:
     fake_fw = types.ModuleType("faster_whisper")
     fake_fw.__spec__ = importlib.machinery.ModuleSpec(
@@ -783,7 +793,7 @@ def test_planned_canary_typed_failure_does_not_enter_temp_file_fallback(
         )
 
     assert calls == [True]
-    assert str(exc_info.value) == "Planned local STT transcription failed"
+    assert str(exc_info.value) == "Planned STT transcription failed"
     assert secret not in str(exc_info.value)
     assert exc_info.value.__cause__ is None
     assert secret not in caplog.text
@@ -832,7 +842,7 @@ def test_planned_standard_parakeet_sentinel_is_sanitized(
             _loaded_runtime=loaded,
         )
 
-    assert str(exc_info.value) == "Planned local STT transcription failed"
+    assert str(exc_info.value) == "Planned STT transcription failed"
     assert secret not in str(exc_info.value)
     assert exc_info.value.__cause__ is None
     assert secret not in caplog.text
@@ -887,7 +897,7 @@ def test_planned_parakeet_onnx_sentinel_is_sanitized(
             execution_route=route,
         )
 
-    assert str(exc_info.value) == "Planned local STT transcription failed"
+    assert str(exc_info.value) == "Planned STT transcription failed"
     assert secret not in str(exc_info.value)
     assert exc_info.value.__cause__ is None
     assert secret not in caplog.text
@@ -2085,7 +2095,7 @@ def test_outer_planned_boundary_sanitizes_typed_error_sentinel(
             execution_plan=plan,
         )
 
-    assert str(exc_info.value) == "Planned local STT transcription failed"
+    assert str(exc_info.value) == "Planned STT transcription failed"
     assert secret not in str(exc_info.value)
     assert exc_info.value.__context__ is None
     assert exc_info.value.__cause__ is None
