@@ -13,4 +13,6 @@ Latest-dev review remediation: complete (commit 85f5e400cc; optional psycopg fai
 
 Final independent-review remediation: complete (commit aeff41d653; every PostgreSQL replay fetch now holds the existing row through commit, including idempotent admission without quotas).
 
-Final rebased branch gate: 71 passed with required real PostgreSQL execution and no skips; Ruff and compileall passed; Bandit reported 0 findings and 0 errors.
+Final conflict-window remediation: complete (commit 1fdc2ed658; disappearing `ON CONFLICT DO NOTHING` rows are retried with bounded insert-or-lock resolution, and no-quota tests pin every effective quota scope to zero).
+
+Final rebased branch gate: 72 passed with required real PostgreSQL execution and no skips; Ruff and compileall passed; Bandit reported 0 findings and 0 errors.
