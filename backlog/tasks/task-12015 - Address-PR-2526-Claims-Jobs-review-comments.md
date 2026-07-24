@@ -1,7 +1,7 @@
 ---
 id: TASK-12015
 title: 'Address PR #2526 Claims Jobs review comments'
-status: Done
+status: In Progress
 created_date: 2026-06-26 06:34
 labels:
 - claims
@@ -10,7 +10,7 @@ labels:
 references:
 - https://github.com/rmusser01/tldw_server/pull/2526
 - TASK-9937
-updated_date: 2026-07-18 18:29
+updated_date: 2026-07-24 00:09
 modified_files:
 - backlog/tasks/task-9934 - Harden-Claims_Extraction-review-findings-and-refactor-design.md
 - backlog/tasks/task-12015 - Address-PR-2526-Claims-Jobs-review-comments.md
@@ -66,6 +66,7 @@ Verified PR #2526 review comments against current code: process_claims_job direc
 Post-rebase verification after git rebase origin/dev: branch is 0 behind and 40 ahead of origin/dev; Claims Jobs test slice passed with 69 passed; Ruff check on touched files passed; Bandit JSON report /tmp/bandit_claims_pr2526_comments_post_rebase.json had 0 results.
 2026-07-18 follow-up: reopening task to rebase PR #2526 onto latest origin/dev and verify/address the later CodeRabbit/Qodo review comments, including fallback behavior, owner scoping, alert/notification delivery reliability, DB abstraction placement, and focused test-review comments.
 2026-07-18 follow-up complete: rebased PR #2526 on latest origin/dev, resolved the rebase conflict in MediaDatabase imports/wiring, re-fetched current Qodo/CodeRabbit/Gemini PR feedback, and addressed the still-valid review comments. Implemented canonical owner validation parity, legacy fallback on Jobs enqueue failures, conditional alert Jobs routing, bounded alert dedupe DB helper, review notification all-channel success semantics, noncritical webhook telemetry isolation, non-transient 4xx fast-fail, empty extraction stale-claim soft-delete, per-owner bulk review notification grouping, DB_Management-owned review latency stats, deterministic/marked/typed tests, dashboard jobs-summary assertions, and duplicate Backlog heading cleanup. Verification: py_compile on touched files passed; Ruff check on touched files passed; focused pytest slice passed with 121 passed; git diff --check passed; Bandit on touched application files wrote /tmp/bandit_claims_pr2526_followup.json and exited 0.
+2026-07-23 follow-up: PR #2526 still has cancelled/red GitHub checks and a CodeRabbit docstring-coverage warning after the 2026-07-18 push. Latest origin/dev is now 178 commits ahead of the PR branch, so reopen this task to rebase on current dev, verify current PR comments/checks, and address any still-valid findings before pushing a fresh head.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
