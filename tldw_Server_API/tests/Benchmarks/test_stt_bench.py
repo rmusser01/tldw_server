@@ -7,10 +7,14 @@ import hashlib
 import json
 import math
 import os
+import pickle
+import re
 import shutil
 import stat
 import subprocess
+import types
 import wave
+from dataclasses import FrozenInstanceError
 from pathlib import Path
 
 import Helper_Scripts.benchmarks.stt_bench as stt_bench
@@ -33,7 +37,45 @@ from hypothesis import strategies as st
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_contract import (
     SttActualExecution,
     SttAudioEgress,
+    SttBatchExecutionPlan,
+    SttExecutionDescriptor,
+    SttExecutionRoute,
 )
+
+_PREFLIGHT_PLANS: dict[tuple[str, str], SttBatchExecutionPlan | BaseException] = {}
+_PREFLIGHT_CALLS: list[tuple[str, str]] = []
+_PREFLIGHT_UNAVAILABLE: set[str] = set()
+_PREFLIGHT_CANONICAL: dict[str, str] = {}
+
+
+class _PreflightFakeAdapter:
+    def __init__(self, lookup_provider: str, canonical_provider: str) -> None:
+        self.lookup_provider = lookup_provider
+        self.name = types.SimpleNamespace(value=canonical_provider)
+
+    def get_capabilities(self):
+        return types.SimpleNamespace(supports_batch=self.lookup_provider not in _PREFLIGHT_UNAVAILABLE)
+
+    def plan_batch_execution(self, *, model, **settings):
+        key = (self.lookup_provider, model)
+        _PREFLIGHT_CALLS.append(key)
+        planned = _PREFLIGHT_PLANS[key]
+        if isinstance(planned, BaseException):
+            raise planned
+        assert settings["mode"] in {"neutral-v1", "production-v1"}
+        return planned
+
+
+def _preflight_fake_factory(provider: str):
+    if not any(key[0] == provider for key in _PREFLIGHT_PLANS):
+        raise LookupError(f"unknown provider {provider}")
+    return _PreflightFakeAdapter(
+        provider,
+        _PREFLIGHT_CANONICAL.get(provider, provider),
+    )
+
+
+_NOT_AN_ADAPTER_FACTORY = object()
 
 
 def _manifest_record(
@@ -2247,3 +2289,472 @@ def test_persist_result_rejects_noncanonical_decoding_ids(
 
     with pytest.raises(ValueError, match="execution"):
         stt_bench.append_result_record(tmp_path / "results.jsonl", record)
+
+
+def _planned_target(
+    *,
+    provider: str = "fake",
+    resolved_provider: str | None = None,
+    model_label: str = "model-a",
+    egress: SttAudioEgress = SttAudioEgress.NONE,
+    local_model_available: bool = True,
+    would_download: bool = False,
+    route_count: int = 1,
+    runtime_secret: str = "/private/models/secret-model",
+    honors_task: bool = True,
+) -> SttBatchExecutionPlan:
+    resolved_provider = resolved_provider or provider
+    routes = tuple(
+        SttExecutionRoute(
+            route_id=f"route-{index + 1}",
+            provider=resolved_provider,
+            model_label=model_label,
+            artifact_id=None,
+            identity_resolved=False,
+            backend=f"backend-{index + 1}",
+            source="local" if egress is SttAudioEgress.NONE else "http",
+            audio_egress=egress,
+            endpoint_id=(None if egress is SttAudioEgress.NONE else f"sha256:{index + 1:064x}"),
+            device="cpu" if egress is SttAudioEgress.NONE else None,
+            compute_type="int8" if egress is SttAudioEgress.NONE else None,
+            dtype=None,
+            decoding_ids=(),
+            local_model_available=local_model_available,
+            would_download=would_download,
+            transport=None if egress is SttAudioEgress.NONE else "httpx",
+        )
+        for index in range(route_count)
+    )
+    descriptor = SttExecutionDescriptor(
+        requested_provider=provider,
+        requested_model_label=model_label,
+        resolved_provider=resolved_provider,
+        resolved_model_label=model_label,
+        routes=routes,
+        honors_task=honors_task,
+        honors_language=True,
+        honors_prompt_absence=True,
+        honors_hotword_absence=True,
+        honors_diarization=True,
+        honors_word_timestamps=True,
+        decoding_settings=(),
+        source_modules=("tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_contract",),
+        dependency_distributions=("pytest",),
+    )
+    return SttBatchExecutionPlan(
+        descriptor=descriptor,
+        task="transcribe",
+        language="en",
+        runtime_settings=(("model_path", runtime_secret),),
+    )
+
+
+@pytest.fixture
+def preflight_fakes():
+    _PREFLIGHT_PLANS.clear()
+    _PREFLIGHT_CALLS.clear()
+    _PREFLIGHT_UNAVAILABLE.clear()
+    _PREFLIGHT_CANONICAL.clear()
+    yield
+    _PREFLIGHT_PLANS.clear()
+    _PREFLIGHT_CALLS.clear()
+    _PREFLIGHT_UNAVAILABLE.clear()
+    _PREFLIGHT_CANONICAL.clear()
+
+
+def _preflight_settings(**overrides):
+    settings = {
+        "git_commit": "a" * 40,
+        "language": "en",
+        "task": "transcribe",
+        "word_timestamps": False,
+        "prompt": None,
+        "hotwords": (),
+        "diarization": False,
+    }
+    settings.update(overrides)
+    return settings
+
+
+def test_prepared_target_and_worker_settings_are_frozen_pickleable_and_secret_safe():
+    plan = _planned_target()
+    contract_json, contract_hash = stt_bench.build_execution_contract(
+        plan=plan,
+        git_commit="a" * 40,
+        safe_target_settings={
+            "mode": "neutral-v1",
+            "task": "transcribe",
+            "language": "en",
+            "word_timestamps": False,
+            "diarization": False,
+            "prompt_present": False,
+            "hotword_count": 0,
+        },
+    )
+    target = stt_bench.PreparedTarget(
+        target_id="target-0123456789abcdef",
+        provider="fake",
+        model_label="model-a",
+        plan=plan,
+        adapter_factory_path="tests:factory",
+        execution_contract_json=contract_json,
+        execution_contract_hash=contract_hash,
+    )
+    settings = stt_bench.WorkerSettings(
+        run_id="run-1",
+        results_path="results.jsonl",
+        normalization_profile="en-v1",
+        cold_probe_sample_id="sample-1",
+        warm_repetitions=1,
+        timing_sample_ids=("sample-2",),
+        text_retention="full",
+        retry_errors=False,
+    )
+
+    assert pickle.loads(pickle.dumps(target)) == target
+    assert pickle.loads(pickle.dumps(settings)) == settings
+    assert "/private/models/secret-model" not in repr(target)
+    assert "tests:factory" not in repr(target)
+    with pytest.raises(FrozenInstanceError):
+        target.provider = "changed"
+
+
+def test_build_execution_contract_is_canonical_deterministic_and_excludes_runtime_secrets():
+    plan = _planned_target(runtime_secret="/Users/alice/.cache/private-model")
+    safe_settings = {
+        "mode": "neutral-v1",
+        "task": "transcribe",
+        "language": "en",
+        "word_timestamps": False,
+        "diarization": False,
+        "prompt_present": False,
+        "hotword_count": 0,
+    }
+
+    first_json, first_hash = stt_bench.build_execution_contract(
+        plan=plan,
+        git_commit="b" * 40,
+        safe_target_settings=safe_settings,
+    )
+    second_json, second_hash = stt_bench.build_execution_contract(
+        plan=plan,
+        git_commit="b" * 40,
+        safe_target_settings=dict(reversed(tuple(safe_settings.items()))),
+    )
+    payload = json.loads(first_json)
+
+    assert (first_json, first_hash) == (second_json, second_hash)
+    assert hashlib.sha256(first_json.encode("utf-8")).hexdigest() == first_hash
+    assert first_json == json.dumps(
+        payload,
+        allow_nan=False,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    assert "/Users/alice" not in first_json
+    assert payload["scorer_version"] == SCORER_VERSION
+    assert payload["unicode_version"]
+    assert payload["source_hashes"]
+    assert payload["dependency_versions"]["pytest"]
+
+
+@pytest.mark.parametrize(
+    "safe_settings",
+    [
+        {"mode": "neutral-v1", "raw_prompt": "do not persist"},
+        {"mode": "neutral-v1", "configuration_id": "secret-token"},
+        {"mode": "unknown-v1"},
+    ],
+)
+def test_build_execution_contract_rejects_unknown_or_unsafe_target_settings(
+    safe_settings,
+):
+    with pytest.raises(ValueError, match="safe target settings"):
+        stt_bench.build_execution_contract(
+            plan=_planned_target(),
+            git_commit="c" * 40,
+            safe_target_settings=safe_settings,
+        )
+
+
+def test_resolve_adapter_factory_accepts_only_a_top_level_callable():
+    resolved = stt_bench._resolve_adapter_factory(f"{__name__}:_preflight_fake_factory")
+
+    assert resolved is _preflight_fake_factory
+    with pytest.raises(ValueError, match="module:top_level_name"):
+        stt_bench._resolve_adapter_factory(__name__)
+    with pytest.raises(ValueError, match="module:top_level_name"):
+        stt_bench._resolve_adapter_factory(f"{__name__}:_PreflightFakeAdapter.get_capabilities")
+    with pytest.raises(ValueError, match="callable"):
+        stt_bench._resolve_adapter_factory(f"{__name__}:_NOT_AN_ADAPTER_FACTORY")
+
+
+def test_load_native_adapter_imports_registry_lazily_and_uses_strict_lookup(
+    monkeypatch,
+):
+    calls = []
+    expected = object()
+
+    class FakeRegistry:
+        def get_adapter_strict(self, provider):
+            calls.append(("strict", provider))
+            return expected
+
+    def fake_import_module(name):
+        calls.append(("import", name))
+        return types.SimpleNamespace(SttProviderRegistry=FakeRegistry)
+
+    monkeypatch.setattr(stt_bench.importlib, "import_module", fake_import_module)
+
+    assert calls == []
+    assert stt_bench._load_native_adapter("faster-whisper") is expected
+    assert calls == [
+        (
+            "import",
+            "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_provider_adapter",
+        ),
+        ("strict", "faster-whisper"),
+    ]
+
+
+def test_preflight_targets_returns_deterministic_secret_safe_targets(
+    preflight_fakes,
+):
+    _PREFLIGHT_PLANS.update(
+        {
+            ("fake", "model-a"): _planned_target(runtime_secret="/private/models/model-a"),
+            ("other", "model-b"): _planned_target(
+                provider="other",
+                model_label="model-b",
+                runtime_secret="/private/models/model-b",
+            ),
+        }
+    )
+
+    first = stt_bench.preflight_targets(
+        ("fake=model-a", "other=model-b"),
+        mode="neutral-v1",
+        allow_network_targets=False,
+        common_settings=_preflight_settings(),
+        adapter_factory_path=f"{__name__}:_preflight_fake_factory",
+    )
+    second = stt_bench.preflight_targets(
+        ("fake=model-a", "other=model-b"),
+        mode="neutral-v1",
+        allow_network_targets=False,
+        common_settings=_preflight_settings(),
+        adapter_factory_path=f"{__name__}:_preflight_fake_factory",
+    )
+
+    assert tuple(target.target_id for target in first) == tuple(target.target_id for target in second)
+    assert tuple(target.provider for target in first) == ("fake", "other")
+    assert tuple(target.model_label for target in first) == (
+        "model-a",
+        "model-b",
+    )
+    assert all(re.fullmatch(r"target-[0-9a-f]{16}", target.target_id) for target in first)
+    serialized = json.dumps(
+        [
+            {
+                "target_id": target.target_id,
+                "provider": target.provider,
+                "model_label": target.model_label,
+                "execution_contract_json": target.execution_contract_json,
+                "execution_contract_hash": target.execution_contract_hash,
+            }
+            for target in first
+        ],
+        sort_keys=True,
+    )
+    assert "/private/models" not in serialized
+
+
+def test_preflight_targets_validates_the_whole_matrix_before_failing(
+    preflight_fakes,
+):
+    _PREFLIGHT_PLANS.update(
+        {
+            ("download", "model-a"): _planned_target(
+                provider="download",
+                would_download=True,
+            ),
+            ("missing", "model-b"): _planned_target(
+                provider="missing",
+                model_label="model-b",
+                local_model_available=False,
+            ),
+            ("broken", "model-c"): RuntimeError("Authorization: Bearer sk-private-token"),
+        }
+    )
+
+    with pytest.raises(ValueError) as raised:
+        stt_bench.preflight_targets(
+            (
+                "download=model-a",
+                "missing=model-b",
+                "broken=model-c",
+                "unknown=model-d",
+            ),
+            mode="neutral-v1",
+            allow_network_targets=False,
+            common_settings=_preflight_settings(),
+            adapter_factory_path=f"{__name__}:_preflight_fake_factory",
+        )
+
+    assert _PREFLIGHT_CALLS == [
+        ("download", "model-a"),
+        ("missing", "model-b"),
+        ("broken", "model-c"),
+    ]
+    message = str(raised.value)
+    assert all(f"target {index}" in message for index in range(1, 5))
+    assert "sk-private-token" not in message
+
+
+def test_preflight_targets_rejects_duplicate_normalized_targets_after_planning(
+    preflight_fakes,
+):
+    plan = _planned_target()
+    _PREFLIGHT_PLANS.update(
+        {
+            ("fake", "model-a"): plan,
+            ("alias", "model-a"): plan,
+        }
+    )
+    _PREFLIGHT_CANONICAL["alias"] = "fake"
+
+    with pytest.raises(ValueError, match="duplicate normalized target"):
+        stt_bench.preflight_targets(
+            ("fake=model-a", "alias=model-a"),
+            mode="neutral-v1",
+            allow_network_targets=False,
+            common_settings=_preflight_settings(),
+            adapter_factory_path=f"{__name__}:_preflight_fake_factory",
+        )
+
+    assert _PREFLIGHT_CALLS == [
+        ("fake", "model-a"),
+        ("alias", "model-a"),
+    ]
+
+
+@pytest.mark.parametrize(
+    "egress",
+    [SttAudioEgress.LOOPBACK, SttAudioEgress.REMOTE],
+)
+def test_preflight_targets_requires_consent_for_every_network_route(
+    preflight_fakes,
+    egress,
+):
+    _PREFLIGHT_PLANS[("network", "model-a")] = _planned_target(
+        provider="network",
+        egress=egress,
+        local_model_available=False,
+    )
+
+    with pytest.raises(ValueError, match="network consent"):
+        stt_bench.preflight_targets(
+            ("network=model-a",),
+            mode="neutral-v1",
+            allow_network_targets=False,
+            common_settings=_preflight_settings(),
+            adapter_factory_path=f"{__name__}:_preflight_fake_factory",
+        )
+
+    prepared = stt_bench.preflight_targets(
+        ("network=model-a",),
+        mode="neutral-v1",
+        allow_network_targets=True,
+        common_settings=_preflight_settings(),
+        adapter_factory_path=f"{__name__}:_preflight_fake_factory",
+    )
+    assert prepared[0].provider == "network"
+
+
+def test_preflight_targets_rejects_unavailable_and_mismatched_adapters(
+    preflight_fakes,
+):
+    _PREFLIGHT_PLANS.update(
+        {
+            ("unavailable", "model-a"): _planned_target(provider="unavailable"),
+            ("mismatch", "model-b"): _planned_target(
+                provider="other",
+                model_label="model-b",
+            ),
+        }
+    )
+    _PREFLIGHT_UNAVAILABLE.add("unavailable")
+
+    with pytest.raises(ValueError) as raised:
+        stt_bench.preflight_targets(
+            ("unavailable=model-a", "mismatch=model-b"),
+            mode="neutral-v1",
+            allow_network_targets=False,
+            common_settings=_preflight_settings(),
+            adapter_factory_path=f"{__name__}:_preflight_fake_factory",
+        )
+
+    assert "target 1" in str(raised.value)
+    assert "target 2" in str(raised.value)
+
+
+def test_preflight_targets_rejects_mismatched_resolved_provider(
+    preflight_fakes,
+):
+    _PREFLIGHT_PLANS[("fake", "model-a")] = _planned_target(
+        resolved_provider="other",
+    )
+
+    with pytest.raises(ValueError, match="provider mismatch"):
+        stt_bench.preflight_targets(
+            ("fake=model-a",),
+            mode="neutral-v1",
+            allow_network_targets=False,
+            common_settings=_preflight_settings(),
+            adapter_factory_path=f"{__name__}:_preflight_fake_factory",
+        )
+
+
+def test_preflight_targets_redacts_prompt_and_hotwords_from_planner_errors(
+    preflight_fakes,
+):
+    prompt = "transcribe Project Nebula exactly"
+    hotword = "Asterion"
+    _PREFLIGHT_PLANS[("fake", "model-a")] = RuntimeError(f"planner rejected {prompt}; hotword={hotword}")
+
+    with pytest.raises(ValueError) as raised:
+        stt_bench.preflight_targets(
+            ("fake=model-a",),
+            mode="production-v1",
+            allow_network_targets=False,
+            common_settings=_preflight_settings(
+                prompt=prompt,
+                hotwords=(hotword,),
+                configuration_id="configuration-1",
+            ),
+            adapter_factory_path=f"{__name__}:_preflight_fake_factory",
+        )
+
+    assert prompt not in str(raised.value)
+    assert hotword not in str(raised.value)
+
+
+def test_preflight_targets_rejects_invalid_specs_and_neutral_fallbacks(
+    preflight_fakes,
+):
+    _PREFLIGHT_PLANS[("fallback", "model-a")] = _planned_target(
+        provider="fallback",
+        route_count=2,
+    )
+
+    with pytest.raises(ValueError) as raised:
+        stt_bench.preflight_targets(
+            ("missing-equals", "=model", "provider=", "fallback=model-a"),
+            mode="neutral-v1",
+            allow_network_targets=False,
+            common_settings=_preflight_settings(),
+            adapter_factory_path=f"{__name__}:_preflight_fake_factory",
+        )
+
+    assert all(f"target {index}" in str(raised.value) for index in range(1, 5))

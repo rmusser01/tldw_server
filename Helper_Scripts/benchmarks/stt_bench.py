@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 import errno
 import hashlib
+import importlib
+import importlib.metadata
 import json
 import math
 import os
@@ -16,7 +18,17 @@ import unicodedata
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from pathlib import Path, PurePosixPath
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_contract import (
+        SttBatchExecutionPlan,
+    )
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_provider_adapter import (
+        SttProviderAdapter,
+    )
 
 SCORER_VERSION = "stt-score-v1"
 STRICT_PROFILE = "strict-v1"
@@ -46,6 +58,7 @@ RESULT_STATUSES = frozenset(
 )
 MEASUREMENT_ROLES = frozenset({"accuracy", "performance_repeat"})
 TIMING_CLASSES = frozenset({"cold_first", "warmup_recovery", "warm"})
+PRODUCTION_ADAPTER_FACTORY_PATH = "Helper_Scripts.benchmarks.stt_bench:_load_native_adapter"
 
 _KNOWN_SAMPLE_PROFILES = frozenset({"comparison", "regression"})
 _KNOWN_NORMALIZATION_PROFILES = frozenset({STRICT_PROFILE, EN_PROFILE})
@@ -134,6 +147,60 @@ _RESOURCE_OBSERVATION_FIELDS = frozenset(
         "rss_before_bytes",
     }
 )
+_SAFE_TARGET_SETTING_FIELDS = frozenset(
+    {
+        "mode",
+        "task",
+        "language",
+        "word_timestamps",
+        "diarization",
+        "prompt_present",
+        "hotword_count",
+        "configuration_id",
+        "network_collection_profile",
+        "network_client_location",
+    }
+)
+_SAFE_TARGET_SETTING_REQUIRED_FIELDS = frozenset(
+    {
+        "mode",
+        "task",
+        "language",
+        "word_timestamps",
+        "diarization",
+        "prompt_present",
+        "hotword_count",
+    }
+)
+_COMMON_TARGET_SETTING_FIELDS = frozenset(
+    {
+        "git_commit",
+        "language",
+        "task",
+        "word_timestamps",
+        "prompt",
+        "hotwords",
+        "diarization",
+        "configuration_id",
+        "network_collection_profile",
+        "network_client_location",
+    }
+)
+_FACTORY_PATH_V1 = re.compile(
+    r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*:"
+    r"[A-Za-z_][A-Za-z0-9_]*"
+)
+_GIT_COMMIT_V1 = re.compile(r"(?:[0-9a-f]{40}|unknown)")
+_UNSAFE_SAFE_SETTING_V1 = re.compile(
+    r"(?:authorization|bearer|api[_-]?key|token|secret|sk-)",
+    re.IGNORECASE,
+)
+_EXECUTION_CONTRACT_SOURCE_MODULES = frozenset(
+    {
+        "Helper_Scripts.benchmarks.stt_bench",
+        "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_contract",
+    }
+)
 
 _APOSTROPHE_TRANSLATION = str.maketrans(
     {
@@ -194,6 +261,33 @@ class ManifestSample:
     source: tuple[tuple[str, str], ...]
     tags: tuple[str, ...]
     sha256: str
+
+
+@dataclass(frozen=True)
+class PreparedTarget:
+    """One immutable, secret-safe target prepared before workers start."""
+
+    target_id: str
+    provider: str
+    model_label: str
+    plan: SttBatchExecutionPlan = dataclass_field(repr=False)
+    adapter_factory_path: str = dataclass_field(repr=False)
+    execution_contract_json: str
+    execution_contract_hash: str
+
+
+@dataclass(frozen=True)
+class WorkerSettings:
+    """Immutable run settings safe to send to a spawned target worker."""
+
+    run_id: str
+    results_path: str
+    normalization_profile: str
+    cold_probe_sample_id: str
+    warm_repetitions: int
+    timing_sample_ids: tuple[str, ...]
+    text_retention: str
+    retry_errors: bool
 
 
 def _require_text(text: str) -> str:
@@ -866,6 +960,427 @@ def select_samples(
         raise ValueError("no samples match the requested profile")
     selected.sort(key=lambda sample: hashlib.sha256(f"{seed}\0{sample.sample_id}".encode()).digest())
     return tuple(selected), selected[0].sample_id
+
+
+def _safe_target_setting_id(value: object, field_name: str) -> str:
+    """Validate one non-secret opaque identifier used in a target contract."""
+    if (
+        not isinstance(value, str)
+        or SERIALIZED_ID_V1.fullmatch(value) is None
+        or _UNSAFE_SAFE_SETTING_V1.search(value) is not None
+    ):
+        raise ValueError(f"safe target settings field {field_name} is invalid")
+    return value
+
+
+def _validate_safe_target_settings(
+    settings: Mapping[str, object],
+) -> dict[str, object]:
+    """Return an allowlisted JSON-safe target-settings projection."""
+    if not isinstance(settings, Mapping):
+        raise ValueError("safe target settings must be an object")
+    result = dict(settings)
+    fields = set(result)
+    if fields - _SAFE_TARGET_SETTING_FIELDS or not _SAFE_TARGET_SETTING_REQUIRED_FIELDS.issubset(fields):
+        raise ValueError("safe target settings have missing or unknown fields")
+    if result["mode"] not in {"neutral-v1", "production-v1"}:
+        raise ValueError("safe target settings mode is invalid")
+    if result["task"] != "transcribe":
+        raise ValueError("safe target settings task is invalid")
+    language = result["language"]
+    if language is not None and (
+        not isinstance(language, str) or BCP47_BASIC_V1.fullmatch(language) is None or language != language.lower()
+    ):
+        raise ValueError("safe target settings language is invalid")
+    for name in (
+        "word_timestamps",
+        "diarization",
+        "prompt_present",
+    ):
+        if not isinstance(result[name], bool):
+            raise ValueError(f"safe target settings field {name} must be boolean")
+    hotword_count = result["hotword_count"]
+    if isinstance(hotword_count, bool) or not isinstance(hotword_count, int) or hotword_count < 0:
+        raise ValueError("safe target settings hotword_count is invalid")
+    for name in (
+        "configuration_id",
+        "network_collection_profile",
+        "network_client_location",
+    ):
+        if name in result:
+            _safe_target_setting_id(result[name], name)
+    if result["mode"] == "neutral-v1" and "configuration_id" in result:
+        raise ValueError("safe target settings configuration_id is invalid in neutral-v1")
+    if result["mode"] == "production-v1" and "configuration_id" not in result:
+        raise ValueError("safe target settings require configuration_id in production-v1")
+    try:
+        json.dumps(
+            result,
+            allow_nan=False,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+    except (TypeError, UnicodeEncodeError, ValueError) as exc:
+        raise ValueError("safe target settings are not serializable") from exc
+    return result
+
+
+def _source_path_for_module(module_name: str) -> Path:
+    """Resolve an allowlisted project module without importing it."""
+    repository_root = Path(__file__).resolve().parents[2]
+    relative = Path(*module_name.split("."))
+    candidates = (
+        repository_root / relative.with_suffix(".py"),
+        repository_root / relative / "__init__.py",
+    )
+    for candidate in candidates:
+        resolved = candidate.resolve()
+        if resolved.is_relative_to(repository_root) and resolved.is_file():
+            return resolved
+    raise ValueError("execution contract source module is unavailable")
+
+
+def build_execution_contract(
+    *,
+    plan: SttBatchExecutionPlan,
+    git_commit: str,
+    safe_target_settings: Mapping[str, object],
+) -> tuple[str, str]:
+    """Build canonical safe execution-contract JSON and its SHA-256."""
+    if not isinstance(git_commit, str) or _GIT_COMMIT_V1.fullmatch(git_commit) is None:
+        raise ValueError("git commit must be a full lowercase hash or unknown")
+    descriptor = getattr(plan, "descriptor", None)
+    as_safe_dict = getattr(descriptor, "as_safe_dict", None)
+    if not callable(as_safe_dict):
+        raise ValueError("execution plan has no validated safe descriptor")
+    descriptor_payload = as_safe_dict()
+    if not isinstance(descriptor_payload, dict):
+        raise ValueError("execution plan safe descriptor is invalid")
+    safe_settings = _validate_safe_target_settings(safe_target_settings)
+    declared_modules = getattr(descriptor, "source_modules", ())
+    declared_dependencies = getattr(
+        descriptor,
+        "dependency_distributions",
+        (),
+    )
+    if not isinstance(declared_modules, tuple) or not isinstance(
+        declared_dependencies,
+        tuple,
+    ):
+        raise ValueError("execution plan source identity is invalid")
+    source_modules = sorted(_EXECUTION_CONTRACT_SOURCE_MODULES | set(declared_modules))
+    source_hashes = {module_name: _sha256_file(_source_path_for_module(module_name)) for module_name in source_modules}
+    dependency_versions: dict[str, str] = {}
+    for distribution in sorted(declared_dependencies):
+        try:
+            dependency_versions[distribution] = importlib.metadata.version(distribution)
+        except importlib.metadata.PackageNotFoundError:
+            dependency_versions[distribution] = "unavailable"
+    payload = {
+        "descriptor": descriptor_payload,
+        "dependency_versions": dependency_versions,
+        "git_commit": git_commit,
+        "safe_target_settings": safe_settings,
+        "scorer_version": SCORER_VERSION,
+        "source_hashes": source_hashes,
+        "unicode_version": unicodedata.unidata_version,
+    }
+    try:
+        contract_json = json.dumps(
+            payload,
+            allow_nan=False,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+    except (TypeError, UnicodeEncodeError, ValueError) as exc:
+        raise ValueError("execution contract is not safely serializable") from exc
+    return (
+        contract_json,
+        hashlib.sha256(contract_json.encode("utf-8")).hexdigest(),
+    )
+
+
+def _resolve_adapter_factory(
+    path: str,
+) -> Callable[[str], SttProviderAdapter]:
+    """Resolve one importable top-level adapter factory."""
+    if not isinstance(path, str) or _FACTORY_PATH_V1.fullmatch(path) is None:
+        raise ValueError("adapter factory path must use module:top_level_name")
+    module_name, attribute_name = path.split(":", 1)
+    try:
+        module = importlib.import_module(module_name)
+    except (ImportError, ModuleNotFoundError):
+        raise ValueError("adapter factory module could not be imported") from None
+    factory = getattr(module, attribute_name, None)
+    if not callable(factory):
+        raise ValueError("adapter factory must resolve to a callable")
+    return factory
+
+
+def _load_native_adapter(provider: str) -> SttProviderAdapter:
+    """Load the native STT registry lazily and perform strict lookup."""
+    module = importlib.import_module("tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_provider_adapter")
+    registry = module.SttProviderRegistry()
+    return registry.get_adapter_strict(provider)
+
+
+def _common_preflight_settings(
+    mode: str,
+    common_settings: Mapping[str, object],
+) -> tuple[dict[str, object], dict[str, object], str]:
+    """Validate planner inputs and derive their non-secret contract projection."""
+    if mode not in {"neutral-v1", "production-v1"}:
+        raise ValueError("benchmark mode must be neutral-v1 or production-v1")
+    if not isinstance(common_settings, Mapping):
+        raise ValueError("common target settings must be an object")
+    source = dict(common_settings)
+    if set(source) - _COMMON_TARGET_SETTING_FIELDS:
+        raise ValueError("common target settings have unknown fields")
+    task = source.get("task", "transcribe")
+    language = source.get("language")
+    word_timestamps = source.get("word_timestamps", False)
+    prompt = source.get("prompt")
+    hotwords = source.get("hotwords", ())
+    diarization = source.get("diarization", False)
+    git_commit = source.get("git_commit", "unknown")
+    if task != "transcribe":
+        raise ValueError("common target task must be transcribe")
+    if language is not None and (not isinstance(language, str) or BCP47_BASIC_V1.fullmatch(language) is None):
+        raise ValueError("common target language is invalid")
+    language = language.lower() if isinstance(language, str) else None
+    if not isinstance(word_timestamps, bool) or not isinstance(
+        diarization,
+        bool,
+    ):
+        raise ValueError("common target boolean settings are invalid")
+    if prompt is not None and not isinstance(prompt, str):
+        raise ValueError("common target prompt must be text or null")
+    if not isinstance(hotwords, tuple) or not all(isinstance(value, str) for value in hotwords):
+        raise ValueError("common target hotwords must be a tuple of strings")
+    if not isinstance(git_commit, str) or _GIT_COMMIT_V1.fullmatch(git_commit) is None:
+        raise ValueError("common target git commit is invalid")
+    configuration_id = source.get("configuration_id")
+    if mode == "neutral-v1":
+        if prompt is not None or hotwords or diarization or word_timestamps or configuration_id is not None:
+            raise ValueError("neutral-v1 common target settings are not neutral")
+    elif configuration_id is None:
+        raise ValueError("production-v1 requires configuration_id")
+    planner_settings = {
+        "language": language,
+        "task": task,
+        "word_timestamps": word_timestamps,
+        "prompt": prompt,
+        "hotwords": hotwords,
+        "diarization": diarization,
+        "mode": mode,
+    }
+    safe_settings: dict[str, object] = {
+        "mode": mode,
+        "task": task,
+        "language": language,
+        "word_timestamps": word_timestamps,
+        "diarization": diarization,
+        "prompt_present": prompt is not None,
+        "hotword_count": len(hotwords),
+    }
+    for name in (
+        "configuration_id",
+        "network_collection_profile",
+        "network_client_location",
+    ):
+        value = source.get(name)
+        if value is not None:
+            safe_settings[name] = value
+    return (
+        planner_settings,
+        _validate_safe_target_settings(safe_settings),
+        git_commit,
+    )
+
+
+def _validate_preflight_plan(
+    *,
+    plan: SttBatchExecutionPlan,
+    adapter: object,
+    requested_model: str,
+    mode: str,
+    allow_network_targets: bool,
+    planner_settings: Mapping[str, object],
+) -> tuple[str, str]:
+    """Validate one planned target without loading its model or opening audio."""
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_contract import (
+        SttAudioEgress,
+        SttBatchExecutionPlan,
+    )
+
+    if not isinstance(plan, SttBatchExecutionPlan):
+        raise ValueError("adapter returned an invalid execution plan")
+    descriptor = plan.descriptor
+    adapter_name = getattr(getattr(adapter, "name", None), "value", None)
+    if not isinstance(adapter_name, str):
+        adapter_name = getattr(adapter, "name", None)
+    if (
+        not isinstance(adapter_name, str)
+        or descriptor.requested_provider != adapter_name
+        or descriptor.resolved_provider != adapter_name
+    ):
+        raise ValueError("adapter and execution-plan provider mismatch")
+    if (
+        SAFE_MODEL_LABEL_V1.fullmatch(requested_model) is not None
+        and descriptor.requested_model_label != requested_model
+    ):
+        raise ValueError("requested model and execution-plan model mismatch")
+    for field_name in (
+        "task",
+        "language",
+        "prompt",
+        "diarization",
+        "word_timestamps",
+    ):
+        if getattr(plan, field_name) != planner_settings[field_name]:
+            raise ValueError(f"execution plan {field_name} mismatch")
+    if plan.hotwords != planner_settings["hotwords"]:
+        raise ValueError("execution plan hotwords mismatch")
+    if mode == "neutral-v1":
+        if len(descriptor.routes) != 1:
+            raise ValueError("neutral-v1 execution plan cannot contain fallback routes")
+        required_honors = (
+            descriptor.honors_task,
+            descriptor.honors_language,
+            descriptor.honors_prompt_absence,
+            descriptor.honors_hotword_absence,
+            descriptor.honors_diarization,
+            descriptor.honors_word_timestamps,
+        )
+        if not all(required_honors):
+            raise ValueError("neutral-v1 execution plan cannot honor common semantics")
+    for route in descriptor.routes:
+        if route.would_download:
+            raise ValueError("execution plan would download model artifacts")
+        if route.provider != descriptor.resolved_provider:
+            raise ValueError("execution route provider mismatch")
+        if route.audio_egress is SttAudioEgress.NONE:
+            if not route.local_model_available:
+                raise ValueError("local execution artifact is unavailable")
+        elif not allow_network_targets or route.endpoint_id is None:
+            raise ValueError("network consent and an opaque endpoint are required")
+    if descriptor.routes[0].model_label != descriptor.resolved_model_label:
+        raise ValueError("primary execution route model mismatch")
+    return (
+        descriptor.requested_provider,
+        descriptor.requested_model_label,
+    )
+
+
+def preflight_targets(
+    target_specs: Sequence[str],
+    *,
+    mode: str,
+    allow_network_targets: bool,
+    common_settings: Mapping[str, object],
+    adapter_factory_path: str = PRODUCTION_ADAPTER_FACTORY_PATH,
+) -> tuple[PreparedTarget, ...]:
+    """Plan and validate every target before returning any executable target."""
+    if isinstance(target_specs, (str, bytes)) or not isinstance(
+        target_specs,
+        Sequence,
+    ):
+        raise ValueError("target specifications must be a sequence")
+    if not target_specs:
+        raise ValueError("at least one target is required")
+    if not isinstance(allow_network_targets, bool):
+        raise ValueError("allow_network_targets must be boolean")
+    planner_settings, safe_settings, git_commit = _common_preflight_settings(
+        mode,
+        common_settings,
+    )
+    suppress_error_details = bool(planner_settings["prompt"] is not None or planner_settings["hotwords"])
+    factory = _resolve_adapter_factory(adapter_factory_path)
+    prepared: list[PreparedTarget] = []
+    errors: list[str] = []
+    normalized_targets: set[tuple[str, str]] = set()
+    for ordinal, target_spec in enumerate(target_specs, start=1):
+        try:
+            if not isinstance(target_spec, str) or target_spec.count("=") < 1:
+                raise ValueError("target must use provider=model")
+            provider, model = target_spec.split("=", 1)
+            provider = provider.strip()
+            model = model.strip()
+            if (
+                not provider
+                or SERIALIZED_ID_V1.fullmatch(provider) is None
+                or not model
+                or len(model) > 4096
+                or any(ord(character) < 32 for character in model)
+            ):
+                raise ValueError("target provider or model is invalid")
+            adapter = factory(provider)
+            if adapter is None:
+                raise ValueError("adapter is unavailable")
+            get_capabilities = getattr(adapter, "get_capabilities", None)
+            if not callable(get_capabilities):
+                raise ValueError("adapter has no capabilities")
+            capabilities = get_capabilities()
+            if getattr(capabilities, "supports_batch", None) is not True:
+                raise ValueError("adapter is unavailable for batch transcription")
+            planner = getattr(adapter, "plan_batch_execution", None)
+            if not callable(planner):
+                raise ValueError("adapter has no execution planner")
+            plan = planner(model=model, **planner_settings)
+            normalized_provider, model_label = _validate_preflight_plan(
+                plan=plan,
+                adapter=adapter,
+                requested_model=model,
+                mode=mode,
+                allow_network_targets=allow_network_targets,
+                planner_settings=planner_settings,
+            )
+            normalized_identity = (normalized_provider, model_label)
+            if normalized_identity in normalized_targets:
+                raise ValueError("duplicate normalized target")
+            normalized_targets.add(normalized_identity)
+            contract_json, contract_hash = build_execution_contract(
+                plan=plan,
+                git_commit=git_commit,
+                safe_target_settings=safe_settings,
+            )
+            descriptor_json = json.dumps(
+                plan.descriptor.as_safe_dict(),
+                allow_nan=False,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            target_id = "target-" + hashlib.sha256(f"{ordinal}\0{descriptor_json}".encode()).hexdigest()[:16]
+            prepared.append(
+                PreparedTarget(
+                    target_id=target_id,
+                    provider=normalized_provider,
+                    model_label=model_label,
+                    plan=plan,
+                    adapter_factory_path=adapter_factory_path,
+                    execution_contract_json=contract_json,
+                    execution_contract_hash=contract_hash,
+                )
+            )
+        except (
+            AttributeError,
+            ImportError,
+            KeyError,
+            LookupError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            sanitized = sanitize_error(exc)
+            detail = "preflight rejected target" if suppress_error_details else sanitized["message"]
+            errors.append(f"target {ordinal}: {sanitized['type']}: {detail}")
+    if errors:
+        raise ValueError("target preflight failed: " + "; ".join(errors))
+    return tuple(prepared)
 
 
 def completion_key(
