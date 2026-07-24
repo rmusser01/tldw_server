@@ -5,33 +5,75 @@ on:
     branches:
       - main
       - dev
+  workflow_run:
+    workflows: [Frontend License Gate Audit]
+    types: [completed]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: e2e-required-${{ github.event.pull_request.number || github.ref }}
+  group: e2e-required-${{ github.event.workflow_run.pull_requests[0].number || github.event.pull_request.number || github.ref || github.run_id }}
   cancel-in-progress: true
 
 jobs:
+  admission:
+    if: >-
+      vars.LICENSE_FIRST_CI_ENABLED == 'true' &&
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success'
+    uses: ./.github/workflows/license-first-admission.yml
+    with:
+      workflow_file: e2e-required.yml
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+      statuses: read
+
   changes:
     name: Detect Gate Changes
+    needs: admission
+    if: >-
+      always() && !cancelled() &&
+      (
+        (
+          github.event_name == 'workflow_run' &&
+          needs.admission.result == 'success' &&
+          needs.admission.outputs.should_run == 'true'
+        ) ||
+        github.event_name != 'workflow_run'
+      )
     runs-on: ubuntu-latest
     outputs:
-      backend_changed: ${{ steps.detect.outputs.backend_changed }}
-      frontend_changed: ${{ steps.detect.outputs.frontend_changed }}
-      e2e_changed: ${{ steps.detect.outputs.e2e_changed }}
-      security_relevant_changed: ${{ steps.detect.outputs.security_relevant_changed }}
-      coverage_required: ${{ steps.detect.outputs.coverage_required }}
+      backend_changed: ${{ steps.detect.outputs.backend_changed || steps.detect_admitted.outputs.backend_changed }}
+      frontend_changed: ${{ steps.detect.outputs.frontend_changed || steps.detect_admitted.outputs.frontend_changed }}
+      e2e_changed: ${{ steps.detect.outputs.e2e_changed || steps.detect_admitted.outputs.e2e_changed }}
+      security_relevant_changed: ${{ steps.detect.outputs.security_relevant_changed || steps.detect_admitted.outputs.security_relevant_changed }}
+      coverage_required: ${{ steps.detect.outputs.coverage_required || steps.detect_admitted.outputs.coverage_required }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           fetch-depth: 0
+          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
       - id: detect
         name: Classify changed files
+        if: github.event_name != 'workflow_run'
         uses: ./.github/actions/detect-required-gate-changes
+      - id: detect_admitted
+        name: Classify admitted changed files
+        if: github.event_name == 'workflow_run'
+        shell: bash
+        env:
+          BASE_SHA: ${{ needs.admission.outputs.base_sha }}
+          HEAD_SHA: ${{ needs.admission.outputs.head_sha }}
+        run: |
+          set -euo pipefail
+          mapfile -t CHANGED_FILES < <(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
+          python -m Helper_Scripts.ci.emit_ci_gate_flags "${CHANGED_FILES[@]}"
 
   e2e-required:
     name: e2e-required
@@ -68,6 +110,9 @@ jobs:
       - name: Checkout
         if: needs.changes.outputs.e2e_changed == 'true'
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
 
       - name: Install FFmpeg and PortAudio (Linux)
         if: needs.changes.outputs.e2e_changed == 'true'

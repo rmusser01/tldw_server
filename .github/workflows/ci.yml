@@ -10,6 +10,9 @@ on:
     branches:
       - main
       - dev
+  workflow_run:
+    workflows: [Frontend License Gate Audit]
+    types: [completed]
   workflow_dispatch:
   release:
     types: [published]
@@ -22,17 +25,45 @@ env:
 
 concurrency:
   # Ensure newer PR commits cancel older queued runs for the same PR.
-  group: ci-${{ github.event.pull_request.number || github.ref }}
+  group: ci-${{ github.event.workflow_run.pull_requests[0].number || github.event.pull_request.number || github.ref || github.run_id }}
   cancel-in-progress: true
 
 jobs:
+  admission:
+    if: >-
+      vars.LICENSE_FIRST_CI_ENABLED == 'true' &&
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success'
+    uses: ./.github/workflows/license-first-admission.yml
+    with:
+      workflow_file: ci.yml
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+      statuses: read
+
   http-client-patch-guard:
     name: HTTP Client Patch Guard
+    needs: admission
+    if: >-
+      always() && !cancelled() &&
+      (
+        (
+          github.event_name == 'workflow_run' &&
+          needs.admission.result == 'success' &&
+          needs.admission.outputs.should_run == 'true'
+        ) ||
+        github.event_name != 'workflow_run'
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
       - name: Setup Python
         uses: actions/setup-python@v6
         with:
@@ -42,11 +73,25 @@ jobs:
           python Helper_Scripts/checks/guard_http_client_patching.py
   syntax-check:
     name: Syntax Check (compileall)
+    needs: admission
+    if: >-
+      always() && !cancelled() &&
+      (
+        (
+          github.event_name == 'workflow_run' &&
+          needs.admission.result == 'success' &&
+          needs.admission.outputs.should_run == 'true'
+        ) ||
+        github.event_name != 'workflow_run'
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
       - name: Setup Python
         uses: actions/setup-python@v6
         with:
@@ -61,11 +106,25 @@ jobs:
           PY
   shard-coverage:
     name: Shard coverage guard
+    needs: admission
+    if: >-
+      always() && !cancelled() &&
+      (
+        (
+          github.event_name == 'workflow_run' &&
+          needs.admission.result == 'success' &&
+          needs.admission.outputs.should_run == 'true'
+        ) ||
+        github.event_name != 'workflow_run'
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
       - name: Setup Python
         uses: actions/setup-python@v6
         with:
@@ -79,11 +138,25 @@ jobs:
         run: python Helper_Scripts/ci/check_shard_coverage.py --ci-file .github/workflows/ci.yml
   quickstart-dry-run:
     name: Quickstart Dry-Run Smoke
+    needs: admission
+    if: >-
+      always() && !cancelled() &&
+      (
+        (
+          github.event_name == 'workflow_run' &&
+          needs.admission.result == 'success' &&
+          needs.admission.outputs.should_run == 'true'
+        ) ||
+        github.event_name != 'workflow_run'
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Checkout
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
+        with:
+          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
       - name: Setup Python
         uses: actions/setup-python@v6
         with:
@@ -93,11 +166,25 @@ jobs:
           make -n quickstart-install
   lint:
     name: Lint & Type Check
+    needs: admission
+    if: >-
+      always() && !cancelled() &&
+      (
+        (
+          github.event_name == 'workflow_run' &&
+          needs.admission.result == 'success' &&
+          needs.admission.outputs.should_run == 'true'
+        ) ||
+        github.event_name != 'workflow_run'
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
 
       - name: Setup Python
         uses: actions/setup-python@v6
@@ -123,6 +210,17 @@ jobs:
 
   frontend-lint:
     name: Frontend Lint (Next.js)
+    needs: admission
+    if: >-
+      always() && !cancelled() &&
+      (
+        (
+          github.event_name == 'workflow_run' &&
+          needs.admission.result == 'success' &&
+          needs.admission.outputs.should_run == 'true'
+        ) ||
+        github.event_name != 'workflow_run'
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -130,6 +228,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -151,6 +252,17 @@ jobs:
 
   wizard-tests:
     name: Wizard Tests (Coverage Gate)
+    needs: admission
+    if: >-
+      always() && !cancelled() &&
+      (
+        (
+          github.event_name == 'workflow_run' &&
+          needs.admission.result == 'success' &&
+          needs.admission.outputs.should_run == 'true'
+        ) ||
+        github.event_name != 'workflow_run'
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 20
     services:
@@ -194,6 +306,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
 
       - name: Install FFmpeg and PortAudio (Linux)
         uses: ./.github/actions/setup-ffmpeg
@@ -259,24 +374,49 @@ jobs:
 
   changes:
     name: Detect changed areas
+    needs: admission
+    if: >-
+      always() && !cancelled() &&
+      (
+        (
+          github.event_name == 'workflow_run' &&
+          needs.admission.result == 'success' &&
+          needs.admission.outputs.should_run == 'true'
+        ) ||
+        github.event_name != 'workflow_run'
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      backend_changed: ${{ steps.detect.outputs.backend_changed }}
+      backend_changed: ${{ steps.detect.outputs.backend_changed || steps.detect_admitted.outputs.backend_changed }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           fetch-depth: 0
+          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
       - name: Classify changed paths
         id: detect
+        if: github.event_name != 'workflow_run'
         uses: ./.github/actions/detect-required-gate-changes
+      - name: Classify admitted changed paths
+        id: detect_admitted
+        if: github.event_name == 'workflow_run'
+        shell: bash
+        env:
+          BASE_SHA: ${{ needs.admission.outputs.base_sha }}
+          HEAD_SHA: ${{ needs.admission.outputs.head_sha }}
+        run: |
+          set -euo pipefail
+          mapfile -t CHANGED_FILES < <(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
+          python -m Helper_Scripts.ci.emit_ci_gate_flags "${CHANGED_FILES[@]}"
   full-suite-linux-311-smoke:
     name: Full Suite (Ubuntu / Python 3.11 / ${{ matrix.shard.name }})
     runs-on: ubuntu-latest
     timeout-minutes: 25
     needs: [lint, syntax-check, changes]
-    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.backend_changed == 'true' }}
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'workflow_run') || needs.changes.outputs.backend_changed == 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -364,6 +504,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
 
       - name: Install FFmpeg and PortAudio (Linux)
         uses: ./.github/actions/setup-ffmpeg
@@ -499,7 +642,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     needs: [lint, syntax-check, changes]
-    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.backend_changed == 'true' }}
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'workflow_run') || needs.changes.outputs.backend_changed == 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -1673,6 +1816,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
 
       - name: Install FFmpeg and PortAudio (Linux)
         uses: ./.github/actions/setup-ffmpeg
@@ -1909,8 +2055,22 @@ jobs:
   full-suite-linux-312-summary:
     name: Full Suite (Ubuntu / Python 3.12)
     runs-on: ubuntu-latest
-    needs: [full-suite-linux-312-shards, changes]
-    if: ${{ always() && (github.event_name != 'pull_request' || needs.changes.outputs.backend_changed == 'true') }}
+    needs: [full-suite-linux-312-shards, changes, admission]
+    if: >-
+      always() && !cancelled() &&
+      (
+        (
+          github.event_name == 'workflow_run' &&
+          needs.admission.result == 'success' &&
+          needs.admission.outputs.should_run == 'true'
+        ) ||
+        github.event_name != 'workflow_run'
+      ) &&
+      (
+        (github.event_name != 'pull_request' &&
+         github.event_name != 'workflow_run') ||
+        needs.changes.outputs.backend_changed == 'true'
+      )
     steps:
       - name: Check Python 3.12 shard result
         shell: bash
@@ -1927,7 +2087,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     needs: [lint, syntax-check, changes]
-    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.backend_changed == 'true' }}
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'workflow_run') || needs.changes.outputs.backend_changed == 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -3101,6 +3261,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
 
       - name: Install FFmpeg and PortAudio (Linux)
         uses: ./.github/actions/setup-ffmpeg
@@ -3281,8 +3444,22 @@ jobs:
   full-suite-linux-313-summary:
     name: Full Suite (Ubuntu / Python 3.13)
     runs-on: ubuntu-latest
-    needs: [full-suite-linux-313-shards, changes]
-    if: ${{ always() && (github.event_name != 'pull_request' || needs.changes.outputs.backend_changed == 'true') }}
+    needs: [full-suite-linux-313-shards, changes, admission]
+    if: >-
+      always() && !cancelled() &&
+      (
+        (
+          github.event_name == 'workflow_run' &&
+          needs.admission.result == 'success' &&
+          needs.admission.outputs.should_run == 'true'
+        ) ||
+        github.event_name != 'workflow_run'
+      ) &&
+      (
+        (github.event_name != 'pull_request' &&
+         github.event_name != 'workflow_run') ||
+        needs.changes.outputs.backend_changed == 'true'
+      )
     steps:
       - name: Check Python 3.13 shard result
         shell: bash
@@ -3300,7 +3477,7 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 60
     needs: [lint, syntax-check, changes]
-    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.backend_changed == 'true' }}
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'workflow_run') || needs.changes.outputs.backend_changed == 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -4376,6 +4553,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
 
       - name: Install FFmpeg (multi-OS)
         uses: ./.github/actions/setup-ffmpeg
@@ -4505,8 +4685,22 @@ jobs:
   full-suite-macos-312-summary:
     name: Full Suite (macos-latest / Python 3.12)
     runs-on: ubuntu-latest
-    needs: [full-suite-macos-312-shards, changes]
-    if: ${{ always() && (github.event_name != 'pull_request' || needs.changes.outputs.backend_changed == 'true') }}
+    needs: [full-suite-macos-312-shards, changes, admission]
+    if: >-
+      always() && !cancelled() &&
+      (
+        (
+          github.event_name == 'workflow_run' &&
+          needs.admission.result == 'success' &&
+          needs.admission.outputs.should_run == 'true'
+        ) ||
+        github.event_name != 'workflow_run'
+      ) &&
+      (
+        (github.event_name != 'pull_request' &&
+         github.event_name != 'workflow_run') ||
+        needs.changes.outputs.backend_changed == 'true'
+      )
     steps:
       - name: Check macos-latest Python 3.12 shard result
         shell: bash
@@ -4523,7 +4717,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 60
     needs: [lint, syntax-check, changes]
-    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.backend_changed == 'true' }}
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'workflow_run') || needs.changes.outputs.backend_changed == 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -5599,6 +5793,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
 
       - name: Install FFmpeg (multi-OS)
         uses: ./.github/actions/setup-ffmpeg
@@ -5733,8 +5930,22 @@ jobs:
   full-suite-windows-312-summary:
     name: Full Suite (windows-latest / Python 3.12)
     runs-on: ubuntu-latest
-    needs: [full-suite-windows-312-shards, changes]
-    if: ${{ always() && (github.event_name != 'pull_request' || needs.changes.outputs.backend_changed == 'true') }}
+    needs: [full-suite-windows-312-shards, changes, admission]
+    if: >-
+      always() && !cancelled() &&
+      (
+        (
+          github.event_name == 'workflow_run' &&
+          needs.admission.result == 'success' &&
+          needs.admission.outputs.should_run == 'true'
+        ) ||
+        github.event_name != 'workflow_run'
+      ) &&
+      (
+        (github.event_name != 'pull_request' &&
+         github.event_name != 'workflow_run') ||
+        needs.changes.outputs.backend_changed == 'true'
+      )
     steps:
       - name: Check windows-latest Python 3.12 shard result
         shell: bash
@@ -5751,7 +5962,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 35
     needs: [lint, syntax-check]
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && github.event_name != 'workflow_run'
     strategy:
       fail-fast: false
       matrix:
@@ -6828,6 +7039,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
 
       - name: Install FFmpeg (multi-OS)
         uses: ./.github/actions/setup-ffmpeg
@@ -6959,7 +7173,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     needs: [full-suite-linux-312-summary, full-suite-linux-313-summary, changes]
-    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.backend_changed == 'true' }}
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'workflow_run') || needs.changes.outputs.backend_changed == 'true' }}
     env:
       PYTHONPATH: .
       PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
@@ -6968,6 +7182,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
 
       - name: Install FFmpeg and PortAudio (Linux)
         uses: ./.github/actions/setup-ffmpeg

@@ -7,6 +7,9 @@ on:
       - 'apps/packages/ui/src/**'
       - 'apps/tldw-frontend/**'
       - 'tldw_Server_API/**'
+  workflow_run:
+    workflows: [Frontend License Gate Audit]
+    types: [completed]
   workflow_dispatch:
     inputs:
       tier:
@@ -28,19 +31,46 @@ env:
   SKIP_WXT_PREPARE: '1'
 
 concurrency:
-  group: frontend-e2e-tiers-${{ github.event.pull_request.number || github.ref }}
+  group: frontend-e2e-tiers-${{ github.event.workflow_run.pull_requests[0].number || github.event.pull_request.number || github.ref || github.run_id }}
   cancel-in-progress: true
 
 jobs:
+  admission:
+    if: >-
+      vars.LICENSE_FIRST_CI_ENABLED == 'true' &&
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success'
+    uses: ./.github/workflows/license-first-admission.yml
+    with:
+      workflow_file: frontend-e2e-tiers.yml
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+      statuses: read
+
   # ── Tier 1 + Journeys (critical path — always runs on PR) ─────────────
   critical:
     name: E2E Critical (Tier 1 + Journeys)
+    needs: admission
     runs-on: ubuntu-latest
     timeout-minutes: 30
     if: >-
-      github.event_name == 'pull_request' ||
-      (github.event_name == 'workflow_dispatch' &&
-       contains(fromJSON('["critical","all-tiers"]'), github.event.inputs.tier))
+      always() && !cancelled() &&
+      (
+        (
+          github.event_name == 'workflow_run' &&
+          needs.admission.result == 'success' &&
+          needs.admission.outputs.should_run == 'true'
+        ) ||
+        github.event_name != 'workflow_run'
+      ) &&
+      (
+        (github.event_name == 'pull_request' ||
+         github.event_name == 'workflow_run') ||
+        (github.event_name == 'workflow_dispatch' &&
+         contains(fromJSON('["critical","all-tiers"]'), github.event.inputs.tier))
+      )
     services:
       redis:
         image: mirror.gcr.io/library/redis:8-alpine@sha256:9eb6a7ba3d344e1958c7e1589fa3dee90373a934e8159c634562a91d622759a0
@@ -64,6 +94,9 @@ jobs:
       PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION: python
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
 
       - name: Install FFmpeg and PortAudio (Linux)
         uses: ./.github/actions/setup-ffmpeg
@@ -129,11 +162,23 @@ jobs:
   # ── Tier 2 + 3 (features — on dispatch or full suite) ─────────────────
   features:
     name: E2E Features (Tier 2 + 3)
+    needs: admission
     runs-on: ubuntu-latest
     timeout-minutes: 30
     if: >-
-      github.event_name == 'workflow_dispatch' &&
-      contains(fromJSON('["features","all-tiers"]'), github.event.inputs.tier)
+      always() && !cancelled() &&
+      (
+        (
+          github.event_name == 'workflow_run' &&
+          needs.admission.result == 'success' &&
+          needs.admission.outputs.should_run == 'true'
+        ) ||
+        github.event_name != 'workflow_run'
+      ) &&
+      (
+        github.event_name == 'workflow_dispatch' &&
+        contains(fromJSON('["features","all-tiers"]'), github.event.inputs.tier)
+      )
     services:
       redis:
         image: mirror.gcr.io/library/redis:8-alpine@sha256:9eb6a7ba3d344e1958c7e1589fa3dee90373a934e8159c634562a91d622759a0
@@ -157,6 +202,9 @@ jobs:
       PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION: python
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
 
       - name: Install FFmpeg and PortAudio (Linux)
         uses: ./.github/actions/setup-ffmpeg
@@ -214,11 +262,23 @@ jobs:
   # ── Tier 4 + 5 (admin/specialized — on dispatch or full suite) ────────
   admin:
     name: E2E Admin (Tier 4 + 5)
+    needs: admission
     runs-on: ubuntu-latest
     timeout-minutes: 30
     if: >-
-      github.event_name == 'workflow_dispatch' &&
-      contains(fromJSON('["admin","all-tiers"]'), github.event.inputs.tier)
+      always() && !cancelled() &&
+      (
+        (
+          github.event_name == 'workflow_run' &&
+          needs.admission.result == 'success' &&
+          needs.admission.outputs.should_run == 'true'
+        ) ||
+        github.event_name != 'workflow_run'
+      ) &&
+      (
+        github.event_name == 'workflow_dispatch' &&
+        contains(fromJSON('["admin","all-tiers"]'), github.event.inputs.tier)
+      )
     services:
       redis:
         image: mirror.gcr.io/library/redis:8-alpine@sha256:9eb6a7ba3d344e1958c7e1589fa3dee90373a934e8159c634562a91d622759a0
@@ -242,6 +302,9 @@ jobs:
       PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION: python
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
 
       - name: Install FFmpeg and PortAudio (Linux)
         uses: ./.github/actions/setup-ffmpeg

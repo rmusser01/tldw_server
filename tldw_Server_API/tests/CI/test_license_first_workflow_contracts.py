@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import subprocess
@@ -18,6 +19,218 @@ EXPECTED_PERMISSIONS = {
     "pull-requests": "read",
     "statuses": "read",
 }
+ORDINARY_WORKFLOW_NAMES = (
+    "actionlint.yml",
+    "backend-required.yml",
+    "ci.yml",
+    "codeql.yml",
+    "container-build-check.yml",
+    "coverage-required.yml",
+    "e2e-required.yml",
+    "e2e-smoke.yml",
+    "frontend-e2e-tiers.yml",
+    "frontend-required.yml",
+    "frontend-ux-gates.yml",
+    "jobs-suite.yml",
+    "mcp-unified-rc.yml",
+    "notes-remediation-targeted.yml",
+    "onboarding-docs-gate.yml",
+    "pre-commit.yml",
+    "pypi-package.yml",
+    "sbom.yml",
+    "security-required.yml",
+    "ui-characters-harness-tests.yml",
+    "ui-dictionaries-tests.yml",
+    "ui-playground-quality-gates.yml",
+    "ui-research-workspace-parity.yml",
+    "ui-watchlists-a11y-gates.yml",
+    "ui-watchlists-extension-e2e.yml",
+    "ui-watchlists-help-tests.yml",
+    "ui-watchlists-scale-gates.yml",
+    "ui-worldbooks-tests.yml",
+)
+DIRECT_TRIGGER_DIGESTS = {
+    "actionlint.yml": "d31daa2c3e010b3a70dcbd640ef24f573bea18619228e7548c50992c54df0e99",
+    "backend-required.yml": "4b65b09e5b40faee5abc68a5e88fd114d8fd4b5b0ae84eb977474336ffdd6653",
+    "ci.yml": "a2ef246f468b2b946f6fa5f9805497d9c8a1c4ca7f3ef395172a290a17a3b3a6",
+    "codeql.yml": "8592a8565d97d233d6b27fb13d9a563f673550f3d8220d0b262487346a70e25f",
+    "container-build-check.yml": "4b65b09e5b40faee5abc68a5e88fd114d8fd4b5b0ae84eb977474336ffdd6653",
+    "coverage-required.yml": "4b65b09e5b40faee5abc68a5e88fd114d8fd4b5b0ae84eb977474336ffdd6653",
+    "e2e-required.yml": "4b65b09e5b40faee5abc68a5e88fd114d8fd4b5b0ae84eb977474336ffdd6653",
+    "e2e-smoke.yml": "47fa5c3b099aeee7d744da19e5c8db6f403d82963b9d19b9f60292f0377d7180",
+    "frontend-e2e-tiers.yml": "c157a675e397e879a8b394b26a99e472dfbe87f5f3f6236c63907d6d21897a79",
+    "frontend-required.yml": "4b65b09e5b40faee5abc68a5e88fd114d8fd4b5b0ae84eb977474336ffdd6653",
+    "frontend-ux-gates.yml": "4b65b09e5b40faee5abc68a5e88fd114d8fd4b5b0ae84eb977474336ffdd6653",
+    "jobs-suite.yml": "023309eacbc53b533c94c56e00e710422e6e5885ba06a0921524964db7cf4476",
+    "mcp-unified-rc.yml": "ea068480ced74050907f60b459dd2ce5b5c33abf348e45286b904644645fe84b",
+    "notes-remediation-targeted.yml": "090c7ff3c4b668cd6c76fc3b9fc9a1b3be128b21b3b2b236cdfe33dd6f5edb5a",
+    "onboarding-docs-gate.yml": "38fc27642d68b7b198e20a9e910ddfa2e1f626b32be5911df63d64c89cb60afa",
+    "pre-commit.yml": "d3d381eead20326078cb0268da7340f8217d95336af86c8d9701419c5e67d3be",
+    "pypi-package.yml": "1faf356cfe858d94100ea61d578f0b9d132c73533277c552fd03f1e3ac141823",
+    "sbom.yml": "6ba4774ab2129a605bb160c5ee6f48ebc51544881592ad60ad5268b910fcfbde",
+    "security-required.yml": "4b65b09e5b40faee5abc68a5e88fd114d8fd4b5b0ae84eb977474336ffdd6653",
+    "ui-characters-harness-tests.yml": "8977899d9903b59c454c686e1fda272a7b919f63782d84ec8c24973449f2eee6",
+    "ui-dictionaries-tests.yml": "f191b9920abca964265ff7ff4510cc9ac554770d4e4a0b8b172854147c0c0dbe",
+    "ui-playground-quality-gates.yml": "af4b03b1d48dd12b93e1bd39a8036109b26a7890ee5cd8ef8ed57b7d2da3008a",
+    "ui-research-workspace-parity.yml": "aa73478a8917cbf0eb7be01e1f4212f1a0692200919d9a09982ab6525af49503",
+    "ui-watchlists-a11y-gates.yml": "3c66abf5ccddb422faad37764afec0e3c9d0ec66e74c36844f99425eb0214526",
+    "ui-watchlists-extension-e2e.yml": "6a6261171eac7c6c12ddc95f3916bc22b0023d5398b06237db4d1fc0e85f6a6b",
+    "ui-watchlists-help-tests.yml": "fe0ad30818f046c2ae0c54a10a1bb9f481968d8b73545ebe934135b2fed88907",
+    "ui-watchlists-scale-gates.yml": "9001042a9f6b85245d7f80dc4d13e16b214df17c2629e1c733ee691e99a4c884",
+    "ui-worldbooks-tests.yml": "c09cbf04ae823361ff2fb13da6b9c4c2b55773a2e58e88bf8bea635f30221ed2",
+}
+ORIGINAL_JOB_NAMES = {
+    "actionlint.yml": ("actionlint",),
+    "backend-required.yml": ("changes", "backend-required"),
+    "ci.yml": (
+        "http-client-patch-guard",
+        "syntax-check",
+        "shard-coverage",
+        "quickstart-dry-run",
+        "lint",
+        "frontend-lint",
+        "wizard-tests",
+        "changes",
+        "full-suite-linux-311-smoke",
+        "full-suite-linux-312-shards",
+        "full-suite-linux-312-summary",
+        "full-suite-linux-313-shards",
+        "full-suite-linux-313-summary",
+        "full-suite-macos-312-shards",
+        "full-suite-macos-312-summary",
+        "full-suite-windows-312-shards",
+        "full-suite-windows-312-summary",
+        "full-suite-os-313-release-shards",
+        "character-chat-rate-limits",
+    ),
+    "codeql.yml": ("analyze",),
+    "container-build-check.yml": ("build", "container-build-check"),
+    "coverage-required.yml": ("changes", "coverage-required"),
+    "e2e-required.yml": ("changes", "e2e-required"),
+    "e2e-smoke.yml": ("e2e-smoke",),
+    "frontend-e2e-tiers.yml": ("critical", "features", "admin"),
+    "frontend-required.yml": ("changes", "frontend-required"),
+    "frontend-ux-gates.yml": ("onboarding-gate", "smoke-gate"),
+    "jobs-suite.yml": ("jobs-sqlite", "jobs-postgres"),
+    "mcp-unified-rc.yml": ("internal-rc",),
+    "notes-remediation-targeted.yml": ("notes-ui-remediation", "notes-backend-remediation"),
+    "onboarding-docs-gate.yml": ("onboarding-docs-gate",),
+    "pre-commit.yml": ("run-pre-commit",),
+    "pypi-package.yml": ("build-and-check",),
+    "sbom.yml": ("build-sbom",),
+    "security-required.yml": ("changes", "security-required"),
+    "ui-characters-harness-tests.yml": ("characters-harness",),
+    "ui-dictionaries-tests.yml": ("dictionaries-vitest",),
+    "ui-playground-quality-gates.yml": ("playground-quality",),
+    "ui-research-workspace-parity.yml": (
+        "webui-research-workspace-parity",
+        "extension-research-workspace-parity",
+    ),
+    "ui-watchlists-a11y-gates.yml": ("watchlists-a11y-gate",),
+    "ui-watchlists-extension-e2e.yml": ("watchlists-extension-e2e",),
+    "ui-watchlists-help-tests.yml": ("watchlists-help-vitest",),
+    "ui-watchlists-scale-gates.yml": ("watchlists-scale-gate",),
+    "ui-worldbooks-tests.yml": ("worldbooks-vitest",),
+}
+ORIGINAL_DEPENDENCIES = {
+    ("backend-required.yml", "backend-required"): ("changes",),
+    ("ci.yml", "full-suite-linux-311-smoke"): ("lint", "syntax-check", "changes"),
+    ("ci.yml", "full-suite-linux-312-shards"): ("lint", "syntax-check", "changes"),
+    ("ci.yml", "full-suite-linux-312-summary"): ("full-suite-linux-312-shards", "changes"),
+    ("ci.yml", "full-suite-linux-313-shards"): ("lint", "syntax-check", "changes"),
+    ("ci.yml", "full-suite-linux-313-summary"): ("full-suite-linux-313-shards", "changes"),
+    ("ci.yml", "full-suite-macos-312-shards"): ("lint", "syntax-check", "changes"),
+    ("ci.yml", "full-suite-macos-312-summary"): ("full-suite-macos-312-shards", "changes"),
+    ("ci.yml", "full-suite-windows-312-shards"): ("lint", "syntax-check", "changes"),
+    ("ci.yml", "full-suite-windows-312-summary"): ("full-suite-windows-312-shards", "changes"),
+    ("ci.yml", "full-suite-os-313-release-shards"): ("lint", "syntax-check"),
+    ("ci.yml", "character-chat-rate-limits"): (
+        "full-suite-linux-312-summary",
+        "full-suite-linux-313-summary",
+        "changes",
+    ),
+    ("container-build-check.yml", "container-build-check"): ("build",),
+    ("coverage-required.yml", "coverage-required"): ("changes",),
+    ("e2e-required.yml", "e2e-required"): ("changes",),
+    ("frontend-required.yml", "frontend-required"): ("changes",),
+    ("jobs-suite.yml", "jobs-postgres"): ("jobs-sqlite",),
+    ("security-required.yml", "security-required"): ("changes",),
+}
+ALWAYS_ROLLUPS = {
+    ("container-build-check.yml", "container-build-check"),
+    ("ci.yml", "full-suite-linux-312-summary"),
+    ("ci.yml", "full-suite-linux-313-summary"),
+    ("ci.yml", "full-suite-macos-312-summary"),
+    ("ci.yml", "full-suite-windows-312-summary"),
+}
+DIRECT_ADMISSION_JOBS = ALWAYS_ROLLUPS | {
+    ("backend-required.yml", "backend-required"),
+    ("frontend-required.yml", "frontend-required"),
+    ("security-required.yml", "security-required"),
+}
+BACKEND_CHANGED_JOBS = {
+    "full-suite-linux-311-smoke",
+    "full-suite-linux-312-shards",
+    "full-suite-linux-312-summary",
+    "full-suite-linux-313-shards",
+    "full-suite-linux-313-summary",
+    "full-suite-macos-312-shards",
+    "full-suite-macos-312-summary",
+    "full-suite-windows-312-shards",
+    "full-suite-windows-312-summary",
+    "character-chat-rate-limits",
+}
+FETCH_DEPTH_CHECKOUTS = {
+    ("backend-required.yml", "changes"),
+    ("ci.yml", "changes"),
+    ("coverage-required.yml", "changes"),
+    ("e2e-required.yml", "changes"),
+    ("frontend-required.yml", "changes"),
+    ("onboarding-docs-gate.yml", "onboarding-docs-gate"),
+    ("pre-commit.yml", "run-pre-commit"),
+    ("security-required.yml", "changes"),
+}
+CHANGE_CLASSIFIER_OUTPUTS = {
+    "backend-required.yml": {
+        "backend_changed",
+        "frontend_changed",
+        "e2e_changed",
+        "security_relevant_changed",
+        "coverage_required",
+    },
+    "ci.yml": {"backend_changed"},
+    "coverage-required.yml": {
+        "backend_changed",
+        "frontend_changed",
+        "e2e_changed",
+        "security_relevant_changed",
+        "coverage_required",
+    },
+    "e2e-required.yml": {
+        "backend_changed",
+        "frontend_changed",
+        "e2e_changed",
+        "security_relevant_changed",
+        "coverage_required",
+    },
+    "frontend-required.yml": {
+        "backend_changed",
+        "frontend_changed",
+        "tldw_frontend_changed",
+        "family_guardrails_changed",
+        "admin_ui_changed",
+        "e2e_changed",
+        "security_relevant_changed",
+        "coverage_required",
+    },
+    "security-required.yml": {
+        "backend_changed",
+        "frontend_changed",
+        "e2e_changed",
+        "security_relevant_changed",
+        "coverage_required",
+    },
+}
 
 
 def _load_workflow() -> tuple[dict[str, Any], str]:
@@ -33,6 +246,31 @@ def _trigger(data: dict[str, Any]) -> dict[str, Any]:
     trigger = data[trigger_key]
     assert isinstance(trigger, dict)
     return trigger
+
+
+def _load_ordinary_workflows() -> dict[str, tuple[dict[str, Any], str]]:
+    workflows: dict[str, tuple[dict[str, Any], str]] = {}
+    for path in sorted((REPO_ROOT / ".github/workflows").glob("*.yml")):
+        text = path.read_text(encoding="utf-8")
+        data = yaml.safe_load(text)
+        if not isinstance(data, dict):
+            continue
+        trigger = _trigger(data)
+        if "pull_request" in trigger:
+            workflows[path.name] = (data, text)
+    return workflows
+
+
+def _needs(job: dict[str, Any]) -> list[str]:
+    needs = job.get("needs", [])
+    return [needs] if isinstance(needs, str) else list(needs)
+
+
+def _normalized(expression: object) -> str:
+    text = str(expression).strip()
+    if text.startswith("${{") and text.endswith("}}"):
+        text = text[3:-2]
+    return re.sub(r"\s+", "", text)
 
 
 def _admission_job(data: dict[str, Any]) -> dict[str, Any]:
@@ -59,6 +297,259 @@ def _unquoted_shell_expansions(script: str) -> list[str]:
             if unescaped_double_quotes % 2 == 0:
                 expansions.append(match.group())
     return expansions
+
+
+def test_ordinary_pr_workflow_inventory_and_direct_triggers_are_frozen() -> None:
+    workflows = _load_ordinary_workflows()
+    assert tuple(workflows) == ORDINARY_WORKFLOW_NAMES
+    assert set(DIRECT_TRIGGER_DIGESTS) == set(ORDINARY_WORKFLOW_NAMES)
+
+    for name, (data, _) in workflows.items():
+        direct_trigger = dict(_trigger(data))
+        direct_trigger.pop("workflow_run", None)
+        encoded = json.dumps(direct_trigger, sort_keys=True, separators=(",", ":")).encode()
+        assert hashlib.sha256(encoded).hexdigest() == DIRECT_TRIGGER_DIGESTS[name], name
+
+
+def test_all_ordinary_workflows_call_exact_inert_admission_gate() -> None:
+    for name, (data, _) in _load_ordinary_workflows().items():
+        assert _trigger(data)["workflow_run"] == {
+            "workflows": ["Frontend License Gate Audit"],
+            "types": ["completed"],
+        }, name
+
+        admission = data["jobs"]["admission"]
+        assert admission == {
+            "if": (
+                "vars.LICENSE_FIRST_CI_ENABLED == 'true' && "
+                "github.event_name == 'workflow_run' && "
+                "github.event.workflow_run.conclusion == 'success'"
+            ),
+            "uses": "./.github/workflows/license-first-admission.yml",
+            "with": {"workflow_file": name},
+            "permissions": EXPECTED_PERMISSIONS,
+        }, name
+
+
+def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> None:
+    checkout_count = 0
+    admission_clause = (
+        """
+        always() && !cancelled() &&
+        (
+          (
+            github.event_name == 'workflow_run' &&
+            needs.admission.result == 'success' &&
+            needs.admission.outputs.should_run == 'true'
+          ) ||
+          github.event_name != 'workflow_run'
+        )
+        """
+    )
+    event_ref = (
+        "${{ github.event.workflow_run.pull_requests[0].head.sha || "
+        "github.event.pull_request.head.sha || github.sha }}"
+    )
+    admission_ref = (
+        "${{ needs.admission.outputs.head_sha || "
+        "github.event.workflow_run.pull_requests[0].head.sha || "
+        "github.event.pull_request.head.sha || github.sha }}"
+    )
+    backend_changed = (
+        "(github.event_name != 'pull_request' && "
+        "github.event_name != 'workflow_run') || "
+        "needs.changes.outputs.backend_changed == 'true'"
+    )
+    frontend_conditions = {
+        "critical": (
+            "(github.event_name == 'pull_request' || "
+            "github.event_name == 'workflow_run') || "
+            "(github.event_name == 'workflow_dispatch' && "
+            "contains(fromJSON('[\"critical\",\"all-tiers\"]'), github.event.inputs.tier))"
+        ),
+        "features": (
+            "github.event_name == 'workflow_dispatch' && "
+            "contains(fromJSON('[\"features\",\"all-tiers\"]'), github.event.inputs.tier)"
+        ),
+        "admin": (
+            "github.event_name == 'workflow_dispatch' && "
+            "contains(fromJSON('[\"admin\",\"all-tiers\"]'), github.event.inputs.tier)"
+        ),
+    }
+
+    for name, (data, _) in _load_ordinary_workflows().items():
+        jobs = data["jobs"]
+        assert tuple(job_name for job_name in jobs if job_name != "admission") == ORIGINAL_JOB_NAMES[name]
+        for job_name in ORIGINAL_JOB_NAMES[name]:
+            job = jobs[job_name]
+            needs = _needs(job)
+            original_needs = ORIGINAL_DEPENDENCIES.get((name, job_name), ())
+            assert tuple(dependency for dependency in needs if dependency != "admission") == original_needs
+
+            root = not original_needs
+            directly_guarded = (name, job_name) in DIRECT_ADMISSION_JOBS
+            if root or directly_guarded:
+                assert needs.count("admission") == 1, (name, job_name)
+                extra_condition = None
+                if name == "frontend-e2e-tiers.yml":
+                    extra_condition = frontend_conditions[job_name]
+                elif name == "ci.yml" and job_name in BACKEND_CHANGED_JOBS:
+                    extra_condition = backend_changed
+                elif (name, job_name) in {
+                    ("backend-required.yml", "backend-required"),
+                    ("frontend-required.yml", "frontend-required"),
+                    ("security-required.yml", "security-required"),
+                }:
+                    extra_condition = "needs.changes.result == 'success'"
+                expected_condition = admission_clause
+                if extra_condition:
+                    expected_condition += f" && ({extra_condition})"
+                assert _normalized(job.get("if")) == _normalized(expected_condition), (name, job_name)
+            else:
+                assert "admission" not in needs, (name, job_name)
+                if name == "ci.yml" and job_name in BACKEND_CHANGED_JOBS:
+                    assert _normalized(job.get("if")) == _normalized(backend_changed), (name, job_name)
+                elif (name, job_name) == ("ci.yml", "full-suite-os-313-release-shards"):
+                    assert _normalized(job.get("if")) == _normalized(
+                        "github.event_name != 'pull_request' && "
+                        "github.event_name != 'workflow_run'"
+                    )
+                else:
+                    assert job.get("if") is None, (name, job_name)
+
+            for step in job.get("steps", []):
+                if not str(step.get("uses", "")).startswith("actions/checkout@"):
+                    continue
+                checkout_count += 1
+                checkout_inputs = step.get("with", {})
+                assert checkout_inputs.get("persist-credentials") is False, (name, job_name)
+                expected_ref = admission_ref if "admission" in needs else event_ref
+                assert checkout_inputs.get("ref") == expected_ref, (name, job_name)
+                other_inputs = {
+                    key: value
+                    for key, value in checkout_inputs.items()
+                    if key not in {"ref", "persist-credentials"}
+                }
+                expected_other_inputs = (
+                    {"fetch-depth": 0} if (name, job_name) in FETCH_DEPTH_CHECKOUTS else {}
+                )
+                assert other_inputs == expected_other_inputs, (name, job_name)
+
+    assert checkout_count == 53
+
+
+def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
+    workflows = _load_ordinary_workflows()
+    concurrency_suffix = (
+        "${{ github.event.workflow_run.pull_requests[0].number || "
+        "github.event.pull_request.number || github.ref || github.run_id }}"
+    )
+    for name, (data, text) in workflows.items():
+        if name == "actionlint.yml":
+            assert "concurrency" not in data
+        else:
+            prefix = "${{ github.workflow }}" if name == "jobs-suite.yml" else name.removesuffix(".yml")
+            assert data["concurrency"]["group"] == f"{prefix}-{concurrency_suffix}", name
+            expected_cancel: object = True
+            if name == "jobs-suite.yml":
+                expected_cancel = (
+                    "${{ github.event_name == 'pull_request' || "
+                    "github.event_name == 'workflow_run' }}"
+                )
+            assert data["concurrency"]["cancel-in-progress"] == expected_cancel, name
+
+        assert "github.head_ref" not in text
+        assert "github.base_ref" not in text
+        assert "GITHUB_HEAD_REF" not in text
+        assert "GITHUB_BASE_REF" not in text
+        assert "github.event.workflow_run.head_sha" not in text
+
+    combined_text = "\n".join(text for _, text in workflows.values())
+    assert combined_text.count("github.event.workflow_run.pull_requests[0].number") == 27
+    assert combined_text.count("github.event.pull_request.number") == 27
+    assert combined_text.count("github.event.workflow_run.pull_requests[0].head.sha") == 53
+    assert combined_text.count("github.event.pull_request.head.sha") == 56
+    assert combined_text.count("github.event.pull_request.base.sha") == 4
+    assert combined_text.count("needs.admission.outputs.base_sha") == 10
+
+    for name, output_names in CHANGE_CLASSIFIER_OUTPUTS.items():
+        changes_job = workflows[name][0]["jobs"]["changes"]
+        assert set(changes_job["outputs"]) == output_names
+        for output_name in output_names:
+            assert changes_job["outputs"][output_name] == (
+                f"${{{{ steps.detect.outputs.{output_name} || "
+                f"steps.detect_admitted.outputs.{output_name} }}}}"
+            )
+        direct_step = next(step for step in changes_job["steps"] if step.get("id") == "detect")
+        admitted_step = next(
+            step for step in changes_job["steps"] if step.get("id") == "detect_admitted"
+        )
+        assert direct_step["if"] == "github.event_name != 'workflow_run'"
+        assert direct_step["uses"] == "./.github/actions/detect-required-gate-changes"
+        assert admitted_step["if"] == "github.event_name == 'workflow_run'"
+        assert admitted_step["env"] == {
+            "BASE_SHA": "${{ needs.admission.outputs.base_sha }}",
+            "HEAD_SHA": "${{ needs.admission.outputs.head_sha }}",
+        }
+        assert 'git diff --name-only "$BASE_SHA" "$HEAD_SHA"' in admitted_step["run"]
+        assert (
+            'python -m Helper_Scripts.ci.emit_ci_gate_flags "${CHANGED_FILES[@]}"'
+            in admitted_step["run"]
+        )
+
+    backend_text = workflows["backend-required.yml"][1]
+    assert (
+        'BASE_SHA="${{ needs.admission.outputs.base_sha || '
+        'github.event.pull_request.base.sha || github.event.before }}"'
+    ) in backend_text
+    assert (
+        'HEAD_SHA="${{ needs.admission.outputs.head_sha || '
+        'github.event.pull_request.head.sha || github.sha }}"'
+    ) in backend_text
+    assert 'git diff --name-only "$BASE_SHA" "$HEAD_SHA"' in backend_text
+
+    frontend_text = workflows["frontend-required.yml"][1]
+    assert (
+        'if [[ "${{ github.event_name }}" == "pull_request" || '
+        '"${{ github.event_name }}" == "workflow_run" ]]; then'
+    ) in frontend_text
+    assert (
+        'BASE_SHA="${{ needs.admission.outputs.base_sha || '
+        'github.event.pull_request.base.sha }}"'
+    ) in frontend_text
+
+    pre_commit_text = workflows["pre-commit.yml"][1]
+    assert (
+        'if [ "${{ github.event_name }}" = "pull_request" ] || '
+        '[ "${{ github.event_name }}" = "workflow_run" ]; then'
+    ) in pre_commit_text
+    assert (
+        'HEAD_SHA="${{ needs.admission.outputs.head_sha || '
+        'github.event.pull_request.head.sha || github.sha }}"'
+    ) in pre_commit_text
+    assert (
+        'FROM_REF="${{ needs.admission.outputs.base_sha || '
+        'github.event.pull_request.base.sha }}"'
+    ) in pre_commit_text
+
+    security_job = workflows["security-required.yml"][0]["jobs"]["security-required"]
+    pull_request_only_steps = [
+        step
+        for step in security_job["steps"]
+        if step.get("name") == "Dependency review (high/critical)"
+    ]
+    assert len(pull_request_only_steps) == 1
+    assert pull_request_only_steps[0]["if"] == (
+        "github.event_name == 'pull_request' || github.event_name == 'workflow_run'"
+    )
+    assert pull_request_only_steps[0]["with"] == {
+        "base-ref": "${{ needs.admission.outputs.base_sha || github.event.pull_request.base.sha }}",
+        "head-ref": (
+            "${{ needs.admission.outputs.head_sha || "
+            "github.event.pull_request.head.sha || github.sha }}"
+        ),
+        "fail-on-severity": "high",
+    }
 
 
 def test_reusable_workflow_has_exact_interface_and_read_permissions() -> None:

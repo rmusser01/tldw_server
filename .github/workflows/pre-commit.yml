@@ -2,6 +2,9 @@ name: pre-commit
 
 on:
   pull_request:
+  workflow_run:
+    workflows: [Frontend License Gate Audit]
+    types: [completed]
   push:
     branches: [ main, master, dev ]
 
@@ -9,18 +12,44 @@ permissions:
   contents: read
 
 concurrency:
-  group: pre-commit-${{ github.event.pull_request.number || github.ref }}
+  group: pre-commit-${{ github.event.workflow_run.pull_requests[0].number || github.event.pull_request.number || github.ref || github.run_id }}
   cancel-in-progress: true
 
 jobs:
+  admission:
+    if: >-
+      vars.LICENSE_FIRST_CI_ENABLED == 'true' &&
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success'
+    uses: ./.github/workflows/license-first-admission.yml
+    with:
+      workflow_file: pre-commit.yml
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+      statuses: read
+
   run-pre-commit:
+    needs: admission
+    if: >-
+      always() && !cancelled() &&
+      (
+        (
+          github.event_name == 'workflow_run' &&
+          needs.admission.result == 'success' &&
+          needs.admission.outputs.should_run == 'true'
+        ) ||
+        github.event_name != 'workflow_run'
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           fetch-depth: 0
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
@@ -30,9 +59,9 @@ jobs:
           pip install pre-commit pytest
       - name: Run pre-commit
         run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            HEAD_SHA="${{ github.event.pull_request.head.sha }}"
-            FROM_REF="${{ github.event.pull_request.base.sha }}"
+          if [ "${{ github.event_name }}" = "pull_request" ] || [ "${{ github.event_name }}" = "workflow_run" ]; then
+            HEAD_SHA="${{ needs.admission.outputs.head_sha || github.event.pull_request.head.sha || github.sha }}"
+            FROM_REF="${{ needs.admission.outputs.base_sha || github.event.pull_request.base.sha }}"
             if git rev-parse --verify "${HEAD_SHA}^" >/dev/null 2>&1; then
               FROM_REF="${HEAD_SHA}^"
             fi

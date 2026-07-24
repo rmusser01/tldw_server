@@ -573,10 +573,18 @@ def test_full_suite_test_result_uploads_are_non_blocking() -> None:
 
 def test_full_suite_summaries_follow_backend_path_filter() -> None:
     workflow = _load(".github/workflows/ci.yml")
-    expected_if = (
-        "${{ always() && (github.event_name != 'pull_request' || "
-        "needs.changes.outputs.backend_changed == 'true') }}"
-    )
+    expected_if = """always() && !cancelled() && (
+  (
+    github.event_name == 'workflow_run' &&
+    needs.admission.result == 'success' &&
+    needs.admission.outputs.should_run == 'true'
+  ) ||
+  github.event_name != 'workflow_run'
+) && (
+  (github.event_name != 'pull_request' &&
+   github.event_name != 'workflow_run') ||
+  needs.changes.outputs.backend_changed == 'true'
+)"""
     summary_to_shards = {
         "full-suite-linux-312-summary": "full-suite-linux-312-shards",
         "full-suite-linux-313-summary": "full-suite-linux-313-shards",
@@ -586,7 +594,7 @@ def test_full_suite_summaries_follow_backend_path_filter() -> None:
 
     for summary_job, shard_job in summary_to_shards.items():
         job = workflow["jobs"][summary_job]
-        assert job["needs"] == [shard_job, "changes"]
+        assert job["needs"] == [shard_job, "changes", "admission"]
         assert job["if"] == expected_if
 
 
