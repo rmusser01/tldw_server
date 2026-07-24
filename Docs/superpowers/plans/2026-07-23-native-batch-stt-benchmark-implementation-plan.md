@@ -1336,7 +1336,7 @@ Expected: no new Bandit findings, no whitespace errors, and the commit succeeds 
 - Modify: `Helper_Scripts/benchmarks/stt_bench.py`
 - Modify: `tldw_Server_API/tests/Benchmarks/test_stt_bench.py`
 
-- [ ] **Step 1: Write failing report/compare tests**
+- [x] **Step 1: Write failing report/compare tests**
 
 Cover:
 
@@ -1360,7 +1360,7 @@ Cover:
 - paired per-sample deltas are emitted and rankings say `descriptive`.
 - target execution order and collection method must match for performance-gate eligibility.
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 ```bash
 source .venv/bin/activate
@@ -1369,7 +1369,7 @@ python -m pytest tldw_Server_API/tests/Benchmarks/test_stt_bench.py -k "report o
 
 Expected: FAIL because disposable reports and comparison policy are absent.
 
-- [ ] **Step 3: Implement retention before serialization**
+- [x] **Step 3: Implement retention before serialization**
 
 ```text
 retain_text(
@@ -1384,7 +1384,7 @@ retain_text(
 
 `errors-only` retains text for any non-zero strict or normalized edit count or non-`ok` status. Summaries never reload discarded text from the manifest.
 
-- [ ] **Step 4: Add `report`**
+- [x] **Step 4: Add `report`**
 
 Write `summary.json` atomically with `SUMMARY_SCHEMA_VERSION`; render `summary.md` from that exact dictionary. Report:
 
@@ -1401,7 +1401,7 @@ Write `summary.json` atomically with `SUMMARY_SCHEMA_VERSION`; render `summary.m
 
 `summary.json` also keeps the active per-sample IDs, edit counts/rates, statuses, timing classes, and durations required for paired deltas. It applies the run's text-retention policy and never embeds audio paths or discarded text.
 
-- [ ] **Step 5: Add an explicit regression-policy input**
+- [x] **Step 5: Add an explicit regression-policy input**
 
 The approved design says baselines contain bounded expectations but does not define where those values come from. Clarify it with optional:
 
@@ -1428,7 +1428,7 @@ Without `--policy`, comparison is descriptive and never fails on metric movement
 Reject unknown fields, negative bounds, and suites absent from either summary.
 If a baseline metric is zero, a relative-regression rule for that metric is ineligible; require an absolute rule instead. Do not divide by zero or silently reinterpret the policy.
 
-- [ ] **Step 6: Add `compare` compatibility and exit codes**
+- [x] **Step 6: Add `compare` compatibility and exit codes**
 
 Exit:
 
@@ -1438,11 +1438,11 @@ Exit:
 
 Add `--allow-network-performance-gates`; require matching non-secret network profiles and at least three warm repetitions.
 
-- [ ] **Step 7: Re-run tests**
+- [x] **Step 7: Re-run tests**
 
 Expected: PASS.
 
-- [ ] **Step 8: Bandit/diff and commit**
+- [x] **Step 8: Bandit/diff and commit**
 
 ```bash
 source .venv/bin/activate

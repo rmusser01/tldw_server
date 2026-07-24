@@ -1694,6 +1694,18 @@ def test_persist_load_history_accepts_missing_file(tmp_path):
     assert stt_bench.load_result_history(tmp_path / "missing.jsonl") == ([], False)
 
 
+def test_persist_load_history_rejects_symlink_source(tmp_path):
+    if os.name != "posix":
+        pytest.skip("symlink policy is POSIX-specific")
+    target = tmp_path / "target.jsonl"
+    target.write_bytes(b"")
+    source = tmp_path / "results.jsonl"
+    source.symlink_to(target)
+
+    with pytest.raises(OSError, match="symbolic link"):
+        stt_bench.load_result_history(source)
+
+
 @pytest.mark.parametrize(
     "attempts",
     [
@@ -2200,8 +2212,13 @@ def test_aggregate_results_uses_only_successful_warm_calls_for_performance():
     summary = stt_bench.aggregate_results(metadata, active)
 
     warm = summary["performance"]["warm"]["targets"]["target-1"]["suites"]["public-english-v1"]
+    assert warm["candidate_count"] == 3
     assert warm["observation_count"] == 2
+    assert warm["ineligible_count"] == 1
     assert warm["adapter_seconds"]["mean"] == pytest.approx(0.375)
+    assert warm["adapter_seconds"]["p25"] == pytest.approx(0.3125)
+    assert warm["adapter_seconds"]["p75"] == pytest.approx(0.4375)
+    assert warm["adapter_seconds"]["iqr"] == pytest.approx(0.125)
     assert warm["rtf"]["p50"] == pytest.approx(0.375)
     assert warm["throughput"]["p50"] == pytest.approx(3.0)
     cold = summary["performance"]["cold_first"]["target-1"]
@@ -2226,7 +2243,7 @@ def test_aggregate_results_excludes_invalid_warm_timing_from_percentiles():
 
     warm = summary["performance"]["warm"]["targets"]["target-1"]["suites"]["public-english-v1"]
     assert warm["observation_count"] == 2
-    assert warm["ineligible_count"] == 1
+    assert warm["ineligible_count"] == 2
 
 
 @pytest.mark.parametrize(
@@ -2570,6 +2587,7 @@ def _planned_target(
     route_count: int = 1,
     runtime_secret: str = "/private/models/secret-model",
     honors_task: bool = True,
+    identity_resolved: bool = False,
 ) -> SttBatchExecutionPlan:
     resolved_provider = resolved_provider or provider
     routes = tuple(
@@ -2577,8 +2595,8 @@ def _planned_target(
             route_id=f"route-{index + 1}",
             provider=resolved_provider,
             model_label=model_label,
-            artifact_id=None,
-            identity_resolved=False,
+            artifact_id=("sha256:" + f"{index + 1:064x}" if identity_resolved else None),
+            identity_resolved=identity_resolved,
             backend=f"backend-{index + 1}",
             source="local" if egress is SttAudioEgress.NONE else "http",
             audio_egress=egress,
@@ -3064,23 +3082,40 @@ def _worker_target(
     provider: str = "worker-ok",
     *,
     target_id: str = "target-worker",
+    identity_resolved: bool = False,
+    egress: SttAudioEgress = SttAudioEgress.NONE,
+    network_collection_profile: str | None = None,
+    network_client_location: str | None = None,
+    mode: str = "neutral-v1",
+    route_count: int = 1,
+    configuration_id: str = "fixture-config-v1",
 ) -> stt_bench.PreparedTarget:
     plan = _planned_target(
         provider=provider,
         model_label="worker-model",
+        identity_resolved=identity_resolved,
+        egress=egress,
+        route_count=route_count,
     )
+    safe_target_settings = {
+        "mode": mode,
+        "task": "transcribe",
+        "language": "en",
+        "word_timestamps": False,
+        "diarization": False,
+        "prompt_present": False,
+        "hotword_count": 0,
+    }
+    if mode == "production-v1":
+        safe_target_settings["configuration_id"] = configuration_id
+    if network_collection_profile is not None:
+        safe_target_settings["network_collection_profile"] = network_collection_profile
+    if network_client_location is not None:
+        safe_target_settings["network_client_location"] = network_client_location
     contract_json, contract_hash = stt_bench.build_execution_contract(
         plan=plan,
         git_commit="a" * 40,
-        safe_target_settings={
-            "mode": "neutral-v1",
-            "task": "transcribe",
-            "language": "en",
-            "word_timestamps": False,
-            "diarization": False,
-            "prompt_present": False,
-            "hotword_count": 0,
-        },
+        safe_target_settings=safe_target_settings,
     )
     return stt_bench.PreparedTarget(
         target_id=target_id,
@@ -3127,6 +3162,7 @@ def _runner_metadata(
     timing_sample_ids=("sample-2",),
     watchdog_seconds=1.0,
     mode="neutral-v1",
+    text_retention="full",
 ):
     return stt_bench.build_run_metadata(
         run_id="run-worker",
@@ -3138,7 +3174,7 @@ def _runner_metadata(
         cold_probe_sample_id="probe",
         warm_repetitions=warm_repetitions,
         timing_sample_ids=timing_sample_ids,
-        text_retention="full",
+        text_retention=text_retention,
         adapter_watchdog_seconds=watchdog_seconds,
         prepared_targets=tuple(targets or (_worker_target(),)),
         environment=_runner_environment(),
@@ -3163,6 +3199,11 @@ def test_run_metadata_is_deterministic_allowlisted_and_secret_safe():
     assert contract["safe_target_settings"]["mode"] == "neutral-v1"
     assert "/private/models" not in serialized
     assert "runtime_settings" not in serialized
+
+
+def test_run_metadata_rejects_cold_probe_in_timing_subset():
+    with pytest.raises(ValueError, match="cold probe"):
+        _runner_metadata(timing_sample_ids=("probe", "sample-2"))
 
 
 def test_run_metadata_persists_only_safe_production_contract_settings():
@@ -4156,3 +4197,1110 @@ def test_run_cli_rejects_mixed_primary_languages_before_preflight(
 
     assert exit_code == 2
     assert "primary language" in capsys.readouterr().err
+
+
+def _report_result(
+    metadata,
+    *,
+    sample_id="probe",
+    attempt_id=1,
+    repetition=0,
+    measurement_role="accuracy",
+    timing_class="cold_first",
+    reference="hello world",
+    hypothesis="hello world",
+    status="ok",
+    adapter_nanoseconds=500_000_000,
+    route_index=0,
+    target_index=0,
+):
+    target = metadata["target_matrix"][target_index]
+    route = target["descriptor"]["routes"][route_index]
+    record = _result_record(
+        run_id=metadata["run_id"],
+        target_id=target["target_id"],
+        sample_id=sample_id,
+        attempt_id=attempt_id,
+        repetition=repetition,
+        measurement_role=measurement_role,
+        timing_class=timing_class,
+        reference=reference,
+        hypothesis=hypothesis,
+        status=status,
+        backend=route["backend"],
+        adapter_nanoseconds=adapter_nanoseconds,
+    )
+    record["completion_key"] = stt_bench.completion_key(
+        metadata["manifest_hash"],
+        target["target_id"],
+        target["execution_contract_hash"],
+        sample_id,
+        repetition,
+    )
+    record["requested_execution"] = {
+        "provider": target["provider"],
+        "model_label": target["model_label"],
+    }
+    record["actual_execution"] = {field: route[field] for field in stt_bench._ACTUAL_EXECUTION_FIELDS}
+    if route["identity_resolved"] is not True:
+        record["eligibility_reasons"] = ["identity_unresolved"]
+    return record
+
+
+def test_report_regenerates_partial_json_markdown_and_terminal_from_run_artifacts(
+    tmp_path,
+):
+    metadata = _runner_metadata(warm_repetitions=3)
+    probe = _report_result(metadata)
+    run_directory = tmp_path / "run"
+    stt_bench.atomic_write_json(run_directory / "run.json", metadata)
+    stt_bench.append_result_record(run_directory / "results.jsonl", probe)
+
+    summary = stt_bench.generate_report(run_directory)
+    persisted = json.loads((run_directory / "summary.json").read_text(encoding="utf-8"))
+    markdown = (run_directory / "summary.md").read_text(encoding="utf-8")
+    terminal = stt_bench.render_summary_terminal(summary)
+
+    assert persisted == summary
+    assert summary["progress"] == {
+        "expected_result_count": 4,
+        "active_result_count": 1,
+        "pending_result_count": 3,
+        "complete": False,
+        "history_truncated_tail_ignored": False,
+    }
+    assert summary["identity"]["manifest_hash"] == "a" * 64
+    assert summary["identity"]["target_order"] == ["target-worker"]
+    assert summary["identity"]["targets"][0]["execution_contract"]["dependency_versions"]["pytest"]
+    assert summary["samples"][0]["sample_id"] == "probe"
+    assert summary["samples"][0]["reference"] == "hello world"
+    for rendered in (markdown, terminal):
+        assert "run-worker" in rendered
+        assert "target-worker" in rendered
+        assert "public-english-v1" in rendered
+        assert "3" in rendered
+
+
+def test_report_worst_examples_use_only_already_retained_text(tmp_path):
+    metadata = _runner_metadata(text_retention="errors-only")
+    error = _report_result(
+        metadata,
+        hypothesis="wrong words",
+    )
+    discarded = _report_result(
+        metadata,
+        sample_id="sample-2",
+        attempt_id=2,
+        timing_class="warm",
+    )
+    discarded["reference"] = None
+    discarded["hypothesis"] = None
+    run_directory = tmp_path / "run"
+    stt_bench.atomic_write_json(run_directory / "run.json", metadata)
+    stt_bench.append_result_record(run_directory / "results.jsonl", error)
+    stt_bench.append_result_record(run_directory / "results.jsonl", discarded)
+
+    summary = stt_bench.generate_report(run_directory)
+
+    assert [example["sample_id"] for example in summary["worst_examples"]] == ["probe"]
+    assert summary["samples"][1]["reference"] is None
+
+
+@pytest.mark.parametrize(
+    ("mode", "hypothesis", "discard"),
+    [
+        ("full", "hello world", True),
+        ("none", "hello world", False),
+        ("errors-only", "hello world", False),
+        ("errors-only", "wrong words", True),
+    ],
+)
+def test_report_rejects_result_text_that_violates_run_retention(
+    tmp_path,
+    mode,
+    hypothesis,
+    discard,
+):
+    metadata = _runner_metadata(
+        selected_sample_ids=("probe",),
+        timing_sample_ids=(),
+        text_retention=mode,
+    )
+    record = _report_result(metadata, hypothesis=hypothesis)
+    if discard:
+        record["reference"] = None
+        record["hypothesis"] = None
+    run_directory = tmp_path / f"{mode}-{discard}-{hypothesis.split()[0]}"
+    stt_bench.atomic_write_json(run_directory / "run.json", metadata)
+    stt_bench.append_result_record(run_directory / "results.jsonl", record)
+
+    with pytest.raises(ValueError, match="retention"):
+        stt_bench.generate_report(run_directory)
+
+
+def test_report_ignores_truncated_tail_without_mutating_durable_history(tmp_path):
+    metadata = _runner_metadata(
+        selected_sample_ids=("probe",),
+        timing_sample_ids=(),
+    )
+    run_directory = tmp_path / "run"
+    stt_bench.atomic_write_json(run_directory / "run.json", metadata)
+    stt_bench.append_result_record(
+        run_directory / "results.jsonl",
+        _report_result(metadata),
+    )
+    results_path = run_directory / "results.jsonl"
+    with results_path.open("ab") as output:
+        output.write(b'{"schema_version":1')
+    before = results_path.read_bytes()
+
+    summary = stt_bench.generate_report(run_directory)
+
+    assert summary["progress"]["history_truncated_tail_ignored"] is True
+    assert results_path.read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    ("sample_id", "repetition", "measurement_role", "timing_class"),
+    [
+        ("probe", 0, "accuracy", "warm"),
+        ("sample-2", 0, "accuracy", "cold_first"),
+        ("sample-2", 1, "performance_repeat", "cold_first"),
+    ],
+)
+def test_report_rejects_schedule_classifications_that_conflict_with_run(
+    tmp_path,
+    sample_id,
+    repetition,
+    measurement_role,
+    timing_class,
+):
+    metadata = _runner_metadata(warm_repetitions=2)
+    record = _report_result(
+        metadata,
+        sample_id=sample_id,
+        repetition=repetition,
+        measurement_role=measurement_role,
+        timing_class=timing_class,
+    )
+    run_directory = tmp_path / "run"
+    stt_bench.atomic_write_json(run_directory / "run.json", metadata)
+    stt_bench.append_result_record(run_directory / "results.jsonl", record)
+
+    with pytest.raises(ValueError, match="timing"):
+        stt_bench.generate_report(run_directory)
+
+
+def test_report_sample_projection_preserves_failure_and_execution_diagnostics(
+    tmp_path,
+):
+    metadata = _runner_metadata(
+        selected_sample_ids=("probe",),
+        timing_sample_ids=(),
+    )
+    failure = _report_result(
+        metadata,
+        status="adapter_error",
+        hypothesis="",
+    )
+    failure["execution_mismatch_reasons"] = ["resolved_model_mismatch"]
+    failure["eligibility_reasons"] = [
+        "resolved_model_mismatch",
+        "identity_unresolved",
+    ]
+    failure["resource_observations"] = {
+        "collection_method": "fixture",
+        "rss_before_bytes": 10,
+        "peak_rss_bytes": 20,
+        "gpu_memory_bytes": None,
+    }
+    failure["error"] = {
+        "type": "AdapterError",
+        "message": "bounded failure",
+    }
+    run_directory = tmp_path / "run"
+    stt_bench.atomic_write_json(run_directory / "run.json", metadata)
+    stt_bench.append_result_record(run_directory / "results.jsonl", failure)
+
+    sample = stt_bench.generate_report(run_directory)["samples"][0]
+
+    assert sample["normalization_profile"] == EN_PROFILE
+    assert sample["execution_mismatch_reasons"] == ["resolved_model_mismatch"]
+    assert sample["resource_observations"]["collection_method"] == "fixture"
+    assert sample["error"] == {
+        "type": "AdapterError",
+        "message": "bounded failure",
+    }
+
+
+def test_report_accepts_recovery_timing_but_rejects_undeclared_execution(
+    tmp_path,
+):
+    metadata = _runner_metadata()
+    recovery = _report_result(
+        metadata,
+        sample_id="sample-2",
+        attempt_id=1,
+        timing_class="warmup_recovery",
+    )
+    run_directory = tmp_path / "recovery"
+    stt_bench.atomic_write_json(run_directory / "run.json", metadata)
+    stt_bench.append_result_record(run_directory / "results.jsonl", recovery)
+
+    summary = stt_bench.generate_report(run_directory)
+
+    assert summary["samples"][0]["timing_class"] == "warmup_recovery"
+    assert summary["performance"]["warm"]["targets"] == {}
+
+    runtime_resolved = copy.deepcopy(recovery)
+    runtime_resolved["actual_execution"]["artifact_id"] = "sha256:" + "c" * 64
+    resolved_directory = tmp_path / "runtime-resolved"
+    stt_bench.atomic_write_json(
+        resolved_directory / "run.json",
+        metadata,
+    )
+    stt_bench.append_result_record(
+        resolved_directory / "results.jsonl",
+        runtime_resolved,
+    )
+    resolved_summary = stt_bench.generate_report(resolved_directory)
+    assert resolved_summary["samples"][0]["actual_execution"]["artifact_id"] == "sha256:" + "c" * 64
+
+    undeclared = copy.deepcopy(recovery)
+    undeclared["actual_execution"]["backend"] = "undeclared-backend"
+    undeclared_directory = tmp_path / "undeclared"
+    stt_bench.atomic_write_json(
+        undeclared_directory / "run.json",
+        metadata,
+    )
+    stt_bench.append_result_record(
+        undeclared_directory / "results.jsonl",
+        undeclared,
+    )
+    with pytest.raises(ValueError, match="declared route"):
+        stt_bench.generate_report(undeclared_directory)
+
+
+def test_report_splits_and_flags_production_mixed_actual_execution(tmp_path):
+    target = _worker_target(
+        identity_resolved=True,
+        mode="production-v1",
+        route_count=2,
+    )
+    metadata = _runner_metadata(
+        targets=(target,),
+        mode="production-v1",
+    )
+    run_directory = tmp_path / "mixed"
+    stt_bench.atomic_write_json(run_directory / "run.json", metadata)
+    stt_bench.append_result_record(
+        run_directory / "results.jsonl",
+        _report_result(metadata, attempt_id=1),
+    )
+    stt_bench.append_result_record(
+        run_directory / "results.jsonl",
+        _report_result(
+            metadata,
+            sample_id="sample-2",
+            attempt_id=2,
+            timing_class="warm",
+            route_index=1,
+        ),
+    )
+
+    summary = stt_bench.generate_report(run_directory)
+
+    eligibility = summary["eligibility"]["targets"]["target-worker"]
+    assert eligibility["mixed_actual_execution"] is True
+    assert eligibility["actual_execution_signature_count"] == 2
+    backend_slices = summary["slices"]["actual_backend"]["target-worker"]
+    assert set(backend_slices) == {"backend-1", "backend-2"}
+
+
+@pytest.mark.parametrize("artifact", ["run", "result"])
+def test_report_rejects_unsupported_source_schema(tmp_path, artifact):
+    metadata = _runner_metadata()
+    run_directory = tmp_path / "run"
+    if artifact == "run":
+        metadata["schema_version"] = 999
+        stt_bench.atomic_write_json(run_directory / "run.json", metadata)
+    else:
+        stt_bench.atomic_write_json(run_directory / "run.json", metadata)
+        record = _report_result(metadata)
+        record["schema_version"] = 999
+        (run_directory / "results.jsonl").write_text(
+            json.dumps(record) + "\n",
+            encoding="utf-8",
+        )
+
+    with pytest.raises(ValueError, match="schema"):
+        stt_bench.generate_report(run_directory)
+
+
+def test_report_cli_prints_the_same_summary_metrics(tmp_path, capsys):
+    metadata = _runner_metadata(
+        selected_sample_ids=("probe",),
+        timing_sample_ids=(),
+    )
+    run_directory = tmp_path / "run"
+    stt_bench.atomic_write_json(run_directory / "run.json", metadata)
+    stt_bench.append_result_record(
+        run_directory / "results.jsonl",
+        _report_result(metadata),
+    )
+
+    exit_code = stt_bench.main(["report", "--run", str(run_directory)])
+    output = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "run-worker" in output.out
+    assert "target-worker" in output.out
+    assert output.err == ""
+
+
+def _complete_report(
+    tmp_path,
+    directory_name,
+    *,
+    target=None,
+    sample_hypothesis="hello world",
+    sample_status="ok",
+    warm_adapter_nanoseconds=500_000_000,
+    mode="neutral-v1",
+):
+    prepared = target or _worker_target(identity_resolved=True)
+    metadata = _runner_metadata(
+        warm_repetitions=3,
+        targets=(prepared,),
+        mode=mode,
+    )
+    records = [
+        _report_result(
+            metadata,
+            attempt_id=1,
+        ),
+        _report_result(
+            metadata,
+            sample_id="sample-2",
+            attempt_id=2,
+            timing_class="warm",
+            hypothesis=sample_hypothesis,
+            status=sample_status,
+            adapter_nanoseconds=warm_adapter_nanoseconds,
+        ),
+        _report_result(
+            metadata,
+            sample_id="sample-2",
+            repetition=1,
+            attempt_id=3,
+            measurement_role="performance_repeat",
+            timing_class="warm",
+            adapter_nanoseconds=warm_adapter_nanoseconds,
+        ),
+        _report_result(
+            metadata,
+            sample_id="sample-2",
+            repetition=2,
+            attempt_id=4,
+            measurement_role="performance_repeat",
+            timing_class="warm",
+            adapter_nanoseconds=warm_adapter_nanoseconds,
+        ),
+    ]
+    run_directory = tmp_path / directory_name
+    stt_bench.atomic_write_json(run_directory / "run.json", metadata)
+    for record in records:
+        stt_bench.append_result_record(run_directory / "results.jsonl", record)
+    return stt_bench.generate_report(run_directory)
+
+
+def test_report_renderers_include_quality_warm_cold_backend_and_eligibility(
+    tmp_path,
+):
+    summary = _complete_report(tmp_path, "rendered")
+
+    for rendered in (
+        stt_bench.render_summary_markdown(summary),
+        stt_bench.render_summary_terminal(summary),
+    ):
+        assert "worker-ok" in rendered
+        assert "worker-model" in rendered
+        assert "public-english-v1" in rendered
+        assert "Strict WER" in rendered or "strict WER" in rendered
+        assert "Strict CER" in rendered or "strict CER" in rendered
+        assert "Warm performance" in rendered
+        assert "0.500000" in rendered
+        assert "Cold-first observations" in rendered
+        assert "Actual backend populations" in rendered
+        assert "backend-1" in rendered
+        assert "Gate eligibility" in rendered
+
+
+def test_validate_summary_rejects_schema_unknown_fields_and_tampered_metrics(
+    tmp_path,
+):
+    summary = _complete_report(tmp_path, "baseline")
+    unsupported = copy.deepcopy(summary)
+    unsupported["schema_version"] = 999
+    unknown = copy.deepcopy(summary)
+    unknown["unexpected"] = True
+    tampered = copy.deepcopy(summary)
+    tampered["primary"]["targets"]["target-worker"]["suites"]["public-english-v1"]["normalized"]["wer"]["pooled"] = 0.75
+
+    for artifact in (unsupported, unknown, tampered):
+        with pytest.raises(ValueError):
+            stt_bench.validate_summary(artifact)
+
+
+def test_validate_summary_rejects_actual_execution_outside_declared_routes(
+    tmp_path,
+):
+    summary = _complete_report(tmp_path, "baseline")
+    tampered = copy.deepcopy(summary)
+    tampered["samples"][0]["actual_execution"]["backend"] = "undeclared-backend"
+
+    with pytest.raises(ValueError, match="declared route"):
+        stt_bench.validate_summary(tampered)
+
+
+@pytest.mark.parametrize(
+    ("drift", "expected_error"),
+    [
+        ("safe-settings", "common safe settings"),
+        ("git-commit", "execution contract identity"),
+    ],
+)
+def test_validate_summary_rejects_second_target_contract_drift(
+    tmp_path,
+    drift,
+    expected_error,
+):
+    metadata = _runner_metadata(
+        targets=(
+            _worker_target(identity_resolved=True),
+            _worker_target(
+                "worker-other",
+                target_id="target-other",
+                identity_resolved=True,
+            ),
+        ),
+        selected_sample_ids=("probe",),
+        timing_sample_ids=(),
+    )
+    run_directory = tmp_path / "two-targets"
+    stt_bench.atomic_write_json(run_directory / "run.json", metadata)
+    stt_bench.append_result_record(
+        run_directory / "results.jsonl",
+        _report_result(metadata, attempt_id=1),
+    )
+    stt_bench.append_result_record(
+        run_directory / "results.jsonl",
+        _report_result(metadata, attempt_id=2, target_index=1),
+    )
+    tampered = copy.deepcopy(stt_bench.generate_report(run_directory))
+    second_target = tampered["identity"]["targets"][1]
+    if drift == "safe-settings":
+        second_target["execution_contract"]["safe_target_settings"]["language"] = "fr"
+    else:
+        second_target["execution_contract"]["git_commit"] = "b" * 40
+    canonical = json.dumps(
+        second_target["execution_contract"],
+        allow_nan=False,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    second_target["execution_contract_hash"] = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    with pytest.raises(ValueError, match=expected_error):
+        stt_bench.validate_summary(tampered)
+
+
+def test_compare_descriptive_cross_target_emits_paired_deltas_and_rankings(
+    tmp_path,
+):
+    baseline = _complete_report(tmp_path, "baseline")
+    candidate = _complete_report(
+        tmp_path,
+        "candidate",
+        target=_worker_target(
+            "worker-other",
+            target_id="target-other",
+            identity_resolved=True,
+        ),
+        sample_hypothesis="wrong words",
+    )
+
+    comparison = stt_bench.compare_summaries(baseline, candidate)
+
+    assert comparison["exit_code"] == 0
+    assert comparison["mode"] == "descriptive"
+    assert comparison["rankings"]["label"] == "descriptive"
+    assert comparison["target_pairs"][0]["same_target"] is False
+    sample_delta = comparison["target_pairs"][0]["paired_samples"][1]
+    assert sample_delta["sample_id"] == "sample-2"
+    assert sample_delta["normalized_wer_delta"] > 0.0
+    assert comparison["gates"] == []
+
+
+def test_compare_descriptive_rejects_partial_summaries_with_value_error(
+    tmp_path,
+):
+    target = _worker_target(identity_resolved=True)
+
+    def partial(directory_name):
+        metadata = _runner_metadata(
+            warm_repetitions=3,
+            targets=(target,),
+        )
+        directory = tmp_path / directory_name
+        stt_bench.atomic_write_json(directory / "run.json", metadata)
+        stt_bench.append_result_record(
+            directory / "results.jsonl",
+            _report_result(metadata),
+        )
+        return stt_bench.generate_report(directory)
+
+    baseline = partial("baseline")
+    candidate = partial("candidate")
+
+    with pytest.raises(ValueError, match="partial"):
+        stt_bench.compare_summaries(baseline, candidate)
+
+
+def test_compare_descriptive_allows_cross_target_production_configuration_ids(
+    tmp_path,
+):
+    baseline = _complete_report(
+        tmp_path,
+        "baseline",
+        target=_worker_target(
+            "worker-a",
+            target_id="target-a",
+            identity_resolved=True,
+            mode="production-v1",
+            configuration_id="config-a",
+        ),
+        mode="production-v1",
+    )
+    candidate = _complete_report(
+        tmp_path,
+        "candidate",
+        target=_worker_target(
+            "worker-b",
+            target_id="target-b",
+            identity_resolved=True,
+            mode="production-v1",
+            configuration_id="config-b",
+        ),
+        mode="production-v1",
+    )
+
+    comparison = stt_bench.compare_summaries(baseline, candidate)
+
+    assert comparison["exit_code"] == 0
+    assert comparison["target_pairs"][0]["same_target"] is False
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("manifest_hash", "b" * 64),
+        ("profile", "regression"),
+        ("scorer_version", "stt-score-v2"),
+        ("unicode_version", "99.0"),
+    ],
+)
+def test_compare_rejects_incompatible_quality_identity(
+    tmp_path,
+    field,
+    value,
+):
+    baseline = _complete_report(tmp_path, "baseline")
+    candidate = copy.deepcopy(baseline)
+    candidate["run_id"] = "candidate-run"
+    candidate["identity"][field] = value
+
+    with pytest.raises(ValueError, match="compatible"):
+        stt_bench.compare_summaries(baseline, candidate)
+
+
+def test_compare_policy_fails_eligible_absolute_wer_regression(tmp_path):
+    baseline = _complete_report(tmp_path, "baseline")
+    candidate = _complete_report(
+        tmp_path,
+        "candidate",
+        sample_hypothesis="wrong words",
+    )
+    policy = {
+        "schema_version": 1,
+        "suites": {
+            "public-english-v1": {
+                "max_normalized_pooled_wer_absolute_regression": 0.01,
+            }
+        },
+    }
+
+    comparison = stt_bench.compare_summaries(
+        baseline,
+        candidate,
+        policy=policy,
+    )
+
+    assert comparison["exit_code"] == 1
+    assert comparison["mode"] == "policy"
+    assert comparison["gates"][0]["eligible"] is True
+    assert comparison["gates"][0]["passed"] is False
+
+
+def test_compare_policy_rejects_relative_rule_with_zero_baseline(tmp_path):
+    baseline = _complete_report(tmp_path, "baseline")
+    candidate = _complete_report(
+        tmp_path,
+        "candidate",
+        sample_hypothesis="wrong words",
+    )
+    policy = {
+        "schema_version": 1,
+        "suites": {
+            "public-english-v1": {
+                "max_normalized_pooled_wer_relative_regression": 0.10,
+            }
+        },
+    }
+
+    with pytest.raises(ValueError, match="zero"):
+        stt_bench.compare_summaries(
+            baseline,
+            candidate,
+            policy=policy,
+        )
+
+
+def test_compare_policy_rejects_partial_or_hardware_mismatched_runs(tmp_path):
+    baseline = _complete_report(tmp_path, "baseline")
+    partial_metadata = _runner_metadata(
+        warm_repetitions=3,
+        targets=(_worker_target(identity_resolved=True),),
+    )
+    partial_directory = tmp_path / "partial"
+    stt_bench.atomic_write_json(
+        partial_directory / "run.json",
+        partial_metadata,
+    )
+    stt_bench.append_result_record(
+        partial_directory / "results.jsonl",
+        _report_result(partial_metadata),
+    )
+    partial = stt_bench.generate_report(partial_directory)
+    hardware_mismatch = copy.deepcopy(baseline)
+    hardware_mismatch["identity"]["environment"]["cpu_model"] = "other-cpu"
+    policy = {
+        "schema_version": 1,
+        "suites": {
+            "public-english-v1": {
+                "max_failure_rate_absolute_regression": 0.0,
+            }
+        },
+    }
+
+    descriptive = stt_bench.compare_summaries(
+        baseline,
+        hardware_mismatch,
+    )
+    assert descriptive["exit_code"] == 0
+    assert descriptive["compatibility"]["hardware_match"] is False
+
+    for candidate in (partial, hardware_mismatch):
+        with pytest.raises(ValueError, match="ineligible"):
+            stt_bench.compare_summaries(
+                baseline,
+                candidate,
+                policy=policy,
+            )
+
+
+def test_compare_cli_uses_documented_exit_codes(tmp_path, capsys):
+    baseline = _complete_report(tmp_path, "baseline")
+    candidate = _complete_report(
+        tmp_path,
+        "candidate",
+        sample_hypothesis="wrong words",
+    )
+    baseline_path = tmp_path / "baseline.json"
+    candidate_path = tmp_path / "candidate.json"
+    policy_path = tmp_path / "policy.json"
+    stt_bench.atomic_write_json(baseline_path, baseline)
+    stt_bench.atomic_write_json(candidate_path, candidate)
+    stt_bench.atomic_write_json(
+        policy_path,
+        {
+            "schema_version": 1,
+            "suites": {
+                "public-english-v1": {
+                    "max_normalized_pooled_wer_absolute_regression": 0.01,
+                }
+            },
+        },
+    )
+
+    exit_code = stt_bench.main(
+        [
+            "compare",
+            "--baseline",
+            str(baseline_path),
+            "--candidate",
+            str(candidate_path),
+            "--policy",
+            str(policy_path),
+        ]
+    )
+    output = capsys.readouterr()
+
+    assert exit_code == 1
+    assert json.loads(output.out)["exit_code"] == 1
+    assert output.err == ""
+
+
+@pytest.mark.parametrize(
+    "policy",
+    [
+        {"schema_version": 2, "suites": {"public-english-v1": {"min_exact_match_rate": 0.5}}},
+        {"schema_version": 1, "suites": {}},
+        {
+            "schema_version": 1,
+            "suites": {"public-english-v1": {"strict_wer_regression": 0.0}},
+        },
+        {
+            "schema_version": 1,
+            "suites": {
+                "public-english-v1": {
+                    "max_failure_rate_absolute_regression": -0.1,
+                }
+            },
+        },
+        {
+            "schema_version": 1,
+            "suites": {"public-english-v1": {"min_exact_match_rate": 1.1}},
+        },
+    ],
+)
+def test_policy_schema_rejects_unknown_or_invalid_bounds(policy):
+    with pytest.raises(ValueError, match="policy"):
+        stt_bench.validate_policy(policy)
+
+
+@pytest.mark.parametrize(
+    ("rule", "bound"),
+    [
+        ("max_normalized_pooled_wer_relative_regression", 0.5),
+        ("max_normalized_pooled_cer_absolute_regression", 0.01),
+        ("max_normalized_pooled_cer_relative_regression", 0.01),
+    ],
+)
+def test_compare_policy_enforces_other_normalized_quality_rules(
+    tmp_path,
+    rule,
+    bound,
+):
+    baseline = _complete_report(
+        tmp_path,
+        "baseline",
+        sample_hypothesis="hello",
+    )
+    candidate = _complete_report(
+        tmp_path,
+        "candidate",
+        sample_hypothesis="wrong words",
+    )
+
+    comparison = stt_bench.compare_summaries(
+        baseline,
+        candidate,
+        policy={
+            "schema_version": 1,
+            "suites": {"public-english-v1": {rule: bound}},
+        },
+    )
+
+    assert comparison["exit_code"] == 1
+    assert comparison["gates"][0]["rule"] == rule
+
+
+def test_compare_policy_enforces_failure_and_exact_match_rules(tmp_path):
+    baseline = _complete_report(tmp_path, "baseline")
+    candidate = _complete_report(
+        tmp_path,
+        "candidate",
+        sample_hypothesis="",
+        sample_status="adapter_error",
+    )
+    policy = {
+        "schema_version": 1,
+        "suites": {
+            "public-english-v1": {
+                "max_failure_rate_absolute_regression": 0.0,
+                "min_exact_match_rate": 0.75,
+            }
+        },
+    }
+
+    comparison = stt_bench.compare_summaries(
+        baseline,
+        candidate,
+        policy=policy,
+    )
+
+    assert comparison["exit_code"] == 1
+    assert {gate["rule"] for gate in comparison["gates"]} == {
+        "max_failure_rate_absolute_regression",
+        "min_exact_match_rate",
+    }
+    assert all(gate["passed"] is False for gate in comparison["gates"])
+
+
+@pytest.mark.parametrize(
+    "rule",
+    [
+        "max_warm_rtf_relative_regression",
+        "max_warm_adapter_seconds_relative_regression",
+    ],
+)
+def test_compare_policy_enforces_warm_metrics_only_with_three_observations(
+    tmp_path,
+    rule,
+):
+    baseline = _complete_report(tmp_path, "baseline")
+    candidate = _complete_report(
+        tmp_path,
+        "candidate",
+        warm_adapter_nanoseconds=750_000_000,
+    )
+    policy = {
+        "schema_version": 1,
+        "suites": {
+            "public-english-v1": {
+                rule: 0.10,
+            }
+        },
+    }
+
+    comparison = stt_bench.compare_summaries(
+        baseline,
+        candidate,
+        policy=policy,
+    )
+
+    assert comparison["exit_code"] == 1
+    assert comparison["gates"][0]["observed"] == pytest.approx(0.5)
+
+
+def test_network_performance_gate_requires_matching_profile_and_opt_in(tmp_path):
+    network_target = _worker_target(
+        identity_resolved=True,
+        egress=SttAudioEgress.REMOTE,
+        network_collection_profile="controlled-west-v1",
+        network_client_location="lab-west",
+    )
+    baseline = _complete_report(
+        tmp_path,
+        "baseline",
+        target=network_target,
+    )
+    candidate = _complete_report(
+        tmp_path,
+        "candidate",
+        target=network_target,
+    )
+    policy = {
+        "schema_version": 1,
+        "suites": {
+            "public-english-v1": {
+                "max_warm_rtf_relative_regression": 0.0,
+            }
+        },
+    }
+
+    with pytest.raises(ValueError, match="ineligible"):
+        stt_bench.compare_summaries(
+            baseline,
+            candidate,
+            policy=policy,
+        )
+
+    comparison = stt_bench.compare_summaries(
+        baseline,
+        candidate,
+        policy=policy,
+        allow_network_performance_gates=True,
+    )
+    assert comparison["exit_code"] == 0
+    assert comparison["gates"][0]["passed"] is True
+
+
+def test_compare_keeps_implementation_and_dependency_differences_visible(
+    tmp_path,
+):
+    baseline = _complete_report(tmp_path, "baseline")
+    candidate = copy.deepcopy(baseline)
+    candidate["run_id"] = "candidate-run"
+    target = candidate["identity"]["targets"][0]
+    target["execution_contract"]["dependency_versions"]["pytest"] = "future-version"
+    canonical = json.dumps(
+        target["execution_contract"],
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    target["execution_contract_hash"] = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    comparison = stt_bench.compare_summaries(baseline, candidate)
+
+    differences = comparison["target_pairs"][0]["provenance_differences"]
+    assert differences["dependency_versions"]["candidate"]["pytest"] == "future-version"
+    assert comparison["target_pairs"][0]["same_target"] is True
+
+
+def test_compare_policy_rejects_production_mixed_backend_run(tmp_path):
+    target = _worker_target(
+        identity_resolved=True,
+        mode="production-v1",
+        route_count=2,
+    )
+
+    def build(directory_name, route_indices):
+        metadata = _runner_metadata(
+            warm_repetitions=3,
+            targets=(target,),
+            mode="production-v1",
+        )
+        records = [
+            _report_result(
+                metadata,
+                attempt_id=1,
+                route_index=route_indices[0],
+            ),
+            _report_result(
+                metadata,
+                sample_id="sample-2",
+                attempt_id=2,
+                timing_class="warm",
+                route_index=route_indices[1],
+            ),
+            _report_result(
+                metadata,
+                sample_id="sample-2",
+                repetition=1,
+                attempt_id=3,
+                measurement_role="performance_repeat",
+                timing_class="warm",
+                route_index=route_indices[2],
+            ),
+            _report_result(
+                metadata,
+                sample_id="sample-2",
+                repetition=2,
+                attempt_id=4,
+                measurement_role="performance_repeat",
+                timing_class="warm",
+                route_index=route_indices[3],
+            ),
+        ]
+        directory = tmp_path / directory_name
+        stt_bench.atomic_write_json(directory / "run.json", metadata)
+        for record in records:
+            stt_bench.append_result_record(
+                directory / "results.jsonl",
+                record,
+            )
+        return stt_bench.generate_report(directory)
+
+    baseline = build("baseline", (0, 0, 0, 0))
+    mixed = build("mixed", (0, 1, 1, 1))
+
+    descriptive = stt_bench.compare_summaries(baseline, mixed)
+    assert descriptive["exit_code"] == 0
+    assert descriptive["target_pairs"][0]["gate_identity_eligible"] is False
+    assert descriptive["rankings"]["excluded"] == [
+        {
+            "role": "candidate",
+            "target_id": "target-worker",
+            "reason": "mixed_actual_execution",
+        }
+    ]
+    with pytest.raises(ValueError, match="ineligible"):
+        stt_bench.compare_summaries(
+            baseline,
+            mixed,
+            policy={
+                "schema_version": 1,
+                "suites": {
+                    "public-english-v1": {
+                        "max_failure_rate_absolute_regression": 0.0,
+                    }
+                },
+            },
+        )
+
+
+def test_performance_policy_requires_matching_target_execution_order(tmp_path):
+    target_a = _worker_target(
+        "worker-a",
+        target_id="target-a",
+        identity_resolved=True,
+    )
+    target_b = _worker_target(
+        "worker-b",
+        target_id="target-b",
+        identity_resolved=True,
+    )
+
+    def build(directory_name, targets):
+        metadata = _runner_metadata(
+            warm_repetitions=3,
+            targets=targets,
+        )
+        directory = tmp_path / directory_name
+        stt_bench.atomic_write_json(directory / "run.json", metadata)
+        attempt_id = 0
+        for target_index in range(2):
+            for sample_id, repetition, role, timing_class in (
+                ("probe", 0, "accuracy", "cold_first"),
+                ("sample-2", 0, "accuracy", "warm"),
+                ("sample-2", 1, "performance_repeat", "warm"),
+                ("sample-2", 2, "performance_repeat", "warm"),
+            ):
+                attempt_id += 1
+                stt_bench.append_result_record(
+                    directory / "results.jsonl",
+                    _report_result(
+                        metadata,
+                        sample_id=sample_id,
+                        repetition=repetition,
+                        attempt_id=attempt_id,
+                        measurement_role=role,
+                        timing_class=timing_class,
+                        target_index=target_index,
+                    ),
+                )
+        return stt_bench.generate_report(directory)
+
+    baseline = build("baseline", (target_a, target_b))
+    reordered = build("reordered", (target_b, target_a))
+
+    descriptive = stt_bench.compare_summaries(baseline, reordered)
+    assert descriptive["exit_code"] == 0
+    assert all(pair["same_target"] is False for pair in descriptive["target_pairs"])
+    with pytest.raises(ValueError, match="ineligible"):
+        stt_bench.compare_summaries(
+            baseline,
+            reordered,
+            policy={
+                "schema_version": 1,
+                "suites": {
+                    "public-english-v1": {
+                        "max_warm_rtf_relative_regression": 0.0,
+                    }
+                },
+            },
+        )

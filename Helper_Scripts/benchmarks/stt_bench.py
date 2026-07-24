@@ -2208,6 +2208,8 @@ def validate_run_metadata(
     )
     if result["cold_probe_sample_id"] not in selected or not set(timing) <= set(selected):
         raise ValueError("run probe or timing sample selection is invalid")
+    if result["cold_probe_sample_id"] in timing:
+        raise ValueError("run cold probe cannot also be a timing sample")
     if result["profile"] not in _KNOWN_SAMPLE_PROFILES:
         raise ValueError("run profile is invalid")
     if result["mode"] not in {"neutral-v1", "production-v1"}:
@@ -2324,7 +2326,9 @@ def _validate_reason_list(value: object, field: str) -> None:
     if not isinstance(value, list) or len(value) > 64:
         raise ValueError(f"result field {field} must be a bounded array")
     for item in value:
-        _require_result_text(item, field=field, maximum=256)
+        reason = _require_result_text(item, field=field, maximum=64)
+        if STABLE_ID_V1.fullmatch(reason) is None:
+            raise ValueError(f"result field {field} must contain stable IDs")
 
 
 def _validate_execution_mapping(
@@ -2682,8 +2686,11 @@ def _decode_result_history(
                 object_pairs_hook=_reject_duplicate_json_keys,
             )
             validated = _validate_result_record(parsed)
-        except (UnicodeError, json.JSONDecodeError, ValueError) as exc:
+        except (UnicodeError, json.JSONDecodeError) as exc:
             raise ValueError(f"results line {line_number}: invalid record") from exc
+        except ValueError as exc:
+            detail = "unsupported schema" if "schema version" in str(exc) else "invalid record"
+            raise ValueError(f"results line {line_number}: {detail}") from exc
         attempt_id = int(validated["attempt_id"])
         if attempt_id <= previous_attempt:
             raise ValueError(f"results line {line_number}: attempt IDs must increase")
@@ -2695,10 +2702,19 @@ def _decode_result_history(
 def load_result_history(path: Path) -> tuple[list[dict[str, object]], bool]:
     """Load validated history and ignore only an unterminated final JSONL line."""
     source = Path(path)
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
     try:
-        content = source.read_bytes()
+        descriptor = os.open(source, flags)
     except FileNotFoundError:
         return [], False
+    except OSError as exc:
+        if exc.errno == getattr(errno, "ELOOP", -1):
+            raise OSError("results path must not be a symbolic link") from exc
+        raise
+    with os.fdopen(descriptor, "rb") as artifact:
+        if not stat.S_ISREG(os.fstat(artifact.fileno()).st_mode):
+            raise OSError("results path must be a regular file")
+        content = artifact.read()
     return _decode_result_history(content)
 
 
@@ -3024,14 +3040,22 @@ def _distribution(values: Sequence[float]) -> dict[str, float | None]:
     if not values:
         return {
             "mean": None,
+            "p25": None,
             "p50": None,
+            "p75": None,
+            "iqr": None,
             "p90": None,
             "p95": None,
             "p99": None,
         }
+    p25 = percentile_type7(values, 0.25)
+    p75 = percentile_type7(values, 0.75)
     return {
         "mean": sum(values) / len(values),
+        "p25": p25,
         "p50": percentile_type7(values, 0.50),
+        "p75": p75,
+        "iqr": p75 - p25,
         "p90": percentile_type7(values, 0.90),
         "p95": percentile_type7(values, 0.95),
         "p99": percentile_type7(values, 0.99),
@@ -3173,7 +3197,8 @@ def _warm_performance_aggregate(
         rtf = record["rtf"]
         throughput = record["throughput"]
         if (
-            not isinstance(adapter_nanoseconds, int)
+            record["status"] != "ok"
+            or not isinstance(adapter_nanoseconds, int)
             or isinstance(adapter_nanoseconds, bool)
             or rtf is None
             or throughput is None
@@ -3183,7 +3208,9 @@ def _warm_performance_aggregate(
         adapter_seconds.append(adapter_nanoseconds / 1_000_000_000)
         rtfs.append(float(rtf))
         throughputs.append(float(throughput))
-        if not record["eligibility_reasons"]:
+        if record["eligibility_reasons"]:
+            ineligible_count += 1
+        else:
             gate_eligible_count += 1
     return {
         "candidate_count": len(records),
@@ -4503,9 +4530,7 @@ def aggregate_results(
     primary_records = [record for record in quality_records if not record["diagnostic_only"]]
     diagnostic_records = [record for record in quality_records if record["diagnostic_only"]]
     warm_candidates = [
-        record
-        for record in validated_records
-        if record["timing_class"] == "warm" and record["status"] == "ok" and not record["diagnostic_only"]
+        record for record in validated_records if record["timing_class"] == "warm" and not record["diagnostic_only"]
     ]
     cold_probe = run_metadata.get("cold_probe_sample_id")
     if cold_probe is not None:
@@ -4538,6 +4563,1661 @@ def aggregate_results(
             ),
         },
     }
+
+
+def _text_retention_required(
+    record: Mapping[str, object],
+    mode: str,
+) -> bool:
+    """Return whether one scored record must retain transcript text."""
+    return mode == "full" or (
+        mode == "errors-only"
+        and (
+            record["status"] != "ok"
+            or any(
+                int(record[profile][unit]["errors"]) > 0
+                for profile in ("strict", "normalized")
+                for unit in ("wer", "cer")
+            )
+        )
+    )
+
+
+def _actual_matches_declared_route(
+    actual: Mapping[str, object],
+    route: Mapping[str, object],
+) -> bool:
+    """Match actual execution using the route contract's nullable wildcards."""
+    return set(route) >= _ACTUAL_EXECUTION_FIELDS and all(
+        route[field] is None or route[field] == actual[field] for field in _ACTUAL_EXECUTION_FIELDS
+    )
+
+
+def _validate_execution_against_target(
+    record: Mapping[str, object],
+    target: Mapping[str, object],
+    *,
+    artifact: str,
+) -> None:
+    """Bind one actual execution and its eligibility to a declared target."""
+    actual_execution = record["actual_execution"]
+    if actual_execution is None:
+        if "actual_execution_unverified" not in record["eligibility_reasons"]:
+            raise ValueError(f"{artifact} actual execution eligibility is inconsistent")
+    else:
+        declared_routes = target["descriptor"].get("routes")
+        matching_routes = (
+            [
+                route
+                for route in declared_routes
+                if isinstance(route, dict) and _actual_matches_declared_route(actual_execution, route)
+            ]
+            if isinstance(declared_routes, list)
+            else []
+        )
+        if len(matching_routes) != 1:
+            raise ValueError(f"{artifact} actual execution does not match a declared route")
+        identity_unresolved = matching_routes[0].get("identity_resolved") is not True
+        if ("identity_unresolved" in record["eligibility_reasons"]) != identity_unresolved:
+            raise ValueError(f"{artifact} execution identity eligibility is inconsistent")
+    if not set(record["execution_mismatch_reasons"]) <= set(record["eligibility_reasons"]):
+        raise ValueError(f"{artifact} execution mismatch eligibility is inconsistent")
+
+
+def _validate_report_records(
+    metadata: Mapping[str, object],
+    records: Sequence[Mapping[str, object]],
+) -> list[dict[str, object]]:
+    """Validate that result identities and repetitions belong to one run."""
+    targets = {str(target["target_id"]): target for target in metadata["target_matrix"]}
+    selected_samples = {str(value) for value in metadata["selected_sample_ids"]}
+    timing_samples = {str(value) for value in metadata["timing_sample_ids"]}
+    warm_repetitions = int(metadata["warm_repetitions"])
+    validated: list[dict[str, object]] = []
+    for record in records:
+        result = _validate_result_record(record)
+        target = targets.get(str(result["target_id"]))
+        sample_id = str(result["sample_id"])
+        repetition = int(result["repetition"])
+        if result["run_id"] != metadata["run_id"] or target is None or sample_id not in selected_samples:
+            raise ValueError("result does not belong to the reported run")
+        maximum_repetition = warm_repetitions - 1 if sample_id in timing_samples else 0
+        if repetition > maximum_repetition:
+            raise ValueError("result repetition does not belong to the reported run")
+        expected_role = "accuracy" if repetition == 0 else "performance_repeat"
+        if result["measurement_role"] != expected_role:
+            raise ValueError("result measurement role does not match repetition")
+        allowed_timing = (
+            {"cold_first"} if sample_id == metadata["cold_probe_sample_id"] else {"warm", "warmup_recovery"}
+        )
+        if result["timing_class"] not in allowed_timing:
+            raise ValueError("result timing class does not match run schedule")
+        expected_key = completion_key(
+            str(metadata["manifest_hash"]),
+            str(target["target_id"]),
+            str(target["execution_contract_hash"]),
+            sample_id,
+            repetition,
+        )
+        if result["completion_key"] != expected_key:
+            raise ValueError("result completion key does not belong to the reported run")
+        if result["requested_execution"] != {
+            "provider": target["provider"],
+            "model_label": target["model_label"],
+        }:
+            raise ValueError("result requested execution does not match target")
+        _validate_execution_against_target(
+            result,
+            target,
+            artifact="result",
+        )
+        retention_required = _text_retention_required(
+            result,
+            str(metadata["text_retention"]),
+        )
+        if (result["reference"] is not None) != retention_required:
+            raise ValueError("result text retention does not match the reported run")
+        validated.append(result)
+    return validated
+
+
+def _summary_sample(record: Mapping[str, object]) -> dict[str, object]:
+    """Project one validated active result into paired-comparison data."""
+    adapter_nanoseconds = record["adapter_nanoseconds"]
+    return {
+        "target_id": record["target_id"],
+        "sample_id": record["sample_id"],
+        "repetition": record["repetition"],
+        "measurement_role": record["measurement_role"],
+        "timing_class": record["timing_class"],
+        "suite": record["suite"],
+        "suite_visibility": record["suite_visibility"],
+        "dataset": record["dataset"],
+        "tags": list(record["tags"]),
+        "diagnostic_only": record["diagnostic_only"],
+        "status": record["status"],
+        "exact_match": record["exact_match"],
+        "strict": record["strict"],
+        "normalized": record["normalized"],
+        "adapter_seconds": (
+            adapter_nanoseconds / 1_000_000_000
+            if isinstance(adapter_nanoseconds, int) and not isinstance(adapter_nanoseconds, bool)
+            else None
+        ),
+        "audio_duration_seconds": record["audio_duration_seconds"],
+        "rtf": record["rtf"],
+        "throughput": record["throughput"],
+        "actual_execution": record["actual_execution"],
+        "execution_mismatch_reasons": list(record["execution_mismatch_reasons"]),
+        "eligibility_reasons": list(record["eligibility_reasons"]),
+        "normalization_profile": record["normalization_profile"],
+        "adapter_nanoseconds": adapter_nanoseconds,
+        "resource_observations": record["resource_observations"],
+        "error": record["error"],
+        "reference": record["reference"],
+        "hypothesis": record["hypothesis"],
+    }
+
+
+def _report_identity(metadata: Mapping[str, object]) -> dict[str, object]:
+    """Project immutable run identity and safe provenance into a summary."""
+    return {
+        "manifest_hash": metadata["manifest_hash"],
+        "selected_sample_ids": list(metadata["selected_sample_ids"]),
+        "profile": metadata["profile"],
+        "mode": metadata["mode"],
+        "seed": metadata["seed"],
+        "cold_probe_sample_id": metadata["cold_probe_sample_id"],
+        "warm_repetitions": metadata["warm_repetitions"],
+        "timing_sample_ids": list(metadata["timing_sample_ids"]),
+        "text_retention": metadata["text_retention"],
+        "adapter_watchdog_seconds": metadata["adapter_watchdog_seconds"],
+        "scorer_version": SCORER_VERSION,
+        "strict_profile": STRICT_PROFILE,
+        "unicode_version": metadata["environment"]["unicode_version"],
+        "target_order": [target["target_id"] for target in metadata["target_matrix"]],
+        "targets": list(metadata["target_matrix"]),
+        "environment": dict(metadata["environment"]),
+    }
+
+
+def _report_eligibility(
+    records: Sequence[Mapping[str, object]],
+) -> dict[str, object]:
+    """Report explicit reasons plus mixed actual-execution identities."""
+    counts: dict[str, Counter[str]] = {}
+    signatures: dict[str, set[str]] = {}
+    for record in records:
+        target_id = str(record["target_id"])
+        target_counts = counts.setdefault(target_id, Counter())
+        for reason in record["eligibility_reasons"]:
+            target_counts[str(reason)] += 1
+        execution = record["actual_execution"]
+        signature = (
+            "unavailable"
+            if execution is None
+            else json.dumps(
+                execution,
+                allow_nan=False,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+        )
+        signatures.setdefault(target_id, set()).add(signature)
+    target_ids = sorted(set(counts) | set(signatures))
+    return {
+        "reason_counts": {
+            target_id: dict(sorted(counts.get(target_id, Counter()).items())) for target_id in target_ids
+        },
+        "targets": {
+            target_id: {
+                "actual_execution_signature_count": len(signatures.get(target_id, set())),
+                "mixed_actual_execution": len(signatures.get(target_id, set())) > 1,
+                "unverified_actual_execution": ("unavailable" in signatures.get(target_id, set())),
+            }
+            for target_id in target_ids
+        },
+    }
+
+
+def _worst_retained_examples(
+    records: Sequence[Mapping[str, object]],
+    *,
+    limit: int = 20,
+) -> list[dict[str, object]]:
+    """Return worst accuracy examples only when their text was retained."""
+    eligible = [
+        record
+        for record in records
+        if record["measurement_role"] == "accuracy"
+        and record["reference"] is not None
+        and record["hypothesis"] is not None
+        and (
+            record["status"] != "ok"
+            or float(record["strict"]["wer"]["rate"]) > 0.0
+            or float(record["normalized"]["wer"]["rate"]) > 0.0
+        )
+    ]
+    eligible.sort(
+        key=lambda record: (
+            -float(record["normalized"]["wer"]["rate"]),
+            -float(record["strict"]["wer"]["rate"]),
+            str(record["target_id"]),
+            str(record["sample_id"]),
+        )
+    )
+    return [
+        {
+            "target_id": record["target_id"],
+            "sample_id": record["sample_id"],
+            "suite": record["suite"],
+            "status": record["status"],
+            "strict_wer": record["strict"]["wer"]["rate"],
+            "normalized_wer": record["normalized"]["wer"]["rate"],
+            "reference": record["reference"],
+            "hypothesis": record["hypothesis"],
+        }
+        for record in eligible[:limit]
+    ]
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    """Atomically replace one owner-only UTF-8 text artifact."""
+    if not isinstance(text, str):
+        raise TypeError("text artifact must be a string")
+    destination = Path(path)
+    _ensure_owner_directory(destination.parent)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{destination.name}.",
+        suffix=".tmp",
+        dir=destination.parent,
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as output:
+            output.write(text)
+            output.flush()
+            os.fsync(output.fileno())
+        if os.name == "posix":
+            os.chmod(temporary, 0o600)
+        os.replace(temporary, destination)
+        if os.name == "posix":
+            os.chmod(destination, 0o600)
+        _fsync_directory(destination.parent)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
+
+
+def _summary_table_rows(summary: Mapping[str, object]) -> list[list[str]]:
+    """Return shared report rows for Markdown and terminal renderers."""
+    rows: list[list[str]] = []
+    primary = summary["primary"]["targets"]
+    for target_id in summary["identity"]["target_order"]:
+        target = primary.get(target_id, {"suites": {}})
+        for suite, metrics in target["suites"].items():
+            rows.append(
+                [
+                    str(target_id),
+                    str(suite),
+                    str(metrics["sample_count"]),
+                    f"{float(metrics['strict']['wer']['pooled']):.6f}",
+                    f"{float(metrics['strict']['cer']['pooled']):.6f}",
+                    f"{float(metrics['normalized']['wer']['pooled']):.6f}",
+                    f"{float(metrics['normalized']['cer']['pooled']):.6f}",
+                    f"{float(metrics['failure_rate']):.6f}",
+                    f"{float(metrics['exact_match_rate']):.6f}",
+                ]
+            )
+    return rows
+
+
+def _target_table_rows(summary: Mapping[str, object]) -> list[list[str]]:
+    """Return the provider/model legend in target execution order."""
+    targets = {str(target["target_id"]): target for target in summary["identity"]["targets"]}
+    return [
+        [
+            str(target_id),
+            str(targets[target_id]["provider"]),
+            str(targets[target_id]["model_label"]),
+        ]
+        for target_id in summary["identity"]["target_order"]
+    ]
+
+
+def _metric_text(value: object) -> str:
+    """Format one optional report metric consistently."""
+    return "n/a" if value is None else f"{float(value):.6f}"
+
+
+def _warm_table_rows(summary: Mapping[str, object]) -> list[list[str]]:
+    """Return shared per-suite warm performance rows."""
+    rows: list[list[str]] = []
+    targets = summary["performance"]["warm"]["targets"]
+    for target_id in summary["identity"]["target_order"]:
+        for suite, metrics in targets.get(target_id, {"suites": {}})["suites"].items():
+            rows.append(
+                [
+                    str(target_id),
+                    str(suite),
+                    str(metrics["candidate_count"]),
+                    str(metrics["observation_count"]),
+                    _metric_text(metrics["adapter_seconds"]["p50"]),
+                    _metric_text(metrics["adapter_seconds"]["iqr"]),
+                    _metric_text(metrics["rtf"]["p50"]),
+                    _metric_text(metrics["rtf"]["iqr"]),
+                    _metric_text(metrics["throughput"]["p50"]),
+                    _metric_text(metrics["throughput"]["iqr"]),
+                ]
+            )
+    return rows
+
+
+def _cold_table_rows(summary: Mapping[str, object]) -> list[list[str]]:
+    """Return shared target-level cold-first rows."""
+    cold = summary["performance"]["cold_first"]
+    return [
+        [
+            str(target_id),
+            str(cold[target_id]["sample_id"]),
+            str(cold[target_id]["status"]),
+            _metric_text(cold[target_id]["adapter_seconds"]),
+            _metric_text(cold[target_id]["rtf"]),
+            _metric_text(cold[target_id]["throughput"]),
+            str(bool(cold[target_id]["gate_eligible"])).lower(),
+        ]
+        for target_id in summary["identity"]["target_order"]
+        if target_id in cold
+    ]
+
+
+def _backend_table_rows(summary: Mapping[str, object]) -> list[list[str]]:
+    """Return shared actual-backend population rows."""
+    rows: list[list[str]] = []
+    slices = summary["slices"]["actual_backend"]
+    for target_id in summary["identity"]["target_order"]:
+        for backend, suites in slices.get(target_id, {}).items():
+            for suite, metrics in suites.items():
+                rows.append(
+                    [
+                        str(target_id),
+                        str(backend),
+                        str(suite),
+                        str(metrics["sample_count"]),
+                    ]
+                )
+    return rows
+
+
+def _eligibility_table_rows(summary: Mapping[str, object]) -> list[list[str]]:
+    """Return shared target-level gate-eligibility diagnostics."""
+    rows: list[list[str]] = []
+    eligibility = summary["eligibility"]
+    for target_id in summary["identity"]["target_order"]:
+        target = eligibility["targets"].get(
+            target_id,
+            {
+                "actual_execution_signature_count": 0,
+                "mixed_actual_execution": False,
+                "unverified_actual_execution": False,
+            },
+        )
+        reason_counts = eligibility["reason_counts"].get(target_id, {})
+        reasons = ", ".join(f"{reason}={count}" for reason, count in sorted(reason_counts.items()))
+        rows.append(
+            [
+                str(target_id),
+                str(target["actual_execution_signature_count"]),
+                str(bool(target["mixed_actual_execution"])).lower(),
+                str(bool(target["unverified_actual_execution"])).lower(),
+                reasons or "none",
+            ]
+        )
+    return rows
+
+
+def render_summary_markdown(summary: Mapping[str, object]) -> str:
+    """Render one summary dictionary as deterministic Markdown."""
+    progress = summary["progress"]
+    identity = summary["identity"]
+    environment = identity["environment"]
+    lines = [
+        "# Native STT Benchmark Report",
+        "",
+        f"- Run: `{summary['run_id']}`",
+        f"- Profile/mode: `{identity['profile']}` / `{identity['mode']}`",
+        (f"- Scorer/Unicode: `{identity['scorer_version']}` / `{identity['unicode_version']}`"),
+        (
+            "- Hardware: "
+            f"`{environment['cpu_model']}`; `{environment['architecture']}`; "
+            f"accelerator `{environment['accelerator']}`"
+        ),
+        (
+            "- Progress: "
+            f"{progress['active_result_count']}/{progress['expected_result_count']} "
+            f"active; {progress['pending_result_count']} pending"
+        ),
+        "",
+        "## Targets",
+        "",
+        "| Target | Provider | Model |",
+        "|---|---|---|",
+    ]
+    for row in _target_table_rows(summary):
+        lines.append("| " + " | ".join(row) + " |")
+    lines.extend(
+        [
+            "",
+            "## Quality",
+            "",
+            (
+                "| Target | Suite | Samples | Strict WER | Strict CER | "
+                "Normalized WER | Normalized CER | Failure rate | Exact match |"
+            ),
+            "|---|---|---:|---:|---:|---:|---:|---:|---:|",
+        ]
+    )
+    for row in _summary_table_rows(summary):
+        lines.append("| " + " | ".join(row) + " |")
+    lines.extend(
+        [
+            "",
+            "## Warm performance",
+            "",
+            (
+                "| Target | Suite | Candidates | Observations | Latency p50 | "
+                "Latency IQR | RTF p50 | RTF IQR | Throughput p50 | Throughput IQR |"
+            ),
+            "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|",
+        ]
+    )
+    for row in _warm_table_rows(summary):
+        lines.append("| " + " | ".join(row) + " |")
+    lines.extend(
+        [
+            "",
+            "## Cold-first observations",
+            "",
+            "| Target | Sample | Status | Latency | RTF | Throughput | Gate eligible |",
+            "|---|---|---|---:|---:|---:|---|",
+        ]
+    )
+    for row in _cold_table_rows(summary):
+        lines.append("| " + " | ".join(row) + " |")
+    lines.extend(
+        [
+            "",
+            "## Actual backend populations",
+            "",
+            "| Target | Backend | Suite | Samples |",
+            "|---|---|---|---:|",
+        ]
+    )
+    for row in _backend_table_rows(summary):
+        lines.append("| " + " | ".join(row) + " |")
+    lines.extend(
+        [
+            "",
+            "## Gate eligibility",
+            "",
+            "| Target | Execution signatures | Mixed | Unverified | Reasons |",
+            "|---|---:|---|---|---|",
+        ]
+    )
+    for row in _eligibility_table_rows(summary):
+        lines.append("| " + " | ".join(row) + " |")
+    return "\n".join(lines) + "\n"
+
+
+def render_summary_terminal(summary: Mapping[str, object]) -> str:
+    """Render one summary dictionary as deterministic terminal text."""
+    progress = summary["progress"]
+    identity = summary["identity"]
+    environment = identity["environment"]
+    lines = [
+        f"Native STT benchmark: {summary['run_id']}",
+        f"Profile/mode: {identity['profile']} / {identity['mode']}",
+        (f"Scorer/Unicode: {identity['scorer_version']} / {identity['unicode_version']}"),
+        (
+            "Hardware: "
+            f"{environment['cpu_model']}; {environment['architecture']}; "
+            f"accelerator {environment['accelerator']}"
+        ),
+        (
+            "Progress: "
+            f"{progress['active_result_count']}/{progress['expected_result_count']} "
+            f"active, {progress['pending_result_count']} pending"
+        ),
+        "Targets:",
+        "target | provider | model",
+    ]
+    lines.extend(" | ".join(row) for row in _target_table_rows(summary))
+    lines.append(
+        "target | suite | samples | strict WER | strict CER | normalized WER | normalized CER | failure | exact"
+    )
+    for row in _summary_table_rows(summary):
+        lines.append(" | ".join(row))
+    lines.extend(
+        [
+            "Warm performance:",
+            (
+                "target | suite | candidates | observations | latency p50 | "
+                "latency IQR | RTF p50 | RTF IQR | throughput p50 | throughput IQR"
+            ),
+        ]
+    )
+    lines.extend(" | ".join(row) for row in _warm_table_rows(summary))
+    lines.extend(
+        [
+            "Cold-first observations:",
+            "target | sample | status | latency | RTF | throughput | gate eligible",
+        ]
+    )
+    lines.extend(" | ".join(row) for row in _cold_table_rows(summary))
+    lines.extend(
+        [
+            "Actual backend populations:",
+            "target | backend | suite | samples",
+        ]
+    )
+    lines.extend(" | ".join(row) for row in _backend_table_rows(summary))
+    lines.extend(
+        [
+            "Gate eligibility:",
+            "target | execution signatures | mixed | unverified | reasons",
+        ]
+    )
+    lines.extend(" | ".join(row) for row in _eligibility_table_rows(summary))
+    return "\n".join(lines) + "\n"
+
+
+def generate_report(run_directory: Path) -> dict[str, object]:
+    """Regenerate disposable report artifacts from durable run state."""
+    directory = Path(run_directory)
+    metadata = validate_run_metadata(_load_json_object(directory / "run.json"))
+    history, truncated = load_result_history(directory / "results.jsonl")
+    records = _validate_report_records(metadata, history)
+    active = reduce_attempts(records)
+    summary = aggregate_results(metadata, active)
+    target_order = [target["target_id"] for target in metadata["target_matrix"]]
+    sample_order = list(metadata["selected_sample_ids"])
+    ordered_records = sorted(
+        active.values(),
+        key=lambda record: (
+            target_order.index(record["target_id"]),
+            sample_order.index(record["sample_id"]),
+            int(record["repetition"]),
+        ),
+    )
+    expected_count = len(metadata["target_matrix"]) * (
+        len(metadata["selected_sample_ids"])
+        + len(metadata["timing_sample_ids"]) * (int(metadata["warm_repetitions"]) - 1)
+    )
+    active_count = len(active)
+    if active_count > expected_count:
+        raise ValueError("active result count exceeds run result matrix")
+    summary.update(
+        {
+            "identity": _report_identity(metadata),
+            "progress": {
+                "expected_result_count": expected_count,
+                "active_result_count": active_count,
+                "pending_result_count": expected_count - active_count,
+                "complete": active_count == expected_count,
+                "history_truncated_tail_ignored": truncated,
+            },
+            "eligibility": _report_eligibility(ordered_records),
+            "samples": [_summary_sample(record) for record in ordered_records],
+            "worst_examples": _worst_retained_examples(ordered_records),
+        }
+    )
+    summary = validate_summary(summary)
+    atomic_write_json(directory / "summary.json", summary)
+    _atomic_write_text(
+        directory / "summary.md",
+        render_summary_markdown(summary),
+    )
+    return summary
+
+
+_SUMMARY_FIELDS = frozenset(
+    {
+        "schema_version",
+        "run_id",
+        "active_result_count",
+        "primary",
+        "diagnostic",
+        "slices",
+        "performance",
+        "identity",
+        "progress",
+        "eligibility",
+        "samples",
+        "worst_examples",
+    }
+)
+_SUMMARY_IDENTITY_FIELDS = frozenset(
+    {
+        "manifest_hash",
+        "selected_sample_ids",
+        "profile",
+        "mode",
+        "seed",
+        "cold_probe_sample_id",
+        "warm_repetitions",
+        "timing_sample_ids",
+        "text_retention",
+        "adapter_watchdog_seconds",
+        "scorer_version",
+        "strict_profile",
+        "unicode_version",
+        "target_order",
+        "targets",
+        "environment",
+    }
+)
+_SUMMARY_SAMPLE_FIELDS = frozenset(
+    {
+        "target_id",
+        "sample_id",
+        "repetition",
+        "measurement_role",
+        "timing_class",
+        "suite",
+        "suite_visibility",
+        "dataset",
+        "tags",
+        "diagnostic_only",
+        "status",
+        "exact_match",
+        "strict",
+        "normalized",
+        "adapter_seconds",
+        "adapter_nanoseconds",
+        "audio_duration_seconds",
+        "rtf",
+        "throughput",
+        "actual_execution",
+        "execution_mismatch_reasons",
+        "eligibility_reasons",
+        "normalization_profile",
+        "resource_observations",
+        "error",
+        "reference",
+        "hypothesis",
+    }
+)
+
+
+def _validate_summary_sample(value: object) -> dict[str, object]:
+    """Validate one comparison-safe per-sample summary projection."""
+    if not isinstance(value, dict) or set(value) != _SUMMARY_SAMPLE_FIELDS:
+        raise ValueError("summary sample has missing or unknown fields")
+    sample = dict(value)
+    for field in ("target_id", "sample_id", "suite", "dataset"):
+        _require_stable_id(sample[field], "<summary>", field)
+    repetition = _require_result_integer(
+        sample["repetition"],
+        field="repetition",
+        minimum=0,
+    )
+    if sample["measurement_role"] not in MEASUREMENT_ROLES:
+        raise ValueError("summary sample measurement role is invalid")
+    if sample["timing_class"] not in TIMING_CLASSES:
+        raise ValueError("summary sample timing class is invalid")
+    if sample["suite_visibility"] not in {"public", "private"}:
+        raise ValueError("summary sample suite visibility is invalid")
+    if not isinstance(sample["diagnostic_only"], bool):
+        raise ValueError("summary sample diagnostic flag is invalid")
+    tags = sample["tags"]
+    if not isinstance(tags, list) or len(tags) > MAX_TAGS_PER_SAMPLE or len(tags) != len(set(tags)):
+        raise ValueError("summary sample tags are invalid")
+    for tag in tags:
+        _require_stable_id(tag, "<summary>", "tag")
+    if sample["status"] not in RESULT_STATUSES:
+        raise ValueError("summary sample status is invalid")
+    if not isinstance(sample["exact_match"], bool):
+        raise ValueError("summary sample exact-match flag is invalid")
+    _validate_score_mapping(sample["strict"], "summary.strict")
+    _validate_score_mapping(sample["normalized"], "summary.normalized")
+    if sample["normalization_profile"] not in _KNOWN_NORMALIZATION_PROFILES:
+        raise ValueError("summary sample normalization profile is invalid")
+    _validate_execution_mapping(
+        sample["actual_execution"],
+        field="summary.actual_execution",
+        actual=True,
+    )
+    _validate_reason_list(
+        sample["execution_mismatch_reasons"],
+        "summary.execution_mismatch_reasons",
+    )
+    _validate_reason_list(
+        sample["eligibility_reasons"],
+        "summary.eligibility_reasons",
+    )
+    adapter_nanoseconds = sample["adapter_nanoseconds"]
+    if adapter_nanoseconds is not None and (
+        isinstance(adapter_nanoseconds, bool) or not isinstance(adapter_nanoseconds, int)
+    ):
+        raise ValueError("summary adapter duration is invalid")
+    expected_seconds = (
+        adapter_nanoseconds / 1_000_000_000
+        if isinstance(adapter_nanoseconds, int) and not isinstance(adapter_nanoseconds, bool)
+        else None
+    )
+    if sample["adapter_seconds"] != expected_seconds:
+        raise ValueError("summary adapter seconds are inconsistent")
+    audio_duration = sample["audio_duration_seconds"]
+    if audio_duration is not None and (
+        isinstance(audio_duration, bool)
+        or not isinstance(audio_duration, (int, float))
+        or not math.isfinite(float(audio_duration))
+    ):
+        raise ValueError("summary audio duration is invalid")
+    base_reasons = [reason for reason in sample["eligibility_reasons"] if reason != "invalid_performance_duration"]
+    expected_rtf, expected_throughput, expected_reasons = performance_fields(
+        adapter_nanoseconds,
+        audio_duration,
+        eligibility_reasons=base_reasons,
+    )
+    if sample["eligibility_reasons"] != expected_reasons:
+        raise ValueError("summary performance eligibility is inconsistent")
+    for actual, expected in (
+        (sample["rtf"], expected_rtf),
+        (sample["throughput"], expected_throughput),
+    ):
+        if (actual is None) != (expected is None) or (
+            actual is not None
+            and expected is not None
+            and not math.isclose(
+                float(actual),
+                expected,
+                rel_tol=1e-12,
+                abs_tol=1e-12,
+            )
+        ):
+            raise ValueError("summary performance value is inconsistent")
+    reference = sample["reference"]
+    hypothesis = sample["hypothesis"]
+    if (reference is None) != (hypothesis is None):
+        raise ValueError("summary retained text is inconsistent")
+    if reference is not None and hypothesis is not None:
+        _require_result_text(reference, field="summary.reference", maximum=1_000_000)
+        _require_result_text(
+            hypothesis,
+            field="summary.hypothesis",
+            maximum=1_000_000,
+            allow_empty=True,
+        )
+        expected_score = _score_as_result_fields(
+            score_result_text(
+                reference,
+                hypothesis,
+                status=str(sample["status"]),
+                normalization_profile=str(sample["normalization_profile"]),
+            )
+        )
+        for field in ("exact_match", "strict", "normalized"):
+            if sample[field] != expected_score[field]:
+                raise ValueError("summary score is inconsistent with retained text")
+    observations = sample["resource_observations"]
+    if observations is not None:
+        if (
+            not isinstance(observations, dict)
+            or set(observations) - _RESOURCE_OBSERVATION_FIELDS
+            or "collection_method" not in observations
+        ):
+            raise ValueError("summary resource observations are invalid")
+        _require_result_text(
+            observations["collection_method"],
+            field="summary.resource_observations.collection_method",
+            maximum=128,
+        )
+        for field, item in observations.items():
+            if field == "collection_method" or item is None:
+                continue
+            if isinstance(item, bool) or not isinstance(item, int) or item < 0:
+                raise ValueError("summary resource observation is invalid")
+    error = sample["error"]
+    if error is not None:
+        if not isinstance(error, dict) or set(error) != {"type", "message"}:
+            raise ValueError("summary error is invalid")
+        _require_result_text(error["type"], field="summary.error.type", maximum=128)
+        _require_result_text(
+            error["message"],
+            field="summary.error.message",
+            maximum=512,
+        )
+    if repetition == 0 and sample["measurement_role"] != "accuracy":
+        raise ValueError("summary sample role is inconsistent")
+    if repetition > 0 and sample["measurement_role"] != "performance_repeat":
+        raise ValueError("summary sample role is inconsistent")
+    return sample
+
+
+def _aggregate_summary_samples(
+    *,
+    run_id: str,
+    cold_probe_sample_id: str,
+    samples: Sequence[Mapping[str, object]],
+) -> dict[str, object]:
+    """Recompute every headline aggregate from validated summary samples."""
+    quality = [sample for sample in samples if sample["measurement_role"] == "accuracy"]
+    primary = [sample for sample in quality if not sample["diagnostic_only"]]
+    diagnostic = [sample for sample in quality if sample["diagnostic_only"]]
+    warm = [sample for sample in samples if sample["timing_class"] == "warm" and not sample["diagnostic_only"]]
+    return {
+        "schema_version": SUMMARY_SCHEMA_VERSION,
+        "run_id": run_id,
+        "active_result_count": len(samples),
+        "primary": {"targets": _target_quality_aggregates(primary)},
+        "diagnostic": {"targets": _target_quality_aggregates(diagnostic)},
+        "slices": {
+            "dataset": _slice_quality_aggregates(primary, dimension="dataset"),
+            "tag": _slice_quality_aggregates(primary, dimension="tag"),
+            "actual_backend": _slice_quality_aggregates(
+                primary,
+                dimension="actual_backend",
+            ),
+        },
+        "performance": {
+            "warm": {"targets": _target_warm_performance(warm)},
+            "cold_first": _cold_first_observations(
+                samples,
+                cold_probe_sample_id=cold_probe_sample_id,
+            ),
+        },
+    }
+
+
+def validate_summary(summary: Mapping[str, object]) -> dict[str, object]:
+    """Strictly validate and reconcile one disposable summary artifact."""
+    if not isinstance(summary, Mapping) or set(summary) != _SUMMARY_FIELDS:
+        raise ValueError("summary has missing or unknown fields")
+    result = dict(summary)
+    if result["schema_version"] != SUMMARY_SCHEMA_VERSION:
+        raise ValueError("unsupported summary schema version")
+    run_id = _require_stable_id(result["run_id"], "<summary>", "run_id")
+    identity = result["identity"]
+    if not isinstance(identity, dict) or set(identity) != _SUMMARY_IDENTITY_FIELDS:
+        raise ValueError("summary identity has missing or unknown fields")
+    manifest_hash = identity["manifest_hash"]
+    if not isinstance(manifest_hash, str) or _SHA256_V1.fullmatch(manifest_hash) is None:
+        raise ValueError("summary manifest hash is invalid")
+    selected = identity["selected_sample_ids"]
+    timing = identity["timing_sample_ids"]
+    target_order = identity["target_order"]
+    if (
+        not isinstance(selected, list)
+        or not selected
+        or len(selected) != len(set(selected))
+        or not isinstance(timing, list)
+        or len(timing) != len(set(timing))
+        or not isinstance(target_order, list)
+        or not target_order
+        or len(target_order) != len(set(target_order))
+    ):
+        raise ValueError("summary ordered identities are invalid")
+    for sample_id in (*selected, *timing):
+        _require_stable_id(sample_id, "<summary>", "sample_id")
+    cold_probe = _require_stable_id(
+        identity["cold_probe_sample_id"],
+        "<summary>",
+        "cold_probe_sample_id",
+    )
+    if cold_probe not in selected or cold_probe in timing or not set(timing) <= set(selected):
+        raise ValueError("summary sample schedule is invalid")
+    if identity["profile"] not in _KNOWN_SAMPLE_PROFILES:
+        raise ValueError("summary profile is invalid")
+    if identity["mode"] not in {"neutral-v1", "production-v1"}:
+        raise ValueError("summary mode is invalid")
+    _require_result_integer(identity["seed"], field="seed", minimum=0)
+    warm_repetitions = _require_result_integer(
+        identity["warm_repetitions"],
+        field="warm_repetitions",
+        minimum=1,
+    )
+    if identity["text_retention"] not in {"full", "errors-only", "none"}:
+        raise ValueError("summary text retention is invalid")
+    watchdog = identity["adapter_watchdog_seconds"]
+    if watchdog is not None and (
+        isinstance(watchdog, bool)
+        or not isinstance(watchdog, (int, float))
+        or not math.isfinite(float(watchdog))
+        or float(watchdog) <= 0.0
+    ):
+        raise ValueError("summary watchdog is invalid")
+    if identity["scorer_version"] != SCORER_VERSION or identity["strict_profile"] != STRICT_PROFILE:
+        raise ValueError("summary scorer identity is invalid")
+    unicode_version = identity["unicode_version"]
+    if (
+        not isinstance(unicode_version, str)
+        or not unicode_version
+        or len(unicode_version) > 64
+        or "\n" in unicode_version
+    ):
+        raise ValueError("summary Unicode identity is invalid")
+    targets = _validate_target_matrix(identity["targets"])
+    if target_order != [target["target_id"] for target in targets]:
+        raise ValueError("summary target order is inconsistent")
+    targets_by_id = {str(target["target_id"]): target for target in targets}
+    environment = _validate_environment_fingerprint(identity["environment"])
+    if environment["unicode_version"] != unicode_version:
+        raise ValueError("summary Unicode identity is inconsistent")
+    safe_settings_json: set[str] = set()
+    for target in targets:
+        contract = target["execution_contract"]
+        if (
+            contract["scorer_version"] != identity["scorer_version"]
+            or contract["unicode_version"] != unicode_version
+            or contract["git_commit"] != environment["git_commit"]
+            or contract["safe_target_settings"]["mode"] != identity["mode"]
+        ):
+            raise ValueError("summary execution contract identity is inconsistent")
+        safe_settings_json.add(
+            json.dumps(
+                contract["safe_target_settings"],
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+        )
+    if len(safe_settings_json) != 1:
+        raise ValueError("summary targets do not share common safe settings")
+    samples_value = result["samples"]
+    if not isinstance(samples_value, list):
+        raise ValueError("summary samples must be an array")
+    samples = [_validate_summary_sample(sample) for sample in samples_value]
+    target_ids = set(target_order)
+    sample_ids = set(selected)
+    timing_ids = set(timing)
+    seen: set[tuple[str, str, int]] = set()
+    for sample in samples:
+        target_id = str(sample["target_id"])
+        sample_id = str(sample["sample_id"])
+        repetition = int(sample["repetition"])
+        key = (target_id, sample_id, repetition)
+        if target_id not in target_ids or sample_id not in sample_ids or key in seen:
+            raise ValueError("summary sample does not belong to its identity")
+        seen.add(key)
+        _validate_execution_against_target(
+            sample,
+            targets_by_id[target_id],
+            artifact="summary sample",
+        )
+        maximum_repetition = warm_repetitions - 1 if sample_id in timing_ids else 0
+        if repetition > maximum_repetition:
+            raise ValueError("summary sample repetition is inconsistent")
+        allowed_timing = {"cold_first"} if sample_id == cold_probe else {"warm", "warmup_recovery"}
+        if sample["timing_class"] not in allowed_timing:
+            raise ValueError("summary sample timing class is inconsistent")
+        if (sample["reference"] is not None) != _text_retention_required(
+            sample,
+            str(identity["text_retention"]),
+        ):
+            raise ValueError("summary sample text retention is inconsistent")
+    expected_order = sorted(
+        samples,
+        key=lambda sample: (
+            target_order.index(sample["target_id"]),
+            selected.index(sample["sample_id"]),
+            int(sample["repetition"]),
+        ),
+    )
+    if samples != expected_order:
+        raise ValueError("summary sample order is inconsistent")
+    recomputed = _aggregate_summary_samples(
+        run_id=run_id,
+        cold_probe_sample_id=cold_probe,
+        samples=samples,
+    )
+    for field in (
+        "schema_version",
+        "run_id",
+        "active_result_count",
+        "primary",
+        "diagnostic",
+        "slices",
+        "performance",
+    ):
+        if result[field] != recomputed[field]:
+            raise ValueError(f"summary {field} is inconsistent with samples")
+    progress = result["progress"]
+    if not isinstance(progress, dict) or set(progress) != {
+        "expected_result_count",
+        "active_result_count",
+        "pending_result_count",
+        "complete",
+        "history_truncated_tail_ignored",
+    }:
+        raise ValueError("summary progress is invalid")
+    expected_count = len(targets) * (len(selected) + len(timing) * (warm_repetitions - 1))
+    active_count = len(samples)
+    expected_progress = {
+        "expected_result_count": expected_count,
+        "active_result_count": active_count,
+        "pending_result_count": expected_count - active_count,
+        "complete": active_count == expected_count,
+        "history_truncated_tail_ignored": progress["history_truncated_tail_ignored"],
+    }
+    if not isinstance(progress["history_truncated_tail_ignored"], bool) or progress != expected_progress:
+        raise ValueError("summary progress is inconsistent")
+    if result["eligibility"] != _report_eligibility(samples):
+        raise ValueError("summary eligibility is inconsistent")
+    if result["worst_examples"] != _worst_retained_examples(samples):
+        raise ValueError("summary worst examples are inconsistent")
+    result["identity"] = dict(identity)
+    result["samples"] = samples
+    return result
+
+
+_POLICY_RULES = frozenset(
+    {
+        "max_normalized_pooled_wer_absolute_regression",
+        "max_normalized_pooled_wer_relative_regression",
+        "max_normalized_pooled_cer_absolute_regression",
+        "max_normalized_pooled_cer_relative_regression",
+        "max_failure_rate_absolute_regression",
+        "max_failure_rate_relative_regression",
+        "min_exact_match_rate",
+        "max_warm_rtf_absolute_regression",
+        "max_warm_rtf_relative_regression",
+        "max_warm_adapter_seconds_absolute_regression",
+        "max_warm_adapter_seconds_relative_regression",
+    }
+)
+_QUALITY_COMPATIBILITY_FIELDS = (
+    "manifest_hash",
+    "selected_sample_ids",
+    "profile",
+    "mode",
+    "seed",
+    "cold_probe_sample_id",
+    "warm_repetitions",
+    "timing_sample_ids",
+    "scorer_version",
+    "strict_profile",
+    "unicode_version",
+)
+_HARDWARE_FIELDS = (
+    "os_name",
+    "os_release",
+    "architecture",
+    "logical_cores",
+    "physical_cores",
+    "ram_bytes",
+    "cpu_model",
+    "accelerator",
+    "collection_methods",
+)
+
+
+def validate_policy(policy: Mapping[str, object]) -> dict[str, object]:
+    """Validate the optional versioned, per-suite regression policy."""
+    if not isinstance(policy, Mapping) or set(policy) != {"schema_version", "suites"}:
+        raise ValueError("policy has missing or unknown fields")
+    if policy["schema_version"] != 1:
+        raise ValueError("unsupported policy schema version")
+    suites = policy["suites"]
+    if not isinstance(suites, dict) or not suites:
+        raise ValueError("policy suites must be a non-empty object")
+    validated_suites: dict[str, dict[str, float]] = {}
+    for suite, rules in suites.items():
+        _require_stable_id(suite, "<policy>", "suite")
+        if not isinstance(rules, dict) or not rules or set(rules) - _POLICY_RULES:
+            raise ValueError("policy suite has missing or unknown rules")
+        validated_rules: dict[str, float] = {}
+        for name, value in rules.items():
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(float(value))
+                or float(value) < 0.0
+            ):
+                raise ValueError("policy bounds must be finite and non-negative")
+            number = float(value)
+            if name == "min_exact_match_rate" and number > 1.0:
+                raise ValueError("policy exact-match minimum must be at most one")
+            validated_rules[name] = number
+        validated_suites[str(suite)] = validated_rules
+    return {
+        "schema_version": 1,
+        "suites": {suite: validated_suites[suite] for suite in sorted(validated_suites)},
+    }
+
+
+def _sample_layout(summary: Mapping[str, object]) -> dict[str, dict[str, object]]:
+    """Return target-independent sample metadata and reject internal drift."""
+    layout: dict[str, dict[str, object]] = {}
+    for sample in summary["samples"]:
+        if sample["measurement_role"] != "accuracy":
+            continue
+        sample_id = str(sample["sample_id"])
+        metadata = {
+            "suite": sample["suite"],
+            "suite_visibility": sample["suite_visibility"],
+            "dataset": sample["dataset"],
+            "tags": sample["tags"],
+            "diagnostic_only": sample["diagnostic_only"],
+            "normalization_profile": sample["normalization_profile"],
+        }
+        previous = layout.setdefault(sample_id, metadata)
+        if previous != metadata:
+            raise ValueError("summary sample metadata is inconsistent across targets")
+    return layout
+
+
+def _target_sample_map(
+    summary: Mapping[str, object],
+    target_id: str,
+) -> dict[str, Mapping[str, object]]:
+    """Return one target's ordered accuracy observations by sample ID."""
+    return {
+        str(sample["sample_id"]): sample
+        for sample in summary["samples"]
+        if sample["target_id"] == target_id and sample["measurement_role"] == "accuracy"
+    }
+
+
+def _actual_execution_signatures(
+    summary: Mapping[str, object],
+    target_id: str,
+) -> set[str]:
+    """Return canonical actual-execution identities for one target."""
+    signatures: set[str] = set()
+    for sample in summary["samples"]:
+        if sample["target_id"] != target_id:
+            continue
+        execution = sample["actual_execution"]
+        if execution is None:
+            signatures.add("unavailable")
+        else:
+            signatures.add(
+                json.dumps(
+                    execution,
+                    allow_nan=False,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+            )
+    return signatures
+
+
+def _target_identity_resolved(target: Mapping[str, object]) -> bool:
+    """Return whether every declared route has immutable resolved identity."""
+    routes = target["descriptor"].get("routes")
+    return bool(
+        isinstance(routes, list)
+        and routes
+        and all(
+            isinstance(route, dict)
+            and route.get("identity_resolved") is True
+            and isinstance(route.get("artifact_id"), str)
+            for route in routes
+        )
+    )
+
+
+def _same_target_identity(
+    baseline: Mapping[str, object],
+    candidate: Mapping[str, object],
+) -> bool:
+    """Compare material target identity while allowing implementation changes."""
+    return (
+        baseline["provider"] == candidate["provider"]
+        and baseline["model_label"] == candidate["model_label"]
+        and baseline["descriptor"] == candidate["descriptor"]
+        and baseline["execution_contract"]["safe_target_settings"]
+        == candidate["execution_contract"]["safe_target_settings"]
+    )
+
+
+def _common_semantic_settings(
+    target: Mapping[str, object],
+) -> dict[str, object]:
+    """Return settings shared across descriptive target/config comparisons."""
+    settings = target["execution_contract"]["safe_target_settings"]
+    return {
+        name: value
+        for name, value in settings.items()
+        if name
+        not in {
+            "configuration_id",
+            "network_collection_profile",
+            "network_client_location",
+        }
+    }
+
+
+def _hardware_matches(
+    baseline: Mapping[str, object],
+    candidate: Mapping[str, object],
+) -> bool:
+    """Compare the hardware and collection-method identity used for gates."""
+    return all(
+        baseline["identity"]["environment"][field] == candidate["identity"]["environment"][field]
+        for field in _HARDWARE_FIELDS
+    )
+
+
+def _paired_sample_deltas(
+    baseline: Mapping[str, object],
+    candidate: Mapping[str, object],
+    baseline_target_id: str,
+    candidate_target_id: str,
+) -> list[dict[str, object]]:
+    """Build deterministic accuracy deltas in selected-sample order."""
+    baseline_samples = _target_sample_map(baseline, baseline_target_id)
+    candidate_samples = _target_sample_map(candidate, candidate_target_id)
+    deltas: list[dict[str, object]] = []
+    for sample_id in baseline["identity"]["selected_sample_ids"]:
+        before = baseline_samples[sample_id]
+        after = candidate_samples[sample_id]
+        deltas.append(
+            {
+                "sample_id": sample_id,
+                "suite": before["suite"],
+                "baseline_status": before["status"],
+                "candidate_status": after["status"],
+                "normalized_wer_delta": (
+                    float(after["normalized"]["wer"]["rate"]) - float(before["normalized"]["wer"]["rate"])
+                ),
+                "normalized_cer_delta": (
+                    float(after["normalized"]["cer"]["rate"]) - float(before["normalized"]["cer"]["rate"])
+                ),
+                "strict_wer_delta": (float(after["strict"]["wer"]["rate"]) - float(before["strict"]["wer"]["rate"])),
+                "strict_cer_delta": (float(after["strict"]["cer"]["rate"]) - float(before["strict"]["cer"]["rate"])),
+                "exact_match_delta": (int(bool(after["exact_match"])) - int(bool(before["exact_match"]))),
+            }
+        )
+    return deltas
+
+
+def _suite_metric_deltas(
+    baseline_metrics: Mapping[str, object],
+    candidate_metrics: Mapping[str, object],
+) -> dict[str, float]:
+    """Return descriptive headline deltas for one target/suite pair."""
+    return {
+        "normalized_pooled_wer_delta": (
+            float(candidate_metrics["normalized"]["wer"]["pooled"])
+            - float(baseline_metrics["normalized"]["wer"]["pooled"])
+        ),
+        "normalized_pooled_cer_delta": (
+            float(candidate_metrics["normalized"]["cer"]["pooled"])
+            - float(baseline_metrics["normalized"]["cer"]["pooled"])
+        ),
+        "failure_rate_delta": (float(candidate_metrics["failure_rate"]) - float(baseline_metrics["failure_rate"])),
+        "exact_match_rate_delta": (
+            float(candidate_metrics["exact_match_rate"]) - float(baseline_metrics["exact_match_rate"])
+        ),
+    }
+
+
+def _descriptive_rankings(
+    baseline: Mapping[str, object],
+    candidate: Mapping[str, object],
+    pairs: Sequence[Mapping[str, object]],
+) -> dict[str, object]:
+    """Rank displayed target/suite WER values without inferential claims."""
+    suites: dict[str, list[dict[str, object]]] = {}
+    excluded: list[dict[str, str]] = []
+    for pair in pairs:
+        for role, summary, target_id in (
+            ("baseline", baseline, pair["baseline_target_id"]),
+            ("candidate", candidate, pair["candidate_target_id"]),
+        ):
+            eligibility = summary["eligibility"]["targets"].get(
+                target_id,
+                {},
+            )
+            if eligibility.get("mixed_actual_execution") is True:
+                excluded.append(
+                    {
+                        "role": role,
+                        "target_id": str(target_id),
+                        "reason": "mixed_actual_execution",
+                    }
+                )
+                continue
+            target = summary["primary"]["targets"].get(target_id, {"suites": {}})
+            for suite, metrics in target["suites"].items():
+                suites.setdefault(str(suite), []).append(
+                    {
+                        "role": role,
+                        "target_id": target_id,
+                        "normalized_pooled_wer": metrics["normalized"]["wer"]["pooled"],
+                    }
+                )
+    return {
+        "label": "descriptive",
+        "suites": {
+            suite: sorted(
+                entries,
+                key=lambda entry: (
+                    float(entry["normalized_pooled_wer"]),
+                    str(entry["role"]),
+                    str(entry["target_id"]),
+                ),
+            )
+            for suite, entries in sorted(suites.items())
+        },
+        "excluded": excluded,
+    }
+
+
+def _provenance_differences(
+    baseline_target: Mapping[str, object],
+    candidate_target: Mapping[str, object],
+) -> dict[str, object]:
+    """Expose allowed implementation/dependency differences."""
+    before = baseline_target["execution_contract"]
+    after = candidate_target["execution_contract"]
+    differences: dict[str, object] = {}
+    for field in ("dependency_versions", "source_hashes", "git_commit"):
+        if before[field] != after[field]:
+            differences[field] = {
+                "baseline": before[field],
+                "candidate": after[field],
+            }
+    return differences
+
+
+def _policy_metric(
+    rule: str,
+    quality: Mapping[str, object],
+    warm: Mapping[str, object] | None,
+) -> float:
+    """Read the allowlisted metric used by one policy rule."""
+    if "normalized_pooled_wer" in rule:
+        return float(quality["normalized"]["wer"]["pooled"])
+    if "normalized_pooled_cer" in rule:
+        return float(quality["normalized"]["cer"]["pooled"])
+    if "failure_rate" in rule:
+        return float(quality["failure_rate"])
+    if rule == "min_exact_match_rate":
+        return float(quality["exact_match_rate"])
+    if "warm_rtf" in rule:
+        if warm is None or warm["rtf"]["p50"] is None:
+            raise ValueError("requested warm performance gate is ineligible")
+        return float(warm["rtf"]["p50"])
+    if "warm_adapter_seconds" in rule:
+        if warm is None or warm["adapter_seconds"]["p50"] is None:
+            raise ValueError("requested warm performance gate is ineligible")
+        return float(warm["adapter_seconds"]["p50"])
+    raise ValueError("unknown policy rule")
+
+
+def _is_network_target(
+    summary: Mapping[str, object],
+    target_id: str,
+) -> bool:
+    """Return whether any active observation sent audio beyond the process."""
+    return any(
+        sample["target_id"] == target_id
+        and sample["actual_execution"] is not None
+        and sample["actual_execution"]["audio_egress"] != "none"
+        for sample in summary["samples"]
+    )
+
+
+def _performance_gate_eligible(
+    baseline: Mapping[str, object],
+    candidate: Mapping[str, object],
+    pair: Mapping[str, object],
+    suite: str,
+    *,
+    allow_network_performance_gates: bool,
+) -> bool:
+    """Return whether one warm performance threshold is comparable."""
+    baseline_target_id = str(pair["baseline_target_id"])
+    candidate_target_id = str(pair["candidate_target_id"])
+    if (
+        not pair["gate_identity_eligible"]
+        or baseline["identity"]["target_order"].index(baseline_target_id)
+        != candidate["identity"]["target_order"].index(candidate_target_id)
+        or int(baseline["identity"]["warm_repetitions"]) < 3
+        or int(candidate["identity"]["warm_repetitions"]) < 3
+    ):
+        return False
+    baseline_warm = (
+        baseline["performance"]["warm"]["targets"].get(baseline_target_id, {"suites": {}})["suites"].get(suite)
+    )
+    candidate_warm = (
+        candidate["performance"]["warm"]["targets"].get(candidate_target_id, {"suites": {}})["suites"].get(suite)
+    )
+    if (
+        baseline_warm is None
+        or candidate_warm is None
+        or int(baseline_warm["gate_eligible_count"]) < 3
+        or int(candidate_warm["gate_eligible_count"]) < 3
+    ):
+        return False
+    network = _is_network_target(
+        baseline,
+        baseline_target_id,
+    ) or _is_network_target(candidate, candidate_target_id)
+    if not network:
+        return True
+    before_settings = pair["baseline_target"]["execution_contract"]["safe_target_settings"]
+    after_settings = pair["candidate_target"]["execution_contract"]["safe_target_settings"]
+    return bool(
+        allow_network_performance_gates
+        and before_settings.get("network_collection_profile")
+        and before_settings.get("network_collection_profile") == after_settings.get("network_collection_profile")
+        and before_settings.get("network_client_location")
+        and before_settings.get("network_client_location") == after_settings.get("network_client_location")
+    )
+
+
+def compare_summaries(
+    baseline: Mapping[str, object],
+    candidate: Mapping[str, object],
+    *,
+    policy: Mapping[str, object] | None = None,
+    allow_network_performance_gates: bool = False,
+) -> dict[str, object]:
+    """Compare compatible summaries and optionally enforce eligible gates."""
+    if not isinstance(allow_network_performance_gates, bool):
+        raise TypeError("network performance gate opt-in must be boolean")
+    validated_policy = validate_policy(policy) if policy is not None else None
+    try:
+        before = validate_summary(baseline)
+        after = validate_summary(candidate)
+    except ValueError as exc:
+        raise ValueError("summaries are not compatible or valid") from exc
+    for field in _QUALITY_COMPATIBILITY_FIELDS:
+        if before["identity"][field] != after["identity"][field]:
+            raise ValueError("summaries are not compatible for quality comparison")
+    if len(before["identity"]["targets"]) != len(after["identity"]["targets"]):
+        raise ValueError("summaries are not compatible target matrices")
+    if not before["progress"]["complete"] or not after["progress"]["complete"]:
+        if validated_policy is not None:
+            raise ValueError("requested policy gates are ineligible for partial runs")
+        raise ValueError("descriptive comparison does not support partial summaries")
+    if _sample_layout(before) != _sample_layout(after):
+        raise ValueError("summaries are not compatible sample suites")
+    if _common_semantic_settings(before["identity"]["targets"][0]) != _common_semantic_settings(
+        after["identity"]["targets"][0]
+    ):
+        raise ValueError("summaries are not compatible common settings")
+    hardware_matches = _hardware_matches(before, after)
+    pairs: list[dict[str, object]] = []
+    public_pairs: list[dict[str, object]] = []
+    for ordinal, (before_target, after_target) in enumerate(
+        zip(
+            before["identity"]["targets"],
+            after["identity"]["targets"],
+            strict=True,
+        ),
+        start=1,
+    ):
+        baseline_target_id = str(before_target["target_id"])
+        candidate_target_id = str(after_target["target_id"])
+        same_target = _same_target_identity(before_target, after_target)
+        baseline_signatures = _actual_execution_signatures(
+            before,
+            baseline_target_id,
+        )
+        candidate_signatures = _actual_execution_signatures(
+            after,
+            candidate_target_id,
+        )
+        gate_identity_eligible = bool(
+            same_target
+            and hardware_matches
+            and _target_identity_resolved(before_target)
+            and _target_identity_resolved(after_target)
+            and len(baseline_signatures) == 1
+            and len(candidate_signatures) == 1
+            and baseline_signatures == candidate_signatures
+            and "unavailable" not in baseline_signatures
+        )
+        before_suites = before["primary"]["targets"].get(
+            baseline_target_id,
+            {"suites": {}},
+        )["suites"]
+        after_suites = after["primary"]["targets"].get(
+            candidate_target_id,
+            {"suites": {}},
+        )["suites"]
+        if set(before_suites) != set(after_suites):
+            raise ValueError("summaries are not compatible suite populations")
+        suite_deltas = {
+            suite: _suite_metric_deltas(before_suites[suite], after_suites[suite]) for suite in sorted(before_suites)
+        }
+        internal_pair = {
+            "ordinal": ordinal,
+            "baseline_target_id": baseline_target_id,
+            "candidate_target_id": candidate_target_id,
+            "same_target": same_target,
+            "gate_identity_eligible": gate_identity_eligible,
+            "baseline_target": before_target,
+            "candidate_target": after_target,
+            "suite_deltas": suite_deltas,
+            "paired_samples": _paired_sample_deltas(
+                before,
+                after,
+                baseline_target_id,
+                candidate_target_id,
+            ),
+            "provenance_differences": _provenance_differences(
+                before_target,
+                after_target,
+            ),
+        }
+        pairs.append(internal_pair)
+        public_pairs.append(
+            {key: value for key, value in internal_pair.items() if key not in {"baseline_target", "candidate_target"}}
+        )
+    gates: list[dict[str, object]] = []
+    if validated_policy is not None:
+        if not all(pair["gate_identity_eligible"] for pair in pairs):
+            raise ValueError("requested policy gates are ineligible for these target identities")
+        available_suites = {suite for pair in pairs for suite in pair["suite_deltas"]}
+        if not set(validated_policy["suites"]) <= available_suites:
+            raise ValueError("policy references a suite absent from either summary")
+        for pair in pairs:
+            baseline_target_id = str(pair["baseline_target_id"])
+            candidate_target_id = str(pair["candidate_target_id"])
+            baseline_quality = before["primary"]["targets"][baseline_target_id]["suites"]
+            candidate_quality = after["primary"]["targets"][candidate_target_id]["suites"]
+            baseline_warm_suites = before["performance"]["warm"]["targets"].get(baseline_target_id, {"suites": {}})[
+                "suites"
+            ]
+            candidate_warm_suites = after["performance"]["warm"]["targets"].get(candidate_target_id, {"suites": {}})[
+                "suites"
+            ]
+            for suite, rules in validated_policy["suites"].items():
+                for rule, bound in rules.items():
+                    is_performance = rule.startswith("max_warm_")
+                    if is_performance and not _performance_gate_eligible(
+                        before,
+                        after,
+                        pair,
+                        suite,
+                        allow_network_performance_gates=allow_network_performance_gates,
+                    ):
+                        raise ValueError("requested warm performance gate is ineligible")
+                    baseline_value = _policy_metric(
+                        rule,
+                        baseline_quality[suite],
+                        baseline_warm_suites.get(suite),
+                    )
+                    candidate_value = _policy_metric(
+                        rule,
+                        candidate_quality[suite],
+                        candidate_warm_suites.get(suite),
+                    )
+                    if rule == "min_exact_match_rate":
+                        observed = candidate_value
+                        passed = observed >= bound
+                    elif rule.endswith("_relative_regression"):
+                        if baseline_value == 0.0:
+                            raise ValueError("relative policy rule has a zero baseline")
+                        observed = (candidate_value - baseline_value) / baseline_value
+                        passed = observed <= bound
+                    else:
+                        observed = candidate_value - baseline_value
+                        passed = observed <= bound
+                    gates.append(
+                        {
+                            "target_ordinal": pair["ordinal"],
+                            "suite": suite,
+                            "rule": rule,
+                            "baseline": baseline_value,
+                            "candidate": candidate_value,
+                            "observed": observed,
+                            "bound": bound,
+                            "eligible": True,
+                            "passed": passed,
+                        }
+                    )
+    failed = any(not gate["passed"] for gate in gates)
+    return {
+        "schema_version": 1,
+        "baseline_run_id": before["run_id"],
+        "candidate_run_id": after["run_id"],
+        "mode": "policy" if validated_policy is not None else "descriptive",
+        "compatibility": {
+            "quality_identity": True,
+            "hardware_match": hardware_matches,
+        },
+        "target_pairs": public_pairs,
+        "rankings": _descriptive_rankings(before, after, pairs),
+        "gates": gates,
+        "exit_code": 1 if failed else 0,
+    }
+
+
+def _compare_command(arguments: argparse.Namespace) -> int:
+    """Compare summary artifacts and return the documented gate exit code."""
+    policy = _load_json_object(arguments.policy) if arguments.policy is not None else None
+    comparison = compare_summaries(
+        _load_json_object(arguments.baseline),
+        _load_json_object(arguments.candidate),
+        policy=policy,
+        allow_network_performance_gates=arguments.allow_network_performance_gates,
+    )
+    print(
+        json.dumps(
+            comparison,
+            allow_nan=False,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+    )
+    return int(comparison["exit_code"])
+
+
+def _report_command(arguments: argparse.Namespace) -> int:
+    """Regenerate and print one run report."""
+    summary = generate_report(arguments.run)
+    print(render_summary_terminal(summary), end="")
+    return 0
 
 
 def _validate_command(arguments: argparse.Namespace) -> int:
@@ -4762,6 +6442,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     run.add_argument("--network-client-location")
     run.add_argument("--run")
     run.set_defaults(handler=_run_command)
+    report = commands.add_parser("report")
+    report.add_argument("--run", required=True, type=Path)
+    report.set_defaults(handler=_report_command)
+    compare = commands.add_parser("compare")
+    compare.add_argument("--baseline", required=True, type=Path)
+    compare.add_argument("--candidate", required=True, type=Path)
+    compare.add_argument("--policy", type=Path)
+    compare.add_argument(
+        "--allow-network-performance-gates",
+        action="store_true",
+    )
+    compare.set_defaults(handler=_compare_command)
     arguments = parser.parse_args(argv)
 
     try:
