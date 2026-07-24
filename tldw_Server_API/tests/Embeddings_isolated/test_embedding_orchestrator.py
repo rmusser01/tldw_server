@@ -492,6 +492,53 @@ async def test_dimension_policy_is_applied_to_provider_native_cache_hits_per_req
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_successful_adapter_reports_compatibility_cache_counts_and_bypasses_provider():
+    cache = RecordingCache()
+    preflight_calls: list[tuple[str, str]] = []
+
+    async def provider_preflight(provider: str, model: str) -> None:
+        preflight_calls.append((provider, model))
+
+    executor = AdapterAwareExecutor(
+        vectors=[[9.0, 9.0]],
+        adapter_output=EmbeddingExecutorOutput(
+            vectors=[[0.1, 0.2], [0.3, 0.4]],
+            embeddings_from_adapter=True,
+        ),
+    )
+    orchestrator = _orchestrator(
+        cache=cache,
+        executor=executor,
+        execution_path="adapter",
+        provider_preflight=provider_preflight,
+    )
+    prepared = orchestrator.prepare(
+        ["one", "two"],
+        _context(model="text-embedding-3-small", provider="openai"),
+    )
+
+    result = await orchestrator.execute(prepared)
+
+    assert result.vectors == [[0.1, 0.2], [0.3, 0.4]]
+    assert result.embeddings_from_adapter is True
+    assert result.cache_hits == 0
+    assert result.cache_misses == 2
+    assert executor.adapter_calls == [
+        {
+            "texts": ["one", "two"],
+            "provider": "openai",
+            "model": "text-embedding-3-small",
+            "dimensions": None,
+        }
+    ]
+    assert preflight_calls == []
+    assert cache.get_keys == []
+    assert cache.set_calls == []
+    assert executor.calls == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_adapter_preferred_path_uses_provider_cache_when_adapter_returns_no_vectors():
     cache = RecordingCache(
         {
@@ -588,6 +635,7 @@ async def test_fallback_execution_maps_model_and_returns_fallback_headers():
 
     result = await orchestrator.execute(prepared)
 
+    assert prepared.execution_plan.fallback_chain == ["openai", "huggingface"]
     assert executor.calls == [
         {
             "texts": ["fallback mapping"],
@@ -602,11 +650,154 @@ async def test_fallback_execution_maps_model_and_returns_fallback_headers():
             "dimensions": None,
         },
     ]
+    assert [call["provider"] for call in executor.calls].count("openai") == 1
     assert result.provider == "huggingface"
     assert result.model == "sentence-transformers/all-MiniLM-L6-v2"
     assert result.fallback_from == "openai"
     assert result.response_headers["X-Embeddings-Provider"] == "huggingface"
     assert result.response_headers["X-Embeddings-Fallback-From"] == "openai"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_fallback_complete_result_is_validated_before_first_cache_write(
+    monkeypatch,
+):
+    primary_error = EmbeddingProviderError(
+        "provider_unavailable",
+        "primary unavailable",
+        provider="openai",
+        model="text-embedding-3-small",
+        retryable=True,
+    )
+    fallback_hit_key = (
+        "one|huggingface|sentence-transformers/all-MiniLM-L6-v2|"
+        "huggingface:sentence-transformers/all-MiniLM-L6-v2:backend"
+    )
+    cache = RecordingCache({fallback_hit_key: [0.1, 0.2]})
+    executor = RecordingExecutor(
+        failures={"openai": primary_error},
+        provider_vectors={
+            "huggingface": [[0.3, 0.4, 0.5]],
+        },
+    )
+    real_validate = orchestrator_module.validated_embedding_vectors
+    validation_calls: list[tuple[object, int, object]] = []
+    cache_key_calls: list[tuple[str, str, str, int | None, str | None]] = []
+
+    def validation_probe(vectors: object, *, expected: int):
+        validated = real_validate(vectors, expected=expected)
+        validation_calls.append((vectors, expected, validated))
+        return validated
+
+    def cache_key_probe(
+        text: str,
+        provider: str,
+        model: str,
+        dimensions: int | None,
+        backend_identity: str | None,
+    ) -> str:
+        cache_key_calls.append(
+            (text, provider, model, dimensions, backend_identity)
+        )
+        return _cache_key(text, provider, model, dimensions, backend_identity)
+
+    monkeypatch.setattr(
+        orchestrator_module,
+        "validated_embedding_vectors",
+        validation_probe,
+    )
+    orchestrator = _orchestrator(
+        cache=cache,
+        executor=executor,
+        cache_key_fn=cache_key_probe,
+        settings_fallback_chain={"openai": ["huggingface"]},
+        settings_fallback_model_map={
+            "openai:text-embedding-3-small": {
+                "huggingface": "sentence-transformers/all-MiniLM-L6-v2",
+            }
+        },
+    )
+    prepared = orchestrator.prepare(
+        ["one", "two"],
+        _context(model="text-embedding-3-small", provider="openai"),
+    )
+
+    with pytest.raises(EmbeddingProviderError) as exc_info:
+        await orchestrator.execute(prepared)
+
+    assert exc_info.value.code == "provider_malformed_response"
+    assert exc_info.value.message == (
+        "Embedding provider returned malformed embedding vectors"
+    )
+    assert exc_info.value.provider == "huggingface"
+    assert exc_info.value.model == "sentence-transformers/all-MiniLM-L6-v2"
+    assert executor.calls == [
+        {
+            "texts": ["one", "two"],
+            "provider": "openai",
+            "model": "text-embedding-3-small",
+            "dimensions": None,
+        },
+        {
+            "texts": ["two"],
+            "provider": "huggingface",
+            "model": "sentence-transformers/all-MiniLM-L6-v2",
+            "dimensions": None,
+        },
+    ]
+    assert cache.get_keys == [
+        "one|openai|text-embedding-3-small|openai:text-embedding-3-small:backend",
+        "two|openai|text-embedding-3-small|openai:text-embedding-3-small:backend",
+        fallback_hit_key,
+        (
+            "two|huggingface|sentence-transformers/all-MiniLM-L6-v2|"
+            "huggingface:sentence-transformers/all-MiniLM-L6-v2:backend"
+        ),
+    ]
+    assert validation_calls == [
+        ([[0.1, 0.2]], 1, [[0.1, 0.2]]),
+        ([[0.3, 0.4, 0.5]], 1, [[0.3, 0.4, 0.5]]),
+        ([[0.1, 0.2], [0.3, 0.4, 0.5]], 2, None),
+    ]
+    assert cache_key_calls == [
+        (
+            "one",
+            "openai",
+            "text-embedding-3-small",
+            None,
+            "openai:text-embedding-3-small:backend",
+        ),
+        (
+            "two",
+            "openai",
+            "text-embedding-3-small",
+            None,
+            "openai:text-embedding-3-small:backend",
+        ),
+        (
+            "one",
+            "huggingface",
+            "sentence-transformers/all-MiniLM-L6-v2",
+            None,
+            "huggingface:sentence-transformers/all-MiniLM-L6-v2:backend",
+        ),
+        (
+            "two",
+            "huggingface",
+            "sentence-transformers/all-MiniLM-L6-v2",
+            None,
+            "huggingface:sentence-transformers/all-MiniLM-L6-v2:backend",
+        ),
+        (
+            "two",
+            "huggingface",
+            "sentence-transformers/all-MiniLM-L6-v2",
+            None,
+            "huggingface:sentence-transformers/all-MiniLM-L6-v2:backend",
+        ),
+    ]
+    assert cache.set_calls == []
 
 
 @pytest.mark.unit
@@ -1428,6 +1619,49 @@ async def test_base64_requested_dimensions_force_reduce_even_when_configured_pol
     assert result.vectors == [[0.25, 0.75]]
     assert cache.set_calls[0][1] == [0.25, 0.75, 0.5]
     assert result.response_headers["X-Embeddings-Dimensions-Policy"] == "reduce"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "cached_values",
+    [
+        pytest.param((), id="empty"),
+        pytest.param(("not-a-number",), id="nonnumeric"),
+        pytest.param((float("nan"), 0.0), id="nan"),
+        pytest.param((float("inf"), 0.0), id="infinite"),
+    ],
+)
+async def test_malformed_cached_vector_becomes_miss_and_is_replaced(
+    cached_values: tuple[object, ...],
+):
+    cache_key = (
+        "replace|huggingface|sentence-transformers/all-MiniLM-L6-v2|"
+        "huggingface:sentence-transformers/all-MiniLM-L6-v2:backend"
+    )
+    cache = RecordingCache(
+        {cache_key: list(cached_values)}  # type: ignore[dict-item]
+    )
+    executor = RecordingExecutor(vectors=[[0.25, 0.75]])
+    orchestrator = _orchestrator(cache=cache, executor=executor)
+    prepared = orchestrator.prepare("replace", _context())
+
+    result = await orchestrator.execute(prepared)
+
+    assert result.vectors == [[0.25, 0.75]]
+    assert result.cache_hits == 0
+    assert result.cache_misses == 1
+    assert cache.get_keys == [cache_key]
+    assert executor.calls == [
+        {
+            "texts": ["replace"],
+            "provider": "huggingface",
+            "model": "sentence-transformers/all-MiniLM-L6-v2",
+            "dimensions": None,
+        }
+    ]
+    assert cache.set_calls == [(cache_key, [0.25, 0.75])]
+    assert cache.values[cache_key] == [0.25, 0.75]
 
 
 @pytest.mark.unit
