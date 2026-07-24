@@ -59,6 +59,7 @@ jobs:
 
           workflow_json="${RUNNER_TEMP}/license-first-workflow.json"
           pull_json="${RUNNER_TEMP}/license-first-pull.json"
+          combined_status_pages_json="${RUNNER_TEMP}/license-first-combined-status-pages.json"
           combined_status_json="${RUNNER_TEMP}/license-first-combined-status.json"
           file_pages_json="${RUNNER_TEMP}/license-first-file-pages.json"
 
@@ -76,7 +77,26 @@ jobs:
             .head.sha
             | select(type == "string" and test("^[0-9a-f]{40}$"))
           ' "${pull_json}")"
-          gh api "repos/${GITHUB_REPOSITORY}/commits/${head_sha}/status" > "${combined_status_json}"
+          gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/commits/${head_sha}/status?per_page=100" > "${combined_status_pages_json}"
+          jq -e --arg head_sha "${head_sha}" '
+            if type != "array" then
+              error("expected a combined-status page array")
+            elif length == 0 then
+              error("expected at least one combined-status page")
+            elif all(
+              .[];
+              type == "object"
+              and .sha == $head_sha
+              and (.statuses | type == "array")
+            ) then
+              {
+                sha: $head_sha,
+                statuses: [.[].statuses[]]
+              }
+            else
+              error("combined-status pages are malformed or for another head")
+            end
+          ' "${combined_status_pages_json}" > "${combined_status_json}"
 
           if gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/pulls/${pr_number}/files?per_page=100" > "${file_pages_json}"; then
             files_complete=true

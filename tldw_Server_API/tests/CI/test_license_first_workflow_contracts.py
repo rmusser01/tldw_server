@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import re
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -41,9 +43,18 @@ def _admission_job(data: dict[str, Any]) -> dict[str, Any]:
 def _unquoted_shell_expansions(script: str) -> list[str]:
     expansions: list[str] = []
     pattern = re.compile(r"\$(?:\{[^}]+\}|\([^)]*\)|[A-Za-z_][A-Za-z0-9_]*)")
+    in_single_quote = False
     for line in script.splitlines():
-        for match in pattern.finditer(line):
-            prefix = line[: match.start()]
+        visible = []
+        for character in line:
+            if character == "'":
+                in_single_quote = not in_single_quote
+                visible.append(" ")
+            else:
+                visible.append(" " if in_single_quote else character)
+        visible_line = "".join(visible)
+        for match in pattern.finditer(visible_line):
+            prefix = visible_line[: match.start()]
             unescaped_double_quotes = len(re.findall(r'(?<!\\)"', prefix))
             if unescaped_double_quotes % 2 == 0:
                 expansions.append(match.group())
@@ -149,7 +160,7 @@ def test_metadata_fetches_validate_api_path_components_and_fail_closed() -> None
     assert 'select(test("^[1-9][0-9]*$"))' in script
 
     head_extract = script.index('head_sha="$(jq -er')
-    status_api = script.index('"repos/${GITHUB_REPOSITORY}/commits/${head_sha}/status"')
+    status_api = script.index('"repos/${GITHUB_REPOSITORY}/commits/${head_sha}/status?per_page=100"')
     assert pr_api < head_extract < status_api
     assert 'select(type == "string" and test("^[0-9a-f]{40}$"))' in script
 
@@ -157,7 +168,11 @@ def test_metadata_fetches_validate_api_path_components_and_fail_closed() -> None
         'gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/' 'frontend-license-gate.yml" > "${workflow_json}"'
     ) in script
     assert ('gh api "repos/${GITHUB_REPOSITORY}/pulls/${pr_number}" ' '> "${pull_json}"') in script
-    assert ('gh api "repos/${GITHUB_REPOSITORY}/commits/${head_sha}/status" ' '> "${combined_status_json}"') in script
+    assert (
+        "gh api --paginate --slurp "
+        '"repos/${GITHUB_REPOSITORY}/commits/${head_sha}/status?per_page=100" '
+        '> "${combined_status_pages_json}"'
+    ) in script
 
     files_api = (
         "gh api --paginate --slurp "
@@ -172,6 +187,77 @@ def test_metadata_fetches_validate_api_path_components_and_fail_closed() -> None
     assert script.count("if gh api") == 1
 
 
+def test_combined_status_pages_are_validated_and_merged_before_admission() -> None:
+    data, _ = _load_workflow()
+    script = _admission_job(data)["steps"][1]["run"]
+    head_sha = "a" * 40
+
+    assert ('combined_status_pages_json="${RUNNER_TEMP}/' 'license-first-combined-status-pages.json"') in script
+    assert (
+        "gh api --paginate --slurp "
+        '"repos/${GITHUB_REPOSITORY}/commits/${head_sha}/status?per_page=100" '
+        '> "${combined_status_pages_json}"'
+    ) in script
+
+    filter_prefix = 'jq -e --arg head_sha "${head_sha}" \''
+    filter_suffix = '\' "${combined_status_pages_json}" > "${combined_status_json}"'
+    filter_start = script.index(filter_prefix) + len(filter_prefix)
+    filter_end = script.index(filter_suffix, filter_start)
+    merge_filter = script[filter_start:filter_end]
+    helper_start = script.index("python3 Helper_Scripts/ci/license_first_admission.py")
+    status_fetch = "gh api --paginate --slurp " '"repos/${GITHUB_REPOSITORY}/commits/${head_sha}/status?per_page=100"'
+    assert script.index(status_fetch) < filter_start
+    assert filter_end < helper_start
+
+    pages = [
+        {
+            "sha": head_sha,
+            "statuses": [
+                {
+                    "context": "unrelated/check",
+                    "state": "success",
+                }
+            ],
+        },
+        {
+            "sha": head_sha,
+            "statuses": [
+                {
+                    "context": "frontend-license-policy/trusted/main",
+                    "state": "success",
+                }
+            ],
+        },
+    ]
+    merged = subprocess.run(
+        ["jq", "-e", "--arg", "head_sha", head_sha, merge_filter],
+        input=json.dumps(pages),
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    assert json.loads(merged.stdout) == {
+        "sha": head_sha,
+        "statuses": pages[0]["statuses"] + pages[1]["statuses"],
+    }
+
+    invalid_pages = (
+        {},
+        [],
+        [pages[0], {"sha": "b" * 40, "statuses": []}],
+        [{"sha": head_sha, "statuses": {}}],
+    )
+    for invalid in invalid_pages:
+        rejected = subprocess.run(
+            ["jq", "-e", "--arg", "head_sha", head_sha, merge_filter],
+            input=json.dumps(invalid),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        assert rejected.returncode != 0
+
+
 def test_helper_is_the_only_checked_out_program_and_owns_all_outputs() -> None:
     data, _ = _load_workflow()
     script = _admission_job(data)["steps"][1]["run"]
@@ -179,6 +265,7 @@ def test_helper_is_the_only_checked_out_program_and_owns_all_outputs() -> None:
     response_files = (
         "workflow_json",
         "pull_json",
+        "combined_status_pages_json",
         "combined_status_json",
         "file_pages_json",
     )
