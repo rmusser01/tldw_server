@@ -1,3 +1,5 @@
+"""Claims enqueue helpers backed by the shared Jobs module."""
+
 from __future__ import annotations
 
 import hashlib
@@ -23,6 +25,7 @@ from .claims_job_contracts import (
 
 
 def _settings_map(settings_obj: Mapping[str, Any] | None = None) -> Mapping[str, Any]:
+    """Return the injected settings mapping or the process-wide settings object."""
     return settings_obj if settings_obj is not None else settings
 
 
@@ -31,6 +34,7 @@ def _setting_value(
     default: Any = None,
     settings_obj: Mapping[str, Any] | None = None,
 ) -> Any:
+    """Resolve a Claims Jobs setting with environment variables taking precedence."""
     if settings_obj is not None:
         return settings_obj.get(key, default)
     env_value = os.getenv(key)
@@ -40,18 +44,22 @@ def _setting_value(
 
 
 def _truthy(value: Any) -> bool:
+    """Interpret common enabled values from environment and config sources."""
     return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
 def claims_jobs_enabled(settings_obj: Mapping[str, Any] | None = None) -> bool:
+    """Return whether Claims background work should enqueue through Jobs."""
     return _truthy(_setting_value("CLAIMS_JOBS_ENABLED", False, settings_obj))
 
 
 def claims_jobs_worker_enabled(settings_obj: Mapping[str, Any] | None = None) -> bool:
+    """Return whether the Claims Jobs worker should start during app lifecycle."""
     return _truthy(_setting_value("CLAIMS_JOBS_WORKER_ENABLED", False, settings_obj))
 
 
 def claims_jobs_queue(settings_obj: Mapping[str, Any] | None = None) -> str:
+    """Resolve the queue name used by Claims Jobs producers and workers."""
     queue = str(_setting_value("CLAIMS_JOBS_QUEUE", CLAIMS_JOBS_DEFAULT_QUEUE, settings_obj)).strip()
     return queue or CLAIMS_JOBS_DEFAULT_QUEUE
 
@@ -61,15 +69,18 @@ def _max_retries(
     default: int = 3,
     settings_obj: Mapping[str, Any] | None = None,
 ) -> int:
+    """Resolve a non-negative max retry count for a Claims job type."""
     retries = coerce_int(_setting_value(key, None, settings_obj), default)
     return int(default) if retries < 0 else retries
 
 
 def _manager(job_manager: JobManager | None = None) -> JobManager:
+    """Return the provided Jobs manager or construct one from environment config."""
     return job_manager or jobs_manager_from_env()
 
 
 def _refresh(manager: JobManager, created: dict[str, Any]) -> dict[str, Any]:
+    """Reload a created job so callers receive the persisted Jobs row shape."""
     job_id = created.get("id")
     if job_id is None:
         return created
@@ -77,6 +88,7 @@ def _refresh(manager: JobManager, created: dict[str, Any]) -> dict[str, Any]:
 
 
 def _hash_ids(values: list[int]) -> str:
+    """Build a stable digest for a set of integer identifiers."""
     joined = ",".join(str(v) for v in sorted(set(values)))
     return hashlib.sha256(joined.encode("utf-8")).hexdigest()
 
@@ -89,6 +101,7 @@ def enqueue_claims_rebuild_media(
     job_manager: JobManager | None = None,
     settings_obj: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """Create a Jobs row for rebuilding claims on one media item."""
     payload = validate_rebuild_media_payload(
         {
             "version": CLAIMS_JOB_PAYLOAD_VERSION,
@@ -119,6 +132,7 @@ def enqueue_claims_review_notification(
     job_manager: JobManager | None = None,
     settings_obj: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """Create a Jobs row for delivering pending claim-review notifications."""
     payload = validate_review_notification_payload(
         {
             "version": CLAIMS_JOB_PAYLOAD_VERSION,
@@ -155,6 +169,7 @@ def enqueue_claims_alert_delivery(
     job_manager: JobManager | None = None,
     settings_obj: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """Create a Jobs row for one alert delivery channel."""
     payload = validate_alert_delivery_payload(
         {
             "version": CLAIMS_JOB_PAYLOAD_VERSION,
@@ -186,6 +201,7 @@ def claims_jobs_summary(
     job_manager: JobManager | None = None,
     owner_user_id: str | None = None,
 ) -> dict[str, Any]:
+    """Return read-only Claims Jobs counts for dashboard analytics."""
     manager = _manager(job_manager)
     return {
         "domain": CLAIMS_JOBS_DOMAIN,

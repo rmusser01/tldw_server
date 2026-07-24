@@ -57,7 +57,7 @@ def test_rebuild_claims_jobs_pg_enqueue_failure_returns_503(monkeypatch):
     assert exc_info.value.detail == "Claims rebuild job enqueue failed"
 
 
-def test_rebuild_helper_skips_when_jobs_owner_missing(monkeypatch):
+def test_rebuild_helper_falls_back_when_jobs_owner_missing(monkeypatch):
     submissions: list[tuple[int, str]] = []
 
     class _FakeSvc:
@@ -78,7 +78,7 @@ def test_rebuild_helper_skips_when_jobs_owner_missing(monkeypatch):
         owner_user_id=None,
     )
 
-    assert submissions == []
+    assert submissions == [(42, "/tmp/user-1/Media_DB_v2.db")]
 
 
 def test_rebuild_all_media_uses_jobs_when_enabled(monkeypatch):

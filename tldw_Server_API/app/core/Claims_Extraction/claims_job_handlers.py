@@ -1,3 +1,5 @@
+"""WorkerSDK handlers for Claims jobs."""
+
 from __future__ import annotations
 
 import asyncio
@@ -29,6 +31,7 @@ _CLAIMS_HANDLER_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = MEDIA_
 
 
 def _payload(job: dict[str, Any]) -> dict[str, Any]:
+    """Extract and normalize a Jobs payload object from a worker job row."""
     value = job.get("payload")
     if value is None:
         value = {}
@@ -53,6 +56,7 @@ def _payload(job: dict[str, Any]) -> dict[str, Any]:
 
 
 def _owner_scope_error(message: str = "claims job owner mismatch") -> ClaimsJobError:
+    """Build a non-retryable owner-scope error for invalid job routing."""
     return ClaimsJobError(
         message,
         retryable=False,
@@ -61,6 +65,7 @@ def _owner_scope_error(message: str = "claims job owner mismatch") -> ClaimsJobE
 
 
 def _canonical_owner_user_id(value: Any) -> str:
+    """Normalize and validate the owner id used for user database routing."""
     if isinstance(value, bool):
         raise _owner_scope_error("claims job owner must be a canonical positive integer")
     if isinstance(value, int):
@@ -79,6 +84,7 @@ def _canonical_owner_user_id(value: Any) -> str:
 
 
 def _assert_owner(job: dict[str, Any], owner_user_id: Any) -> str:
+    """Ensure the job row owner matches the owner embedded in the payload."""
     row_owner = _canonical_owner_user_id(job.get("owner_user_id"))
     payload_owner = _canonical_owner_user_id(owner_user_id)
     if row_owner != payload_owner:
@@ -87,11 +93,13 @@ def _assert_owner(job: dict[str, Any], owner_user_id: Any) -> str:
 
 
 def _db_path(owner_user_id: Any) -> str:
+    """Resolve the media database path for a canonical Claims owner id."""
     canonical_owner = _canonical_owner_user_id(owner_user_id)
     return str(get_user_media_db_path(int(canonical_owner)))
 
 
 def _payload_dict(row: dict[str, Any]) -> dict[str, Any]:
+    """Decode a monitoring-event payload row into a dictionary."""
     raw = row.get("payload_json") or "{}"
     try:
         parsed = json.loads(str(raw))
@@ -101,6 +109,7 @@ def _payload_dict(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def _enabled(value: Any) -> bool:
+    """Interpret alert enabled values while preserving the default-on behavior."""
     if value is None:
         return True
     if isinstance(value, str):
@@ -109,6 +118,7 @@ def _enabled(value: Any) -> bool:
 
 
 def _already_delivered(db: Any, *, owner_user_id: str, event_id: int, alert_id: int, channel: str) -> bool:
+    """Return whether a matching successful alert delivery is already recorded."""
     return bool(db.has_successful_claims_monitoring_event_delivery(
         user_id=str(owner_user_id),
         event_id=int(event_id),
@@ -118,6 +128,7 @@ def _already_delivered(db: Any, *, owner_user_id: str, event_id: int, alert_id: 
 
 
 def _deliver_alert(payload: dict[str, Any]) -> dict[str, Any]:
+    """Deliver one alert channel for a validated Claims alert job payload."""
     owner_user_id = _canonical_owner_user_id(payload["owner_user_id"])
     db_path = _db_path(owner_user_id)
     try:

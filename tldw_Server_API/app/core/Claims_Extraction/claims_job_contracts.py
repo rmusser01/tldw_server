@@ -1,3 +1,5 @@
+"""Validation contracts for Claims jobs handled by the shared Jobs module."""
+
 from __future__ import annotations
 
 import json
@@ -43,6 +45,8 @@ CLAIMS_ALERT_DELIVERY_PAYLOAD_KEYS = {
 
 
 class ClaimsJobError(RuntimeError):
+    """Structured failure raised when a Claims job cannot be accepted or processed."""
+
     def __init__(
         self,
         message: str,
@@ -51,6 +55,7 @@ class ClaimsJobError(RuntimeError):
         failure_code: str = "claims_job_failed",
         backoff_seconds: int | None = None,
     ) -> None:
+        """Create a Claims job error with retry metadata for WorkerSDK handling."""
         super().__init__(message)
         self.retryable = bool(retryable)
         self.failure_code = str(failure_code)
@@ -59,6 +64,7 @@ class ClaimsJobError(RuntimeError):
 
 
 def _normalize_dict(value: Any) -> dict[str, Any]:
+    """Coerce a JSON object or mapping payload into a mutable dictionary."""
     if isinstance(value, dict):
         return dict(value)
     if isinstance(value, str):
@@ -80,6 +86,7 @@ def _normalize_dict(value: Any) -> dict[str, Any]:
 
 
 def _reject_sensitive_keys(payload: dict[str, Any]) -> None:
+    """Reject fields that must never be persisted in Jobs payloads."""
     present = sorted(SENSITIVE_PAYLOAD_KEYS.intersection(payload))
     if present:
         raise ClaimsJobError(
@@ -90,6 +97,7 @@ def _reject_sensitive_keys(payload: dict[str, Any]) -> None:
 
 
 def _reject_unknown_keys(payload: dict[str, Any], allowed_keys: set[str]) -> None:
+    """Reject payload fields outside the contract for a specific job type."""
     present = sorted(set(payload).difference(allowed_keys), key=str)
     if present:
         unknown_keys = ", ".join(str(key) for key in present)
@@ -101,6 +109,7 @@ def _reject_unknown_keys(payload: dict[str, Any], allowed_keys: set[str]) -> Non
 
 
 def _owner_user_id(value: Any) -> str:
+    """Normalize an owner id to the canonical positive-integer string format."""
     if isinstance(value, bool) or not isinstance(value, (int, str)):
         raise ClaimsJobError(
             "claims job payload missing real owner_user_id",
@@ -128,6 +137,7 @@ def _owner_user_id(value: Any) -> str:
 
 
 def _positive_int(value: Any, field: str) -> int:
+    """Parse a positive integer payload field without accepting booleans."""
     if isinstance(value, bool):
         raise ClaimsJobError(
             f"claims job payload has invalid {field}",
@@ -161,6 +171,7 @@ def _positive_int(value: Any, field: str) -> int:
 
 
 def _version(payload: dict[str, Any]) -> int:
+    """Validate the payload contract version."""
     version = _positive_int(payload.get("version"), "version")
     if version != CLAIMS_JOB_PAYLOAD_VERSION:
         raise ClaimsJobError(
@@ -172,6 +183,7 @@ def _version(payload: dict[str, Any]) -> int:
 
 
 def validate_rebuild_media_payload(value: Any) -> dict[str, Any]:
+    """Validate and normalize a Claims media-rebuild job payload."""
     payload = _normalize_dict(value)
     _reject_sensitive_keys(payload)
     version = _version(payload)
@@ -185,6 +197,7 @@ def validate_rebuild_media_payload(value: Any) -> dict[str, Any]:
 
 
 def validate_review_notification_payload(value: Any) -> dict[str, Any]:
+    """Validate and normalize a review-notification delivery job payload."""
     payload = _normalize_dict(value)
     _reject_sensitive_keys(payload)
     version = _version(payload)
@@ -212,6 +225,7 @@ def validate_review_notification_payload(value: Any) -> dict[str, Any]:
 
 
 def validate_alert_delivery_payload(value: Any) -> dict[str, Any]:
+    """Validate and normalize an alert-delivery job payload."""
     payload = _normalize_dict(value)
     _reject_sensitive_keys(payload)
     version = _version(payload)
@@ -234,8 +248,10 @@ def validate_alert_delivery_payload(value: Any) -> dict[str, Any]:
 
 
 def skipped_result(reason: str, /, **extra: Any) -> dict[str, Any]:
+    """Build a standard skipped outcome for Claims job handlers."""
     return {**extra, "outcome": "skipped", "reason": str(reason)}
 
 
 def ok_result(**extra: Any) -> dict[str, Any]:
+    """Build a standard successful outcome for Claims job handlers."""
     return {**extra, "outcome": "ok"}

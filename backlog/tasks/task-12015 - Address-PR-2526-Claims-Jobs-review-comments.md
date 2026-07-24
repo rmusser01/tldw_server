@@ -1,7 +1,7 @@
 ---
 id: TASK-12015
 title: 'Address PR #2526 Claims Jobs review comments'
-status: In Progress
+status: Done
 created_date: 2026-06-26 06:34
 labels:
 - claims
@@ -10,30 +10,16 @@ labels:
 references:
 - https://github.com/rmusser01/tldw_server/pull/2526
 - TASK-9937
-updated_date: 2026-07-24 00:09
+updated_date: 2026-07-24 00:16
 modified_files:
-- backlog/tasks/task-9934 - Harden-Claims_Extraction-review-findings-and-refactor-design.md
 - backlog/tasks/task-12015 - Address-PR-2526-Claims-Jobs-review-comments.md
 - tldw_Server_API/app/core/Claims_Extraction/claims_alert_delivery.py
 - tldw_Server_API/app/core/Claims_Extraction/claims_job_contracts.py
 - tldw_Server_API/app/core/Claims_Extraction/claims_job_handlers.py
-- tldw_Server_API/app/core/Claims_Extraction/claims_notifications.py
-- tldw_Server_API/app/core/Claims_Extraction/claims_rebuild_service.py
-- tldw_Server_API/app/core/Claims_Extraction/claims_service.py
-- tldw_Server_API/app/core/Claims_Extraction/ingestion_claims.py
-- tldw_Server_API/app/core/DB_Management/media_db/media_database_impl.py
-- tldw_Server_API/app/core/DB_Management/media_db/runtime/claims_monitoring_event_ops.py
-- tldw_Server_API/app/core/DB_Management/media_db/runtime/claims_review_metrics_ops.py
-- tldw_Server_API/tests/Claims/test_claims_dashboard_analytics.py
-- tldw_Server_API/tests/Claims/test_claims_jobs_contracts.py
-- tldw_Server_API/tests/Claims/test_claims_jobs_handlers.py
-- tldw_Server_API/tests/Claims/test_claims_rebuild_service_failure.py
-- tldw_Server_API/tests/Claims/test_claims_review_api.py
-- tldw_Server_API/tests/Claims/test_claims_review_notifications.py
-- tldw_Server_API/tests/Claims/test_claims_webhook_delivery.py
-- tldw_Server_API/tests/Claims_Extraction/test_fva_pipeline.py
-- tldw_Server_API/tests/DB_Management/test_media_db_claims_monitoring_event_ops.py
-- tldw_Server_API/tests/Services/test_claims_jobs_worker.py
+- tldw_Server_API/app/core/Claims_Extraction/claims_jobs.py
+- tldw_Server_API/app/core/Claims_Extraction/fva_pipeline.py
+- tldw_Server_API/app/services/claims_jobs_worker.py
+- tldw_Server_API/tests/Claims/test_claims_rebuild_stale_policy.py
 ---
 
 ## Description
@@ -67,12 +53,13 @@ Post-rebase verification after git rebase origin/dev: branch is 0 behind and 40 
 2026-07-18 follow-up: reopening task to rebase PR #2526 onto latest origin/dev and verify/address the later CodeRabbit/Qodo review comments, including fallback behavior, owner scoping, alert/notification delivery reliability, DB abstraction placement, and focused test-review comments.
 2026-07-18 follow-up complete: rebased PR #2526 on latest origin/dev, resolved the rebase conflict in MediaDatabase imports/wiring, re-fetched current Qodo/CodeRabbit/Gemini PR feedback, and addressed the still-valid review comments. Implemented canonical owner validation parity, legacy fallback on Jobs enqueue failures, conditional alert Jobs routing, bounded alert dedupe DB helper, review notification all-channel success semantics, noncritical webhook telemetry isolation, non-transient 4xx fast-fail, empty extraction stale-claim soft-delete, per-owner bulk review notification grouping, DB_Management-owned review latency stats, deterministic/marked/typed tests, dashboard jobs-summary assertions, and duplicate Backlog heading cleanup. Verification: py_compile on touched files passed; Ruff check on touched files passed; focused pytest slice passed with 121 passed; git diff --check passed; Bandit on touched application files wrote /tmp/bandit_claims_pr2526_followup.json and exited 0.
 2026-07-23 follow-up: PR #2526 still has cancelled/red GitHub checks and a CodeRabbit docstring-coverage warning after the 2026-07-18 push. Latest origin/dev is now 178 commits ahead of the PR branch, so reopen this task to rebase on current dev, verify current PR comments/checks, and address any still-valid findings before pushing a fresh head.
+2026-07-23 completion: rebased PR #2526 on current origin/dev (branch now 0 behind / 42 ahead of origin/dev before this final commit), verified current PR feedback. Qodo's latest summary reports its findings resolved; the remaining actionable CodeRabbit comment was a docstring-coverage warning. Added concise docstrings to the PR-added Claims Jobs modules and lifecycle worker so those modules measure 100% documented by AST, fixed a rebased fva_pipeline import-order/unused-import lint finding, and updated a stale rebuild fallback test to assert the legacy fallback required by prior review feedback. Verification after final edits: Ruff on all changed Python files passed; py_compile on all changed Python files passed; git diff --check passed; Bandit on changed application files wrote /tmp/bandit_claims_pr2526_20260723.json with empty results and exited 0; focused Claims/Jobs/FVA/worker pytest slice passed with 139 passed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Rebased PR #2526 on latest origin/dev and addressed the validated Qodo, CodeRabbit, and Gemini review comments without adding Claims-owned Jobs infrastructure. The follow-up changes tighten Claims job owner contracts, preserve legacy Claims fallbacks when Jobs enqueue fails, only treat alerts as Jobs-routed after successful enqueue, move review latency SQL into DB_Management, bound alert dedupe with a DB helper, harden review/alert notification delivery semantics, clear stale claims on empty rebuild extraction, group bulk review notifications by resolved claim owner, and fill the called-out deterministic/typed/marked test coverage gaps. Verification recorded: py_compile on touched files passed; Ruff on touched files passed; focused pytest slice passed with 121 passed; git diff --check passed; Bandit on touched application files exited 0 with an empty results list in /tmp/bandit_claims_pr2526_followup.json.
+Rebased PR #2526 onto current origin/dev again and addressed the remaining PR feedback/check issues. Qodo now reports the prior review findings as resolved. The remaining CodeRabbit issue was docstring coverage, so the PR-added Claims Jobs modules and worker now have concise docstrings on all functions/classes in those modules. The rebase also exposed a stale test expectation around missing Jobs owner fallback; the test now asserts the intended legacy rebuild fallback instead of dropped work. Final local verification: Ruff and py_compile passed on all changed Python files, git diff --check passed, Bandit returned empty results for changed application files, and the focused Claims/Jobs/FVA/worker pytest slice passed with 139 tests.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

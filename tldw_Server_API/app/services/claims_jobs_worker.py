@@ -32,6 +32,7 @@ from tldw_Server_API.app.services.lifecycle_worker_specs import (
 
 
 def _worker_id() -> str:
+    """Resolve the Claims Jobs worker id from environment or default config."""
     return (
         os.getenv("CLAIMS_JOBS_WORKER_ID") or "claims-jobs-worker"
     ).strip() or "claims-jobs-worker"
@@ -74,6 +75,7 @@ async def start_claims_jobs_worker(stop_event: asyncio.Event | None = None) -> N
     sdk = WorkerSDK(manager, config)
 
     async def _watch_stop() -> None:
+        """Stop the WorkerSDK when the lifecycle stop event is set."""
         if stop_event is None:
             return
         await stop_event.wait()
@@ -95,6 +97,7 @@ async def start_claims_jobs_worker(stop_event: asyncio.Event | None = None) -> N
 
 
 def _claims_jobs_worker_enabled(context: WorkerLifecycleContext) -> bool:
+    """Evaluate the Claims worker lifecycle flag from the startup context."""
     return claims_jobs_worker_enabled(context.settings)
 
 

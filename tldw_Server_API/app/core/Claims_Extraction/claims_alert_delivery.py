@@ -1,3 +1,5 @@
+"""Alert delivery helpers used by Claims Jobs and legacy Claims dispatch."""
+
 from __future__ import annotations
 
 import json
@@ -40,6 +42,7 @@ _CLAIMS_ALERT_DELIVERY_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] =
 
 
 def normalize_claims_alert_channels(raw_value: Any | None) -> dict[str, bool]:
+    """Normalize persisted alert channel settings into boolean flags."""
     if isinstance(raw_value, dict):
         data = raw_value
     else:
@@ -58,6 +61,7 @@ def normalize_claims_alert_channels(raw_value: Any | None) -> dict[str, bool]:
 
 
 def format_claims_alert_ratio(value: float | None) -> str:
+    """Format an alert ratio as a percentage string for human-facing payloads."""
     if value is None:
         return "n/a"
     try:
@@ -67,6 +71,7 @@ def format_claims_alert_ratio(value: float | None) -> str:
 
 
 def build_claims_alert_delivery_payload(*, channel: str, event_payload: dict[str, Any]) -> dict[str, Any]:
+    """Build the outbound webhook body for one Claims alert channel."""
     normalized_channel = str(channel or "").strip().lower()
     if normalized_channel == "slack":
         return {
@@ -81,6 +86,7 @@ def build_claims_alert_delivery_payload(*, channel: str, event_payload: dict[str
 
 
 def _classify_httpx_exception(exc: Exception, msg: str) -> str | None:
+    """Map httpx exception classes and messages to delivery failure reasons."""
     module = getattr(exc.__class__, "__module__", "")
     if not module.startswith("httpx"):
         return None
@@ -98,6 +104,7 @@ def _classify_httpx_exception(exc: Exception, msg: str) -> str | None:
 
 
 def _classify_webhook_exception(exc: Exception) -> str:
+    """Classify webhook exceptions into stable monitoring reason labels."""
     if isinstance(exc, EgressPolicyError):
         return "invalid_url"
     if isinstance(exc, RetryExhaustedError):
@@ -127,6 +134,7 @@ def _record_webhook_event(
     alert_id: int | None = None,
     event_id: int | None = None,
 ) -> None:
+    """Persist best-effort webhook delivery telemetry to the user's media DB."""
     try:
         with managed_media_database(
             client_id=str(settings.get("SERVER_CLIENT_ID", "SERVER_API_V1")),
@@ -174,6 +182,7 @@ def _record_webhook_delivery_telemetry(
     alert_id: int | None = None,
     event_id: int | None = None,
 ) -> None:
+    """Record metrics and monitoring events without affecting delivery outcome."""
     try:
         if reason:
             record_claims_webhook_delivery(status=metric_status, reason=reason, latency_s=latency_s)
@@ -207,6 +216,7 @@ def deliver_claims_alert_webhook(
     alert_id: int | None = None,
     event_id: int | None = None,
 ) -> bool:
+    """POST a Claims alert webhook with bounded retries and telemetry."""
     try:
         from tldw_Server_API.app.core.http_client import RetryPolicy, create_client, fetch
     except ImportError:

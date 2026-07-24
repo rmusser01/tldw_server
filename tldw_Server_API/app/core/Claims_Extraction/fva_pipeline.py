@@ -40,15 +40,13 @@ from tldw_Server_API.app.core.Claims_Extraction.claims_engine import (
     ClaimsEngine,
     ClaimVerification,
 )
-from tldw_Server_API.app.core.RAG.rag_service.types import (
-    Document,
-    VerificationStatus,
-)
 from tldw_Server_API.app.core.Claims_Extraction.falsification import (
     FalsificationDecision,
     should_trigger_falsification,
 )
-
+from tldw_Server_API.app.core.RAG.rag_service.types import (
+    Document,
+)
 
 # Metrics integration - graceful fallback if not available
 try:
