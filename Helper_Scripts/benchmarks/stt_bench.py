@@ -67,6 +67,7 @@ PRODUCTION_ADAPTER_FACTORY_PATH = "Helper_Scripts.benchmarks.stt_bench:_load_nat
 
 _KNOWN_SAMPLE_PROFILES = frozenset({"comparison", "regression"})
 _KNOWN_NORMALIZATION_PROFILES = frozenset({STRICT_PROFILE, EN_PROFILE})
+_KNOWN_REFERENCE_PROVENANCE = frozenset({"canonical-dataset", "human-reviewed"})
 _SOURCE_REQUIRED_FIELDS = frozenset({"dataset", "version", "license", "reference_provenance", "sha256"})
 _MANIFEST_REQUIRED_FIELDS = frozenset(
     {
@@ -103,6 +104,7 @@ _RESULT_REQUIRED_FIELDS = frozenset(
         "suite",
         "suite_visibility",
         "dataset",
+        "reference_provenance",
         "tags",
         "diagnostic_only",
         "requested_execution",
@@ -741,6 +743,12 @@ def _validate_source(
     if _SHA256_V1.fullmatch(audio_sha256) is None:
         raise _manifest_error(sample_id, "source.sha256", "must be a lower-case SHA-256")
     _require_stable_id(canonical["dataset"], sample_id, "source.dataset")
+    if canonical["reference_provenance"] not in _KNOWN_REFERENCE_PROVENANCE:
+        raise _manifest_error(
+            sample_id,
+            "source.reference_provenance",
+            "must be canonical-dataset or human-reviewed",
+        )
     source = tuple(sorted(canonical.items()))
     return source, audio_sha256, dict(sorted(value.items()))
 
@@ -1436,6 +1444,7 @@ def preflight_targets(
 _RUN_IDENTITY_FIELDS = (
     "manifest_hash",
     "selected_sample_ids",
+    "reference_provenance_counts",
     "profile",
     "mode",
     "seed",
@@ -2115,6 +2124,56 @@ def _require_result_text(
     return _require_utf8_scalar_text(value, "<result>", field)
 
 
+def _validate_reference_provenance_counts(
+    value: object,
+    *,
+    sample_count: int,
+) -> dict[str, dict[str, int]]:
+    """Validate bounded selected-sample provenance counts grouped by suite."""
+    if not isinstance(value, dict) or not value or len(value) > sample_count:
+        raise ValueError("reference provenance counts must be a bounded object")
+    if any(not isinstance(suite, str) for suite in value):
+        raise ValueError("reference provenance suite must be a string")
+    result: dict[str, dict[str, int]] = {}
+    total = 0
+    for suite in sorted(value):
+        _require_stable_id(suite, "<run>", "suite")
+        counts = value[suite]
+        if not isinstance(counts, dict) or not counts:
+            raise ValueError("reference provenance suite counts must be an object")
+        if any(not isinstance(provenance, str) for provenance in counts):
+            raise ValueError("reference provenance kind must be a string")
+        if set(counts) - _KNOWN_REFERENCE_PROVENANCE:
+            raise ValueError("reference provenance counts contain an unknown kind")
+        canonical: dict[str, int] = {}
+        for provenance in sorted(counts):
+            count = _require_result_integer(
+                counts[provenance],
+                field="reference_provenance_counts",
+                minimum=1,
+            )
+            canonical[provenance] = count
+            total += count
+        result[suite] = canonical
+    if total != sample_count:
+        raise ValueError("reference provenance counts do not match selected samples")
+    return result
+
+
+def _reference_provenance_counts_for_samples(
+    samples: Sequence[ManifestSample],
+) -> dict[str, dict[str, int]]:
+    """Return deterministic per-suite provenance counts for selected samples."""
+    counts: dict[str, Counter[str]] = {}
+    for sample in samples:
+        provenance = dict(sample.source)["reference_provenance"]
+        counts.setdefault(sample.suite, Counter())[provenance] += 1
+    return _validate_reference_provenance_counts(
+        {suite: dict(sorted(suite_counts.items())) for suite, suite_counts in sorted(counts.items())},
+        sample_count=len(samples),
+    )
+
+
 def _validate_worker_attempts(value: object) -> list[dict[str, object]]:
     """Validate bounded parent-owned worker-attempt observations."""
     if not isinstance(value, list):
@@ -2201,6 +2260,10 @@ def validate_run_metadata(
         raise ValueError("run sample IDs must be unique arrays")
     for sample_id in (*selected, *timing):
         _require_stable_id(sample_id, "<run>", "sample_id")
+    result["reference_provenance_counts"] = _validate_reference_provenance_counts(
+        result["reference_provenance_counts"],
+        sample_count=len(selected),
+    )
     _require_stable_id(
         result["cold_probe_sample_id"],
         "<run>",
@@ -2274,6 +2337,7 @@ def build_run_metadata(
     run_id: str,
     manifest_hash: str,
     selected_sample_ids: Sequence[str],
+    reference_provenance_counts: Mapping[str, Mapping[str, int]],
     profile: str,
     mode: str,
     seed: int,
@@ -2286,11 +2350,16 @@ def build_run_metadata(
     environment: Mapping[str, object],
 ) -> dict[str, object]:
     """Build deterministic, secret-safe metadata for a new benchmark run."""
+    canonical_provenance_counts = _validate_reference_provenance_counts(
+        reference_provenance_counts,
+        sample_count=len(selected_sample_ids),
+    )
     payload: dict[str, object] = {
         "schema_version": RUN_SCHEMA_VERSION,
         "run_id": run_id,
         "manifest_hash": manifest_hash,
         "selected_sample_ids": list(selected_sample_ids),
+        "reference_provenance_counts": canonical_provenance_counts,
         "profile": profile,
         "mode": mode,
         "seed": seed,
@@ -2485,6 +2554,8 @@ def _validate_result_record(
         raise ValueError("unsupported result schema version")
     for field in ("run_id", "target_id", "sample_id", "suite", "dataset"):
         _require_stable_id(result[field], "<result>", field)
+    if result["reference_provenance"] not in _KNOWN_REFERENCE_PROVENANCE:
+        raise ValueError("result reference provenance is invalid")
     if not isinstance(result["completion_key"], str) or _SHA256_V1.fullmatch(result["completion_key"]) is None:
         raise ValueError("result field completion_key must be a SHA-256")
     _require_result_integer(result["repetition"], field="repetition", minimum=0)
@@ -3554,7 +3625,9 @@ def _worker_result_record(
         sample.measured_duration_seconds,
         eligibility_reasons=eligibility_reasons,
     )
-    dataset = dict(sample.source).get("dataset")
+    source = dict(sample.source)
+    dataset = source["dataset"]
+    reference_provenance = source["reference_provenance"]
     score_fields = _score_as_result_fields(score)
     return {
         "schema_version": RESULT_SCHEMA_VERSION,
@@ -3576,6 +3649,7 @@ def _worker_result_record(
         "suite": sample.suite,
         "suite_visibility": sample.suite_visibility,
         "dataset": dataset,
+        "reference_provenance": reference_provenance,
         "tags": list(sample.tags),
         "diagnostic_only": sample.diagnostic_only,
         "requested_execution": {
@@ -4693,6 +4767,7 @@ def _summary_sample(record: Mapping[str, object]) -> dict[str, object]:
         "suite": record["suite"],
         "suite_visibility": record["suite_visibility"],
         "dataset": record["dataset"],
+        "reference_provenance": record["reference_provenance"],
         "tags": list(record["tags"]),
         "diagnostic_only": record["diagnostic_only"],
         "status": record["status"],
@@ -4724,6 +4799,9 @@ def _report_identity(metadata: Mapping[str, object]) -> dict[str, object]:
     return {
         "manifest_hash": metadata["manifest_hash"],
         "selected_sample_ids": list(metadata["selected_sample_ids"]),
+        "reference_provenance_counts": {
+            suite: dict(counts) for suite, counts in metadata["reference_provenance_counts"].items()
+        },
         "profile": metadata["profile"],
         "mode": metadata["mode"],
         "seed": metadata["seed"],
@@ -4977,6 +5055,15 @@ def _eligibility_table_rows(summary: Mapping[str, object]) -> list[list[str]]:
     return rows
 
 
+def _reference_provenance_text(summary: Mapping[str, object]) -> str:
+    """Render immutable selected-sample provenance counts compactly."""
+    suites = summary["identity"]["reference_provenance_counts"]
+    return "; ".join(
+        (f"{suite}[" + ", ".join(f"{provenance}={count}" for provenance, count in sorted(counts.items())) + "]")
+        for suite, counts in sorted(suites.items())
+    )
+
+
 def render_summary_markdown(summary: Mapping[str, object]) -> str:
     """Render one summary dictionary as deterministic Markdown."""
     progress = summary["progress"]
@@ -4988,6 +5075,7 @@ def render_summary_markdown(summary: Mapping[str, object]) -> str:
         f"- Run: `{summary['run_id']}`",
         f"- Profile/mode: `{identity['profile']}` / `{identity['mode']}`",
         (f"- Scorer/Unicode: `{identity['scorer_version']}` / `{identity['unicode_version']}`"),
+        f"- Reference provenance: {_reference_provenance_text(summary)}",
         (
             "- Hardware: "
             f"`{environment['cpu_model']}`; `{environment['architecture']}`; "
@@ -5079,6 +5167,7 @@ def render_summary_terminal(summary: Mapping[str, object]) -> str:
         f"Native STT benchmark: {summary['run_id']}",
         f"Profile/mode: {identity['profile']} / {identity['mode']}",
         (f"Scorer/Unicode: {identity['scorer_version']} / {identity['unicode_version']}"),
+        f"Reference provenance: {_reference_provenance_text(summary)}",
         (
             "Hardware: "
             f"{environment['cpu_model']}; {environment['architecture']}; "
@@ -5201,6 +5290,7 @@ _SUMMARY_IDENTITY_FIELDS = frozenset(
     {
         "manifest_hash",
         "selected_sample_ids",
+        "reference_provenance_counts",
         "profile",
         "mode",
         "seed",
@@ -5227,6 +5317,7 @@ _SUMMARY_SAMPLE_FIELDS = frozenset(
         "suite",
         "suite_visibility",
         "dataset",
+        "reference_provenance",
         "tags",
         "diagnostic_only",
         "status",
@@ -5257,6 +5348,8 @@ def _validate_summary_sample(value: object) -> dict[str, object]:
     sample = dict(value)
     for field in ("target_id", "sample_id", "suite", "dataset"):
         _require_stable_id(sample[field], "<summary>", field)
+    if sample["reference_provenance"] not in _KNOWN_REFERENCE_PROVENANCE:
+        raise ValueError("summary sample reference provenance is invalid")
     repetition = _require_result_integer(
         sample["repetition"],
         field="repetition",
@@ -5431,6 +5524,39 @@ def _aggregate_summary_samples(
     }
 
 
+def _validate_observed_reference_provenance(
+    samples: Sequence[Mapping[str, object]],
+    *,
+    declared: Mapping[str, Mapping[str, int]],
+    complete: bool,
+) -> None:
+    """Reconcile per-sample result provenance with immutable selected counts."""
+    layouts: dict[str, tuple[str, str]] = {}
+    observed: dict[str, Counter[str]] = {}
+    counted_accuracy_ids: set[str] = set()
+    for sample in samples:
+        sample_id = str(sample["sample_id"])
+        layout = (
+            str(sample["suite"]),
+            str(sample["reference_provenance"]),
+        )
+        previous = layouts.setdefault(sample_id, layout)
+        if previous != layout:
+            raise ValueError("summary sample reference provenance is inconsistent")
+        if sample["measurement_role"] == "accuracy" and sample_id not in counted_accuracy_ids:
+            observed.setdefault(layout[0], Counter())[layout[1]] += 1
+            counted_accuracy_ids.add(sample_id)
+    canonical_observed = {suite: dict(sorted(counts.items())) for suite, counts in sorted(observed.items())}
+    for suite, counts in canonical_observed.items():
+        if suite not in declared:
+            raise ValueError("summary provenance suite is not declared")
+        for provenance, count in counts.items():
+            if count > declared[suite].get(provenance, 0):
+                raise ValueError("summary provenance count exceeds the run identity")
+    if complete and canonical_observed != declared:
+        raise ValueError("summary provenance counts do not match the run identity")
+
+
 def validate_summary(summary: Mapping[str, object]) -> dict[str, object]:
     """Strictly validate and reconcile one disposable summary artifact."""
     if not isinstance(summary, Mapping) or set(summary) != _SUMMARY_FIELDS:
@@ -5461,6 +5587,11 @@ def validate_summary(summary: Mapping[str, object]) -> dict[str, object]:
         raise ValueError("summary ordered identities are invalid")
     for sample_id in (*selected, *timing):
         _require_stable_id(sample_id, "<summary>", "sample_id")
+    provenance_counts = _validate_reference_provenance_counts(
+        identity["reference_provenance_counts"],
+        sample_count=len(selected),
+    )
+    identity["reference_provenance_counts"] = provenance_counts
     cold_probe = _require_stable_id(
         identity["cold_probe_sample_id"],
         "<summary>",
@@ -5603,6 +5734,11 @@ def validate_summary(summary: Mapping[str, object]) -> dict[str, object]:
     }
     if not isinstance(progress["history_truncated_tail_ignored"], bool) or progress != expected_progress:
         raise ValueError("summary progress is inconsistent")
+    _validate_observed_reference_provenance(
+        samples,
+        declared=provenance_counts,
+        complete=bool(progress["complete"]),
+    )
     if result["eligibility"] != _report_eligibility(samples):
         raise ValueError("summary eligibility is inconsistent")
     if result["worst_examples"] != _worst_retained_examples(samples):
@@ -5630,6 +5766,7 @@ _POLICY_RULES = frozenset(
 _QUALITY_COMPATIBILITY_FIELDS = (
     "manifest_hash",
     "selected_sample_ids",
+    "reference_provenance_counts",
     "profile",
     "mode",
     "seed",
@@ -5698,6 +5835,7 @@ def _sample_layout(summary: Mapping[str, object]) -> dict[str, dict[str, object]
             "suite": sample["suite"],
             "suite_visibility": sample["suite_visibility"],
             "dataset": sample["dataset"],
+            "reference_provenance": sample["reference_provenance"],
             "tags": sample["tags"],
             "diagnostic_only": sample["diagnostic_only"],
             "normalization_profile": sample["normalization_profile"],
@@ -6374,6 +6512,7 @@ def _run_command(arguments: argparse.Namespace) -> int:
         run_id=run_id,
         manifest_hash=manifest_hash,
         selected_sample_ids=tuple(sample.sample_id for sample in selected_samples),
+        reference_provenance_counts=(_reference_provenance_counts_for_samples(selected_samples)),
         profile=arguments.profile,
         mode=arguments.mode,
         seed=arguments.seed,

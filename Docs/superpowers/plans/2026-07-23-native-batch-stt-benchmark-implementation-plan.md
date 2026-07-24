@@ -1522,14 +1522,15 @@ Expected: helper tests pass, real-model cases skip unless opted in, Bandit has n
 - Create: `Helper_Scripts/benchmarks/stt_benchmark_manifest.example.jsonl`
 - Create: `Docs/Development/STT_Benchmark_Protocol.md`
 - Modify: `Helper_Scripts/benchmarks/README.md`
+- Modify: `Helper_Scripts/benchmarks/stt_bench.py`
 - Modify: `.gitignore`
 - Test: `tldw_Server_API/tests/Benchmarks/test_stt_bench.py`
 
-- [ ] **Step 1: Add a failing example-manifest parse test**
+- [x] **Step 1: Add a failing example-manifest parse test**
 
 The example must parse as JSONL schema documentation but may point to non-existent illustrative media; validation tests replace the audio/checksum fields in a temp directory. Do not commit corpus audio without explicit license/provenance.
 
-- [ ] **Step 2: Document the exact protocol**
+- [x] **Step 2: Document the exact protocol**
 
 Include:
 
@@ -1547,11 +1548,11 @@ Include:
 - artifact layout, resume/retry behavior, retention/privacy warnings, owner-only permissions;
 - comparison eligibility and descriptive-ranking language.
 
-- [ ] **Step 3: Add `.benchmarks/stt/` to `.gitignore`**
+- [x] **Step 3: Add `.benchmarks/stt/` to `.gitignore`**
 
 Do not ignore the example manifest or documentation.
 
-- [ ] **Step 4: Run doc/example tests and commit**
+- [x] **Step 4: Run doc/example tests and commit**
 
 ```bash
 source .venv/bin/activate

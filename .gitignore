@@ -372,6 +372,7 @@ models/flashrank/**/.DS_Store
 
 # Detritus
 /cache
+/.benchmarks/stt/
 /.tmp
 /tldw_Server_API/Test_Cache
 /logs

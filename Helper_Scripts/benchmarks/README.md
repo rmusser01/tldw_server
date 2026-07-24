@@ -1,4 +1,56 @@
-LLM Gateway Benchmark Scripts
+# Benchmark Scripts
+
+## Native Batch STT
+
+`stt_bench.py` benchmarks batch transcription through tldw_server's native
+`SttProviderRegistry` and `SttProviderAdapter` contract. It uses deterministic
+strict and normalized WER/CER—no Pipecat, LLM judge, automatic model download,
+or server process.
+
+Read the exact
+[STT benchmark protocol](../../Docs/Development/STT_Benchmark_Protocol.md)
+before collecting or publishing results. Start from
+[`stt_benchmark_manifest.example.jsonl`](stt_benchmark_manifest.example.jsonl),
+but treat it only as a schema example. Replace or independently verify every
+illustrative value, including IDs, references, language/profile/suite choices,
+tags, paths, source metadata, durations, and checksums. Corpus audio is not
+included.
+
+Quick start:
+
+```bash
+source .venv/bin/activate
+
+python Helper_Scripts/benchmarks/stt_bench.py validate \
+  --manifest /data/stt/manifest.jsonl \
+  --dataset-root /data/stt
+
+python Helper_Scripts/benchmarks/stt_bench.py run \
+  --manifest /data/stt/manifest.jsonl \
+  --dataset-root /data/stt \
+  --profile regression \
+  --mode neutral-v1 \
+  --text-retention errors-only \
+  --target faster-whisper=large-v3 \
+  --run local-regression-v1
+
+python Helper_Scripts/benchmarks/stt_bench.py report \
+  --run .benchmarks/stt/local-regression-v1
+
+python Helper_Scripts/benchmarks/stt_bench.py compare \
+  --baseline .benchmarks/stt/baseline/summary.json \
+  --candidate .benchmarks/stt/candidate/summary.json
+```
+
+`--target` is repeatable and uses `provider=model`. All model files and optional
+dependencies must already be installed. Any loopback or remote audio target
+requires the separate `--allow-network-targets` flag. V1 has no dry-run plan
+preview: inspect the configured provider endpoint and its privacy/retention
+terms before giving that flag, because successful preflight proceeds directly
+to execution. Local run artifacts are written under `.benchmarks/stt/`, ignored
+by Git, and may still contain sensitive transcripts.
+
+## LLM Gateway
 
 Overview
 - `llm_gateway_bench.py` is a minimal async load generator for the Chat API (`/api/v1/chat/completions`).

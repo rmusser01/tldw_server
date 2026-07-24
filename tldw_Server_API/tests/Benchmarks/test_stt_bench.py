@@ -224,6 +224,54 @@ def _valid_manifest(tmp_path: Path, **overrides):
     return manifest_path, audio_path, record
 
 
+def test_example_manifest_documents_and_validates_every_record(tmp_path):
+    example_path = Path(__file__).parents[3] / "Helper_Scripts" / "benchmarks" / "stt_benchmark_manifest.example.jsonl"
+    lines = example_path.read_text(encoding="utf-8").splitlines()
+    assert lines
+    assert all(line and line == line.strip() for line in lines)
+
+    records = [
+        json.loads(
+            line,
+            object_pairs_hook=stt_bench._reject_duplicate_json_keys,
+        )
+        for line in lines
+    ]
+    durations = {}
+    for record in records:
+        audio_path = tmp_path / "audio" / f"{record['id']}.wav"
+        audio_path.parent.mkdir(parents=True, exist_ok=True)
+        audio_path.write_bytes(f"illustrative fixture for {record['id']}".encode())
+        record["audio"] = audio_path.relative_to(tmp_path).as_posix()
+        record["source"]["sha256"] = hashlib.sha256(audio_path.read_bytes()).hexdigest()
+        durations[record["audio"]] = record["duration_seconds"]
+
+    manifest_path = _write_manifest(tmp_path / "manifest.jsonl", records)
+    samples, content_hash = stt_bench.load_and_validate_manifest(
+        manifest_path,
+        tmp_path,
+        duration_probe=lambda path: durations[path.relative_to(tmp_path).as_posix()],
+    )
+
+    assert {sample.suite_visibility for sample in samples} == {"private", "public"}
+    assert {profile for sample in samples for profile in sample.profiles} == {
+        "comparison",
+        "regression",
+    }
+    assert {sample.language for sample in samples} == {"en"}
+    assert any(sample.diagnostic_only for sample in samples)
+    assert len(content_hash) == 64
+
+
+@pytest.mark.parametrize("command", ["validate", "run", "report", "compare"])
+def test_cli_help_documents_every_subcommand(command, capsys):
+    with pytest.raises(SystemExit) as exc_info:
+        stt_bench.main([command, "--help"])
+
+    assert exc_info.value.code == 0
+    assert f"usage: stt-bench {command}" in capsys.readouterr().out
+
+
 def test_manifest_loads_canonical_portable_sample_and_hash(tmp_path):
     manifest_path, _, _ = _valid_manifest(
         tmp_path,
@@ -494,6 +542,43 @@ def test_manifest_rejects_whitespace_only_required_provenance(tmp_path, field):
             tmp_path,
             duration_probe=lambda _: 1.0,
         )
+
+
+@pytest.mark.parametrize(
+    "provenance",
+    ["canonical", "model-generated", "unverified-candidate"],
+)
+def test_manifest_rejects_reference_provenance_that_is_not_independent(
+    tmp_path,
+    provenance,
+):
+    manifest_path, _, record = _valid_manifest(tmp_path)
+    record["source"]["reference_provenance"] = provenance
+    _write_manifest(manifest_path, [record])
+
+    with pytest.raises(
+        ValueError,
+        match=r"sample-1.*source\.reference_provenance",
+    ):
+        stt_bench.load_and_validate_manifest(
+            manifest_path,
+            tmp_path,
+            duration_probe=lambda _: 1.0,
+        )
+
+
+def test_manifest_accepts_human_reviewed_reference_provenance(tmp_path):
+    manifest_path, _, record = _valid_manifest(tmp_path)
+    record["source"]["reference_provenance"] = "human-reviewed"
+    _write_manifest(manifest_path, [record])
+
+    samples, _ = stt_bench.load_and_validate_manifest(
+        manifest_path,
+        tmp_path,
+        duration_probe=lambda _: 1.0,
+    )
+
+    assert ("reference_provenance", "human-reviewed") in samples[0].source
 
 
 def test_manifest_rejects_sha256_mismatch(tmp_path):
@@ -1432,6 +1517,7 @@ def _result_record(
     suite="public-english-v1",
     suite_visibility="public",
     dataset="fixture",
+    reference_provenance="canonical-dataset",
     tags=("read-speech",),
     diagnostic_only=False,
     backend="local",
@@ -1475,6 +1561,7 @@ def _result_record(
         "suite": suite,
         "suite_visibility": suite_visibility,
         "dataset": dataset,
+        "reference_provenance": reference_provenance,
         "tags": list(tags),
         "diagnostic_only": diagnostic_only,
         "requested_execution": {
@@ -2401,6 +2488,15 @@ def test_persist_result_rejects_empty_status_with_nonempty_hypothesis(tmp_path):
         stt_bench.append_result_record(tmp_path / "results.jsonl", record)
 
 
+def test_persist_result_rejects_non_independent_reference_provenance(
+    tmp_path,
+):
+    record = _result_record(reference_provenance="model-generated")
+
+    with pytest.raises(ValueError, match="reference provenance"):
+        stt_bench.append_result_record(tmp_path / "results.jsonl", record)
+
+
 @pytest.mark.parametrize(
     "message",
     [
@@ -3070,7 +3166,10 @@ def _worker_sample(
             suite_visibility="public",
             annotation_profile="canonical-v1",
             diagnostic_only=False,
-            source=(("dataset", "fixture"),),
+            source=(
+                ("dataset", "fixture"),
+                ("reference_provenance", "canonical-dataset"),
+            ),
             tags=("read-speech",),
             sha256=hashlib.sha256(audio_path.read_bytes()).hexdigest(),
         ),
@@ -3163,7 +3262,17 @@ def _runner_metadata(
     watchdog_seconds=1.0,
     mode="neutral-v1",
     text_retention="full",
+    reference_provenance_counts=None,
 ):
+    provenance_counts = (
+        reference_provenance_counts
+        if reference_provenance_counts is not None
+        else {
+            "public-english-v1": {
+                "canonical-dataset": len(selected_sample_ids),
+            }
+        }
+    )
     return stt_bench.build_run_metadata(
         run_id="run-worker",
         manifest_hash="a" * 64,
@@ -3175,6 +3284,7 @@ def _runner_metadata(
         warm_repetitions=warm_repetitions,
         timing_sample_ids=timing_sample_ids,
         text_retention=text_retention,
+        reference_provenance_counts=provenance_counts,
         adapter_watchdog_seconds=watchdog_seconds,
         prepared_targets=tuple(targets or (_worker_target(),)),
         environment=_runner_environment(),
@@ -3192,6 +3302,7 @@ def test_run_metadata_is_deterministic_allowlisted_and_secret_safe():
     assert first["next_attempt_id"] == 1
     assert first["next_worker_attempt_id"] == 1
     assert first["worker_attempts"] == []
+    assert first["reference_provenance_counts"] == {"public-english-v1": {"canonical-dataset": 2}}
     assert first["target_matrix"][0]["target_id"] == "target-worker"
     contract = first["target_matrix"][0]["execution_contract"]
     assert contract["dependency_versions"]["pytest"]
@@ -3204,6 +3315,31 @@ def test_run_metadata_is_deterministic_allowlisted_and_secret_safe():
 def test_run_metadata_rejects_cold_probe_in_timing_subset():
     with pytest.raises(ValueError, match="cold probe"):
         _runner_metadata(timing_sample_ids=("probe", "sample-2"))
+
+
+@pytest.mark.parametrize(
+    "counts",
+    [
+        {},
+        {"public-english-v1": {"model-generated": 2}},
+        {"public-english-v1": {"canonical-dataset": 0}},
+        {"public-english-v1": {"canonical-dataset": 1}},
+        {"Bad Suite": {"canonical-dataset": 2}},
+        {
+            1: {"canonical-dataset": 1},
+            "public-english-v1": {"canonical-dataset": 1},
+        },
+        {
+            "public-english-v1": {
+                1: 1,
+                "canonical-dataset": 1,
+            }
+        },
+    ],
+)
+def test_run_metadata_rejects_invalid_reference_provenance_counts(counts):
+    with pytest.raises(ValueError, match="provenance|suite"):
+        _runner_metadata(reference_provenance_counts=counts)
 
 
 def test_run_metadata_persists_only_safe_production_contract_settings():
@@ -4271,13 +4407,16 @@ def test_report_regenerates_partial_json_markdown_and_terminal_from_run_artifact
     }
     assert summary["identity"]["manifest_hash"] == "a" * 64
     assert summary["identity"]["target_order"] == ["target-worker"]
+    assert summary["identity"]["reference_provenance_counts"] == {"public-english-v1": {"canonical-dataset": 2}}
     assert summary["identity"]["targets"][0]["execution_contract"]["dependency_versions"]["pytest"]
     assert summary["samples"][0]["sample_id"] == "probe"
+    assert summary["samples"][0]["reference_provenance"] == "canonical-dataset"
     assert summary["samples"][0]["reference"] == "hello world"
     for rendered in (markdown, terminal):
         assert "run-worker" in rendered
         assert "target-worker" in rendered
         assert "public-english-v1" in rendered
+        assert "canonical-dataset=2" in rendered
         assert "3" in rendered
 
 
@@ -4634,6 +4773,16 @@ def test_report_renderers_include_quality_warm_cold_backend_and_eligibility(
         assert "Actual backend populations" in rendered
         assert "backend-1" in rendered
         assert "Gate eligibility" in rendered
+
+
+def test_validate_summary_rejects_result_provenance_outside_run_counts(
+    tmp_path,
+):
+    summary = _complete_report(tmp_path, "provenance")
+    summary["samples"][0]["reference_provenance"] = "human-reviewed"
+
+    with pytest.raises(ValueError, match="provenance"):
+        stt_bench.validate_summary(summary)
 
 
 def test_validate_summary_rejects_schema_unknown_fields_and_tampered_metrics(
