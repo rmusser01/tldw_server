@@ -30,6 +30,11 @@ from Helper_Scripts.benchmarks.stt_bench import (
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_contract import (
+    SttActualExecution,
+    SttAudioEgress,
+)
+
 
 def _manifest_record(
     audio_path: Path,
@@ -2198,3 +2203,47 @@ def test_atomic_persist_refuses_to_chmod_unrelated_existing_parent(tmp_path):
 
     if os.name == "posix":
         assert stat.S_IMODE(shared.stat().st_mode) == 0o755
+
+
+def test_persist_result_round_trips_canonical_actual_execution(tmp_path):
+    actual = SttActualExecution(
+        route_id="route-1",
+        provider="external",
+        model_label="external:MyProvider",
+        artifact_id=None,
+        backend="remote",
+        audio_egress=SttAudioEgress.REMOTE,
+        endpoint_id="sha256:" + "c" * 64,
+        source="external",
+        device=None,
+        compute_type=None,
+        dtype=None,
+        decoding_ids=("configuration_id", "prompt_present"),
+        transport="https",
+    )
+    record = _result_record()
+    record["requested_execution"]["model_label"] = "external:MyProvider"
+    record["actual_execution"] = actual.as_safe_dict()
+
+    stt_bench.append_result_record(tmp_path / "run" / "results.jsonl", record)
+
+    persisted = json.loads((tmp_path / "run" / "results.jsonl").read_text(encoding="utf-8"))
+    assert persisted["actual_execution"] == actual.as_safe_dict()
+
+
+@pytest.mark.parametrize(
+    "decoding_ids",
+    [
+        ["secret"],
+        ["prompt_present", "configuration_id"],
+    ],
+)
+def test_persist_result_rejects_noncanonical_decoding_ids(
+    decoding_ids,
+    tmp_path,
+):
+    record = _result_record()
+    record["actual_execution"]["decoding_ids"] = decoding_ids
+
+    with pytest.raises(ValueError, match="execution"):
+        stt_bench.append_result_record(tmp_path / "results.jsonl", record)

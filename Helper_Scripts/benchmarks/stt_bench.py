@@ -25,11 +25,10 @@ BCP47_BASIC_V1 = re.compile(r"[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*")
 STABLE_ID_V1 = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}")
 SERIALIZED_ID_V1 = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,255}")
 SAFE_MODEL_LABEL_V1 = re.compile(
-    r"(?:external:[a-z0-9][a-z0-9._-]{0,63}|"
+    r"(?:external:[A-Za-z0-9][A-Za-z0-9._+-]{0,255}|"
     r"[A-Za-z0-9][A-Za-z0-9._+-]*"
     r"(?:/[A-Za-z0-9][A-Za-z0-9._+-]*)?)"
 )
-ENDPOINT_ID_V1 = re.compile(r"sha256:[0-9a-f]{64}")
 MAX_TAGS_PER_SAMPLE = 32
 RUN_SCHEMA_VERSION = 1
 RESULT_SCHEMA_VERSION = 1
@@ -1057,54 +1056,34 @@ def _validate_execution_mapping(
             raise ValueError(f"result field {field}.{key} is not a safe label")
     if not actual:
         return
-    for key in ("route_id", "backend", "source"):
-        item = _require_result_text(
-            value[key],
-            field=f"{field}.{key}",
-            maximum=256,
-        )
-        if SERIALIZED_ID_V1.fullmatch(item) is None:
-            raise ValueError(f"result field {field}.{key} is not a safe ID")
-    if value["audio_egress"] not in {"none", "loopback", "remote"}:
-        raise ValueError(f"result field {field}.audio_egress is invalid")
-    for key in (
-        "artifact_id",
-        "endpoint_id",
-        "device",
-        "compute_type",
-        "dtype",
-        "transport",
-    ):
-        item = value[key]
-        if item is None:
-            continue
-        text = _require_result_text(item, field=f"{field}.{key}", maximum=256)
-        if key == "endpoint_id":
-            if ENDPOINT_ID_V1.fullmatch(text) is None:
-                raise ValueError(f"result field {field}.{key} is invalid")
-        elif key == "artifact_id":
-            if not (
-                _SHA256_V1.fullmatch(text)
-                or re.fullmatch(r"sha256:[0-9a-f]{64}", text)
-                or re.fullmatch(r"[0-9a-f]{40}", text)
-                or SERIALIZED_ID_V1.fullmatch(text)
-            ):
-                raise ValueError(f"result field {field}.{key} is invalid")
-        elif SERIALIZED_ID_V1.fullmatch(text) is None:
-            raise ValueError(f"result field {field}.{key} is invalid")
-    if value["audio_egress"] == "none":
-        if value["endpoint_id"] is not None or value["transport"] is not None:
-            raise ValueError("local execution cannot carry endpoint or transport")
-    elif value["endpoint_id"] is None:
-        raise ValueError("network execution requires an opaque endpoint ID")
     decoding_ids = value["decoding_ids"]
-    if not isinstance(decoding_ids, list) or len(decoding_ids) > 64:
+    if not isinstance(decoding_ids, list):
         raise ValueError(f"result field {field}.decoding_ids is invalid")
-    for identifier in decoding_ids:
-        if not isinstance(identifier, str) or SERIALIZED_ID_V1.fullmatch(identifier) is None:
-            raise ValueError(f"result field {field}.decoding_ids is invalid")
-    if len(decoding_ids) != len(set(decoding_ids)):
-        raise ValueError(f"result field {field}.decoding_ids is invalid")
+    try:
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_contract import (
+            SttActualExecution,
+            SttAudioEgress,
+        )
+
+        canonical = SttActualExecution(
+            route_id=value["route_id"],
+            provider=value["provider"],
+            model_label=value["model_label"],
+            artifact_id=value["artifact_id"],
+            backend=value["backend"],
+            audio_egress=SttAudioEgress(value["audio_egress"]),
+            endpoint_id=value["endpoint_id"],
+            source=value["source"],
+            device=value["device"],
+            compute_type=value["compute_type"],
+            dtype=value["dtype"],
+            decoding_ids=tuple(decoding_ids),
+            transport=value["transport"],
+        ).as_safe_dict()
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"result field {field} is not canonical") from exc
+    if canonical != value:
+        raise ValueError(f"result field {field} is not canonical")
 
 
 def _validate_edit_payload(value: object, field: str) -> None:
