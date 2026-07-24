@@ -263,7 +263,12 @@ class _ReplayPruneCoordinationCursor:
     def execute(self, sql: Any, params: Any = None) -> Any:
         statement = str(sql)
         self._coordinate_replay_fetch = (
-            "SELECT 1 FROM jobs WHERE domain = %s AND queue = %s AND job_type = %s" in statement
+            (
+                "SELECT 1 FROM jobs WHERE domain = %s AND queue = %s AND job_type = %s"
+                in statement
+                or "SELECT * FROM jobs WHERE domain = %s AND queue = %s AND job_type = %s"
+                in statement
+            )
             and "idempotency_key = %s" in statement
         )
         self._probe_locks_row = "FOR KEY SHARE" in statement
@@ -536,6 +541,80 @@ def test_max_queued_replay_holds_row_against_concurrent_prune(monkeypatch, jobs_
         owner_user_id="owner-1",
         status="queued",
     ) == 1
+
+
+def test_idempotent_replay_without_quota_commits_before_concurrent_prune(
+    monkeypatch,
+    jobs_pg_dsn,
+):
+    monkeypatch.setenv("JOBS_DB_URL", jobs_pg_dsn)
+    monkeypatch.delenv("JOBS_QUOTA_MAX_QUEUED", raising=False)
+    monkeypatch.delenv("JOBS_QUOTA_SUBMITS_PER_MINUTE", raising=False)
+    seed_manager = JobManager(backend="postgres", db_url=jobs_pg_dsn)
+    original = seed_manager.create_job(
+        domain="no-quota-prune-replay",
+        queue="default",
+        job_type="replay-target",
+        payload={"attempt": "original"},
+        owner_user_id="owner-1",
+        idempotency_key="replay-key",
+    )
+
+    replay_detected = threading.Event()
+    delete_attempted = threading.Event()
+    delete_committed = threading.Event()
+    replay_manager = _ReplayPruneCoordinationJobManager(
+        db_url=jobs_pg_dsn,
+        replay_detected=replay_detected,
+        delete_attempted=delete_attempted,
+        delete_committed=delete_committed,
+    )
+    prune_manager = _PruneDeleteCoordinationJobManager(
+        db_url=jobs_pg_dsn,
+        replay_detected=replay_detected,
+        delete_attempted=delete_attempted,
+    )
+
+    def replay() -> dict[str, Any]:
+        return replay_manager.create_job(
+            domain="no-quota-prune-replay",
+            queue="default",
+            job_type="replay-target",
+            payload={"attempt": "replay"},
+            owner_user_id="owner-1",
+            idempotency_key="replay-key",
+            request_id="request-replay",
+        )
+
+    def prune() -> int:
+        try:
+            deleted = prune_manager.prune_jobs(
+                statuses=["queued"],
+                older_than_days=-1,
+                domain="no-quota-prune-replay",
+                queue="default",
+                job_type="replay-target",
+            )
+            with psycopg.connect(jobs_pg_dsn) as conn:
+                replay_event = conn.execute(
+                    "SELECT 1 FROM job_events WHERE job_id = %s AND request_id = %s",
+                    (int(original["id"]), "request-replay"),
+                ).fetchone()
+            if replay_event is None:
+                raise AssertionError("prune committed before the idempotent replay event")
+            return deleted
+        finally:
+            delete_committed.set()
+
+    results = _run_concurrent_calls(
+        [replay, prune],
+        release_events=(replay_detected, delete_attempted, delete_committed),
+    )
+
+    replay_rows = [value for outcome, value in results if outcome == "returned" and isinstance(value, dict)]
+    prune_counts = [value for outcome, value in results if outcome == "returned" and isinstance(value, int)]
+    assert [int(row["id"]) for row in replay_rows] == [int(original["id"])], results
+    assert prune_counts == [1], results
 
 
 def test_repeatable_read_max_queued_quota_is_atomic_under_concurrent_admission(monkeypatch, jobs_pg_dsn):

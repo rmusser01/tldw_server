@@ -317,7 +317,8 @@ def create_job_admission(
                 inserted = row is not None
                 if row is None:
                     cur.execute(
-                        "SELECT * FROM jobs WHERE domain = %s AND queue = %s AND job_type = %s AND idempotency_key = %s",
+                        "SELECT * FROM jobs WHERE domain = %s AND queue = %s AND job_type = %s "
+                        "AND idempotency_key = %s FOR KEY SHARE",
                         (command.domain, command.queue, command.job_type, command.idempotency_key),
                     )
                     row = _row_to_dict(cur.fetchone())
