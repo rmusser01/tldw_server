@@ -296,6 +296,52 @@ def _assert_response_parity(result):
     ]
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method_name", ["get", "set"])
+@pytest.mark.parametrize(
+    "error_factory",
+    [
+        pytest.param(
+            lambda: RuntimeError("cache dependency failed"),
+            id="unexpected",
+        ),
+        pytest.param(
+            lambda: EmbeddingExecutionError(
+                "internal_execution_failure",
+                "domain-shaped cache failure",
+                retryable=True,
+            ),
+            id="domain",
+        ),
+    ],
+)
+async def test_endpoint_cache_adapter_propagates_dependency_error_unchanged(
+    monkeypatch,
+    method_name,
+    error_factory,
+):
+    from tldw_Server_API.app.api.v1.endpoints import (
+        embeddings_v5_production_enhanced as mod,
+    )
+
+    original = error_factory()
+    dependency = AsyncMock(side_effect=original)
+    monkeypatch.setattr(mod.embedding_cache, method_name, dependency)
+    cache = mod._EndpointEmbeddingCache()
+
+    with pytest.raises(type(original)) as exc_info:
+        if method_name == "get":
+            await cache.get("cache-key")
+        else:
+            await cache.set("cache-key", [0.1, 0.2])
+
+    assert exc_info.value is original
+    if method_name == "get":
+        dependency.assert_awaited_once_with("cache-key")
+    else:
+        dependency.assert_awaited_once_with("cache-key", [0.1, 0.2])
+
+
 def _run_dual_path_embedding_request(
     client,
     monkeypatch,
