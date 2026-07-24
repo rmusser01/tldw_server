@@ -1323,9 +1323,19 @@ def _result_record(
             "model_label": "fake-model",
         },
         "actual_execution": {
+            "route_id": "route-1",
             "provider": "fake",
             "model_label": "fake-model",
+            "artifact_id": None,
             "backend": backend,
+            "audio_egress": "none",
+            "endpoint_id": None,
+            "source": "fake",
+            "device": "cpu",
+            "compute_type": None,
+            "dtype": None,
+            "decoding_ids": [],
+            "transport": None,
         },
         "execution_mismatch_reasons": [],
         "eligibility_reasons": [],
@@ -1404,7 +1414,8 @@ def test_atomic_persist_replaces_in_same_directory_and_fsyncs_file_and_parent(
     monkeypatch,
 ):
     destination = tmp_path / "run" / "run.json"
-    destination.parent.mkdir()
+    destination.parent.mkdir(mode=0o700)
+    destination.parent.chmod(0o700)
     destination.write_text('{"old":true}\n', encoding="utf-8")
     replacements = []
     fsync_calls = []
@@ -1904,11 +1915,12 @@ def test_aggregate_results_reports_suite_quality_without_cross_suite_pooling():
 
     assert summary["schema_version"] == stt_bench.SUMMARY_SCHEMA_VERSION
     assert summary["run_id"] == "run-1"
-    assert set(summary["primary"]["suites"]) == {
+    target = summary["primary"]["targets"]["target-1"]
+    assert set(target["suites"]) == {
         "private-english-v1",
         "public-english-v1",
     }
-    public = summary["primary"]["suites"]["public-english-v1"]
+    public = target["suites"]["public-english-v1"]
     assert public["sample_count"] == 3
     assert public["success_count"] == 2
     assert public["empty_count"] == 0
@@ -1927,11 +1939,11 @@ def test_aggregate_results_separates_diagnostics_and_suite_scoped_slices():
 
     summary = stt_bench.aggregate_results(metadata, active)
 
-    assert summary["diagnostic"]["suites"]["public-english-v1"]["sample_count"] == 1
-    assert summary["slices"]["dataset"]["dataset-a"]["public-english-v1"]["sample_count"] == 2
-    assert summary["slices"]["tag"]["clean"]["public-english-v1"]["sample_count"] == 1
-    assert summary["slices"]["actual_backend"]["local"]["public-english-v1"]["sample_count"] == 3
-    assert summary["slices"]["actual_backend"]["remote"]["private-english-v1"]["sample_count"] == 1
+    assert summary["diagnostic"]["targets"]["target-1"]["suites"]["public-english-v1"]["sample_count"] == 1
+    assert summary["slices"]["dataset"]["target-1"]["dataset-a"]["public-english-v1"]["sample_count"] == 2
+    assert summary["slices"]["tag"]["target-1"]["clean"]["public-english-v1"]["sample_count"] == 1
+    assert summary["slices"]["actual_backend"]["target-1"]["local"]["public-english-v1"]["sample_count"] == 3
+    assert summary["slices"]["actual_backend"]["target-1"]["remote"]["private-english-v1"]["sample_count"] == 1
 
 
 def test_aggregate_results_uses_only_successful_warm_calls_for_performance():
@@ -1939,7 +1951,7 @@ def test_aggregate_results_uses_only_successful_warm_calls_for_performance():
 
     summary = stt_bench.aggregate_results(metadata, active)
 
-    warm = summary["performance"]["warm"]["suites"]["public-english-v1"]
+    warm = summary["performance"]["warm"]["targets"]["target-1"]["suites"]["public-english-v1"]
     assert warm["observation_count"] == 2
     assert warm["adapter_seconds"]["mean"] == pytest.approx(0.375)
     assert warm["rtf"]["p50"] == pytest.approx(0.375)
@@ -1964,7 +1976,7 @@ def test_aggregate_results_excludes_invalid_warm_timing_from_percentiles():
 
     summary = stt_bench.aggregate_results(metadata, active)
 
-    warm = summary["performance"]["warm"]["suites"]["public-english-v1"]
+    warm = summary["performance"]["warm"]["targets"]["target-1"]["suites"]["public-english-v1"]
     assert warm["observation_count"] == 2
     assert warm["ineligible_count"] == 1
 
@@ -2052,7 +2064,7 @@ def test_aggregate_empty_output_counts_as_failure_and_empty_subtype():
         {record["completion_key"]: record},
     )
 
-    suite = summary["primary"]["suites"]["public-english-v1"]
+    suite = summary["primary"]["targets"]["target-1"]["suites"]["public-english-v1"]
     assert suite["success_count"] == 0
     assert suite["failure_count"] == 1
     assert suite["empty_count"] == 1
@@ -2079,3 +2091,110 @@ def test_sanitize_error_redacts_env_style_credentials_and_quoted_paths():
 
     for leaked in ("abc", "def", "model cache", "private", "users\\alice"):
         assert leaked not in sanitized
+
+
+def test_aggregate_results_never_pools_distinct_targets():
+    first = _result_record(target_id="target-1", attempt_id=1)
+    second = _result_record(target_id="target-2", attempt_id=2)
+
+    summary = stt_bench.aggregate_results(
+        {
+            "schema_version": stt_bench.RUN_SCHEMA_VERSION,
+            "run_id": "run-1",
+            "cold_probe_sample_id": None,
+        },
+        {
+            first["completion_key"]: first,
+            second["completion_key"]: second,
+        },
+    )
+
+    assert set(summary["primary"]["targets"]) == {"target-1", "target-2"}
+    assert set(summary["slices"]["dataset"]) == {"target-1", "target-2"}
+    assert set(summary["performance"]["warm"]["targets"]) == {
+        "target-1",
+        "target-2",
+    }
+    for target in ("target-1", "target-2"):
+        assert summary["primary"]["targets"][target]["suites"]["public-english-v1"]["sample_count"] == 1
+
+
+def test_persist_result_rejects_ok_status_with_retained_empty_hypothesis(
+    tmp_path,
+):
+    record = _result_record(hypothesis="")
+
+    with pytest.raises(ValueError, match="empty"):
+        stt_bench.append_result_record(tmp_path / "results.jsonl", record)
+
+
+def test_persist_result_rejects_empty_status_with_nonempty_hypothesis(tmp_path):
+    record = _result_record()
+    record["status"] = "empty"
+
+    with pytest.raises(ValueError, match="empty"):
+        stt_bench.append_result_record(tmp_path / "results.jsonl", record)
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Authorization: Basic LEAKME\nsafe context",
+        'authorization="Basic LEAK ME"\nsafe context',
+    ],
+)
+def test_sanitize_error_redacts_complete_authorization_value(message):
+    sanitized = stt_bench.sanitize_error(RuntimeError(message))["message"]
+
+    assert "LEAK" not in sanitized
+    assert "safe context" in sanitized
+
+
+@pytest.mark.parametrize(
+    ("envelope", "field", "value"),
+    [
+        ("requested_execution", "provider", True),
+        ("requested_execution", "provider", None),
+        ("requested_execution", "model_label", False),
+        ("requested_execution", "model_label", None),
+        ("actual_execution", "provider", True),
+        ("actual_execution", "provider", None),
+        ("actual_execution", "model_label", False),
+        ("actual_execution", "model_label", None),
+        ("actual_execution", "backend", True),
+        ("actual_execution", "backend", None),
+    ],
+)
+def test_persist_result_rejects_invalid_execution_identities(
+    envelope,
+    field,
+    value,
+    tmp_path,
+):
+    record = _result_record()
+    record[envelope][field] = value
+
+    with pytest.raises(ValueError, match="execution"):
+        stt_bench.append_result_record(tmp_path / "results.jsonl", record)
+
+
+def test_persist_result_requires_complete_actual_execution_envelope(tmp_path):
+    record = _result_record()
+    record["actual_execution"].pop("source")
+
+    with pytest.raises(ValueError, match="execution"):
+        stt_bench.append_result_record(tmp_path / "results.jsonl", record)
+
+
+def test_atomic_persist_refuses_to_chmod_unrelated_existing_parent(tmp_path):
+    if os.name != "posix":
+        pytest.skip("POSIX mode bits are unavailable")
+    shared = tmp_path / "shared"
+    shared.mkdir(mode=0o755)
+    shared.chmod(0o755)
+
+    with pytest.raises(PermissionError, match="owner-only"):
+        stt_bench.atomic_write_json(shared / "run.json", {"run_id": "run-1"})
+
+    if os.name == "posix":
+        assert stat.S_IMODE(shared.stat().st_mode) == 0o755

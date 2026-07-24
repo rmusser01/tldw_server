@@ -23,6 +23,13 @@ STRICT_PROFILE = "strict-v1"
 EN_PROFILE = "en-v1"
 BCP47_BASIC_V1 = re.compile(r"[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*")
 STABLE_ID_V1 = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}")
+SERIALIZED_ID_V1 = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,255}")
+SAFE_MODEL_LABEL_V1 = re.compile(
+    r"(?:external:[a-z0-9][a-z0-9._-]{0,63}|"
+    r"[A-Za-z0-9][A-Za-z0-9._+-]*"
+    r"(?:/[A-Za-z0-9][A-Za-z0-9._+-]*)?)"
+)
+ENDPOINT_ID_V1 = re.compile(r"sha256:[0-9a-f]{64}")
 MAX_TAGS_PER_SAMPLE = 32
 RUN_SCHEMA_VERSION = 1
 RESULT_SCHEMA_VERSION = 1
@@ -898,10 +905,19 @@ def completion_key(
 
 
 def _ensure_owner_directory(path: Path) -> None:
-    """Create or tighten one run directory to owner-only access."""
-    path.mkdir(mode=0o700, parents=True, exist_ok=True)
-    if os.name == "posix":
+    """Create an owner-only run directory or reject an unsafe existing one."""
+    try:
+        path.mkdir(mode=0o700, parents=True, exist_ok=False)
+        created = True
+    except FileExistsError:
+        created = False
+    if os.name != "posix":
+        return
+    if created:
         os.chmod(path, 0o700)
+        return
+    if path.stat().st_mode & 0o077:
+        raise PermissionError("artifact parent directory must already be owner-only")
 
 
 def _fsync_directory(path: Path) -> bool:
@@ -1028,24 +1044,67 @@ def _validate_execution_mapping(
     if not isinstance(value, dict):
         raise ValueError(f"result field {field} must be an object")
     allowed = _ACTUAL_EXECUTION_FIELDS if actual else {"provider", "model_label"}
-    required = {"provider", "model_label", "backend"} if actual else allowed
-    if set(value) - set(allowed) or not required <= value.keys():
+    if set(value) != set(allowed):
         raise ValueError(f"result field {field} has invalid execution fields")
-    for key, item in value.items():
+    for key in ("provider", "model_label"):
+        item = _require_result_text(
+            value[key],
+            field=f"{field}.{key}",
+            maximum=256,
+        )
+        pattern = SAFE_MODEL_LABEL_V1 if key == "model_label" else SERIALIZED_ID_V1
+        if pattern.fullmatch(item) is None:
+            raise ValueError(f"result field {field}.{key} is not a safe label")
+    if not actual:
+        return
+    for key in ("route_id", "backend", "source"):
+        item = _require_result_text(
+            value[key],
+            field=f"{field}.{key}",
+            maximum=256,
+        )
+        if SERIALIZED_ID_V1.fullmatch(item) is None:
+            raise ValueError(f"result field {field}.{key} is not a safe ID")
+    if value["audio_egress"] not in {"none", "loopback", "remote"}:
+        raise ValueError(f"result field {field}.audio_egress is invalid")
+    for key in (
+        "artifact_id",
+        "endpoint_id",
+        "device",
+        "compute_type",
+        "dtype",
+        "transport",
+    ):
+        item = value[key]
         if item is None:
             continue
-        if isinstance(item, bool):
-            continue
-        if isinstance(item, str):
-            _require_result_text(item, field=f"{field}.{key}", maximum=256)
-            continue
-        if key == "decoding_ids" and isinstance(item, list):
-            if len(item) > 64:
-                raise ValueError(f"result field {field}.{key} is too large")
-            for identifier in item:
-                _require_stable_id(identifier, "<result>", f"{field}.{key}")
-            continue
-        raise ValueError(f"result field {field}.{key} has an invalid value")
+        text = _require_result_text(item, field=f"{field}.{key}", maximum=256)
+        if key == "endpoint_id":
+            if ENDPOINT_ID_V1.fullmatch(text) is None:
+                raise ValueError(f"result field {field}.{key} is invalid")
+        elif key == "artifact_id":
+            if not (
+                _SHA256_V1.fullmatch(text)
+                or re.fullmatch(r"sha256:[0-9a-f]{64}", text)
+                or re.fullmatch(r"[0-9a-f]{40}", text)
+                or SERIALIZED_ID_V1.fullmatch(text)
+            ):
+                raise ValueError(f"result field {field}.{key} is invalid")
+        elif SERIALIZED_ID_V1.fullmatch(text) is None:
+            raise ValueError(f"result field {field}.{key} is invalid")
+    if value["audio_egress"] == "none":
+        if value["endpoint_id"] is not None or value["transport"] is not None:
+            raise ValueError("local execution cannot carry endpoint or transport")
+    elif value["endpoint_id"] is None:
+        raise ValueError("network execution requires an opaque endpoint ID")
+    decoding_ids = value["decoding_ids"]
+    if not isinstance(decoding_ids, list) or len(decoding_ids) > 64:
+        raise ValueError(f"result field {field}.decoding_ids is invalid")
+    for identifier in decoding_ids:
+        if not isinstance(identifier, str) or SERIALIZED_ID_V1.fullmatch(identifier) is None:
+            raise ValueError(f"result field {field}.decoding_ids is invalid")
+    if len(decoding_ids) != len(set(decoding_ids)):
+        raise ValueError(f"result field {field}.decoding_ids is invalid")
 
 
 def _validate_edit_payload(value: object, field: str) -> None:
@@ -1202,6 +1261,11 @@ def _validate_result_record(
             maximum=1_000_000,
             allow_empty=True,
         )
+        hypothesis_is_empty = not normalize_strict_v1(hypothesis)
+        if result["status"] == "ok" and hypothesis_is_empty:
+            raise ValueError("result ok status cannot carry an empty hypothesis")
+        if result["status"] == "empty" and not hypothesis_is_empty:
+            raise ValueError("result empty status requires an empty hypothesis")
     if result["scorer_version"] != SCORER_VERSION:
         raise ValueError("unsupported scorer version")
     if result["strict_profile"] != STRICT_PROFILE:
@@ -1577,7 +1641,7 @@ def performance_fields(
 
 
 _URL_SECRET_V1 = re.compile(r"(?i)\b(?:https?|wss?)://[^\s<>'\"]+")
-_AUTH_SECRET_V1 = re.compile(r"(?i)\bauthorization\b\s*[:=]\s*(?:bearer\s+)?[^\s,;]+")
+_AUTH_SECRET_V1 = re.compile(r"(?im)\bauthorization\b\s*[:=]\s*[^\r\n]*")
 _NAMED_SECRET_V1 = re.compile(
     r"(?i)\b[a-z0-9_-]*(?:api[_-]?key|token|secret)"
     r"[a-z0-9_-]*\b\s*[:=]\s*[^\s,;]+"
@@ -1717,14 +1781,25 @@ def _suite_quality_aggregates(
     return {suite: _quality_aggregate(grouped[suite]) for suite in sorted(grouped)}
 
 
+def _target_quality_aggregates(
+    records: Sequence[Mapping[str, object]],
+) -> dict[str, dict[str, object]]:
+    """Aggregate quality by target first, then suite."""
+    grouped: dict[str, list[Mapping[str, object]]] = {}
+    for record in records:
+        grouped.setdefault(str(record["target_id"]), []).append(record)
+    return {target_id: {"suites": _suite_quality_aggregates(grouped[target_id])} for target_id in sorted(grouped)}
+
+
 def _slice_quality_aggregates(
     records: Sequence[Mapping[str, object]],
     *,
     dimension: str,
-) -> dict[str, dict[str, dict[str, object]]]:
-    """Build one slice dimension, keeping every population suite-scoped."""
-    grouped: dict[str, list[Mapping[str, object]]] = {}
+) -> dict[str, object]:
+    """Build target-first slices with every population suite-scoped."""
+    grouped: dict[str, dict[str, list[Mapping[str, object]]]] = {}
     for record in records:
+        target_id = str(record["target_id"])
         if dimension == "tag":
             values = [str(tag) for tag in record["tags"]]
         elif dimension == "actual_backend":
@@ -1735,8 +1810,11 @@ def _slice_quality_aggregates(
         else:
             values = [str(record[dimension])]
         for value in values:
-            grouped.setdefault(value, []).append(record)
-    return {value: _suite_quality_aggregates(grouped[value]) for value in sorted(grouped)}
+            grouped.setdefault(target_id, {}).setdefault(value, []).append(record)
+    return {
+        target_id: {value: _suite_quality_aggregates(grouped[target_id][value]) for value in sorted(grouped[target_id])}
+        for target_id in sorted(grouped)
+    }
 
 
 def _warm_performance_aggregate(
@@ -1784,6 +1862,16 @@ def _warm_performance_suites(
     for record in records:
         grouped.setdefault(str(record["suite"]), []).append(record)
     return {suite: _warm_performance_aggregate(grouped[suite]) for suite in sorted(grouped)}
+
+
+def _target_warm_performance(
+    records: Sequence[Mapping[str, object]],
+) -> dict[str, dict[str, object]]:
+    """Aggregate warm performance by target first, then suite."""
+    grouped: dict[str, list[Mapping[str, object]]] = {}
+    for record in records:
+        grouped.setdefault(str(record["target_id"]), []).append(record)
+    return {target_id: {"suites": _warm_performance_suites(grouped[target_id])} for target_id in sorted(grouped)}
 
 
 def _cold_first_observations(
@@ -1864,8 +1952,8 @@ def aggregate_results(
         "schema_version": SUMMARY_SCHEMA_VERSION,
         "run_id": run_id,
         "active_result_count": len(validated_records),
-        "primary": {"suites": _suite_quality_aggregates(primary_records)},
-        "diagnostic": {"suites": _suite_quality_aggregates(diagnostic_records)},
+        "primary": {"targets": _target_quality_aggregates(primary_records)},
+        "diagnostic": {"targets": _target_quality_aggregates(diagnostic_records)},
         "slices": {
             "dataset": _slice_quality_aggregates(
                 primary_records,
@@ -1881,7 +1969,7 @@ def aggregate_results(
             ),
         },
         "performance": {
-            "warm": {"suites": _warm_performance_suites(warm_candidates)},
+            "warm": {"targets": _target_warm_performance(warm_candidates)},
             "cold_first": _cold_first_observations(
                 validated_records,
                 cold_probe_sample_id=(str(cold_probe) if cold_probe is not None else None),
