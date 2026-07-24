@@ -20,6 +20,8 @@ from tldw_Server_API.app.core.Jobs.operations.contracts import (
 _MAX_QUEUED_MESSAGE = "Quota exceeded: max queued per user/domain"
 _SUBMITS_PER_MINUTE_MESSAGE = "Quota exceeded: submits per minute"
 _PSYCOPG_REQUIRED_MESSAGE = "psycopg is required for PostgreSQL quota admission"
+_IDEMPOTENT_CONFLICT_ATTEMPTS = 3
+_IDEMPOTENT_CONFLICT_LOST_MESSAGE = "Idempotent job conflict repeatedly disappeared during admission"
 
 try:
     import psycopg as _psycopg  # type: ignore
@@ -264,6 +266,38 @@ def _insert_job(
     return _row_to_dict(row) if row else None
 
 
+def _insert_or_lock_idempotent_job(
+    cur: Any,
+    *,
+    command: CreateJobCommand,
+    uuid_value: str,
+    payload_json: str,
+    available_at: datetime | None,
+) -> tuple[dict[str, Any], bool]:
+    for _ in range(_IDEMPOTENT_CONFLICT_ATTEMPTS):
+        row = _insert_job(
+            cur,
+            command=command,
+            uuid_value=uuid_value,
+            payload_json=payload_json,
+            available_at=available_at,
+            idempotent_insert=True,
+        )
+        if row is not None:
+            return row, True
+
+        cur.execute(
+            "SELECT * FROM jobs WHERE domain = %s AND queue = %s AND job_type = %s "
+            "AND idempotency_key = %s FOR KEY SHARE",
+            (command.domain, command.queue, command.job_type, command.idempotency_key),
+        )
+        row = _row_to_dict(cur.fetchone())
+        if row:
+            return row, False
+
+    raise RuntimeError(_IDEMPOTENT_CONFLICT_LOST_MESSAGE)
+
+
 def create_job_admission(
     conn: Any,
     cursor_factory: Callable[[Any], AbstractContextManager[Any]],
@@ -306,30 +340,13 @@ def create_job_admission(
                     return quota_result
 
             if command.idempotency_key:
-                row = _insert_job(
+                row, inserted = _insert_or_lock_idempotent_job(
                     cur,
                     command=command,
                     uuid_value=uuid_value,
                     payload_json=payload_json,
                     available_at=available_at,
-                    idempotent_insert=True,
                 )
-                inserted = row is not None
-                if row is None:
-                    cur.execute(
-                        "SELECT * FROM jobs WHERE domain = %s AND queue = %s AND job_type = %s "
-                        "AND idempotency_key = %s FOR KEY SHARE",
-                        (command.domain, command.queue, command.job_type, command.idempotency_key),
-                    )
-                    row = _row_to_dict(cur.fetchone())
-                if not row:
-                    row = {
-                        "uuid": uuid_value,
-                        "status": "queued",
-                        "domain": command.domain,
-                        "queue": command.queue,
-                        "job_type": command.job_type,
-                    }
                 if inserted and counters_enabled:
                     _bump_counters_best_effort(cur, command=command, available_at=available_at)
                 event = _insert_created_event(

@@ -51,6 +51,24 @@ def _run_concurrent_calls(
     return results
 
 
+def _disable_admission_quotas(
+    monkeypatch,
+    *,
+    domain: str,
+    owner_user_id: str,
+) -> None:
+    domain_key = domain.upper()
+    suffixes = (
+        "",
+        f"_{domain_key}",
+        f"_USER_{owner_user_id}",
+        f"_{domain_key}_USER_{owner_user_id}",
+    )
+    for base in ("JOBS_QUOTA_MAX_QUEUED", "JOBS_QUOTA_SUBMITS_PER_MIN"):
+        for suffix in suffixes:
+            monkeypatch.setenv(f"{base}{suffix}", "0")
+
+
 def _install_delay_trigger(dsn: str) -> None:
     with psycopg.connect(dsn) as conn:
         conn.execute(
@@ -245,11 +263,13 @@ class _ReplayPruneCoordinationCursor:
         replay_detected: threading.Event,
         delete_attempted: threading.Event,
         delete_committed: threading.Event,
+        expected_replay_projection: str | None = None,
     ) -> None:
         self._inner = inner
         self._replay_detected = replay_detected
         self._delete_attempted = delete_attempted
         self._delete_committed = delete_committed
+        self._expected_replay_projection = expected_replay_projection
         self._coordinate_replay_fetch = False
         self._probe_locks_row = False
 
@@ -262,7 +282,7 @@ class _ReplayPruneCoordinationCursor:
 
     def execute(self, sql: Any, params: Any = None) -> Any:
         statement = str(sql)
-        self._coordinate_replay_fetch = (
+        replay_query = (
             (
                 "SELECT 1 FROM jobs WHERE domain = %s AND queue = %s AND job_type = %s"
                 in statement
@@ -271,6 +291,12 @@ class _ReplayPruneCoordinationCursor:
             )
             and "idempotency_key = %s" in statement
         )
+        projection_matches = self._expected_replay_projection is None or statement.lstrip().startswith(
+            self._expected_replay_projection
+        )
+        if replay_query and not projection_matches:
+            raise AssertionError(f"unexpected replay query projection: {statement}")
+        self._coordinate_replay_fetch = replay_query and projection_matches
         self._probe_locks_row = "FOR KEY SHARE" in statement
         return self._inner.execute(sql, params)
 
@@ -296,17 +322,80 @@ class _ReplayPruneCoordinationJobManager(JobManager):
         replay_detected: threading.Event,
         delete_attempted: threading.Event,
         delete_committed: threading.Event,
+        expected_replay_projection: str | None = None,
     ) -> None:
         super().__init__(backend="postgres", db_url=db_url)
         self._replay_detected = replay_detected
         self._delete_attempted = delete_attempted
         self._delete_committed = delete_committed
+        self._expected_replay_projection = expected_replay_projection
 
     def _pg_cursor(self, conn):
         return _ReplayPruneCoordinationCursor(
             super()._pg_cursor(conn),
             self._replay_detected,
             self._delete_attempted,
+            self._delete_committed,
+            self._expected_replay_projection,
+        )
+
+
+class _ConflictPruneCoordinationCursor:
+    def __init__(
+        self,
+        inner: Any,
+        conflict_observed: threading.Event,
+        delete_committed: threading.Event,
+    ) -> None:
+        self._inner = inner
+        self._conflict_observed = conflict_observed
+        self._delete_committed = delete_committed
+        self._idempotent_insert = False
+        self._coordinated = False
+
+    def __enter__(self) -> "_ConflictPruneCoordinationCursor":
+        self._inner.__enter__()
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return self._inner.__exit__(exc_type, exc, tb)
+
+    def execute(self, sql: Any, params: Any = None) -> Any:
+        statement = str(sql)
+        self._idempotent_insert = statement.lstrip().startswith("INSERT INTO jobs") and (
+            "ON CONFLICT (domain, queue, job_type, idempotency_key) DO NOTHING" in statement
+        )
+        return self._inner.execute(sql, params)
+
+    def fetchone(self) -> Any:
+        row = self._inner.fetchone()
+        if self._idempotent_insert and row is None and not self._coordinated:
+            self._coordinated = True
+            self._conflict_observed.set()
+            if not self._delete_committed.wait(timeout=5):
+                raise AssertionError("prune did not delete the conflicting row")
+        return row
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+
+class _ConflictPruneCoordinationJobManager(JobManager):
+    def __init__(
+        self,
+        *,
+        db_url: str,
+        conflict_observed: threading.Event,
+        delete_committed: threading.Event,
+    ) -> None:
+        super().__init__(backend="postgres", db_url=db_url)
+        self._conflict_observed = conflict_observed
+        self._delete_committed = delete_committed
+
+    def _pg_cursor(self, conn):
+        return _ConflictPruneCoordinationCursor(
+            super()._pg_cursor(conn),
+            self._conflict_observed,
             self._delete_committed,
         )
 
@@ -548,8 +637,11 @@ def test_idempotent_replay_without_quota_commits_before_concurrent_prune(
     jobs_pg_dsn,
 ):
     monkeypatch.setenv("JOBS_DB_URL", jobs_pg_dsn)
-    monkeypatch.delenv("JOBS_QUOTA_MAX_QUEUED", raising=False)
-    monkeypatch.delenv("JOBS_QUOTA_SUBMITS_PER_MINUTE", raising=False)
+    _disable_admission_quotas(
+        monkeypatch,
+        domain="no-quota-prune-replay",
+        owner_user_id="owner-1",
+    )
     seed_manager = JobManager(backend="postgres", db_url=jobs_pg_dsn)
     original = seed_manager.create_job(
         domain="no-quota-prune-replay",
@@ -568,6 +660,7 @@ def test_idempotent_replay_without_quota_commits_before_concurrent_prune(
         replay_detected=replay_detected,
         delete_attempted=delete_attempted,
         delete_committed=delete_committed,
+        expected_replay_projection="SELECT *",
     )
     prune_manager = _PruneDeleteCoordinationJobManager(
         db_url=jobs_pg_dsn,
@@ -615,6 +708,87 @@ def test_idempotent_replay_without_quota_commits_before_concurrent_prune(
     prune_counts = [value for outcome, value in results if outcome == "returned" and isinstance(value, int)]
     assert [int(row["id"]) for row in replay_rows] == [int(original["id"])], results
     assert prune_counts == [1], results
+
+
+def test_idempotent_replay_retries_when_prune_deletes_conflict_before_locking_fetch(
+    monkeypatch,
+    jobs_pg_dsn,
+):
+    monkeypatch.setenv("JOBS_DB_URL", jobs_pg_dsn)
+    _disable_admission_quotas(
+        monkeypatch,
+        domain="conflict-prune-replay",
+        owner_user_id="owner-1",
+    )
+    seed_manager = JobManager(backend="postgres", db_url=jobs_pg_dsn)
+    original = seed_manager.create_job(
+        domain="conflict-prune-replay",
+        queue="default",
+        job_type="replay-target",
+        payload={"attempt": "original"},
+        owner_user_id="owner-1",
+        idempotency_key="replay-key",
+    )
+
+    conflict_observed = threading.Event()
+    delete_attempted = threading.Event()
+    delete_committed = threading.Event()
+    replay_manager = _ConflictPruneCoordinationJobManager(
+        db_url=jobs_pg_dsn,
+        conflict_observed=conflict_observed,
+        delete_committed=delete_committed,
+    )
+    prune_manager = _PruneDeleteCoordinationJobManager(
+        db_url=jobs_pg_dsn,
+        replay_detected=conflict_observed,
+        delete_attempted=delete_attempted,
+    )
+
+    def replay() -> dict[str, Any]:
+        return replay_manager.create_job(
+            domain="conflict-prune-replay",
+            queue="default",
+            job_type="replay-target",
+            payload={"attempt": "replay"},
+            owner_user_id="owner-1",
+            idempotency_key="replay-key",
+            request_id="request-replay",
+        )
+
+    def prune() -> int:
+        try:
+            return prune_manager.prune_jobs(
+                statuses=["queued"],
+                older_than_days=-1,
+                domain="conflict-prune-replay",
+                queue="default",
+                job_type="replay-target",
+            )
+        finally:
+            delete_committed.set()
+
+    results = _run_concurrent_calls(
+        [replay, prune],
+        release_events=(conflict_observed, delete_attempted, delete_committed),
+    )
+
+    replay_rows = [value for outcome, value in results if outcome == "returned" and isinstance(value, dict)]
+    prune_counts = [value for outcome, value in results if outcome == "returned" and isinstance(value, int)]
+    assert len(replay_rows) == 1, results
+    assert int(replay_rows[0]["id"]) != int(original["id"]), results
+    assert prune_counts == [1], results
+    assert seed_manager.count_jobs(
+        domain="conflict-prune-replay",
+        owner_user_id="owner-1",
+        status="queued",
+    ) == 1
+    with psycopg.connect(jobs_pg_dsn) as conn:
+        event = conn.execute(
+            "SELECT attrs_json FROM job_events WHERE job_id = %s AND request_id = %s",
+            (int(replay_rows[0]["id"]), "request-replay"),
+        ).fetchone()
+    assert event is not None
+    assert event[0]["idempotent"] is False
 
 
 def test_repeatable_read_max_queued_quota_is_atomic_under_concurrent_admission(monkeypatch, jobs_pg_dsn):
