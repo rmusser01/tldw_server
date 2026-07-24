@@ -4,7 +4,7 @@ title: Run PR CI only after the trusted license workflow succeeds
 status: In Progress
 assignee: []
 created_date: '2026-07-24 04:08'
-updated_date: '2026-07-24 13:47'
+updated_date: '2026-07-24 13:52'
 labels:
   - ci
   - github-actions
@@ -36,6 +36,8 @@ Make the trusted frontend-license workflow the only workflow started by main/dev
 Requester corrected the objective: the license check must complete successfully before any other PR CI begins. The status-bypass direction was a misunderstanding and will not be implemented; no live ruleset changes were made. Selected credential-free approach: workflow_run chaining from Frontend License Gate Audit.
 
 Corrected workflow_run specification passed independent review on iteration 3. Iteration 1 fixed server-side non-success skipping, unsupported-base PR trigger preservation, exact workflow/PR payload field validation, job-scoped permissions and credentialless checkouts, CodeQL no-upload PR analysis, default-branch rollout, check association canarying, and path-filter edge behavior. Iteration 2 added the normative LICENSE_FIRST_CI_ENABLED cutover guard, !cancelled() semantics, and pre-admission workflow-level concurrency expressions. Iteration 3 approved with no blockers.
+
+Pre-PR verification on 2026-07-24: source .venv/bin/activate && python -m pytest -q tldw_Server_API/tests/CI/test_frontend_license_gate_workflow.py tldw_Server_API/tests/CI/test_required_workflow_contracts.py -> 54 passed, 2 warnings in 12.81s. git diff --check origin/dev...HEAD passed. Final PR diff contains only the corrected workflow_run design and TASK-12986 record. Bandit is not applicable because the PR adds no executable code.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
