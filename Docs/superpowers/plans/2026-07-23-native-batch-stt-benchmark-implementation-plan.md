@@ -1467,7 +1467,7 @@ Expected: no new Bandit findings, no whitespace errors, and the commit succeeds 
 - Modify: `tldw_Server_API/tests/Helper_Scripts/test_generate_stt_golden.py`
 - Modify: `Docs/Development/STT_Adapter_Golden_Tests.md`
 
-- [ ] **Step 1: Write failing golden-helper tests**
+- [x] **Step 1: Write failing golden-helper tests**
 
 Test that:
 
@@ -1480,7 +1480,7 @@ Test that:
 - the golden test imports `score_transcript` and `load_and_validate_manifest`;
 - artifact/segment contract assertions remain.
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 ```bash
 source .venv/bin/activate
@@ -1492,13 +1492,13 @@ python -m pytest \
 
 The real-model cases should skip unless the existing opt-in environment is enabled.
 
-- [ ] **Step 3: Migrate the golden flow**
+- [x] **Step 3: Migrate the golden flow**
 
 Remove `_normalize_text`, `_levenshtein`, and `_token_error_rate`. Load the regression profile from `TLDW_STT_GOLDEN_MANIFEST` plus `TLDW_STT_GOLDEN_AUDIO_DIR`. Require `TLDW_STT_GOLDEN_TARGETS` as a JSON array of `provider=model` strings; resolve each target strictly, create/approve its execution plan, and score with `score_transcript`. Use `TLDW_STT_GOLDEN_MAX_NORMALIZED_WER` (default `0.20`) for the existing per-sample assertion and keep segment-shape assertions. Dynamic network plans also require the separate truthy `TLDW_STT_GOLDEN_ALLOW_NETWORK`.
 
 Keep the golden marker and explicit opt-in. Treat adapter-generated output as a candidate/snapshot only.
 
-- [ ] **Step 4: Re-run tests, Bandit, and commit**
+- [x] **Step 4: Re-run tests, Bandit, and commit**
 
 ```bash
 source .venv/bin/activate
