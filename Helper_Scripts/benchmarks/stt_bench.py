@@ -11,6 +11,7 @@ import json
 import math
 import multiprocessing
 import os
+import platform
 import re
 import stat
 import subprocess  # nosec B404
@@ -22,6 +23,7 @@ from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
+from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
@@ -1491,7 +1493,19 @@ _TARGET_MATRIX_FIELDS = frozenset(
         "provider",
         "model_label",
         "descriptor",
+        "execution_contract",
         "execution_contract_hash",
+    }
+)
+_EXECUTION_CONTRACT_FIELDS = frozenset(
+    {
+        "descriptor",
+        "dependency_versions",
+        "git_commit",
+        "safe_target_settings",
+        "scorer_version",
+        "source_hashes",
+        "unicode_version",
     }
 )
 _WORKER_ATTEMPT_FIELDS = frozenset(
@@ -1549,6 +1563,258 @@ def _validate_environment_fingerprint(
     return result
 
 
+def _bounded_environment_text(
+    value: object,
+    *,
+    fallback: str = "unavailable",
+) -> str:
+    """Return one bounded, single-line environment identity value."""
+    if not isinstance(value, str):
+        return fallback
+    first_line = value.splitlines()[0].strip() if value.splitlines() else ""
+    return first_line[:256] or fallback
+
+
+def _run_environment_command(
+    command: Sequence[str],
+    *,
+    cwd: Path | None = None,
+) -> subprocess.CompletedProcess[str] | None:
+    """Run one fixed local identity command without exposing its failures."""
+    try:
+        return subprocess.run(  # nosec B603
+            list(command),
+            cwd=cwd,
+            check=False,
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            text=True,
+            timeout=10,
+        )
+    except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def _positive_environment_integer(value: object) -> int | None:
+    """Return a positive non-boolean integer or None."""
+    if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+        return value
+    return None
+
+
+def collect_environment_fingerprint() -> dict[str, object]:
+    """Collect a bounded, model-free environment identity for run metadata."""
+    logical_cores = _positive_environment_integer(os.cpu_count())
+    physical_cores: int | None = None
+    ram_bytes: int | None = None
+    cores_method = "os.cpu_count" if logical_cores is not None else "unavailable"
+    ram_method = "unavailable"
+    try:
+        psutil = importlib.import_module("psutil")
+        logical_candidate = _positive_environment_integer(
+            psutil.cpu_count(logical=True),
+        )
+        physical_candidate = _positive_environment_integer(
+            psutil.cpu_count(logical=False),
+        )
+        ram_candidate = _positive_environment_integer(
+            getattr(psutil.virtual_memory(), "total", None),
+        )
+        if logical_candidate is not None:
+            logical_cores = logical_candidate
+        if physical_candidate is not None:
+            physical_cores = physical_candidate
+        if logical_candidate is not None or physical_candidate is not None:
+            cores_method = "psutil"
+        if ram_candidate is not None:
+            ram_bytes = ram_candidate
+            ram_method = "psutil"
+    except (AttributeError, ImportError, OSError, RuntimeError, ValueError):
+        pass
+
+    repository_root = Path(__file__).resolve().parents[2]
+    git_commit = "unknown"
+    git_dirty: bool | None = None
+    git_method = "unavailable"
+    commit_result = _run_environment_command(
+        ("git", "rev-parse", "HEAD"),
+        cwd=repository_root,
+    )
+    status_result = _run_environment_command(
+        ("git", "status", "--porcelain", "--untracked-files=normal"),
+        cwd=repository_root,
+    )
+    if (
+        commit_result is not None
+        and commit_result.returncode == 0
+        and _GIT_COMMIT_V1.fullmatch(commit_result.stdout.strip()) is not None
+    ):
+        git_commit = commit_result.stdout.strip()
+    if status_result is not None and status_result.returncode == 0:
+        git_dirty = bool(status_result.stdout.strip())
+    if git_commit != "unknown" or git_dirty is not None:
+        git_method = "git-cli"
+
+    ffprobe_version = "unavailable"
+    ffprobe_method = "unavailable"
+    ffprobe_result = _run_environment_command(("ffprobe", "-version"))
+    if ffprobe_result is not None and ffprobe_result.returncode == 0:
+        ffprobe_version = _bounded_environment_text(ffprobe_result.stdout)
+        ffprobe_method = "ffprobe-cli"
+
+    system_name = platform.system()
+    architecture = _bounded_environment_text(platform.machine())
+    cpu_model = _bounded_environment_text(
+        platform.processor() or platform.machine(),
+    )
+    cpu_method = "platform" if cpu_model != "unavailable" else "unavailable"
+    if system_name == "Darwin" and architecture.lower() in {
+        "arm64",
+        "aarch64",
+    }:
+        accelerator = "apple-silicon"
+        accelerator_method = "platform"
+        hardware_result = _run_environment_command(
+            (
+                "system_profiler",
+                "SPHardwareDataType",
+                "-json",
+                "-detailLevel",
+                "mini",
+            )
+        )
+        try:
+            hardware_payload = (
+                json.loads(hardware_result.stdout)
+                if hardware_result is not None and hardware_result.returncode == 0
+                else None
+            )
+            hardware_items = hardware_payload["SPHardwareDataType"]
+            hardware = hardware_items[0]
+            chip = _bounded_environment_text(
+                hardware.get("chip_type"),
+                fallback="",
+            )
+            machine_model = _bounded_environment_text(
+                hardware.get("machine_model"),
+                fallback="",
+            )
+        except (AttributeError, IndexError, KeyError, TypeError, ValueError):
+            chip = ""
+            machine_model = ""
+        if chip:
+            cpu_model = _bounded_environment_text(
+                f"{chip} ({machine_model})" if machine_model else chip,
+            )
+            accelerator = chip
+            cpu_method = "system-profiler-mini"
+            accelerator_method = "system-profiler-mini"
+    else:
+        accelerator = "unavailable"
+        accelerator_method = "unavailable"
+
+    fingerprint: dict[str, object] = {
+        "python_version": platform.python_version(),
+        "unicode_version": unicodedata.unidata_version,
+        "os_name": _bounded_environment_text(system_name or os.name),
+        "os_release": _bounded_environment_text(platform.release()),
+        "architecture": architecture,
+        "logical_cores": logical_cores,
+        "physical_cores": physical_cores,
+        "ram_bytes": ram_bytes,
+        "cpu_model": cpu_model,
+        "git_commit": git_commit,
+        "git_dirty": git_dirty,
+        "ffprobe_version": ffprobe_version,
+        "accelerator": accelerator,
+        "collection_methods": {
+            "cores": cores_method,
+            "ram": ram_method,
+            "cpu": cpu_method,
+            "git": git_method,
+            "ffprobe": ffprobe_method,
+            "accelerator": accelerator_method,
+        },
+    }
+    return _validate_environment_fingerprint(fingerprint)
+
+
+def _validate_execution_contract_projection(
+    value: object,
+    *,
+    expected_hash: str,
+) -> dict[str, object]:
+    """Validate one persisted, allowlisted execution-contract projection."""
+    if not isinstance(value, dict) or set(value) != _EXECUTION_CONTRACT_FIELDS:
+        raise ValueError("run execution contract has missing or unknown fields")
+    contract = dict(value)
+    descriptor = contract["descriptor"]
+    if not isinstance(descriptor, dict) or "runtime_settings" in descriptor:
+        raise ValueError("run execution contract descriptor is invalid")
+    dependencies = contract["dependency_versions"]
+    source_hashes = contract["source_hashes"]
+    if (
+        not isinstance(dependencies, dict)
+        or len(dependencies) > 256
+        or not isinstance(source_hashes, dict)
+        or not source_hashes
+        or len(source_hashes) > 256
+    ):
+        raise ValueError("run execution contract provenance is invalid")
+    for field_name, mapping in (
+        ("dependency_versions", dependencies),
+        ("source_hashes", source_hashes),
+    ):
+        for key, item in mapping.items():
+            if (
+                not isinstance(key, str)
+                or not key
+                or len(key) > 256
+                or "\n" in key
+                or not isinstance(item, str)
+                or not item
+                or len(item) > 256
+                or "\n" in item
+            ):
+                raise ValueError(f"run execution contract {field_name} is invalid")
+            if field_name == "source_hashes" and _SHA256_V1.fullmatch(item) is None:
+                raise ValueError("run execution contract source hash is invalid")
+    git_commit = contract["git_commit"]
+    if not isinstance(git_commit, str) or _GIT_COMMIT_V1.fullmatch(git_commit) is None:
+        raise ValueError("run execution contract git commit is invalid")
+    contract["safe_target_settings"] = _validate_safe_target_settings(
+        contract["safe_target_settings"],
+    )
+    if contract["scorer_version"] != SCORER_VERSION:
+        raise ValueError("run execution contract scorer version is invalid")
+    unicode_version = contract["unicode_version"]
+    if (
+        not isinstance(unicode_version, str)
+        or not unicode_version
+        or len(unicode_version) > 64
+        or "\n" in unicode_version
+    ):
+        raise ValueError("run execution contract Unicode version is invalid")
+    try:
+        canonical = json.dumps(
+            contract,
+            allow_nan=False,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+    except (TypeError, UnicodeEncodeError, ValueError) as exc:
+        raise ValueError("run execution contract is not serializable") from exc
+    if (
+        len(canonical) > 262_144
+        or _SHA256_V1.fullmatch(expected_hash) is None
+        or hashlib.sha256(canonical.encode("utf-8")).hexdigest() != expected_hash
+    ):
+        raise ValueError("run execution contract hash is inconsistent")
+    return json.loads(canonical)
+
+
 def _prepared_target_matrix(
     prepared_targets: Sequence[PreparedTarget],
 ) -> list[dict[str, object]]:
@@ -1566,12 +1832,17 @@ def _prepared_target_matrix(
             target.execution_contract_json,
             object_pairs_hook=_reject_duplicate_json_keys,
         )
+        validated_contract = _validate_execution_contract_projection(
+            contract,
+            expected_hash=target.execution_contract_hash,
+        )
         matrix.append(
             {
                 "target_id": target.target_id,
                 "provider": target.provider,
                 "model_label": target.model_label,
-                "descriptor": contract["descriptor"],
+                "descriptor": validated_contract["descriptor"],
+                "execution_contract": validated_contract,
                 "execution_contract_hash": target.execution_contract_hash,
             }
         )
@@ -1603,6 +1874,10 @@ def _validate_target_matrix(
         contract_hash = target["execution_contract_hash"]
         if not isinstance(contract_hash, str) or _SHA256_V1.fullmatch(contract_hash) is None:
             raise ValueError("run execution contract hash is invalid")
+        execution_contract = _validate_execution_contract_projection(
+            target["execution_contract"],
+            expected_hash=contract_hash,
+        )
         descriptor = target["descriptor"]
         if not isinstance(descriptor, dict) or "runtime_settings" in descriptor:
             raise ValueError("run target descriptor is invalid")
@@ -1618,12 +1893,17 @@ def _validate_target_matrix(
             raise ValueError("run target descriptor is invalid") from exc
         if len(descriptor_json) > 131_072:
             raise ValueError("run target descriptor is invalid")
+        if descriptor != execution_contract["descriptor"]:
+            raise ValueError("run target descriptor and execution contract differ")
+        if descriptor.get("requested_provider") != provider or descriptor.get("requested_model_label") != model_label:
+            raise ValueError("run target identity and descriptor differ")
         validated.append(
             {
                 "target_id": target_id,
                 "provider": provider,
                 "model_label": model_label,
                 "descriptor": json.loads(descriptor_json),
+                "execution_contract": execution_contract,
                 "execution_contract_hash": contract_hash,
             }
         )
@@ -1777,6 +2057,37 @@ def atomic_write_json(path: Path, payload: Mapping[str, object]) -> None:
         raise
 
 
+def atomic_create_json(path: Path, payload: Mapping[str, object]) -> None:
+    """Atomically create one owner-only JSON artifact without replacement."""
+    destination = Path(path)
+    _ensure_owner_directory(destination.parent)
+    encoded = _canonical_json_bytes(payload)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{destination.name}.",
+        suffix=".tmp",
+        dir=destination.parent,
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "wb") as output:
+            output.write(encoded)
+            output.flush()
+            os.fsync(output.fileno())
+        if os.name == "posix":
+            os.chmod(temporary, 0o600)
+        try:
+            os.link(temporary, destination, follow_symlinks=False)
+        except FileExistsError as exc:
+            raise ValueError("new run cannot resume an existing run") from exc
+        temporary.unlink()
+        if os.name == "posix":
+            os.chmod(destination, 0o600)
+        _fsync_directory(destination.parent)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
+
+
 def _require_result_integer(
     value: object,
     *,
@@ -1919,6 +2230,26 @@ def validate_run_metadata(
         raise ValueError("run adapter watchdog is invalid")
     result["target_matrix"] = _validate_target_matrix(result["target_matrix"])
     result["environment"] = _validate_environment_fingerprint(result["environment"])
+    safe_settings_json: set[str] = set()
+    for target in result["target_matrix"]:
+        contract = target["execution_contract"]
+        safe_settings = contract["safe_target_settings"]
+        if (
+            safe_settings["mode"] != result["mode"]
+            or contract["git_commit"] != result["environment"]["git_commit"]
+            or contract["unicode_version"] != result["environment"]["unicode_version"]
+        ):
+            raise ValueError("run execution contract does not match run identity")
+        safe_settings_json.add(
+            json.dumps(
+                safe_settings,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+        )
+    if len(safe_settings_json) != 1:
+        raise ValueError("run targets do not share common safe settings")
     for field in (
         "next_operation_id",
         "next_attempt_id",
@@ -2945,10 +3276,20 @@ def _verify_worker_target(prepared_target: PreparedTarget) -> None:
     }
     if set(payload) != required:
         raise ValueError("worker execution contract fields changed")
+    safe_settings = payload["safe_target_settings"]
+    if not isinstance(safe_settings, dict) or (
+        safe_settings.get("task") != prepared_target.plan.task
+        or safe_settings.get("language") != prepared_target.plan.language
+        or safe_settings.get("word_timestamps") != prepared_target.plan.word_timestamps
+        or safe_settings.get("diarization") != prepared_target.plan.diarization
+        or safe_settings.get("prompt_present") is not (prepared_target.plan.prompt is not None)
+        or safe_settings.get("hotword_count") != len(prepared_target.plan.hotwords)
+    ):
+        raise ValueError("worker execution contract settings mismatch")
     rebuilt_json, rebuilt_hash = build_execution_contract(
         plan=prepared_target.plan,
         git_commit=payload["git_commit"],
-        safe_target_settings=payload["safe_target_settings"],
+        safe_target_settings=safe_settings,
     )
     if (
         rebuilt_json != prepared_target.execution_contract_json
@@ -4073,10 +4414,13 @@ def execute_prepared_targets(
     samples: Sequence[ManifestSample],
     audio_paths: Sequence[str],
     retry_errors: bool,
+    allow_resume: bool = True,
 ) -> dict[str, object]:
     """Create or resume a run and execute targets sequentially in CLI order."""
     if not isinstance(retry_errors, bool):
         raise TypeError("retry_errors must be boolean")
+    if not isinstance(allow_resume, bool):
+        raise TypeError("allow_resume must be boolean")
     expected = validate_run_metadata(run_metadata)
     targets = tuple(prepared_targets)
     selected_samples = tuple(samples)
@@ -4095,13 +4439,18 @@ def execute_prepared_targets(
     _ensure_owner_directory(run_directory)
     run_path = run_directory / "run.json"
     if run_path.exists():
+        if not allow_resume:
+            raise ValueError("new run cannot resume an existing run")
         current = validate_run_metadata(_load_json_object(run_path))
         assert_resume_compatible(current, expected)
     else:
         if any(run_directory.iterdir()):
             raise ValueError("new run directory must be empty")
         current = expected
-        atomic_write_json(run_path, current)
+        if allow_resume:
+            atomic_write_json(run_path, current)
+        else:
+            atomic_create_json(run_path, current)
     repair_result_history(run_directory / "results.jsonl")
     if (run_directory / "inflight.json").exists():
         current = _recover_persisted_inflight(
@@ -4191,26 +4540,12 @@ def aggregate_results(
     }
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    """Validate a manifest and print only portable aggregate identity."""
-    parser = argparse.ArgumentParser(prog="stt-bench")
-    commands = parser.add_subparsers(dest="command", required=True)
-    validate = commands.add_parser("validate")
-    validate.add_argument("--manifest", required=True, type=Path)
-    validate.add_argument("--dataset-root", required=True, type=Path)
-    arguments = parser.parse_args(argv)
-
-    try:
-        samples, content_hash = load_and_validate_manifest(
-            arguments.manifest,
-            arguments.dataset_root,
-        )
-    except ValueError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 2
-    except OSError:
-        print("error: validation could not read a required file", file=sys.stderr)
-        return 2
+def _validate_command(arguments: argparse.Namespace) -> int:
+    """Validate one manifest and print only its portable aggregate identity."""
+    samples, content_hash = load_and_validate_manifest(
+        arguments.manifest,
+        arguments.dataset_root,
+    )
     profile_counts = Counter(profile for sample in samples for profile in sample.profiles)
     suite_counts = Counter(sample.suite for sample in samples)
     visibility_counts = Counter(sample.suite_visibility for sample in samples)
@@ -4223,6 +4558,223 @@ def main(argv: Sequence[str] | None = None) -> int:
     }
     print(json.dumps(summary, sort_keys=True, separators=(",", ":")))
     return 0
+
+
+def _default_run_id(
+    manifest_hash: str,
+    prepared_targets: Sequence[PreparedTarget],
+) -> str:
+    """Return a collision-resistant, stable default run identifier."""
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dt%H%M%Sz").lower()
+    identity = "\0".join(
+        (
+            timestamp,
+            str(time.time_ns()),
+            manifest_hash,
+            *(target.execution_contract_hash for target in prepared_targets),
+        )
+    )
+    suffix = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:12]
+    return f"{timestamp}-{suffix}"
+
+
+def _benchmark_run_directory(run_id: str) -> Path:
+    """Return the repository-owned directory for one validated run ID."""
+    _require_stable_id(run_id, "<cli>", "run")
+    return Path(__file__).resolve().parents[2] / ".benchmarks" / "stt" / run_id
+
+
+def _selected_primary_language(
+    samples: Sequence[ManifestSample],
+) -> str:
+    """Return the single v1 primary language or reject a mixed selection."""
+    languages = {sample.language for sample in samples}
+    if len(languages) != 1:
+        raise ValueError("v1 runs require exactly one primary language")
+    return next(iter(languages))
+
+
+def _selected_timing_sample_ids(
+    samples: Sequence[ManifestSample],
+    *,
+    cold_probe_sample_id: str,
+    requested_sample_ids: Sequence[str] | None,
+) -> tuple[str, ...]:
+    """Validate or derive the ordered non-probe timing subset."""
+    selected_ids = tuple(sample.sample_id for sample in samples)
+    if requested_sample_ids is None:
+        return tuple(sample_id for sample_id in selected_ids if sample_id != cold_probe_sample_id)
+    timing_ids = tuple(requested_sample_ids)
+    if len(timing_ids) != len(set(timing_ids)):
+        raise ValueError("timing sample IDs must be unique")
+    if cold_probe_sample_id in timing_ids:
+        raise ValueError("the cold probe cannot also be a timing sample")
+    requested = set(timing_ids)
+    if not requested <= set(selected_ids):
+        raise ValueError("timing samples must belong to the selected profile")
+    return tuple(sample_id for sample_id in selected_ids if sample_id in requested)
+
+
+def _run_command(arguments: argparse.Namespace) -> int:
+    """Preflight and execute one deterministic native STT benchmark run."""
+    if arguments.mode == "production-v1" and arguments.configuration_id is None:
+        raise ValueError("production-v1 requires --configuration-id")
+    if arguments.mode == "neutral-v1" and arguments.configuration_id is not None:
+        raise ValueError("neutral-v1 rejects --configuration-id")
+    if arguments.seed < 0:
+        raise ValueError("--seed must be non-negative")
+    if arguments.warm_repetitions < 1:
+        raise ValueError("--warm-repetitions must be positive")
+    if arguments.worker_watchdog_seconds is not None and (
+        not math.isfinite(arguments.worker_watchdog_seconds) or arguments.worker_watchdog_seconds <= 0.0
+    ):
+        raise ValueError("--worker-watchdog-seconds must be positive and finite")
+    if arguments.run is not None:
+        _require_stable_id(arguments.run, "<cli>", "run")
+
+    samples, manifest_hash = load_and_validate_manifest(
+        arguments.manifest,
+        arguments.dataset_root,
+    )
+    selected_samples, cold_probe_sample_id = select_samples(
+        samples,
+        profile=arguments.profile,
+        seed=arguments.seed,
+    )
+    primary_language = _selected_primary_language(
+        selected_samples,
+    )
+    timing_sample_ids = _selected_timing_sample_ids(
+        selected_samples,
+        cold_probe_sample_id=cold_probe_sample_id,
+        requested_sample_ids=arguments.timing_sample,
+    )
+    if arguments.text_retention == "full" and any(sample.suite_visibility == "private" for sample in selected_samples):
+        print(
+            "warning: full text retention will persist private-suite transcripts",
+            file=sys.stderr,
+        )
+
+    environment = collect_environment_fingerprint()
+    common_settings: dict[str, object] = {
+        "task": "transcribe",
+        "language": primary_language,
+        "word_timestamps": False,
+        "prompt": None,
+        "hotwords": (),
+        "diarization": False,
+        "git_commit": environment["git_commit"],
+    }
+    for name in (
+        "configuration_id",
+        "network_collection_profile",
+        "network_client_location",
+    ):
+        value = getattr(arguments, name)
+        if value is not None:
+            common_settings[name] = value
+    prepared_targets = preflight_targets(
+        tuple(arguments.target),
+        mode=arguments.mode,
+        allow_network_targets=arguments.allow_network_targets,
+        common_settings=common_settings,
+    )
+    run_id = arguments.run or _default_run_id(
+        manifest_hash,
+        prepared_targets,
+    )
+    run_directory = _benchmark_run_directory(run_id)
+    if arguments.run is None and run_directory.exists():
+        raise ValueError("generated run identifier already exists")
+
+    audio_paths = tuple(
+        str(resolve_audio_for_scheduling(sample, arguments.dataset_root)) for sample in selected_samples
+    )
+    run_metadata = build_run_metadata(
+        run_id=run_id,
+        manifest_hash=manifest_hash,
+        selected_sample_ids=tuple(sample.sample_id for sample in selected_samples),
+        profile=arguments.profile,
+        mode=arguments.mode,
+        seed=arguments.seed,
+        cold_probe_sample_id=cold_probe_sample_id,
+        warm_repetitions=arguments.warm_repetitions,
+        timing_sample_ids=timing_sample_ids,
+        text_retention=arguments.text_retention,
+        adapter_watchdog_seconds=arguments.worker_watchdog_seconds,
+        prepared_targets=prepared_targets,
+        environment=environment,
+    )
+    completed = execute_prepared_targets(
+        run_directory=run_directory,
+        run_metadata=run_metadata,
+        prepared_targets=prepared_targets,
+        samples=selected_samples,
+        audio_paths=audio_paths,
+        retry_errors=arguments.retry_errors,
+        allow_resume=arguments.run is not None,
+    )
+    print(
+        json.dumps(
+            {
+                "result": "completed",
+                "run_id": run_id,
+                "worker_attempt_count": len(completed["worker_attempts"]),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+    )
+    return 0
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """Run the native batch STT benchmark command-line interface."""
+    parser = argparse.ArgumentParser(prog="stt-bench")
+    commands = parser.add_subparsers(dest="command", required=True)
+    validate = commands.add_parser("validate")
+    validate.add_argument("--manifest", required=True, type=Path)
+    validate.add_argument("--dataset-root", required=True, type=Path)
+    validate.set_defaults(handler=_validate_command)
+    run = commands.add_parser("run")
+    run.add_argument("--manifest", required=True, type=Path)
+    run.add_argument("--dataset-root", required=True, type=Path)
+    run.add_argument("--target", required=True, action="append")
+    run.add_argument("--profile", choices=sorted(_KNOWN_SAMPLE_PROFILES), default="comparison")
+    run.add_argument(
+        "--mode",
+        choices=("neutral-v1", "production-v1"),
+        default="neutral-v1",
+    )
+    run.add_argument(
+        "--text-retention",
+        choices=("full", "errors-only", "none"),
+        default="full",
+    )
+    run.add_argument("--seed", type=int, default=0)
+    run.add_argument("--warm-repetitions", type=int, default=1)
+    run.add_argument("--timing-sample", action="append")
+    run.add_argument("--worker-watchdog-seconds", type=float)
+    run.add_argument("--retry-errors", action="store_true")
+    run.add_argument("--allow-network-targets", action="store_true")
+    run.add_argument("--configuration-id")
+    run.add_argument("--network-collection-profile")
+    run.add_argument("--network-client-location")
+    run.add_argument("--run")
+    run.set_defaults(handler=_run_command)
+    arguments = parser.parse_args(argv)
+
+    try:
+        return arguments.handler(arguments)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    except OSError:
+        print("error: command could not access a required local file", file=sys.stderr)
+        return 2
+    except KeyboardInterrupt:
+        print("error: benchmark interrupted", file=sys.stderr)
+        return 130
 
 
 if __name__ == "__main__":

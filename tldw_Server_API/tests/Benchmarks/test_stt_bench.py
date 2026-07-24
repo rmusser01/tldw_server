@@ -16,7 +16,7 @@ import subprocess
 import time
 import types
 import wave
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, replace
 from pathlib import Path
 
 import Helper_Scripts.benchmarks.stt_bench as stt_bench
@@ -1607,6 +1607,18 @@ def test_atomic_persist_replaces_in_same_directory_and_fsyncs_file_and_parent(
         assert stat.S_IMODE(destination.parent.stat().st_mode) == 0o700
 
 
+def test_atomic_create_never_replaces_an_existing_run_identity(tmp_path):
+    destination = tmp_path / "run" / "run.json"
+    stt_bench.atomic_create_json(destination, {"run_id": "original"})
+
+    with pytest.raises(ValueError, match="resume"):
+        stt_bench.atomic_create_json(destination, {"run_id": "replacement"})
+
+    assert json.loads(destination.read_text(encoding="utf-8")) == {
+        "run_id": "original",
+    }
+
+
 def test_persist_append_result_record_is_owner_only_and_fsynced(
     tmp_path,
     monkeypatch,
@@ -3084,7 +3096,7 @@ def _worker_target(
 def _runner_environment():
     return {
         "python_version": "3.11.13",
-        "unicode_version": "15.0.0",
+        "unicode_version": stt_bench.unicodedata.unidata_version,
         "os_name": "Darwin",
         "os_release": "test-release",
         "architecture": "arm64",
@@ -3114,13 +3126,14 @@ def _runner_metadata(
     selected_sample_ids=("probe", "sample-2"),
     timing_sample_ids=("sample-2",),
     watchdog_seconds=1.0,
+    mode="neutral-v1",
 ):
     return stt_bench.build_run_metadata(
         run_id="run-worker",
         manifest_hash="a" * 64,
         selected_sample_ids=selected_sample_ids,
         profile="comparison",
-        mode="neutral-v1",
+        mode=mode,
         seed=0,
         cold_probe_sample_id="probe",
         warm_repetitions=warm_repetitions,
@@ -3144,8 +3157,59 @@ def test_run_metadata_is_deterministic_allowlisted_and_secret_safe():
     assert first["next_worker_attempt_id"] == 1
     assert first["worker_attempts"] == []
     assert first["target_matrix"][0]["target_id"] == "target-worker"
+    contract = first["target_matrix"][0]["execution_contract"]
+    assert contract["dependency_versions"]["pytest"]
+    assert contract["source_hashes"]
+    assert contract["safe_target_settings"]["mode"] == "neutral-v1"
     assert "/private/models" not in serialized
     assert "runtime_settings" not in serialized
+
+
+def test_run_metadata_persists_only_safe_production_contract_settings():
+    target = _worker_target()
+    contract_json, contract_hash = stt_bench.build_execution_contract(
+        plan=target.plan,
+        git_commit="a" * 40,
+        safe_target_settings={
+            "mode": "production-v1",
+            "task": "transcribe",
+            "language": "en",
+            "word_timestamps": False,
+            "diarization": False,
+            "prompt_present": False,
+            "hotword_count": 0,
+            "configuration_id": "config-v1",
+            "network_collection_profile": "controlled-lan-v1",
+            "network_client_location": "lab-west",
+        },
+    )
+    production_target = replace(
+        target,
+        execution_contract_json=contract_json,
+        execution_contract_hash=contract_hash,
+    )
+
+    metadata = _runner_metadata(
+        targets=(production_target,),
+        mode="production-v1",
+    )
+    serialized = json.dumps(metadata)
+    safe_settings = metadata["target_matrix"][0]["execution_contract"]["safe_target_settings"]
+
+    assert safe_settings == {
+        "mode": "production-v1",
+        "task": "transcribe",
+        "language": "en",
+        "word_timestamps": False,
+        "diarization": False,
+        "prompt_present": False,
+        "hotword_count": 0,
+        "configuration_id": "config-v1",
+        "network_collection_profile": "controlled-lan-v1",
+        "network_client_location": "lab-west",
+    }
+    assert "runtime_settings" not in serialized
+    assert "/private/models" not in serialized
 
 
 def test_run_resume_identity_changes_with_immutable_execution_settings():
@@ -3163,6 +3227,9 @@ def test_run_resume_identity_changes_with_immutable_execution_settings():
         lambda metadata: metadata.update(extra="unknown"),
         lambda metadata: metadata.update(next_operation_id=True),
         lambda metadata: metadata["target_matrix"][0].update(provider="other"),
+        lambda metadata: metadata["target_matrix"][0]["execution_contract"]["safe_target_settings"].update(
+            language="fr"
+        ),
         lambda metadata: metadata["environment"].update(api_key="leak"),
     ],
 )
@@ -3728,3 +3795,364 @@ def test_runner_recovers_persisted_inflight_without_double_scoring_probe(
     ]
     assert completed["worker_attempts"][1]["rewarm_status"] == "ok"
     assert not (run_directory / "inflight.json").exists()
+
+
+def test_runner_refuses_resume_when_caller_requires_new_run(tmp_path):
+    probe, probe_path = _worker_sample(tmp_path, "probe", "probe.wav")
+    target = _worker_target()
+    metadata = _runner_metadata(
+        selected_sample_ids=("probe",),
+        timing_sample_ids=(),
+    )
+    run_directory = tmp_path / "run"
+    stt_bench.atomic_write_json(run_directory / "run.json", metadata)
+
+    with pytest.raises(ValueError, match="resume"):
+        stt_bench.execute_prepared_targets(
+            run_directory=run_directory,
+            run_metadata=metadata,
+            prepared_targets=(target,),
+            samples=(probe,),
+            audio_paths=(probe_path,),
+            retry_errors=False,
+            allow_resume=False,
+        )
+
+
+def test_environment_fingerprint_is_bounded_and_validated():
+    fingerprint = stt_bench.collect_environment_fingerprint()
+    serialized = json.dumps(fingerprint)
+
+    assert stt_bench._validate_environment_fingerprint(fingerprint) == fingerprint
+    assert set(fingerprint) == stt_bench._ENVIRONMENT_FIELDS
+    assert str(Path.cwd()) not in serialized
+    assert "environment" not in fingerprint
+
+
+def test_environment_fingerprint_degrades_to_valid_unavailable_values(
+    monkeypatch,
+):
+    original_import = stt_bench.importlib.import_module
+
+    def unavailable_psutil(name):
+        if name == "psutil":
+            raise ImportError
+        return original_import(name)
+
+    monkeypatch.setattr(stt_bench.importlib, "import_module", unavailable_psutil)
+    monkeypatch.setattr(stt_bench.os, "cpu_count", lambda: 0)
+    monkeypatch.setattr(
+        stt_bench,
+        "_run_environment_command",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(stt_bench.platform, "system", lambda: "")
+    monkeypatch.setattr(stt_bench.platform, "release", lambda: "")
+    monkeypatch.setattr(stt_bench.platform, "machine", lambda: "")
+    monkeypatch.setattr(stt_bench.platform, "processor", lambda: "")
+
+    fingerprint = stt_bench.collect_environment_fingerprint()
+
+    assert fingerprint["logical_cores"] is None
+    assert fingerprint["physical_cores"] is None
+    assert fingerprint["ram_bytes"] is None
+    assert fingerprint["git_commit"] == "unknown"
+    assert fingerprint["git_dirty"] is None
+    assert fingerprint["architecture"] == "unavailable"
+    assert fingerprint["collection_methods"]["cores"] == "unavailable"
+
+
+def test_environment_fingerprint_projects_apple_chip_without_serial_data(
+    monkeypatch,
+):
+    def fake_command(command, **_kwargs):
+        if tuple(command) == (
+            "system_profiler",
+            "SPHardwareDataType",
+            "-json",
+            "-detailLevel",
+            "mini",
+        ):
+            return types.SimpleNamespace(
+                returncode=0,
+                stdout=json.dumps(
+                    {
+                        "SPHardwareDataType": [
+                            {
+                                "chip_type": "Apple M4 Pro",
+                                "machine_model": "Mac16,8",
+                                "serial_number": "must-not-survive",
+                            }
+                        ]
+                    }
+                ),
+            )
+        return None
+
+    monkeypatch.setattr(stt_bench, "_run_environment_command", fake_command)
+    monkeypatch.setattr(stt_bench.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(stt_bench.platform, "machine", lambda: "arm64")
+    monkeypatch.setattr(stt_bench.platform, "processor", lambda: "arm")
+
+    fingerprint = stt_bench.collect_environment_fingerprint()
+    serialized = json.dumps(fingerprint)
+
+    assert fingerprint["cpu_model"] == "Apple M4 Pro (Mac16,8)"
+    assert fingerprint["accelerator"] == "Apple M4 Pro"
+    assert fingerprint["collection_methods"]["cpu"] == "system-profiler-mini"
+    assert "must-not-survive" not in serialized
+
+
+def test_environment_fingerprint_counts_untracked_files_as_dirty(monkeypatch):
+    observed_commands = []
+
+    def fake_command(command, **_kwargs):
+        observed_commands.append(tuple(command))
+        if tuple(command) == ("git", "rev-parse", "HEAD"):
+            return types.SimpleNamespace(returncode=0, stdout="a" * 40 + "\n")
+        if command[0:2] == ("git", "status"):
+            return types.SimpleNamespace(
+                returncode=0,
+                stdout="?? local-change.py\n",
+            )
+        return None
+
+    monkeypatch.setattr(stt_bench, "_run_environment_command", fake_command)
+
+    fingerprint = stt_bench.collect_environment_fingerprint()
+
+    assert fingerprint["git_dirty"] is True
+    assert (
+        "git",
+        "status",
+        "--porcelain",
+        "--untracked-files=normal",
+    ) in observed_commands
+
+
+def test_run_cli_builds_selected_native_batch_run_without_real_adapter(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    probe, probe_path = _worker_sample(tmp_path, "probe", "probe.wav")
+    sample, sample_path = _worker_sample(tmp_path, "sample-2", "sample.wav")
+    samples = (probe, sample)
+    target = _worker_target()
+    captured = {}
+    monkeypatch.setattr(
+        stt_bench,
+        "load_and_validate_manifest",
+        lambda *_args, **_kwargs: (samples, "a" * 64),
+    )
+    monkeypatch.setattr(
+        stt_bench,
+        "preflight_targets",
+        lambda specs, **kwargs: captured.update(specs=specs, preflight=kwargs) or (target,),
+    )
+    paths = {probe.sample_id: Path(probe_path), sample.sample_id: Path(sample_path)}
+    monkeypatch.setattr(
+        stt_bench,
+        "resolve_audio_for_scheduling",
+        lambda selected, _root: paths[selected.sample_id],
+    )
+    monkeypatch.setattr(
+        stt_bench,
+        "collect_environment_fingerprint",
+        _runner_environment,
+    )
+
+    def fake_execute(**kwargs):
+        captured["execute"] = kwargs
+        return kwargs["run_metadata"]
+
+    monkeypatch.setattr(stt_bench, "execute_prepared_targets", fake_execute)
+
+    exit_code = stt_bench.main(
+        [
+            "run",
+            "--manifest",
+            str(tmp_path / "manifest.jsonl"),
+            "--dataset-root",
+            str(tmp_path),
+            "--target",
+            "worker-ok=worker-model",
+            "--profile",
+            "comparison",
+            "--seed",
+            "0",
+            "--warm-repetitions",
+            "3",
+            "--timing-sample",
+            "sample-2",
+            "--run",
+            "run-fixed",
+        ]
+    )
+    output = capsys.readouterr()
+
+    assert exit_code == 0
+    assert captured["specs"] == ("worker-ok=worker-model",)
+    assert captured["preflight"]["mode"] == "neutral-v1"
+    assert captured["preflight"]["common_settings"]["language"] == "en"
+    assert captured["execute"]["run_directory"].name == "run-fixed"
+    assert captured["execute"]["prepared_targets"] == (target,)
+    assert captured["execute"]["audio_paths"] == (probe_path, sample_path)
+    assert captured["execute"]["allow_resume"] is True
+    assert captured["execute"]["run_metadata"]["warm_repetitions"] == 3
+    assert json.loads(output.out) == {
+        "result": "completed",
+        "run_id": "run-fixed",
+        "worker_attempt_count": 0,
+    }
+    assert output.err == ""
+
+
+def test_run_cli_never_implicitly_resumes_generated_run_id(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    probe, _ = _worker_sample(tmp_path, "probe", "probe.wav")
+    target = _worker_target()
+    existing_run = tmp_path / "existing-run"
+    existing_run.mkdir()
+    monkeypatch.setattr(
+        stt_bench,
+        "load_and_validate_manifest",
+        lambda *_args, **_kwargs: ((probe,), "a" * 64),
+    )
+    monkeypatch.setattr(
+        stt_bench,
+        "collect_environment_fingerprint",
+        _runner_environment,
+    )
+    monkeypatch.setattr(
+        stt_bench,
+        "preflight_targets",
+        lambda *_args, **_kwargs: (target,),
+    )
+    monkeypatch.setattr(
+        stt_bench,
+        "_default_run_id",
+        lambda *_args, **_kwargs: "generated-run",
+    )
+    monkeypatch.setattr(
+        stt_bench,
+        "_benchmark_run_directory",
+        lambda _run_id: existing_run,
+    )
+    monkeypatch.setattr(
+        stt_bench,
+        "resolve_audio_for_scheduling",
+        lambda *_args, **_kwargs: pytest.fail("audio resolution must not start"),
+    )
+    monkeypatch.setattr(
+        stt_bench,
+        "execute_prepared_targets",
+        lambda **_kwargs: pytest.fail("execution must not start"),
+    )
+
+    exit_code = stt_bench.main(
+        [
+            "run",
+            "--manifest",
+            str(tmp_path / "manifest.jsonl"),
+            "--dataset-root",
+            str(tmp_path),
+            "--target",
+            "worker-ok=worker-model",
+        ]
+    )
+
+    assert exit_code == 2
+    assert "already exists" in capsys.readouterr().err
+
+
+def test_timing_subset_uses_deterministic_selected_sample_order(tmp_path):
+    probe, _ = _worker_sample(tmp_path, "probe", "probe.wav")
+    second, _ = _worker_sample(tmp_path, "sample-2", "sample-2.wav")
+    third, _ = _worker_sample(tmp_path, "sample-3", "sample-3.wav")
+
+    selected = stt_bench._selected_timing_sample_ids(
+        (probe, second, third),
+        cold_probe_sample_id="probe",
+        requested_sample_ids=("sample-3", "sample-2"),
+    )
+
+    assert selected == ("sample-2", "sample-3")
+
+
+@pytest.mark.parametrize(
+    "extra_arguments",
+    [
+        ("--mode", "production-v1"),
+        ("--configuration-id", "config-v1"),
+    ],
+)
+def test_run_cli_rejects_missing_or_misplaced_configuration_id(
+    tmp_path,
+    monkeypatch,
+    capsys,
+    extra_arguments,
+):
+    monkeypatch.setattr(
+        stt_bench,
+        "load_and_validate_manifest",
+        lambda *_args, **_kwargs: pytest.fail("validation must not start"),
+    )
+
+    exit_code = stt_bench.main(
+        [
+            "run",
+            "--manifest",
+            str(tmp_path / "manifest.jsonl"),
+            "--dataset-root",
+            str(tmp_path),
+            "--target",
+            "worker-ok=worker-model",
+            *extra_arguments,
+        ]
+    )
+
+    assert exit_code == 2
+    assert "configuration" in capsys.readouterr().err
+
+
+def test_run_cli_rejects_mixed_primary_languages_before_preflight(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    english, _ = _worker_sample(tmp_path, "probe", "probe.wav")
+    french_source, _ = _worker_sample(tmp_path, "sample-2", "french.wav")
+    french = replace(
+        french_source,
+        language="fr",
+        normalization_profile=STRICT_PROFILE,
+    )
+    monkeypatch.setattr(
+        stt_bench,
+        "load_and_validate_manifest",
+        lambda *_args, **_kwargs: ((english, french), "a" * 64),
+    )
+    monkeypatch.setattr(
+        stt_bench,
+        "preflight_targets",
+        lambda *_args, **_kwargs: pytest.fail("preflight must not start"),
+    )
+
+    exit_code = stt_bench.main(
+        [
+            "run",
+            "--manifest",
+            str(tmp_path / "manifest.jsonl"),
+            "--dataset-root",
+            str(tmp_path),
+            "--target",
+            "worker-ok=worker-model",
+        ]
+    )
+
+    assert exit_code == 2
+    assert "primary language" in capsys.readouterr().err
