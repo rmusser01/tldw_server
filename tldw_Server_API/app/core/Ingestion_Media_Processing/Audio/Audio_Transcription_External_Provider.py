@@ -36,6 +36,7 @@ from tldw_Server_API.app.core.http_client import (
     RetryPolicy,
     afetch,
     opaque_stt_http_observability,
+    resolve_afetch_transport,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_contract import (
     SttBatchExecutionPlan,
@@ -198,6 +199,7 @@ async def transcribe_with_external_provider_async(
     config: Optional[ExternalProviderConfig] = None,
     base_dir: Optional[Path] = None,
     execution_plan: SttBatchExecutionPlan | None = None,
+    transport: str | None = None,
     **kwargs
 ) -> str:
     """
@@ -238,6 +240,15 @@ async def transcribe_with_external_provider_async(
         endpoint, egress, endpoint_id = _normalize_audio_endpoint(
             _resolve_transcription_endpoint(config.base_url)
         )
+        planned_transport = transport or route.transport
+        try:
+            planned_transport = resolve_afetch_transport(
+                planned_transport
+            )
+        except (RuntimeError, ValueError):
+            raise STTExecutionPlanError(
+                "External STT planned transport is unavailable"
+            ) from None
         if (
             len(execution_plan.descriptor.routes) != 1
             or route.provider != "external"
@@ -246,10 +257,12 @@ async def transcribe_with_external_provider_async(
             or route.audio_egress is not egress
             or route.endpoint_id != endpoint_id
             or route.model_label != config.model
+            or route.transport != planned_transport
         ):
             raise STTExecutionPlanError(
                 "External STT endpoint does not match its plan"
             )
+        transport = planned_transport
         config.base_url = endpoint
 
     # Validate configuration
@@ -334,9 +347,10 @@ async def transcribe_with_external_provider_async(
                     "timeout": config.timeout,
                     "retry": retry_policy,
                     "verify": config.verify_ssl,
+                    "allow_redirects": False,
                 }
-                if execution_plan is not None:
-                    request_kwargs["allow_redirects"] = False
+                if transport is not None:
+                    request_kwargs["transport"] = transport
                 if execution_plan is None:
                     resp = await afetch(**request_kwargs)
                 else:
@@ -411,6 +425,7 @@ def transcribe_with_external_provider(
     config: Optional[ExternalProviderConfig] = None,
     base_dir: Optional[Path] = None,
     execution_plan: SttBatchExecutionPlan | None = None,
+    transport: str | None = None,
     **kwargs
 ) -> str | SttTranscriptionOutcome:
     """
@@ -452,6 +467,7 @@ def transcribe_with_external_provider(
                         config,
                         base_dir=base_dir,
                         execution_plan=execution_plan,
+                        transport=transport,
                         **kwargs,
                     )
                 )
@@ -469,6 +485,7 @@ def transcribe_with_external_provider(
                     config,
                     base_dir=base_dir,
                     execution_plan=execution_plan,
+                    transport=transport,
                     **kwargs,
                 )
             )

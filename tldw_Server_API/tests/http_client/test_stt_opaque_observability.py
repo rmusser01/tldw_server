@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from contextlib import asynccontextmanager
+import threading
+from contextlib import asynccontextmanager, contextmanager
 from typing import Any
 
 import httpx
@@ -12,6 +13,7 @@ import pytest
 from loguru import logger
 
 from tldw_Server_API.app.core import http_client
+from tldw_Server_API.app.core.Security import egress
 
 
 class _ListHandler(logging.Handler):
@@ -69,6 +71,184 @@ class _MetricsRecorder:
         labels: dict[str, str],
     ) -> None:
         self.calls.append(("observe", dict(labels)))
+
+
+@pytest.mark.unit
+def test_planned_observability_suppresses_optional_http_instrumentation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    endpoint_id = "sha256:" + "b" * 64
+    events: list[str] = []
+
+    @contextmanager
+    def fake_suppression():
+        events.append("enter")
+        yield
+        events.append("exit")
+
+    monkeypatch.setattr(
+        http_client,
+        "_suppress_http_instrumentation",
+        fake_suppression,
+        raising=False,
+    )
+
+    with http_client.opaque_stt_http_observability(endpoint_id):
+        events.append("body")
+        assert http_client._opaque_stt_endpoint_id() == endpoint_id
+
+    assert events == ["enter", "body", "exit"]
+
+
+@pytest.mark.unit
+def test_planned_egress_dns_logs_are_opaque_across_worker_context_loss(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    endpoint_id = "sha256:" + "c" * 64
+    secret_host = "private-resolver-host.example"
+    messages: list[str] = []
+    sink_id = logger.add(
+        lambda message: messages.append(str(message)),
+        level="DEBUG",
+        format="{message}|{extra}",
+    )
+
+    class ReleaseFailureSlots:
+        def acquire(
+            self,
+            blocking: bool = True,
+            timeout: float | None = None,
+        ) -> bool:
+            return True
+
+        def release(self) -> None:
+            raise ValueError("forced double release")
+
+    monkeypatch.setattr(
+        egress,
+        "_DNS_RESOLVER_SLOTS",
+        ReleaseFailureSlots(),
+    )
+    monkeypatch.setattr(
+        egress.socket,
+        "getaddrinfo",
+        lambda *_args, **_kwargs: [],
+    )
+
+    try:
+        with http_client.opaque_stt_http_observability(endpoint_id):
+            assert (
+                egress._getaddrinfo_with_timeout(
+                    secret_host,
+                    timeout_s=0.5,
+                )
+                == []
+            )
+    finally:
+        logger.remove(sink_id)
+
+    combined = "\n".join(messages)
+    assert "dns_resolver_slot_release_failed" in combined
+    assert endpoint_id in combined
+    assert secret_host not in combined
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "failure",
+    ("resolver", "saturation"),
+)
+def test_planned_egress_failure_logs_never_expose_host(
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+) -> None:
+    endpoint_id = "sha256:" + "d" * 64
+    secret_host = "private-egress-host.example"
+    messages: list[str] = []
+    sink_id = logger.add(
+        lambda message: messages.append(str(message)),
+        level="DEBUG",
+        format="{message}|{extra}",
+    )
+
+    if failure == "resolver":
+        monkeypatch.setattr(
+            egress,
+            "_DNS_RESOLVER_SLOTS",
+            threading.BoundedSemaphore(1),
+        )
+
+        def fail_resolver(
+            *_args: object,
+            **_kwargs: object,
+        ) -> list[object]:
+            raise OSError("forced resolver failure")
+
+        monkeypatch.setattr(
+            egress.socket,
+            "getaddrinfo",
+            fail_resolver,
+        )
+    else:
+        class SaturatedSlots:
+            def acquire(
+                self,
+                blocking: bool = True,
+                timeout: float | None = None,
+            ) -> bool:
+                return False
+
+        monkeypatch.setattr(
+            egress,
+            "_DNS_RESOLVER_SLOTS",
+            SaturatedSlots(),
+        )
+
+    try:
+        with http_client.opaque_stt_http_observability(endpoint_id):
+            assert (
+                egress._getaddrinfo_with_timeout(
+                    secret_host,
+                    timeout_s=0.5,
+                )
+                == []
+            )
+    finally:
+        logger.remove(sink_id)
+
+    combined = "\n".join(messages)
+    assert endpoint_id in combined
+    assert secret_host not in combined
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_afetch_explicit_transport_selector_is_pinned(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    selected: list[str] = []
+
+    class Adapter:
+        async def arequest(self, **_kwargs: Any) -> object:
+            return object()
+
+    def select(name: str) -> Adapter:
+        selected.append(name)
+        return Adapter()
+
+    monkeypatch.setattr(
+        http_client,
+        "_get_transport_adapter",
+        select,
+    )
+
+    await http_client.afetch(
+        method="POST",
+        url="http://127.0.0.1/transcriptions",
+        transport="httpx",
+    )
+
+    assert selected == ["httpx"]
 
 
 @pytest.mark.unit

@@ -844,7 +844,7 @@ def transcribe_with_vibevoice(
             )
         for route in routes:
             if route.backend == "vllm_http":
-                _endpoint, egress, endpoint_id = (
+                endpoint, egress, endpoint_id = (
                     _normalize_audio_endpoint(
                         str(runtime.get("endpoint") or "")
                     )
@@ -859,6 +859,7 @@ def transcribe_with_vibevoice(
                     raise STTExecutionPlanError(
                         "VibeVoice endpoint does not match its plan"
                     )
+                runtime["endpoint"] = endpoint
                 runtime["endpoint_id"] = endpoint_id
             elif route.backend == "transformers":
                 if (
@@ -943,6 +944,7 @@ def transcribe_with_vibevoice(
                     ),
                 )
             except (
+                CancelCheckError,
                 STTExecutionPlanError,
                 TranscriptionCancelled,
             ):
@@ -976,6 +978,8 @@ def transcribe_with_vibevoice(
                 hotwords=hotwords_list,
                 cancel_check=cancel_check,
             )
+        except (CancelCheckError, TranscriptionCancelled):
+            raise
         except Exception as exc:
             logger.warning("VibeVoice vLLM HTTP path failed; falling back to local inference: {}", exc)
             if not settings.get("enabled"):

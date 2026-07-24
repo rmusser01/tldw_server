@@ -8,7 +8,10 @@ import pytest
 import soundfile as sf  # type: ignore
 
 import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_VibeVoice as vv
-from tldw_Server_API.app.core.exceptions import STTExecutionPlanError
+from tldw_Server_API.app.core.exceptions import (
+    CancelCheckError,
+    STTExecutionPlanError,
+)
 
 
 def _minimal_settings(tmp_path: Path) -> dict[str, Any]:
@@ -117,6 +120,41 @@ def test_vllm_failure_falls_back_to_local(monkeypatch: pytest.MonkeyPatch, tmp_p
     artifact = vv.transcribe_with_vibevoice(str(tmp_path / "audio.wav"))
     assert artifact["metadata"]["source"] == "local"
     assert called["local"] == 1
+
+
+@pytest.mark.unit
+def test_legacy_vllm_cancel_check_error_never_uses_local_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    audio = tmp_path / "audio.wav"
+    audio.write_bytes(b"audio")
+    settings = _minimal_settings(tmp_path)
+    settings["vllm_enabled"] = True
+    settings["vllm_base_url"] = "http://127.0.0.1:8000"
+    cancel_error = CancelCheckError("cancel callback failed")
+    monkeypatch.setattr(
+        vv,
+        "_resolve_settings",
+        lambda: dict(settings),
+    )
+    monkeypatch.setattr(
+        vv,
+        "_transcribe_via_vllm_http",
+        lambda **_kwargs: (_ for _ in ()).throw(cancel_error),
+    )
+    monkeypatch.setattr(
+        vv,
+        "_load_audio",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("cancellation error used local fallback")
+        ),
+    )
+
+    with pytest.raises(CancelCheckError) as exc_info:
+        vv.transcribe_with_vibevoice(str(audio))
+
+    assert exc_info.value is cancel_error
 
 
 @pytest.mark.unit

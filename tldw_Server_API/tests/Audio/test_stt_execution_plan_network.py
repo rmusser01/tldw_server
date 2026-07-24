@@ -9,9 +9,13 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
+from yarl import URL
 
+from tldw_Server_API.app.core import http_client
 from tldw_Server_API.app.core.exceptions import (
+    CancelCheckError,
     STTExecutionUnsupportedError,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import (
@@ -138,6 +142,11 @@ def test_classify_audio_egress_treats_every_other_host_as_remote(url: str) -> No
         "https://example.com/[x]/transcriptions",
         "https://example.com/proxy;private/v1/audio/transcriptions",
         "https://example.com//v1///audio/transcriptions",
+        "http://127.000.0.1/v1/audio/transcriptions",
+        "http://0177.0.0.1/v1/audio/transcriptions",
+        "http://127.1/v1/audio/transcriptions",
+        "http://2130706433/v1/audio/transcriptions",
+        "http://0x7f000001/v1/audio/transcriptions",
     ),
 )
 def test_classify_audio_egress_rejects_malformed_or_ambiguous_urls(url: str) -> None:
@@ -190,11 +199,11 @@ def test_normalized_endpoint_identity_is_opaque_and_covers_complete_path() -> No
         ),
         (
             "http://[0:0:0:0:0:0:0:1]/v1/audio/transcriptions",
-            "http://[0:0:0:0:0:0:0:1]/v1/audio/transcriptions",
+            "http://[::1]/v1/audio/transcriptions",
         ),
     ),
 )
-def test_normalized_endpoint_matches_ascii_transport_authority(
+def test_normalized_endpoint_matches_httpx_and_yarl_transport_authority(
     source: str,
     expected: str,
 ) -> None:
@@ -203,6 +212,8 @@ def test_normalized_endpoint_matches_ascii_transport_authority(
     )
 
     assert normalized == expected
+    assert str(httpx.URL(normalized)) == expected
+    assert str(URL(normalized)) == expected
     assert endpoint_id == (
         "sha256:"
         + hashlib.sha256(expected.encode("ascii")).hexdigest()
@@ -342,6 +353,10 @@ def test_qwen3_vllm_plan_freezes_endpoint_and_reports_actual_route(
     )
     assert runtime["request_model"] == "Qwen/Qwen3-ASR-1.7B"
     assert route.model_label == "Qwen/Qwen3-ASR-1.7B"
+    assert {
+        "tldw_Server_API.app.core.http_client",
+        "tldw_Server_API.app.core.stt_observability_context",
+    }.issubset(plan.descriptor.source_modules)
     assert "localhost" not in str(plan.descriptor.as_safe_dict())
 
     settings.update(
@@ -644,6 +659,71 @@ def test_vibevoice_neutral_vllm_plan_never_falls_back(
 
 
 @pytest.mark.unit
+def test_vibevoice_planned_request_uses_revalidated_canonical_endpoint(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    audio = tmp_path / "vibe.wav"
+    audio.write_bytes(b"audio")
+    model_dir = tmp_path / "vibe-model"
+    model_dir.mkdir()
+    settings = _vibe_settings(
+        model_dir,
+        vllm_enabled=True,
+    )
+    settings["vllm_base_url"] = "http://[::1]:9000/api"
+    monkeypatch.setattr(
+        vibe,
+        "_resolve_settings",
+        lambda: dict(settings),
+    )
+    adapter = spa.VibeVoiceAdapter()
+    plan = _plan(
+        adapter,
+        model=str(model_dir),
+    )
+    expanded_endpoint = (
+        "http://[0:0:0:0:0:0:0:1]:9000"
+        "/api/v1/audio/transcriptions"
+    )
+    mutated = replace(
+        plan,
+        runtime_settings=tuple(
+            (
+                key,
+                expanded_endpoint if key == "endpoint" else value,
+            )
+            for key, value in plan.runtime_settings
+        ),
+    )
+
+    def fake_vllm(**kwargs: Any) -> dict[str, Any]:
+        assert kwargs["settings"]["endpoint"] == (
+            "http://[::1]:9000/api/v1/audio/transcriptions"
+        )
+        return {
+            "text": "canonical endpoint",
+            "segments": [],
+        }
+
+    monkeypatch.setattr(
+        vibe,
+        "_transcribe_via_vllm_http",
+        fake_vllm,
+    )
+
+    artifact = adapter.transcribe_batch(
+        str(audio),
+        model=str(model_dir),
+        language="en",
+        base_dir=tmp_path,
+        execution_plan=mutated,
+    )
+
+    assert artifact["text"] == "canonical endpoint"
+
+
+@pytest.mark.unit
 def test_vibevoice_production_plan_freezes_exact_fallback_and_actual_backend(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -678,6 +758,11 @@ def test_vibevoice_production_plan_freezes_exact_fallback_and_actual_backend(
     assert [
         route.model_label for route in plan.descriptor.routes
     ] == ["microsoft/VibeVoice-ASR-HTTP", "local-model"]
+    assert {
+        "tldw_Server_API.app.core.Security.egress",
+        "tldw_Server_API.app.core.http_client",
+        "tldw_Server_API.app.core.stt_observability_context",
+    }.issubset(plan.descriptor.source_modules)
     assert dict(plan.descriptor.decoding_settings) == {
         "hotword_count": 1,
         "prompt_present": False,
@@ -800,6 +885,55 @@ def test_vibevoice_production_plan_freezes_exact_fallback_and_actual_backend(
     )
     assert "metadata" not in artifact
     assert "private-hotword" not in str(artifact)
+
+
+@pytest.mark.unit
+def test_vibevoice_planned_fallback_propagates_cancel_check_error(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    audio = tmp_path / "vibe.wav"
+    audio.write_bytes(b"audio")
+    model_dir = tmp_path / "vibe-model"
+    model_dir.mkdir()
+    monkeypatch.setattr(
+        vibe,
+        "_resolve_settings",
+        lambda: _vibe_settings(
+            model_dir,
+            vllm_enabled=True,
+        ),
+    )
+    adapter = spa.VibeVoiceAdapter()
+    plan = _plan(
+        adapter,
+        model=str(model_dir),
+        mode="production-v1",
+    )
+    cancel_error = CancelCheckError("cancel callback failed")
+    monkeypatch.setattr(
+        vibe,
+        "_transcribe_via_vllm_http",
+        lambda **_kwargs: (_ for _ in ()).throw(cancel_error),
+    )
+    monkeypatch.setattr(
+        vibe,
+        "_transcribe_local",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("cancellation error used fallback")
+        ),
+    )
+
+    with pytest.raises(CancelCheckError) as exc_info:
+        adapter.transcribe_batch(
+            str(audio),
+            model=str(model_dir),
+            language="en",
+            base_dir=tmp_path,
+            execution_plan=plan,
+        )
+
+    assert exc_info.value is cancel_error
 
 
 @pytest.mark.unit
@@ -1367,6 +1501,7 @@ def test_external_plan_freezes_config_and_returns_safe_typed_execution(
     audio = tmp_path / "external.wav"
     audio.write_bytes(b"audio")
     config = _external_config()
+    monkeypatch.setattr(http_client, "aiohttp", object())
     monkeypatch.setattr(
         external,
         "load_external_provider_config",
@@ -1384,10 +1519,18 @@ def test_external_plan_freezes_config_and_returns_safe_typed_execution(
     assert route.model_label == "whisper-large"
     assert route.backend == "openai_compatible"
     assert route.source == "external_http"
+    assert route.transport == "aiohttp"
     assert route.audio_egress is spa.SttAudioEgress.REMOTE
     assert route.endpoint_id == spa._normalize_audio_endpoint(
         "https://api.example.com/v1/audio/transcriptions"
     )[2]
+    assert plan.runtime_values()["external_transport"] == "aiohttp"
+    assert plan.descriptor.dependency_distributions == ("aiohttp",)
+    assert {
+        "tldw_Server_API.app.core.Security.egress",
+        "tldw_Server_API.app.core.http_client",
+        "tldw_Server_API.app.core.stt_observability_context",
+    }.issubset(plan.descriptor.source_modules)
     safe_descriptor = str(plan.descriptor.as_safe_dict())
     for secret in (
         "api.example.com",
@@ -1428,6 +1571,7 @@ def test_external_plan_freezes_config_and_returns_safe_typed_execution(
     ) -> str:
         assert frozen_config is not None
         captured.update(vars(frozen_config))
+        captured["transport"] = _kwargs.get("transport")
         return "planned external"
 
     monkeypatch.setattr(
@@ -1460,6 +1604,7 @@ def test_external_plan_freezes_config_and_returns_safe_typed_execution(
         "temperature": 0.25,
         "language": "en",
         "prompt": None,
+        "transport": "aiohttp",
     }
     assert artifact["text"] == "planned external"
     assert artifact["actual_execution"]["route_id"] == route.route_id
@@ -1469,6 +1614,7 @@ def test_external_plan_freezes_config_and_returns_safe_typed_execution(
     assert artifact["actual_execution"]["model_label"] == (
         "whisper-large"
     )
+    assert artifact["actual_execution"]["transport"] == "aiohttp"
     assert "metadata" not in artifact
     for secret in (
         "external-api-secret",
@@ -1613,7 +1759,8 @@ async def test_external_legacy_network_call_keeps_default_redirect_behavior(
     )
 
     assert result == "redirect-safe"
-    assert "allow_redirects" not in captured
+    assert captured["allow_redirects"] is False
+    assert "transport" not in captured
 
 
 @pytest.mark.unit
@@ -1673,11 +1820,72 @@ async def test_external_planned_network_call_disables_redirects(
         config=frozen,
         base_dir=tmp_path,
         execution_plan=plan,
+        transport=str(runtime["external_transport"]),
     )
 
     assert result == "redirect-safe"
     assert captured["allow_redirects"] is False
+    assert captured["transport"] == runtime["external_transport"]
     assert captured["data"]["model"] == "whisper-large"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_external_planned_transport_fails_closed_when_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    audio = tmp_path / "external.wav"
+    audio.write_bytes(b"audio")
+    config = _external_config()
+    monkeypatch.setattr(http_client, "aiohttp", object())
+    monkeypatch.setattr(
+        external,
+        "load_external_provider_config",
+        lambda _name="default": config,
+    )
+    plan = _plan(
+        spa.ExternalAdapter(),
+        model="external:custom",
+    )
+    runtime = plan.runtime_values()
+    frozen = external.ExternalProviderConfig(
+        base_url=str(runtime["external_base_url"]),
+        api_key=str(runtime["external_api_key"]),
+        model=str(runtime["external_model"]),
+        timeout=float(runtime["external_timeout"]),
+        max_retries=int(runtime["external_max_retries"]),
+        verify_ssl=bool(runtime["external_verify_ssl"]),
+        custom_headers=dict(
+            zip(
+                runtime["external_header_names"],
+                runtime["external_header_values"],
+            )
+        ),
+        response_format=str(runtime["external_response_format"]),
+        temperature=float(runtime["external_temperature"]),
+        language=str(runtime["external_language"]),
+    )
+    monkeypatch.setattr(http_client, "aiohttp", None)
+    monkeypatch.setattr(
+        external,
+        "afetch",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("unavailable frozen transport was used")
+        ),
+    )
+
+    with pytest.raises(
+        spa.STTExecutionPlanError,
+        match="transport",
+    ):
+        await external.transcribe_with_external_provider_async(
+            audio,
+            config=frozen,
+            base_dir=tmp_path,
+            execution_plan=plan,
+            transport=str(runtime["external_transport"]),
+        )
 
 
 @pytest.mark.unit

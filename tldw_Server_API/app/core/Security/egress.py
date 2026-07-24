@@ -12,6 +12,9 @@ from urllib.parse import urlparse
 
 from loguru import logger
 
+from tldw_Server_API.app.core.stt_observability_context import (
+    get_opaque_stt_endpoint_id,
+)
 from tldw_Server_API.app.core.testing import is_truthy
 
 DEFAULT_ALLOWED_SCHEMES = {"http", "https"}
@@ -282,22 +285,44 @@ def _dns_slot_wait_seconds(timeout_s: float) -> float:
     return min(configured, timeout_s)
 
 
+def _dns_log_fields(
+    host: str,
+    *,
+    sensitive_observability: bool = False,
+    endpoint_id: str | None = None,
+    **fields: object,
+) -> dict[str, object]:
+    """Return a redacted, opaque, or legacy host identity for DNS logs."""
+    opaque_id = endpoint_id or get_opaque_stt_endpoint_id()
+    if opaque_id is not None:
+        identity = {"endpoint_id": opaque_id}
+    elif sensitive_observability:
+        identity = {"host": _SENSITIVE_LOG_HOST}
+    else:
+        identity = {"host": host}
+    identity.update(fields)
+    return identity
+
+
 def _release_dns_resolver_slot(
     host: str,
     reason: str,
     *,
     sensitive_observability: bool = False,
+    endpoint_id: str | None = None,
 ) -> None:
     """Release one DNS resolver slot and log impossible double-release cases."""
     try:
         _DNS_RESOLVER_SLOTS.release()
     except ValueError as exc:
-        logger.bind(
-            host=_SENSITIVE_LOG_HOST if sensitive_observability else host,
+        logger.bind(**_dns_log_fields(
+            host,
+            sensitive_observability=sensitive_observability,
+            endpoint_id=endpoint_id,
             reason=reason,
             exception_type=type(exc).__name__,
             event="dns_resolver_slot_release_failed",
-        ).debug("DNS resolver slot release failed")
+        )).debug("DNS resolver slot release failed")
 
 
 def _remaining_dns_budget(start_time: float, timeout_s: float) -> float:
@@ -312,13 +337,15 @@ def _getaddrinfo_with_timeout(
     sensitive_observability: bool = False,
 ) -> list[tuple]:
     """Resolve a host with fail-closed timeout and DNS worker saturation guards."""
-    log_host = _SENSITIVE_LOG_HOST if sensitive_observability else host
+    endpoint_id = get_opaque_stt_endpoint_id()
     if not math.isfinite(timeout_s) or timeout_s <= 0:
-        logger.bind(
-            host=log_host,
+        logger.bind(**_dns_log_fields(
+            host,
+            sensitive_observability=sensitive_observability,
+            endpoint_id=endpoint_id,
             timeout_s=timeout_s,
             event="dns_resolver_invalid_timeout",
-        ).warning("Invalid DNS resolver timeout; failing closed")
+        )).warning("Invalid DNS resolver timeout; failing closed")
         return []
 
     start_time = time.monotonic()
@@ -329,13 +356,15 @@ def _getaddrinfo_with_timeout(
         else _DNS_RESOLVER_SLOTS.acquire(timeout=slot_wait_s)
     )
     if not acquired:
-        logger.bind(
-            host=log_host,
+        logger.bind(**_dns_log_fields(
+            host,
+            sensitive_observability=sensitive_observability,
+            endpoint_id=endpoint_id,
             slot_wait_s=slot_wait_s,
             elapsed_s=time.monotonic() - start_time,
             timeout_s=timeout_s,
             event="dns_resolver_slots_exhausted",
-        ).warning("DNS resolver slots exhausted; failing closed")
+        )).warning("DNS resolver slots exhausted; failing closed")
         return []
 
     remaining_s = _remaining_dns_budget(start_time, timeout_s)
@@ -344,13 +373,16 @@ def _getaddrinfo_with_timeout(
             host,
             "timeout budget exhausted before worker start",
             sensitive_observability=sensitive_observability,
+            endpoint_id=endpoint_id,
         )
-        logger.bind(
-            host=log_host,
+        logger.bind(**_dns_log_fields(
+            host,
+            sensitive_observability=sensitive_observability,
+            endpoint_id=endpoint_id,
             elapsed_s=time.monotonic() - start_time,
             timeout_s=timeout_s,
             event="dns_resolver_timeout_budget_exhausted",
-        ).warning("DNS resolver timeout budget exhausted before worker start; failing closed")
+        )).warning("DNS resolver timeout budget exhausted before worker start; failing closed")
         return []
 
     result: list[list[tuple]] = []
@@ -374,6 +406,7 @@ def _getaddrinfo_with_timeout(
                 host,
                 "worker completion",
                 sensitive_observability=sensitive_observability,
+                endpoint_id=endpoint_id,
             )
 
     thread = threading.Thread(target=_worker, daemon=True)
@@ -384,13 +417,16 @@ def _getaddrinfo_with_timeout(
             host,
             "thread start failure",
             sensitive_observability=sensitive_observability,
+            endpoint_id=endpoint_id,
         )
-        bound_logger = logger.bind(
-            host=log_host,
+        bound_logger = logger.bind(**_dns_log_fields(
+            host,
+            sensitive_observability=sensitive_observability,
+            endpoint_id=endpoint_id,
             exception_type=type(exc).__name__,
             event="dns_resolver_worker_start_failed",
-        )
-        if sensitive_observability:
+        ))
+        if sensitive_observability or endpoint_id is not None:
             bound_logger.warning("DNS resolver worker could not start; failing closed")
         else:
             bound_logger.opt(exception=exc).warning("DNS resolver worker could not start; failing closed")
@@ -398,28 +434,34 @@ def _getaddrinfo_with_timeout(
 
     remaining_s = _remaining_dns_budget(start_time, timeout_s)
     if remaining_s <= 0:
-        logger.bind(
-            host=log_host,
+        logger.bind(**_dns_log_fields(
+            host,
+            sensitive_observability=sensitive_observability,
+            endpoint_id=endpoint_id,
             elapsed_s=time.monotonic() - start_time,
             timeout_s=timeout_s,
             event="dns_resolver_timeout",
-        ).warning("DNS resolver timed out before waiting for worker; failing closed")
+        )).warning("DNS resolver timed out before waiting for worker; failing closed")
         return []
     thread.join(remaining_s)
     if thread.is_alive():
-        logger.bind(
-            host=log_host,
+        logger.bind(**_dns_log_fields(
+            host,
+            sensitive_observability=sensitive_observability,
+            endpoint_id=endpoint_id,
             elapsed_s=time.monotonic() - start_time,
             timeout_s=timeout_s,
             event="dns_resolver_timeout",
-        ).warning("DNS resolver timed out; failing closed")
+        )).warning("DNS resolver timed out; failing closed")
         return []
     if error_types:
-        logger.bind(
-            host=log_host,
+        logger.bind(**_dns_log_fields(
+            host,
+            sensitive_observability=sensitive_observability,
+            endpoint_id=endpoint_id,
             exception_type=error_types[0],
             event="dns_resolver_error",
-        ).debug("DNS resolver failed; failing closed")
+        )).debug("DNS resolver failed; failing closed")
         return []
     return result[0] if result else []
 
@@ -464,11 +506,15 @@ def resolve_host_ips(
         # Preserve order but deduplicate
         return tuple(dict.fromkeys(addrs))
     except (OSError, TypeError, ValueError) as exc:
-        if sensitive_observability:
-            logger.bind(
-                host=_SENSITIVE_LOG_HOST,
+        endpoint_id = get_opaque_stt_endpoint_id()
+        if sensitive_observability or endpoint_id is not None:
+            logger.bind(**_dns_log_fields(
+                host,
+                sensitive_observability=sensitive_observability,
+                endpoint_id=endpoint_id,
                 exception_type=type(exc).__name__,
-            ).debug("Host resolution failed; treating as unsafe")
+                event="dns_resolver_failed_closed",
+            )).debug("Host resolution failed; treating as unsafe")
         else:
             logger.debug(
                 "Host resolution failed for {} with {}; treating as unsafe",

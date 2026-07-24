@@ -197,6 +197,7 @@ _EXTERNAL_RUNTIME_PROVIDER = "external_provider"
 _EXTERNAL_RUNTIME_RESPONSE_FORMAT = "external_response_format"
 _EXTERNAL_RUNTIME_TEMPERATURE = "external_temperature"
 _EXTERNAL_RUNTIME_TIMEOUT = "external_timeout"
+_EXTERNAL_RUNTIME_TRANSPORT = "external_transport"
 _EXTERNAL_RUNTIME_VERIFY_SSL = "external_verify_ssl"
 
 
@@ -1757,6 +1758,14 @@ class Qwen3ASRAdapter(SttProviderAdapter):
                         "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Qwen3ASR",
                         "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_contract",
                         "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_provider_adapter",
+                        *(
+                            (
+                                "tldw_Server_API.app.core.http_client",
+                                "tldw_Server_API.app.core.stt_observability_context",
+                            )
+                            if backend == "vllm"
+                            else ()
+                        ),
                     )
                 )
             ),
@@ -2081,6 +2090,18 @@ class VibeVoiceAdapter(SttProviderAdapter):
                         "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_VibeVoice",
                         "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_contract",
                         "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_provider_adapter",
+                        *(
+                            (
+                                "tldw_Server_API.app.core.Security.egress",
+                                "tldw_Server_API.app.core.http_client",
+                                "tldw_Server_API.app.core.stt_observability_context",
+                            )
+                            if any(
+                                route.backend == "vllm_http"
+                                for route in routes
+                            )
+                            else ()
+                        ),
                     )
                 )
             ),
@@ -2278,6 +2299,16 @@ class ExternalAdapter(SttProviderAdapter):
         endpoint, egress, endpoint_id = _normalize_audio_endpoint(
             _resolve_audio_transcription_endpoint(config.base_url)
         )
+        from tldw_Server_API.app.core.http_client import (
+            resolve_afetch_transport,
+        )
+
+        try:
+            transport = resolve_afetch_transport()
+        except (RuntimeError, ValueError):
+            raise STTExecutionUnsupportedError(
+                "External STT has no available async HTTP transport"
+            ) from None
         decoding_settings = (
             (
                 ("hotword_count", 0),
@@ -2305,6 +2336,7 @@ class ExternalAdapter(SttProviderAdapter):
             decoding_ids=decoding_ids,
             local_model_available=False,
             would_download=False,
+            transport=transport,
         )
         header_items = tuple(
             sorted((config.custom_headers or {}).items())
@@ -2330,6 +2362,7 @@ class ExternalAdapter(SttProviderAdapter):
                 config.temperature
             ),
             _EXTERNAL_RUNTIME_TIMEOUT: float(config.timeout),
+            _EXTERNAL_RUNTIME_TRANSPORT: transport,
             _EXTERNAL_RUNTIME_VERIFY_SSL: bool(config.verify_ssl),
         }
         descriptor = SttExecutionDescriptor(
@@ -2351,10 +2384,13 @@ class ExternalAdapter(SttProviderAdapter):
                         "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_External_Provider",
                         "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_contract",
                         "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_provider_adapter",
+                        "tldw_Server_API.app.core.Security.egress",
+                        "tldw_Server_API.app.core.http_client",
+                        "tldw_Server_API.app.core.stt_observability_context",
                     )
                 )
             ),
-            dependency_distributions=("httpx",),
+            dependency_distributions=(transport,),
         )
         return SttBatchExecutionPlan(
             descriptor=descriptor,
@@ -2429,6 +2465,7 @@ class ExternalAdapter(SttProviderAdapter):
             config=config,
             base_dir=base_dir,
             execution_plan=execution_plan,
+            transport=str(runtime[_EXTERNAL_RUNTIME_TRANSPORT]),
         )
         if not isinstance(outcome, SttTranscriptionOutcome):
             raise STTExecutionPlanError(

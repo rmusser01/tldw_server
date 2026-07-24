@@ -26,8 +26,7 @@ import ssl  # noqa: E402
 import threading  # noqa: E402
 import time  # noqa: E402
 from collections.abc import AsyncIterator, Callable, Iterable, Iterator  # noqa: E402
-from contextlib import asynccontextmanager, contextmanager, suppress  # noqa: E402
-from contextvars import ContextVar  # noqa: E402
+from contextlib import asynccontextmanager, contextmanager, nullcontext, suppress  # noqa: E402
 from dataclasses import dataclass  # noqa: E402
 from datetime import datetime, timezone  # noqa: E402
 from email.utils import parsedate_to_datetime  # noqa: E402
@@ -74,6 +73,13 @@ _OTEL_HTTP_SUPPRESSION_KEY = getattr(
 
 _StreamItem = TypeVar("_StreamItem")
 
+try:  # Optional public OpenTelemetry suppression helper
+    from opentelemetry.instrumentation.utils import (  # type: ignore
+        suppress_http_instrumentation as _suppress_http_instrumentation,
+    )
+except ImportError:  # pragma: no cover - optional dependency
+    _suppress_http_instrumentation = nullcontext
+
 from tldw_Server_API.app.core.exceptions import (  # noqa: E402
     DownloadError,
     EgressPolicyError,
@@ -90,6 +96,12 @@ from tldw_Server_API.app.core.Metrics import (  # noqa: E402
 )
 from tldw_Server_API.app.core.Metrics.traces import get_tracing_manager  # noqa: E402
 from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope  # noqa: E402
+from tldw_Server_API.app.core.stt_observability_context import (
+    OPAQUE_STT_ENDPOINT_ID as _OPAQUE_STT_ENDPOINT_ID,
+)
+from tldw_Server_API.app.core.stt_observability_context import (
+    get_opaque_stt_endpoint_id,
+)
 from tldw_Server_API.app.core.testing import (
     env_flag_enabled,
     is_explicit_pytest_runtime,
@@ -396,10 +408,6 @@ async def _iterate_sensitive_http_items(
             async with _sensitive_http_stream_context(enabled):
                 await close()
 
-_OPAQUE_STT_ENDPOINT_ID: ContextVar[str | None] = ContextVar(
-    "opaque_stt_endpoint_id",
-    default=None,
-)
 _OPAQUE_STT_ENDPOINT_ID_RE = re.compile(
     r"^sha256:[0-9a-f]{64}$"
 )
@@ -479,13 +487,14 @@ def opaque_stt_http_observability(
     _install_opaque_stt_log_record_factory()
     token = _OPAQUE_STT_ENDPOINT_ID.set(endpoint_id)
     try:
-        yield
+        with _suppress_http_instrumentation():
+            yield
     finally:
         _OPAQUE_STT_ENDPOINT_ID.reset(token)
 
 
 def _opaque_stt_endpoint_id() -> str | None:
-    return _OPAQUE_STT_ENDPOINT_ID.get()
+    return get_opaque_stt_endpoint_id()
 
 
 def _http_trace_attributes(
@@ -3793,6 +3802,27 @@ async def _afetch_aiohttp(
     raise RetryExhaustedError("All retry attempts exhausted")  # noqa: TRY003
 
 
+def resolve_afetch_transport(
+    transport: str | None = None,
+) -> str:
+    """Resolve and validate the async transport selected by ``afetch``."""
+    selected = (
+        transport
+        if transport is not None
+        else ("aiohttp" if aiohttp is not None else "httpx")
+    )
+    normalized = str(selected).strip().lower()
+    if normalized == "aiohttp":
+        if aiohttp is None:
+            raise RuntimeError("aiohttp is not available")  # noqa: TRY003
+        return normalized
+    if normalized == "httpx":
+        if _resolve_httpx() is None:
+            raise RuntimeError("httpx is not available")  # noqa: TRY003
+        return normalized
+    raise ValueError("Unsupported async HTTP transport")
+
+
 @_with_sensitive_http_log_context_async
 async def afetch(
     *,
@@ -3813,11 +3843,19 @@ async def afetch(
     verify: bool | str | ssl.SSLContext | None = None,
     configured_endpoint: ConfiguredEndpointScope | None = None,
     sensitive_observability: bool = False,
+    transport: str | None = None,
 ) -> Any:
     if client is not None:
         adapter_name = "aiohttp" if _is_aiohttp_client(client) else "httpx"
+        if (
+            transport is not None
+            and resolve_afetch_transport(transport) != adapter_name
+        ):
+            raise ValueError(
+                "Explicit async HTTP transport does not match client"
+            )
     else:
-        adapter_name = "aiohttp" if aiohttp is not None else "httpx"
+        adapter_name = resolve_afetch_transport(transport)
     adapter = _get_transport_adapter(adapter_name)
     return await adapter.arequest(
         method=method,

@@ -24,6 +24,10 @@ _ENDPOINT_ID_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _HOST_LABEL_RE = re.compile(
     r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$"
 )
+_NUMERIC_HOST_RE = re.compile(
+    r"^(?:0[xX][0-9A-Fa-f]+|[0-9]+)"
+    r"(?:\.(?:0[xX][0-9A-Fa-f]+|[0-9]+))*$"
+)
 _URL_PATH_RE = re.compile(r"^[A-Za-z0-9._~!$&'()*+,=:@/\-]*$")
 _CONTENT_SHA_RE = re.compile(r"^(?:sha256:)?[0-9a-f]{64}$")
 _SNAPSHOT_COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -355,7 +359,8 @@ def _normalize_audio_endpoint(
         address = None
         labels = hostname.split(".")
         if (
-            not labels
+            _NUMERIC_HOST_RE.fullmatch(hostname) is not None
+            or not labels
             or any(
                 not label
                 or len(label) > 63
@@ -373,8 +378,7 @@ def _normalize_audio_endpoint(
             getattr(address, "ipv4_mapped", None)
             and address.ipv4_mapped.is_loopback
         )
-        if address.version == 4:
-            hostname = address.compressed
+        hostname = address.compressed
 
     if ":" in hostname:
         hostname = f"[{hostname}]"
@@ -441,6 +445,7 @@ class SttExecutionRoute:
     decoding_ids: tuple[str, ...]
     local_model_available: bool
     would_download: bool
+    transport: str | None = None
 
     def __post_init__(self) -> None:
         _require_serialized_id(self.route_id, "route_id")
@@ -477,6 +482,12 @@ class SttExecutionRoute:
             raise ValueError("local_model_available must be boolean")
         if not isinstance(self.would_download, bool):
             raise ValueError("would_download must be boolean")
+        if self.transport is not None:
+            _require_serialized_id(self.transport, "transport")
+            if self.audio_egress is SttAudioEgress.NONE:
+                raise ValueError(
+                    "transport is invalid when audio egress is none"
+                )
 
     def as_safe_dict(self) -> dict[str, Any]:
         """Return only the route's explicitly declared safe fields."""
@@ -632,6 +643,7 @@ class SttActualExecution:
     compute_type: str | None
     dtype: str | None
     decoding_ids: tuple[str, ...] = ()
+    transport: str | None = None
 
     def __post_init__(self) -> None:
         _require_serialized_id(self.route_id, "route_id")
@@ -657,6 +669,12 @@ class SttActualExecution:
             "decoding_ids",
             validator=_require_decoding_id,
         )
+        if self.transport is not None:
+            _require_serialized_id(self.transport, "transport")
+            if self.audio_egress is SttAudioEgress.NONE:
+                raise ValueError(
+                    "transport is invalid when audio egress is none"
+                )
 
     def as_safe_dict(self) -> dict[str, Any]:
         """Return only the actual execution's declared safe fields."""
@@ -713,6 +731,7 @@ def _actual_matches_route(
         "compute_type",
         "dtype",
         "decoding_ids",
+        "transport",
     )
     return all(
         getattr(route, name) is None or getattr(actual, name) == getattr(route, name) for name in material_fields
@@ -762,6 +781,7 @@ def actual_execution_from_route(
         compute_type=compute_type,
         dtype=dtype,
         decoding_ids=route.decoding_ids,
+        transport=route.transport,
     )
 
 
