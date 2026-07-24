@@ -4,7 +4,7 @@ title: Run PR CI only after the trusted license workflow succeeds
 status: In Progress
 assignee: []
 created_date: '2026-07-24 04:08'
-updated_date: '2026-07-24 13:53'
+updated_date: '2026-07-24 14:39'
 labels:
   - ci
   - github-actions
@@ -42,6 +42,12 @@ Corrected workflow_run specification passed independent review on iteration 3. I
 Pre-PR verification on 2026-07-24: source .venv/bin/activate && python -m pytest -q tldw_Server_API/tests/CI/test_frontend_license_gate_workflow.py tldw_Server_API/tests/CI/test_required_workflow_contracts.py -> 54 passed, 2 warnings in 12.81s. git diff --check origin/dev...HEAD passed. Final PR diff contains only the corrected workflow_run design and TASK-12986 record. Bandit is not applicable because the PR adds no executable code.
 
 Draft PR #2758 opened against dev from codex/trusted-license-first-ci. It remains draft pending requester review and the repository-required requester-written Change summary.
+
+Requester approved the strict license-first design on 2026-07-24. Independent re-review found and the spec now addresses: head-scoped stale-run semantics, base-branch advancement without admission deadlock, conservative fail-open path routing under conflicting GitHub file-limit documentation, event-loss-free cutover/rollback ordering, and main-as-canonical CI definition parity for dev-targeted PRs.
+
+Independent specification re-review approved on 2026-07-24 after resolving base-advancement path-routing ambiguity and replacing Actions reruns with fresh supported PR activity during cutover.
+
+Post-review verification on 2026-07-24: focused CI contract suites passed (54 passed, 2 warnings in 14.63s); git diff --check passed. This commit remains documentation/task-record only, so Bandit is not applicable.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

@@ -1,7 +1,8 @@
 # License-First PR CI with `workflow_run`
 
-- **Status:** Independent spec review approved on 2026-07-24; written
-  specification pending final requester review
+- **Status:** Requester approved the strict license-first design and independent
+  specification review approved it on 2026-07-24; written specification pending
+  final requester review
 - **Backlog task:** TASK-12986
 - **Repository:** `rmusser01/tldw_server`
 
@@ -31,7 +32,8 @@ the goal and will not be implemented. No live ruleset was changed.
 - A `workflow_run` workflow executes from the repository default branch and
   can receive a write-capable token and secrets even when the upstream workflow
   did not.
-- `workflow_run` has no native `paths` or `paths-ignore` filter.
+- `workflow_run` has no native `paths` or `paths-ignore` filter and always
+  executes the workflow definition from the default `main` branch.
 - Live successful license runs normally include one associated pull request
   with its number, base, repository IDs, and exact head SHA. Some historical
   run records have an empty pull-request list, so absence or ambiguity must
@@ -43,7 +45,9 @@ the goal and will not be implemented. No live ruleset was changed.
    `main` and `dev` pull-request activity.
 2. Start ordinary PR CI only after a successful completion of
    `Frontend License Gate Audit`.
-3. Bind every downstream run to the exact audited PR head and current base.
+3. Bind every downstream run to the exact audited PR head and current base
+   branch/repository identity without treating normal base-branch advancement
+   as a stale-head failure.
 4. Preserve existing non-PR triggers and workflow-specific path selection.
 5. Prevent the privileged `workflow_run` context from exposing secrets, write
    authority, or trusted caches to untrusted PR code.
@@ -93,14 +97,26 @@ It validates:
 5. that entry's `number`, `head.sha`, `head.repo.id`, `base.sha`, `base.ref`,
    and `base.repo.id` are well formed;
 6. the current Pulls API response has the same PR number, head SHA, head
-   repository ID, base SHA, base ref, and base repository ID;
+   repository ID, base ref, and base repository ID;
 7. current PR state is open and base ref is exactly `main` or `dev`; and
 8. the exact branch-qualified trusted status is successful on that head and
    was created no earlier than the upstream run's `run_started_at`.
 
-It returns immutable outputs for PR number, head SHA, base SHA, base ref, and a
-workflow-specific `should_run` path decision. Missing, stale, ambiguous, or
-malformed metadata fails closed before PR code is checked out.
+The current Pulls API base SHA is intentionally not required to equal the
+audited event's base SHA. The target branch can advance without a PR
+`synchronize` event; failing admission on that routine movement would suppress
+CI with no guaranteed event to release it. The audited base SHA remains the
+immutable diff/test baseline for that run, while current base ref and repository
+identity still detect retargeting.
+
+When the current base SHA differs from the audited base SHA, admission remains
+valid but path-based skipping is disabled. Every path-filtered workflow receives
+`should_run == "true"` because the current Pull Files API response is no longer
+guaranteed to describe the same diff as the audited base/head pair.
+
+Admission returns immutable outputs for PR number, head SHA, audited base SHA,
+base ref, and a workflow-specific `should_run` path decision. Missing, stale,
+ambiguous, or malformed metadata fails closed before PR code is checked out.
 
 For existing non-PR triggers, callers bypass PR admission and keep their
 current event semantics.
@@ -181,7 +197,7 @@ In particular:
   Admission later validates the same workflow-run PR number, and malformed or
   empty associations cannot release a job;
 - every checkout of PR code uses the immutable admitted head SHA;
-- base-diff logic uses the admitted base SHA;
+- base-diff logic uses the admitted audited base SHA;
 - PR/non-PR conditionals treat an admitted `workflow_run` as the PR execution
   mode; and
 - no bare `actions/checkout` in the admitted path may implicitly check out the
@@ -193,28 +209,36 @@ enumerated by a static contract test. Untranslated references are a failure.
 ### Path-filter compatibility
 
 Eighteen ordinary workflows currently use `paths` or `paths-ignore`, which
-`workflow_run` cannot express for `main`/`dev`. Preserve those filters in one
-reviewed routing manifest keyed by workflow filename while retaining them
-unchanged on residual direct PR triggers for unsupported bases.
+`workflow_run` cannot express for `main`/`dev`. Preserve their include/exclude
+intent in one reviewed routing manifest keyed by workflow filename while
+retaining the original filters unchanged on residual direct PR triggers for
+unsupported bases.
 
 The admission helper reads the current PR file list through the API and applies
 the corresponding ordered include/exclude patterns. Its matcher implements
 GitHub-compatible slash-aware `*`, recursive `**`, `?`, character classes, and
 ordered `!` re-inclusion/exclusion semantics. It follows pagination completely
-and reproduces GitHub's documented three-dot PR diff and first-3,000-file
-evaluation boundary.
+but does not claim that Pull Files API ordering is identical to GitHub Actions'
+internal path-filter ordering.
 
 Path filtering is an execution optimization, not an authorization boundary.
-If file enumeration is incomplete, exceeds the documented boundary, uses
-unsupported pattern syntax, or otherwise cannot be proven equivalent, admission
-sets `should_run == "true"` so CI runs rather than silently skipping a relevant
-workflow.
+GitHub's current canonical workflow-syntax and troubleshooting pages disagree
+about whether internal path evaluation stops at 3,000 or 300 files, while the
+Pull Files API itself caps responses at 3,000. Therefore the router preserves
+normal-case selection but makes no byte-for-byte equivalence claim. If more
+than 300 files changed, enumeration is incomplete, ordering matters beyond
+enumerated data, pattern syntax is unsupported, or equivalence is otherwise
+uncertain, admission sets `should_run == "true"` so CI runs rather than silently
+skipping a relevant workflow. A current base SHA that differs from the audited
+base SHA is also uncertain: admission skips path evaluation and sets
+`should_run == "true"` for every formerly path-filtered workflow.
 
 Contract tests compare the routing manifest with the pre-cutover trigger
 filters so the migration cannot silently narrow a workflow. Tests cover
 `paths-ignore`, ordered negation, rename old/new names, deletion paths, empty
-diffs, pagination, and more than 3,000 files. A workflow without a prior path
-filter receives `should_run == "true"`.
+diffs, pagination, the conservative greater-than-300-file fallback, and the
+3,000-file API ceiling. A workflow without a prior path filter receives
+`should_run == "true"`.
 
 ### Privilege and cache boundary
 
@@ -250,9 +274,16 @@ write permissions on the admitted path.
 6. On success, admission re-reads the current PR, proves the audited SHA is
    still current, and applies the workflow's original path filter.
 7. Relevant workflows check out and test only the admitted immutable head SHA.
-8. A later synchronize event cancels or supersedes work through existing
-   PR-number concurrency and starts a new license audit. No CI for the new head
-   is released until its own audit succeeds.
+8. A later synchronize event starts a new license audit. Existing ordinary runs
+   remain permanently bound to the previously audited immutable head and cannot
+   produce results for the new head. New-head CI is not released until the new
+   head's own audit succeeds; when released, existing workflow-specific
+   PR-number concurrency supersedes older work.
+
+The ordering invariant is head-scoped: no ordinary job for head `H` may start
+until the trusted audit for `H` succeeds. A job already admitted for old head
+`H1` may finish while new head `H2` is being audited, but it continues to use
+only `H1`, and its result cannot satisfy or represent `H2`.
 
 ## Failure Handling
 
@@ -264,7 +295,9 @@ write permissions on the admitted path.
   before runner allocation while residual direct/non-PR triggers keep their
   explicitly preserved behavior.
 - **Missing or multiple PR associations:** fail admission.
-- **Closed, retargeted, or changed-head PR:** fail admission.
+- **Closed, retargeted, or changed-head PR:** fail admission. Normal movement
+  of the same base branch does not fail admission, but it disables path-based
+  skipping.
 - **Status missing or not successful:** fail admission.
 - **Path API or matcher uncertainty:** run the workflow rather than risk a
   false skip.
@@ -272,7 +305,8 @@ write permissions on the admitted path.
   the skip into success.
 - **New PR head after admission:** jobs continue only on the immutable old SHA;
   the new head gets a separate audit and admission. Old results are not treated
-  as results for the new head.
+  as results for the new head, and no new-head job starts before new-head
+  admission.
 
 ## Testing
 
@@ -285,12 +319,16 @@ Use test-first contract changes to prove:
 - a truth table covers enabled/disabled cutover state, preserves non-PR and
   unsupported-base PR behavior, and rejects failed, cancelled, skipped,
   malformed, or concurrency-cancelled workflow runs;
-- admission validates exact workflow name/path/ID, one current open PR, every
-  explicitly named head/base field, repository identities, and a fresh
-  branch-qualified status success;
+- admission validates exact workflow name/path/ID, one current open PR, the
+  exact current head identity, current base branch/repository identity, the
+  audited base SHA's shape, and a fresh branch-qualified status success;
+- base-branch advancement without retargeting remains admissible and forces
+  every path-filtered workflow to run, while a changed head, base ref, or base
+  repository fails closed;
 - missing, stale, retargeted, closed, and ambiguous payloads fail closed;
-- the path manifest preserves every old path filter and matcher behavior,
-  including pagination and the documented 3,000-file boundary;
+- the path manifest preserves every old path filter's normal-case behavior and
+  fails open for uncertain ordering, more than 300 files, incomplete
+  pagination, or the 3,000-file API ceiling;
 - pre/post direct PR base coverage is identical outside `main`/`dev`;
 - existing non-PR triggers remain unchanged;
 - every PR-event expression and checkout is translated;
@@ -314,12 +352,18 @@ Bandit on the admission helper, YAML parsing, and `git diff --check`.
 
 1. Re-read the live rulesets and prove no required context depends on any of the
    28 ordinary workflow checks.
-2. Land an inert preparation state on `main`: the admission workflow, helper,
-   routing manifest, translated event logic, and dual-trigger-capable ordinary
-   workflows. Keep existing direct PR triggers active and guard the
+2. Declare `main` the canonical CI-definition branch for both `main`- and
+   `dev`-targeted PRs after cutover. Before canarying, make every migrated
+   workflow, admission helper, and routing manifest byte-identical on `main`
+   and `dev`, and add a contract that blocks cutover on drift. After cutover,
+   CI-definition changes land on `main` first; `dev` may not carry an
+   ahead-of-`main` CI definition that its PRs cannot execute.
+3. Land an inert preparation state on both branches: the admission workflow,
+   helper, routing manifest, translated event logic, and dual-trigger-capable
+   ordinary workflows. Keep existing direct PR triggers active and guard the
    `workflow_run` path with repository variable
    `LICENSE_FIRST_CI_ENABLED` unset or not equal to `true`.
-3. Briefly enable that variable for controlled canary PRs, then disable it
+4. Briefly enable that variable for controlled canary PRs, then disable it
    again. Record:
    - license run ID, conclusion, and completion time;
    - admission and ordinary job start times;
@@ -327,15 +371,27 @@ Bandit on the admission helper, YAML parsing, and `git diff --check`.
    - path-filter behavior; and
    - downstream `workflow_sha`, check-suite `head_sha`, PR UI association,
      cache behavior, secret access, and effective permissions.
-4. Require the canary to prove ordering and acceptable check visibility before
+5. Require the canary to prove ordering and acceptable check visibility before
    the mass cutover.
-5. Establish a short `main`/`dev` PR-event freeze. On `dev`, remove only the
-   direct `main`/`dev` PR triggers while the variable remains disabled.
-6. Land the final `main` cutover that removes its direct `main`/`dev` PR
-   triggers, then enable the repository variable. `workflow_run` definitions
-   and the reusable workflow execute from `main`; synchronizing `dev` matters
-   only to remove its old direct triggers.
-7. Trigger one post-cutover canary per base and prove every ordinary
+6. Establish a short `main`/`dev` CI-definition and author-activity freeze,
+   verify no preparation drift, and enable `LICENSE_FIRST_CI_ENABLED` **before**
+   removing either branch's direct PR triggers. This creates a temporary
+   duplicate-CI window but no event-loss window.
+7. While the freeze remains active, generate a fresh supported PR activity for
+   every open `main`/`dev` PR whose current head's license event completed
+   before the variable was enabled. Use a controlled `edited` activity, such as
+   a recorded title/body marker, and wait until its fresh license event produces
+   a successful admitted downstream run. Do **not** use the Actions rerun API:
+   a rerun retains the old event payload and therefore cannot establish a fresh
+   audited base after the target branch advances.
+8. Remove the direct `main`/`dev` PR triggers on `dev`, then land the same
+   cutover on `main`. The `workflow_run` definitions and reusable workflow now
+   execute canonically from `main`.
+9. Restore any controlled PR metadata marker, which emits another fresh
+   supported `edited` activity, and wait for every open PR's resulting license
+   and admitted downstream runs. This ensures no head depends on an event
+   emitted during the transition. Then end the freeze.
+10. Trigger one post-cutover canary per base and prove every ordinary
    runner-owning job starts after the matching successful license completion.
 
 Strict ordering is not claimed during the preparation/canary stage because
@@ -345,11 +401,14 @@ before license success stops rollout and triggers rollback.
 
 ## Rollback
 
-Disable the repository variable first. Restore the previous direct
-`pull_request` triggers, event expressions, checkouts, and cache behavior from
-the saved pre-cutover source state on `main` and `dev`. Remove the admission
-workflow, path manifest, helper, and variable only after direct PR CI is
-restored on both branches.
+Restore the previous direct `pull_request` triggers, event expressions,
+checkouts, and cache behavior from the saved pre-cutover source state on
+`main` and `dev` **while the repository variable remains enabled**. This
+temporarily permits duplicate CI but prevents a no-trigger window. After both
+branches contain working direct triggers, rerun or explicitly supersede any
+open-PR head that lacks ordinary CI, then disable the variable. Remove the
+admission workflow, path manifest, helper, and variable only after direct PR CI
+is restored and open PRs have a current execution path.
 
 The trusted license workflow and source-bound required statuses remain
 unchanged throughout rollback.
