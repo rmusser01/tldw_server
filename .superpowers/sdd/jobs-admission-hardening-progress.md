@@ -11,4 +11,6 @@ Task 4: complete (commits 12170fb846, e1f10ecedc, and db91a2a7cc; final specific
 
 Latest-dev review remediation: complete (commit 85f5e400cc; optional psycopg failure is explicit, changed-line suppressions are removed or justified, and prune/replay coordination covers upstream candidate-row locking).
 
-Final rebased branch gate: 61 passed with required real PostgreSQL execution and no skips; Ruff and compileall passed; Bandit reported 0 findings and 0 errors.
+Final independent-review remediation: complete (commit aeff41d653; every PostgreSQL replay fetch now holds the existing row through commit, including idempotent admission without quotas).
+
+Final rebased branch gate: 71 passed with required real PostgreSQL execution and no skips; Ruff and compileall passed; Bandit reported 0 findings and 0 errors.
