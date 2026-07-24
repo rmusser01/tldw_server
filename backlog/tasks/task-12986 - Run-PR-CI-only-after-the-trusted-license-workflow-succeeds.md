@@ -48,6 +48,8 @@ Requester approved the strict license-first design on 2026-07-24. Independent re
 Independent specification re-review approved on 2026-07-24 after resolving base-advancement path-routing ambiguity and replacing Actions reruns with fresh supported PR activity during cutover.
 
 Post-review verification on 2026-07-24: focused CI contract suites passed (54 passed, 2 warnings in 14.63s); git diff --check passed. This commit remains documentation/task-record only, so Bandit is not applicable.
+
+State correction on 2026-07-24: GitHub reports PR #2758 is currently ready for review (not draft) at head a2f3338c575b; no merge or ruleset change was performed.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
