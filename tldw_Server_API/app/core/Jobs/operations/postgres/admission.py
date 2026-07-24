@@ -19,13 +19,15 @@ from tldw_Server_API.app.core.Jobs.operations.contracts import (
 
 _MAX_QUEUED_MESSAGE = "Quota exceeded: max queued per user/domain"
 _SUBMITS_PER_MINUTE_MESSAGE = "Quota exceeded: submits per minute"
+_PSYCOPG_REQUIRED_MESSAGE = "psycopg is required for PostgreSQL quota admission"
 
 try:
-    import psycopg  # type: ignore
-
-    _PG_ERRORS: tuple[type[BaseException], ...] = (psycopg.Error,)
+    import psycopg as _psycopg  # type: ignore
 except ImportError:  # pragma: no cover - optional dependency path
+    _psycopg = None
     _PG_ERRORS = ()
+else:
+    _PG_ERRORS: tuple[type[BaseException], ...] = (_psycopg.Error,)
 
 
 _COUNTER_NONCRITICAL_ERRORS: tuple[type[BaseException], ...] = (
@@ -43,8 +45,11 @@ def _read_committed_quota_transaction(conn: Any, *, enabled: bool):
         yield
         return
 
+    if _psycopg is None:
+        raise RuntimeError(_PSYCOPG_REQUIRED_MESSAGE)
+
     previous_isolation = conn.isolation_level
-    conn.isolation_level = psycopg.IsolationLevel.READ_COMMITTED
+    conn.isolation_level = _psycopg.IsolationLevel.READ_COMMITTED
     try:
         yield
     finally:
@@ -53,7 +58,7 @@ def _read_committed_quota_transaction(conn: Any, *, enabled: bool):
 
 
 def _quota_lock_key(command: CreateJobCommand) -> int:
-    material = f"jobs:admission-quota\0{command.domain}\0{command.owner_user_id}".encode("utf-8")  # noqa: UP012
+    material = f"jobs:admission-quota\x00{command.domain}\x00{command.owner_user_id}".encode()
     digest = hashlib.blake2b(material, digest_size=8).digest()
     return int.from_bytes(digest, byteorder="big", signed=True)
 

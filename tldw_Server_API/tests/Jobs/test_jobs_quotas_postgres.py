@@ -4,10 +4,9 @@ from typing import Any
 
 import pytest
 
+from tldw_Server_API.app.core.Jobs.manager import JobManager
+
 psycopg = pytest.importorskip("psycopg")
-
-from tldw_Server_API.app.core.Jobs.manager import JobManager  # noqa: E402, I001
-
 
 pytestmark = [
     pytest.mark.pg_jobs,
@@ -277,7 +276,7 @@ class _ReplayPruneCoordinationCursor:
             self._replay_detected.set()
             progress = self._delete_attempted if self._probe_locks_row else self._delete_committed
             if not progress.wait(timeout=5):
-                raise AssertionError("prune did not reach the coordinated delete state")
+                raise AssertionError("prune did not attempt the coordinated destructive row lock")
         return row
 
     def __getattr__(self, name: str) -> Any:
@@ -326,11 +325,45 @@ class _PruneDeleteCoordinationCursor:
         return self._inner.__exit__(exc_type, exc, tb)
 
     def execute(self, sql: Any, params: Any = None) -> Any:
-        if str(sql).lstrip().startswith("DELETE FROM jobs"):
+        statement = str(sql).lstrip()
+        candidate_row_lock = statement.startswith("SELECT id FROM jobs") and "FOR UPDATE" in statement
+        if candidate_row_lock or statement.startswith("DELETE FROM jobs"):
             if not self._replay_detected.wait(timeout=5):
                 raise AssertionError("replay probe did not detect the existing row")
             self._delete_attempted.set()
         return self._inner.execute(sql, params)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+
+class _PruneDeleteCoordinationConnection:
+    def __init__(
+        self,
+        inner: Any,
+        replay_detected: threading.Event,
+        delete_attempted: threading.Event,
+    ) -> None:
+        self._inner = inner
+        self._replay_detected = replay_detected
+        self._delete_attempted = delete_attempted
+
+    def __enter__(self) -> "_PruneDeleteCoordinationConnection":
+        self._inner.__enter__()
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return self._inner.__exit__(exc_type, exc, tb)
+
+    def cursor(self, *args: Any, **kwargs: Any) -> Any:
+        cursor = self._inner.cursor(*args, **kwargs)
+        if kwargs.get("name") == "jobs_prune_candidates":
+            return _PruneDeleteCoordinationCursor(
+                cursor,
+                self._replay_detected,
+                self._delete_attempted,
+            )
+        return cursor
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._inner, name)
@@ -347,6 +380,13 @@ class _PruneDeleteCoordinationJobManager(JobManager):
         super().__init__(backend="postgres", db_url=db_url)
         self._replay_detected = replay_detected
         self._delete_attempted = delete_attempted
+
+    def _connect(self):
+        return _PruneDeleteCoordinationConnection(
+            super()._connect(),
+            self._replay_detected,
+            self._delete_attempted,
+        )
 
     def _pg_cursor(self, conn):
         return _PruneDeleteCoordinationCursor(

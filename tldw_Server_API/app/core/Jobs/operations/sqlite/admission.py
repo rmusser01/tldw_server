@@ -7,8 +7,6 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Any
 
-from loguru import logger
-
 from tldw_Server_API.app.core.Jobs.operations.contracts import (
     AdmissionRejectionReason,
     AdmissionResult,

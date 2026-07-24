@@ -8,6 +8,18 @@ from tldw_Server_API.app.core.Jobs.operations.postgres import admission
 psycopg = pytest.importorskip("psycopg")
 
 
+def test_quota_transaction_without_psycopg_raises_clear_error(monkeypatch):
+    class FakeConnection:
+        isolation_level = object()
+        closed = False
+
+    monkeypatch.setattr(admission, "_psycopg", None)
+
+    with pytest.raises(RuntimeError, match="psycopg is required for PostgreSQL quota admission"):
+        with admission._read_committed_quota_transaction(FakeConnection(), enabled=True):
+            pytest.fail("quota transaction unexpectedly started")
+
+
 @pytest.mark.pg_jobs
 def test_counter_failure_rolls_back_to_savepoint_and_commits_job_event(jobs_pg_dsn, monkeypatch):
     monkeypatch.setenv("JOBS_COUNTERS_ENABLED", "true")
