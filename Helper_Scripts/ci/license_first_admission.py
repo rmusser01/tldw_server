@@ -226,9 +226,7 @@ def admit(
 ) -> dict[str, str]:
     """Validate a trusted license run and decide whether one workflow should run."""
     run = _field(event, "workflow_run")
-    action = event.get("action")
-    if action is not None:
-        _require_equal(action, "completed")
+    _require_equal(_field(event, "action"), "completed")
     _require_equal(_field(run, "name"), WORKFLOW_NAME)
     _require_equal(_field(run, "path"), WORKFLOW_PATH)
     _require_equal(_field(run, "event"), "pull_request_target")

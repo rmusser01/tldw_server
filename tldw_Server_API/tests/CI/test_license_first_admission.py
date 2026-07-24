@@ -203,6 +203,22 @@ def test_invalid_or_stale_trust_metadata_fails_closed(
         admission.admit(**inputs)
 
 
+def test_missing_action_fails_closed() -> None:
+    inputs = valid_inputs()
+    del inputs["event"]["action"]
+
+    with pytest.raises(admission.AdmissionError):
+        admission.admit(**inputs)
+
+
+def test_null_action_fails_closed() -> None:
+    inputs = valid_inputs()
+    inputs["event"]["action"] = None
+
+    with pytest.raises(admission.AdmissionError):
+        admission.admit(**inputs)
+
+
 def test_exactly_one_associated_pull_request_is_required() -> None:
     inputs = valid_inputs()
     pull_request = copy.deepcopy(inputs["event"]["workflow_run"]["pull_requests"][0])
