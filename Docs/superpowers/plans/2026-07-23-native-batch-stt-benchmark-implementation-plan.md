@@ -1570,7 +1570,7 @@ Expected: PASS, no whitespace errors, and the commit succeeds after staging only
 - Modify: slice Backlog tasks
 - Remove after all implementation slices are complete: `Docs/superpowers/plans/2026-07-23-native-batch-stt-benchmark-implementation-plan.md`
 
-- [ ] **Step 1: Run focused benchmark and adapter suites**
+- [x] **Step 1: Run focused benchmark and adapter suites**
 
 ```bash
 source .venv/bin/activate
@@ -1594,7 +1594,7 @@ python -m pytest \
 
 Expected: PASS; real models/network are not contacted.
 
-- [ ] **Step 2: Run the broader STT regression scope**
+- [x] **Step 2: Run the broader STT regression scope**
 
 ```bash
 source .venv/bin/activate
@@ -1603,11 +1603,11 @@ python -m pytest tldw_Server_API/tests/Audio -q
 
 Expected: PASS or documented pre-existing unrelated failures. Do not silently waive new failures.
 
-- [ ] **Step 3: Exercise the CLI with generated fake fixtures**
+- [x] **Step 3: Exercise the CLI with generated fake fixtures**
 
 Run `validate`, fake-adapter `run`, `report`, and `compare` through tests or a temp-directory smoke script. Confirm an interrupt/resume, a worker crash, and a retention-none report without storing transcript text.
 
-- [ ] **Step 4: Run final security/static gates**
+- [x] **Step 4: Run final security/static gates**
 
 ```bash
 source .venv/bin/activate
@@ -1633,7 +1633,7 @@ git diff --check
 
 Expected: compilation succeeds, Bandit reports no new findings, and there are no whitespace errors.
 
-- [ ] **Step 5: Verify every acceptance criterion**
+- [x] **Step 5: Verify every acceptance criterion**
 
 Map the approved design's twelve criteria to passing tests/artifacts:
 
@@ -1649,6 +1649,46 @@ Map the approved design's twelve criteria to passing tests/artifacts:
 10. sentinel/crash/watchdog attribution holds;
 11. contract mismatch/unresolved identity/allowlist rules hold;
 12. apostrophes/Unicode/annotation protocol hold.
+
+#### Task 11A: Resolve Final Review Findings
+
+**Files:**
+
+- Modify: `Helper_Scripts/benchmarks/stt_bench.py`
+- Modify: `tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/Audio_Transcription_Qwen3ASR.py`
+- Modify: `tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/Audio_Transcription_VibeVoice.py`
+- Test: `tldw_Server_API/tests/Benchmarks/test_stt_bench.py`
+- Test: relevant Qwen3-ASR and VibeVoice tests
+
+- [x] **Stage 1: Disqualify execution mismatches from quality gates**
+
+Add a failing comparison-policy regression using a retained mismatch, then
+derive gate identity eligibility from the active sample execution contracts.
+
+- [x] **Stage 2: Separate eligible performance distributions**
+
+Add a failing mixed-observation regression, then compute policy metrics only
+from eligible successful timings while keeping all-observation counts
+descriptive.
+
+- [x] **Stage 3: Reconcile stale running worker attempts**
+
+Add failing resume cases for crashes before and after the in-flight marker,
+then close prior running attempts deterministically before spawning a new
+worker. Do not mutate completed attempts.
+
+- [x] **Stage 4: Remove raw planned-model paths from logs**
+
+Capture planned local Qwen3-ASR and VibeVoice logging with absolute model paths,
+then replace them with safe opaque labels and verify the paths are absent.
+
+- [x] **Stage 5: Complete human-readable report projections**
+
+Add renderer regressions for means/tails, status rates, diagnostic aggregates,
+dataset/tag slices, and bounded retained worst examples. Render only validated
+summary data and escape transcript text appropriately.
+
+- [x] **Stage 6: Re-run focused/full tests, security gates, and re-review**
 
 - [ ] **Step 6: Finalize Backlog tasks**
 

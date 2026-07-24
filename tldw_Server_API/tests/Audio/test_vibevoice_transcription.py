@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sys
+import types
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +32,63 @@ def _minimal_settings(tmp_path: Path) -> dict[str, Any]:
         "vllm_api_key": None,
         "vllm_timeout_seconds": 60,
     }
+
+
+@pytest.mark.unit
+def test_planned_local_model_log_does_not_expose_absolute_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model_path = tmp_path / "private-user" / "model"
+    model_path.mkdir(parents=True)
+    captured: list[str] = []
+
+    class FakeModel:
+        def to(self, _device: str) -> FakeModel:
+            return self
+
+        def eval(self) -> None:
+            return None
+
+    fake_loader = types.SimpleNamespace(
+        from_pretrained=lambda *_args, **_kwargs: FakeModel(),
+    )
+    fake_torch = types.SimpleNamespace(
+        float32="float32",
+        float16="float16",
+        bfloat16="bfloat16",
+        cuda=types.SimpleNamespace(is_available=lambda: False),
+    )
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
+    monkeypatch.setitem(
+        sys.modules,
+        "transformers",
+        types.SimpleNamespace(
+            AutoModelForCausalLM=fake_loader,
+            AutoProcessor=fake_loader,
+        ),
+    )
+    monkeypatch.setattr(
+        vv.logger,
+        "info",
+        lambda message, *args: captured.append(message.format(*args)),
+    )
+    vv._MODEL_CACHE.clear()
+
+    vv._load_local_components(
+        {
+            "model_id": str(model_path),
+            "device": "cpu",
+            "dtype": "float32",
+            "allow_download": False,
+            "model_revision": None,
+            "cache_dir": str(tmp_path / "cache"),
+            "planned_device": "cpu",
+        }
+    )
+
+    assert captured
+    assert str(model_path) not in "\n".join(captured)
 
 
 @pytest.mark.unit
@@ -84,7 +143,9 @@ def test_transcribe_prefers_vllm_when_enabled(monkeypatch: pytest.MonkeyPatch, t
         }
 
     monkeypatch.setattr(vv, "_transcribe_via_vllm_http", _fake_vllm, raising=True)
-    monkeypatch.setattr(vv, "_transcribe_local", lambda **_: (_ for _ in ()).throw(AssertionError("local called")), raising=True)
+    monkeypatch.setattr(
+        vv, "_transcribe_local", lambda **_: (_ for _ in ()).throw(AssertionError("local called")), raising=True
+    )
 
     artifact = vv.transcribe_with_vibevoice(str(audio_file), model_id="override")
     assert artifact["metadata"]["source"] == "vllm_http"
@@ -99,8 +160,12 @@ def test_vllm_failure_falls_back_to_local(monkeypatch: pytest.MonkeyPatch, tmp_p
     settings["vllm_base_url"] = "http://127.0.0.1:8000"
 
     monkeypatch.setattr(vv, "_resolve_settings", lambda: dict(settings), raising=True)
-    monkeypatch.setattr(vv, "_transcribe_via_vllm_http", lambda **_: (_ for _ in ()).throw(RuntimeError("boom")), raising=True)
-    monkeypatch.setattr(vv, "_load_audio", lambda *_args, **_kwargs: (np.zeros(1600, dtype="float32"), 16000, 0.1), raising=True)
+    monkeypatch.setattr(
+        vv, "_transcribe_via_vllm_http", lambda **_: (_ for _ in ()).throw(RuntimeError("boom")), raising=True
+    )
+    monkeypatch.setattr(
+        vv, "_load_audio", lambda *_args, **_kwargs: (np.zeros(1600, dtype="float32"), 16000, 0.1), raising=True
+    )
 
     called = {"local": 0}
 
@@ -146,9 +211,7 @@ def test_legacy_vllm_cancel_check_error_never_uses_local_fallback(
     monkeypatch.setattr(
         vv,
         "_load_audio",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("cancellation error used local fallback")
-        ),
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("cancellation error used local fallback")),
     )
 
     with pytest.raises(CancelCheckError) as exc_info:
@@ -200,9 +263,10 @@ def test_legacy_vllm_http_keeps_default_redirect_behavior(
 
 @pytest.mark.unit
 def test_legacy_vllm_endpoint_keeps_urljoin_behavior() -> None:
-    assert vv._resolve_vllm_endpoint(
-        "https://example.com/prefix?legacy=value"
-    ) == "https://example.com/v1/audio/transcriptions"
+    assert (
+        vv._resolve_vllm_endpoint("https://example.com/prefix?legacy=value")
+        == "https://example.com/v1/audio/transcriptions"
+    )
 
 
 @pytest.mark.unit
@@ -246,9 +310,7 @@ def test_planned_vllm_http_disables_redirects(
     )
 
     assert captured["allow_redirects"] is False
-    assert captured["data"]["model"] == (
-        "microsoft/VibeVoice-ASR"
-    )
+    assert captured["data"]["model"] == ("microsoft/VibeVoice-ASR")
     assert artifact["text"] == "redirect-safe"
 
 

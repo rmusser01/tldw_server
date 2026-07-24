@@ -473,7 +473,7 @@ def _load_local_components(settings: dict[str, Any]) -> tuple[Any, Any, str]:
         model.eval()
 
         _MODEL_CACHE[cache_key] = (processor, model, device)
-        logger.info("VibeVoice: loaded local model '{}' on device '{}'", model_id, device)
+        logger.info("VibeVoice: loaded local model on device '{}'", device)
         return processor, model, device
 
 

@@ -359,6 +359,12 @@ adds `--retry-errors`; a retry appends a new attempt rather than rewriting
 history. Omitting `--run` creates a collision-resistant run ID, which is
 printed on completion; pass that ID explicitly to resume it.
 
+Only one coordinator may execute a run at a time. The runner holds an
+OS-managed exclusive lock from recovery through final persistence and rejects
+an overlapping invocation before it can modify attempt state or send audio.
+The lock file remains in the run directory, but the operating system releases
+the lock automatically when the coordinator exits or crashes.
+
 Use `--worker-watchdog-seconds N` to terminate a hung target process. The
 persisted in-flight sample receives `timeout`; the worker does not continue
 with warm state.
@@ -373,6 +379,12 @@ python Helper_Scripts/benchmarks/stt_bench.py report \
 This validates `run.json` and `results.jsonl`, rebuilds `summary.json` and
 `summary.md`, and prints the terminal projection. Summaries are disposable
 views; the append-only run records are authoritative.
+
+Both human-readable projections include primary and diagnostic status/error
+distributions, dataset and tag slices, and bounded retained examples.
+Diagnostic slices remain separate from primary slices. Retained examples
+escape Markdown HTML and table delimiters, render Unicode/terminal controls as
+visible code-point text, and never affect the machine-readable summary.
 
 ### 4. Compare
 
@@ -405,6 +417,7 @@ fails, and 2 for invalid input or incompatibility.
 Each run is stored under `.benchmarks/stt/<run-id>/`:
 
 ```text
+.coordinator.lock
 run.json
 inflight.json
 results.jsonl

@@ -2289,6 +2289,8 @@ def test_aggregate_results_separates_diagnostics_and_suite_scoped_slices():
     assert summary["diagnostic"]["targets"]["target-1"]["suites"]["public-english-v1"]["sample_count"] == 1
     assert summary["slices"]["dataset"]["target-1"]["dataset-a"]["public-english-v1"]["sample_count"] == 2
     assert summary["slices"]["tag"]["target-1"]["clean"]["public-english-v1"]["sample_count"] == 1
+    assert summary["slices"]["diagnostic_dataset"]["target-1"]["fixture"]["public-english-v1"]["sample_count"] == 1
+    assert summary["slices"]["diagnostic_tag"]["target-1"]["read-speech"]["public-english-v1"]["sample_count"] == 1
     assert summary["slices"]["actual_backend"]["target-1"]["local"]["public-english-v1"]["sample_count"] == 3
     assert summary["slices"]["actual_backend"]["target-1"]["remote"]["private-english-v1"]["sample_count"] == 1
 
@@ -2331,6 +2333,37 @@ def test_aggregate_results_excludes_invalid_warm_timing_from_percentiles():
     warm = summary["performance"]["warm"]["targets"]["target-1"]["suites"]["public-english-v1"]
     assert warm["observation_count"] == 2
     assert warm["ineligible_count"] == 2
+
+
+def test_aggregate_results_excludes_mismatched_warm_timing_from_gate_distribution():
+    records = []
+    for index, seconds in enumerate((0.5, 2.0, 3.0, 1.0), start=1):
+        record = _result_record(
+            sample_id=f"warm-{index}",
+            attempt_id=index,
+            measurement_role="performance_repeat",
+            adapter_nanoseconds=int(seconds * 1_000_000_000),
+            audio_duration_seconds=1.0,
+        )
+        if index == 4:
+            record["execution_mismatch_reasons"] = ["language"]
+            record["eligibility_reasons"] = ["language"]
+        records.append(record)
+    active = {record["completion_key"]: record for record in records}
+
+    summary = stt_bench.aggregate_results(
+        {
+            "schema_version": stt_bench.RUN_SCHEMA_VERSION,
+            "run_id": "run-1",
+        },
+        active,
+    )
+
+    warm = summary["performance"]["warm"]["targets"]["target-1"]["suites"]["public-english-v1"]
+    assert warm["observation_count"] == 3
+    assert warm["gate_eligible_count"] == 3
+    assert warm["ineligible_count"] == 1
+    assert warm["rtf"]["p50"] == 2.0
 
 
 @pytest.mark.parametrize(
@@ -3974,6 +4007,70 @@ def test_runner_recovers_persisted_inflight_without_double_scoring_probe(
     assert not (run_directory / "inflight.json").exists()
 
 
+@pytest.mark.parametrize("ready_seen", [False, True])
+def test_runner_reconciles_stale_running_attempt_without_inflight(
+    tmp_path,
+    ready_seen,
+):
+    probe, probe_path = _worker_sample(tmp_path, "probe", "probe.wav")
+    target = _worker_target()
+    requested = _runner_metadata(
+        selected_sample_ids=("probe",),
+        timing_sample_ids=(),
+    )
+    persisted = copy.deepcopy(requested)
+    persisted["next_worker_attempt_id"] = 2
+    stale = stt_bench._new_worker_attempt(1, target.target_id)
+    if ready_seen:
+        stale["spawn_to_ready_nanoseconds"] = 10
+        stale["setup_nanoseconds"] = 5
+    persisted["worker_attempts"].append(stale)
+    run_directory = tmp_path / "run"
+    stt_bench.atomic_write_json(run_directory / "run.json", persisted)
+
+    completed = stt_bench.execute_prepared_targets(
+        run_directory=run_directory,
+        run_metadata=requested,
+        prepared_targets=(target,),
+        samples=(probe,),
+        audio_paths=(probe_path,),
+        retry_errors=False,
+    )
+
+    assert [attempt["status"] for attempt in completed["worker_attempts"]] == [
+        "worker_crash",
+        "completed",
+    ]
+    assert completed["worker_attempts"][0]["error"] == {
+        "type": "WorkerCrash",
+        "message": "prior benchmark worker ended without in-flight coordination",
+    }
+
+
+def test_runner_rejects_an_overlapping_coordinator_before_recovery(tmp_path):
+    probe, probe_path = _worker_sample(tmp_path, "probe", "probe.wav")
+    target = _worker_target()
+    metadata = _runner_metadata(
+        selected_sample_ids=("probe",),
+        timing_sample_ids=(),
+    )
+    run_directory = tmp_path / "run"
+    stt_bench._ensure_owner_directory(run_directory)
+
+    with stt_bench._exclusive_run_coordinator_lock(run_directory):
+        with pytest.raises(RuntimeError, match="already active"):
+            stt_bench.execute_prepared_targets(
+                run_directory=run_directory,
+                run_metadata=metadata,
+                prepared_targets=(target,),
+                samples=(probe,),
+                audio_paths=(probe_path,),
+                retry_errors=False,
+            )
+
+    assert list(run_directory.iterdir()) == [run_directory / ".coordinator.lock"]
+
+
 def test_runner_refuses_resume_when_caller_requires_new_run(tmp_path):
     probe, probe_path = _worker_sample(tmp_path, "probe", "probe.wav")
     target = _worker_target()
@@ -4706,6 +4803,7 @@ def _complete_report(
     sample_status="ok",
     warm_adapter_nanoseconds=500_000_000,
     mode="neutral-v1",
+    record_mutator=None,
 ):
     prepared = target or _worker_target(identity_resolved=True)
     metadata = _runner_metadata(
@@ -4746,6 +4844,8 @@ def _complete_report(
             adapter_nanoseconds=warm_adapter_nanoseconds,
         ),
     ]
+    if record_mutator is not None:
+        record_mutator(records)
     run_directory = tmp_path / directory_name
     stt_bench.atomic_write_json(run_directory / "run.json", metadata)
     for record in records:
@@ -4773,6 +4873,66 @@ def test_report_renderers_include_quality_warm_cold_backend_and_eligibility(
         assert "Actual backend populations" in rendered
         assert "backend-1" in rendered
         assert "Gate eligibility" in rendered
+
+
+def test_report_renderers_include_complete_quality_slices_diagnostics_and_bounded_examples(
+    tmp_path,
+):
+    def mark_sample_diagnostic(records):
+        for record in records:
+            if record["sample_id"] == "sample-2":
+                record["diagnostic_only"] = True
+                record["dataset"] = "diagnostic-set"
+                record["tags"] = ["diagnostic-tag"]
+
+    summary = _complete_report(
+        tmp_path,
+        "complete-render",
+        sample_hypothesis=("wrong | words\nnext \x1b[2J \u202e <details>" + ("x" * 300)),
+        record_mutator=mark_sample_diagnostic,
+    )
+    markdown = stt_bench.render_summary_markdown(summary)
+    terminal = stt_bench.render_summary_terminal(summary)
+
+    for rendered in (markdown, terminal):
+        assert "Success rate" in rendered or "success rate" in rendered
+        assert "Empty rate" in rendered or "empty rate" in rendered
+        assert "Failure rate" in rendered or "failure rate" in rendered
+        assert "Strict WER" in rendered or "strict WER" in rendered
+        assert "Normalized CER" in rendered or "normalized CER" in rendered
+        assert "Mean" in rendered or "mean" in rendered
+        assert "p90" in rendered
+        assert "p95" in rendered
+        assert "p99" in rendered
+        assert "Diagnostic-only aggregates" in rendered
+        assert "Dataset slices" in rendered
+        assert "Tag slices" in rendered
+        assert "Diagnostic dataset slices" in rendered
+        assert "Diagnostic tag slices" in rendered
+        assert "diagnostic-set" in rendered
+        assert "diagnostic-tag" in rendered
+        assert "Worst retained examples" in rendered
+        assert "sample-2" in rendered
+        assert "\x1b" not in rendered
+        assert "\u202e" not in rendered
+    assert "wrong \\| words\\\\u000anext \\\\u001b[2J \\\\u202e &lt;details&gt;" in markdown
+    assert "wrong ¦ words\\u000anext \\u001b[2J \\u202e <details>" in terminal
+    assert "<details>" not in markdown
+    assert "x" * 200 not in markdown
+    assert "x" * 200 not in terminal
+    assert "…" in markdown
+    assert "…" in terminal
+
+
+def test_bounded_display_text_shows_whitespace_controls_and_keeps_tokens_atomic():
+    assert stt_bench._bounded_display_text("a\n\tb") == "a\\u000a\\u0009b"
+    assert (
+        stt_bench._bounded_display_text(
+            "abcd\x1brest",
+            maximum=10,
+        )
+        == "abcd…"
+    )
 
 
 def test_validate_summary_rejects_result_provenance_outside_run_counts(
@@ -5000,6 +5160,40 @@ def test_compare_policy_fails_eligible_absolute_wer_regression(tmp_path):
     assert comparison["mode"] == "policy"
     assert comparison["gates"][0]["eligible"] is True
     assert comparison["gates"][0]["passed"] is False
+
+
+def test_compare_policy_rejects_execution_mismatch_in_quality_sample(tmp_path):
+    baseline = _complete_report(tmp_path, "baseline")
+
+    def mismatch_quality_sample(records):
+        mismatched = next(
+            record
+            for record in records
+            if record["measurement_role"] == "accuracy" and record["sample_id"] == "sample-2"
+        )
+        mismatched["execution_mismatch_reasons"] = ["language"]
+        mismatched["eligibility_reasons"] = ["language"]
+
+    candidate = _complete_report(
+        tmp_path,
+        "candidate",
+        record_mutator=mismatch_quality_sample,
+    )
+    policy = {
+        "schema_version": 1,
+        "suites": {
+            "public-english-v1": {
+                "max_normalized_pooled_wer_absolute_regression": 0.0,
+            }
+        },
+    }
+
+    with pytest.raises(ValueError, match="ineligible"):
+        stt_bench.compare_summaries(
+            baseline,
+            candidate,
+            policy=policy,
+        )
 
 
 def test_compare_policy_rejects_relative_rule_with_zero_baseline(tmp_path):

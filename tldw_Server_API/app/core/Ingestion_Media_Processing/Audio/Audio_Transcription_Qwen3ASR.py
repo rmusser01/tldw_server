@@ -289,7 +289,7 @@ def _load_qwen3_asr_model(settings: dict[str, Any]) -> tuple[Any, Any, str]:
         torch_dtype = _get_torch_dtype(dtype_name)
         local_only = not allow_download
 
-        logger.info("Qwen3-ASR: loading model from '{}' on device '{}'", model_path, device)
+        logger.info("Qwen3-ASR: loading local model on device '{}'", device)
 
         processor = AutoProcessor.from_pretrained(
             str(validated_path),

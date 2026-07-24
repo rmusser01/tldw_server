@@ -14,6 +14,63 @@ def _import_module():
 
 
 @pytest.mark.unit
+def test_planned_local_model_log_does_not_expose_absolute_path(
+    tmp_path,
+    monkeypatch,
+):
+    qwen3 = _import_module()
+    model_path = tmp_path / "private-user" / "model"
+    model_path.mkdir(parents=True)
+    captured = []
+
+    class FakeModel:
+        def to(self, _device):
+            return self
+
+        def eval(self):
+            return None
+
+    fake_loader = types.SimpleNamespace(
+        from_pretrained=lambda *_args, **_kwargs: FakeModel(),
+    )
+    fake_torch = types.SimpleNamespace(
+        float32="float32",
+        float16="float16",
+        bfloat16="bfloat16",
+        cuda=types.SimpleNamespace(is_available=lambda: False),
+    )
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
+    monkeypatch.setitem(
+        sys.modules,
+        "transformers",
+        types.SimpleNamespace(
+            AutoModelForCausalLM=fake_loader,
+            AutoProcessor=fake_loader,
+        ),
+    )
+    monkeypatch.setattr(
+        qwen3.logger,
+        "info",
+        lambda message, *args: captured.append(message.format(*args)),
+    )
+    qwen3._MODEL_CACHE.clear()
+
+    qwen3._load_qwen3_asr_model(
+        {
+            "model_path": str(model_path),
+            "device": "cpu",
+            "dtype": "float32",
+            "allow_download": False,
+            "model_revision": None,
+            "planned_device": "cpu",
+        }
+    )
+
+    assert captured
+    assert str(model_path) not in "\n".join(captured)
+
+
+@pytest.mark.unit
 def test_resolve_settings_defaults(monkeypatch):
     """Test that settings resolve with sensible defaults."""
     qwen3 = _import_module()
@@ -467,9 +524,7 @@ def test_transcribe_vllm_http_success(monkeypatch, tmp_path):
     audio_file.write_bytes(b"\x00" * 100)
 
     settings = {
-        "vllm_base_url": (
-            "http://localhost:8000/proxy?legacy=value"
-        ),
+        "vllm_base_url": ("http://localhost:8000/proxy?legacy=value"),
         "request_model": "Qwen/Qwen3-ASR-1.7B",
         "sample_rate": 16000,
     }
@@ -527,6 +582,7 @@ def test_transcribe_vllm_http_success(monkeypatch, tmp_path):
 
     # Import httpx into the module namespace for the test
     import sys
+
     sys.modules["httpx"] = mock_httpx
 
     try:
@@ -534,16 +590,11 @@ def test_transcribe_vllm_http_success(monkeypatch, tmp_path):
 
         assert result["text"] == "Hello world"
         assert result["language"] == "en"
-        assert result["metadata"]["model"] == (
-            "vllm:http://localhost:8000/proxy?legacy=value"
-        )
+        assert result["metadata"]["model"] == ("vllm:http://localhost:8000/proxy?legacy=value")
         assert result["usage"]["duration_ms"] == 2500
         assert client_kwargs["follow_redirects"] is False
         assert request_data["model"] == "Qwen/Qwen3-ASR-1.7B"
-        assert request_urls == [
-            "http://localhost:8000/proxy?legacy=value"
-            "/v1/audio/transcriptions"
-        ]
+        assert request_urls == ["http://localhost:8000/proxy?legacy=value/v1/audio/transcriptions"]
     finally:
         if "httpx" in sys.modules and sys.modules["httpx"] is mock_httpx:
             del sys.modules["httpx"]

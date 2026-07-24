@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import errno
 import hashlib
+import html
 import importlib
 import importlib.metadata
 import json
@@ -20,7 +21,8 @@ import tempfile
 import time
 import unicodedata
 from collections import Counter
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from datetime import datetime, timezone
@@ -3276,13 +3278,13 @@ def _warm_performance_aggregate(
         ):
             ineligible_count += 1
             continue
+        if record["eligibility_reasons"]:
+            ineligible_count += 1
+            continue
         adapter_seconds.append(adapter_nanoseconds / 1_000_000_000)
         rtfs.append(float(rtf))
         throughputs.append(float(throughput))
-        if record["eligibility_reasons"]:
-            ineligible_count += 1
-        else:
-            gate_eligible_count += 1
+        gate_eligible_count += 1
     return {
         "candidate_count": len(records),
         "observation_count": len(adapter_seconds),
@@ -4507,6 +4509,84 @@ def _recover_persisted_inflight(
     return current
 
 
+def _reconcile_stale_worker_attempts(
+    run_directory: Path,
+    metadata: Mapping[str, object],
+) -> dict[str, object]:
+    """Close worker attempts left running without an in-flight operation."""
+    current = validate_run_metadata(metadata)
+    changed = False
+    for attempt in current["worker_attempts"]:
+        if attempt["status"] != "running":
+            continue
+        attempt["status"] = "worker_crash"
+        attempt["error"] = {
+            "type": "WorkerCrash",
+            "message": "prior benchmark worker ended without in-flight coordination",
+        }
+        changed = True
+    if changed:
+        validate_run_metadata(current)
+        atomic_write_json(run_directory / "run.json", current)
+    return current
+
+
+@contextmanager
+def _exclusive_run_coordinator_lock(
+    run_directory: Path,
+) -> Iterator[None]:
+    """Hold a non-blocking OS lock for one run coordinator."""
+    lock_path = run_directory / ".coordinator.lock"
+    if lock_path.is_symlink():
+        raise OSError("coordinator lock must not be a symbolic link")
+    flags = os.O_CREAT | os.O_RDWR | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(lock_path, flags, 0o600)
+    acquired = False
+    windows_lock = os.name == "nt"
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise OSError("coordinator lock must be a regular file")
+        if os.name == "posix":
+            os.fchmod(descriptor, 0o600)
+        try:
+            if windows_lock:
+                import msvcrt
+
+                if os.fstat(descriptor).st_size == 0:
+                    os.write(descriptor, b"\0")
+                os.lseek(descriptor, 0, os.SEEK_SET)
+                msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(
+                    descriptor,
+                    fcntl.LOCK_EX | fcntl.LOCK_NB,
+                )
+        except OSError as exc:
+            if exc.errno in {
+                errno.EACCES,
+                errno.EAGAIN,
+                getattr(errno, "EDEADLK", errno.EAGAIN),
+            }:
+                raise RuntimeError("another benchmark coordinator is already active for this run") from exc
+            raise
+        acquired = True
+        yield
+    finally:
+        if acquired:
+            if windows_lock:
+                import msvcrt
+
+                os.lseek(descriptor, 0, os.SEEK_SET)
+                msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(descriptor, fcntl.LOCK_UN)
+        os.close(descriptor)
+
+
 def execute_prepared_targets(
     *,
     run_directory: Path,
@@ -4538,39 +4618,45 @@ def execute_prepared_targets(
         raise ValueError("run inputs do not match immutable metadata")
     run_directory = Path(run_directory)
     _ensure_owner_directory(run_directory)
-    run_path = run_directory / "run.json"
-    if run_path.exists():
-        if not allow_resume:
-            raise ValueError("new run cannot resume an existing run")
-        current = validate_run_metadata(_load_json_object(run_path))
-        assert_resume_compatible(current, expected)
-    else:
-        if any(run_directory.iterdir()):
-            raise ValueError("new run directory must be empty")
-        current = expected
-        if allow_resume:
-            atomic_write_json(run_path, current)
+    with _exclusive_run_coordinator_lock(run_directory):
+        run_path = run_directory / "run.json"
+        if run_path.exists():
+            if not allow_resume:
+                raise ValueError("new run cannot resume an existing run")
+            current = validate_run_metadata(_load_json_object(run_path))
+            assert_resume_compatible(current, expected)
         else:
-            atomic_create_json(run_path, current)
-    repair_result_history(run_directory / "results.jsonl")
-    if (run_directory / "inflight.json").exists():
-        current = _recover_persisted_inflight(
-            run_directory=run_directory,
-            metadata=current,
-            prepared_targets=targets,
-            samples=selected_samples,
-            audio_paths=pinned_paths,
+            unexpected = [path for path in run_directory.iterdir() if path.name != ".coordinator.lock"]
+            if unexpected:
+                raise ValueError("new run directory must be empty")
+            current = expected
+            if allow_resume:
+                atomic_write_json(run_path, current)
+            else:
+                atomic_create_json(run_path, current)
+        repair_result_history(run_directory / "results.jsonl")
+        if (run_directory / "inflight.json").exists():
+            current = _recover_persisted_inflight(
+                run_directory=run_directory,
+                metadata=current,
+                prepared_targets=targets,
+                samples=selected_samples,
+                audio_paths=pinned_paths,
+            )
+        current = _reconcile_stale_worker_attempts(
+            run_directory,
+            current,
         )
-    for target in targets:
-        current = _execute_target_attempt(
-            run_directory=run_directory,
-            metadata=current,
-            prepared_target=target,
-            samples=selected_samples,
-            audio_paths=pinned_paths,
-            retry_errors=retry_errors,
-        )
-    return validate_run_metadata(current)
+        for target in targets:
+            current = _execute_target_attempt(
+                run_directory=run_directory,
+                metadata=current,
+                prepared_target=target,
+                samples=selected_samples,
+                audio_paths=pinned_paths,
+                retry_errors=retry_errors,
+            )
+        return validate_run_metadata(current)
 
 
 def aggregate_results(
@@ -4622,6 +4708,14 @@ def aggregate_results(
             ),
             "tag": _slice_quality_aggregates(
                 primary_records,
+                dimension="tag",
+            ),
+            "diagnostic_dataset": _slice_quality_aggregates(
+                diagnostic_records,
+                dimension="dataset",
+            ),
+            "diagnostic_tag": _slice_quality_aggregates(
+                diagnostic_records,
                 dimension="tag",
             ),
             "actual_backend": _slice_quality_aggregates(
@@ -4928,26 +5022,160 @@ def _atomic_write_text(path: Path, text: str) -> None:
         raise
 
 
-def _summary_table_rows(summary: Mapping[str, object]) -> list[list[str]]:
-    """Return shared report rows for Markdown and terminal renderers."""
+def _quality_status_table_rows(
+    summary: Mapping[str, object],
+    *,
+    section: str,
+) -> list[list[str]]:
+    """Return per-suite status-rate rows for one quality population."""
     rows: list[list[str]] = []
-    primary = summary["primary"]["targets"]
+    targets = summary[section]["targets"]
     for target_id in summary["identity"]["target_order"]:
-        target = primary.get(target_id, {"suites": {}})
+        target = targets.get(target_id, {"suites": {}})
         for suite, metrics in target["suites"].items():
             rows.append(
                 [
                     str(target_id),
                     str(suite),
                     str(metrics["sample_count"]),
-                    f"{float(metrics['strict']['wer']['pooled']):.6f}",
-                    f"{float(metrics['strict']['cer']['pooled']):.6f}",
-                    f"{float(metrics['normalized']['wer']['pooled']):.6f}",
-                    f"{float(metrics['normalized']['cer']['pooled']):.6f}",
+                    f"{float(metrics['success_rate']):.6f}",
+                    f"{float(metrics['empty_rate']):.6f}",
                     f"{float(metrics['failure_rate']):.6f}",
+                    f"{float(metrics['error_rate']):.6f}",
                     f"{float(metrics['exact_match_rate']):.6f}",
                 ]
             )
+    return rows
+
+
+def _quality_distribution_table_rows(
+    summary: Mapping[str, object],
+    *,
+    section: str,
+) -> list[list[str]]:
+    """Return pooled, mean, and tail error-rate rows."""
+    rows: list[list[str]] = []
+    targets = summary[section]["targets"]
+    for target_id in summary["identity"]["target_order"]:
+        target = targets.get(target_id, {"suites": {}})
+        for suite, metrics in target["suites"].items():
+            for profile in ("strict", "normalized"):
+                for unit in ("wer", "cer"):
+                    distribution = metrics[profile][unit]
+                    rows.append(
+                        [
+                            str(target_id),
+                            str(suite),
+                            f"{profile.title()} {unit.upper()}",
+                            _metric_text(distribution["pooled"]),
+                            _metric_text(distribution["mean"]),
+                            _metric_text(distribution["p50"]),
+                            _metric_text(distribution["p90"]),
+                            _metric_text(distribution["p95"]),
+                            _metric_text(distribution["p99"]),
+                        ]
+                    )
+    return rows
+
+
+def _slice_table_rows(
+    summary: Mapping[str, object],
+    *,
+    dimension: str,
+) -> list[list[str]]:
+    """Return one human-readable dataset or tag slice table."""
+    rows: list[list[str]] = []
+    slices = summary["slices"][dimension]
+    for target_id in summary["identity"]["target_order"]:
+        for value, suites in slices.get(target_id, {}).items():
+            for suite, metrics in suites.items():
+                rows.append(
+                    [
+                        str(target_id),
+                        str(value),
+                        str(suite),
+                        str(metrics["sample_count"]),
+                        _metric_text(metrics["normalized"]["wer"]["pooled"]),
+                        _metric_text(metrics["failure_rate"]),
+                    ]
+                )
+    return rows
+
+
+def _bounded_display_text(value: object, *, maximum: int = 160) -> str:
+    """Collapse controls and bound retained transcript text for display."""
+    display_tokens: list[str] = []
+    pending_space = False
+    for character in str(value):
+        code_point = ord(character)
+        if unicodedata.category(character) in {"Cc", "Cf", "Cs"}:
+            if pending_space and display_tokens:
+                display_tokens.append(" ")
+            pending_space = False
+            display_tokens.append(f"\\u{code_point:04x}" if code_point <= 0xFFFF else f"\\U{code_point:08x}")
+        elif character.isspace():
+            pending_space = bool(display_tokens)
+        else:
+            if pending_space:
+                display_tokens.append(" ")
+                pending_space = False
+            display_tokens.append(character)
+    text = "".join(display_tokens)
+    if len(text) <= maximum:
+        return text
+    budget = maximum - 1
+    bounded: list[str] = []
+    used = 0
+    for token in display_tokens:
+        if used + len(token) > budget:
+            break
+        bounded.append(token)
+        used += len(token)
+    return "".join(bounded).rstrip() + "…"
+
+
+def _worst_example_table_rows(
+    summary: Mapping[str, object],
+    *,
+    markdown: bool,
+) -> list[list[str]]:
+    """Return bounded, escaped retained examples for a human report."""
+    rows: list[list[str]] = []
+    for example in summary["worst_examples"]:
+        reference = _bounded_display_text(example["reference"])
+        hypothesis = _bounded_display_text(example["hypothesis"])
+        if markdown:
+            reference = (
+                html.escape(
+                    reference,
+                    quote=True,
+                )
+                .replace("\\", "\\\\")
+                .replace("|", "\\|")
+            )
+            hypothesis = (
+                html.escape(
+                    hypothesis,
+                    quote=True,
+                )
+                .replace("\\", "\\\\")
+                .replace("|", "\\|")
+            )
+        else:
+            reference = reference.replace("|", "¦")
+            hypothesis = hypothesis.replace("|", "¦")
+        rows.append(
+            [
+                str(example["target_id"]),
+                str(example["sample_id"]),
+                str(example["suite"]),
+                str(example["status"]),
+                _metric_text(example["strict_wer"]),
+                _metric_text(example["normalized_wer"]),
+                reference,
+                hypothesis,
+            ]
+        )
     return rows
 
 
@@ -5099,15 +5327,58 @@ def render_summary_markdown(summary: Mapping[str, object]) -> str:
             "",
             "## Quality",
             "",
-            (
-                "| Target | Suite | Samples | Strict WER | Strict CER | "
-                "Normalized WER | Normalized CER | Failure rate | Exact match |"
-            ),
-            "|---|---|---:|---:|---:|---:|---:|---:|---:|",
+            ("| Target | Suite | Samples | Success rate | Empty rate | Failure rate | Error rate | Exact match |"),
+            "|---|---|---:|---:|---:|---:|---:|---:|",
         ]
     )
-    for row in _summary_table_rows(summary):
+    for row in _quality_status_table_rows(summary, section="primary"):
         lines.append("| " + " | ".join(row) + " |")
+    lines.extend(
+        [
+            "",
+            "| Target | Suite | Metric | Pooled | Mean | p50 | p90 | p95 | p99 |",
+            "|---|---|---|---:|---:|---:|---:|---:|---:|",
+        ]
+    )
+    for row in _quality_distribution_table_rows(summary, section="primary"):
+        lines.append("| " + " | ".join(row) + " |")
+    lines.extend(
+        [
+            "",
+            "## Diagnostic-only aggregates",
+            "",
+            ("| Target | Suite | Samples | Success rate | Empty rate | Failure rate | Error rate | Exact match |"),
+            "|---|---|---:|---:|---:|---:|---:|---:|",
+        ]
+    )
+    for row in _quality_status_table_rows(summary, section="diagnostic"):
+        lines.append("| " + " | ".join(row) + " |")
+    lines.extend(
+        [
+            "",
+            "| Target | Suite | Metric | Pooled | Mean | p50 | p90 | p95 | p99 |",
+            "|---|---|---|---:|---:|---:|---:|---:|---:|",
+        ]
+    )
+    for row in _quality_distribution_table_rows(summary, section="diagnostic"):
+        lines.append("| " + " | ".join(row) + " |")
+    for title, dimension in (
+        ("Dataset slices", "dataset"),
+        ("Tag slices", "tag"),
+        ("Diagnostic dataset slices", "diagnostic_dataset"),
+        ("Diagnostic tag slices", "diagnostic_tag"),
+    ):
+        lines.extend(
+            [
+                "",
+                f"## {title}",
+                "",
+                "| Target | Value | Suite | Samples | Normalized WER | Failure rate |",
+                "|---|---|---|---:|---:|---:|",
+            ]
+        )
+        for row in _slice_table_rows(summary, dimension=dimension):
+            lines.append("| " + " | ".join(row) + " |")
     lines.extend(
         [
             "",
@@ -5155,6 +5426,17 @@ def render_summary_markdown(summary: Mapping[str, object]) -> str:
     )
     for row in _eligibility_table_rows(summary):
         lines.append("| " + " | ".join(row) + " |")
+    lines.extend(
+        [
+            "",
+            "## Worst retained examples",
+            "",
+            ("| Target | Sample | Suite | Status | Strict WER | Normalized WER | Reference | Hypothesis |"),
+            "|---|---|---|---|---:|---:|---|---|",
+        ]
+    )
+    for row in _worst_example_table_rows(summary, markdown=True):
+        lines.append("| " + " | ".join(row) + " |")
     return "\n".join(lines) + "\n"
 
 
@@ -5182,11 +5464,62 @@ def render_summary_terminal(summary: Mapping[str, object]) -> str:
         "target | provider | model",
     ]
     lines.extend(" | ".join(row) for row in _target_table_rows(summary))
-    lines.append(
-        "target | suite | samples | strict WER | strict CER | normalized WER | normalized CER | failure | exact"
+    lines.append("target | suite | samples | success rate | empty rate | failure rate | error rate | exact match")
+    lines.extend(
+        " | ".join(row)
+        for row in _quality_status_table_rows(
+            summary,
+            section="primary",
+        )
     )
-    for row in _summary_table_rows(summary):
-        lines.append(" | ".join(row))
+    lines.append("target | suite | metric | pooled | mean | p50 | p90 | p95 | p99")
+    lines.extend(
+        " | ".join(row)
+        for row in _quality_distribution_table_rows(
+            summary,
+            section="primary",
+        )
+    )
+    lines.extend(
+        [
+            "Diagnostic-only aggregates:",
+            "target | suite | samples | success rate | empty rate | failure rate | error rate | exact match",
+        ]
+    )
+    lines.extend(
+        " | ".join(row)
+        for row in _quality_status_table_rows(
+            summary,
+            section="diagnostic",
+        )
+    )
+    lines.append("target | suite | metric | pooled | mean | p50 | p90 | p95 | p99")
+    lines.extend(
+        " | ".join(row)
+        for row in _quality_distribution_table_rows(
+            summary,
+            section="diagnostic",
+        )
+    )
+    for title, dimension in (
+        ("Dataset slices", "dataset"),
+        ("Tag slices", "tag"),
+        ("Diagnostic dataset slices", "diagnostic_dataset"),
+        ("Diagnostic tag slices", "diagnostic_tag"),
+    ):
+        lines.extend(
+            [
+                f"{title}:",
+                "target | value | suite | samples | normalized WER | failure rate",
+            ]
+        )
+        lines.extend(
+            " | ".join(row)
+            for row in _slice_table_rows(
+                summary,
+                dimension=dimension,
+            )
+        )
     lines.extend(
         [
             "Warm performance:",
@@ -5218,6 +5551,19 @@ def render_summary_terminal(summary: Mapping[str, object]) -> str:
         ]
     )
     lines.extend(" | ".join(row) for row in _eligibility_table_rows(summary))
+    lines.extend(
+        [
+            "Worst retained examples:",
+            ("target | sample | suite | status | strict WER | normalized WER | reference | hypothesis"),
+        ]
+    )
+    lines.extend(
+        " | ".join(row)
+        for row in _worst_example_table_rows(
+            summary,
+            markdown=False,
+        )
+    )
     return "\n".join(lines) + "\n"
 
 
@@ -5509,6 +5855,14 @@ def _aggregate_summary_samples(
         "slices": {
             "dataset": _slice_quality_aggregates(primary, dimension="dataset"),
             "tag": _slice_quality_aggregates(primary, dimension="tag"),
+            "diagnostic_dataset": _slice_quality_aggregates(
+                diagnostic,
+                dimension="dataset",
+            ),
+            "diagnostic_tag": _slice_quality_aggregates(
+                diagnostic,
+                dimension="tag",
+            ),
             "actual_backend": _slice_quality_aggregates(
                 primary,
                 dimension="actual_backend",
@@ -5883,6 +6237,16 @@ def _actual_execution_signatures(
     return signatures
 
 
+def _target_has_execution_mismatch(
+    summary: Mapping[str, object],
+    target_id: str,
+) -> bool:
+    """Return whether any retained result for one target mismatched its plan."""
+    return any(
+        sample["target_id"] == target_id and bool(sample["execution_mismatch_reasons"]) for sample in summary["samples"]
+    )
+
+
 def _target_identity_resolved(target: Mapping[str, object]) -> bool:
     """Return whether every declared route has immutable resolved identity."""
     routes = target["descriptor"].get("routes")
@@ -6212,6 +6576,14 @@ def compare_summaries(
             and len(candidate_signatures) == 1
             and baseline_signatures == candidate_signatures
             and "unavailable" not in baseline_signatures
+            and not _target_has_execution_mismatch(
+                before,
+                baseline_target_id,
+            )
+            and not _target_has_execution_mismatch(
+                after,
+                candidate_target_id,
+            )
         )
         before_suites = before["primary"]["targets"].get(
             baseline_target_id,
