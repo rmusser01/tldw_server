@@ -14,6 +14,7 @@ import re
 import subprocess  # nosec B404
 import sys
 import tempfile
+import time
 import unicodedata
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
@@ -282,12 +283,56 @@ class WorkerSettings:
 
     run_id: str
     results_path: str
+    manifest_hash: str
     normalization_profile: str
     cold_probe_sample_id: str
     warm_repetitions: int
     timing_sample_ids: tuple[str, ...]
     text_retention: str
     retry_errors: bool
+    worker_attempt_id: int
+    audio_paths: tuple[str, ...] = dataclass_field(
+        repr=False,
+    )
+
+    def __post_init__(self) -> None:
+        """Reject invalid or mutable worker inputs before spawning."""
+        _require_stable_id(self.run_id, "<worker>", "run_id")
+        _require_stable_id(
+            self.cold_probe_sample_id,
+            "<worker>",
+            "cold_probe_sample_id",
+        )
+        if _SHA256_V1.fullmatch(self.manifest_hash) is None:
+            raise ValueError("worker manifest_hash must be a lower-case SHA-256")
+        if self.normalization_profile not in _KNOWN_NORMALIZATION_PROFILES:
+            raise ValueError("worker normalization profile is unsupported")
+        if (
+            isinstance(self.warm_repetitions, bool)
+            or not isinstance(self.warm_repetitions, int)
+            or self.warm_repetitions < 1
+        ):
+            raise ValueError("worker warm repetitions must be positive")
+        if not isinstance(self.timing_sample_ids, tuple) or len(set(self.timing_sample_ids)) != len(
+            self.timing_sample_ids
+        ):
+            raise ValueError("worker timing sample IDs must be a unique tuple")
+        for sample_id in self.timing_sample_ids:
+            _require_stable_id(sample_id, "<worker>", "timing_sample_ids")
+        if self.text_retention not in {"full", "errors-only", "none"}:
+            raise ValueError("worker text retention mode is unsupported")
+        if not isinstance(self.retry_errors, bool):
+            raise TypeError("worker retry_errors must be boolean")
+        if (
+            isinstance(self.worker_attempt_id, bool)
+            or not isinstance(self.worker_attempt_id, int)
+            or self.worker_attempt_id < 1
+        ):
+            raise ValueError("worker attempt ID must be positive")
+        if not isinstance(self.audio_paths, tuple) or not all(
+            isinstance(path, str) and Path(path).is_absolute() for path in self.audio_paths
+        ):
+            raise ValueError("worker audio paths must be absolute strings")
 
 
 def _require_text(text: str) -> str:
@@ -691,6 +736,7 @@ def _validate_source(
     audio_sha256 = canonical.pop("sha256")
     if _SHA256_V1.fullmatch(audio_sha256) is None:
         raise _manifest_error(sample_id, "source.sha256", "must be a lower-case SHA-256")
+    _require_stable_id(canonical["dataset"], sample_id, "source.dataset")
     source = tuple(sorted(canonical.items()))
     return source, audio_sha256, dict(sorted(value.items()))
 
@@ -1555,6 +1601,8 @@ def _validate_execution_mapping(
     actual: bool,
 ) -> None:
     """Validate one explicitly allowlisted execution summary."""
+    if actual and value is None:
+        return
     if not isinstance(value, dict):
         raise ValueError(f"result field {field} must be an object")
     allowed = _ACTUAL_EXECUTION_FIELDS if actual else {"provider", "model_label"}
@@ -1739,6 +1787,12 @@ def _validate_result_record(
     _validate_reason_list(result["eligibility_reasons"], "eligibility_reasons")
     if result["status"] not in RESULT_STATUSES:
         raise ValueError("unknown result status")
+    actual_unverified = "actual_execution_unverified" in result["eligibility_reasons"]
+    if result["actual_execution"] is None:
+        if result["status"] in {"ok", "empty"} or not actual_unverified:
+            raise ValueError("result actual execution is inconsistent with status")
+    elif actual_unverified:
+        raise ValueError("result actual execution is inconsistent with eligibility")
     reference = result["reference"]
     hypothesis = result["hypothesis"]
     if (reference is None) != (hypothesis is None):
@@ -1930,6 +1984,8 @@ def validate_inflight_record(
         "completion_key",
         "repetition",
         "result_attempt_id",
+        "measurement_role",
+        "timing_class",
     }
     if not isinstance(record, Mapping) or set(record) != fields:
         raise ValueError("in-flight record has missing or unknown fields")
@@ -1954,6 +2010,8 @@ def validate_inflight_record(
         raise ValueError("unknown in-flight operation role")
     repetition = validated["repetition"]
     result_attempt_id = validated["result_attempt_id"]
+    measurement_role = validated["measurement_role"]
+    timing_class = validated["timing_class"]
     if role == "result_call":
         _require_result_integer(repetition, field="repetition", minimum=0)
         _require_result_integer(
@@ -1961,11 +2019,17 @@ def validate_inflight_record(
             field="result_attempt_id",
             minimum=1,
         )
+        if measurement_role not in MEASUREMENT_ROLES:
+            raise ValueError("unknown in-flight measurement role")
+        if timing_class not in TIMING_CLASSES:
+            raise ValueError("unknown in-flight timing class")
     else:
         if repetition is not None:
             _require_result_integer(repetition, field="repetition", minimum=0)
         if result_attempt_id is not None:
             raise ValueError("rewarm probe cannot allocate a result attempt")
+        if measurement_role is not None or timing_class is not None:
+            raise ValueError("rewarm probe cannot have result classifications")
     return validated
 
 
@@ -1978,6 +2042,8 @@ def allocate_inflight(
     sample_id: str,
     completion_key: str,
     repetition: int | None,
+    measurement_role: str | None,
+    timing_class: str | None,
 ) -> tuple[dict[str, object], dict[str, object]]:
     """Allocate coordinator-owned monotonic IDs for one adapter operation."""
     if not isinstance(run_metadata, Mapping):
@@ -2005,6 +2071,8 @@ def allocate_inflight(
             "completion_key": completion_key,
             "repetition": repetition,
             "result_attempt_id": result_attempt_id,
+            "measurement_role": measurement_role,
+            "timing_class": timing_class,
         }
     )
     updated = dict(run_metadata)
@@ -2298,9 +2366,12 @@ def _slice_quality_aggregates(
             values = [str(tag) for tag in record["tags"]]
         elif dimension == "actual_backend":
             execution = record["actual_execution"]
-            if not isinstance(execution, Mapping):
+            if execution is None:
+                values = ["unavailable"]
+            elif not isinstance(execution, Mapping):
                 raise ValueError("validated actual execution is not an object")
-            values = [str(execution["backend"])]
+            else:
+                values = [str(execution["backend"])]
         else:
             values = [str(record[dimension])]
         for value in values:
@@ -2402,6 +2473,584 @@ def _cold_first_observations(
             ),
         }
     return {target_id: cold[target_id] for target_id in sorted(cold)}
+
+
+def _verify_worker_target(prepared_target: PreparedTarget) -> None:
+    """Rebuild and compare the exact safe execution contract in the child."""
+    if not isinstance(prepared_target, PreparedTarget):
+        raise ValueError("worker target is invalid")
+    try:
+        payload = json.loads(
+            prepared_target.execution_contract_json,
+            object_pairs_hook=_reject_duplicate_json_keys,
+        )
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise ValueError("worker execution contract is invalid") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("worker execution contract is invalid")
+    required = {
+        "descriptor",
+        "dependency_versions",
+        "git_commit",
+        "safe_target_settings",
+        "scorer_version",
+        "source_hashes",
+        "unicode_version",
+    }
+    if set(payload) != required:
+        raise ValueError("worker execution contract fields changed")
+    rebuilt_json, rebuilt_hash = build_execution_contract(
+        plan=prepared_target.plan,
+        git_commit=payload["git_commit"],
+        safe_target_settings=payload["safe_target_settings"],
+    )
+    if (
+        rebuilt_json != prepared_target.execution_contract_json
+        or rebuilt_hash != prepared_target.execution_contract_hash
+        or payload["descriptor"] != prepared_target.plan.descriptor.as_safe_dict()
+        or prepared_target.provider != prepared_target.plan.descriptor.requested_provider
+        or prepared_target.model_label != prepared_target.plan.descriptor.requested_model_label
+    ):
+        raise ValueError("worker execution contract mismatch")
+
+
+def _actual_matches_worker_plan(
+    actual: Mapping[str, object],
+    plan: SttBatchExecutionPlan,
+) -> bool:
+    """Return whether one canonical actual envelope matches an approved route."""
+    material_fields = (
+        "route_id",
+        "provider",
+        "model_label",
+        "artifact_id",
+        "backend",
+        "audio_egress",
+        "endpoint_id",
+        "source",
+        "device",
+        "compute_type",
+        "dtype",
+        "decoding_ids",
+        "transport",
+    )
+    for route in plan.descriptor.routes:
+        matches = True
+        for name in material_fields:
+            expected = getattr(route, name)
+            if hasattr(expected, "value"):
+                expected = expected.value
+            elif isinstance(expected, tuple):
+                expected = list(expected)
+            if expected is not None and actual[name] != expected:
+                matches = False
+                break
+        if matches:
+            return True
+    return False
+
+
+def _classify_worker_artifact(
+    artifact: object,
+    plan: SttBatchExecutionPlan,
+) -> dict[str, object]:
+    """Project one unrestricted adapter artifact into allowlisted result data."""
+    invalid = {
+        "status": "invalid_artifact",
+        "hypothesis": "",
+        "actual_execution": None,
+        "execution_mismatch_reasons": [],
+        "error": {
+            "type": "InvalidArtifact",
+            "message": "adapter returned an invalid normalized artifact",
+        },
+    }
+    if not isinstance(artifact, Mapping):
+        return invalid
+    text = artifact.get("text")
+    segments = artifact.get("segments")
+    actual_value = artifact.get("actual_execution")
+    if not isinstance(text, str) or not isinstance(segments, list) or not isinstance(actual_value, dict):
+        return invalid
+    try:
+        _validate_execution_mapping(
+            actual_value,
+            field="actual_execution",
+            actual=True,
+        )
+    except ValueError:
+        return invalid
+    actual = dict(actual_value)
+    if not _actual_matches_worker_plan(actual, plan):
+        return invalid
+    mismatch_value = artifact.get("execution_mismatch", [])
+    allowed_mismatches = {
+        "diarization",
+        "hotword_absence",
+        "hotwords",
+        "language",
+        "prompt_absence",
+        "task",
+        "word_timestamps",
+    }
+    if (
+        not isinstance(mismatch_value, list)
+        or len(mismatch_value) > 8
+        or not all(isinstance(reason, str) and reason in allowed_mismatches for reason in mismatch_value)
+        or mismatch_value != sorted(set(mismatch_value))
+    ):
+        return invalid
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_contract import (
+        is_planned_stt_sentinel,
+    )
+
+    if is_planned_stt_sentinel(text):
+        return {
+            "status": "adapter_error",
+            "hypothesis": "",
+            "actual_execution": actual,
+            "execution_mismatch_reasons": mismatch_value,
+            "error": {
+                "type": "TranscriptionSentinel",
+                "message": "adapter returned a transcription error sentinel",
+            },
+        }
+    if not normalize_strict_v1(text):
+        return {
+            "status": "empty",
+            "hypothesis": "",
+            "actual_execution": actual,
+            "execution_mismatch_reasons": mismatch_value,
+            "error": {
+                "type": "EmptyTranscription",
+                "message": "adapter returned an empty transcription",
+            },
+        }
+    return {
+        "status": "ok",
+        "hypothesis": text,
+        "actual_execution": actual,
+        "execution_mismatch_reasons": mismatch_value,
+        "error": None,
+    }
+
+
+def _receive_worker_ack(
+    connection: object,
+    *,
+    message_type: str,
+    operation_id: int | None = None,
+    completion: str | None = None,
+    requires_result: bool | None = None,
+    target_id: str | None = None,
+    worker_attempt_id: int | None = None,
+) -> dict[str, object]:
+    """Receive one exact coordinator acknowledgement or fail closed."""
+    message = connection.recv()
+    fields = {
+        "ready_ack": {
+            "type",
+            "target_id",
+            "worker_attempt_id",
+        },
+        "begin_ack": {
+            "type",
+            "operation_id",
+            "result_attempt_id",
+            "completion_key",
+        },
+        "adapter_done_ack": {"type", "operation_id"},
+        "committed_ack": {"type", "operation_id"},
+    }[message_type]
+    if not isinstance(message, dict) or set(message) != fields:
+        raise ValueError("worker received a malformed acknowledgement")
+    if message["type"] != message_type:
+        raise ValueError("worker received an unexpected acknowledgement")
+    if message_type == "ready_ack":
+        if (
+            message["target_id"] != target_id
+            or isinstance(message["worker_attempt_id"], bool)
+            or not isinstance(message["worker_attempt_id"], int)
+            or message["worker_attempt_id"] != worker_attempt_id
+        ):
+            raise ValueError("worker ready acknowledgement mismatch")
+        return message
+    acknowledged_operation = message["operation_id"]
+    if (
+        isinstance(acknowledged_operation, bool)
+        or not isinstance(acknowledged_operation, int)
+        or acknowledged_operation < 1
+        or (operation_id is not None and acknowledged_operation != operation_id)
+    ):
+        raise ValueError("worker acknowledgement operation mismatch")
+    if message_type == "begin_ack":
+        if message["completion_key"] != completion:
+            raise ValueError("worker acknowledgement completion mismatch")
+        result_attempt_id = message["result_attempt_id"]
+        if requires_result:
+            if isinstance(result_attempt_id, bool) or not isinstance(result_attempt_id, int) or result_attempt_id < 1:
+                raise ValueError("worker acknowledgement attempt is invalid")
+        elif result_attempt_id is not None:
+            raise ValueError("rewarm acknowledgement cannot allocate a result")
+    return message
+
+
+def _worker_result_record(
+    *,
+    prepared_target: PreparedTarget,
+    settings: WorkerSettings,
+    sample: ManifestSample,
+    repetition: int,
+    result_attempt_id: int,
+    measurement_role: str,
+    timing_class: str,
+    adapter_nanoseconds: int,
+    classified: Mapping[str, object],
+) -> dict[str, object]:
+    """Build one complete deterministic record after adapter acknowledgement."""
+    status = str(classified["status"])
+    hypothesis = str(classified["hypothesis"])
+    score = score_result_text(
+        sample.reference,
+        hypothesis,
+        status=status,
+        normalization_profile=sample.normalization_profile,
+    )
+    retained_reference, retained_hypothesis = retain_text(
+        mode=settings.text_retention,
+        status=status,
+        reference=sample.reference,
+        hypothesis=hypothesis,
+        score=score,
+    )
+    mismatch_reasons = list(classified["execution_mismatch_reasons"])
+    eligibility_reasons = list(mismatch_reasons)
+    actual_execution = classified["actual_execution"]
+    if actual_execution is None:
+        eligibility_reasons.append("actual_execution_unverified")
+    elif isinstance(actual_execution, Mapping):
+        actual_route_id = actual_execution["route_id"]
+        actual_route = next(
+            route for route in prepared_target.plan.descriptor.routes if route.route_id == actual_route_id
+        )
+        if not actual_route.identity_resolved:
+            eligibility_reasons.append("identity_unresolved")
+    rtf, throughput, eligibility_reasons = performance_fields(
+        adapter_nanoseconds,
+        sample.measured_duration_seconds,
+        eligibility_reasons=eligibility_reasons,
+    )
+    dataset = dict(sample.source).get("dataset")
+    score_fields = _score_as_result_fields(score)
+    return {
+        "schema_version": RESULT_SCHEMA_VERSION,
+        "run_id": settings.run_id,
+        "target_id": prepared_target.target_id,
+        "completion_key": completion_key(
+            settings.manifest_hash,
+            prepared_target.target_id,
+            prepared_target.execution_contract_hash,
+            sample.sample_id,
+            repetition,
+        ),
+        "sample_id": sample.sample_id,
+        "repetition": repetition,
+        "attempt_id": result_attempt_id,
+        "worker_attempt_id": settings.worker_attempt_id,
+        "measurement_role": measurement_role,
+        "timing_class": timing_class,
+        "suite": sample.suite,
+        "suite_visibility": sample.suite_visibility,
+        "dataset": dataset,
+        "tags": list(sample.tags),
+        "diagnostic_only": sample.diagnostic_only,
+        "requested_execution": {
+            "provider": prepared_target.provider,
+            "model_label": prepared_target.model_label,
+        },
+        "actual_execution": classified["actual_execution"],
+        "execution_mismatch_reasons": mismatch_reasons,
+        "eligibility_reasons": eligibility_reasons,
+        "status": status,
+        "reference": retained_reference,
+        "hypothesis": retained_hypothesis,
+        "scorer_version": SCORER_VERSION,
+        "strict_profile": STRICT_PROFILE,
+        "normalization_profile": sample.normalization_profile,
+        **score_fields,
+        "adapter_nanoseconds": adapter_nanoseconds,
+        "audio_duration_seconds": sample.measured_duration_seconds,
+        "rtf": rtf,
+        "throughput": throughput,
+        "resource_observations": None,
+        "error": classified["error"],
+    }
+
+
+def _worker_main(
+    connection: object,
+    prepared_target: PreparedTarget,
+    samples: tuple[ManifestSample, ...],
+    settings: WorkerSettings,
+) -> None:
+    """Execute one planned target through the coordinator acknowledgement pipe."""
+    for name in (
+        "HF_HUB_OFFLINE",
+        "TRANSFORMERS_OFFLINE",
+        "HF_DATASETS_OFFLINE",
+    ):
+        os.environ[name] = "1"
+    try:
+        if (
+            not isinstance(settings, WorkerSettings)
+            or not isinstance(samples, tuple)
+            or not samples
+            or not all(isinstance(sample, ManifestSample) for sample in samples)
+            or len(settings.audio_paths) != len(samples)
+            or len({sample.sample_id for sample in samples}) != len(samples)
+            or settings.cold_probe_sample_id not in {sample.sample_id for sample in samples}
+            or not set(settings.timing_sample_ids) <= {sample.sample_id for sample in samples}
+        ):
+            raise ValueError("worker sample settings are invalid")
+        _verify_worker_target(prepared_target)
+        history, truncated = load_result_history(
+            Path(settings.results_path),
+        )
+        if truncated:
+            raise ValueError("worker result history is truncated")
+        setup_started = time.monotonic_ns()
+        factory = _resolve_adapter_factory(
+            prepared_target.adapter_factory_path,
+        )
+        adapter = factory(prepared_target.provider)
+        adapter_name = getattr(getattr(adapter, "name", None), "value", None)
+        if adapter_name is None:
+            adapter_name = getattr(adapter, "name", None)
+        if adapter_name != prepared_target.provider or not callable(getattr(adapter, "transcribe_batch", None)):
+            raise ValueError("worker adapter does not match prepared target")
+        setup_nanoseconds = time.monotonic_ns() - setup_started
+    except (
+        AttributeError,
+        ImportError,
+        KeyError,
+        LookupError,
+        OSError,
+        RuntimeError,
+        TypeError,
+        ValueError,
+    ) as exc:
+        error_type = sanitize_error(exc)["type"]
+        connection.send(
+            {
+                "type": "ready",
+                "target_id": getattr(
+                    prepared_target,
+                    "target_id",
+                    "target-invalid",
+                ),
+                "worker_attempt_id": getattr(
+                    settings,
+                    "worker_attempt_id",
+                    1,
+                ),
+                "setup_nanoseconds": 0,
+                "status": "error",
+                "error": {
+                    "type": error_type,
+                    "message": "worker setup failed",
+                },
+            }
+        )
+        connection.close()
+        return
+
+    connection.send(
+        {
+            "type": "ready",
+            "target_id": prepared_target.target_id,
+            "worker_attempt_id": settings.worker_attempt_id,
+            "setup_nanoseconds": setup_nanoseconds,
+            "status": "ok",
+            "error": None,
+        }
+    )
+    _receive_worker_ack(
+        connection,
+        message_type="ready_ack",
+        target_id=prepared_target.target_id,
+        worker_attempt_id=settings.worker_attempt_id,
+    )
+    active = reduce_attempts(history)
+    ordered = list(zip(samples, settings.audio_paths, strict=True))
+    probe_index = next(
+        index for index, (sample, _) in enumerate(ordered) if sample.sample_id == settings.cold_probe_sample_id
+    )
+    ordered.insert(0, ordered.pop(probe_index))
+
+    def run_operation(
+        sample: ManifestSample,
+        audio_path: str,
+        *,
+        repetition: int,
+        operation_role: str,
+        measurement_role: str | None,
+        timing_class: str | None,
+    ) -> str:
+        key = completion_key(
+            settings.manifest_hash,
+            prepared_target.target_id,
+            prepared_target.execution_contract_hash,
+            sample.sample_id,
+            repetition,
+        )
+        connection.send(
+            {
+                "type": "begin",
+                "target_id": prepared_target.target_id,
+                "worker_attempt_id": settings.worker_attempt_id,
+                "sample_id": sample.sample_id,
+                "completion_key": key,
+                "repetition": repetition,
+                "operation_role": operation_role,
+                "measurement_role": measurement_role,
+                "timing_class": timing_class,
+            }
+        )
+        begin_ack = _receive_worker_ack(
+            connection,
+            message_type="begin_ack",
+            completion=key,
+            requires_result=operation_role == "result_call",
+        )
+        operation_id = int(begin_ack["operation_id"])
+        started = time.perf_counter_ns()
+        try:
+            artifact = adapter.transcribe_batch(
+                audio_path,
+                model=prepared_target.plan.descriptor.requested_model_label,
+                language=prepared_target.plan.language,
+                task=prepared_target.plan.task,
+                word_timestamps=prepared_target.plan.word_timestamps,
+                prompt=prepared_target.plan.prompt,
+                hotwords=prepared_target.plan.hotwords,
+                execution_plan=prepared_target.plan,
+            )
+        except Exception as exc:  # noqa: BLE001 - provider boundary
+            stopped = time.perf_counter_ns()
+            classified: dict[str, object] = {
+                "status": "adapter_error",
+                "hypothesis": "",
+                "actual_execution": None,
+                "execution_mismatch_reasons": [],
+                "error": sanitize_error(exc),
+            }
+        else:
+            stopped = time.perf_counter_ns()
+            classified = _classify_worker_artifact(
+                artifact,
+                prepared_target.plan,
+            )
+        adapter_nanoseconds = stopped - started
+        status = str(classified["status"])
+        connection.send(
+            {
+                "type": "adapter_done",
+                "operation_id": operation_id,
+                "status": status,
+                "adapter_nanoseconds": adapter_nanoseconds,
+            }
+        )
+        _receive_worker_ack(
+            connection,
+            message_type="adapter_done_ack",
+            operation_id=operation_id,
+        )
+        result_attempt_id = begin_ack["result_attempt_id"]
+        if operation_role == "result_call":
+            if measurement_role is None or timing_class is None:
+                raise ValueError("result operation is missing measurement classification")
+            record = _worker_result_record(
+                prepared_target=prepared_target,
+                settings=settings,
+                sample=sample,
+                repetition=repetition,
+                result_attempt_id=int(result_attempt_id),
+                measurement_role=measurement_role,
+                timing_class=timing_class,
+                adapter_nanoseconds=adapter_nanoseconds,
+                classified=classified,
+            )
+            append_result_record(Path(settings.results_path), record)
+            active[key] = record
+        connection.send(
+            {
+                "type": "committed",
+                "operation_id": operation_id,
+                "completion_key": key,
+                "result_attempt_id": result_attempt_id,
+                "status": status,
+            }
+        )
+        _receive_worker_ack(
+            connection,
+            message_type="committed_ack",
+            operation_id=operation_id,
+        )
+        return status
+
+    probe, probe_path = ordered[0]
+    probe_key = completion_key(
+        settings.manifest_hash,
+        prepared_target.target_id,
+        prepared_target.execution_contract_hash,
+        probe.sample_id,
+        0,
+    )
+    probe_action = resume_action(
+        active.get(probe_key),
+        retry_errors=settings.retry_errors,
+    )
+    probe_role = "result_call" if probe_action in {"execute", "retry"} else "rewarm_probe"
+    probe_status = run_operation(
+        probe,
+        probe_path,
+        repetition=0,
+        operation_role=probe_role,
+        measurement_role=("accuracy" if probe_role == "result_call" else None),
+        timing_class=("cold_first" if probe_role == "result_call" else None),
+    )
+    warmed = probe_status == "ok"
+
+    for sample, audio_path in ordered[1:]:
+        repetitions = settings.warm_repetitions if sample.sample_id in settings.timing_sample_ids else 1
+        for repetition in range(repetitions):
+            key = completion_key(
+                settings.manifest_hash,
+                prepared_target.target_id,
+                prepared_target.execution_contract_hash,
+                sample.sample_id,
+                repetition,
+            )
+            if (
+                resume_action(
+                    active.get(key),
+                    retry_errors=settings.retry_errors,
+                )
+                == "skip"
+            ):
+                continue
+            timing_class = "warm" if warmed else "warmup_recovery"
+            status = run_operation(
+                sample,
+                audio_path,
+                repetition=repetition,
+                operation_role="result_call",
+                measurement_role=("accuracy" if repetition == 0 else "performance_repeat"),
+                timing_class=timing_class,
+            )
+            if status == "ok":
+                warmed = True
+    connection.close()
 
 
 def aggregate_results(

@@ -6,6 +6,7 @@ import copy
 import hashlib
 import json
 import math
+import multiprocessing
 import os
 import pickle
 import re
@@ -76,6 +77,85 @@ def _preflight_fake_factory(provider: str):
 
 
 _NOT_AN_ADAPTER_FACTORY = object()
+
+
+class _WorkerFakeAdapter:
+    """Spawn-safe adapter that exercises worker policy without real STT."""
+
+    def __init__(self, provider: str) -> None:
+        self.name = types.SimpleNamespace(value=provider)
+
+    def transcribe_batch(
+        self,
+        audio_path,
+        *,
+        model,
+        language,
+        task,
+        word_timestamps,
+        prompt,
+        hotwords,
+        execution_plan,
+        **_kwargs,
+    ):
+        assert all(
+            os.environ.get(name) == "1"
+            for name in (
+                "HF_HUB_OFFLINE",
+                "TRANSFORMERS_OFFLINE",
+                "HF_DATASETS_OFFLINE",
+            )
+        )
+        assert model == execution_plan.descriptor.requested_model_label
+        assert language == execution_plan.language
+        assert task == execution_plan.task
+        assert word_timestamps == execution_plan.word_timestamps
+        assert prompt == execution_plan.prompt
+        assert tuple(hotwords) == execution_plan.hotwords
+        name = Path(audio_path).name
+        if name.startswith("exception"):
+            raise RuntimeError("Authorization: Bearer sk-worker-secret /private/models/secret")
+        route = execution_plan.descriptor.primary_route
+        actual = SttActualExecution(
+            route_id=route.route_id,
+            provider=route.provider,
+            model_label=route.model_label,
+            artifact_id=route.artifact_id,
+            backend=route.backend,
+            audio_egress=route.audio_egress,
+            endpoint_id=route.endpoint_id,
+            source=route.source,
+            device=route.device,
+            compute_type=route.compute_type,
+            dtype=route.dtype,
+            decoding_ids=route.decoding_ids,
+            transport=route.transport,
+        ).as_safe_dict()
+        if name.startswith("malformed"):
+            return {"text": "hello world", "actual_execution": actual}
+        if name.startswith("sentinel"):
+            text = "[Error: Authorization: Bearer sk-worker-secret]"
+        elif name.startswith("empty"):
+            text = " \n "
+        else:
+            text = "hello world"
+        return {
+            "text": text,
+            "segments": [],
+            "actual_execution": actual,
+            "metadata": {
+                "authorization": "Bearer sk-worker-secret",
+                "url": "https://secret.invalid/audio",
+            },
+        }
+
+
+def _worker_fake_factory(provider: str):
+    if provider == "worker-broken":
+        raise RuntimeError("worker setup exposed /private/models/secret-model")
+    if not provider.startswith("worker"):
+        raise LookupError("unknown worker provider")
+    return _WorkerFakeAdapter(provider)
 
 
 def _manifest_record(
@@ -266,6 +346,21 @@ def test_manifest_rejects_lone_surrogate_text_with_field_error(
 
     assert "sample-1" in str(error.value)
     assert field in str(error.value)
+
+
+def test_manifest_rejects_dataset_name_that_cannot_form_a_result_slice(
+    tmp_path,
+):
+    manifest_path, _, record = _valid_manifest(tmp_path)
+    record["source"]["dataset"] = "Dataset Name"
+    _write_manifest(manifest_path, [record])
+
+    with pytest.raises(ValueError, match=r"source\.dataset"):
+        stt_bench.load_and_validate_manifest(
+            manifest_path,
+            tmp_path,
+            duration_probe=lambda _: 1.0,
+        )
 
 
 def test_manifest_rejects_declared_duration_outside_tolerance(tmp_path):
@@ -1622,6 +1717,8 @@ def _inflight_record(**overrides):
         ),
         "repetition": 0,
         "result_attempt_id": 4,
+        "measurement_role": "accuracy",
+        "timing_class": "warm",
     }
     record.update(overrides)
     return record
@@ -1635,10 +1732,22 @@ def _inflight_record(**overrides):
         {"result_attempt_id": None},
         {"completion_key": None},
         {"repetition": None},
+        {"measurement_role": None},
+        {"measurement_role": "unknown"},
+        {"timing_class": None},
+        {"timing_class": "unknown"},
         {"extra": "not-allowlisted"},
         {
             "operation_role": "rewarm_probe",
             "result_attempt_id": 4,
+            "measurement_role": None,
+            "timing_class": None,
+        },
+        {
+            "operation_role": "rewarm_probe",
+            "result_attempt_id": None,
+            "measurement_role": "accuracy",
+            "timing_class": None,
         },
     ],
 )
@@ -1662,12 +1771,16 @@ def test_inflight_rewarm_probe_requires_prior_key_and_allocates_no_result_attemp
         sample_id="sample-1",
         completion_key=_inflight_record()["completion_key"],
         repetition=None,
+        measurement_role=None,
+        timing_class=None,
     )
 
     assert updated["next_operation_id"] == 8
     assert updated["next_attempt_id"] == 11
     assert inflight["operation_id"] == 7
     assert inflight["result_attempt_id"] is None
+    assert inflight["measurement_role"] is None
+    assert inflight["timing_class"] is None
 
 
 def test_inflight_result_allocation_advances_both_global_counters_once():
@@ -1685,12 +1798,16 @@ def test_inflight_result_allocation_advances_both_global_counters_once():
         sample_id="sample-1",
         completion_key=_inflight_record()["completion_key"],
         repetition=0,
+        measurement_role="performance_repeat",
+        timing_class="warmup_recovery",
     )
 
     assert updated["next_operation_id"] == 8
     assert updated["next_attempt_id"] == 12
     assert inflight["operation_id"] == 7
     assert inflight["result_attempt_id"] == 11
+    assert inflight["measurement_role"] == "performance_repeat"
+    assert inflight["timing_class"] == "warmup_recovery"
 
 
 @pytest.mark.parametrize(
@@ -1752,6 +1869,8 @@ def test_inflight_recovery_never_appends_result_for_rewarm_probe():
             operation_role="rewarm_probe",
             repetition=None,
             result_attempt_id=None,
+            measurement_role=None,
+            timing_class=None,
         ),
         [],
         timed_out=True,
@@ -2291,6 +2410,59 @@ def test_persist_result_rejects_noncanonical_decoding_ids(
         stt_bench.append_result_record(tmp_path / "results.jsonl", record)
 
 
+def test_persist_result_allows_unverified_actual_execution_only_for_failure(
+    tmp_path,
+):
+    record = _result_record(status="adapter_error", hypothesis="")
+    record["actual_execution"] = None
+    record["eligibility_reasons"] = ["actual_execution_unverified"]
+
+    stt_bench.append_result_record(tmp_path / "results.jsonl", record)
+
+    loaded, truncated = stt_bench.load_result_history(tmp_path / "results.jsonl")
+    assert truncated is False
+    assert loaded[0]["actual_execution"] is None
+
+
+@pytest.mark.parametrize(
+    ("status", "reasons"),
+    [
+        ("ok", ["actual_execution_unverified"]),
+        ("adapter_error", []),
+    ],
+)
+def test_persist_result_rejects_inconsistent_unverified_actual_execution(
+    status,
+    reasons,
+    tmp_path,
+):
+    hypothesis = "hello world" if status == "ok" else ""
+    record = _result_record(status=status, hypothesis=hypothesis)
+    record["actual_execution"] = None
+    record["eligibility_reasons"] = reasons
+
+    with pytest.raises(ValueError, match="actual execution"):
+        stt_bench.append_result_record(tmp_path / "results.jsonl", record)
+
+
+def test_aggregate_groups_missing_actual_backend_as_unavailable():
+    record = _result_record(status="worker_crash", hypothesis="")
+    record["actual_execution"] = None
+    record["eligibility_reasons"] = ["actual_execution_unverified"]
+
+    summary = stt_bench.aggregate_results(
+        {
+            "schema_version": stt_bench.RUN_SCHEMA_VERSION,
+            "run_id": "run-1",
+            "cold_probe_sample_id": None,
+        },
+        {record["completion_key"]: record},
+    )
+
+    unavailable = summary["slices"]["actual_backend"]["target-1"]["unavailable"]
+    assert unavailable["public-english-v1"]["sample_count"] == 1
+
+
 def _planned_target(
     *,
     provider: str = "fake",
@@ -2403,18 +2575,22 @@ def test_prepared_target_and_worker_settings_are_frozen_pickleable_and_secret_sa
     settings = stt_bench.WorkerSettings(
         run_id="run-1",
         results_path="results.jsonl",
+        manifest_hash="c" * 64,
         normalization_profile="en-v1",
         cold_probe_sample_id="sample-1",
         warm_repetitions=1,
         timing_sample_ids=("sample-2",),
         text_retention="full",
         retry_errors=False,
+        worker_attempt_id=1,
+        audio_paths=("/private/audio/sample-1.wav",),
     )
 
     assert pickle.loads(pickle.dumps(target)) == target
     assert pickle.loads(pickle.dumps(settings)) == settings
     assert "/private/models/secret-model" not in repr(target)
     assert "tests:factory" not in repr(target)
+    assert "/private/audio" not in repr(settings)
     with pytest.raises(FrozenInstanceError):
         target.provider = "changed"
 
@@ -2758,3 +2934,446 @@ def test_preflight_targets_rejects_invalid_specs_and_neutral_fallbacks(
         )
 
     assert all(f"target {index}" in str(raised.value) for index in range(1, 5))
+
+
+def _worker_sample(
+    tmp_path: Path,
+    sample_id: str,
+    filename: str,
+) -> tuple[stt_bench.ManifestSample, str]:
+    audio_path = tmp_path / filename
+    audio_path.write_bytes(b"worker audio fixture")
+    return (
+        stt_bench.ManifestSample(
+            sample_id=sample_id,
+            audio_relative=f"untrusted/{filename}",
+            reference="hello world",
+            language="en",
+            normalization_profile=EN_PROFILE,
+            measured_duration_seconds=1.0,
+            profiles=("comparison",),
+            suite="public-english-v1",
+            suite_visibility="public",
+            annotation_profile="canonical-v1",
+            diagnostic_only=False,
+            source=(("dataset", "fixture"),),
+            tags=("read-speech",),
+            sha256=hashlib.sha256(audio_path.read_bytes()).hexdigest(),
+        ),
+        str(audio_path.resolve()),
+    )
+
+
+def _worker_target(provider: str = "worker-ok") -> stt_bench.PreparedTarget:
+    plan = _planned_target(
+        provider=provider,
+        model_label="worker-model",
+    )
+    contract_json, contract_hash = stt_bench.build_execution_contract(
+        plan=plan,
+        git_commit="a" * 40,
+        safe_target_settings={
+            "mode": "neutral-v1",
+            "task": "transcribe",
+            "language": "en",
+            "word_timestamps": False,
+            "diarization": False,
+            "prompt_present": False,
+            "hotword_count": 0,
+        },
+    )
+    return stt_bench.PreparedTarget(
+        target_id="target-worker",
+        provider=provider,
+        model_label="worker-model",
+        plan=plan,
+        adapter_factory_path=f"{__name__}:_worker_fake_factory",
+        execution_contract_json=contract_json,
+        execution_contract_hash=contract_hash,
+    )
+
+
+def _worker_settings(
+    tmp_path: Path,
+    samples,
+    audio_paths,
+    *,
+    worker_attempt_id=1,
+    warm_repetitions=1,
+    timing_sample_ids=(),
+):
+    return stt_bench.WorkerSettings(
+        run_id="run-worker",
+        results_path=str(tmp_path / "run" / "results.jsonl"),
+        manifest_hash="a" * 64,
+        normalization_profile=EN_PROFILE,
+        cold_probe_sample_id=samples[0].sample_id,
+        warm_repetitions=warm_repetitions,
+        timing_sample_ids=tuple(timing_sample_ids),
+        text_retention="full",
+        retry_errors=False,
+        worker_attempt_id=worker_attempt_id,
+        audio_paths=tuple(audio_paths),
+    )
+
+
+def _drive_spawned_worker(target, samples, settings, expected_operations, *, first_attempt_id=1):
+    context = multiprocessing.get_context("spawn")
+    parent_connection, child_connection = context.Pipe(duplex=True)
+    process = context.Process(
+        target=stt_bench._worker_main,
+        args=(child_connection, target, tuple(samples), settings),
+    )
+    process.start()
+    child_connection.close()
+    trace = []
+    operation_id = 1
+    attempt_id = first_attempt_id
+    committed = 0
+    try:
+        while committed < expected_operations:
+            assert parent_connection.poll(15), "spawned worker stopped responding"
+            message = parent_connection.recv()
+            trace.append(message)
+            if message["type"] == "ready":
+                assert set(message) == {
+                    "type",
+                    "target_id",
+                    "worker_attempt_id",
+                    "setup_nanoseconds",
+                    "status",
+                    "error",
+                }
+                assert message["status"] == "ok"
+                assert parent_connection.poll(0.05) is False
+                parent_connection.send(
+                    {
+                        "type": "ready_ack",
+                        "target_id": message["target_id"],
+                        "worker_attempt_id": message["worker_attempt_id"],
+                    }
+                )
+                continue
+            if message["type"] == "begin":
+                assert set(message) == {
+                    "type",
+                    "target_id",
+                    "worker_attempt_id",
+                    "sample_id",
+                    "completion_key",
+                    "repetition",
+                    "operation_role",
+                    "measurement_role",
+                    "timing_class",
+                }
+                result_attempt_id = attempt_id if message["operation_role"] == "result_call" else None
+                parent_connection.send(
+                    {
+                        "type": "begin_ack",
+                        "operation_id": operation_id,
+                        "result_attempt_id": result_attempt_id,
+                        "completion_key": message["completion_key"],
+                    }
+                )
+                if result_attempt_id is not None:
+                    attempt_id += 1
+                continue
+            if message["type"] == "adapter_done":
+                assert set(message) == {
+                    "type",
+                    "operation_id",
+                    "status",
+                    "adapter_nanoseconds",
+                }
+                parent_connection.send(
+                    {
+                        "type": "adapter_done_ack",
+                        "operation_id": message["operation_id"],
+                    }
+                )
+                continue
+            assert message["type"] == "committed"
+            assert set(message) == {
+                "type",
+                "operation_id",
+                "completion_key",
+                "result_attempt_id",
+                "status",
+            }
+            parent_connection.send(
+                {
+                    "type": "committed_ack",
+                    "operation_id": message["operation_id"],
+                }
+            )
+            operation_id += 1
+            committed += 1
+    finally:
+        process.join(15)
+        if process.is_alive():
+            process.terminate()
+            process.join(5)
+        parent_connection.close()
+    assert process.exitcode == 0
+    return trace
+
+
+def test_worker_spawn_uses_pinned_paths_and_writes_accuracy_and_performance_records(
+    tmp_path,
+    monkeypatch,
+):
+    for name in (
+        "HF_HUB_OFFLINE",
+        "TRANSFORMERS_OFFLINE",
+        "HF_DATASETS_OFFLINE",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    probe, probe_path = _worker_sample(tmp_path, "probe", "probe.wav")
+    sample, sample_path = _worker_sample(tmp_path, "sample-2", "sample.wav")
+    samples = (probe, sample)
+    settings = _worker_settings(
+        tmp_path,
+        samples,
+        (probe_path, sample_path),
+        warm_repetitions=2,
+        timing_sample_ids=("sample-2",),
+    )
+
+    trace = _drive_spawned_worker(
+        _worker_target(),
+        samples,
+        settings,
+        expected_operations=3,
+    )
+    records, truncated = stt_bench.load_result_history(Path(settings.results_path))
+
+    assert truncated is False
+    assert [
+        (
+            record["sample_id"],
+            record["repetition"],
+            record["measurement_role"],
+            record["timing_class"],
+            record["status"],
+        )
+        for record in records
+    ] == [
+        ("probe", 0, "accuracy", "cold_first", "ok"),
+        ("sample-2", 0, "accuracy", "warm", "ok"),
+        ("sample-2", 1, "performance_repeat", "warm", "ok"),
+    ]
+    assert all("identity_unresolved" in record["eligibility_reasons"] for record in records)
+    assert [message["operation_role"] for message in trace if message["type"] == "begin"] == [
+        "result_call",
+        "result_call",
+        "result_call",
+    ]
+    assert all(
+        os.environ.get(name) is None
+        for name in (
+            "HF_HUB_OFFLINE",
+            "TRANSFORMERS_OFFLINE",
+            "HF_DATASETS_OFFLINE",
+        )
+    )
+    assert "sk-worker-secret" not in Path(settings.results_path).read_text()
+    assert "secret.invalid" not in Path(settings.results_path).read_text()
+
+
+def test_worker_failed_probe_recovers_before_reporting_warm(tmp_path):
+    probe, probe_path = _worker_sample(tmp_path, "probe", "exception-probe.wav")
+    recovery, recovery_path = _worker_sample(tmp_path, "recovery", "recovery.wav")
+    warm, warm_path = _worker_sample(tmp_path, "warm", "warm.wav")
+    samples = (probe, recovery, warm)
+    settings = _worker_settings(
+        tmp_path,
+        samples,
+        (probe_path, recovery_path, warm_path),
+    )
+
+    _drive_spawned_worker(
+        _worker_target(),
+        samples,
+        settings,
+        expected_operations=3,
+    )
+    records, _ = stt_bench.load_result_history(Path(settings.results_path))
+
+    assert [(record["status"], record["timing_class"]) for record in records] == [
+        ("adapter_error", "cold_first"),
+        ("ok", "warmup_recovery"),
+        ("ok", "warm"),
+    ]
+    assert "sk-worker-secret" not in json.dumps(records)
+    assert "/private/models" not in json.dumps(records)
+
+
+def test_resumed_worker_rewarms_probe_without_appending_a_second_result(tmp_path):
+    probe, probe_path = _worker_sample(tmp_path, "probe", "probe.wav")
+    samples = (probe,)
+    first_settings = _worker_settings(tmp_path, samples, (probe_path,))
+    target = _worker_target()
+    _drive_spawned_worker(target, samples, first_settings, expected_operations=1)
+    before = Path(first_settings.results_path).read_bytes()
+    second_settings = _worker_settings(
+        tmp_path,
+        samples,
+        (probe_path,),
+        worker_attempt_id=2,
+    )
+
+    trace = _drive_spawned_worker(
+        target,
+        samples,
+        second_settings,
+        expected_operations=1,
+        first_attempt_id=2,
+    )
+
+    assert Path(first_settings.results_path).read_bytes() == before
+    begin = next(message for message in trace if message["type"] == "begin")
+    committed = next(message for message in trace if message["type"] == "committed")
+    assert begin["operation_role"] == "rewarm_probe"
+    assert begin["measurement_role"] is None
+    assert begin["timing_class"] is None
+    assert committed["result_attempt_id"] is None
+
+
+def test_worker_artifact_classification_is_allowlisted_and_deterministic():
+    plan = _planned_target(provider="worker-ok", model_label="worker-model")
+    route = plan.descriptor.primary_route
+    actual = SttActualExecution(
+        route_id=route.route_id,
+        provider=route.provider,
+        model_label=route.model_label,
+        artifact_id=route.artifact_id,
+        backend=route.backend,
+        audio_egress=route.audio_egress,
+        endpoint_id=route.endpoint_id,
+        source=route.source,
+        device=route.device,
+        compute_type=route.compute_type,
+        dtype=route.dtype,
+        decoding_ids=route.decoding_ids,
+        transport=route.transport,
+    ).as_safe_dict()
+
+    ok = stt_bench._classify_worker_artifact(
+        {
+            "text": "hello world",
+            "segments": [],
+            "actual_execution": actual,
+            "metadata": {"authorization": "Bearer sk-worker-secret"},
+        },
+        plan,
+    )
+    empty = stt_bench._classify_worker_artifact(
+        {"text": " \n ", "segments": [], "actual_execution": actual},
+        plan,
+    )
+    sentinel = stt_bench._classify_worker_artifact(
+        {
+            "text": "[Error: Bearer sk-worker-secret]",
+            "segments": [],
+            "actual_execution": actual,
+        },
+        plan,
+    )
+    malformed = stt_bench._classify_worker_artifact(
+        {"text": "hello world", "actual_execution": actual},
+        plan,
+    )
+
+    assert (ok["status"], ok["hypothesis"]) == ("ok", "hello world")
+    assert (empty["status"], empty["hypothesis"]) == ("empty", "")
+    assert (sentinel["status"], sentinel["hypothesis"]) == (
+        "adapter_error",
+        "",
+    )
+    assert (malformed["status"], malformed["hypothesis"]) == (
+        "invalid_artifact",
+        "",
+    )
+    assert "sk-worker-secret" not in json.dumps([ok, empty, sentinel, malformed])
+
+
+def test_worker_refuses_truncated_result_history_before_adapter_setup(tmp_path):
+    probe, probe_path = _worker_sample(tmp_path, "probe", "probe.wav")
+    settings = _worker_settings(tmp_path, (probe,), (probe_path,))
+    results_path = Path(settings.results_path)
+    results_path.parent.mkdir(mode=0o700)
+    results_path.write_bytes(b'{"schema_version":1')
+    context = multiprocessing.get_context("spawn")
+    parent_connection, child_connection = context.Pipe(duplex=True)
+    process = context.Process(
+        target=stt_bench._worker_main,
+        args=(child_connection, _worker_target(), (probe,), settings),
+    )
+    process.start()
+    child_connection.close()
+    try:
+        assert parent_connection.poll(15)
+        message = parent_connection.recv()
+    finally:
+        process.join(15)
+        if process.is_alive():
+            process.terminate()
+            process.join(5)
+        parent_connection.close()
+
+    assert process.exitcode == 0
+    assert message["type"] == "ready"
+    assert message["status"] == "error"
+    assert message["error"]["message"] == "worker setup failed"
+    assert results_path.read_bytes() == b'{"schema_version":1'
+
+
+def test_worker_ready_error_never_echoes_setup_exception_details(tmp_path):
+    probe, probe_path = _worker_sample(tmp_path, "probe", "probe.wav")
+    settings = _worker_settings(tmp_path, (probe,), (probe_path,))
+    context = multiprocessing.get_context("spawn")
+    parent_connection, child_connection = context.Pipe(duplex=True)
+    process = context.Process(
+        target=stt_bench._worker_main,
+        args=(
+            child_connection,
+            _worker_target("worker-broken"),
+            (probe,),
+            settings,
+        ),
+    )
+    process.start()
+    child_connection.close()
+    try:
+        assert parent_connection.poll(15)
+        message = parent_connection.recv()
+    finally:
+        process.join(15)
+        if process.is_alive():
+            process.terminate()
+            process.join(5)
+        parent_connection.close()
+
+    assert process.exitcode == 0
+    assert message["status"] == "error"
+    assert message["error"]["type"] == "RuntimeError"
+    assert message["error"]["message"] == "worker setup failed"
+    assert "secret-model" not in json.dumps(message)
+
+
+def test_worker_ready_ack_rejects_boolean_attempt_identity():
+    connection = types.SimpleNamespace(
+        recv=lambda: {
+            "type": "ready_ack",
+            "target_id": "target-worker",
+            "worker_attempt_id": True,
+        }
+    )
+
+    with pytest.raises(ValueError, match="ready acknowledgement"):
+        stt_bench._receive_worker_ack(
+            connection,
+            message_type="ready_ack",
+            target_id="target-worker",
+            worker_attempt_id=1,
+        )
