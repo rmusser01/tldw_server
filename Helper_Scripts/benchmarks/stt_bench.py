@@ -196,14 +196,17 @@ def percentile_type7(values: Sequence[float], p: float) -> float | None:
     """Return the type-7 percentile of finite observations."""
     if isinstance(p, bool) or not isinstance(p, (int, float)):
         raise TypeError("percentile p must be numeric")
-    if not math.isfinite(p) or not 0.0 <= p <= 1.0:
+    if not 0.0 <= p <= 1.0 or not math.isfinite(p):
         raise ValueError("percentile p must be finite and within [0, 1]")
 
     finite_values: list[float] = []
     for value in values:
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             raise TypeError("percentile observations must be numeric")
-        numeric_value = float(value)
+        try:
+            numeric_value = float(value)
+        except OverflowError as exc:
+            raise ValueError("percentile observations must be finite") from exc
         if not math.isfinite(numeric_value):
             raise ValueError("percentile observations must be finite")
         finite_values.append(numeric_value)

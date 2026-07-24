@@ -17,7 +17,7 @@ from Helper_Scripts.benchmarks.stt_bench import (
     percentile_type7,
     score_transcript,
 )
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 
@@ -192,6 +192,16 @@ def test_percentile_type7_rejects_non_finite_observations(values):
         percentile_type7(values, 0.5)
 
 
+def test_percentile_type7_rejects_out_of_range_huge_percentile():
+    with pytest.raises(ValueError):
+        percentile_type7([1.0], 10**400)
+
+
+def test_percentile_type7_rejects_unrepresentable_huge_observation():
+    with pytest.raises(ValueError, match="finite"):
+        percentile_type7([10**400], 0.5)
+
+
 @pytest.mark.parametrize(
     ("values", "p"),
     [([True], 0.5), (["1.0"], 0.5), ([1.0], True), ([1.0], "0.5")],
@@ -202,6 +212,7 @@ def test_percentile_type7_rejects_boolean_and_non_numeric_inputs(values, p):
 
 
 @pytest.mark.property
+@settings(max_examples=100, deadline=None)
 @given(text=st.text(max_size=80))
 def test_normalize_profiles_are_idempotent(text):
     for normalizer in (normalize_exact_text, normalize_strict_v1, normalize_en_v1):
@@ -210,12 +221,14 @@ def test_normalize_profiles_are_idempotent(text):
 
 
 @pytest.mark.property
+@settings(max_examples=100, deadline=None)
 @given(units=st.lists(st.sampled_from(["", "a", "b", "é", "1"]), max_size=12))
 def test_score_edit_counts_identity(units):
     assert edit_counts(units, units) == EditCounts(0, 0, 0, len(units))
 
 
 @pytest.mark.property
+@settings(max_examples=100, deadline=None)
 @given(
     reference=st.text(max_size=24),
     hypothesis=st.text(max_size=24),
@@ -227,6 +240,7 @@ def test_score_transcript_is_deterministic(reference, hypothesis):
 
 
 @pytest.mark.property
+@settings(max_examples=100, deadline=None)
 @given(
     reference=st.lists(st.sampled_from(["", "a", "b", "é", "1"]), max_size=12),
     hypothesis=st.lists(st.sampled_from(["", "a", "b", "é", "1"]), max_size=12),
@@ -243,6 +257,7 @@ def test_score_edit_counts_are_non_negative_and_length_consistent(reference, hyp
 
 
 @pytest.mark.property
+@settings(max_examples=100, deadline=None)
 @given(
     pairs=st.lists(
         st.tuples(
