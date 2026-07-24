@@ -4,6 +4,7 @@ import asyncio
 
 import pytest
 
+from tldw_Server_API.app.core.Embeddings import orchestrator as orchestrator_module
 from tldw_Server_API.app.core.Embeddings.orchestrator import (
     EmbeddingExecutionResult,
     EmbeddingExecutorOutput,
@@ -154,21 +155,29 @@ def _orchestrator(
     *,
     cache: RecordingCache | None = None,
     executor: RecordingExecutor | None = None,
+    cache_key_fn=None,
     settings_fallback_chain: dict[str, object] | None = None,
     settings_fallback_model_map: dict[str, object] | None = None,
     dimension_policy: str = "reduce",
+    backend_identity_resolver=None,
     provider_preflight=None,
     execution_path: str = "legacy",
 ) -> EmbeddingRequestOrchestrator:
     return EmbeddingRequestOrchestrator(
         count_tokens=_count_tokens,
         tokens_to_texts=_tokens_to_texts,
-        cache_key_fn=_cache_key,
+        cache_key_fn=_cache_key if cache_key_fn is None else cache_key_fn,
         cache=cache or RecordingCache(),
         executor=executor or RecordingExecutor(),
         settings_config={},
         max_tokens=100,
-        implemented_providers={"openai", "huggingface", "onnx", "local_api"},
+        implemented_providers={
+            "openai",
+            "cohere",
+            "huggingface",
+            "onnx",
+            "local_api",
+        },
         allowed_providers=None,
         allowed_models=None,
         enforce_policy=True,
@@ -176,7 +185,11 @@ def _orchestrator(
         settings_fallback_chain=settings_fallback_chain,
         settings_fallback_model_map=settings_fallback_model_map,
         dimension_policy=dimension_policy,
-        backend_identity_resolver=lambda provider, model: f"{provider}:{model}:backend",
+        backend_identity_resolver=(
+            backend_identity_resolver
+            if backend_identity_resolver is not None
+            else lambda provider, model: f"{provider}:{model}:backend"
+        ),
         provider_preflight=provider_preflight,
         execution_path=execution_path,  # type: ignore[arg-type]
     )
@@ -199,6 +212,58 @@ def test_prepare_normalizes_input_and_returns_token_totals_without_execution():
     assert cache.get_keys == []
     assert cache.set_calls == []
     assert executor.calls == []
+
+
+@pytest.mark.unit
+def test_prepare_orders_intent_normalization_policy_and_plan_identity(monkeypatch):
+    calls: list[str] = []
+    real_resolve_provider_model = orchestrator_module.resolve_provider_model
+    real_normalize_embedding_input = orchestrator_module.normalize_embedding_input
+    real_enforce_embedding_policy = orchestrator_module.enforce_embedding_policy
+
+    def resolve_provider_model_probe(*args, **kwargs):
+        calls.append("resolve_intent")
+        return real_resolve_provider_model(*args, **kwargs)
+
+    def normalize_embedding_input_probe(*args, **kwargs):
+        calls.append("normalize")
+        return real_normalize_embedding_input(*args, **kwargs)
+
+    def enforce_embedding_policy_probe(*args, **kwargs):
+        calls.append("resolve_policy")
+        return real_enforce_embedding_policy(*args, **kwargs)
+
+    def backend_identity_probe(provider: str, model: str) -> str:
+        calls.append("plan_identity")
+        return f"{provider}:{model}:backend"
+
+    monkeypatch.setattr(
+        orchestrator_module,
+        "resolve_provider_model",
+        resolve_provider_model_probe,
+    )
+    monkeypatch.setattr(
+        orchestrator_module,
+        "normalize_embedding_input",
+        normalize_embedding_input_probe,
+    )
+    monkeypatch.setattr(
+        orchestrator_module,
+        "enforce_embedding_policy",
+        enforce_embedding_policy_probe,
+    )
+    orchestrator = _orchestrator(
+        backend_identity_resolver=backend_identity_probe,
+    )
+
+    orchestrator.prepare("ordered preparation", _context())
+
+    assert calls == [
+        "resolve_intent",
+        "normalize",
+        "resolve_policy",
+        "plan_identity",
+    ]
 
 
 @pytest.mark.unit
@@ -581,6 +646,74 @@ async def test_fallback_execution_uses_retryable_execution_failures():
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_primary_preflight_failure_propagates_without_cache_or_fallback():
+    preflight_error = EmbeddingExecutionError(
+        "circuit_breaker_open",
+        "openai circuit open",
+        provider="openai",
+        model="text-embedding-3-small",
+        retryable=True,
+    )
+    preflight_calls: list[tuple[str, str]] = []
+    backend_identity_calls: list[tuple[str, str]] = []
+    cache_key_calls: list[tuple[str, str, str, int | None, str | None]] = []
+    cache = RecordingCache()
+    executor = RecordingExecutor(provider_vectors={"huggingface": [[0.5, 0.25]]})
+
+    async def provider_preflight(provider: str, model: str) -> None:
+        preflight_calls.append((provider, model))
+        raise preflight_error
+
+    def backend_identity_resolver(provider: str, model: str) -> str:
+        backend_identity_calls.append((provider, model))
+        return f"{provider}:{model}:backend"
+
+    def cache_key_probe(
+        text: str,
+        provider: str,
+        model: str,
+        dimensions: int | None = None,
+        backend_identity: str | None = None,
+    ) -> str:
+        cache_key_calls.append(
+            (text, provider, model, dimensions, backend_identity)
+        )
+        return _cache_key(text, provider, model, dimensions, backend_identity)
+
+    orchestrator = _orchestrator(
+        cache=cache,
+        executor=executor,
+        cache_key_fn=cache_key_probe,
+        backend_identity_resolver=backend_identity_resolver,
+        provider_preflight=provider_preflight,
+        settings_fallback_chain={"openai": ["huggingface"]},
+        settings_fallback_model_map={
+            "openai:text-embedding-3-small": {
+                "huggingface": "sentence-transformers/all-MiniLM-L6-v2"
+            }
+        },
+    )
+    prepared = orchestrator.prepare(
+        "preflight failure",
+        _context(model="text-embedding-3-small", provider="openai"),
+    )
+    assert backend_identity_calls == [("openai", "text-embedding-3-small")]
+    backend_identity_calls.clear()
+
+    with pytest.raises(EmbeddingExecutionError) as exc_info:
+        await orchestrator.execute(prepared)
+
+    assert exc_info.value is preflight_error
+    assert preflight_calls == [("openai", "text-embedding-3-small")]
+    assert backend_identity_calls == []
+    assert cache_key_calls == []
+    assert cache.get_keys == []
+    assert cache.set_calls == []
+    assert executor.calls == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_fallback_full_cache_hit_skips_fallback_executor_and_sets_adapter_origin():
     cache = RecordingCache(
         {
@@ -692,6 +825,169 @@ async def test_missing_credentials_for_non_requested_fallback_provider_is_skippe
             "model": "sentence-transformers/all-MiniLM-L6-v2",
             "dimensions": None,
         },
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_retryable_fallback_preflight_failure_continues_to_next_candidate():
+    openai_failure = EmbeddingProviderError(
+        "provider_unavailable",
+        "openai unavailable",
+        provider="openai",
+        model="text-embedding-3-small",
+        retryable=True,
+    )
+    events: list[tuple[str, str, str]] = []
+    preflight_calls: list[tuple[str, str]] = []
+
+    class EventRecordingCache(RecordingCache):
+        async def get(self, key: str) -> list[float] | None:
+            _, provider, model, _ = key.split("|", maxsplit=3)
+            events.append(("cache_get", provider, model))
+            return await super().get(key)
+
+        async def set(self, key: str, value: list[float]) -> object:
+            _, provider, model, _ = key.split("|", maxsplit=3)
+            events.append(("cache_set", provider, model))
+            return await super().set(key, value)
+
+    class EventRecordingExecutor(RecordingExecutor):
+        async def create(
+            self,
+            texts: list[str],
+            *,
+            provider: str,
+            model: str,
+            dimensions: int | None,
+        ) -> list[list[float]]:
+            events.append(("executor", provider, model))
+            try:
+                return await super().create(
+                    texts,
+                    provider=provider,
+                    model=model,
+                    dimensions=dimensions,
+                )
+            except EmbeddingProviderError:
+                events.append(("executor_error", provider, model))
+                raise
+
+    cache = EventRecordingCache()
+    executor = EventRecordingExecutor(
+        failures={"openai": openai_failure},
+        provider_vectors={"huggingface": [[0.5, 0.25]]},
+    )
+
+    async def provider_preflight(provider: str, model: str) -> None:
+        preflight_calls.append((provider, model))
+        events.append(("preflight", provider, model))
+        if provider == "cohere":
+            events.append(("preflight_error", provider, model))
+            raise EmbeddingExecutionError(
+                "circuit_breaker_open",
+                "cohere circuit open",
+                provider=provider,
+                model=model,
+                retryable=True,
+            )
+
+    def backend_identity_resolver(provider: str, model: str) -> str:
+        events.append(("identity", provider, model))
+        return f"{provider}:{model}:backend"
+
+    def cache_key_probe(
+        text: str,
+        provider: str,
+        model: str,
+        dimensions: int | None = None,
+        backend_identity: str | None = None,
+    ) -> str:
+        events.append(("cache_key", provider, model))
+        return _cache_key(text, provider, model, dimensions, backend_identity)
+
+    orchestrator = _orchestrator(
+        cache=cache,
+        executor=executor,
+        cache_key_fn=cache_key_probe,
+        backend_identity_resolver=backend_identity_resolver,
+        provider_preflight=provider_preflight,
+        settings_fallback_chain={"openai": ["cohere", "huggingface"]},
+        settings_fallback_model_map={
+            "openai:text-embedding-3-small": {
+                "cohere": "embed-english-v3.0",
+                "huggingface": "sentence-transformers/all-MiniLM-L6-v2",
+            }
+        },
+    )
+    prepared = orchestrator.prepare(
+        "fallback after circuit breaker",
+        _context(model="text-embedding-3-small", provider="openai"),
+    )
+    assert events == [("identity", "openai", "text-embedding-3-small")]
+    events.clear()
+
+    result = await orchestrator.execute(prepared)
+
+    assert result.provider == "huggingface"
+    assert result.vectors == [[0.5, 0.25]]
+    assert preflight_calls == [
+        ("openai", "text-embedding-3-small"),
+        ("cohere", "embed-english-v3.0"),
+        ("huggingface", "sentence-transformers/all-MiniLM-L6-v2"),
+    ]
+    assert events == [
+        ("preflight", "openai", "text-embedding-3-small"),
+        ("identity", "openai", "text-embedding-3-small"),
+        ("cache_key", "openai", "text-embedding-3-small"),
+        ("cache_get", "openai", "text-embedding-3-small"),
+        ("executor", "openai", "text-embedding-3-small"),
+        ("executor_error", "openai", "text-embedding-3-small"),
+        ("preflight", "cohere", "embed-english-v3.0"),
+        ("preflight_error", "cohere", "embed-english-v3.0"),
+        (
+            "preflight",
+            "huggingface",
+            "sentence-transformers/all-MiniLM-L6-v2",
+        ),
+        (
+            "identity",
+            "huggingface",
+            "sentence-transformers/all-MiniLM-L6-v2",
+        ),
+        (
+            "cache_key",
+            "huggingface",
+            "sentence-transformers/all-MiniLM-L6-v2",
+        ),
+        (
+            "cache_get",
+            "huggingface",
+            "sentence-transformers/all-MiniLM-L6-v2",
+        ),
+        (
+            "executor",
+            "huggingface",
+            "sentence-transformers/all-MiniLM-L6-v2",
+        ),
+        (
+            "cache_key",
+            "huggingface",
+            "sentence-transformers/all-MiniLM-L6-v2",
+        ),
+        (
+            "cache_set",
+            "huggingface",
+            "sentence-transformers/all-MiniLM-L6-v2",
+        ),
+    ]
+    assert not any(
+        action in {"cache_get", "cache_set"} and provider == "cohere"
+        for action, provider, _ in events
+    )
+    assert [call["provider"] for call in executor.calls] == [
+        "openai",
+        "huggingface",
     ]
 
 
