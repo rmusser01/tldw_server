@@ -9,8 +9,10 @@ import importlib
 import importlib.metadata
 import json
 import math
+import multiprocessing
 import os
 import re
+import stat
 import subprocess  # nosec B404
 import sys
 import tempfile
@@ -1429,6 +1431,218 @@ def preflight_targets(
     return tuple(prepared)
 
 
+_RUN_IDENTITY_FIELDS = (
+    "manifest_hash",
+    "selected_sample_ids",
+    "profile",
+    "mode",
+    "seed",
+    "cold_probe_sample_id",
+    "warm_repetitions",
+    "timing_sample_ids",
+    "text_retention",
+    "adapter_watchdog_seconds",
+    "target_matrix",
+    "environment",
+)
+_RUN_FIELDS = frozenset(
+    {
+        "schema_version",
+        "run_id",
+        "resume_identity_hash",
+        *_RUN_IDENTITY_FIELDS,
+        "next_operation_id",
+        "next_attempt_id",
+        "next_worker_attempt_id",
+        "worker_attempts",
+    }
+)
+_ENVIRONMENT_FIELDS = frozenset(
+    {
+        "python_version",
+        "unicode_version",
+        "os_name",
+        "os_release",
+        "architecture",
+        "logical_cores",
+        "physical_cores",
+        "ram_bytes",
+        "cpu_model",
+        "git_commit",
+        "git_dirty",
+        "ffprobe_version",
+        "accelerator",
+        "collection_methods",
+    }
+)
+_ENVIRONMENT_METHOD_FIELDS = frozenset(
+    {
+        "cores",
+        "ram",
+        "cpu",
+        "git",
+        "ffprobe",
+        "accelerator",
+    }
+)
+_TARGET_MATRIX_FIELDS = frozenset(
+    {
+        "target_id",
+        "provider",
+        "model_label",
+        "descriptor",
+        "execution_contract_hash",
+    }
+)
+_WORKER_ATTEMPT_FIELDS = frozenset(
+    {
+        "worker_attempt_id",
+        "target_id",
+        "status",
+        "spawn_to_ready_nanoseconds",
+        "setup_nanoseconds",
+        "total_nanoseconds",
+        "exit_code",
+        "rewarm_status",
+        "rewarm_nanoseconds",
+        "error",
+    }
+)
+
+
+def _validate_environment_fingerprint(
+    environment: Mapping[str, object],
+) -> dict[str, object]:
+    """Validate the bounded environment projection persisted with one run."""
+    if not isinstance(environment, Mapping) or set(environment) != _ENVIRONMENT_FIELDS:
+        raise ValueError("environment fingerprint has missing or unknown fields")
+    result = dict(environment)
+    for field in (
+        "python_version",
+        "unicode_version",
+        "os_name",
+        "os_release",
+        "architecture",
+        "cpu_model",
+        "ffprobe_version",
+        "accelerator",
+    ):
+        value = result[field]
+        if not isinstance(value, str) or not value or len(value) > 256 or "\n" in value:
+            raise ValueError(f"environment field {field} is invalid")
+    git_commit = result["git_commit"]
+    if not isinstance(git_commit, str) or _GIT_COMMIT_V1.fullmatch(git_commit) is None:
+        raise ValueError("environment git commit is invalid")
+    if result["git_dirty"] is not None and not isinstance(result["git_dirty"], bool):
+        raise ValueError("environment git dirty flag is invalid")
+    for field in ("logical_cores", "physical_cores", "ram_bytes"):
+        value = result[field]
+        if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value < 1):
+            raise ValueError(f"environment field {field} is invalid")
+    methods = result["collection_methods"]
+    if not isinstance(methods, Mapping) or set(methods) != _ENVIRONMENT_METHOD_FIELDS:
+        raise ValueError("environment collection methods are invalid")
+    for value in methods.values():
+        if not isinstance(value, str) or not value or len(value) > 128 or "\n" in value:
+            raise ValueError("environment collection method is invalid")
+    result["collection_methods"] = dict(methods)
+    return result
+
+
+def _prepared_target_matrix(
+    prepared_targets: Sequence[PreparedTarget],
+) -> list[dict[str, object]]:
+    """Project prepared targets into the non-secret run metadata matrix."""
+    if not prepared_targets:
+        raise ValueError("run metadata requires at least one target")
+    matrix: list[dict[str, object]] = []
+    seen: set[str] = set()
+    for target in prepared_targets:
+        _verify_worker_target(target)
+        if target.target_id in seen:
+            raise ValueError("run metadata target IDs must be unique")
+        seen.add(target.target_id)
+        contract = json.loads(
+            target.execution_contract_json,
+            object_pairs_hook=_reject_duplicate_json_keys,
+        )
+        matrix.append(
+            {
+                "target_id": target.target_id,
+                "provider": target.provider,
+                "model_label": target.model_label,
+                "descriptor": contract["descriptor"],
+                "execution_contract_hash": target.execution_contract_hash,
+            }
+        )
+    return matrix
+
+
+def _validate_target_matrix(
+    target_matrix: object,
+) -> list[dict[str, object]]:
+    """Validate the ordered, explicitly projected target matrix."""
+    if not isinstance(target_matrix, list) or not target_matrix:
+        raise ValueError("run target matrix must be a non-empty array")
+    validated: list[dict[str, object]] = []
+    seen: set[str] = set()
+    for target in target_matrix:
+        if not isinstance(target, dict) or set(target) != _TARGET_MATRIX_FIELDS:
+            raise ValueError("run target matrix entry has invalid fields")
+        _require_stable_id(target["target_id"], "<run>", "target_id")
+        target_id = str(target["target_id"])
+        if target_id in seen:
+            raise ValueError("run target matrix IDs must be unique")
+        seen.add(target_id)
+        provider = target["provider"]
+        model_label = target["model_label"]
+        if not isinstance(provider, str) or SERIALIZED_ID_V1.fullmatch(provider) is None:
+            raise ValueError("run target provider is invalid")
+        if not isinstance(model_label, str) or SAFE_MODEL_LABEL_V1.fullmatch(model_label) is None:
+            raise ValueError("run target model label is invalid")
+        contract_hash = target["execution_contract_hash"]
+        if not isinstance(contract_hash, str) or _SHA256_V1.fullmatch(contract_hash) is None:
+            raise ValueError("run execution contract hash is invalid")
+        descriptor = target["descriptor"]
+        if not isinstance(descriptor, dict) or "runtime_settings" in descriptor:
+            raise ValueError("run target descriptor is invalid")
+        try:
+            descriptor_json = json.dumps(
+                descriptor,
+                allow_nan=False,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+        except (TypeError, UnicodeEncodeError, ValueError) as exc:
+            raise ValueError("run target descriptor is invalid") from exc
+        if len(descriptor_json) > 131_072:
+            raise ValueError("run target descriptor is invalid")
+        validated.append(
+            {
+                "target_id": target_id,
+                "provider": provider,
+                "model_label": model_label,
+                "descriptor": json.loads(descriptor_json),
+                "execution_contract_hash": contract_hash,
+            }
+        )
+    return validated
+
+
+def _run_identity_hash(payload: Mapping[str, object]) -> str:
+    """Hash exactly the immutable resume identity fields."""
+    identity = {field: payload[field] for field in _RUN_IDENTITY_FIELDS}
+    encoded = json.dumps(
+        identity,
+        allow_nan=False,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def completion_key(
     manifest_hash: str,
     target_id: str,
@@ -1471,6 +1685,10 @@ def _ensure_owner_directory(path: Path) -> None:
         created = True
     except FileExistsError:
         created = False
+    if not created and path.is_symlink():
+        raise OSError("artifact parent must not be a symbolic link")
+    if not path.is_dir():
+        raise OSError("artifact parent must be a directory")
     if os.name != "posix":
         return
     if created:
@@ -1584,6 +1802,190 @@ def _require_result_text(
     if not isinstance(value, str) or (not allow_empty and not value) or len(value) > maximum:
         raise ValueError(f"result field {field} must be a bounded string")
     return _require_utf8_scalar_text(value, "<result>", field)
+
+
+def _validate_worker_attempts(value: object) -> list[dict[str, object]]:
+    """Validate bounded parent-owned worker-attempt observations."""
+    if not isinstance(value, list):
+        raise ValueError("worker attempts must be an array")
+    attempts: list[dict[str, object]] = []
+    previous = 0
+    for item in value:
+        if not isinstance(item, dict) or set(item) != _WORKER_ATTEMPT_FIELDS:
+            raise ValueError("worker attempt has missing or unknown fields")
+        attempt = dict(item)
+        attempt_id = _require_result_integer(
+            attempt["worker_attempt_id"],
+            field="worker_attempt_id",
+            minimum=1,
+        )
+        if attempt_id <= previous:
+            raise ValueError("worker attempt IDs must increase")
+        previous = attempt_id
+        _require_stable_id(attempt["target_id"], "<run>", "target_id")
+        if attempt["status"] not in {
+            "running",
+            "completed",
+            "setup_error",
+            "worker_crash",
+            "timeout",
+            "interrupted",
+            "protocol_error",
+        }:
+            raise ValueError("worker attempt status is invalid")
+        for field in (
+            "spawn_to_ready_nanoseconds",
+            "setup_nanoseconds",
+            "total_nanoseconds",
+            "rewarm_nanoseconds",
+        ):
+            number = attempt[field]
+            if number is not None:
+                _require_result_integer(number, field=field, minimum=0)
+        exit_code = attempt["exit_code"]
+        if exit_code is not None and (isinstance(exit_code, bool) or not isinstance(exit_code, int)):
+            raise ValueError("worker attempt exit code is invalid")
+        if attempt["rewarm_status"] is not None and attempt["rewarm_status"] not in RESULT_STATUSES:
+            raise ValueError("worker attempt rewarm status is invalid")
+        error = attempt["error"]
+        if error is not None:
+            if not isinstance(error, dict) or set(error) != {"type", "message"}:
+                raise ValueError("worker attempt error is invalid")
+            _require_result_text(
+                error["type"],
+                field="worker_attempt.error.type",
+                maximum=128,
+            )
+            _require_result_text(
+                error["message"],
+                field="worker_attempt.error.message",
+                maximum=512,
+            )
+        attempts.append(attempt)
+    return attempts
+
+
+def validate_run_metadata(
+    metadata: Mapping[str, object],
+) -> dict[str, object]:
+    """Validate one complete run artifact and its immutable identity hash."""
+    if not isinstance(metadata, Mapping) or set(metadata) != _RUN_FIELDS:
+        raise ValueError("run metadata has missing or unknown fields")
+    result = dict(metadata)
+    if result["schema_version"] != RUN_SCHEMA_VERSION:
+        raise ValueError("unsupported run schema version")
+    _require_stable_id(result["run_id"], "<run>", "run_id")
+    manifest_hash = result["manifest_hash"]
+    if not isinstance(manifest_hash, str) or _SHA256_V1.fullmatch(manifest_hash) is None:
+        raise ValueError("run manifest hash is invalid")
+    selected = result["selected_sample_ids"]
+    timing = result["timing_sample_ids"]
+    if (
+        not isinstance(selected, list)
+        or not selected
+        or len(selected) != len(set(selected))
+        or not isinstance(timing, list)
+        or len(timing) != len(set(timing))
+    ):
+        raise ValueError("run sample IDs must be unique arrays")
+    for sample_id in (*selected, *timing):
+        _require_stable_id(sample_id, "<run>", "sample_id")
+    _require_stable_id(
+        result["cold_probe_sample_id"],
+        "<run>",
+        "cold_probe_sample_id",
+    )
+    if result["cold_probe_sample_id"] not in selected or not set(timing) <= set(selected):
+        raise ValueError("run probe or timing sample selection is invalid")
+    if result["profile"] not in _KNOWN_SAMPLE_PROFILES:
+        raise ValueError("run profile is invalid")
+    if result["mode"] not in {"neutral-v1", "production-v1"}:
+        raise ValueError("run mode is invalid")
+    _require_result_integer(result["seed"], field="seed", minimum=0)
+    _require_result_integer(
+        result["warm_repetitions"],
+        field="warm_repetitions",
+        minimum=1,
+    )
+    if result["text_retention"] not in {"full", "errors-only", "none"}:
+        raise ValueError("run text retention is invalid")
+    watchdog = result["adapter_watchdog_seconds"]
+    if watchdog is not None and (
+        isinstance(watchdog, bool)
+        or not isinstance(watchdog, (int, float))
+        or not math.isfinite(float(watchdog))
+        or float(watchdog) <= 0.0
+    ):
+        raise ValueError("run adapter watchdog is invalid")
+    result["target_matrix"] = _validate_target_matrix(result["target_matrix"])
+    result["environment"] = _validate_environment_fingerprint(result["environment"])
+    for field in (
+        "next_operation_id",
+        "next_attempt_id",
+        "next_worker_attempt_id",
+    ):
+        _require_result_integer(result[field], field=field, minimum=1)
+    result["worker_attempts"] = _validate_worker_attempts(result["worker_attempts"])
+    resume_hash = result["resume_identity_hash"]
+    if (
+        not isinstance(resume_hash, str)
+        or _SHA256_V1.fullmatch(resume_hash) is None
+        or resume_hash != _run_identity_hash(result)
+    ):
+        raise ValueError("run resume identity is inconsistent")
+    return result
+
+
+def build_run_metadata(
+    *,
+    run_id: str,
+    manifest_hash: str,
+    selected_sample_ids: Sequence[str],
+    profile: str,
+    mode: str,
+    seed: int,
+    cold_probe_sample_id: str,
+    warm_repetitions: int,
+    timing_sample_ids: Sequence[str],
+    text_retention: str,
+    adapter_watchdog_seconds: float | None,
+    prepared_targets: Sequence[PreparedTarget],
+    environment: Mapping[str, object],
+) -> dict[str, object]:
+    """Build deterministic, secret-safe metadata for a new benchmark run."""
+    payload: dict[str, object] = {
+        "schema_version": RUN_SCHEMA_VERSION,
+        "run_id": run_id,
+        "manifest_hash": manifest_hash,
+        "selected_sample_ids": list(selected_sample_ids),
+        "profile": profile,
+        "mode": mode,
+        "seed": seed,
+        "cold_probe_sample_id": cold_probe_sample_id,
+        "warm_repetitions": warm_repetitions,
+        "timing_sample_ids": list(timing_sample_ids),
+        "text_retention": text_retention,
+        "adapter_watchdog_seconds": adapter_watchdog_seconds,
+        "target_matrix": _prepared_target_matrix(prepared_targets),
+        "environment": _validate_environment_fingerprint(environment),
+        "next_operation_id": 1,
+        "next_attempt_id": 1,
+        "next_worker_attempt_id": 1,
+        "worker_attempts": [],
+    }
+    payload["resume_identity_hash"] = _run_identity_hash(payload)
+    return validate_run_metadata(payload)
+
+
+def assert_resume_compatible(
+    existing: Mapping[str, object],
+    expected: Mapping[str, object],
+) -> None:
+    """Reject an explicit resume whose immutable identity changed."""
+    current = validate_run_metadata(existing)
+    candidate = validate_run_metadata(expected)
+    if current["run_id"] != candidate["run_id"] or current["resume_identity_hash"] != candidate["resume_identity_hash"]:
+        raise ValueError("run is incompatible with requested resume settings")
 
 
 def _validate_reason_list(value: object, field: str) -> None:
@@ -1908,12 +2310,19 @@ def append_result_record(path: Path, record: Mapping[str, object]) -> None:
     encoded = _canonical_json_bytes(validated)
     destination = Path(path)
     _ensure_owner_directory(destination.parent)
-    descriptor = os.open(
-        destination,
-        os.O_APPEND | os.O_CREAT | os.O_WRONLY,
-        0o600,
-    )
+    try:
+        descriptor = os.open(
+            destination,
+            os.O_APPEND | os.O_CREAT | os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+        )
+    except OSError as exc:
+        if exc.errno == getattr(errno, "ELOOP", -1):
+            raise OSError("results path must not be a symbolic link") from exc
+        raise
     with os.fdopen(descriptor, "ab") as output:
+        if not stat.S_ISREG(os.fstat(output.fileno()).st_mode):
+            raise OSError("results path must be a regular file")
         if os.name == "posix":
             os.fchmod(output.fileno(), 0o600)
         output.write(encoded)
@@ -1922,13 +2331,10 @@ def append_result_record(path: Path, record: Mapping[str, object]) -> None:
     _fsync_directory(destination.parent)
 
 
-def load_result_history(path: Path) -> tuple[list[dict[str, object]], bool]:
-    """Load validated history and ignore only an unterminated final JSONL line."""
-    source = Path(path)
-    try:
-        content = source.read_bytes()
-    except FileNotFoundError:
-        return [], False
+def _decode_result_history(
+    content: bytes,
+) -> tuple[list[dict[str, object]], bool]:
+    """Validate result JSONL bytes, ignoring only an incomplete final line."""
     if not content:
         return [], False
     lines = content.splitlines(keepends=True)
@@ -1953,6 +2359,46 @@ def load_result_history(path: Path) -> tuple[list[dict[str, object]], bool]:
         previous_attempt = attempt_id
         records.append(validated)
     return records, truncated
+
+
+def load_result_history(path: Path) -> tuple[list[dict[str, object]], bool]:
+    """Load validated history and ignore only an unterminated final JSONL line."""
+    source = Path(path)
+    try:
+        content = source.read_bytes()
+    except FileNotFoundError:
+        return [], False
+    return _decode_result_history(content)
+
+
+def repair_result_history(path: Path) -> list[dict[str, object]]:
+    """Validate history and durably remove only an incomplete final line."""
+    source = Path(path)
+    flags = os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(source, flags)
+    except FileNotFoundError:
+        return []
+    except OSError as exc:
+        if exc.errno == getattr(errno, "ELOOP", -1):
+            raise OSError("results path must not be a symbolic link") from exc
+        raise
+    with os.fdopen(descriptor, "r+b") as artifact:
+        details = os.fstat(artifact.fileno())
+        if not stat.S_ISREG(details.st_mode):
+            raise OSError("results path must be a regular file")
+        content = artifact.read()
+        records, truncated = _decode_result_history(content)
+        if truncated:
+            artifact.seek(0)
+            artifact.truncate(content.rfind(b"\n") + 1)
+            artifact.flush()
+            os.fsync(artifact.fileno())
+        if os.name == "posix":
+            os.fchmod(artifact.fileno(), 0o600)
+    if truncated:
+        _fsync_directory(source.parent)
+    return records
 
 
 def reduce_attempts(
@@ -2704,7 +3150,7 @@ def _worker_result_record(
     result_attempt_id: int,
     measurement_role: str,
     timing_class: str,
-    adapter_nanoseconds: int,
+    adapter_nanoseconds: int | None,
     classified: Mapping[str, object],
 ) -> dict[str, object]:
     """Build one complete deterministic record after adapter acknowledgement."""
@@ -2924,6 +3370,8 @@ def _worker_main(
         )
         operation_id = int(begin_ack["operation_id"])
         started = time.perf_counter_ns()
+        artifact: object | None = None
+        adapter_exception: BaseException | None = None
         try:
             artifact = adapter.transcribe_batch(
                 audio_path,
@@ -2937,26 +3385,17 @@ def _worker_main(
             )
         except Exception as exc:  # noqa: BLE001 - provider boundary
             stopped = time.perf_counter_ns()
-            classified: dict[str, object] = {
-                "status": "adapter_error",
-                "hypothesis": "",
-                "actual_execution": None,
-                "execution_mismatch_reasons": [],
-                "error": sanitize_error(exc),
-            }
+            adapter_exception = exc
+            adapter_outcome = "raised"
         else:
             stopped = time.perf_counter_ns()
-            classified = _classify_worker_artifact(
-                artifact,
-                prepared_target.plan,
-            )
+            adapter_outcome = "returned"
         adapter_nanoseconds = stopped - started
-        status = str(classified["status"])
         connection.send(
             {
                 "type": "adapter_done",
                 "operation_id": operation_id,
-                "status": status,
+                "status": adapter_outcome,
                 "adapter_nanoseconds": adapter_nanoseconds,
             }
         )
@@ -2965,6 +3404,20 @@ def _worker_main(
             message_type="adapter_done_ack",
             operation_id=operation_id,
         )
+        if adapter_exception is not None:
+            classified: dict[str, object] = {
+                "status": "adapter_error",
+                "hypothesis": "",
+                "actual_execution": None,
+                "execution_mismatch_reasons": [],
+                "error": sanitize_error(adapter_exception),
+            }
+        else:
+            classified = _classify_worker_artifact(
+                artifact,
+                prepared_target.plan,
+            )
+        status = str(classified["status"])
         result_attempt_id = begin_ack["result_attempt_id"]
         if operation_role == "result_call":
             if measurement_role is None or timing_class is None:
@@ -3051,6 +3504,623 @@ def _worker_main(
             if status == "ok":
                 warmed = True
     connection.close()
+
+
+def _load_json_object(path: Path) -> dict[str, object]:
+    """Load one strict JSON object without following a symbolic link."""
+    source = Path(path)
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(source, flags)
+    except OSError as exc:
+        if exc.errno == getattr(errno, "ELOOP", -1):
+            raise OSError("artifact path must not be a symbolic link") from exc
+        raise
+    with os.fdopen(descriptor, "rb") as artifact:
+        if not stat.S_ISREG(os.fstat(artifact.fileno()).st_mode):
+            raise OSError("artifact path must be a regular file")
+        content = artifact.read()
+    try:
+        result = json.loads(
+            content.decode("utf-8"),
+            object_pairs_hook=_reject_duplicate_json_keys,
+        )
+    except (UnicodeError, json.JSONDecodeError, ValueError) as exc:
+        raise ValueError("artifact contains invalid JSON") from exc
+    if not isinstance(result, dict):
+        raise ValueError("artifact must contain a JSON object")
+    return result
+
+
+def _clear_inflight(path: Path) -> None:
+    """Durably remove the coordinator in-flight marker."""
+    destination = Path(path)
+    try:
+        if destination.is_symlink():
+            raise OSError("in-flight path must not be a symbolic link")
+        destination.unlink()
+    except FileNotFoundError:
+        return
+    _fsync_directory(destination.parent)
+
+
+def _coordinator_failure_record(
+    *,
+    prepared_target: PreparedTarget,
+    settings: WorkerSettings,
+    sample: ManifestSample,
+    inflight: Mapping[str, object],
+    status: str,
+) -> dict[str, object]:
+    """Build a scored empty-hypothesis result for an uncommitted call."""
+    active = validate_inflight_record(inflight)
+    if active["operation_role"] != "result_call" or status not in {
+        "worker_crash",
+        "timeout",
+        "interrupted",
+    }:
+        raise ValueError("coordinator failure cannot create this result")
+    measurement_role = active["measurement_role"]
+    timing_class = active["timing_class"]
+    result_attempt_id = active["result_attempt_id"]
+    if not isinstance(measurement_role, str) or not isinstance(timing_class, str):
+        raise ValueError("coordinator failure lacks result classifications")
+    if not isinstance(result_attempt_id, int):
+        raise ValueError("coordinator failure lacks a result attempt")
+    error_types = {
+        "worker_crash": "WorkerCrash",
+        "timeout": "AdapterTimeout",
+        "interrupted": "Interrupted",
+    }
+    return _worker_result_record(
+        prepared_target=prepared_target,
+        settings=settings,
+        sample=sample,
+        repetition=int(active["repetition"]),
+        result_attempt_id=result_attempt_id,
+        measurement_role=measurement_role,
+        timing_class=timing_class,
+        adapter_nanoseconds=None,
+        classified={
+            "status": status,
+            "hypothesis": "",
+            "actual_execution": None,
+            "execution_mismatch_reasons": [],
+            "error": {
+                "type": error_types[status],
+                "message": "worker did not durably commit an adapter result",
+            },
+        },
+    )
+
+
+def _new_worker_attempt(
+    worker_attempt_id: int,
+    target_id: str,
+) -> dict[str, object]:
+    """Return the fixed parent-owned worker-attempt envelope."""
+    return {
+        "worker_attempt_id": worker_attempt_id,
+        "target_id": target_id,
+        "status": "running",
+        "spawn_to_ready_nanoseconds": None,
+        "setup_nanoseconds": None,
+        "total_nanoseconds": None,
+        "exit_code": None,
+        "rewarm_status": None,
+        "rewarm_nanoseconds": None,
+        "error": None,
+    }
+
+
+def _validate_worker_message(
+    message: object,
+    *,
+    message_type: str,
+    fields: set[str],
+) -> dict[str, object]:
+    """Require one exact worker protocol message."""
+    if not isinstance(message, dict) or set(message) != fields:
+        raise ValueError("worker sent a malformed protocol message")
+    if message["type"] != message_type:
+        raise ValueError("worker sent an unexpected protocol message")
+    return message
+
+
+def _execute_target_attempt(
+    *,
+    run_directory: Path,
+    metadata: Mapping[str, object],
+    prepared_target: PreparedTarget,
+    samples: tuple[ManifestSample, ...],
+    audio_paths: tuple[str, ...],
+    retry_errors: bool,
+) -> dict[str, object]:
+    """Run one spawned target while the parent owns durable coordination."""
+    run_path = run_directory / "run.json"
+    results_path = run_directory / "results.jsonl"
+    inflight_path = run_directory / "inflight.json"
+    current = validate_run_metadata(metadata)
+    worker_attempt_id = int(current["next_worker_attempt_id"])
+    attempt = _new_worker_attempt(
+        worker_attempt_id,
+        prepared_target.target_id,
+    )
+    current["next_worker_attempt_id"] = worker_attempt_id + 1
+    current["worker_attempts"].append(attempt)
+    validate_run_metadata(current)
+    atomic_write_json(run_path, current)
+    settings = WorkerSettings(
+        run_id=str(current["run_id"]),
+        results_path=str(results_path.resolve()),
+        manifest_hash=str(current["manifest_hash"]),
+        normalization_profile=samples[0].normalization_profile,
+        cold_probe_sample_id=str(current["cold_probe_sample_id"]),
+        warm_repetitions=int(current["warm_repetitions"]),
+        timing_sample_ids=tuple(str(value) for value in current["timing_sample_ids"]),
+        text_retention=str(current["text_retention"]),
+        retry_errors=retry_errors,
+        worker_attempt_id=worker_attempt_id,
+        audio_paths=audio_paths,
+    )
+    sample_by_id = {sample.sample_id: sample for sample in samples}
+    context = multiprocessing.get_context("spawn")
+    parent_connection, child_connection = context.Pipe(duplex=True)
+    process = context.Process(
+        target=_worker_main,
+        args=(child_connection, prepared_target, samples, settings),
+    )
+    started = time.perf_counter_ns()
+    process.start()
+    child_connection.close()
+    ready_seen = False
+    setup_failed = False
+    active_inflight: dict[str, object] | None = None
+    adapter_deadline: float | None = None
+    adapter_done_seen = False
+    last_adapter_nanoseconds: int | None = None
+    failure_status: str | None = None
+    protocol_error: BaseException | None = None
+    interrupted = False
+    watchdog = current["adapter_watchdog_seconds"]
+    try:
+        while True:
+            if adapter_deadline is not None:
+                remaining = adapter_deadline - time.monotonic()
+                if remaining <= 0 and not parent_connection.poll(0):
+                    failure_status = "timeout"
+                    process.terminate()
+                    break
+                wait_seconds = max(0.0, min(0.05, remaining))
+            else:
+                wait_seconds = 0.05
+            try:
+                has_message = parent_connection.poll(wait_seconds)
+            except (OSError, EOFError):
+                has_message = False
+            if not has_message:
+                if not process.is_alive():
+                    try:
+                        if parent_connection.poll(0):
+                            has_message = True
+                        else:
+                            break
+                    except (OSError, EOFError):
+                        break
+                else:
+                    continue
+            if not has_message:
+                continue
+            try:
+                raw_message = parent_connection.recv()
+            except (EOFError, OSError):
+                break
+            if not isinstance(raw_message, dict):
+                raise ValueError("worker sent a malformed protocol message")
+            message_type = raw_message.get("type")
+            if message_type == "ready":
+                if ready_seen or active_inflight is not None:
+                    raise ValueError("worker sent ready out of sequence")
+                message = _validate_worker_message(
+                    raw_message,
+                    message_type="ready",
+                    fields={
+                        "type",
+                        "target_id",
+                        "worker_attempt_id",
+                        "setup_nanoseconds",
+                        "status",
+                        "error",
+                    },
+                )
+                setup_nanoseconds = message["setup_nanoseconds"]
+                if (
+                    message["target_id"] != prepared_target.target_id
+                    or message["worker_attempt_id"] != worker_attempt_id
+                    or isinstance(setup_nanoseconds, bool)
+                    or not isinstance(setup_nanoseconds, int)
+                    or setup_nanoseconds < 0
+                    or message["status"] not in {"ok", "error"}
+                ):
+                    raise ValueError("worker ready identity is invalid")
+                error = message["error"]
+                if message["status"] == "ok":
+                    if error is not None:
+                        raise ValueError("successful worker ready cannot have an error")
+                elif not isinstance(error, dict) or set(error) != {"type", "message"}:
+                    raise ValueError("failed worker ready must have a bounded error")
+                ready_seen = True
+                attempt["spawn_to_ready_nanoseconds"] = time.perf_counter_ns() - started
+                attempt["setup_nanoseconds"] = setup_nanoseconds
+                if message["status"] == "error":
+                    setup_failed = True
+                    attempt["status"] = "setup_error"
+                    attempt["error"] = error
+                validate_run_metadata(current)
+                atomic_write_json(run_path, current)
+                if setup_failed:
+                    continue
+                parent_connection.send(
+                    {
+                        "type": "ready_ack",
+                        "target_id": prepared_target.target_id,
+                        "worker_attempt_id": worker_attempt_id,
+                    }
+                )
+                continue
+            if message_type == "begin":
+                if not ready_seen or setup_failed or active_inflight is not None:
+                    raise ValueError("worker sent begin out of sequence")
+                message = _validate_worker_message(
+                    raw_message,
+                    message_type="begin",
+                    fields={
+                        "type",
+                        "target_id",
+                        "worker_attempt_id",
+                        "sample_id",
+                        "completion_key",
+                        "repetition",
+                        "operation_role",
+                        "measurement_role",
+                        "timing_class",
+                    },
+                )
+                sample_id = message["sample_id"]
+                repetition = message["repetition"]
+                if (
+                    message["target_id"] != prepared_target.target_id
+                    or message["worker_attempt_id"] != worker_attempt_id
+                    or sample_id not in sample_by_id
+                    or isinstance(repetition, bool)
+                    or not isinstance(repetition, int)
+                    or repetition < 0
+                ):
+                    raise ValueError("worker begin identity is invalid")
+                expected_key = completion_key(
+                    str(current["manifest_hash"]),
+                    prepared_target.target_id,
+                    prepared_target.execution_contract_hash,
+                    str(sample_id),
+                    repetition,
+                )
+                if message["completion_key"] != expected_key:
+                    raise ValueError("worker begin completion key is invalid")
+                current, active_inflight = allocate_inflight(
+                    current,
+                    target_id=prepared_target.target_id,
+                    operation_role=str(message["operation_role"]),
+                    worker_attempt_id=worker_attempt_id,
+                    sample_id=str(sample_id),
+                    completion_key=expected_key,
+                    repetition=repetition,
+                    measurement_role=message["measurement_role"],
+                    timing_class=message["timing_class"],
+                )
+                validate_run_metadata(current)
+                atomic_write_json(run_path, current)
+                atomic_write_json(inflight_path, active_inflight)
+                adapter_done_seen = False
+                if watchdog is not None:
+                    adapter_deadline = time.monotonic() + float(watchdog)
+                parent_connection.send(
+                    {
+                        "type": "begin_ack",
+                        "operation_id": active_inflight["operation_id"],
+                        "result_attempt_id": active_inflight["result_attempt_id"],
+                        "completion_key": active_inflight["completion_key"],
+                    }
+                )
+                continue
+            if message_type == "adapter_done":
+                if active_inflight is None or adapter_done_seen:
+                    raise ValueError("worker sent adapter_done out of sequence")
+                message = _validate_worker_message(
+                    raw_message,
+                    message_type="adapter_done",
+                    fields={
+                        "type",
+                        "operation_id",
+                        "status",
+                        "adapter_nanoseconds",
+                    },
+                )
+                adapter_nanoseconds = message["adapter_nanoseconds"]
+                if (
+                    message["operation_id"] != active_inflight["operation_id"]
+                    or message["status"] not in {"returned", "raised"}
+                    or isinstance(adapter_nanoseconds, bool)
+                    or not isinstance(adapter_nanoseconds, int)
+                    or adapter_nanoseconds < 0
+                ):
+                    raise ValueError("worker adapter_done is invalid")
+                adapter_deadline = None
+                adapter_done_seen = True
+                last_adapter_nanoseconds = adapter_nanoseconds
+                parent_connection.send(
+                    {
+                        "type": "adapter_done_ack",
+                        "operation_id": active_inflight["operation_id"],
+                    }
+                )
+                continue
+            if message_type == "committed":
+                if active_inflight is None or not adapter_done_seen:
+                    raise ValueError("worker sent committed out of sequence")
+                message = _validate_worker_message(
+                    raw_message,
+                    message_type="committed",
+                    fields={
+                        "type",
+                        "operation_id",
+                        "completion_key",
+                        "result_attempt_id",
+                        "status",
+                    },
+                )
+                if (
+                    message["operation_id"] != active_inflight["operation_id"]
+                    or message["completion_key"] != active_inflight["completion_key"]
+                    or message["result_attempt_id"] != active_inflight["result_attempt_id"]
+                    or message["status"] not in RESULT_STATUSES
+                ):
+                    raise ValueError("worker committed identity is invalid")
+                if active_inflight["operation_role"] == "result_call":
+                    history, truncated = load_result_history(results_path)
+                    if truncated:
+                        raise ValueError("worker committed a truncated result")
+                    exact = [
+                        record
+                        for record in history
+                        if record["completion_key"] == active_inflight["completion_key"]
+                        and record["attempt_id"] == active_inflight["result_attempt_id"]
+                    ]
+                    if len(exact) != 1 or exact[0]["status"] != message["status"]:
+                        raise ValueError("worker committed result is missing")
+                else:
+                    attempt["rewarm_status"] = message["status"]
+                    attempt["rewarm_nanoseconds"] = last_adapter_nanoseconds
+                    validate_run_metadata(current)
+                    atomic_write_json(run_path, current)
+                operation_id = int(active_inflight["operation_id"])
+                _clear_inflight(inflight_path)
+                active_inflight = None
+                adapter_done_seen = False
+                last_adapter_nanoseconds = None
+                parent_connection.send(
+                    {
+                        "type": "committed_ack",
+                        "operation_id": operation_id,
+                    }
+                )
+                continue
+            raise ValueError("worker sent an unknown protocol message")
+    except KeyboardInterrupt:
+        interrupted = True
+        failure_status = "interrupted"
+        if process.is_alive():
+            process.terminate()
+    except (TypeError, ValueError) as exc:
+        protocol_error = exc
+        if process.is_alive():
+            process.terminate()
+    finally:
+        process.join(5)
+        if process.is_alive():
+            process.terminate()
+            process.join(5)
+        parent_connection.close()
+
+    if active_inflight is not None:
+        history = repair_result_history(results_path)
+        action = recover_inflight_action(
+            active_inflight,
+            history,
+            interrupted=interrupted,
+            timed_out=failure_status == "timeout",
+        )
+        if action["action"] == "append_result":
+            sample = sample_by_id[str(active_inflight["sample_id"])]
+            record = _coordinator_failure_record(
+                prepared_target=prepared_target,
+                settings=settings,
+                sample=sample,
+                inflight=active_inflight,
+                status=str(action["status"]),
+            )
+            append_result_record(results_path, record)
+        elif action["action"] == "record_rewarm":
+            attempt["rewarm_status"] = action["status"]
+            attempt["rewarm_nanoseconds"] = last_adapter_nanoseconds
+        _clear_inflight(inflight_path)
+
+    attempt["total_nanoseconds"] = time.perf_counter_ns() - started
+    attempt["exit_code"] = process.exitcode
+    if interrupted:
+        attempt["status"] = "interrupted"
+        attempt["error"] = {
+            "type": "Interrupted",
+            "message": "benchmark worker was interrupted",
+        }
+    elif protocol_error is not None:
+        attempt["status"] = "protocol_error"
+        attempt["error"] = {
+            "type": "ProtocolError",
+            "message": "worker violated the benchmark protocol",
+        }
+    elif failure_status == "timeout":
+        attempt["status"] = "timeout"
+        attempt["error"] = {
+            "type": "AdapterTimeout",
+            "message": "adapter call exceeded the configured watchdog",
+        }
+    elif setup_failed:
+        pass
+    elif not ready_seen or process.exitcode != 0:
+        attempt["status"] = "worker_crash"
+        attempt["error"] = {
+            "type": "WorkerCrash",
+            "message": "benchmark worker exited before clean completion",
+        }
+    else:
+        attempt["status"] = "completed"
+    validate_run_metadata(current)
+    atomic_write_json(run_path, current)
+    if interrupted:
+        raise KeyboardInterrupt
+    return current
+
+
+def _recover_persisted_inflight(
+    *,
+    run_directory: Path,
+    metadata: Mapping[str, object],
+    prepared_targets: Sequence[PreparedTarget],
+    samples: tuple[ManifestSample, ...],
+    audio_paths: tuple[str, ...],
+) -> dict[str, object]:
+    """Attribute a prior parent/worker crash before starting a new worker."""
+    inflight_path = run_directory / "inflight.json"
+    active = validate_inflight_record(_load_json_object(inflight_path))
+    current = validate_run_metadata(metadata)
+    target_by_id = {target.target_id: target for target in prepared_targets}
+    sample_by_id = {sample.sample_id: sample for sample in samples}
+    target = target_by_id.get(str(active["target_id"]))
+    sample = sample_by_id.get(str(active["sample_id"]))
+    if target is None or sample is None:
+        raise ValueError("in-flight work does not belong to this run")
+    expected_key = completion_key(
+        str(current["manifest_hash"]),
+        target.target_id,
+        target.execution_contract_hash,
+        sample.sample_id,
+        int(active["repetition"] or 0),
+    )
+    if active["completion_key"] != expected_key:
+        raise ValueError("in-flight completion key does not belong to this run")
+    matching_attempts = [
+        attempt
+        for attempt in current["worker_attempts"]
+        if attempt["worker_attempt_id"] == active["worker_attempt_id"] and attempt["target_id"] == active["target_id"]
+    ]
+    if len(matching_attempts) != 1 or matching_attempts[0]["status"] != "running":
+        raise ValueError("in-flight worker attempt is inconsistent")
+    attempt = matching_attempts[0]
+    history = repair_result_history(run_directory / "results.jsonl")
+    action = recover_inflight_action(active, history)
+    settings = WorkerSettings(
+        run_id=str(current["run_id"]),
+        results_path=str((run_directory / "results.jsonl").resolve()),
+        manifest_hash=str(current["manifest_hash"]),
+        normalization_profile=sample.normalization_profile,
+        cold_probe_sample_id=str(current["cold_probe_sample_id"]),
+        warm_repetitions=int(current["warm_repetitions"]),
+        timing_sample_ids=tuple(str(value) for value in current["timing_sample_ids"]),
+        text_retention=str(current["text_retention"]),
+        retry_errors=False,
+        worker_attempt_id=int(active["worker_attempt_id"]),
+        audio_paths=audio_paths,
+    )
+    if action["action"] == "append_result":
+        append_result_record(
+            run_directory / "results.jsonl",
+            _coordinator_failure_record(
+                prepared_target=target,
+                settings=settings,
+                sample=sample,
+                inflight=active,
+                status="worker_crash",
+            ),
+        )
+    elif action["action"] == "record_rewarm":
+        attempt["rewarm_status"] = "worker_crash"
+    attempt["status"] = "worker_crash"
+    attempt["error"] = {
+        "type": "WorkerCrash",
+        "message": "prior benchmark worker did not complete coordination",
+    }
+    validate_run_metadata(current)
+    atomic_write_json(run_directory / "run.json", current)
+    _clear_inflight(inflight_path)
+    return current
+
+
+def execute_prepared_targets(
+    *,
+    run_directory: Path,
+    run_metadata: Mapping[str, object],
+    prepared_targets: Sequence[PreparedTarget],
+    samples: Sequence[ManifestSample],
+    audio_paths: Sequence[str],
+    retry_errors: bool,
+) -> dict[str, object]:
+    """Create or resume a run and execute targets sequentially in CLI order."""
+    if not isinstance(retry_errors, bool):
+        raise TypeError("retry_errors must be boolean")
+    expected = validate_run_metadata(run_metadata)
+    targets = tuple(prepared_targets)
+    selected_samples = tuple(samples)
+    pinned_paths = tuple(audio_paths)
+    if (
+        not targets
+        or not selected_samples
+        or len(selected_samples) != len(pinned_paths)
+        or not all(isinstance(sample, ManifestSample) for sample in selected_samples)
+        or not all(isinstance(path, str) and Path(path).is_absolute() for path in pinned_paths)
+        or [sample.sample_id for sample in selected_samples] != expected["selected_sample_ids"]
+        or _prepared_target_matrix(targets) != expected["target_matrix"]
+    ):
+        raise ValueError("run inputs do not match immutable metadata")
+    run_directory = Path(run_directory)
+    _ensure_owner_directory(run_directory)
+    run_path = run_directory / "run.json"
+    if run_path.exists():
+        current = validate_run_metadata(_load_json_object(run_path))
+        assert_resume_compatible(current, expected)
+    else:
+        if any(run_directory.iterdir()):
+            raise ValueError("new run directory must be empty")
+        current = expected
+        atomic_write_json(run_path, current)
+    repair_result_history(run_directory / "results.jsonl")
+    if (run_directory / "inflight.json").exists():
+        current = _recover_persisted_inflight(
+            run_directory=run_directory,
+            metadata=current,
+            prepared_targets=targets,
+            samples=selected_samples,
+            audio_paths=pinned_paths,
+        )
+    for target in targets:
+        current = _execute_target_attempt(
+            run_directory=run_directory,
+            metadata=current,
+            prepared_target=target,
+            samples=selected_samples,
+            audio_paths=pinned_paths,
+            retry_errors=retry_errors,
+        )
+    return validate_run_metadata(current)
 
 
 def aggregate_results(

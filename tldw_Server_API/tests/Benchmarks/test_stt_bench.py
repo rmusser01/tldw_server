@@ -13,6 +13,7 @@ import re
 import shutil
 import stat
 import subprocess
+import time
 import types
 import wave
 from dataclasses import FrozenInstanceError
@@ -113,6 +114,10 @@ class _WorkerFakeAdapter:
         assert prompt == execution_plan.prompt
         assert tuple(hotwords) == execution_plan.hotwords
         name = Path(audio_path).name
+        if name.startswith("hard-exit"):
+            os._exit(19)
+        if name.startswith("timeout"):
+            time.sleep(0.5)
         if name.startswith("exception"):
             raise RuntimeError("Authorization: Bearer sk-worker-secret /private/models/secret")
         route = execution_plan.descriptor.primary_route
@@ -139,7 +144,7 @@ class _WorkerFakeAdapter:
             text = " \n "
         else:
             text = "hello world"
-        return {
+        artifact = {
             "text": text,
             "segments": [],
             "actual_execution": actual,
@@ -148,6 +153,18 @@ class _WorkerFakeAdapter:
                 "url": "https://secret.invalid/audio",
             },
         }
+        if name.startswith("slow-classify"):
+            return _SlowArtifact(artifact)
+        return artifact
+
+
+class _SlowArtifact(dict):
+    """Spawn-safe mapping that delays post-adapter artifact classification."""
+
+    def get(self, key, default=None):
+        if key == "text":
+            time.sleep(0.3)
+        return super().get(key, default)
 
 
 def _worker_fake_factory(provider: str):
@@ -1689,6 +1706,59 @@ def test_attempt_history_rejects_duplicate_or_non_monotonic_global_ids(
         stt_bench.load_result_history(destination)
 
 
+def test_repair_result_history_truncates_only_incomplete_final_line(tmp_path):
+    destination = tmp_path / "run" / "results.jsonl"
+    first = _result_record(attempt_id=1)
+    stt_bench.append_result_record(destination, first)
+    complete = destination.read_bytes()
+    with destination.open("ab") as output:
+        output.write(b'{"schema_version":1')
+
+    records = stt_bench.repair_result_history(destination)
+
+    assert records == [first]
+    assert destination.read_bytes() == complete
+    if os.name == "posix":
+        assert stat.S_IMODE(destination.stat().st_mode) == 0o600
+
+
+def test_repair_result_history_never_mutates_earlier_malformed_line(tmp_path):
+    destination = tmp_path / "results.jsonl"
+    original = b'{"not":"a result"}\n{"schema_version":1'
+    destination.write_bytes(original)
+
+    with pytest.raises(ValueError, match="line 1"):
+        stt_bench.repair_result_history(destination)
+
+    assert destination.read_bytes() == original
+
+
+def test_repair_result_history_rejects_symlink_destination(tmp_path):
+    if os.name != "posix":
+        pytest.skip("symlink policy is POSIX-specific")
+    target = tmp_path / "target.jsonl"
+    target.write_bytes(b"")
+    destination = tmp_path / "results.jsonl"
+    destination.symlink_to(target)
+
+    with pytest.raises(OSError, match="symbolic link"):
+        stt_bench.repair_result_history(destination)
+
+
+def test_append_result_history_rejects_symlink_destination(tmp_path):
+    if os.name != "posix":
+        pytest.skip("symlink policy is POSIX-specific")
+    target = tmp_path / "target.jsonl"
+    target.write_bytes(b"do not modify")
+    destination = tmp_path / "results.jsonl"
+    destination.symlink_to(target)
+
+    with pytest.raises(OSError, match="symbolic link"):
+        stt_bench.append_result_record(destination, _result_record())
+
+    assert target.read_bytes() == b"do not modify"
+
+
 def test_reduce_attempts_selects_highest_attempt_by_stable_completion_key():
     first = _result_record(attempt_id=1, status="adapter_error", hypothesis="")
     retry = _result_record(attempt_id=3, status="ok")
@@ -2366,6 +2436,20 @@ def test_atomic_persist_refuses_to_chmod_unrelated_existing_parent(tmp_path):
         assert stat.S_IMODE(shared.stat().st_mode) == 0o755
 
 
+def test_atomic_persist_rejects_symbolic_link_parent(tmp_path):
+    if os.name != "posix":
+        pytest.skip("symlink policy is POSIX-specific")
+    target = tmp_path / "target"
+    target.mkdir(mode=0o700)
+    linked = tmp_path / "linked"
+    linked.symlink_to(target, target_is_directory=True)
+
+    with pytest.raises(OSError, match="symbolic link"):
+        stt_bench.atomic_write_json(linked / "run.json", {"run_id": "run-1"})
+
+    assert list(target.iterdir()) == []
+
+
 def test_persist_result_round_trips_canonical_actual_execution(tmp_path):
     actual = SttActualExecution(
         route_id="route-1",
@@ -2964,7 +3048,11 @@ def _worker_sample(
     )
 
 
-def _worker_target(provider: str = "worker-ok") -> stt_bench.PreparedTarget:
+def _worker_target(
+    provider: str = "worker-ok",
+    *,
+    target_id: str = "target-worker",
+) -> stt_bench.PreparedTarget:
     plan = _planned_target(
         provider=provider,
         model_label="worker-model",
@@ -2983,7 +3071,7 @@ def _worker_target(provider: str = "worker-ok") -> stt_bench.PreparedTarget:
         },
     )
     return stt_bench.PreparedTarget(
-        target_id="target-worker",
+        target_id=target_id,
         provider=provider,
         model_label="worker-model",
         plan=plan,
@@ -2991,6 +3079,101 @@ def _worker_target(provider: str = "worker-ok") -> stt_bench.PreparedTarget:
         execution_contract_json=contract_json,
         execution_contract_hash=contract_hash,
     )
+
+
+def _runner_environment():
+    return {
+        "python_version": "3.11.13",
+        "unicode_version": "15.0.0",
+        "os_name": "Darwin",
+        "os_release": "test-release",
+        "architecture": "arm64",
+        "logical_cores": 8,
+        "physical_cores": 4,
+        "ram_bytes": 16_000_000_000,
+        "cpu_model": "test-cpu",
+        "git_commit": "a" * 40,
+        "git_dirty": False,
+        "ffprobe_version": "6.0",
+        "accelerator": "unavailable",
+        "collection_methods": {
+            "cores": "fixture",
+            "ram": "fixture",
+            "cpu": "fixture",
+            "git": "fixture",
+            "ffprobe": "fixture",
+            "accelerator": "fixture",
+        },
+    }
+
+
+def _runner_metadata(
+    *,
+    warm_repetitions=1,
+    targets=None,
+    selected_sample_ids=("probe", "sample-2"),
+    timing_sample_ids=("sample-2",),
+    watchdog_seconds=1.0,
+):
+    return stt_bench.build_run_metadata(
+        run_id="run-worker",
+        manifest_hash="a" * 64,
+        selected_sample_ids=selected_sample_ids,
+        profile="comparison",
+        mode="neutral-v1",
+        seed=0,
+        cold_probe_sample_id="probe",
+        warm_repetitions=warm_repetitions,
+        timing_sample_ids=timing_sample_ids,
+        text_retention="full",
+        adapter_watchdog_seconds=watchdog_seconds,
+        prepared_targets=tuple(targets or (_worker_target(),)),
+        environment=_runner_environment(),
+    )
+
+
+def test_run_metadata_is_deterministic_allowlisted_and_secret_safe():
+    first = _runner_metadata()
+    second = _runner_metadata()
+    serialized = json.dumps(first, sort_keys=True)
+
+    assert first == second
+    assert stt_bench.validate_run_metadata(first) == first
+    assert first["next_operation_id"] == 1
+    assert first["next_attempt_id"] == 1
+    assert first["next_worker_attempt_id"] == 1
+    assert first["worker_attempts"] == []
+    assert first["target_matrix"][0]["target_id"] == "target-worker"
+    assert "/private/models" not in serialized
+    assert "runtime_settings" not in serialized
+
+
+def test_run_resume_identity_changes_with_immutable_execution_settings():
+    first = _runner_metadata(warm_repetitions=1)
+    changed = _runner_metadata(warm_repetitions=3)
+
+    assert first["resume_identity_hash"] != changed["resume_identity_hash"]
+    with pytest.raises(ValueError, match="incompatible"):
+        stt_bench.assert_resume_compatible(first, changed)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda metadata: metadata.update(extra="unknown"),
+        lambda metadata: metadata.update(next_operation_id=True),
+        lambda metadata: metadata["target_matrix"][0].update(provider="other"),
+        lambda metadata: metadata["environment"].update(api_key="leak"),
+    ],
+)
+def test_run_metadata_validation_rejects_unknown_or_inconsistent_fields(
+    mutation,
+):
+    metadata = _runner_metadata()
+    mutation(metadata)
+
+    with pytest.raises(ValueError):
+        stt_bench.validate_run_metadata(metadata)
 
 
 def _worker_settings(
@@ -3191,7 +3374,7 @@ def test_worker_failed_probe_recovers_before_reporting_warm(tmp_path):
         (probe_path, recovery_path, warm_path),
     )
 
-    _drive_spawned_worker(
+    trace = _drive_spawned_worker(
         _worker_target(),
         samples,
         settings,
@@ -3203,6 +3386,11 @@ def test_worker_failed_probe_recovers_before_reporting_warm(tmp_path):
         ("adapter_error", "cold_first"),
         ("ok", "warmup_recovery"),
         ("ok", "warm"),
+    ]
+    assert [message["status"] for message in trace if message["type"] == "adapter_done"] == [
+        "raised",
+        "returned",
+        "returned",
     ]
     assert "sk-worker-secret" not in json.dumps(records)
     assert "/private/models" not in json.dumps(records)
@@ -3377,3 +3565,166 @@ def test_worker_ready_ack_rejects_boolean_attempt_identity():
             target_id="target-worker",
             worker_attempt_id=1,
         )
+
+
+def test_runner_executes_targets_sequentially_and_persists_parent_timings(
+    tmp_path,
+):
+    probe, probe_path = _worker_sample(tmp_path, "probe", "probe.wav")
+    first = _worker_target("worker-one", target_id="target-worker-one")
+    second = _worker_target("worker-two", target_id="target-worker-two")
+    metadata = _runner_metadata(
+        targets=(first, second),
+        selected_sample_ids=("probe",),
+        timing_sample_ids=(),
+    )
+    run_directory = tmp_path / "run"
+
+    completed = stt_bench.execute_prepared_targets(
+        run_directory=run_directory,
+        run_metadata=metadata,
+        prepared_targets=(first, second),
+        samples=(probe,),
+        audio_paths=(probe_path,),
+        retry_errors=False,
+    )
+    records, truncated = stt_bench.load_result_history(run_directory / "results.jsonl")
+
+    assert truncated is False
+    assert [record["target_id"] for record in records] == [
+        "target-worker-one",
+        "target-worker-two",
+    ]
+    assert [attempt["target_id"] for attempt in completed["worker_attempts"]] == [
+        "target-worker-one",
+        "target-worker-two",
+    ]
+    assert all(attempt["status"] == "completed" for attempt in completed["worker_attempts"])
+    assert all(attempt["spawn_to_ready_nanoseconds"] > 0 for attempt in completed["worker_attempts"])
+    assert all(attempt["setup_nanoseconds"] >= 0 for attempt in completed["worker_attempts"])
+    assert all(attempt["total_nanoseconds"] > 0 for attempt in completed["worker_attempts"])
+    assert completed["next_worker_attempt_id"] == 3
+    assert completed["next_operation_id"] == 3
+    assert completed["next_attempt_id"] == 3
+    assert json.loads((run_directory / "run.json").read_text()) == completed
+    assert not (run_directory / "inflight.json").exists()
+
+
+@pytest.mark.parametrize(
+    ("filename", "watchdog_seconds", "expected_status"),
+    [
+        ("hard-exit-probe.wav", 1.0, "worker_crash"),
+        ("timeout-probe.wav", 0.1, "timeout"),
+    ],
+)
+def test_runner_attributes_worker_exit_and_adapter_watchdog(
+    tmp_path,
+    filename,
+    watchdog_seconds,
+    expected_status,
+):
+    probe, probe_path = _worker_sample(tmp_path, "probe", filename)
+    target = _worker_target()
+    metadata = _runner_metadata(
+        selected_sample_ids=("probe",),
+        timing_sample_ids=(),
+        watchdog_seconds=watchdog_seconds,
+    )
+    run_directory = tmp_path / "run"
+
+    completed = stt_bench.execute_prepared_targets(
+        run_directory=run_directory,
+        run_metadata=metadata,
+        prepared_targets=(target,),
+        samples=(probe,),
+        audio_paths=(probe_path,),
+        retry_errors=False,
+    )
+    records, truncated = stt_bench.load_result_history(run_directory / "results.jsonl")
+
+    assert truncated is False
+    assert len(records) == 1
+    assert records[0]["status"] == expected_status
+    assert records[0]["actual_execution"] is None
+    assert "actual_execution_unverified" in records[0]["eligibility_reasons"]
+    assert "invalid_performance_duration" in records[0]["eligibility_reasons"]
+    assert completed["worker_attempts"][0]["status"] == expected_status
+    assert not (run_directory / "inflight.json").exists()
+
+
+def test_runner_disarms_watchdog_before_slow_artifact_classification(tmp_path):
+    probe, probe_path = _worker_sample(tmp_path, "probe", "slow-classify-probe.wav")
+    target = _worker_target()
+    metadata = _runner_metadata(
+        selected_sample_ids=("probe",),
+        timing_sample_ids=(),
+        watchdog_seconds=0.1,
+    )
+    run_directory = tmp_path / "run"
+
+    completed = stt_bench.execute_prepared_targets(
+        run_directory=run_directory,
+        run_metadata=metadata,
+        prepared_targets=(target,),
+        samples=(probe,),
+        audio_paths=(probe_path,),
+        retry_errors=False,
+    )
+    records, _ = stt_bench.load_result_history(run_directory / "results.jsonl")
+
+    assert records[0]["status"] == "ok"
+    assert completed["worker_attempts"][0]["status"] == "completed"
+
+
+def test_runner_recovers_persisted_inflight_without_double_scoring_probe(
+    tmp_path,
+):
+    probe, probe_path = _worker_sample(tmp_path, "probe", "probe.wav")
+    target = _worker_target()
+    requested = _runner_metadata(
+        selected_sample_ids=("probe",),
+        timing_sample_ids=(),
+    )
+    persisted = copy.deepcopy(requested)
+    persisted["next_worker_attempt_id"] = 2
+    persisted["worker_attempts"].append(stt_bench._new_worker_attempt(1, target.target_id))
+    key = stt_bench.completion_key(
+        persisted["manifest_hash"],
+        target.target_id,
+        target.execution_contract_hash,
+        probe.sample_id,
+        0,
+    )
+    persisted, inflight = stt_bench.allocate_inflight(
+        persisted,
+        target_id=target.target_id,
+        operation_role="result_call",
+        worker_attempt_id=1,
+        sample_id=probe.sample_id,
+        completion_key=key,
+        repetition=0,
+        measurement_role="accuracy",
+        timing_class="cold_first",
+    )
+    run_directory = tmp_path / "run"
+    stt_bench.atomic_write_json(run_directory / "run.json", persisted)
+    stt_bench.atomic_write_json(run_directory / "inflight.json", inflight)
+
+    completed = stt_bench.execute_prepared_targets(
+        run_directory=run_directory,
+        run_metadata=requested,
+        prepared_targets=(target,),
+        samples=(probe,),
+        audio_paths=(probe_path,),
+        retry_errors=False,
+    )
+    records, _ = stt_bench.load_result_history(run_directory / "results.jsonl")
+
+    assert len(records) == 1
+    assert records[0]["status"] == "worker_crash"
+    assert [attempt["status"] for attempt in completed["worker_attempts"]] == [
+        "worker_crash",
+        "completed",
+    ]
+    assert completed["worker_attempts"][1]["rewarm_status"] == "ok"
+    assert not (run_directory / "inflight.json").exists()
