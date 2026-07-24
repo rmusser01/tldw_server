@@ -410,6 +410,7 @@ def _resolve_audio_path(root: Path, relative: object, sample_id: str) -> tuple[s
     """Resolve one manifest-relative regular file without permitting escape."""
     if not isinstance(relative, str) or not relative:
         raise _manifest_error(sample_id, "audio", "must be a relative path")
+    relative = _require_utf8_scalar_text(relative, sample_id, "audio")
     if (
         "\\" in relative
         or relative.startswith("//")
@@ -445,6 +446,52 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def resolve_audio_for_scheduling(
+    sample: ManifestSample,
+    dataset_root: Path,
+) -> Path:
+    """Revalidate and pin the resolved audio path immediately before scheduling.
+
+    Coordinators must pass the returned resolved path to the worker rather than
+    resolving ``sample.audio_relative`` again.
+    """
+    if not isinstance(sample, ManifestSample):
+        raise TypeError("sample must be a ManifestSample")
+    sample_id = _require_stable_id(sample.sample_id, "<sample>", "id")
+    try:
+        root = Path(dataset_root).resolve(strict=True)
+    except (FileNotFoundError, OSError) as exc:
+        raise _manifest_error(
+            sample_id,
+            "audio",
+            "dataset root does not exist",
+        ) from exc
+    if not root.is_dir():
+        raise _manifest_error(sample_id, "audio", "dataset root must be a directory")
+    relative, audio_path = _resolve_audio_path(
+        root,
+        sample.audio_relative,
+        sample_id,
+    )
+    if relative != sample.audio_relative:
+        raise _manifest_error(sample_id, "audio", "relative path changed")
+    try:
+        audio_sha256 = _sha256_file(audio_path)
+    except OSError as exc:
+        raise _manifest_error(
+            sample_id,
+            "source.sha256",
+            "audio file could not be read before scheduling",
+        ) from exc
+    if audio_sha256 != sample.sha256:
+        raise _manifest_error(
+            sample_id,
+            "source.sha256",
+            "audio changed since manifest validation",
+        )
+    return audio_path
+
+
 def _validate_source(
     value: object,
     *,
@@ -463,7 +510,7 @@ def _validate_source(
             raise _manifest_error(sample_id, "source", "contains an invalid field name")
         if (
             not isinstance(item, str)
-            or not item
+            or not item.strip()
             or len(item) > _MAX_SOURCE_VALUE_LENGTH
         ):
             raise _manifest_error(sample_id, f"source.{key}", "must be a bounded string")
@@ -686,32 +733,20 @@ def load_and_validate_manifest(
                     "must be positive and finite",
                 )
             tolerance = max(0.100, measured_duration * 0.01)
-            if abs(declared_duration - measured_duration) > tolerance:
+            rounding_slack = (
+                math.ulp(declared_duration)
+                + math.ulp(measured_duration)
+                + math.ulp(tolerance)
+            )
+            if (
+                abs(declared_duration - measured_duration)
+                > tolerance + rounding_slack
+            ):
                 raise _manifest_error(
                     sample_id,
                     "duration_seconds",
                     "does not agree with measured duration",
                 )
-
-        final_relative, final_audio_path = _resolve_audio_path(
-            root,
-            record["audio"],
-            sample_id,
-        )
-        try:
-            final_sha256 = _sha256_file(final_audio_path)
-        except OSError as exc:
-            raise _manifest_error(
-                sample_id,
-                "source.sha256",
-                "audio file could not be re-read",
-            ) from exc
-        if final_relative != audio_relative or final_sha256 != declared_sha256:
-            raise _manifest_error(
-                sample_id,
-                "source.sha256",
-                "audio changed during validation",
-            )
 
         sample = ManifestSample(
             sample_id=sample_id,
@@ -729,6 +764,7 @@ def load_and_validate_manifest(
             tags=tags,
             sha256=declared_sha256,
         )
+        resolve_audio_for_scheduling(sample, root)
         samples.append(sample)
         canonical_record: dict[str, object] = {
             "id": sample_id,

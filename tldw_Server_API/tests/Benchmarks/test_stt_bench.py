@@ -230,6 +230,18 @@ def test_manifest_rejects_declared_duration_outside_tolerance(tmp_path):
         )
 
 
+def test_manifest_accepts_declared_duration_at_exact_tolerance_boundary(tmp_path):
+    manifest_path, _, _ = _valid_manifest(tmp_path, duration_seconds=1.1)
+
+    samples, _ = stt_bench.load_and_validate_manifest(
+        manifest_path,
+        tmp_path,
+        duration_probe=lambda _: 1.0,
+    )
+
+    assert samples[0].measured_duration_seconds == 1.0
+
+
 @pytest.mark.parametrize(
     "measured",
     [True, 0, -1, math.nan, math.inf, -math.inf, "1.0"],
@@ -299,6 +311,23 @@ def test_manifest_rejects_incomplete_or_invalid_source(tmp_path, source):
     manifest_path, _, _ = _valid_manifest(tmp_path, source=source)
 
     with pytest.raises(ValueError, match=r"sample-1.*source"):
+        stt_bench.load_and_validate_manifest(
+            manifest_path,
+            tmp_path,
+            duration_probe=lambda _: 1.0,
+        )
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["dataset", "version", "license", "reference_provenance"],
+)
+def test_manifest_rejects_whitespace_only_required_provenance(tmp_path, field):
+    manifest_path, _, record = _valid_manifest(tmp_path)
+    record["source"][field] = " \t "
+    _write_manifest(manifest_path, [record])
+
+    with pytest.raises(ValueError, match=rf"sample-1.*source\.{field}"):
         stt_bench.load_and_validate_manifest(
             manifest_path,
             tmp_path,
@@ -400,6 +429,53 @@ def test_manifest_allows_internal_symlink_and_rejects_escape_and_directory(tmp_p
                 dataset_root,
                 duration_probe=lambda _: 1.0,
             )
+
+
+def test_scheduling_revalidation_rejects_post_validation_symlink_swap(tmp_path):
+    dataset_root = tmp_path / "dataset"
+    dataset_root.mkdir()
+    audio_path = dataset_root / "clip.wav"
+    audio_path.write_bytes(b"audio fixture")
+    link = dataset_root / "linked.wav"
+    link.symlink_to(audio_path)
+    outside = tmp_path / "outside.wav"
+    outside.write_bytes(b"audio fixture")
+    record = _manifest_record(audio_path, audio=link.name)
+    manifest_path = _write_manifest(tmp_path / "manifest.jsonl", [record])
+    samples, _ = stt_bench.load_and_validate_manifest(
+        manifest_path,
+        dataset_root,
+        duration_probe=lambda _: 1.0,
+    )
+
+    scheduled_path = stt_bench.resolve_audio_for_scheduling(
+        samples[0],
+        dataset_root,
+    )
+    link.unlink()
+    link.symlink_to(outside)
+
+    assert scheduled_path == audio_path.resolve()
+    with pytest.raises(ValueError, match=r"sample-1.*audio"):
+        stt_bench.resolve_audio_for_scheduling(samples[0], dataset_root)
+
+    replacement = dataset_root / "replacement.wav"
+    replacement.write_bytes(b"different audio")
+    link.unlink()
+    link.symlink_to(replacement)
+    with pytest.raises(ValueError, match=r"sample-1.*source\.sha256"):
+        stt_bench.resolve_audio_for_scheduling(samples[0], dataset_root)
+
+
+def test_manifest_rejects_non_scalar_audio_path_with_field_error(tmp_path):
+    manifest_path, _, _ = _valid_manifest(tmp_path, audio="\ud800.wav")
+
+    with pytest.raises(ValueError, match=r"sample-1.*audio.*Unicode scalar"):
+        stt_bench.load_and_validate_manifest(
+            manifest_path,
+            tmp_path,
+            duration_probe=lambda _: 1.0,
+        )
 
 
 def test_manifest_rejects_dataset_root_that_is_not_a_directory(tmp_path):
