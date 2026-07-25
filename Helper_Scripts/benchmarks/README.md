@@ -7,6 +7,11 @@
 strict and normalized WER/CER—no Pipecat, LLM judge, automatic model download,
 or server process.
 
+Start with the
+[native batch STT benchmark user guide](../../Docs/User_Guides/STT_Benchmark_User_Guide.md)
+for target selection, corpus preparation, retention, compatible comparison,
+and network safety. Use this section as a compact command reference.
+
 Read the exact
 [STT benchmark protocol](../../Docs/Development/STT_Benchmark_Protocol.md)
 before collecting or publishing results. Start from
