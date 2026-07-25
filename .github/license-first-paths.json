@@ -1,0 +1,220 @@
+{
+  "actionlint.yml": {
+    "mode": "paths",
+    "patterns": [
+      ".github/actionlint.yaml",
+      ".github/workflows/**",
+      ".github/actions/**"
+    ]
+  },
+  "frontend-e2e-tiers.yml": {
+    "mode": "paths",
+    "patterns": [
+      "apps/packages/ui/src/**",
+      "apps/tldw-frontend/**",
+      "tldw_Server_API/**"
+    ]
+  },
+  "jobs-suite.yml": {
+    "mode": "paths",
+    "patterns": [
+      "tldw_Server_API/app/core/Jobs/**",
+      "tldw_Server_API/app/api/v1/endpoints/jobs_admin.py",
+      "tldw_Server_API/tests/Jobs/**",
+      ".github/workflows/jobs-suite.yml"
+    ]
+  },
+  "mcp-unified-rc.yml": {
+    "mode": "paths",
+    "patterns": [
+      "apps/mcp-unified/**",
+      "Makefile",
+      "Helper_Scripts/mcp_unified_rc.py",
+      "Helper_Scripts/Testing-related/mcp_standalone_user_guide_uat.py",
+      ".github/tests/test_mcp_unified_artifact_gate.py",
+      "tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py",
+      "tldw_Server_API/app/core/MCP_unified/tests/test_mcp_unified_rc_harness.py",
+      ".github/workflows/mcp-unified-rc.yml"
+    ]
+  },
+  "notes-remediation-targeted.yml": {
+    "mode": "paths",
+    "patterns": [
+      "apps/packages/ui/src/components/Notes/**",
+      "apps/packages/ui/src/components/Common/NotesDock/**",
+      "apps/packages/ui/package.json",
+      "apps/packages/ui/vitest.config.ts",
+      "apps/bun.lock",
+      "tldw_Server_API/app/api/v1/endpoints/notes.py",
+      "tldw_Server_API/app/api/v1/schemas/notes_schemas.py",
+      "tldw_Server_API/tests/Notes/**",
+      "tldw_Server_API/tests/Notes_NEW/**",
+      "Docs/Plans/IMPLEMENTATION_PLAN_notes_page_gap_remediation_2026_02_19.md",
+      ".github/workflows/notes-remediation-targeted.yml"
+    ]
+  },
+  "onboarding-docs-gate.yml": {
+    "mode": "paths",
+    "patterns": [
+      "README.md",
+      "Docs/**",
+      "Helper_Scripts/docs/**",
+      "Helper_Scripts/refresh_docs_published.sh",
+      "tldw_Server_API/tests/Docs/**",
+      ".github/workflows/mkdocs.yml",
+      ".github/workflows/onboarding-docs-gate.yml",
+      ".github/workflows/onboarding-docs-smoke-nightly.yml"
+    ]
+  },
+  "pypi-package.yml": {
+    "mode": "paths",
+    "patterns": [
+      "pyproject.toml",
+      "README.md",
+      "Makefile",
+      "tldw_Server_API/**",
+      "Helper_Scripts/Packaging/**",
+      ".github/workflows/pypi-package.yml",
+      ".github/workflows/publish-pypi.yml"
+    ]
+  },
+  "ui-characters-harness-tests.yml": {
+    "mode": "paths",
+    "patterns": [
+      "apps/packages/ui/src/components/Option/Characters/**",
+      "apps/packages/ui/src/utils/default-character-preference.ts",
+      "apps/packages/ui/src/utils/__tests__/default-character-preference.test.ts",
+      "apps/packages/ui/vitest.config.ts",
+      "apps/packages/ui/vitest.setup.ts",
+      "apps/tldw-frontend/vitest.config.ts",
+      "apps/tldw-frontend/vitest.setup.ts",
+      "apps/tldw-frontend/__tests__/vitest.setup-contract.test.ts",
+      "apps/packages/ui/package.json",
+      "apps/tldw-frontend/package.json",
+      "apps/bun.lock",
+      ".github/workflows/ui-characters-harness-tests.yml"
+    ]
+  },
+  "ui-dictionaries-tests.yml": {
+    "mode": "paths",
+    "patterns": [
+      "apps/packages/ui/src/components/Option/Dictionaries/**",
+      "apps/packages/ui/src/assets/tailwind-shared.css",
+      "apps/packages/ui/vitest.config.ts",
+      "apps/packages/ui/package.json",
+      "apps/bun.lock",
+      ".github/workflows/ui-dictionaries-tests.yml"
+    ]
+  },
+  "ui-playground-quality-gates.yml": {
+    "mode": "paths",
+    "patterns": [
+      "apps/packages/ui/src/components/Option/Playground/**",
+      "apps/packages/ui/src/components/Common/Playground/**",
+      "apps/packages/ui/src/components/Sidepanel/Chat/**",
+      "apps/packages/ui/src/components/Layouts/**",
+      "apps/packages/ui/src/hooks/playground/**",
+      "apps/packages/ui/package.json",
+      "apps/bun.lock",
+      ".github/workflows/ui-playground-quality-gates.yml"
+    ]
+  },
+  "ui-research-workspace-parity.yml": {
+    "mode": "paths",
+    "patterns": [
+      "apps/test-utils/research-workspace/**",
+      "apps/tldw-frontend/e2e/workflows/research-workspace.parity.spec.ts",
+      "apps/extension/tests/e2e/research-workspace.parity.spec.ts",
+      "apps/tldw-frontend/components/**/*",
+      "apps/tldw-frontend/extension/**/*",
+      "apps/tldw-frontend/hooks/**/*",
+      "apps/tldw-frontend/lib/**/*",
+      "apps/tldw-frontend/pages/**/*",
+      "apps/tldw-frontend/styles/**/*",
+      "apps/tldw-frontend/types/**/*",
+      "apps/extension/entrypoints/**/*",
+      "apps/extension/public/**/*",
+      "apps/extension/scripts/**/*",
+      "apps/extension/types/**/*",
+      "apps/packages/ui/src/**/*",
+      "apps/packages/ui/index.ts",
+      "apps/packages/ui/package.json",
+      "apps/packages/ui/tsconfig.json",
+      "apps/packages/ui/vitest.config.ts",
+      "apps/packages/ui/src/components/Option/ResearchWorkspace/**",
+      "apps/packages/ui/src/store/workspace.ts",
+      "apps/packages/ui/src/store/workspace-bundle.ts",
+      "apps/packages/ui/src/utils/research-workspace-*.ts",
+      "apps/tldw-frontend/package.json",
+      "apps/extension/package.json",
+      "apps/tldw-frontend/playwright.config.ts",
+      "apps/extension/playwright.config.ts",
+      "apps/bun.lock",
+      ".github/workflows/ui-research-workspace-parity.yml"
+    ]
+  },
+  "ui-watchlists-a11y-gates.yml": {
+    "mode": "paths",
+    "patterns": [
+      "apps/packages/ui/src/components/Option/Watchlists/**",
+      "apps/packages/ui/src/assets/locale/en/watchlists.json",
+      "apps/packages/ui/src/public/_locales/en/watchlists.json",
+      "apps/packages/ui/src/services/watchlists.ts",
+      "apps/packages/ui/package.json",
+      "apps/bun.lock",
+      ".github/workflows/ui-watchlists-a11y-gates.yml"
+    ]
+  },
+  "ui-watchlists-extension-e2e.yml": {
+    "mode": "paths",
+    "patterns": [
+      "apps/extension/tests/e2e/watchlists.spec.ts",
+      "apps/extension/tests/e2e/utils/**",
+      "apps/extension/package.json",
+      "apps/extension/playwright.config.ts",
+      "apps/packages/ui/src/components/Option/Watchlists/**",
+      "apps/packages/ui/src/services/watchlists.ts",
+      "apps/packages/ui/src/types/watchlists.ts",
+      "apps/bun.lock",
+      ".github/workflows/ui-watchlists-extension-e2e.yml"
+    ]
+  },
+  "ui-watchlists-help-tests.yml": {
+    "mode": "paths",
+    "patterns": [
+      "apps/packages/ui/src/components/Option/Watchlists/WatchlistsPlaygroundPage.tsx",
+      "apps/packages/ui/src/components/Option/Watchlists/__tests__/WatchlistsPlaygroundPage.help-links.test.tsx",
+      "apps/packages/ui/src/components/Option/Watchlists/shared/help-docs.ts",
+      "apps/packages/ui/src/components/Option/Watchlists/shared/__tests__/help-docs.test.ts",
+      "apps/packages/ui/src/assets/locale/en/watchlists.json",
+      "apps/packages/ui/src/public/_locales/en/watchlists.json",
+      "apps/packages/ui/package.json",
+      "apps/packages/ui/vitest.config.ts",
+      "apps/bun.lock",
+      ".github/workflows/ui-watchlists-help-tests.yml"
+    ]
+  },
+  "ui-watchlists-scale-gates.yml": {
+    "mode": "paths",
+    "patterns": [
+      "apps/packages/ui/src/components/Option/Watchlists/**",
+      "apps/packages/ui/src/assets/locale/en/watchlists.json",
+      "apps/packages/ui/src/public/_locales/en/watchlists.json",
+      "apps/packages/ui/src/services/watchlists.ts",
+      "apps/packages/ui/package.json",
+      "apps/bun.lock",
+      ".github/workflows/ui-watchlists-scale-gates.yml"
+    ]
+  },
+  "ui-worldbooks-tests.yml": {
+    "mode": "paths",
+    "patterns": [
+      "apps/packages/ui/src/components/Option/WorldBooks/**",
+      "apps/packages/ui/src/assets/tailwind-shared.css",
+      "apps/packages/ui/vitest.config.ts",
+      "apps/packages/ui/package.json",
+      "apps/bun.lock",
+      ".github/workflows/ui-worldbooks-tests.yml"
+    ]
+  }
+}

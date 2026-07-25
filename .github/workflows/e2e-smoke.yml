@@ -3,18 +3,46 @@ name: E2E Critical Smoke (In-Process)
 on:
   pull_request:
     types: [opened, synchronize, reopened]
+  workflow_run:
+    workflows: [Frontend License Gate Audit]
+    types: [completed]
   workflow_dispatch: {}
 
 permissions:
   contents: read
 
 concurrency:
-  group: e2e-smoke-${{ github.ref }}
+  group: e2e-smoke-${{ github.event.workflow_run.pull_requests[0].number || github.event.pull_request.number || github.ref || github.run_id }}
   cancel-in-progress: true
 
 jobs:
+  admission:
+    if: >-
+      vars.LICENSE_FIRST_CI_ENABLED == 'true' &&
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success'
+    uses: ./.github/workflows/license-first-admission.yml
+    with:
+      workflow_file: e2e-smoke.yml
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+      statuses: read
+
   e2e-smoke:
     name: e2e-smoke (${{ matrix.os }}, py${{ matrix.python-version }})
+    needs: admission
+    if: >-
+      always() && !cancelled() &&
+      (
+        (
+          github.event_name == 'workflow_run' &&
+          needs.admission.result == 'success' &&
+          needs.admission.outputs.should_run == 'true'
+        ) ||
+        github.event_name != 'workflow_run'
+      )
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -43,6 +71,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
 
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v6
@@ -54,7 +85,19 @@ jobs:
           mkdir -p "$MPLCONFIGDIR"
 
 
-      - name: Cache pip
+      - name: Restore pip cache (admitted PR)
+        if: github.event_name == 'workflow_run'
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('**/pyproject.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-${{ matrix.python-version }}-
+            ${{ runner.os }}-pip-
+
+      - name: Cache pip (trusted events)
+        if: github.event_name != 'workflow_run'
         uses: actions/cache@v5
         with:
           path: |

@@ -339,8 +339,11 @@ def test_workflow_publishes_success_only_for_an_explicit_success_verdict() -> No
     assert '[[ "${state}" == success ]]' in script
 
 
-def test_actionlint_targets_the_trusted_workflow() -> None:
+def test_actionlint_scans_all_workflows_including_the_trusted_workflow() -> None:
     steps = load_yaml(ACTIONLINT_PATH)["jobs"]["actionlint"]["steps"]
-    invocation = next(step for step in steps if step.get("name") == "Run actionlint on targeted workflows")["run"]
+    invocation = next(step for step in steps if step.get("name") == "Run actionlint")["run"]
 
-    assert ".github/workflows/frontend-license-gate.yml" in invocation.split()
+    assert invocation == (
+        "set -euo pipefail\n"
+        "./actionlint -color -config-file .github/actionlint.yaml\n"
+    )
