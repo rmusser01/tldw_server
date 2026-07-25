@@ -10,12 +10,10 @@ import multiprocessing
 import os
 import pickle
 import re
-import shutil
 import stat
 import subprocess
 import time
 import types
-import wave
 from dataclasses import FrozenInstanceError, replace
 from pathlib import Path
 
@@ -43,6 +41,8 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_con
     SttExecutionDescriptor,
     SttExecutionRoute,
 )
+
+pytestmark = pytest.mark.unit
 
 _PREFLIGHT_PLANS: dict[tuple[str, str], SttBatchExecutionPlan | BaseException] = {}
 _PREFLIGHT_CALLS: list[tuple[str, str]] = []
@@ -224,7 +224,9 @@ def _valid_manifest(tmp_path: Path, **overrides):
     return manifest_path, audio_path, record
 
 
-def test_example_manifest_documents_and_validates_every_record(tmp_path):
+def test_example_manifest_documents_and_validates_every_record(
+    tmp_path: Path,
+) -> None:
     example_path = Path(__file__).parents[3] / "Helper_Scripts" / "benchmarks" / "stt_benchmark_manifest.example.jsonl"
     lines = example_path.read_text(encoding="utf-8").splitlines()
     assert lines
@@ -1126,20 +1128,6 @@ def test_ffprobe_fails_safely_when_missing_failed_or_malformed(
     monkeypatch.setattr(stt_bench.subprocess, "run", fake_run)
     with pytest.raises(ValueError, match="ffprobe"):
         stt_bench.probe_audio_duration_ffprobe(tmp_path / "audio.wav")
-
-
-@pytest.mark.integration
-def test_ffprobe_generated_wav_integration(tmp_path):
-    if shutil.which("ffprobe") is None:
-        pytest.skip("ffprobe is not installed")
-    audio_path = tmp_path / "tone.wav"
-    with wave.open(str(audio_path), "wb") as output:
-        output.setnchannels(1)
-        output.setsampwidth(2)
-        output.setframerate(8_000)
-        output.writeframes(b"\0\0" * 8_000)
-
-    assert stt_bench.probe_audio_duration_ffprobe(audio_path) == pytest.approx(1.0)
 
 
 def test_manifest_validate_cli_prints_only_safe_deterministic_summary(

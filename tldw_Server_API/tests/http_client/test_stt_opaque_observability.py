@@ -139,6 +139,28 @@ def test_planned_observability_suppresses_optional_http_instrumentation(
 
 
 @pytest.mark.unit
+def test_opaque_stt_log_factory_redacts_httpx_child_logger() -> None:
+    endpoint_id = "sha256:" + "f" * 64
+    secret_url = "https://private.example/audio?token=private"
+    stdlib_handler = _ListHandler()
+    transport_logger = logging.getLogger("httpx.transport")
+    previous_level = transport_logger.level
+    transport_logger.setLevel(logging.DEBUG)
+    transport_logger.addHandler(stdlib_handler)
+
+    try:
+        with http_client.opaque_stt_http_observability(endpoint_id):
+            transport_logger.debug("request URL=%s", secret_url)
+    finally:
+        transport_logger.removeHandler(stdlib_handler)
+        transport_logger.setLevel(previous_level)
+
+    assert stdlib_handler.messages == [
+        f"planned STT HTTP endpoint_id={endpoint_id}"
+    ]
+
+
+@pytest.mark.unit
 def test_planned_egress_dns_logs_are_opaque_across_worker_context_loss(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

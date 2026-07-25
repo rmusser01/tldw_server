@@ -335,3 +335,44 @@ adapter call. Artifact hashing must encode file boundaries unambiguously.
 
 Run each regression test through red/green, then repeat the complete changed-file
 matrix, Ruff, compileall, Bandit, CLI help, link checks, and final diff checks.
+
+## Task 7: Rebase, Resolve PR Feedback, and Merge
+
+**Files:**
+- Modify: `tldw_Server_API/app/core/http_client.py`
+- Modify: `tldw_Server_API/tests/http_client/test_stt_opaque_observability.py`
+- Modify: `tldw_Server_API/tests/Benchmarks/test_stt_bench.py`
+- Create: `tldw_Server_API/tests/Benchmarks/test_stt_bench_integration.py`
+- Modify through the Backlog.md CLI fallback: `backlog/tasks/task-12985.15 - Add-native-STT-benchmark-operator-user-guide-and-open-dev-PR.md`
+
+- [x] **Step 1: Rebase onto the latest `origin/dev`**
+
+Fetch `origin/dev`, rebase the complete benchmark branch, verify that
+`origin/dev` is an ancestor, and inspect the resulting branch state.
+
+- [x] **Step 2: Address every actionable review finding**
+
+Use a failing regression test before fixing the opaque `httpx.*` log-redaction
+gap. Add the requested helper docstrings, classify the benchmark test module,
+and annotate the specifically cited test signature. Preserve the benchmark
+CLI's stable stderr contract and reply with repository evidence rather than
+converting user-facing command output into application logs.
+
+- [x] **Step 3: Re-run security and regression verification**
+
+Run the focused HTTP observability and benchmark tests, the changed-file test
+matrix, Ruff, compileall, Bandit on touched Python paths, CLI help, link checks,
+and diff checks. Record exact results in the Backlog task.
+
+- [ ] **Step 4: Push, clear review threads, and verify CI**
+
+Commit the review fixes, force-push the rebased branch with lease protection,
+reply to and resolve each addressed inline review thread, and wait for all
+required GitHub checks to reach a terminal successful state.
+
+- [ ] **Step 5: Satisfy the human summary gate and merge**
+
+Verify that the requester has supplied their own `Change summary` explaining
+what changed and why. Do not author that summary for them. Once the policy gate
+and all repository checks are satisfied, merge PR #2759 into `dev` and record
+the merged PR and commit in the Backlog task.

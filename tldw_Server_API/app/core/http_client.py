@@ -443,9 +443,10 @@ def _install_opaque_stt_log_record_factory() -> None:
             record = previous_factory(*args, **kwargs)
             endpoint_id = _OPAQUE_STT_ENDPOINT_ID.get()
             if endpoint_id is None or not (
-                record.name == "httpx"
-                or record.name.startswith("httpcore")
-                or record.name.startswith("aiohttp")
+                record.name in {"httpx", "httpcore", "aiohttp"}
+                or record.name.startswith(
+                    ("httpx.", "httpcore.", "aiohttp.")
+                )
             ):
                 return record
             status_code = next(
@@ -502,6 +503,7 @@ def opaque_stt_http_observability(
 
 
 def _opaque_stt_endpoint_id() -> str | None:
+    """Return the opaque endpoint identifier for the active planned STT call."""
     return get_opaque_stt_endpoint_id()
 
 
@@ -509,6 +511,7 @@ def _http_trace_attributes(
     method: str,
     url: str,
 ) -> dict[str, Any]:
+    """Build privacy-aware trace attributes for an HTTP request."""
     endpoint_id = _opaque_stt_endpoint_id()
     if endpoint_id is not None:
         return {"stt.endpoint_id": endpoint_id}
@@ -527,6 +530,7 @@ def _http_metric_labels(
     *,
     status_code: int | None = None,
 ) -> dict[str, str]:
+    """Build privacy-aware metric labels for an HTTP request."""
     endpoint_id = _opaque_stt_endpoint_id()
     if endpoint_id is not None:
         labels = {"endpoint_id": endpoint_id}
