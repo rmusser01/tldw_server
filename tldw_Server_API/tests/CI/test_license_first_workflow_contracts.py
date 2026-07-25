@@ -607,6 +607,10 @@ def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
         "fail-on-severity": "high",
     }
 
+    jobs_suite_text = workflows["jobs-suite.yml"][1]
+    assert "ports[5432]" not in jobs_suite_text
+    assert jobs_suite_text.count("ports['5432']") == 4
+
 
 def test_shared_change_detector_fails_closed_on_diff_errors() -> None:
     script = yaml.safe_load(CHANGE_DETECTOR_PATH.read_text(encoding="utf-8"))["runs"][
@@ -619,6 +623,17 @@ def test_shared_change_detector_fails_closed_on_diff_errors() -> None:
         in script
     )
     assert 'mapfile -t CHANGED_FILES < "$CHANGED_FILES_PATH"' in script
+
+
+def test_actionlint_scans_the_complete_workflow_directory() -> None:
+    actionlint_job = _load_ordinary_workflows()["actionlint.yml"][0]["jobs"]["actionlint"]
+    lint_step = next(
+        step for step in actionlint_job["steps"] if step.get("name") == "Run actionlint"
+    )
+    assert lint_step["run"] == (
+        "set -euo pipefail\n"
+        "./actionlint -color -config-file .github/actionlint.yaml\n"
+    )
 
 
 def test_admitted_jobs_have_no_secrets_or_write_scoped_credentials() -> None:

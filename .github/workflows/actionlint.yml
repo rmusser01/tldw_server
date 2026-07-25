@@ -69,17 +69,8 @@ jobs:
           install -m 0755 /tmp/actionlint ./actionlint
           ./actionlint -version
 
-      - name: Run actionlint on targeted workflows
+      - name: Run actionlint
         shell: bash
         run: |
           set -euo pipefail
-          ./actionlint -color -config-file .github/actionlint.yaml \
-            .github/workflows/actionlint.yml \
-            .github/workflows/codeql.yml \
-            .github/workflows/container-build-check.yml \
-            .github/workflows/frontend-license-gate.yml \
-            .github/workflows/frontend-ux-gates.yml \
-            .github/workflows/publish-ghcr-main.yml \
-            .github/workflows/publish-docker.yml \
-            .github/workflows/sbom.yml \
-            .github/workflows/vz-linux-host-gated.yml
+          ./actionlint -color -config-file .github/actionlint.yaml

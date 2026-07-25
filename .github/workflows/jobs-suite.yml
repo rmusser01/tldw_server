@@ -184,20 +184,20 @@ jobs:
         uses: ./.github/actions/wait-for-postgres
         with:
           host: 127.0.0.1
-          port: ${{ job.services.postgres.ports[5432] }}
+          port: ${{ job.services.postgres.ports['5432'] }}
           user: tldw
 
       - name: Export PG env vars
         run: |
-          echo "POSTGRES_TEST_PORT=${{ job.services.postgres.ports[5432] }}" >> "$GITHUB_ENV"
-          echo "TEST_DB_PORT=${{ job.services.postgres.ports[5432] }}" >> "$GITHUB_ENV"
+          echo "POSTGRES_TEST_PORT=${{ job.services.postgres.ports['5432'] }}" >> "$GITHUB_ENV"
+          echo "TEST_DB_PORT=${{ job.services.postgres.ports['5432'] }}" >> "$GITHUB_ENV"
 
       - name: Ensure base DB exists
         env:
           # Use the same env vars tests read
           PGPASSWORD: ${{ env.POSTGRES_TEST_PASSWORD }}
         run: |
-          PORT="${{ job.services.postgres.ports[5432] }}"
+          PORT="${{ job.services.postgres.ports['5432'] }}"
           DB_NAME="${POSTGRES_TEST_DB:-tldw_content}"
           DB_USER="${POSTGRES_TEST_USER:-tldw}"
           echo "Ensuring database '$DB_NAME' exists on port $PORT as user $DB_USER"
