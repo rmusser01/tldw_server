@@ -518,19 +518,28 @@ def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
         'github.event.pull_request.base.sha }}"'
     ) in frontend_text
 
-    pre_commit_text = workflows["pre-commit.yml"][1]
-    assert (
-        'if [ "${{ github.event_name }}" = "pull_request" ] || '
-        '[ "${{ github.event_name }}" = "workflow_run" ]; then'
-    ) in pre_commit_text
-    assert (
-        'HEAD_SHA="${{ needs.admission.outputs.head_sha || '
-        'github.event.pull_request.head.sha || github.sha }}"'
-    ) in pre_commit_text
-    assert (
-        'FROM_REF="${{ needs.admission.outputs.base_sha || '
-        'github.event.pull_request.base.sha }}"'
-    ) in pre_commit_text
+    pre_commit = workflows["pre-commit.yml"][0]
+    pre_commit_script = next(
+        step["run"]
+        for step in pre_commit["jobs"]["run-pre-commit"]["steps"]
+        if step.get("name") == "Run pre-commit"
+    )
+    workflow_run_start = pre_commit_script.index(
+        'if [ "${{ github.event_name }}" = "workflow_run" ]; then'
+    )
+    pull_request_start = pre_commit_script.index(
+        'elif [ "${{ github.event_name }}" = "pull_request" ]; then'
+    )
+    push_start = pre_commit_script.index(
+        'elif [ "${{ github.event_name }}" = "push" ]; then'
+    )
+    workflow_run_branch = pre_commit_script[workflow_run_start:pull_request_start]
+    pull_request_branch = pre_commit_script[pull_request_start:push_start]
+    assert 'HEAD_SHA="${{ needs.admission.outputs.head_sha }}"' in workflow_run_branch
+    assert 'FROM_REF="${{ needs.admission.outputs.base_sha }}"' in workflow_run_branch
+    assert 'HEAD_SHA}^' not in workflow_run_branch
+    assert 'FROM_REF="${{ github.event.pull_request.base.sha }}"' in pull_request_branch
+    assert 'FROM_REF="${HEAD_SHA}^"' in pull_request_branch
 
     security_job = workflows["security-required.yml"][0]["jobs"]["security-required"]
     pull_request_only_steps = [

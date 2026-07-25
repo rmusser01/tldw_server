@@ -59,9 +59,15 @@ jobs:
           pip install pre-commit pytest
       - name: Run pre-commit
         run: |
-          if [ "${{ github.event_name }}" = "pull_request" ] || [ "${{ github.event_name }}" = "workflow_run" ]; then
-            HEAD_SHA="${{ needs.admission.outputs.head_sha || github.event.pull_request.head.sha || github.sha }}"
-            FROM_REF="${{ needs.admission.outputs.base_sha || github.event.pull_request.base.sha }}"
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            HEAD_SHA="${{ needs.admission.outputs.head_sha }}"
+            FROM_REF="${{ needs.admission.outputs.base_sha }}"
+            pre-commit run --show-diff-on-failure \
+              --from-ref "$FROM_REF" \
+              --to-ref "$HEAD_SHA"
+          elif [ "${{ github.event_name }}" = "pull_request" ]; then
+            HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+            FROM_REF="${{ github.event.pull_request.base.sha }}"
             if git rev-parse --verify "${HEAD_SHA}^" >/dev/null 2>&1; then
               FROM_REF="${HEAD_SHA}^"
             fi
