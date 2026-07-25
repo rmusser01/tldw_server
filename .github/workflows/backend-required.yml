@@ -57,7 +57,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           fetch-depth: 0
-          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.sha }}
           persist-credentials: false
       - id: detect
         name: Classify changed files
@@ -72,7 +72,17 @@ jobs:
           HEAD_SHA: ${{ needs.admission.outputs.head_sha }}
         run: |
           set -euo pipefail
-          mapfile -t CHANGED_FILES < <(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
+          CHANGED_FILES_PATH="${RUNNER_TEMP}/required-gate-changed-files.txt"
+          if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+            git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          fi
+          if ! git cat-file -e "${HEAD_SHA}^{commit}" 2>/dev/null; then
+            git fetch --no-tags --depth=1 origin "$HEAD_SHA"
+          fi
+          git cat-file -e "${BASE_SHA}^{commit}"
+          git cat-file -e "${HEAD_SHA}^{commit}"
+          git diff --name-only "$BASE_SHA" "$HEAD_SHA" > "$CHANGED_FILES_PATH"
+          mapfile -t CHANGED_FILES < "$CHANGED_FILES_PATH"
           python -m Helper_Scripts.ci.emit_ci_gate_flags "${CHANGED_FILES[@]}"
 
   backend-required:
@@ -102,6 +112,7 @@ jobs:
         if: needs.changes.outputs.backend_changed == 'true'
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
+          fetch-depth: 0
           ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
@@ -147,7 +158,16 @@ jobs:
           fi
 
           if [[ -n "${BASE_SHA:-}" ]]; then
-            mapfile -t CHANGED_PY < <(git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -E '^tldw_Server_API/.*\.py$' || true)
+            if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+              git fetch --no-tags --depth=1 origin "$BASE_SHA"
+            fi
+            if ! git cat-file -e "${HEAD_SHA}^{commit}" 2>/dev/null; then
+              git fetch --no-tags --depth=1 origin "$HEAD_SHA"
+            fi
+            git cat-file -e "${BASE_SHA}^{commit}"
+            git cat-file -e "${HEAD_SHA}^{commit}"
+            git diff --name-only "$BASE_SHA" "$HEAD_SHA" > "${RUNNER_TEMP}/backend-required-changed-files.txt"
+            mapfile -t CHANGED_PY < <(grep -E '^tldw_Server_API/.*\.py$' "${RUNNER_TEMP}/backend-required-changed-files.txt" || true)
           else
             mapfile -t CHANGED_PY < <(git ls-files | grep -E '^tldw_Server_API/.*\.py$' || true)
           fi

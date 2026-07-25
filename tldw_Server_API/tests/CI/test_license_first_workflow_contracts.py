@@ -11,6 +11,7 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 WORKFLOW_PATH = REPO_ROOT / ".github/workflows/license-first-admission.yml"
+CHANGE_DETECTOR_PATH = REPO_ROOT / ".github/actions/detect-required-gate-changes/action.yml"
 CHECKOUT_ACTION = "actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd"
 OUTPUT_NAMES = ("pr_number", "head_sha", "base_sha", "base_ref", "should_run")
 EXPECTED_PERMISSIONS = {
@@ -182,10 +183,12 @@ BACKEND_CHANGED_JOBS = {
 }
 FETCH_DEPTH_CHECKOUTS = {
     ("backend-required.yml", "changes"),
+    ("backend-required.yml", "backend-required"),
     ("ci.yml", "changes"),
     ("coverage-required.yml", "changes"),
     ("e2e-required.yml", "changes"),
     ("frontend-required.yml", "changes"),
+    ("frontend-required.yml", "frontend-required"),
     ("onboarding-docs-gate.yml", "onboarding-docs-gate"),
     ("pre-commit.yml", "run-pre-commit"),
     ("security-required.yml", "changes"),
@@ -231,6 +234,7 @@ CHANGE_CLASSIFIER_OUTPUTS = {
         "coverage_required",
     },
 }
+CHANGE_CLASSIFIER_JOBS = {(name, "changes") for name in CHANGE_CLASSIFIER_OUTPUTS}
 
 
 def _load_workflow() -> tuple[dict[str, Any], str]:
@@ -355,6 +359,10 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
         "github.event.workflow_run.pull_requests[0].head.sha || "
         "github.event.pull_request.head.sha || github.sha }}"
     )
+    classifier_ref = (
+        "${{ needs.admission.outputs.head_sha || "
+        "github.event.workflow_run.pull_requests[0].head.sha || github.sha }}"
+    )
     backend_changed = (
         "(github.event_name != 'pull_request' && "
         "github.event_name != 'workflow_run') || "
@@ -423,7 +431,10 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                 checkout_count += 1
                 checkout_inputs = step.get("with", {})
                 assert checkout_inputs.get("persist-credentials") is False, (name, job_name)
-                expected_ref = admission_ref if "admission" in needs else event_ref
+                if (name, job_name) in CHANGE_CLASSIFIER_JOBS:
+                    expected_ref = classifier_ref
+                else:
+                    expected_ref = admission_ref if "admission" in needs else event_ref
                 assert checkout_inputs.get("ref") == expected_ref, (name, job_name)
                 other_inputs = {
                     key: value
@@ -468,7 +479,7 @@ def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
     assert combined_text.count("github.event.workflow_run.pull_requests[0].number") == 27
     assert combined_text.count("github.event.pull_request.number") == 27
     assert combined_text.count("github.event.workflow_run.pull_requests[0].head.sha") == 53
-    assert combined_text.count("github.event.pull_request.head.sha") == 56
+    assert combined_text.count("github.event.pull_request.head.sha") == 50
     assert combined_text.count("github.event.pull_request.base.sha") == 4
     assert combined_text.count("needs.admission.outputs.base_sha") == 10
 
@@ -491,10 +502,20 @@ def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
             "BASE_SHA": "${{ needs.admission.outputs.base_sha }}",
             "HEAD_SHA": "${{ needs.admission.outputs.head_sha }}",
         }
-        assert 'git diff --name-only "$BASE_SHA" "$HEAD_SHA"' in admitted_step["run"]
+        admitted_script = admitted_step["run"]
+        assert "< <(git diff" not in admitted_script
+        assert 'git cat-file -e "${BASE_SHA}^{commit}"' in admitted_script
+        assert 'git cat-file -e "${HEAD_SHA}^{commit}"' in admitted_script
+        assert 'git fetch --no-tags --depth=1 origin "$BASE_SHA"' in admitted_script
+        assert 'git fetch --no-tags --depth=1 origin "$HEAD_SHA"' in admitted_script
+        assert (
+            'git diff --name-only "$BASE_SHA" "$HEAD_SHA" > "$CHANGED_FILES_PATH"'
+            in admitted_script
+        )
+        assert 'mapfile -t CHANGED_FILES < "$CHANGED_FILES_PATH"' in admitted_script
         assert (
             'python -m Helper_Scripts.ci.emit_ci_gate_flags "${CHANGED_FILES[@]}"'
-            in admitted_step["run"]
+            in admitted_script
         )
 
     backend_text = workflows["backend-required.yml"][1]
@@ -507,6 +528,16 @@ def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
         'github.event.pull_request.head.sha || github.sha }}"'
     ) in backend_text
     assert 'git diff --name-only "$BASE_SHA" "$HEAD_SHA"' in backend_text
+    assert "< <(git diff" not in backend_text
+    backend_mypy_script = next(
+        step["run"]
+        for step in workflows["backend-required.yml"][0]["jobs"]["backend-required"]["steps"]
+        if step.get("name") == "Type check changed backend modules"
+    )
+    assert 'git cat-file -e "${BASE_SHA}^{commit}"' in backend_mypy_script
+    assert 'git cat-file -e "${HEAD_SHA}^{commit}"' in backend_mypy_script
+    assert 'git fetch --no-tags --depth=1 origin "$BASE_SHA"' in backend_mypy_script
+    assert 'git fetch --no-tags --depth=1 origin "$HEAD_SHA"' in backend_mypy_script
 
     frontend_text = workflows["frontend-required.yml"][1]
     assert (
@@ -517,6 +548,22 @@ def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
         'BASE_SHA="${{ needs.admission.outputs.base_sha || '
         'github.event.pull_request.base.sha }}"'
     ) in frontend_text
+    frontend_checkout = next(
+        step
+        for step in workflows["frontend-required.yml"][0]["jobs"]["frontend-required"]["steps"]
+        if step.get("name") == "Checkout"
+    )
+    assert frontend_checkout["with"]["fetch-depth"] == 0
+    frontend_unit_script = next(
+        step["run"]
+        for step in workflows["frontend-required.yml"][0]["jobs"]["frontend-required"]["steps"]
+        if step.get("name") == "Run frontend unit tests"
+    )
+    assert 'git cat-file -e "${BASE_SHA}^{commit}"' in frontend_unit_script
+    assert 'git fetch --no-tags --depth=1 origin "$BASE_SHA"' in frontend_unit_script
+    assert frontend_unit_script.index('git cat-file -e "${BASE_SHA}^{commit}"') < (
+        frontend_unit_script.index('bunx vitest run --changed="${BASE_SHA}"')
+    )
 
     pre_commit = workflows["pre-commit.yml"][0]
     pre_commit_script = next(
@@ -559,6 +606,19 @@ def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
         ),
         "fail-on-severity": "high",
     }
+
+
+def test_shared_change_detector_fails_closed_on_diff_errors() -> None:
+    script = yaml.safe_load(CHANGE_DETECTOR_PATH.read_text(encoding="utf-8"))["runs"][
+        "steps"
+    ][0]["run"]
+
+    assert "< <(git diff" not in script
+    assert (
+        'git diff --name-only "$BASE_SHA" "${{ github.sha }}" > "$CHANGED_FILES_PATH"'
+        in script
+    )
+    assert 'mapfile -t CHANGED_FILES < "$CHANGED_FILES_PATH"' in script
 
 
 def test_reusable_workflow_has_exact_interface_and_read_permissions() -> None:

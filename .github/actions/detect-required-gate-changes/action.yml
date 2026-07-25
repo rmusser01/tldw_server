@@ -45,10 +45,12 @@ runs:
           BASE_SHA="$(git rev-parse HEAD^ 2>/dev/null || true)"
         fi
 
+        CHANGED_FILES_PATH="${RUNNER_TEMP}/required-gate-changed-files.txt"
         if [[ -n "${BASE_SHA:-}" ]]; then
-          mapfile -t CHANGED_FILES < <(git diff --name-only "$BASE_SHA" "${{ github.sha }}")
+          git diff --name-only "$BASE_SHA" "${{ github.sha }}" > "$CHANGED_FILES_PATH"
         else
-          mapfile -t CHANGED_FILES < <(git ls-files)
+          git ls-files > "$CHANGED_FILES_PATH"
         fi
+        mapfile -t CHANGED_FILES < "$CHANGED_FILES_PATH"
 
         python -m Helper_Scripts.ci.emit_ci_gate_flags "${CHANGED_FILES[@]}"
