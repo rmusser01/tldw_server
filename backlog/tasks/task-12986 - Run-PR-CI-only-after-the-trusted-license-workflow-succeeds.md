@@ -4,7 +4,7 @@ title: Run PR CI only after the trusted license workflow succeeds
 status: In Progress
 assignee: []
 created_date: '2026-07-24 04:08'
-updated_date: '2026-07-24 14:39'
+updated_date: '2026-07-25 17:44'
 labels:
   - ci
   - github-actions
@@ -50,6 +50,12 @@ Independent specification re-review approved on 2026-07-24 after resolving base-
 Post-review verification on 2026-07-24: focused CI contract suites passed (54 passed, 2 warnings in 14.63s); git diff --check passed. This commit remains documentation/task-record only, so Bandit is not applicable.
 
 State correction on 2026-07-24: GitHub reports PR #2758 is currently ready for review (not draft) at head a2f3338c575b; no merge or ruleset change was performed.
+
+Implementation complete for PR #2758 preparation stage. Added trusted workflow_run admission, exact run/PR/head/base/status validation, conservative path routing, admission guards across all 28 ordinary PR workflows, immutable credential-free checkouts, fail-closed diff classification, read-only permissions, and restore-only admitted caches. Independent spec and quality reviews approved the result.
+
+Final verification: four focused CI contract files -> 144 passed, 2 warnings; actionlint 1.7.12 across all workflows -> exit 0; Bandit on Helper_Scripts/ci/license_first_admission.py -> 0 findings; git diff --check origin/dev...HEAD -> exit 0.
+
+Rollout prerequisite: this PR deliberately preserves direct PR triggers and keeps LICENSE_FIRST_CI_ENABLED inert. After the definitions land on the canonical/default branch and main/dev are synchronized, run the documented canary, then perform the separate trigger-removal/variable cutover. TASK-12986 remains In Progress until that cutover proves strict ordering.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

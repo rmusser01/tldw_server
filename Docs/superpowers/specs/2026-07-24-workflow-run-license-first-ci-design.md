@@ -1,8 +1,8 @@
 # License-First PR CI with `workflow_run`
 
-- **Status:** Requester approved the strict license-first design and independent
-  specification review approved it on 2026-07-24; written specification pending
-  final requester review
+- **Status:** Implemented in PR #2758 as inert dual-trigger preparation; final
+  main/dev cutover requires merge, canary validation, and a separate trigger
+  removal change
 - **Backlog task:** TASK-12986
 - **Repository:** `rmusser01/tldw_server`
 
