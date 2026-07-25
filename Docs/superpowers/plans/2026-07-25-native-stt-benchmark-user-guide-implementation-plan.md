@@ -288,7 +288,7 @@ Push `codex/native-stt-benchmark`, then create a draft PR with:
 - an explicit statement that pasted AI-generated text does not satisfy the
   merge gate.
 
-- [ ] **Step 5: Verify, record, and commit PR state**
+- [x] **Step 5: Verify, record, and commit PR state**
 
 First confirm that the PR base is `dev`, the PR remains draft, and the rendered
 body contains the required verification evidence and human `Change summary`
