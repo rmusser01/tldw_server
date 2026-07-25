@@ -94,11 +94,15 @@ depending on your hardware and setup:
 | --- | --- |
 | CPU Parakeet ONNX | `parakeet=parakeet-tdt-0.6b-v3-onnx` |
 | NVIDIA faster-whisper | `faster-whisper=large-v3` |
-| Apple Silicon Parakeet MLX | `parakeet=parakeet-mlx` |
+| Apple Silicon local CPU fallback | `parakeet=parakeet-tdt-0.6b-v3-onnx` |
 
 These are examples, not an inventory of what is installed on your machine.
 Use the exact provider and model/artifact label from your verified setup.
 Unknown providers fail closed rather than falling back to another adapter.
+Although `parakeet-mlx` is supported by other tldw_server STT paths, the
+benchmark planner currently rejects it because it cannot prove immutable
+device and dtype identity. Do not use it as a benchmark target until that
+planner support exists.
 
 Start with one target:
 
@@ -278,20 +282,20 @@ is recorded and later matters for performance comparison eligibility.
 
 ## Inspect and rebuild reports
 
-A completed run writes:
+A completed run retains:
 
 ```text
 .benchmarks/stt/<run-id>/
 ├── .coordinator.lock
 ├── run.json
-├── inflight.json
-├── results.jsonl
-├── summary.json
-└── summary.md
+└── results.jsonl
 ```
 
 `run.json` and append-only `results.jsonl` are authoritative.
-`summary.json` and `summary.md` are disposable projections.
+`inflight.json` exists only while a call is active or when crash recovery is
+needed; it is cleared after successful persistence. The `report` command
+creates or refreshes the disposable `summary.json` and `summary.md`
+projections.
 
 Rebuild a report by passing the run directory, not the run ID:
 
@@ -457,7 +461,7 @@ opaque `--configuration-id`. It compares complete configurations, not isolated
 model quality. A network run template is:
 
 ```bash
-export STT_NETWORK_TARGET='external=REPLACE_WITH_CONFIGURED_MODEL'
+export STT_NETWORK_TARGET='external=external:REPLACE_WITH_CONFIGURED_PROVIDER'
 
 python Helper_Scripts/benchmarks/stt_bench.py run \
   --manifest "$STT_MANIFEST" \
@@ -476,11 +480,13 @@ python Helper_Scripts/benchmarks/stt_bench.py run \
 
 Replace every illustrative label after reviewing the actual adapter
 configuration. Never put credentials in a run identifier, configuration ID,
-network label, manifest, or command history. The current generic `external`
-adapter does not resolve a concrete model artifact, so its results remain
-descriptive and are not eligible for policy gates. Use a network-capable native
-adapter with a resolved execution identity when you need an eligible network
-regression gate.
+network label, manifest, or command history. For the `external` adapter, the
+model portion `external:<provider>` selects that named external-provider
+configuration; the actual request model comes from the selected configuration.
+The adapter does not resolve a concrete model artifact, so its results remain
+descriptive and are not eligible for policy gates. Use a network-capable
+native adapter with a resolved execution identity when you need an eligible
+network regression gate.
 
 Network performance is informational by default. A network performance policy
 gate additionally requires matching non-empty network collection and client

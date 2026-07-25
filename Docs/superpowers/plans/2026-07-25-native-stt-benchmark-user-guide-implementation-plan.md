@@ -247,7 +247,7 @@ Backlog.md CLI fallback:
 - branch name;
 - the remaining human-authored `Change summary` merge gate.
 
-- [ ] **Step 2: Commit the documentation slice**
+- [x] **Step 2: Commit the documentation slice**
 
 ```bash
 git add \
