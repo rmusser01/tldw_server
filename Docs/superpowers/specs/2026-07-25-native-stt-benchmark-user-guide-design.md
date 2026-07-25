@@ -78,9 +78,11 @@ The guide must state that:
 - the benchmark does not download models or corpora;
 - unknown providers fail closed;
 - `--allow-network-targets` is consent to send audio, not a dry run;
-- remote performance gates additionally require matching network collection
-  metadata and explicit gate consent;
+- performance gates for any network-dependent target, including loopback and
+  remote execution, additionally require matching network collection metadata
+  and explicit gate consent;
 - only compatible complete runs are eligible for policy gates;
+- descriptive comparison also rejects partial summaries;
 - failures are scored as empty hypotheses and cannot improve quality;
 - retained transcripts may contain private content.
 
