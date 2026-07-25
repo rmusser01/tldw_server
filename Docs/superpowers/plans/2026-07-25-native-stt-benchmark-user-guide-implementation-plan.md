@@ -277,7 +277,7 @@ the final diff includes the complete benchmark implementation and guide. If
 the rebase changes or conflicts with benchmark or guide files, rerun the
 focused tests and documentation checks before proceeding.
 
-- [ ] **Step 4: Push and open a draft PR against `dev`**
+- [x] **Step 4: Push and open a draft PR against `dev`**
 
 Push `codex/native-stt-benchmark`, then create a draft PR with:
 
