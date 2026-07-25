@@ -146,6 +146,7 @@ jobs:
         with:
           python-version: "3.12"
           use-uv: "true"
+          enable-pip-cache: ${{ github.event_name != 'workflow_run' }}
           cache-dependency-path: |
             pyproject.toml
             uv.lock

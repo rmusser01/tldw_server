@@ -621,6 +621,115 @@ def test_shared_change_detector_fails_closed_on_diff_errors() -> None:
     assert 'mapfile -t CHANGED_FILES < "$CHANGED_FILES_PATH"' in script
 
 
+def test_admitted_jobs_have_no_secrets_or_write_scoped_credentials() -> None:
+    for name, (data, text) in _load_ordinary_workflows().items():
+        assert "${{ secrets." not in text, name
+        assert "secrets: inherit" not in text, name
+        assert "write" not in data.get("permissions", {}).values(), name
+
+        for job_name, job in data["jobs"].items():
+            permissions = job.get("permissions", {})
+            assert "write" not in permissions.values(), (name, job_name, permissions)
+
+            for step in job.get("steps", []):
+                serialized_step = json.dumps(step, sort_keys=True)
+                if "${{ github.token }}" in serialized_step:
+                    token_condition = _normalized(step.get("if"))
+                    assert token_condition == "github.event_name!='workflow_run'" or (
+                        token_condition.startswith("github.event_name!='workflow_run'&&")
+                    ), (name, job_name, step.get("name"))
+                for value in step.get("env", {}).values():
+                    value_text = str(value)
+                    assert "${{ secrets." not in value_text, (name, job_name, step.get("name"))
+                    assert "${{ github.token }}" not in value_text, (
+                        name,
+                        job_name,
+                        step.get("name"),
+                    )
+
+    codeql = _load_ordinary_workflows()["codeql.yml"][0]["jobs"]["analyze"]
+    assert codeql["permissions"] == {
+        "actions": "read",
+        "contents": "read",
+        "security-events": "read",
+    }
+    analyze = next(
+        step for step in codeql["steps"] if step.get("name") == "Perform CodeQL Analysis"
+    )
+    assert analyze["with"]["upload"] is False
+
+
+def test_admitted_jobs_restore_but_cannot_save_shared_caches() -> None:
+    setup_helper_count = 0
+    setup_python_cache_count = 0
+    cache_save_count = 0
+    cache_restore_count = 0
+
+    for name, (data, _) in _load_ordinary_workflows().items():
+        for job_name, job in data["jobs"].items():
+            steps = job.get("steps", [])
+            for step in steps:
+                uses = str(step.get("uses", ""))
+                inputs = step.get("with", {})
+
+                if uses == "./.github/actions/setup-python-deps":
+                    setup_helper_count += 1
+                    cache_condition = inputs.get("enable-pip-cache")
+                    assert cache_condition in {
+                        "${{ github.event_name != 'workflow_run' }}",
+                        (
+                            "${{ github.event_name != 'workflow_run' && "
+                            "runner.os != 'Windows' }}"
+                        ),
+                    }, (
+                        name,
+                        job_name,
+                        step.get("name"),
+                    )
+
+                if uses.startswith("actions/setup-python@") and "cache" in inputs:
+                    setup_python_cache_count += 1
+                    assert inputs["cache"] == (
+                        "${{ github.event_name != 'workflow_run' && 'pip' || '' }}"
+                    ), (name, job_name, step.get("name"))
+
+                if uses.startswith("actions/cache@"):
+                    cache_save_count += 1
+                    save_condition = _normalized(step.get("if"))
+                    assert save_condition == "github.event_name!='workflow_run'" or (
+                        save_condition.startswith("github.event_name!='workflow_run'&&")
+                    ), (
+                        name,
+                        job_name,
+                        step.get("name"),
+                    )
+                    matching_restores = [
+                        candidate
+                        for candidate in steps
+                        if str(candidate.get("uses", "")).startswith("actions/cache/restore@")
+                        and candidate.get("with", {}) == inputs
+                    ]
+                    assert len(matching_restores) == 1, (name, job_name, step.get("name"))
+                    restore_condition = _normalized(matching_restores[0].get("if"))
+                    assert restore_condition == "github.event_name=='workflow_run'" or (
+                        restore_condition.startswith("github.event_name=='workflow_run'&&")
+                    )
+
+                if uses.startswith("actions/cache/restore@"):
+                    cache_restore_count += 1
+
+                if uses.startswith("actions/cache/save@"):
+                    save_condition = _normalized(step.get("if"))
+                    assert save_condition == "github.event_name!='workflow_run'" or (
+                        save_condition.startswith("github.event_name!='workflow_run'&&")
+                    )
+
+    assert setup_helper_count == 23
+    assert setup_python_cache_count == 1
+    assert cache_save_count == 6
+    assert cache_restore_count == 6
+
+
 def test_reusable_workflow_has_exact_interface_and_read_permissions() -> None:
     data, text = _load_workflow()
     trigger_key = "on" if "on" in data else True

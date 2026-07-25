@@ -85,7 +85,19 @@ jobs:
           mkdir -p "$MPLCONFIGDIR"
 
 
-      - name: Cache pip
+      - name: Restore pip cache (admitted PR)
+        if: github.event_name == 'workflow_run'
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('**/pyproject.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-${{ matrix.python-version }}-
+            ${{ runner.os }}-pip-
+
+      - name: Cache pip (trusted events)
+        if: github.event_name != 'workflow_run'
         uses: actions/cache@v5
         with:
           path: |

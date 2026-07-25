@@ -190,7 +190,7 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: '3.12'
-          cache: pip
+          cache: ${{ github.event_name != 'workflow_run' && 'pip' || '' }}
           cache-dependency-path: |
             pyproject.toml
             uv.lock
@@ -321,6 +321,7 @@ jobs:
         with:
           python-version: '3.12'
           use-uv: 'true'
+          enable-pip-cache: ${{ github.event_name != 'workflow_run' }}
           cache-dependency-path: |
             pyproject.toml
             uv.lock
@@ -529,6 +530,7 @@ jobs:
         with:
           python-version: '3.11'
           use-uv: 'true'
+          enable-pip-cache: ${{ github.event_name != 'workflow_run' }}
           cache-dependency-path: |
             pyproject.toml
             uv.lock
@@ -1841,6 +1843,7 @@ jobs:
         with:
           python-version: '3.12'
           use-uv: 'true'
+          enable-pip-cache: ${{ github.event_name != 'workflow_run' }}
           cache-dependency-path: |
             pyproject.toml
             uv.lock
@@ -2007,8 +2010,18 @@ jobs:
         run: |
           python tldw_Server_API/tests/scripts/server_lifecycle.py stop || true
 
+      - name: Restore embedding model cache (admitted PR)
+        if: ${{ github.event_name == 'workflow_run' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'research-websearch') }}
+        continue-on-error: true
+        uses: actions/cache/restore@v5
+        with:
+          path: models/embeddings
+          key: ${{ runner.os }}-embeddings-static-v1
+          restore-keys: |
+            ${{ runner.os }}-embeddings-
+
       - name: Cache embedding models
-        if: ${{ github.event_name != 'workflow_dispatch' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'research-websearch') }}
+        if: ${{ github.event_name != 'workflow_run' && github.event_name != 'workflow_dispatch' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'research-websearch') }}
         continue-on-error: true
         uses: actions/cache@v5
         with:
@@ -3286,6 +3299,7 @@ jobs:
         with:
           python-version: '3.13'
           use-uv: 'true'
+          enable-pip-cache: ${{ github.event_name != 'workflow_run' }}
           cache-dependency-path: |
             pyproject.toml
             uv.lock
@@ -3396,8 +3410,18 @@ jobs:
         run: |
           python tldw_Server_API/tests/scripts/server_lifecycle.py stop || true
 
+      - name: Restore embedding model cache (admitted PR)
+        if: ${{ github.event_name == 'workflow_run' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'research-websearch') }}
+        continue-on-error: true
+        uses: actions/cache/restore@v5
+        with:
+          path: models/embeddings
+          key: ${{ runner.os }}-embeddings-static-v1
+          restore-keys: |
+            ${{ runner.os }}-embeddings-
+
       - name: Cache embedding models
-        if: ${{ github.event_name != 'workflow_dispatch' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'research-websearch') }}
+        if: ${{ github.event_name != 'workflow_run' && github.event_name != 'workflow_dispatch' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'research-websearch') }}
         continue-on-error: true
         uses: actions/cache@v5
         with:
@@ -4578,7 +4602,7 @@ jobs:
         with:
           python-version: '3.12'
           use-uv: ${{ runner.os != 'Windows' }}
-          enable-pip-cache: ${{ runner.os != 'Windows' }}
+          enable-pip-cache: ${{ github.event_name != 'workflow_run' && runner.os != 'Windows' }}
           cache-dependency-path: |
             pyproject.toml
             uv.lock
@@ -4637,8 +4661,18 @@ jobs:
         run: |
           python tldw_Server_API/tests/scripts/server_lifecycle.py stop || true
 
+      - name: Restore embedding model cache (admitted PR)
+        if: ${{ github.event_name == 'workflow_run' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'research-websearch') }}
+        continue-on-error: true
+        uses: actions/cache/restore@v5
+        with:
+          path: models/embeddings
+          key: ${{ runner.os }}-embeddings-static-v1
+          restore-keys: |
+            ${{ runner.os }}-embeddings-
+
       - name: Cache embedding models
-        if: ${{ github.event_name != 'workflow_dispatch' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'research-websearch') }}
+        if: ${{ github.event_name != 'workflow_run' && github.event_name != 'workflow_dispatch' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'research-websearch') }}
         continue-on-error: true
         uses: actions/cache@v5
         with:
@@ -5818,7 +5852,7 @@ jobs:
         with:
           python-version: '3.12'
           use-uv: ${{ runner.os != 'Windows' }}
-          enable-pip-cache: ${{ runner.os != 'Windows' }}
+          enable-pip-cache: ${{ github.event_name != 'workflow_run' && runner.os != 'Windows' }}
           cache-dependency-path: |
             pyproject.toml
             uv.lock
@@ -5877,8 +5911,18 @@ jobs:
         run: |
           python tldw_Server_API/tests/scripts/server_lifecycle.py stop || true
 
+      - name: Restore embedding model cache (admitted PR)
+        if: ${{ github.event_name == 'workflow_run' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'research-websearch') }}
+        continue-on-error: true
+        uses: actions/cache/restore@v5
+        with:
+          path: models/embeddings
+          key: ${{ runner.os }}-embeddings-static-v1
+          restore-keys: |
+            ${{ runner.os }}-embeddings-
+
       - name: Cache embedding models
-        if: ${{ github.event_name != 'workflow_dispatch' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'research-websearch') }}
+        if: ${{ github.event_name != 'workflow_run' && github.event_name != 'workflow_dispatch' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'research-websearch') }}
         continue-on-error: true
         uses: actions/cache@v5
         with:
@@ -7064,7 +7108,7 @@ jobs:
         with:
           python-version: '3.13'
           use-uv: ${{ runner.os != 'Windows' }}
-          enable-pip-cache: ${{ runner.os != 'Windows' }}
+          enable-pip-cache: ${{ github.event_name != 'workflow_run' && runner.os != 'Windows' }}
           cache-dependency-path: |
             pyproject.toml
             uv.lock
@@ -7123,8 +7167,18 @@ jobs:
         run: |
           python tldw_Server_API/tests/scripts/server_lifecycle.py stop || true
 
+      - name: Restore embedding model cache (admitted PR)
+        if: ${{ github.event_name == 'workflow_run' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'research-websearch') }}
+        continue-on-error: true
+        uses: actions/cache/restore@v5
+        with:
+          path: models/embeddings
+          key: ${{ runner.os }}-embeddings-static-v1
+          restore-keys: |
+            ${{ runner.os }}-embeddings-
+
       - name: Cache embedding models
-        if: ${{ github.event_name != 'workflow_dispatch' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'research-websearch') }}
+        if: ${{ github.event_name != 'workflow_run' && github.event_name != 'workflow_dispatch' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'research-websearch') }}
         continue-on-error: true
         uses: actions/cache@v5
         with:
@@ -7207,6 +7261,7 @@ jobs:
         with:
           python-version: '3.12'
           use-uv: 'true'
+          enable-pip-cache: ${{ github.event_name != 'workflow_run' }}
           cache-dependency-path: |
             pyproject.toml
             uv.lock
