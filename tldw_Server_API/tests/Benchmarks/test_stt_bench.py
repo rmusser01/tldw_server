@@ -2727,7 +2727,11 @@ def _planned_target(
             artifact_id=("sha256:" + f"{index + 1:064x}" if identity_resolved else None),
             identity_resolved=identity_resolved,
             backend=f"backend-{index + 1}",
-            source="local" if egress is SttAudioEgress.NONE else "http",
+            source=(
+                "fixture"
+                if egress is SttAudioEgress.NONE
+                else "http"
+            ),
             audio_egress=egress,
             endpoint_id=(None if egress is SttAudioEgress.NONE else f"sha256:{index + 1:064x}"),
             device="cpu" if egress is SttAudioEgress.NONE else None,
@@ -3258,6 +3262,62 @@ def _worker_target(
         execution_contract_json=contract_json,
         execution_contract_hash=contract_hash,
     )
+
+
+def test_worker_rejects_local_artifact_changed_after_preflight(tmp_path):
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import (
+        stt_provider_adapter,
+    )
+
+    model_dir = tmp_path / "model"
+    model_dir.mkdir()
+    weights = model_dir / "weights.bin"
+    weights.write_bytes(b"version-one")
+    artifact_id = stt_provider_adapter._local_artifact_id(model_dir)
+    plan = _planned_target(
+        provider="worker-ok",
+        model_label="worker-model",
+        identity_resolved=True,
+        runtime_secret=str(model_dir.resolve()),
+    )
+    route = replace(
+        plan.descriptor.routes[0],
+        artifact_id=artifact_id,
+        source="local",
+    )
+    plan = replace(
+        plan,
+        descriptor=replace(plan.descriptor, routes=(route,)),
+    )
+    safe_settings = {
+        "mode": "neutral-v1",
+        "task": "transcribe",
+        "language": "en",
+        "word_timestamps": False,
+        "diarization": False,
+        "prompt_present": False,
+        "hotword_count": 0,
+    }
+    contract_json, contract_hash = stt_bench.build_execution_contract(
+        plan=plan,
+        git_commit="a" * 40,
+        safe_target_settings=safe_settings,
+    )
+    target = stt_bench.PreparedTarget(
+        target_id="target-worker",
+        provider="worker-ok",
+        model_label="worker-model",
+        plan=plan,
+        adapter_factory_path=f"{__name__}:_worker_fake_factory",
+        execution_contract_json=contract_json,
+        execution_contract_hash=contract_hash,
+    )
+
+    stt_bench._verify_worker_target(target)
+    weights.write_bytes(b"version-two")
+
+    with pytest.raises(ValueError, match="local artifact"):
+        stt_bench._verify_worker_target(target)
 
 
 def _runner_environment():

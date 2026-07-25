@@ -204,6 +204,66 @@ def _make_execution_plan(
 
 
 @pytest.mark.unit
+def test_local_plan_identity_tracks_artifact_content(tmp_path: Path) -> None:
+    model_dir = tmp_path / "model"
+    model_dir.mkdir()
+    weights = model_dir / "weights.bin"
+    weights.write_bytes(b"version-one")
+
+    def build_plan():
+        return _import_module()._build_local_plan(
+            provider="faster-whisper",
+            requested_model="tiny",
+            resolved_model="tiny",
+            backend="ctranslate2",
+            model_path=model_dir,
+            device="cpu",
+            compute_type="int8",
+            dtype=None,
+            revision=None,
+            task="transcribe",
+            language="en",
+            word_timestamps=False,
+            prompt=None,
+            hotwords=None,
+            diarization=False,
+            fixed_english=False,
+            runtime_settings={},
+            source_modules=(),
+            dependency_distributions=(),
+        )
+
+    before = build_plan().descriptor.primary_route
+    weights.write_bytes(b"version-two")
+    after = build_plan().descriptor.primary_route
+
+    assert before.identity_resolved is True
+    assert before.artifact_id is not None
+    assert before.artifact_id.startswith("sha256:")
+    assert after.artifact_id != before.artifact_id
+
+
+@pytest.mark.unit
+def test_local_artifact_identity_preserves_file_boundaries(
+    tmp_path: Path,
+) -> None:
+    model_dir = tmp_path / "model"
+    model_dir.mkdir()
+    first = model_dir / "a"
+    second = model_dir / "b"
+    second_record_prefix = len(second.name).to_bytes(8, "big") + b"b"
+    first.write_bytes(b"")
+    second.write_bytes(second_record_prefix)
+    before = _import_module()._local_artifact_id(model_dir)
+
+    first.write_bytes(second_record_prefix)
+    second.write_bytes(b"")
+    after = _import_module()._local_artifact_id(model_dir)
+
+    assert after != before
+
+
+@pytest.mark.unit
 def test_execution_plan_is_frozen_and_pickleable():
     spa = _import_module()
     plan = _make_execution_plan(spa)
@@ -1479,9 +1539,10 @@ def test_transcribe_batch_canary_converts_compressed_input_before_soundfile(
     """Canary adapter converts compressed input before soundfile reads it."""
     spa = _import_module()
 
+    import sys
+
     import numpy as np
     import soundfile as sf
-    import sys
 
     compressed_file = tmp_path / "sample_canary.mp3"
     compressed_file.write_bytes(b"not really mp3")
@@ -1543,6 +1604,7 @@ def test_transcribe_batch_qwen3_asr_converts_compressed_input(
     spa = _import_module()
 
     import sys
+
     import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as atlib
 
     compressed_file = tmp_path / "sample_qwen3.webm"
@@ -1615,6 +1677,7 @@ def test_transcribe_batch_vibevoice_converts_compressed_input(
     spa = _import_module()
 
     import sys
+
     import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as atlib
 
     compressed_file = tmp_path / "sample_vibevoice.m4a"

@@ -107,6 +107,35 @@ def _route(
     )
 
 
+@pytest.mark.unit
+def test_parakeet_tdt_wrapper_reports_upstream_execution_provider() -> None:
+    upstream = types.SimpleNamespace(
+        get_providers=lambda: ["CPUExecutionProvider"],
+    )
+    runtime = parakeet_onnx.ParakeetOnnxAsrRuntime(upstream)
+
+    assert parakeet_onnx._effective_onnx_device(runtime) == "cpu"
+
+
+@pytest.mark.unit
+def test_parakeet_tdt_wrapper_reports_nested_onnx_asr_sessions() -> None:
+    encoder = types.SimpleNamespace(
+        get_providers=lambda: ["CPUExecutionProvider"],
+    )
+    decoder_joint = types.SimpleNamespace(
+        get_providers=lambda: ["CPUExecutionProvider"],
+    )
+    upstream = types.SimpleNamespace(
+        asr=types.SimpleNamespace(
+            _encoder=encoder,
+            _decoder_joint=decoder_joint,
+        )
+    )
+    runtime = parakeet_onnx.ParakeetOnnxAsrRuntime(upstream)
+
+    assert parakeet_onnx._effective_onnx_device(runtime) == "cpu"
+
+
 def _plan(
     route: spa.SttExecutionRoute,
     *,

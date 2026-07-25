@@ -10,8 +10,8 @@ dependencies. Transcription methods will be layered on gradually.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import inspect
-import re
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -176,8 +176,6 @@ _STT_PROVIDER_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     TypeError,
     ValueError,
 )
-_IMMUTABLE_REVISION_RE = re.compile(r"^[0-9a-f]{40}$")
-
 _LOCAL_RUNTIME_MODEL_PATH = "model_path"
 _LOCAL_RUNTIME_REVISION = "revision"
 _LOCAL_RUNTIME_DEVICE = "device"
@@ -441,6 +439,57 @@ def _require_planned_precision(
     return value
 
 
+def _local_artifact_id(model_path: Path | str) -> str:
+    """Hash local model contents and layout into a stable execution identity."""
+    root = Path(model_path).resolve()
+    if root.is_file():
+        files = (root,)
+    elif root.is_dir():
+        files = tuple(
+            sorted(
+                (path for path in root.rglob("*") if path.is_file()),
+                key=lambda path: path.relative_to(root).as_posix(),
+            )
+        )
+    else:
+        raise STTExecutionUnsupportedError(
+            "Planned local STT artifact is unavailable"
+        )
+    if not files:
+        raise STTExecutionUnsupportedError(
+            "Planned local STT artifact contains no files"
+        )
+
+    digest = hashlib.sha256()
+    try:
+        for path in files:
+            relative = (
+                path.name
+                if root.is_file()
+                else path.relative_to(root).as_posix()
+            )
+            encoded = relative.encode("utf-8")
+            digest.update(len(encoded).to_bytes(8, "big"))
+            digest.update(encoded)
+            size = path.stat().st_size
+            digest.update(size.to_bytes(8, "big"))
+            bytes_read = 0
+            with path.open("rb") as artifact_file:
+                for chunk in iter(
+                    lambda: artifact_file.read(1024 * 1024),
+                    b"",
+                ):
+                    bytes_read += len(chunk)
+                    digest.update(chunk)
+            if bytes_read != size:
+                raise OSError("local artifact changed while hashing")
+    except (OSError, UnicodeError, ValueError) as exc:
+        raise STTExecutionUnsupportedError(
+            "Planned local STT artifact could not be identified"
+        ) from exc
+    return f"sha256:{digest.hexdigest()}"
+
+
 def _plan_semantics(
     *,
     task: str,
@@ -518,19 +567,14 @@ def _build_local_plan(
         diarization=diarization,
         fixed_english=fixed_english,
     )
-    artifact_id = (
-        revision
-        if revision is not None and _IMMUTABLE_REVISION_RE.fullmatch(revision)
-        else None
-    )
-    identity_resolved = artifact_id is not None
+    artifact_id = _local_artifact_id(model_path)
     decoding_ids = tuple(key for key, _value in decoding_settings)
     route = SttExecutionRoute(
         route_id="local-1",
         provider=provider,
         model_label=resolved_model,
         artifact_id=artifact_id,
-        identity_resolved=identity_resolved,
+        identity_resolved=True,
         backend=backend,
         source="local",
         audio_egress=SttAudioEgress.NONE,
@@ -1701,18 +1745,13 @@ class Qwen3ASRAdapter(SttProviderAdapter):
                 settings.get("model_revision") or ""
             ).strip()
             revision = revision_value or None
-            artifact_id = (
-                revision
-                if revision is not None
-                and _IMMUTABLE_REVISION_RE.fullmatch(revision)
-                else None
-            )
+            artifact_id = _local_artifact_id(model_path)
             route = SttExecutionRoute(
                 route_id="local-1",
                 provider=self.name.value,
                 model_label=model_label,
                 artifact_id=artifact_id,
-                identity_resolved=artifact_id is not None,
+                identity_resolved=True,
                 backend="transformers",
                 source="local",
                 audio_egress=SttAudioEgress.NONE,
@@ -1760,6 +1799,7 @@ class Qwen3ASRAdapter(SttProviderAdapter):
                         "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_provider_adapter",
                         *(
                             (
+                                "tldw_Server_API.app.core.Security.egress",
                                 "tldw_Server_API.app.core.http_client",
                                 "tldw_Server_API.app.core.stt_observability_context",
                             )
@@ -2030,17 +2070,15 @@ class VibeVoiceAdapter(SttProviderAdapter):
             revision = str(
                 settings.get("model_revision") or ""
             ).strip() or None
-            artifact_id = (
-                revision
-                if revision is not None
-                and _IMMUTABLE_REVISION_RE.fullmatch(revision)
-                else None
-            )
+            artifact_id = _local_artifact_id(model_path)
             runtime.update(
                 device=device,
                 dtype=dtype,
                 model_id=str(model_path.resolve()),
                 model_revision=revision,
+            )
+            runtime[_LOCAL_RUNTIME_MODEL_PATH] = str(
+                model_path.resolve()
             )
             local_model_label = _safe_requested_model_label(
                 str(model_path.resolve())
@@ -2054,7 +2092,7 @@ class VibeVoiceAdapter(SttProviderAdapter):
                     provider=self.name.value,
                     model_label=local_model_label,
                     artifact_id=artifact_id,
-                    identity_resolved=artifact_id is not None,
+                    identity_resolved=True,
                     backend="transformers",
                     source="local",
                     audio_egress=SttAudioEgress.NONE,

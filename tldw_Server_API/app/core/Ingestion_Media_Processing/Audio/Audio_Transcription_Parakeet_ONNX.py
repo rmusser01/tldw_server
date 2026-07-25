@@ -669,21 +669,42 @@ def _middle_trimmed_chunk_text(text: str, chunk_duration: float, overlap_duratio
 
 
 def _effective_onnx_device(session: object) -> str | None:
-    get_providers = getattr(session, "get_providers", None)
-    if not callable(get_providers):
-        nested = getattr(session, "model", None)
-        get_providers = getattr(nested, "get_providers", None)
-    if not callable(get_providers):
-        return None
     devices = {
         "CUDAExecutionProvider": "cuda",
         "CoreMLExecutionProvider": "mps",
         "CPUExecutionProvider": "cpu",
     }
-    for provider in map(str, get_providers()):
-        if provider in devices:
-            return devices[provider]
-    return None
+    pending = [session]
+    visited: set[int] = set()
+    effective: list[str] = []
+    nested_attributes = (
+        "upstream_model",
+        "model",
+        "asr",
+        "_encoder",
+        "_decoder_joint",
+        "_decoder",
+        "_model",
+    )
+    while pending:
+        component = pending.pop()
+        component_id = id(component)
+        if component_id in visited:
+            continue
+        visited.add(component_id)
+        get_providers = getattr(component, "get_providers", None)
+        if callable(get_providers):
+            for provider in map(str, get_providers()):
+                if provider in devices:
+                    effective.append(devices[provider])
+                    break
+        for attribute in nested_attributes:
+            nested = getattr(component, attribute, None)
+            if nested is not None:
+                pending.append(nested)
+    if not effective or len(set(effective)) != 1:
+        return None
+    return effective[0]
 
 
 def _onnx_loaded_runtime(
@@ -714,7 +735,8 @@ def validate_local_onnx_artifact(model_path: str | Path) -> Path:
             "Planned Parakeet ONNX requires a complete local artifact"
         )
     resolved = path.resolve()
-    if _resolve_parakeet_tdt_bundle_paths(resolved) is not None:
+    quantization = _resolve_parakeet_tdt_quantization(resolved)
+    if _resolve_parakeet_tdt_bundle_paths(resolved, quantization) is not None:
         return resolved
     has_graph = any(resolved.glob("*.onnx"))
     has_tokenizer = any(

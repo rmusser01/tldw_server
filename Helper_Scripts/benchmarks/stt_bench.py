@@ -1835,7 +1835,10 @@ def _prepared_target_matrix(
     matrix: list[dict[str, object]] = []
     seen: set[str] = set()
     for target in prepared_targets:
-        _verify_worker_target(target)
+        _verify_worker_target(
+            target,
+            verify_local_artifact=False,
+        )
         if target.target_id in seen:
             raise ValueError("run metadata target IDs must be unique")
         seen.add(target.target_id)
@@ -3352,7 +3355,11 @@ def _cold_first_observations(
     return {target_id: cold[target_id] for target_id in sorted(cold)}
 
 
-def _verify_worker_target(prepared_target: PreparedTarget) -> None:
+def _verify_worker_target(
+    prepared_target: PreparedTarget,
+    *,
+    verify_local_artifact: bool = True,
+) -> None:
     """Rebuild and compare the exact safe execution contract in the child."""
     if not isinstance(prepared_target, PreparedTarget):
         raise ValueError("worker target is invalid")
@@ -3365,6 +3372,38 @@ def _verify_worker_target(prepared_target: PreparedTarget) -> None:
         raise ValueError("worker execution contract is invalid") from exc
     if not isinstance(payload, dict):
         raise ValueError("worker execution contract is invalid")
+    if verify_local_artifact:
+        local_routes = tuple(
+            route
+            for route in prepared_target.plan.descriptor.routes
+            if route.source == "local"
+        )
+        if local_routes:
+            model_path = prepared_target.plan.runtime_values().get(
+                "model_path"
+            )
+            if not isinstance(model_path, str) or not model_path:
+                raise ValueError("worker local artifact path is invalid")
+            module = importlib.import_module(
+                "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_provider_adapter"
+            )
+            identify = getattr(module, "_local_artifact_id", None)
+            if not callable(identify):
+                raise ValueError("worker local artifact verifier is unavailable")
+            try:
+                current_artifact_id = identify(model_path)
+            except (OSError, TypeError, ValueError):
+                raise ValueError(
+                    "worker local artifact could not be verified"
+                ) from None
+            if any(
+                not route.identity_resolved
+                or route.artifact_id != current_artifact_id
+                for route in local_routes
+            ):
+                raise ValueError(
+                    "worker local artifact changed after preflight"
+                )
     required = {
         "descriptor",
         "dependency_versions",
@@ -3702,7 +3741,10 @@ def _worker_main(
             or not set(settings.timing_sample_ids) <= {sample.sample_id for sample in samples}
         ):
             raise ValueError("worker sample settings are invalid")
-        _verify_worker_target(prepared_target)
+        _verify_worker_target(
+            prepared_target,
+            verify_local_artifact=False,
+        )
         history, truncated = load_result_history(
             Path(settings.results_path),
         )
@@ -3776,6 +3818,7 @@ def _worker_main(
         index for index, (sample, _) in enumerate(ordered) if sample.sample_id == settings.cold_probe_sample_id
     )
     ordered.insert(0, ordered.pop(probe_index))
+    local_artifact_verified = False
 
     def run_operation(
         sample: ManifestSample,
@@ -3786,6 +3829,7 @@ def _worker_main(
         measurement_role: str | None,
         timing_class: str | None,
     ) -> str:
+        nonlocal local_artifact_verified
         key = completion_key(
             settings.manifest_hash,
             prepared_target.target_id,
@@ -3813,6 +3857,9 @@ def _worker_main(
             requires_result=operation_role == "result_call",
         )
         operation_id = int(begin_ack["operation_id"])
+        if not local_artifact_verified:
+            _verify_worker_target(prepared_target)
+            local_artifact_verified = True
         started = time.perf_counter_ns()
         artifact: object | None = None
         adapter_exception: BaseException | None = None

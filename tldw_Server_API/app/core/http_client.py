@@ -345,7 +345,11 @@ def _http_client_observability_span(
     sensitive_observability: bool,
 ) -> Iterator[Any]:
     """Keep raw sensitive exceptions outside the application-owned span."""
-    if not _effective_sensitive_observability(sensitive_observability):
+    protected = (
+        _effective_sensitive_observability(sensitive_observability)
+        or _opaque_stt_endpoint_id() is not None
+    )
+    if not protected:
         with tracing_manager.span(name, attributes=attributes) as span:
             yield span
         return
@@ -369,7 +373,11 @@ async def _async_http_client_observability_span(
     sensitive_observability: bool,
 ) -> AsyncIterator[Any]:
     """Async counterpart that re-raises sensitive failures after span exit."""
-    if not _effective_sensitive_observability(sensitive_observability):
+    protected = (
+        _effective_sensitive_observability(sensitive_observability)
+        or _opaque_stt_endpoint_id() is not None
+    )
+    if not protected:
         async with tracing_manager.async_span(name, attributes=attributes) as span:
             yield span
         return

@@ -260,7 +260,7 @@ git add \
 git commit -m "docs: add native STT benchmark user guide"
 ```
 
-- [ ] **Step 3: Update from `origin/dev` and reverify**
+- [x] **Step 3: Update from `origin/dev` and reverify**
 
 Run:
 
@@ -305,3 +305,33 @@ git diff --check origin/dev...HEAD
 Expected: a clean tree and a whitespace-clean final PR diff that includes the
 task closeout commit. Do not claim merge readiness until the requester supplies
 the human-owned `Change summary`.
+
+## Task 6: Address Final Post-Rebase Review Findings
+
+**Files:**
+- Modify: `tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/Audio_Transcription_Qwen3ASR.py`
+- Modify: `tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/Audio_Transcription_Parakeet_ONNX.py`
+- Modify: `tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/stt_provider_adapter.py`
+- Modify: `tldw_Server_API/app/core/http_client.py`
+- Test: corresponding Audio and HTTP-client test modules
+
+- [x] **Step 1: Add failing regression tests**
+
+Cover planned Qwen3 HTTP egress enforcement, Parakeet TDT provider discovery,
+opaque-span exception privacy, and local artifact content identity.
+
+- [x] **Step 2: Implement the smallest validated fixes**
+
+Route planned Qwen3 uploads through the hardened client, inspect the wrapped
+Parakeet runtime, keep opaque exceptions outside tracing spans, and hash local
+artifact content into the execution identity.
+
+The follow-up review must also exercise the installed `onnx-asr` nested-session
+shape, force proxy isolation when `HTTP_TRUST_ENV=true`, and verify local
+artifact identity again in the spawned worker immediately before its first
+adapter call. Artifact hashing must encode file boundaries unambiguously.
+
+- [x] **Step 3: Re-run focused and full verification**
+
+Run each regression test through red/green, then repeat the complete changed-file
+matrix, Ruff, compileall, Bandit, CLI help, link checks, and final diff checks.

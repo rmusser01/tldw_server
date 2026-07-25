@@ -9,6 +9,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+import Helper_Scripts.benchmarks.stt_bench as stt_bench
 import httpx
 import pytest
 from yarl import URL
@@ -419,12 +420,78 @@ def test_qwen3_vllm_plan_freezes_endpoint_and_reports_actual_route(
 
 
 @pytest.mark.unit
+def test_planned_qwen3_upload_uses_hardened_scoped_http_client(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    audio = tmp_path / "qwen.wav"
+    audio.write_bytes(b"audio")
+    endpoint = "http://127.0.0.1:1/v1/audio/transcriptions"
+    endpoint_id = spa._normalize_audio_endpoint(endpoint)[2]
+    captured: dict[str, Any] = {}
+    client = object()
+
+    class Response:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, str]:
+            return {"text": "scoped upload"}
+
+    class ClientContext:
+        def __enter__(self) -> object:
+            return client
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+    def fake_create_client(**kwargs: Any) -> ClientContext:
+        captured["client_settings"] = kwargs
+        return ClientContext()
+
+    def fake_fetch(**kwargs: Any) -> Response:
+        captured.update(kwargs)
+        return Response()
+
+    monkeypatch.setenv("HTTP_TRUST_ENV", "true")
+    monkeypatch.setattr(http_client, "create_client", fake_create_client)
+    monkeypatch.setattr(http_client, "fetch", fake_fetch)
+    monkeypatch.setattr(
+        qwen3,
+        "_load_audio",
+        lambda *_args, **_kwargs: (object(), 16000, 1.0),
+    )
+
+    artifact = qwen3._transcribe_vllm_http(
+        audio,
+        {
+            "endpoint": endpoint,
+            "endpoint_id": endpoint_id,
+            "request_model": "Qwen/Qwen3-ASR-1.7B",
+            "sample_rate": 16000,
+        },
+        "en",
+        None,
+    )
+
+    assert artifact["text"] == "scoped upload"
+    assert captured["method"] == "POST"
+    assert captured["url"] == endpoint
+    assert captured["allow_redirects"] is False
+    assert captured["configured_endpoint"].matches(endpoint)
+    assert captured["retry"].attempts == 1
+    assert captured["client"] is client
+    assert captured["client_settings"]["trust_env"] is False
+
+
+@pytest.mark.unit
 def test_qwen3_local_plan_freezes_model_device_and_dtype(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     model_dir = tmp_path / "qwen-model"
     model_dir.mkdir()
+    (model_dir / "weights.bin").write_bytes(b"qwen-test-model")
     revision = "a" * 40
     settings: dict[str, Any] = {
         "enabled": True,
@@ -451,7 +518,9 @@ def test_qwen3_local_plan_freezes_model_device_and_dtype(
     assert route.backend == "transformers"
     assert route.source == "local"
     assert route.audio_egress is spa.SttAudioEgress.NONE
-    assert route.artifact_id == revision
+    assert route.artifact_id is not None
+    assert route.artifact_id.startswith("sha256:")
+    assert route.identity_resolved is True
     assert route.device == "cpu"
     assert route.dtype == "float32"
     assert plan.runtime_values()["model_path"] == str(model_dir.resolve())
@@ -538,6 +607,10 @@ def _vibe_settings(
     vllm_enabled: bool,
     local_enabled: bool = True,
 ) -> dict[str, Any]:
+    model_dir.mkdir(parents=True, exist_ok=True)
+    weights = model_dir / "weights.bin"
+    if not weights.exists():
+        weights.write_bytes(b"vibe-test-model")
     return {
         "enabled": local_enabled,
         "model_id": str(model_dir),
@@ -585,6 +658,30 @@ def test_vibevoice_local_neutral_plan_pins_one_mismatch_tracking_route(
     assert route.device == "cpu"
     assert route.dtype == "float32"
     assert plan.runtime_values()["strict_semantics"] is False
+    contract_json, contract_hash = stt_bench.build_execution_contract(
+        plan=plan,
+        git_commit="a" * 40,
+        safe_target_settings={
+            "mode": "neutral-v1",
+            "task": "transcribe",
+            "language": "en",
+            "word_timestamps": False,
+            "diarization": False,
+            "prompt_present": False,
+            "hotword_count": 0,
+        },
+    )
+    prepared = stt_bench.PreparedTarget(
+        target_id="target-vibevoice",
+        provider="vibevoice",
+        model_label=plan.descriptor.requested_model_label,
+        plan=plan,
+        adapter_factory_path="unused:factory",
+        execution_contract_json=contract_json,
+        execution_contract_hash=contract_hash,
+    )
+
+    stt_bench._verify_worker_target(prepared)
 
 
 @pytest.mark.unit

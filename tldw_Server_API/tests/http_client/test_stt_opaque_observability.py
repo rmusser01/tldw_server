@@ -73,6 +73,44 @@ class _MetricsRecorder:
         self.calls.append(("observe", dict(labels)))
 
 
+class _ExceptionRecordingTracing:
+    def __init__(self) -> None:
+        self.recorded_exceptions: list[str] = []
+
+    @contextmanager
+    def span(
+        self,
+        _name: str,
+        *,
+        attributes: dict[str, Any],
+    ):
+        _ = attributes
+        try:
+            yield self
+        except Exception as exc:
+            self.recorded_exceptions.append(str(exc))
+            raise
+
+
+@pytest.mark.unit
+def test_opaque_stt_exception_stays_outside_application_span() -> None:
+    endpoint_id = "sha256:" + "e" * 64
+    secret = "https://private.example/secret-path?token=private"
+    tracing = _ExceptionRecordingTracing()
+
+    with pytest.raises(RuntimeError, match="private.example"):
+        with http_client.opaque_stt_http_observability(endpoint_id):
+            with http_client._http_client_observability_span(
+                tracing,
+                "http.client",
+                attributes={"stt.endpoint_id": endpoint_id},
+                sensitive_observability=False,
+            ):
+                raise RuntimeError(secret)
+
+    assert tracing.recorded_exceptions == []
+
+
 @pytest.mark.unit
 def test_planned_observability_suppresses_optional_http_instrumentation(
     monkeypatch: pytest.MonkeyPatch,

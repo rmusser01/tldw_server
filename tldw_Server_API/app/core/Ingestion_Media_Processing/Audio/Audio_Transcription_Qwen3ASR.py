@@ -621,24 +621,38 @@ def _transcribe_vllm_http(
             # Use sync httpx client with generous timeout for large files
             if planned:
                 from tldw_Server_API.app.core.http_client import (
+                    RetryPolicy,
+                    create_client,
+                    fetch,
                     opaque_stt_http_observability,
+                )
+                from tldw_Server_API.app.core.Security.egress import (
+                    ConfiguredEndpointScope,
                 )
 
                 endpoint_id = str(
                     settings.get("endpoint_id") or ""
                 )
                 with opaque_stt_http_observability(endpoint_id):
-                    with httpx.Client(
+                    with create_client(
                         timeout=300.0,
-                        follow_redirects=False,
+                        trust_env=False,
                     ) as client:
-                        response = client.post(
-                            url,
+                        response = fetch(
+                            method="POST",
+                            url=url,
+                            client=client,
+                            timeout=300.0,
+                            allow_redirects=False,
                             files=files,
                             data=data,
+                            retry=RetryPolicy(attempts=1),
+                            configured_endpoint=ConfiguredEndpointScope.from_url(
+                                url
+                            ),
                         )
-                        response.raise_for_status()
-                        result = response.json()
+                    response.raise_for_status()
+                    result = response.json()
             else:
                 with httpx.Client(
                     timeout=300.0,
