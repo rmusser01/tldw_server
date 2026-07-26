@@ -62,13 +62,13 @@ Out of scope:
 **Goal:** Add one generic expected-failure result and identical fallback/injected breaker accounting.
 **Success Criteria:** Closed and half-open neutral/counting matrices pass, safe error envelopes are emitted, and unexpected exceptions retain existing behavior.
 **Tests:** Outcome validation, fallback/injected breaker tests, runtime envelope/reporting tests, safe-log assertions.
-**Status:** In Progress
+**Status:** Complete
 
 ## Stage 3: Prepared Policy And Admission Integrity
 **Goal:** Remove mutable tool-definition authority from runtime and make admission fail closed when configured.
 **Success Criteria:** Policy and snapshots are immutable/HMAC-bound, stale or tampered calls fail before dispatch, and fail-closed rate metadata is generic.
 **Tests:** Canonical encoding, mutation/tamper, live replacement/disable/definition drift, second-check race, and rate-admission tests.
-**Status:** Not Started
+**Status:** In Progress
 
 ## Stage 4: Idempotency Ownership And Success Commit
 **Goal:** Guarantee callback-at-most-once per request with bounded waiting and robust post-success persistence.
@@ -305,17 +305,17 @@ In the same commit, catch `ExpectedToolFailure` outside the idempotency manager 
 
 ### Required Tests
 
-- [ ] Closed fallback breaker: prior failure count remains unchanged after ignored failure.
-- [ ] Closed injected breaker: same assertion using `create_tldw_circuit_breaker`.
-- [ ] Half-open fallback: ignored failure releases `_half_open_in_flight`, remains half-open, preserves failure/success counters, and allows the next probe.
-- [ ] Half-open injected: ignored failure releases `half_open_calls`, remains half-open, and does not advance success threshold.
-- [ ] Counted expected failure reopens both half-open implementations with normal backoff.
-- [ ] Unexpected exception counts in both implementations and re-raises the original exception type.
-- [ ] Success still resets/closes according to existing thresholds.
-- [ ] Cancellation remains uncounted and propagates.
-- [ ] Captured logs contain exception family/reason code but not a sentinel secret embedded in the original message.
-- [ ] Replace all `str(e)`/`repr(e)` interpolation and `exc_info=<exception>` in touched `BaseModule` lifecycle, health, tool-cache, and execution logs with structured module and exception-family fields.
-- [ ] An expected failure from a write callback bypasses local/Redis result caching and returns a JSON-RPC success whose `tools/call` payload has `isError: true` and the sole safe JSON content object.
+- [x] Closed fallback breaker: prior failure count remains unchanged after ignored failure.
+- [x] Closed injected breaker: same assertion using `create_tldw_circuit_breaker`.
+- [x] Half-open fallback: ignored failure releases `_half_open_in_flight`, remains half-open, preserves failure/success counters, and allows the next probe.
+- [x] Half-open injected: ignored failure releases `half_open_calls`, remains half-open, and does not advance success threshold.
+- [x] Counted expected failure reopens both half-open implementations with normal backoff.
+- [x] Unexpected exception counts in both implementations and re-raises the original exception type.
+- [x] Success still resets/closes according to existing thresholds.
+- [x] Cancellation remains uncounted and propagates.
+- [x] Captured logs contain exception family/reason code but not a sentinel secret embedded in the original message.
+- [x] Replace all `str(e)`/`repr(e)` interpolation and `exc_info=<exception>` in touched `BaseModule` lifecycle, health, tool-cache, and execution logs with structured module and exception-family fields.
+- [x] An expected failure from a write callback bypasses local/Redis result caching and returns a JSON-RPC success whose `tools/call` payload has `isError: true` and the sole safe JSON content object.
 
 Run:
 
