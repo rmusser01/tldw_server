@@ -290,6 +290,9 @@ The dedicated audio.cpp benchmark target is `audio-cpp=<model>`, where
 Planning is network-free, but execution always requires
 `--allow-network-targets`, including for a loopback origin. V1 supports
 `neutral-v1`; it does not support `production-v1`.
+Benchmark planning rejects selector tokens and selector-prefixed values in the
+model portion; ordinary `audio-cpp:<model>` API selector syntax is not valid
+inside `audio-cpp=<model>`.
 
 The operator builds, configures, starts, and, when needed, restarts
 `audiocpp_server` according to the upstream
@@ -313,13 +316,18 @@ not convert audio, follow redirects, retry failed transcriptions, fall back to
 another provider, download models, expose an authentication setting, or
 provide a TLS-verification-disable setting.
 
-The execution plan records an opaque endpoint ID and descriptive server/model
-metadata, but model/artifact identity remains unresolved. audio.cpp runs are
-therefore gate-ineligible. Cold-first adapter timing includes initial
-`/health` and `/v1/models` discovery, the transcription request, and any
-server-side lazy loading. A true server cold start requires the operator to
-restart `audiocpp_server` immediately before the run. Warm calls reuse the
-tldw_server discovery cache and the server's loaded model/session.
+Persisted benchmark artifacts include the requested and resolved model labels,
+the generic `audio_cpp_http` route/egress classification, and an opaque
+endpoint ID. The discovered server backend, model family, and model mode remain
+request-local normalized artifact metadata; they are not retained in benchmark
+results. Model/artifact identity remains unresolved, so audio.cpp runs are
+gate-ineligible.
+
+Cold-first adapter timing includes initial `/health` and `/v1/models`
+discovery, the transcription request, and any server-side lazy loading. A true
+server cold start requires the operator to restart `audiocpp_server`
+immediately before the run. Warm calls reuse the tldw_server discovery cache
+and the server's loaded model/session.
 
 ## Timing Protocol
 

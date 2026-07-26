@@ -70,10 +70,17 @@ Run an explicit `audio-cpp=<model>` target in `neutral-v1` with
 `--allow-network-targets`, even when the configured server is loopback. Input
 must be a regular `.wav` file containing uncompressed PCM RIFF/WAVE audio.
 There is no conversion, retry, redirect, fallback, or automatic download.
-Model/artifact identity remains unresolved, so results are descriptive and
-gate-ineligible. For a true server cold start, restart `audiocpp_server`
-immediately before the run; warm calls reuse the adapter discovery cache and
-the server's loaded model/session.
+The model portion must be the exact server model ID, not a canonical or alias
+selector token or a selector-prefixed value.
+
+Persisted benchmark artifacts include the requested and resolved model labels,
+the generic `audio_cpp_http` route/egress classification, and an opaque
+endpoint ID. The discovered server backend, model family, and model mode remain
+request-local normalized artifact metadata; they are not retained in benchmark
+results. Model/artifact identity remains unresolved, so results are
+descriptive and gate-ineligible. For a true server cold start, restart
+`audiocpp_server` immediately before the run; warm calls reuse the adapter
+discovery cache and the server's loaded model/session.
 
 ## LLM Gateway
 

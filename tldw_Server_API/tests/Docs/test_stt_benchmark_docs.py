@@ -12,8 +12,12 @@ SETUP_GUIDES = (
 )
 
 
+def _normalized_text(path: Path) -> str:
+    return " ".join(path.read_text(encoding="utf-8").split())
+
+
 def test_audio_cpp_operator_workflow_documents_security_and_timing_contract() -> None:
-    guide = USER_GUIDE.read_text(encoding="utf-8")
+    guide = _normalized_text(USER_GUIDE)
 
     required = (
         "## Optional: user-managed audio.cpp server",
@@ -31,18 +35,21 @@ def test_audio_cpp_operator_workflow_documents_security_and_timing_contract() ->
         "`audio-cpp:<model>`",
         "`audio-cpp=<model>`",
         "`--allow-network-targets`",
+        "`--text-retention errors-only`",
         "uncompressed PCM RIFF/WAVE",
         "identity remains descriptive and unresolved",
         "restart `audiocpp_server` immediately before the run",
         "Warm calls reuse tldw_server's discovery cache",
+        "Benchmark planning rejects selector tokens and selector-prefixed values",
+        "Privacy warning:",
     )
     for text in required:
         assert text in guide
 
 
 def test_audio_cpp_protocol_and_compact_readme_match_operator_contract() -> None:
-    protocol = PROTOCOL.read_text(encoding="utf-8")
-    readme = BENCHMARK_README.read_text(encoding="utf-8")
+    protocol = _normalized_text(PROTOCOL)
+    readme = _normalized_text(BENCHMARK_README)
 
     for text in (
         "`audio-cpp=<model>`",
@@ -52,6 +59,20 @@ def test_audio_cpp_protocol_and_compact_readme_match_operator_contract() -> None
     ):
         assert text in protocol
         assert text in readme
+
+
+def test_audio_cpp_docs_distinguish_persisted_and_request_local_metadata() -> None:
+    required = (
+        "requested and resolved model labels",
+        "`audio_cpp_http` route/egress classification",
+        "opaque endpoint ID",
+        "request-local normalized artifact metadata",
+        "not retained in benchmark results",
+    )
+    for path in (USER_GUIDE, PROTOCOL, BENCHMARK_README):
+        text = _normalized_text(path)
+        for claim in required:
+            assert claim in text
 
 
 def test_audio_setup_guides_link_to_optional_audio_cpp_workflow() -> None:
@@ -66,8 +87,8 @@ def test_audio_setup_guides_link_to_optional_audio_cpp_workflow() -> None:
 
 
 def test_benchmark_guide_keeps_supported_target_and_artifact_lifecycle_syntax() -> None:
-    guide = USER_GUIDE.read_text(encoding="utf-8")
-    protocol = PROTOCOL.read_text(encoding="utf-8")
+    guide = _normalized_text(USER_GUIDE)
+    protocol = _normalized_text(PROTOCOL)
 
     assert "--target 'parakeet-mlx" not in guide
     assert "benchmark planner currently rejects it" in guide

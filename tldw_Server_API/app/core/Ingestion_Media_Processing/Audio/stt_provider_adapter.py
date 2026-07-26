@@ -17,7 +17,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from tldw_Server_API.app.core.config import (
     get_stt_config,
@@ -77,6 +77,9 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_con
     require_local_execution_route as require_local_execution_route,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.path_utils import resolve_safe_local_path
+
+if TYPE_CHECKING:
+    from .Audio_Transcription_AudioCpp import AudioCppConfig
 
 
 def _fallback_parse_transcription_model(
@@ -2299,6 +2302,38 @@ class AudioCppAdapter(SttProviderAdapter):
         diarization: bool,
         mode: str,
     ) -> SttBatchExecutionPlan:
+        self._validate_plan_request(
+            task=task,
+            word_timestamps=word_timestamps,
+            prompt=prompt,
+            hotwords=hotwords,
+            diarization=diarization,
+            mode=mode,
+        )
+        from . import Audio_Transcription_AudioCpp as audio_cpp
+
+        config = audio_cpp.load_audio_cpp_config(get_stt_config() or {})
+        if not config.enabled:
+            raise STTExecutionUnsupportedError("audio.cpp is disabled")
+        model_id = audio_cpp.require_exact_audio_cpp_model(model)
+        return self._build_audio_cpp_plan(
+            config=config,
+            model_id=model_id,
+            language=language,
+            task=task,
+        )
+
+    @staticmethod
+    def _validate_plan_request(
+        *,
+        task: str,
+        word_timestamps: bool,
+        prompt: str | None,
+        hotwords: Sequence[str] | None,
+        diarization: bool,
+        mode: str,
+    ) -> None:
+        """Require the neutral semantics shared by every audio.cpp plan."""
         normalized_mode = str(mode or "").strip().lower()
         if normalized_mode != "neutral-v1":
             raise STTExecutionUnsupportedError(
@@ -2315,19 +2350,21 @@ class AudioCppAdapter(SttProviderAdapter):
                 "audio.cpp cannot honor the requested benchmark semantics"
             )
 
+    def _build_audio_cpp_plan(
+        self,
+        *,
+        config: AudioCppConfig,
+        model_id: str,
+        language: str | None,
+        task: str,
+    ) -> SttBatchExecutionPlan:
+        """Build one immutable plan from a validated config snapshot."""
         from tldw_Server_API.app.core.http_client import (
             resolve_afetch_transport,
         )
 
         from . import Audio_Transcription_AudioCpp as audio_cpp
 
-        config = audio_cpp.load_audio_cpp_config(get_stt_config() or {})
-        if not config.enabled:
-            raise STTExecutionUnsupportedError("audio.cpp is disabled")
-        model_id = audio_cpp.normalize_audio_cpp_model(
-            model,
-            default_model=config.default_model,
-        )
         try:
             transport = resolve_afetch_transport()
         except (RuntimeError, ValueError):
@@ -2461,9 +2498,7 @@ class AudioCppAdapter(SttProviderAdapter):
         from . import Audio_Transcription_AudioCpp as audio_cpp
 
         if execution_plan is None:
-            execution_plan = self.plan_batch_execution(
-                model=model,
-                language=language,
+            self._validate_plan_request(
                 task=task,
                 word_timestamps=word_timestamps,
                 prompt=prompt,
@@ -2471,10 +2506,24 @@ class AudioCppAdapter(SttProviderAdapter):
                 diarization=False,
                 mode="neutral-v1",
             )
-        normalized_model = audio_cpp.normalize_audio_cpp_model(
-            model,
-            default_model=execution_plan.descriptor.resolved_model_label,
-        )
+            config = audio_cpp.load_audio_cpp_config(get_stt_config() or {})
+            if not config.enabled:
+                raise STTExecutionUnsupportedError("audio.cpp is disabled")
+            normalized_model = audio_cpp.normalize_audio_cpp_model(
+                model,
+                default_model=config.default_model,
+            )
+            execution_plan = self._build_audio_cpp_plan(
+                config=config,
+                model_id=normalized_model,
+                language=language,
+                task=task,
+            )
+        else:
+            normalized_model = audio_cpp.normalize_audio_cpp_model(
+                model,
+                default_model=execution_plan.descriptor.resolved_model_label,
+            )
         return self._run_planned_batch(
             audio_path,
             execution_plan=execution_plan,

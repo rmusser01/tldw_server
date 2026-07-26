@@ -396,6 +396,25 @@ def normalize_audio_cpp_model(
     return _safe_model_id(selected)
 
 
+def require_exact_audio_cpp_model(model: object) -> str:
+    """Return a safe exact server model ID without resolving selectors."""
+    if isinstance(model, str):
+        normalized_model = model.lower()
+        if normalized_model in _SELECTORS or any(
+            normalized_model.startswith(f"{selector}:")
+            for selector in _SELECTORS
+        ):
+            raise STTExecutionUnsupportedError(
+                "audio.cpp benchmark requires an exact server model ID"
+            )
+    try:
+        return _safe_model_id(model)
+    except STTExecutionUnsupportedError:
+        raise STTExecutionUnsupportedError(
+            "audio.cpp benchmark requires an exact server model ID"
+        ) from None
+
+
 def _read_exact(handle: BinaryIO, size: int) -> bytes:
     value = handle.read(size)
     if len(value) != size:

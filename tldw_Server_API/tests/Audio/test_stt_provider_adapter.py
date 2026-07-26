@@ -2484,6 +2484,37 @@ def test_audio_cpp_planning_classifies_remote_egress(
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
+    "model",
+    (
+        "audio-cpp",
+        "audiocpp",
+        "audio_cpp",
+        "AUDIO-CPP",
+        "AUDIOCPP",
+        "AUDIO_CPP",
+        "audio-cpp:whisper-small",
+        "audiocpp:whisper-small",
+        "audio_cpp:whisper-small",
+        "AUDIO-CPP:Whisper-Small",
+        "AUDIOCPP:Whisper-Small",
+        "AUDIO_CPP:Whisper-Small",
+    ),
+)
+def test_audio_cpp_planning_requires_an_exact_server_model_id(
+    monkeypatch: pytest.MonkeyPatch,
+    model: str,
+) -> None:
+    spa = _import_module()
+
+    with pytest.raises(
+        spa.STTExecutionUnsupportedError,
+        match="exact server model ID",
+    ):
+        _plan_audio_cpp(spa, monkeypatch, model=model)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
     ("override", "expected"),
     (
         ({"mode": "production-v1"}, "benchmark mode"),
@@ -2529,7 +2560,7 @@ def test_audio_cpp_planned_execution_uses_frozen_config_and_exact_metadata(
     plan = _plan_audio_cpp(
         spa,
         monkeypatch,
-        model="audio-cpp:whisper-small",
+        model="whisper-small",
     )
     route = plan.descriptor.primary_route
     captured: dict[str, object] = {}
@@ -2638,10 +2669,17 @@ def test_audio_cpp_unplanned_batch_normalizes_ordinary_selector(
     )
 
     _clear_audio_cpp_environment(monkeypatch)
+    config_reads = 0
+
+    def get_audio_cpp_settings() -> dict[str, object]:
+        nonlocal config_reads
+        config_reads += 1
+        return _audio_cpp_enabled_settings(default_model=default_model)
+
     monkeypatch.setattr(
         spa,
         "get_stt_config",
-        lambda: _audio_cpp_enabled_settings(default_model=default_model),
+        get_audio_cpp_settings,
     )
     captured: dict[str, object] = {}
 
@@ -2680,6 +2718,7 @@ def test_audio_cpp_unplanned_batch_normalizes_ordinary_selector(
 
     assert captured["model_id"] == expected_model
     assert artifact["actual_execution"]["model_label"] == expected_model
+    assert config_reads == 1
 
 
 @pytest.mark.unit

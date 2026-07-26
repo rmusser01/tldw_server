@@ -158,6 +158,11 @@ ordinary requests: benchmark targets must always include the exact model:
 export STT_AUDIO_CPP_TARGET='audio-cpp=REPLACE_WITH_EXACT_ASR_MODEL_ID'
 ```
 
+Benchmark planning rejects selector tokens and selector-prefixed values in the
+model portion. For example, do not use `audio-cpp=audio-cpp:<model>`:
+`audio-cpp:<model>` is ordinary API selector syntax, not an exact server model
+ID.
+
 After setting `STT_MANIFEST` and `STT_DATASET_ROOT` as described in the next
 section, run:
 
@@ -167,6 +172,7 @@ python Helper_Scripts/benchmarks/stt_bench.py run \
   --dataset-root "$STT_DATASET_ROOT" \
   --profile regression \
   --mode neutral-v1 \
+  --text-retention errors-only \
   --target "$STT_AUDIO_CPP_TARGET" \
   --allow-network-targets \
   --run 'audio-cpp-regression-v1'
@@ -177,6 +183,11 @@ python Helper_Scripts/benchmarks/stt_bench.py run \
 server. Supplying it authorizes audio transmission as soon as preflight
 succeeds, so inspect the configured endpoint first.
 
+Privacy warning: the run sends corpus audio to the configured server, and
+`--text-retention errors-only` still retains transcript text for scored errors
+or failed samples. Use `--text-retention none` when that text must not be
+stored, and protect the run directory according to the corpus sensitivity.
+
 V1 accepts only a regular `.wav` file that Python can validate as an
 uncompressed PCM RIFF/WAVE container. Validation happens before network I/O.
 The provider does not convert other formats, follow redirects, retry failed
@@ -185,8 +196,11 @@ authentication setting or TLS-verification-disable knob; deployments that
 need authentication must use a suitable reverse proxy or the generic external
 provider integration.
 
-The benchmark records the requested model and bounded server metadata, but the
-model/artifact identity remains descriptive and unresolved. Therefore
+Persisted benchmark artifacts include the requested and resolved model labels,
+the generic `audio_cpp_http` route/egress classification, and an opaque
+endpoint ID. The discovered server backend, model family, and model mode remain
+request-local normalized artifact metadata; they are not retained in benchmark
+results. Model/artifact identity remains descriptive and unresolved, so
 audio.cpp results are gate-ineligible and should be treated as descriptive
 measurements.
 

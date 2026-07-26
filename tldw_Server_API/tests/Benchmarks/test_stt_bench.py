@@ -3150,6 +3150,32 @@ def test_audio_cpp_preflight_requires_consent_and_exposes_only_opaque_endpoint(
     assert "http://127.0.0.1:18080" not in serialized_contract
 
 
+@pytest.mark.parametrize(
+    "target",
+    (
+        "audio-cpp=audio-cpp:whisper-small",
+        "audio-cpp=audiocpp:whisper-small",
+        "audio-cpp=audio_cpp:whisper-small",
+        "audio-cpp=AUDIO-CPP:Whisper-Small",
+        "audio-cpp=AUDIOCPP:Whisper-Small",
+        "audio-cpp=AUDIO_CPP:Whisper-Small",
+    ),
+)
+def test_audio_cpp_preflight_rejects_nested_selector_models(
+    monkeypatch: pytest.MonkeyPatch,
+    target: str,
+) -> None:
+    _configure_audio_cpp_planning(monkeypatch)
+
+    with pytest.raises(ValueError, match="exact server model ID"):
+        stt_bench.preflight_targets(
+            (target,),
+            mode="neutral-v1",
+            allow_network_targets=True,
+            common_settings=_preflight_settings(),
+        )
+
+
 def test_preflight_targets_rejects_unavailable_and_mismatched_adapters(
     preflight_fakes,
 ):
