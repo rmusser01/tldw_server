@@ -1315,6 +1315,7 @@ Verification: the final focused matrix passed 65 tests with required real Postgr
 - Modify: `tldw_Server_API/app/core/Jobs/operations/sqlite/__init__.py`
 - Modify: `tldw_Server_API/app/core/Jobs/operations/postgres/lifecycle.py`
 - Modify: `tldw_Server_API/app/core/Jobs/operations/postgres/__init__.py`
+- Modify: `tldw_Server_API/app/core/Jobs/pg_migrations.py`
 - Modify: `tldw_Server_API/app/core/Jobs/manager.py`
 - Create: `tldw_Server_API/tests/Jobs/test_jobs_renew_release_operations_sqlite.py`
 - Create: `tldw_Server_API/tests/Jobs/test_jobs_renew_release_operations_postgres.py`
@@ -1328,7 +1329,7 @@ Verification: the final focused matrix passed 65 tests with required real Postgr
   - PostgreSQL `renew_lease(conn, cursor_factory, *, command: RenewLeaseCommand, now: datetime) -> LifecycleResult`
   - PostgreSQL `release_job(conn, cursor_factory, *, command: ReleaseJobCommand, counters_enabled: bool) -> LifecycleResult`
 
-Both applied operations return the post-transition row required by `LifecycleResult`. PostgreSQL must use the facade-provided cursor factory so dict rows, `SET ROLE`, and tenant RLS GUCs remain active.
+Both applied operations return bounded post-transition facts required by `LifecycleResult` and the facade. Renewal results exclude payload/result blobs; release results include queue identity and cleared lifecycle fields. PostgreSQL must use the facade-provided cursor factory so dict rows, `SET ROLE`, and tenant RLS GUCs remain active.
 
 - [x] **Step 1: Write direct operation tests, then implement SQLite**
 
@@ -1352,7 +1353,7 @@ SQLite execution evidence: direct tests first failed at collection because `rele
 
 Use `pytestmark = pytest.mark.pg_jobs` and `jobs_pg_dsn`; a skip is failure. Preserve:
 
-- `UPDATE ... RETURNING *` for renewal;
+- `UPDATE ... RETURNING` fixed transition columns for renewal, without materializing payload/result blobs;
 - `GREATEST(COALESCE(leased_until, now), now + interval)` no-shorten behavior;
 - fixed parameterized SQL variants for optional progress fields and enforcement predicates, without interpolation or Bandit suppression;
 - zero-row classification inside the transaction;
@@ -1363,7 +1364,7 @@ Use `pytestmark = pytest.mark.pg_jobs` and `jobs_pg_dsn`; a skip is failure. Pre
 
 Route the PostgreSQL facade only after direct tests pass. Delete only the migrated single-job renewal/release SQL.
 
-PostgreSQL execution evidence: direct tests first failed at collection because `release_job` was absent, then 25 direct operation tests passed against required real PostgreSQL. Facade/observer tests produced eight expected failures before routing and nine PostgreSQL renewal/release cases passed afterward, including a real rollback/no-event commit failure. RLS tests prove visible operations apply and hidden rows return `MISSING` without mutation. A specification review found that the RLS helper had replaced its optional no-DSN skip with an assertion; the previous optional behavior was restored while the shared required fixture still fails unreachable required runs. Independent verification passed 113 required PostgreSQL operation/contract/observer/parity/RLS/acquisition tests plus all five selected PostgreSQL release regressions, with zero skips. Ruff, compileall, and `git diff --check` pass; Bandit reports zero findings/errors and 79 pre-existing manager suppressions. Final quality review approved with no actionable findings.
+PostgreSQL execution evidence: direct tests first failed at collection because `release_job` was absent, then 25 direct operation tests passed against required real PostgreSQL. Facade/observer tests produced eight expected failures before routing and nine PostgreSQL renewal/release cases passed afterward, including a real rollback/no-event commit failure. RLS tests prove visible operations apply and hidden rows return `MISSING` without mutation. A specification review found that the RLS helper had replaced its optional no-DSN skip with an assertion; the previous optional behavior was restored while the shared required fixture still fails unreachable required runs. Independent verification passed 113 required PostgreSQL operation/contract/observer/parity/RLS/acquisition tests plus all five selected PostgreSQL release regressions, with zero skips. Ruff, compileall, and `git diff --check` pass; Bandit reports zero findings/errors and 79 pre-existing manager suppressions. Final quality review approved with no actionable findings. Final branch review then caught two issues: renewal/release operations materialized complete job rows, and the configured RLS role lacked `INSERT` on `job_counters`. Fixed-column transition results now avoid copying job blobs, persisted-row assertions still prove unrelated fields are preserved, and a table-specific grant plus a real counters-enabled RLS release test closes the privilege gap without broad schema-wide insert access. The reviewer confirmed both findings resolved.
 
 - [x] **Step 3: Prove post-commit side effects**
 
@@ -1403,7 +1404,7 @@ RUN_JOBS=1 python -m pytest \
 
 Expected: all tests pass and PostgreSQL does not skip.
 
-Execution evidence: 130 focused renewal/release tests passed against SQLite and required real PostgreSQL with zero skips.
+Execution evidence: the final focused matrix passed 131 renewal/release tests against SQLite and required real PostgreSQL with zero skips, including counters-enabled release under the configured RLS role.
 
 - [x] **Step 5: Commit backend work in reviewable units**
 
@@ -1443,7 +1444,7 @@ RUN_JOBS=1 python -m pytest \
 
 Expected: batch and terminal behavior remains green on both backends and PostgreSQL does not skip.
 
-Execution evidence: the acquisition regression matrix passed 109 tests and the focused renewal/release matrix passed 130 tests, both with required real PostgreSQL and zero skips. The neighboring matrix passed 101 selected tests with two PostgreSQL admission counter rollback parameterizations excluded after both failures reproduced unchanged on a clean detached `origin/dev` worktree at `76481b2939`. Those stale tests expect admission counter failures to abort job creation, while merged admission behavior intentionally treats counter maintenance as best effort under a savepoint. They are a confirmed dev-baseline defect outside this renewal/release extraction.
+Execution evidence: the acquisition regression matrix passed 109 tests and the focused renewal/release matrix passed 131 tests, both with required real PostgreSQL and zero skips. The neighboring matrix passed 102 selected tests with two PostgreSQL admission counter rollback parameterizations excluded after both failures reproduced unchanged on a clean detached `origin/dev` worktree at `76481b2939`. Those stale tests expect admission counter failures to abort job creation, while merged admission behavior intentionally treats counter maintenance as best effort under a savepoint. They are a confirmed dev-baseline defect outside this renewal/release extraction.
 
 - [x] **Step 2: Verify boundaries mechanically**
 
@@ -1456,7 +1457,7 @@ git diff --function-context origin/dev -- tldw_Server_API/app/core/Jobs/manager.
 
 Expected: operation modules do not reference `JobManager`; public methods remain; only single-job renew/release SQL moved; lifecycle SQL uses fixed parameterized variants without query suppressions; acquisition behavior is unchanged from merged PR 2; batch and terminal methods have no behavioral changes.
 
-Execution evidence: the branch remains three commits ahead of its original dev base and changes only the expected 18 plan/tracking, lifecycle, facade, and test files. Operation modules contain no `JobManager` references, public acquisition/renewal/release/batch methods remain, and the manager diff replaces only single-job renewal/release inline SQL plus the required imports.
+Execution evidence: the branch remains based on current `origin/dev` and is five commits ahead before final tracking updates. Changes remain limited to the expected plan/tracking, lifecycle, facade, RLS grant, and test files. Operation modules contain no `JobManager` references, public acquisition/renewal/release/batch methods remain, and the manager diff replaces only single-job renewal/release inline SQL plus the required imports.
 
 - [x] **Step 3: Run syntax and security validation**
 
@@ -1468,6 +1469,7 @@ python -m compileall -q \
 python -m bandit -r \
   tldw_Server_API/app/core/Jobs/manager.py \
   tldw_Server_API/app/core/Jobs/operations \
+  tldw_Server_API/app/core/Jobs/pg_migrations.py \
   -f json -o /tmp/bandit_task_12969_3.json
 ```
 
@@ -1477,7 +1479,7 @@ Execution evidence: final `compileall` succeeds. Bandit output at `/tmp/bandit_t
 
 - [ ] **Step 4: Open PR 3 and finalize tracking after merge**
 
-Confirm no schema, batch, terminal, admission, or unrelated formatting changes. Commit plan/Backlog updates, open PR 3 against `dev`, request review, and include a requester-owned Change summary. Mark `TASK-12969.3` and parent `TASK-12969` Done only after the merge is visible on `origin/dev` and all evidence is recorded.
+Confirm there are no schema-definition, batch, terminal, admission, or unrelated formatting changes; the only migration-module change is the reviewed table-specific `job_counters` insert grant required by counters-enabled RLS release. Commit plan/Backlog updates, open PR 3 against `dev`, request review, and include a requester-owned Change summary. Mark `TASK-12969.3` and parent `TASK-12969` Done only after the merge is visible on `origin/dev` and all evidence is recorded.
 
 ---
 
