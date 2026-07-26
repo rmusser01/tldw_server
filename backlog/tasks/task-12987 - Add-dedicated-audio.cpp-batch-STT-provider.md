@@ -4,7 +4,7 @@ title: Add dedicated audio.cpp batch STT provider
 status: In Progress
 assignee: []
 created_date: '2026-07-26 03:27'
-updated_date: '2026-07-26 03:30'
+updated_date: '2026-07-26 03:39'
 labels:
   - stt
   - benchmark
@@ -36,6 +36,10 @@ Add a first-class external-server-only audio.cpp STT adapter and provider regist
 
 <!-- SECTION:NOTES:BEGIN -->
 2026-07-25: Human-approved design recorded in Docs/superpowers/specs/2026-07-25-audio-cpp-batch-stt-provider-design.md. Scope is external-server-only, WAV batch transcription, network-free planning, consent-gated discovery, unresolved weight identity, no fallback/retry/download/process supervision. Design-only changed-file pre-commit and git diff --check passed using the repository-level .venv.
+
+Independent design review found and the spec now addresses four blocking gaps: explicit ordinary API selectors/default-model routing; frozen origin/model/timeout/transport with pre-I/O plan verification; a bounded allowlisted metadata finalizer extension; and real RIFF/WAVE PCM validation with byte-zero upload. It also clarifies empty-output scoring, strict config parsing, and cache lock/reset behavior.
+
+Independent spec re-review approved the revised design with no remaining issues. The final revision additionally makes adapter-side selector normalization mandatory so original REST/Jobs model strings cannot leak upstream, and pins the six retained artifact metadata keys.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

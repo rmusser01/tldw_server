@@ -1,6 +1,6 @@
 # Dedicated audio.cpp Batch STT Provider — Design
 
-**Status:** Approved for planning
+**Status:** Approved for planning after independent review
 **Backlog task:** `TASK-12987`
 **Target branch:** `codex/native-stt-benchmark`
 **Upstream contract reviewed:** `0xShug0/audio.cpp` commit
@@ -130,6 +130,49 @@ generic external-provider integration.
 does not supply a model. Benchmark targets must explicitly provide the model
 portion of `audio-cpp=<model>`.
 
+Configuration parsing is strict. Boolean values use an explicit accepted
+token set, and the timeout must be finite and greater than zero. The new
+parser does not use permissive helpers that replace invalid values with
+defaults. An empty default model is valid while the provider is disabled or
+an ordinary request supplies an explicit audio.cpp model; it fails when an
+ordinary request actually needs the default.
+
+### Ordinary API model selection
+
+Ordinary OpenAI-compatible transcription requests select audio.cpp with
+`audio-cpp:<server-model-id>`. The `audiocpp:` and `audio_cpp:` prefixes are
+accepted as aliases and normalized to `audio-cpp`. Exact selectors
+`audio-cpp`, `audiocpp`, and `audio_cpp` use `audio_cpp_default_model`.
+
+When audio.cpp is the configured default provider, an absent request model
+also uses `audio_cpp_default_model`. A bare audio.cpp server model ID is never
+treated as an audio.cpp selector because it can collide with existing local
+provider heuristics such as `qwen3-asr`.
+
+`resolve_provider_for_model()` handles the canonical selector and aliases
+before existing model-family heuristics, and
+`_resolve_default_model_for_provider()` supplies the configured default.
+These paths return the canonical provider and the exact upstream server model
+ID. Missing or unsafe model IDs fail closed; they do not fall through to
+Whisper or another adapter.
+
+Some existing REST, ingestion, and Jobs dispatchers select the resolved
+adapter but still pass the original non-empty request model to
+`transcribe_batch()`. The adapter therefore owns the final normalization
+invariant at both `plan_batch_execution()` and unplanned
+`transcribe_batch()` entry points:
+
+- strip a canonical or aliased `<selector>:` prefix and use the remaining
+  exact server model ID;
+- resolve an exact canonical or aliased selector through the configured
+  default; and
+- accept an unprefixed safe model only after the caller has already selected
+  `AudioCppAdapter`, as the benchmark does.
+
+Consequently, `audio-cpp:<model>` is never sent upstream verbatim. Updating
+dispatchers to pass their resolved `provider_model_name` is optional cleanup,
+not a correctness dependency.
+
 ## Planning contract
 
 `AudioCppAdapter.plan_batch_execution()` performs no network I/O. It:
@@ -143,8 +186,25 @@ portion of `audio-cpp=<model>`.
 7. records a single route with backend `audio_cpp_http`;
 8. records `source="audio_cpp_http"`;
 9. records the opaque endpoint ID;
-10. sets `local_model_available=false` and `would_download=false`; and
-11. keeps `identity_resolved=false` and `artifact_id=None`.
+10. resolves the available async HTTP transport without performing I/O and
+    records it on the route;
+11. freezes the canonical origin, exact upstream model ID, validated timeout,
+    and selected HTTP transport in in-memory `runtime_settings`;
+12. sets `local_model_available=false` and `would_download=false`; and
+13. keeps `identity_resolved=false` and `artifact_id=None`.
+
+The transcription endpoint, endpoint identity, egress class, and transport
+are therefore part of the authorization boundary. Runtime never rereads
+audio.cpp configuration. Before any request, it derives the three URLs from
+the frozen origin, verifies that the derived transcription endpoint still
+matches the planned endpoint ID and egress class, and verifies that the
+selected HTTP transport matches both the frozen runtime value and
+`route.transport`.
+
+An ordinary call without an incoming execution plan first resolves its
+explicit/default audio.cpp model, builds this same immutable plan, and then
+executes through the planned path. It does not maintain a second,
+configuration-reading execution path.
 
 The native benchmark coordinator uses the route egress to require
 `--allow-network-targets` before starting a worker. An API key or loopback
@@ -159,7 +219,7 @@ specified and tested production-configuration identity contract.
 
 1. Resolve the selected adapter and immutable execution plan.
 2. Resolve the WAV path through the existing safe-path boundary.
-3. Reject a non-WAV input before any network call.
+3. Validate the file as the supported WAV subset before any network call.
 4. Look up the discovery cache by normalized endpoint identity and exact model
    ID.
 5. On a cache miss, request and validate `/health`.
@@ -174,14 +234,33 @@ specified and tested production-configuration identity contract.
 10. Accept an empty string as a valid transcript for silence.
 11. Return a normalized STT artifact and typed actual-execution record.
 
-The artifact metadata records:
+The first version accepts only regular files with a case-insensitive `.wav`
+suffix that the Python standard library can open as an uncompressed
+RIFF/WAVE PCM container. It verifies the RIFF/WAVE header and reads the
+container parameters far enough to reject truncated, malformed, compressed,
+or renamed non-WAV input. The upload uses a fresh file handle positioned at
+byte zero; if validation and upload ever share a handle, the implementation
+must explicitly rewind it before the multipart request. This intentionally
+narrow subset may reject WAV encodings that audio.cpp itself can decode, but
+it makes the pre-network guarantee testable and can be broadened separately.
 
-- adapter/provider `audio-cpp`;
-- contract `audio_cpp_http_v1`;
-- requested server model ID;
-- discovered model family;
-- discovered model mode; and
-- discovered audio.cpp server backend.
+The artifact metadata contract contains exactly these string keys:
+
+- `provider`: `audio-cpp`;
+- `contract`: `audio_cpp_http_v1`;
+- `model_id`: the requested server model ID;
+- `model_family`: the discovered model family;
+- `model_mode`: the discovered model mode; and
+- `server_backend`: the discovered audio.cpp server backend.
+
+`finalize_stt_artifact()` currently drops provider `metadata`. Extend it with
+an optional metadata allowlist whose default is empty, preserving current
+behavior for all existing providers. When an adapter opts in, the finalizer
+requires a mapping containing only allowlisted keys and bounded string
+values; unknown keys, non-string values, excessive counts, and oversized
+values fail closed. `AudioCppAdapter` opts in only for the six fields above,
+and the finalized artifact retains them under `metadata`. Raw upstream
+objects are never copied into the artifact.
 
 Upstream timing fields are not used for benchmark calculations. The benchmark
 continues to use its client-side monotonic adapter timer.
@@ -190,7 +269,9 @@ continues to use its client-side monotonic adapter timer.
 
 Discovery is cached per adapter process and keyed by opaque endpoint identity
 plus exact model ID. Access is protected by a lock so concurrent first use does
-not issue an unbounded discovery burst.
+not issue an unbounded discovery burst. On a miss, the lock covers one
+health-plus-model-catalog discovery sequence for that key. It does not cover
+the transcription request, so independent audio uploads are not serialized.
 
 The cache is invalidated after:
 
@@ -201,7 +282,7 @@ The cache is invalidated after:
 
 The failed transcription is not retried. Invalidation only allows a later
 request to perform fresh discovery. Resetting the STT provider registry also
-clears the cache.
+calls a module reset hook that clears the cache under the same lock.
 
 ## Cold and warm timing semantics
 
@@ -255,7 +336,10 @@ metadata.
 
 Require a bounded JSON object with a `text` string. Empty text is valid.
 Ignore unknown fields. Do not use upstream timing values to replace or adjust
-the benchmark's timing.
+the benchmark's timing. The adapter returns empty or whitespace-only text as
+a valid artifact. The benchmark then applies its existing outcome policy:
+whitespace-only text is classified as `status="empty"` and scored as an empty
+hypothesis rather than as a provider exception.
 
 Fixtures record the reviewed audio.cpp commit. Contract changes require a new
 fixture provenance record and focused compatibility review.
@@ -318,6 +402,11 @@ install audio.cpp or download models.
 - Invalid booleans, timeouts, schemes, ports, user information, paths,
   queries, fragments, and ambiguous host forms.
 - Explicit benchmark model versus ordinary-request default model.
+- Canonical and aliased ordinary selectors, exact-selector default use, and
+  precedence over existing model-family heuristics.
+- Adapter-side stripping of ordinary selector prefixes even when a dispatcher
+  forwards the original request model.
+- Strict boolean and finite-positive-timeout parsing without silent defaults.
 
 ### Registry and planning tests
 
@@ -330,6 +419,9 @@ install audio.cpp or download models.
 - Rejection of translation, prompts, hotwords, diarization, word timestamps,
   unsupported modes, and disabled configuration.
 - Secret-safe plan serialization.
+- Frozen origin, exact model, timeout, and transport despite later config
+  mutation.
+- Runtime endpoint/egress/transport verification before discovery.
 
 ### Contract tests
 
@@ -344,6 +436,8 @@ install audio.cpp or download models.
 ### Execution tests
 
 - Multipart field names, fixed WAV filename, model, and optional language.
+- RIFF/WAVE PCM validation rejects renamed, truncated, and compressed inputs
+  before network I/O and uploads from byte zero.
 - Empty and non-empty transcripts.
 - Discovery cached after first success.
 - Concurrent first use performs one discovery sequence.
@@ -352,6 +446,8 @@ install audio.cpp or download models.
 - Non-WAV inputs fail before network I/O.
 - Busy, timeout, malformed JSON, missing text, and server errors.
 - Actual execution and artifact metadata remain consistent with the plan.
+- Finalizer preserves only the audio.cpp metadata allowlist and rejects
+  unknown, non-string, or oversized metadata.
 
 ### Benchmark tests
 
